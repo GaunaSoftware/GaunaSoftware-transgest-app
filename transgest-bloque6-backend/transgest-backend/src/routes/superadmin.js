@@ -624,6 +624,107 @@ async function audit(req, accion, detalle = {}, empresaId = null) {
   ).catch(() => {});
 }
 
+function formatDateEs(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("es-ES");
+}
+
+function normalizeBillingMethod(value) {
+  const method = String(value || "pendiente").trim().toLowerCase();
+  if (["tarjeta", "card"].includes(method)) return "tarjeta";
+  if (["domiciliacion", "sepa", "sepa_debit"].includes(method)) return "domiciliacion";
+  if (["transferencia", "transfer"].includes(method)) return "transferencia";
+  return "pendiente";
+}
+
+function billingEmailForEmpresa(empresa = {}) {
+  return String(empresa.email_facturacion || empresa.email_admin || "").trim().toLowerCase();
+}
+
+async function createBillingCheckoutForEmpresa(empresa, userId = null) {
+  const plan = empresa.plan || "profesional";
+  const ciclo = empresa.ciclo_facturacion || "mensual";
+  const priceId = stripe.planPriceId(plan, ciclo);
+  if (!stripe.configured() || !priceId) {
+    const missing = [
+      !stripe.configured() ? "STRIPE_SECRET_KEY" : null,
+      !priceId ? `STRIPE_PRICE_${String(plan).toUpperCase()}_${String(ciclo).toUpperCase()}` : null,
+    ].filter(Boolean);
+    const err = new Error("Stripe no esta configurado para este plan/ciclo");
+    err.code = "stripe_not_configured";
+    err.missing = missing;
+    throw err;
+  }
+
+  let customerId = empresa.stripe_customer_id;
+  if (!customerId) {
+    const customer = await stripe.createCustomer({
+      email: billingEmailForEmpresa(empresa),
+      name: empresa.nombre,
+      empresaId: empresa.id,
+    });
+    customerId = customer.id;
+    await db.query("UPDATE empresas SET stripe_customer_id=$1 WHERE id=$2", [customerId, empresa.id]);
+  }
+
+  const session = await stripe.createCheckoutSession({
+    customerId,
+    priceId,
+    empresaId: empresa.id,
+    plan,
+    ciclo,
+    userId,
+    metodoPago: empresa.metodo_pago || "auto",
+  });
+  return session;
+}
+
+async function sendBillingReminder(empresa, tipo = "auto", checkoutUrl = null) {
+  const email = billingEmailForEmpresa(empresa);
+  if (!email) {
+    const err = new Error("La empresa no tiene email de facturacion ni email admin");
+    err.code = "missing_billing_email";
+    throw err;
+  }
+  const venc = empresa.fecha_vencimiento ? new Date(empresa.fecha_vencimiento) : null;
+  const isOverdue = tipo === "vencido" || (tipo === "auto" && venc && venc < new Date());
+  const plantilla = isOverdue ? "suscripcion_pago_vencido" : "suscripcion_proximo_vencimiento";
+  const mail = await enviarEmail({
+    trigger: plantilla,
+    destinatario: email,
+    plantilla,
+    datos: {
+      nombre: empresa.nombre_contacto || empresa.nombre || "",
+      empresa: empresa.nombre,
+      fecha_vencimiento: formatDateEs(empresa.fecha_vencimiento),
+      checkout_url: checkoutUrl || "",
+    },
+    empresa_id: empresa.id,
+    force_platform: true,
+    meta: { empresa_id: empresa.id, tipo },
+  });
+  await db.query(
+    `UPDATE empresas
+     SET ultimo_aviso_pago_at=CASE WHEN $2::boolean THEN ultimo_aviso_pago_at ELSE NOW() END,
+         ultimo_aviso_vencido_at=CASE WHEN $2::boolean THEN NOW() ELSE ultimo_aviso_vencido_at END
+     WHERE id=$1`,
+    [empresa.id, isOverdue]
+  ).catch(() => {});
+  return mail;
+}
+
+async function createInvitationForUser({ client = db, empresa, usuario, actorEmail = "" }) {
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
+  await client.query(`
+    INSERT INTO invitaciones_usuario (empresa_id, usuario_id, email, token_hash, expires_at, created_by)
+    VALUES ($1,$2,$3,$4,$5,$6)
+  `, [empresa.id, usuario.id, usuario.email, hashToken(token), expiresAt, actorEmail]);
+  return { token, expiresAt, url: `${appUrl()}/invitacion/${token}` };
+}
+
 // ── Superadmin auth middleware ────────────────────────────────────────────
 function superAuth(req, res, next) {
   const header = req.headers.authorization;
@@ -826,7 +927,18 @@ router.post("/calendario-laboral/refresh", superAuth, async (req, res) => {
 });
 
 router.post("/empresas", superAuth, async (req, res) => {
-  const { nombre_empresa, cif, email_admin, nombre_admin, plan = "profesional", fecha_vencimiento, ciclo_facturacion = "mensual" } = req.body;
+  const {
+    nombre_empresa,
+    cif,
+    email_admin,
+    nombre_admin,
+    plan = "profesional",
+    fecha_vencimiento,
+    ciclo_facturacion = "mensual",
+    metodo_pago = "pendiente",
+    iban_facturacion,
+    email_facturacion,
+  } = req.body;
   if (!nombre_empresa || !email_admin || !nombre_admin) {
     return res.status(400).json({ error: "Nombre empresa, email admin y nombre admin son obligatorios" });
   }
@@ -838,10 +950,10 @@ router.post("/empresas", superAuth, async (req, res) => {
 
     const result = await db.transaction(async (client) => {
       const empresaRes = await client.query(`
-        INSERT INTO empresas (nombre, cif, email_admin, dominio, plan, max_vehiculos, max_usuarios, fecha_vencimiento, ciclo_facturacion)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, nombre, dominio
+        INSERT INTO empresas (nombre, cif, email_admin, dominio, plan, max_vehiculos, max_usuarios, fecha_vencimiento, ciclo_facturacion, metodo_pago, iban_facturacion, email_facturacion)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, nombre, dominio
       `, [nombre_empresa, cif||null, email_admin, dominio, plan, 0, 0,
-          fecha_vencimiento || null, ciclo_facturacion]);
+          fecha_vencimiento || null, ciclo_facturacion, normalizeBillingMethod(metodo_pago), iban_facturacion || null, email_facturacion || email_admin]);
 
       const empresa = empresaRes.rows[0];
       const tempHash = await bcrypt.hash(crypto.randomBytes(24).toString("hex"), 12);
@@ -851,29 +963,30 @@ router.post("/empresas", superAuth, async (req, res) => {
         RETURNING id, nombre, email, rol
       `, [nombre_admin, email_admin, email_admin.toLowerCase(), tempHash, empresa.id]);
 
-      const token = crypto.randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
-      await client.query(`
-        INSERT INTO invitaciones_usuario (empresa_id, usuario_id, email, token_hash, expires_at, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6)
-      `, [empresa.id, userRes.rows[0].id, email_admin, hashToken(token), expiresAt, req.superadmin.email]);
+      const invitation = await createInvitationForUser({
+        client,
+        empresa,
+        usuario: userRes.rows[0],
+        actorEmail: req.superadmin.email,
+      });
 
-      return { empresa, usuario: userRes.rows[0], token, expiresAt };
+      return { empresa, usuario: userRes.rows[0], ...invitation };
     });
 
-    const invitacionUrl = `${appUrl()}/invitacion/${result.token}`;
     const mail = await enviarEmail({
       trigger: "invitacion_usuario",
       destinatario: email_admin,
       plantilla: "invitacion_usuario",
-      datos: { nombre: nombre_admin, empresa: nombre_empresa, url: invitacionUrl },
+      datos: { nombre: nombre_admin, empresa: nombre_empresa, url: result.url },
+      empresa_id: result.empresa.id,
+      force_platform: true,
     }).catch(e => ({ error: e.message }));
     await audit(req, "empresa.creada", { nombre_empresa, email_admin, plan }, result.empresa.id);
 
     res.status(201).json({
       ok: true,
       empresa: result.empresa,
-      invitacion_url: invitacionUrl,
+      invitacion_url: result.url,
       invitacion_expira: result.expiresAt,
       email: mail,
     });
@@ -902,8 +1015,8 @@ router.post("/empresas/demo", superAuth, async (req, res) => {
   try {
     const result = await db.transaction(async (client) => {
       const empresaRes = await client.query(`
-        INSERT INTO empresas (nombre, cif, email_admin, dominio, plan, max_vehiculos, max_usuarios, estado, ciclo_facturacion)
-        VALUES ($1,$2,$3,$4,'enterprise',0,0,'activo','mensual')
+        INSERT INTO empresas (nombre, cif, email_admin, dominio, plan, max_vehiculos, max_usuarios, estado, ciclo_facturacion, metodo_pago, email_facturacion)
+        VALUES ($1,$2,$3,$4,'enterprise',0,0,'activo','mensual','pendiente',$3)
         RETURNING id, nombre, dominio, plan, estado
       `, [nombreEmpresa, `DEMO${stamp.slice(-8)}`, emailAdmin, dominio]);
       const empresa = empresaRes.rows[0];
@@ -1016,6 +1129,9 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
     proxima_tarea,
     proxima_tarea_fecha,
     ia_limite_mensual,
+    metodo_pago,
+    iban_facturacion,
+    email_facturacion,
   } = req.body;
   const updates = [], params = [];
   let i = 1;
@@ -1032,6 +1148,11 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
     if (!["mensual","anual"].includes(ciclo_facturacion)) return res.status(400).json({ error: "Ciclo no valido" });
     updates.push(`ciclo_facturacion=$${i++}`); params.push(ciclo_facturacion);
   }
+  if ("metodo_pago" in req.body) {
+    updates.push(`metodo_pago=$${i++}`); params.push(normalizeBillingMethod(metodo_pago));
+  }
+  if ("iban_facturacion" in req.body) { updates.push(`iban_facturacion=$${i++}`); params.push(iban_facturacion || null); }
+  if ("email_facturacion" in req.body) { updates.push(`email_facturacion=$${i++}`); params.push(email_facturacion || null); }
   if ("bloqueo_motivo" in req.body) { updates.push(`bloqueo_motivo=$${i++}`); params.push(bloqueo_motivo || null); }
   if ("bloqueo_manual" in req.body) { updates.push(`bloqueo_manual=$${i++}`); params.push(Boolean(bloqueo_manual)); }
   if ("notas_comerciales" in req.body) { updates.push(`notas_comerciales=$${i++}`); params.push(notas_comerciales || null); }
@@ -1047,6 +1168,134 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
   await db.query(`UPDATE empresas SET ${updates.join(",")} WHERE id=$${i}`, params);
   await audit(req, "empresa.actualizada", req.body, req.params.id);
   res.json({ ok: true });
+});
+
+router.post("/empresas/:id/reset-password", superAuth, async (req, res) => {
+  const password = String(req.body?.password || "").trim();
+  if (password.length < 8) return res.status(400).json({ error: "La contrasena debe tener al menos 8 caracteres" });
+
+  const empresaRes = await db.query("SELECT id,nombre,email_admin FROM empresas WHERE id=$1", [req.params.id]);
+  const empresa = empresaRes.rows[0];
+  if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
+
+  const hash = await bcrypt.hash(password, 12);
+  const userRes = await db.query(
+    `SELECT id,nombre,email,username,rol
+     FROM usuarios
+     WHERE empresa_id=$1
+     ORDER BY CASE WHEN rol='gerente' THEN 0 ELSE 1 END, activo DESC, created_at ASC
+     LIMIT 1`,
+    [empresa.id]
+  );
+  let usuario = userRes.rows[0];
+  if (usuario) {
+    const updated = await db.query(
+      `UPDATE usuarios
+       SET password_hash=$1, activo=true, debe_cambiar_password=false,
+           username=COALESCE(NULLIF(username,''), LOWER(COALESCE(email,$2)))
+       WHERE id=$3
+       RETURNING id,nombre,email,username,rol`,
+      [hash, empresa.email_admin || null, usuario.id]
+    );
+    usuario = updated.rows[0];
+  } else {
+    const email = String(empresa.email_admin || `gerente.${empresa.id}@transgest.local`).trim().toLowerCase();
+    const created = await db.query(
+      `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,debe_cambiar_password)
+       VALUES ('Gerente', $1, $1, $2, 'gerente', $3, true, false)
+       RETURNING id,nombre,email,username,rol`,
+      [email, hash, empresa.id]
+    );
+    usuario = created.rows[0];
+  }
+
+  await audit(req, "empresa.password_reset", { usuario_id: usuario.id, email: usuario.email || usuario.username }, empresa.id);
+  res.json({ ok: true, usuario: usuario.email || usuario.username });
+});
+
+router.post("/empresas/:id/reinvitar", superAuth, async (req, res) => {
+  const empresaRes = await db.query("SELECT id,nombre,email_admin FROM empresas WHERE id=$1", [req.params.id]);
+  const empresa = empresaRes.rows[0];
+  if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
+
+  const email = String(req.body?.email || empresa.email_admin || "").trim().toLowerCase();
+  const nombre = String(req.body?.nombre || "Gerente").trim();
+  if (!email) return res.status(400).json({ error: "La empresa no tiene email admin para enviar invitacion" });
+
+  const result = await db.transaction(async (client) => {
+    const existing = await client.query(
+      `SELECT id,nombre,email,username,rol FROM usuarios
+       WHERE empresa_id=$1 AND (LOWER(email)=LOWER($2) OR LOWER(username)=LOWER($2))
+       ORDER BY CASE WHEN rol='gerente' THEN 0 ELSE 1 END, created_at ASC
+       LIMIT 1`,
+      [empresa.id, email]
+    );
+    let usuario = existing.rows[0];
+    if (!usuario) {
+      const tempHash = await bcrypt.hash(crypto.randomBytes(24).toString("hex"), 12);
+      const created = await client.query(
+        `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,debe_cambiar_password)
+         VALUES ($1,$2,$2,$3,'gerente',$4,false,true)
+         RETURNING id,nombre,email,username,rol`,
+        [nombre, email, tempHash, empresa.id]
+      );
+      usuario = created.rows[0];
+    } else {
+      const updated = await client.query(
+        `UPDATE usuarios SET email=COALESCE(email,$2), username=COALESCE(NULLIF(username,''),$2), debe_cambiar_password=true
+         WHERE id=$1 RETURNING id,nombre,email,username,rol`,
+        [usuario.id, email]
+      );
+      usuario = updated.rows[0];
+    }
+    const invitation = await createInvitationForUser({ client, empresa, usuario, actorEmail: req.superadmin.email });
+    return { usuario, ...invitation };
+  });
+
+  const mail = await enviarEmail({
+    trigger: "invitacion_usuario",
+    destinatario: email,
+    plantilla: "invitacion_usuario",
+    datos: { nombre: result.usuario.nombre || nombre, empresa: empresa.nombre, url: result.url },
+    empresa_id: empresa.id,
+    force_platform: true,
+  }).catch(e => ({ error: e.message }));
+
+  await audit(req, "empresa.reinvitada", { email }, empresa.id);
+  res.json({ ok: true, invitacion_url: result.url, invitacion_expira: result.expiresAt, email: mail });
+});
+
+router.post("/empresas/:id/billing/checkout", superAuth, async (req, res) => {
+  const { rows } = await db.query("SELECT * FROM empresas WHERE id=$1", [req.params.id]);
+  const empresa = rows[0];
+  if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
+  try {
+    const session = await createBillingCheckoutForEmpresa(empresa, req.superadmin.id || null);
+    await audit(req, "empresa.billing_checkout", { metodo_pago: empresa.metodo_pago || "auto" }, empresa.id);
+    res.json({ ok: true, url: session.url });
+  } catch (err) {
+    if (err.code === "stripe_not_configured") {
+      return res.status(503).json({ error: err.message, faltan: err.missing || [] });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/empresas/:id/billing/recordatorio", superAuth, async (req, res) => {
+  const { rows } = await db.query("SELECT * FROM empresas WHERE id=$1", [req.params.id]);
+  const empresa = rows[0];
+  if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
+  let checkoutUrl = "";
+  if (stripe.configured() && stripe.planPriceId(empresa.plan, empresa.ciclo_facturacion)) {
+    checkoutUrl = (await createBillingCheckoutForEmpresa(empresa, req.superadmin.id || null).catch(() => null))?.url || "";
+  }
+  try {
+    const mail = await sendBillingReminder(empresa, req.body?.tipo || "auto", checkoutUrl);
+    await audit(req, "empresa.billing_recordatorio", { tipo: req.body?.tipo || "auto" }, empresa.id);
+    res.json({ ok: true, email: mail, checkout_url: checkoutUrl || null });
+  } catch (err) {
+    res.status(err.code === "missing_billing_email" ? 400 : 500).json({ error: err.message });
+  }
 });
 
 // ── GET /superadmin/stats — Métricas globales ─────────────────────────────
@@ -1256,14 +1505,14 @@ router.post("/empresas/:id/impersonar", superAuth, async (req, res) => {
     `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.empresa_id, e.plan, e.nombre AS empresa
      FROM usuarios u
      JOIN empresas e ON e.id=u.empresa_id
-     WHERE u.empresa_id=$1 AND u.activo=true
-     ORDER BY CASE WHEN u.rol='gerente' THEN 0 ELSE 1 END, u.created_at ASC
+     WHERE u.empresa_id=$1
+     ORDER BY CASE WHEN u.rol='gerente' THEN 0 ELSE 1 END, u.activo DESC, u.created_at ASC
      LIMIT 1`,
     [req.params.id]
   );
   const user = rows[0];
   if (!user) {
-    return res.status(404).json({ error: "No hay usuarios activos en esta empresa para acceder" });
+    return res.status(404).json({ error: "No hay usuarios en esta empresa para acceder" });
   }
 
   const token = jwt.sign(

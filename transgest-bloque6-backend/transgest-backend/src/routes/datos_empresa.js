@@ -138,6 +138,83 @@ function ensureNominasSchema() {
   return nominasSchemaReady;
 }
 
+let liquidacionChoferSchemaReady = null;
+function ensureLiquidacionChoferSchema() {
+  if (!liquidacionChoferSchemaReady) {
+    liquidacionChoferSchemaReady = (async () => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS chofer_config (
+          chofer_id UUID PRIMARY KEY REFERENCES choferes(id) ON DELETE CASCADE,
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          salario_base NUMERIC(10,2),
+          precio_noche NUMERIC(10,2) NOT NULL DEFAULT 40,
+          plus_actividad NUMERIC(10,2) NOT NULL DEFAULT 0,
+          irpf_pct NUMERIC(6,2) NOT NULL DEFAULT 0,
+          ss_empresa_pct NUMERIC(6,2) NOT NULL DEFAULT 29.9,
+          ss_trabajador_pct NUMERIC(6,2) NOT NULL DEFAULT 6.35,
+          convenio TEXT,
+          incentivo_pct NUMERIC(6,2) NOT NULL DEFAULT 0,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS vehiculo_noches (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          vehiculo_id UUID NOT NULL REFERENCES vehiculos(id) ON DELETE CASCADE,
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          fecha DATE NOT NULL,
+          chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL,
+          pedido_id UUID REFERENCES pedidos(id) ON DELETE SET NULL,
+          ciudad VARCHAR(180),
+          importe NUMERIC(10,2) NOT NULL DEFAULT 0,
+          notas TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await db.query("CREATE INDEX IF NOT EXISTS idx_vehiculo_noches_empresa_vehiculo_fecha ON vehiculo_noches(empresa_id, vehiculo_id, fecha DESC)");
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS vehiculo_gasoil_config (
+          vehiculo_id UUID PRIMARY KEY REFERENCES vehiculos(id) ON DELETE CASCADE,
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          tipo VARCHAR(20) NOT NULL DEFAULT 'fijo',
+          precio_fijo NUMERIC(10,4) NOT NULL DEFAULT 1.65,
+          periodos JSONB NOT NULL DEFAULT '[]'::jsonb,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS vehiculo_repostajes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          vehiculo_id UUID NOT NULL REFERENCES vehiculos(id) ON DELETE CASCADE,
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          fecha DATE NOT NULL,
+          litros NUMERIC(10,2) NOT NULL DEFAULT 0,
+          precio_litro NUMERIC(10,4),
+          importe NUMERIC(10,2),
+          km_odometro NUMERIC(12,2),
+          notas TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await db.query("CREATE INDEX IF NOT EXISTS idx_vehiculo_repostajes_empresa_vehiculo_fecha ON vehiculo_repostajes(empresa_id, vehiculo_id, fecha DESC)");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS precio_km NUMERIC(10,4) NOT NULL DEFAULT 0");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS km_pago_tipo VARCHAR(20) NOT NULL DEFAULT 'todos'");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS dieta_local NUMERIC(10,2) NOT NULL DEFAULT 0");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS dieta_nacional NUMERIC(10,2) NOT NULL DEFAULT 40");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS dieta_internacional NUMERIC(10,2) NOT NULL DEFAULT 0");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS disponibilidad_diaria NUMERIC(10,2) NOT NULL DEFAULT 0");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS disponibilidad_mensual NUMERIC(10,2) NOT NULL DEFAULT 0");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS convenio_notas TEXT");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS convenio_importado_nombre VARCHAR(180)");
+      await db.query("ALTER TABLE vehiculo_noches ADD COLUMN IF NOT EXISTS tipo_dieta VARCHAR(30) NOT NULL DEFAULT 'nacional'");
+    })().catch(err => {
+      liquidacionChoferSchemaReady = null;
+      throw err;
+    });
+  }
+  return liquidacionChoferSchemaReady;
+}
+
 async function integrationProviderStatus(empresaId, provider) {
   const status = await publicStatusForProvider(provider, empresaId);
   const configured = status.company_configured || (status.use_global && status.global_configured);
@@ -1068,12 +1145,14 @@ router.delete("/meses-cerrados/:mes", GERENTE_O_CONTABLE, async (req,res) => {
 // ════════════════════════════════════════════════════════════
 router.get("/gasoil-config/:vehiculo_id", async (req,res) => {
   try {
+    await ensureLiquidacionChoferSchema();
     const {rows} = await db.query("SELECT * FROM vehiculo_gasoil_config WHERE vehiculo_id=$1 AND empresa_id=$2",[req.params.vehiculo_id,EID(req)]);
     res.json(rows[0] || {tipo:"fijo",precio_fijo:1.65,periodos:[]});
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 router.put("/gasoil-config/:vehiculo_id", async (req,res) => {
   try {
+    await ensureLiquidacionChoferSchema();
     const vehiculo = await db.query("SELECT id FROM vehiculos WHERE id=$1 AND empresa_id=$2", [req.params.vehiculo_id, EID(req)]);
     if (!vehiculo.rows[0]) return res.status(404).json({ error:"Vehiculo no encontrado" });
     const {tipo,precio_fijo,periodos} = req.body;
@@ -1092,6 +1171,7 @@ router.put("/gasoil-config/:vehiculo_id", async (req,res) => {
 // ════════════════════════════════════════════════════════════
 router.get("/repostajes/:vehiculo_id", async (req,res) => {
   try {
+    await ensureLiquidacionChoferSchema();
     const {rows} = await db.query(
       "SELECT * FROM vehiculo_repostajes WHERE vehiculo_id=$1 AND empresa_id=$2 ORDER BY fecha DESC",
       [req.params.vehiculo_id,EID(req)]
@@ -1101,6 +1181,7 @@ router.get("/repostajes/:vehiculo_id", async (req,res) => {
 });
 router.post("/repostajes/:vehiculo_id", async (req,res) => {
   try {
+    await ensureLiquidacionChoferSchema();
     const {fecha,litros,precio_litro,importe,km_odometro,notas} = req.body;
     const {rows} = await db.query(
       "INSERT INTO vehiculo_repostajes (vehiculo_id,empresa_id,fecha,litros,precio_litro,importe,km_odometro,notas) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
@@ -1119,6 +1200,7 @@ router.delete("/repostajes/:id", async (req,res) => {
 // ════════════════════════════════════════════════════════════
 router.get("/noches/:vehiculo_id", async (req,res) => {
   try {
+    await ensureLiquidacionChoferSchema();
     const {desde,hasta} = req.query;
     let q = "SELECT n.*, ch.nombre AS chofer_nombre FROM vehiculo_noches n LEFT JOIN choferes ch ON ch.id=n.chofer_id AND ch.empresa_id=n.empresa_id WHERE n.vehiculo_id=$1 AND n.empresa_id=$2";
     const params = [req.params.vehiculo_id,EID(req)];
@@ -1131,10 +1213,11 @@ router.get("/noches/:vehiculo_id", async (req,res) => {
 });
 router.post("/noches/:vehiculo_id", async (req,res) => {
   try {
-    const {fecha,chofer_id,pedido_id,ciudad,importe,notas} = req.body;
+    await ensureLiquidacionChoferSchema();
+    const {fecha,chofer_id,pedido_id,ciudad,importe,notas,tipo_dieta} = req.body;
     const {rows} = await db.query(
-      "INSERT INTO vehiculo_noches (vehiculo_id,empresa_id,fecha,chofer_id,pedido_id,ciudad,importe,notas) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
-      [req.params.vehiculo_id,EID(req),fecha,chofer_id||null,pedido_id||null,ciudad||null,importe||0,notas||null]
+      "INSERT INTO vehiculo_noches (vehiculo_id,empresa_id,fecha,chofer_id,pedido_id,ciudad,importe,notas,tipo_dieta) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *",
+      [req.params.vehiculo_id,EID(req),fecha,chofer_id||null,pedido_id||null,ciudad||null,importe||0,notas||null,tipo_dieta||"nacional"]
     );
     res.status(201).json(rows[0]);
   } catch(e) { res.status(500).json({error:e.message}); }
@@ -1209,22 +1292,27 @@ router.delete("/km-vacio/:id", async (req,res) => {
 // ════════════════════════════════════════════════════════════
 router.get("/chofer-config/:chofer_id", async (req,res) => {
   try {
+    await ensureLiquidacionChoferSchema();
     const chofer = await assertChoferEmpresa(req.params.chofer_id, EID(req));
     if (!chofer) return res.status(404).json({ error: "Chofer no encontrado" });
     const {rows} = await db.query("SELECT * FROM chofer_config WHERE chofer_id=$1 AND empresa_id=$2",[req.params.chofer_id, EID(req)]);
-    res.json(rows[0] || {salario_base:0,precio_noche:40,plus_actividad:0,incentivo_pct:0,irpf_pct:0,ss_empresa_pct:29.9,ss_trabajador_pct:6.35});
+    res.json(rows[0] || {salario_base:0,precio_noche:40,plus_actividad:0,incentivo_pct:0,irpf_pct:0,ss_empresa_pct:29.9,ss_trabajador_pct:6.35,precio_km:0,km_pago_tipo:"todos",dieta_local:0,dieta_nacional:40,dieta_internacional:0,disponibilidad_diaria:0,disponibilidad_mensual:0,convenio:"",convenio_notas:"",convenio_importado_nombre:""});
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 router.put("/chofer-config/:chofer_id", async (req,res) => {
   try {
+    await ensureLiquidacionChoferSchema();
     const chofer = await assertChoferEmpresa(req.params.chofer_id, EID(req));
     if (!chofer) return res.status(404).json({ error: "Chofer no encontrado" });
-    const {salario_base,precio_noche,plus_actividad,irpf_pct,ss_empresa_pct,ss_trabajador_pct,convenio,incentivo_pct} = req.body;
+    const {salario_base,precio_noche,plus_actividad,irpf_pct,ss_empresa_pct,ss_trabajador_pct,convenio,incentivo_pct,precio_km,km_pago_tipo,dieta_local,dieta_nacional,dieta_internacional,disponibilidad_diaria,disponibilidad_mensual,convenio_notas,convenio_importado_nombre} = req.body;
     await db.query(
-      `INSERT INTO chofer_config (chofer_id,empresa_id,salario_base,precio_noche,plus_actividad,irpf_pct,ss_empresa_pct,ss_trabajador_pct,convenio,incentivo_pct,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
-       ON CONFLICT (chofer_id) DO UPDATE SET salario_base=$3,precio_noche=$4,plus_actividad=$5,irpf_pct=$6,ss_empresa_pct=$7,ss_trabajador_pct=$8,convenio=$9,incentivo_pct=$10,updated_at=NOW()`,
-      [req.params.chofer_id,EID(req),salario_base||null,precio_noche||40,plus_actividad||0,irpf_pct||0,ss_empresa_pct||29.9,ss_trabajador_pct||6.35,convenio||null,incentivo_pct||0]
+      `INSERT INTO chofer_config (chofer_id,empresa_id,salario_base,precio_noche,plus_actividad,irpf_pct,ss_empresa_pct,ss_trabajador_pct,convenio,incentivo_pct,
+        precio_km,km_pago_tipo,dieta_local,dieta_nacional,dieta_internacional,disponibilidad_diaria,disponibilidad_mensual,convenio_notas,convenio_importado_nombre,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW())
+       ON CONFLICT (chofer_id) DO UPDATE SET salario_base=$3,precio_noche=$4,plus_actividad=$5,irpf_pct=$6,ss_empresa_pct=$7,ss_trabajador_pct=$8,convenio=$9,incentivo_pct=$10,
+         precio_km=$11,km_pago_tipo=$12,dieta_local=$13,dieta_nacional=$14,dieta_internacional=$15,disponibilidad_diaria=$16,disponibilidad_mensual=$17,convenio_notas=$18,convenio_importado_nombre=$19,updated_at=NOW()`,
+      [req.params.chofer_id,EID(req),salario_base||null,precio_noche||40,plus_actividad||0,irpf_pct||0,ss_empresa_pct||29.9,ss_trabajador_pct||6.35,convenio||null,incentivo_pct||0,
+       precio_km||0,["todos","cargado","vacio"].includes(km_pago_tipo)?km_pago_tipo:"todos",dieta_local||0,dieta_nacional||precio_noche||40,dieta_internacional||0,disponibilidad_diaria||0,disponibilidad_mensual||0,convenio_notas||null,convenio_importado_nombre||null]
     );
     res.json({ok:true});
   } catch(e) { res.status(500).json({error:e.message}); }

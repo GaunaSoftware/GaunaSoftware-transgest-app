@@ -388,7 +388,7 @@ async function authenticate(req, res, next) {
       [payload.sub]
     );
 
-    if (!rows[0] || !rows[0].activo) {
+    if (!rows[0] || (!rows[0].activo && !payload.superadmin_impersonation)) {
       return res.status(401).json({ error: "Usuario no valido o desactivado" });
     }
 

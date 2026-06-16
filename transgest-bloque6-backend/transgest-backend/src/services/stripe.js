@@ -65,8 +65,8 @@ async function createCustomer({ email, name, empresaId }) {
   });
 }
 
-async function createCheckoutSession({ customerId, priceId, empresaId, plan, ciclo, userId }) {
-  return request("/checkout/sessions", {
+async function createCheckoutSession({ customerId, priceId, empresaId, plan, ciclo, userId, metodoPago = "auto" }) {
+  const base = {
     mode: "subscription",
     customer: customerId,
     success_url: `${defaultUrl("STRIPE_SUCCESS_URL", "http://localhost:3000")}/?stripe=success`,
@@ -84,6 +84,18 @@ async function createCheckoutSession({ customerId, priceId, empresaId, plan, cic
       plan,
       ciclo,
     },
+  };
+  const method = String(metodoPago || "auto").toLowerCase();
+  if (method === "tarjeta" || method === "card") {
+    base["payment_method_types[0]"] = "card";
+  } else if (method === "domiciliacion" || method === "sepa_debit" || method === "sepa") {
+    base["payment_method_types[0]"] = "sepa_debit";
+  } else {
+    base["payment_method_types[0]"] = "card";
+    base["payment_method_types[1]"] = "sepa_debit";
+  }
+  return request("/checkout/sessions", {
+    ...base,
   });
 }
 

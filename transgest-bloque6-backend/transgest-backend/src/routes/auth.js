@@ -165,7 +165,7 @@ router.post("/billing/checkout", async (req, res) => {
 
   const { rows } = await db.query(
     `SELECT u.id, u.nombre, u.email, u.rol, u.empresa_id,
-            e.nombre AS empresa_nombre, e.email_admin, e.plan, e.ciclo_facturacion,
+            e.nombre AS empresa_nombre, e.email_admin, e.plan, e.ciclo_facturacion, e.metodo_pago,
             e.stripe_customer_id
      FROM usuarios u
      JOIN empresas e ON e.id=u.empresa_id
@@ -208,6 +208,7 @@ router.post("/billing/checkout", async (req, res) => {
       plan,
       ciclo,
       userId: user.id,
+      metodoPago: user.metodo_pago || "auto",
     });
     res.json({ ok: true, url: session.url });
   } catch (err) {

@@ -11,6 +11,7 @@ const logger      = require("./services/logger");
 const db          = require("./services/db");
 const backupService = require("./services/backup");
 const fiscalScheduler = require("./services/fiscalScheduler");
+const billingReminders = require("./services/billingReminders");
 const { ensureTables: ensureApiKeyTables } = require("./services/apiKeys");
 const { validateEnv } = require("./services/envValidator");
 const { authenticate, requireModulePermission, requirePlanFeature } = require("./middleware/auth");
@@ -396,6 +397,11 @@ async function applyMigrations() {
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(120)").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_price_id VARCHAR(120)").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ciclo_facturacion VARCHAR(20) DEFAULT 'mensual'").catch(() => {});
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS metodo_pago VARCHAR(30) DEFAULT 'pendiente'").catch(() => {});
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS iban_facturacion VARCHAR(80)").catch(() => {});
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS email_facturacion VARCHAR(255)").catch(() => {});
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ultimo_aviso_pago_at TIMESTAMPTZ").catch(() => {});
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ultimo_aviso_vencido_at TIMESTAMPTZ").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS bloqueo_motivo VARCHAR(60)").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS bloqueo_manual BOOLEAN DEFAULT false").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS notas_comerciales TEXT").catch(() => {});
@@ -889,6 +895,7 @@ async function startServer() {
     try { backupService.startScheduler(); } catch (e) { logger.warn("Backup: " + e.message); }
     try { fiscalScheduler.startScheduler(); } catch (e) { logger.warn("Fiscal: " + e.message); }
     try { pedidosRoutes.startAlbaranesReminderScheduler?.(); } catch (e) { logger.warn("Albaranes: " + e.message); }
+    try { billingReminders.startScheduler(); } catch (e) { logger.warn("Billing: " + e.message); }
   });
   } catch (e) {
     logger.error("Startup abortado: " + e.message);

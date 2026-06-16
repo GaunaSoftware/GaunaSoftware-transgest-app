@@ -5,8 +5,25 @@ const { encryptSecret, decryptSecret, maskSecret } = require("./apiKeys");
 
 // ── Transporter ───────────────────────────────────────
 let transporter;
-function getTransporter(config = null) {
+let platformTransporter;
+
+function getTransporter(config = null, cacheKey = "global") {
   if (config) {
+    if (cacheKey === "platform") {
+      if (!platformTransporter) {
+        platformTransporter = nodemailer.createTransport({
+          host: config.smtp_host,
+          port: parseInt(config.smtp_port || "587"),
+          secure: !!config.smtp_secure || String(config.smtp_port) === "465",
+          auth: config.smtp_user || config.smtp_pass ? {
+            user: config.smtp_user || "",
+            pass: config.smtp_pass || "",
+          } : undefined,
+          tls: { rejectUnauthorized: process.env.NODE_ENV === "production" },
+        });
+      }
+      return platformTransporter;
+    }
     return nodemailer.createTransport({
       host: config.smtp_host,
       port: parseInt(config.smtp_port || "587"),
@@ -31,6 +48,23 @@ function getTransporter(config = null) {
     });
   }
   return transporter;
+}
+
+function platformSmtpConfig() {
+  const host = process.env.GAUNA_SMTP_HOST || process.env.PLATFORM_SMTP_HOST || process.env.SMTP_HOST;
+  if (!host) return null;
+  const port = process.env.GAUNA_SMTP_PORT || process.env.PLATFORM_SMTP_PORT || process.env.SMTP_PORT || "587";
+  const secure = process.env.GAUNA_SMTP_SECURE || process.env.PLATFORM_SMTP_SECURE || process.env.SMTP_SECURE || "";
+  return {
+    smtp_host: host,
+    smtp_port: port,
+    smtp_secure: ["true", "1", "yes", "si"].includes(String(secure).toLowerCase()) || String(port) === "465",
+    smtp_user: process.env.GAUNA_SMTP_USER || process.env.PLATFORM_SMTP_USER || process.env.SMTP_USER,
+    smtp_pass: process.env.GAUNA_SMTP_PASS || process.env.PLATFORM_SMTP_PASS || process.env.SMTP_PASS,
+    smtp_from: process.env.GAUNA_SMTP_FROM || process.env.PLATFORM_SMTP_FROM || process.env.SMTP_FROM,
+    smtp_from_nombre: process.env.GAUNA_SMTP_FROM_NAME || process.env.PLATFORM_SMTP_FROM_NAME || "Gauna - TransGest",
+    reply_to: process.env.GAUNA_SMTP_REPLY_TO || process.env.PLATFORM_SMTP_REPLY_TO || process.env.SMTP_REPLY_TO || process.env.GAUNA_SMTP_FROM || process.env.PLATFORM_SMTP_FROM || process.env.SMTP_FROM,
+  };
 }
 
 async function ensureEmailTables() {
@@ -159,33 +193,30 @@ async function markEmailConfigTest(empresaId, ok, error = "") {
   );
 }
 
-async function resolveTransportConfig(empresaId) {
-  const company = empresaId ? await getEmpresaEmailConfig(empresaId, true) : null;
+async function resolveTransportConfig(empresaId, opts = {}) {
+  const platformCfg = platformSmtpConfig();
+  if (opts.forcePlatform && platformCfg?.smtp_host) {
+    const host = String(platformCfg.smtp_host || "").trim().toLowerCase();
+    if (!["smtp.tuproveedor.com", "smtp.example.com", "example.com"].some(token => host.includes(token))) {
+      return { cfg: platformCfg, source: "gauna" };
+    }
+  }
+
+  const company = !opts.forcePlatform && empresaId ? await getEmpresaEmailConfig(empresaId, true) : null;
   if (company?.activo && company.smtp_host) {
     const host = String(company.smtp_host || "").trim().toLowerCase();
     const looksPlaceholder = ["smtp.tuproveedor.com", "smtp.example.com", "example.com"].some(token => host.includes(token));
     if (!looksPlaceholder) return { cfg: company, source: "empresa" };
     logger.warn("SMTP de empresa con host de ejemplo - email simulado:", { empresaId, host });
   }
-  if (!process.env.SMTP_HOST) return { cfg: null, source: "simulado" };
-  const envHost = String(process.env.SMTP_HOST || "").trim().toLowerCase();
+  const envCfg = platformCfg;
+  if (!envCfg?.smtp_host) return { cfg: null, source: "simulado" };
+  const envHost = String(envCfg.smtp_host || "").trim().toLowerCase();
   if (["smtp.tuproveedor.com", "smtp.example.com", "example.com"].some(token => envHost.includes(token))) {
     logger.warn("SMTP global con host de ejemplo - email simulado:", { host: envHost });
     return { cfg: null, source: "simulado" };
   }
-  return {
-    cfg: {
-      smtp_host: process.env.SMTP_HOST,
-      smtp_port: process.env.SMTP_PORT || "587",
-      smtp_secure: process.env.SMTP_PORT === "465",
-      smtp_user: process.env.SMTP_USER,
-      smtp_pass: process.env.SMTP_PASS,
-      smtp_from: process.env.SMTP_FROM,
-      smtp_from_nombre: process.env.SMTP_FROM_NAME || "TransGest TMS",
-      reply_to: process.env.SMTP_REPLY_TO || process.env.SMTP_FROM,
-    },
-    source: "global",
-  };
+  return { cfg: envCfg, source: envCfg.smtp_from_nombre?.toLowerCase().includes("gauna") ? "gauna" : "global" };
 }
 
 // ── Plantillas HTML ───────────────────────────────────
@@ -377,6 +408,36 @@ const PLANTILLAS = {
     </div>`,
   }),
 
+  suscripcion_proximo_vencimiento: (data) => ({
+    asunto: `TransGest - Suscripcion proxima a vencer (${data.empresa || ""})`,
+    html: `<div style="${BASE_STYLE}">
+      ${HEADER("Aviso de suscripcion")}
+      <div style="background:#fff;border-radius:0 0 10px 10px;padding:24px 28px;border:1px solid #e2e8f0;border-top:none;">
+        <p>Hola ${htmlEscape(data.nombre || "")},</p>
+        <p>La suscripcion de <strong>${htmlEscape(data.empresa || "tu empresa")}</strong> vence el <strong>${htmlEscape(data.fecha_vencimiento || "-")}</strong>.</p>
+        <p>Para evitar interrupciones, revisa el metodo de pago o confirma la renovacion antes de esa fecha.</p>
+        ${data.checkout_url ? `<p style="margin:20px 0;"><a href="${htmlEscape(data.checkout_url)}" style="display:inline-block;background:#1e3a6e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Actualizar pago</a></p>` : ""}
+        <p style="font-size:12px;color:#64748b;">Si ya has realizado el pago, puedes ignorar este aviso.</p>
+      </div>
+      ${FOOTER}
+    </div>`,
+  }),
+
+  suscripcion_pago_vencido: (data) => ({
+    asunto: `TransGest - Pago vencido (${data.empresa || ""})`,
+    html: `<div style="${BASE_STYLE}">
+      ${HEADER("Pago pendiente")}
+      <div style="background:#fff;border-radius:0 0 10px 10px;padding:24px 28px;border:1px solid #e2e8f0;border-top:none;">
+        <p>Hola ${htmlEscape(data.nombre || "")},</p>
+        <p>Consta pendiente el pago de la suscripcion de <strong>${htmlEscape(data.empresa || "tu empresa")}</strong>, con vencimiento el <strong>${htmlEscape(data.fecha_vencimiento || "-")}</strong>.</p>
+        <p>Regulariza el pago para mantener el servicio activo y evitar bloqueos automaticos.</p>
+        ${data.checkout_url ? `<p style="margin:20px 0;"><a href="${htmlEscape(data.checkout_url)}" style="display:inline-block;background:#dc2626;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Pagar ahora</a></p>` : ""}
+        <p style="font-size:12px;color:#64748b;">Este aviso se envia desde Gauna / TransGest.</p>
+      </div>
+      ${FOOTER}
+    </div>`,
+  }),
+
   colaborador_confirmar: (data) => ({
     asunto: `Confirmar transporte ${data.numero || ""}`,
     html: `<div style="${BASE_STYLE}">
@@ -563,8 +624,8 @@ const PLANTILLAS = {
 };
 
 // ── Función principal de envío ────────────────────────
-async function enviarEmail({ trigger, destinatario, plantilla, datos, empresa_id, attachments = [], meta = {} }) {
-  const { cfg, source } = await resolveTransportConfig(empresa_id);
+async function enviarEmail({ trigger, destinatario, plantilla, datos, empresa_id, attachments = [], meta = {}, force_platform = false }) {
+  const { cfg, source } = await resolveTransportConfig(empresa_id, { forcePlatform: force_platform });
   const adjuntosCount = Array.isArray(attachments) ? attachments.length : 0;
   if (!cfg?.smtp_host) {
     logger.warn("SMTP no configurado - email simulado:", { trigger, destinatario });
@@ -587,7 +648,7 @@ async function enviarEmail({ trigger, destinatario, plantilla, datos, empresa_id
   try {
     const fromAddress = cfg.smtp_from || cfg.smtp_user;
     const fromName = cfg.smtp_from_nombre || datos?.empresa || "TransGest TMS";
-    const info = await getTransporter(cfg).sendMail({
+    const info = await getTransporter(cfg, source === "gauna" ? "platform" : "global").sendMail({
       from:    fromName ? `"${fromName}" <${fromAddress}>` : fromAddress,
       replyTo: cfg.reply_to || fromAddress,
       to:      destinatario,

@@ -113,7 +113,7 @@ function LoginSA({ onLogin }){
 
 // Section
 function ModalNuevaEmpresa({ onClose, onCreada }){
-  const [form,setForm]=useState({nombre_empresa:"",cif:"",nombre_admin:"",email_admin:"",plan:"profesional",ciclo_facturacion:"mensual",fecha_vencimiento:""});
+  const [form,setForm]=useState({nombre_empresa:"",cif:"",nombre_admin:"",email_admin:"",plan:"profesional",ciclo_facturacion:"mensual",fecha_vencimiento:"",metodo_pago:"pendiente",email_facturacion:"",iban_facturacion:""});
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
   const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
   async function crear(){
@@ -151,11 +151,21 @@ function ModalNuevaEmpresa({ onClose, onCreada }){
               <option value="anual">Anual (-15%)</option>
             </select>
           </div>
+          <div><label style={lbl}>Metodo de pago</label>
+            <select style={inp} value={form.metodo_pago} onChange={f("metodo_pago")}>
+              <option value="pendiente">Pendiente</option>
+              <option value="tarjeta">Tarjeta</option>
+              <option value="domiciliacion">Domiciliacion bancaria</option>
+              <option value="transferencia">Transferencia</option>
+            </select>
+          </div>
           <div style={{gridColumn:"1/-1",borderTop:"1px solid #1c2740",paddingTop:4,marginTop:8}}>
             <label style={{...lbl,color:"#94a3b8"}}>Administrador (rol gerente)</label>
           </div>
           <div><label style={lbl}>Nombre *</label><input style={inp} value={form.nombre_admin} onChange={f("nombre_admin")} placeholder="Carlos Garcia"/></div>
           <div><label style={lbl}>Email *</label><input type="email" style={inp} value={form.email_admin} onChange={f("email_admin")} placeholder="carlos@empresa.com"/></div>
+          <div><label style={lbl}>Email facturacion</label><input type="email" style={inp} value={form.email_facturacion} onChange={f("email_facturacion")} placeholder="facturas@empresa.com"/></div>
+          <div><label style={lbl}>IBAN domiciliacion</label><input style={inp} value={form.iban_facturacion} onChange={f("iban_facturacion")} placeholder="ES00..."/></div>
           <div><label style={lbl}>Vencimiento (vacio=sin limite)</label><input type="date" style={inp} value={form.fecha_vencimiento} onChange={f("fecha_vencimiento")}/></div>
         </div>
         <div style={{display:"flex",gap:10,marginTop:16,justifyContent:"flex-end"}}>
@@ -182,6 +192,9 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
     proxima_tarea:empresa.proxima_tarea||"",
     proxima_tarea_fecha:empresa.proxima_tarea_fecha?.slice(0,10)||"",
     ia_limite_mensual: empresa.ia_limite_mensual ?? (empresa.plan==="enterprise"?1000:0),
+    metodo_pago: empresa.metodo_pago || "pendiente",
+    email_facturacion: empresa.email_facturacion || empresa.email_admin || "",
+    iban_facturacion: empresa.iban_facturacion || "",
   });
   const [loading,setLoading]=useState(false); const [err,setErr]=useState("");
   const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
@@ -191,6 +204,43 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
     try{ await saFetch("/empresas/"+empresa.id,{method:"PATCH",body}); onGuardado(); }
     catch(e){ setErr(e.message); }
     finally{ setLoading(false); }
+  }
+
+  async function resetPasswordEmpresa(){
+    try{
+      const password = await promptDialog({
+        title:"Cambiar contrasena de empresa",
+        message:"Se cambiara la contrasena del gerente o primer usuario de la empresa. Minimo 8 caracteres.",
+        inputType:"password",
+        placeholder:"Nueva contrasena",
+        confirmText:"Cambiar",
+      });
+      if(!password) return;
+      await saFetch(`/empresas/${empresa.id}/reset-password`,{method:"POST",body:{password}});
+      notify("Contrasena actualizada. Ya puedes iniciar sesion con ese usuario.", "success");
+    }catch(e){ notify(e.message || "No se pudo cambiar la contrasena", "error"); }
+  }
+
+  async function reinvitarEmpresa(){
+    try{
+      const r = await saFetch(`/empresas/${empresa.id}/reinvitar`,{method:"POST",body:{email:empresa.email_admin}});
+      if(r.invitacion_url && r.email?.simulado) notify("Invitacion generada en modo simulado:\n\n"+r.invitacion_url, "success", 12000);
+      else notify("Invitacion enviada al gerente.", "success");
+    }catch(e){ notify(e.message || "No se pudo enviar la invitacion", "error"); }
+  }
+
+  async function abrirCheckoutEmpresa(){
+    try{
+      const r = await saFetch(`/empresas/${empresa.id}/billing/checkout`,{method:"POST"});
+      if(r.url) window.open(r.url, "_blank", "noopener,noreferrer");
+    }catch(e){ notify(e.message || "No se pudo generar el enlace de pago", "error"); }
+  }
+
+  async function enviarAvisoPago(tipo="auto"){
+    try{
+      const r = await saFetch(`/empresas/${empresa.id}/billing/recordatorio`,{method:"POST",body:{tipo}});
+      notify(r.checkout_url ? "Aviso de pago enviado con enlace Stripe." : "Aviso de pago enviado.", "success");
+    }catch(e){ notify(e.message || "No se pudo enviar el aviso de pago", "error"); }
   }
 
   // Exportar datos de esta empresa
@@ -239,7 +289,16 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
               <option value="mensual">Mensual</option>
               <option value="anual">Anual (-15%)</option>
             </select></div>
+          <div><label style={lbl}>Metodo de pago</label>
+            <select style={inp} value={form.metodo_pago} onChange={f("metodo_pago")}>
+              <option value="pendiente">Pendiente</option>
+              <option value="tarjeta">Tarjeta</option>
+              <option value="domiciliacion">Domiciliacion bancaria</option>
+              <option value="transferencia">Transferencia</option>
+            </select></div>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Vencimiento</label><input type="date" style={inp} value={form.fecha_vencimiento} onChange={f("fecha_vencimiento")}/></div>
+          <div><label style={lbl}>Email facturacion</label><input type="email" style={inp} value={form.email_facturacion} onChange={f("email_facturacion")}/></div>
+          <div><label style={lbl}>IBAN domiciliacion</label><input style={inp} value={form.iban_facturacion} onChange={f("iban_facturacion")} placeholder="ES00..."/></div>
           <div><label style={lbl}>Bloqueo manual</label>
             <select style={inp} value={form.bloqueo_manual?"true":"false"} onChange={e=>setForm(p=>({...p,bloqueo_manual:e.target.value==="true"}))}>
               <option value="false">No</option>
@@ -257,6 +316,19 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
           <div><label style={lbl}>Fecha tarea</label><input type="date" style={inp} value={form.proxima_tarea_fecha} onChange={f("proxima_tarea_fecha")}/></div>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Limite IA mensual (0 = sin IA)</label><input type="number" style={inp} value={form.ia_limite_mensual} onChange={f("ia_limite_mensual")}/></div>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Notas comerciales</label><textarea style={{...inp,minHeight:70,resize:"vertical"}} value={form.notas_comerciales} onChange={f("notas_comerciales")} /></div>
+        </div>
+
+        <div style={{marginTop:18,borderTop:"1px solid #1c2740",paddingTop:14}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"#64748b",marginBottom:10}}>
+            Accesos y cobros
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button onClick={resetPasswordEmpresa} style={{...btnExport,background:"rgba(20,184,166,.12)",color:"#5eead4",border:"1px solid rgba(20,184,166,.25)",fontWeight:700}}>Cambiar clave</button>
+            <button onClick={reinvitarEmpresa} style={btnExport}>Reenviar invitacion</button>
+            <button onClick={abrirCheckoutEmpresa} style={{...btnExport,background:"rgba(59,130,246,.15)",color:"#85B7EB",border:"1px solid rgba(59,130,246,.3)",fontWeight:700}}>Enlace Stripe</button>
+            <button onClick={()=>enviarAvisoPago("proximo")} style={btnExport}>Aviso vencimiento</button>
+            <button onClick={()=>enviarAvisoPago("vencido")} style={{...btnExport,color:"#fca5a5",border:"1px solid rgba(239,68,68,.25)"}}>Aviso impago</button>
+          </div>
         </div>
 
         {/* Section */}
@@ -2236,10 +2308,10 @@ export default function SuperAdmin(){
               <div style={{padding:30,textAlign:"center",color:"#64748b"}}>Sin resultados.</div>
             ):(
               <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
+                <table style={{width:"100%",borderCollapse:"collapse",minWidth:980}}>
                   <thead><tr>
                     <th style={S.th}>Empresa</th><th style={S.th}>Plan</th><th style={S.th}>Estado</th>
-                    <th style={S.th}>Uso</th><th style={S.th}>Pedidos</th>
+                    <th style={S.th}>Pago</th><th style={S.th}>Uso</th><th style={S.th}>Pedidos</th>
                     <th style={S.th}>Registro</th><th style={S.th}>Vencimiento</th><th style={S.th}></th>
                   </tr></thead>
                   <tbody>
@@ -2255,6 +2327,10 @@ export default function SuperAdmin(){
                           </td>
                           <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${PLAN_COLOR[e.plan]}20`,color:PLAN_COLOR[e.plan],border:`1px solid ${PLAN_COLOR[e.plan]}40`}}>{e.plan}</span></td>
                           <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${ESTADO_COLOR[e.estado]}18`,color:ESTADO_COLOR[e.estado]}}>{e.estado}</span></td>
+                          <td style={S.td}>
+                            <div style={{fontSize:11,color:e.metodo_pago==="pendiente"?"#fbbf24":"#94a3b8",fontWeight:700}}>{e.metodo_pago || "pendiente"}</div>
+                            {e.email_facturacion&&<div style={{fontSize:10,color:"#64748b",marginTop:2}}>{e.email_facturacion}</div>}
+                          </td>
                           <td style={S.td}>
                             <div style={{fontSize:11,color:"#f97316",fontWeight:700}}>{fmtN(e.n_vehiculos)} vehiculos</div>
                             <div style={{fontSize:11,color:"#3b82f6",fontWeight:700,marginTop:2}}>{fmtN(e.n_usuarios)} usuarios</div>

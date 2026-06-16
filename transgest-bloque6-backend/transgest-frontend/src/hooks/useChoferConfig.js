@@ -6,10 +6,19 @@ const CHOFER_DEFAULTS = {
   precio_noche: 40,
   plus_actividad: 0,
   incentivo_pct: 0,
+  precio_km: 0,
+  km_pago_tipo: "todos",
+  dieta_local: 0,
+  dieta_nacional: 40,
+  dieta_internacional: 0,
+  disponibilidad_diaria: 0,
+  disponibilidad_mensual: 0,
   irpf_pct: 0,
   ss_empresa_pct: 29.9,
   ss_trabajador_pct: 6.35,
   convenio: "",
+  convenio_notas: "",
+  convenio_importado_nombre: "",
 };
 
 const choferConfigCache = new Map();

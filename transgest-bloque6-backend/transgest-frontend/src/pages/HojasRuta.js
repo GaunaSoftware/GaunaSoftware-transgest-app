@@ -8,6 +8,12 @@ import { notify } from "../services/notify";
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtN = n => Number(n||0).toLocaleString("es-ES",{maximumFractionDigits:0});
 const fmtFecha = v => v ? new Date(String(v).slice(0,10)).toLocaleDateString("es-ES") : "";
+const num = v => Number(v || 0) || 0;
+function importeDietaPorTipo(cfg, tipo){
+  if(tipo==="local") return num(cfg?.dieta_local);
+  if(tipo==="internacional") return num(cfg?.dieta_internacional);
+  return num(cfg?.dieta_nacional || cfg?.precio_noche || 40);
+}
 // gasoilVehSave → BD via setGasoilConfig
 // litrosVehSave → BD via crearRepostaje
 // nochesVehSave → BD via crearNoche
@@ -149,10 +155,10 @@ function ModalLitros({vehiculo,fechaDesde,fechaHasta,onClose}){
   );
 }
 
-function ModalNoches({vehiculo,choferes=[],fechaDesde,fechaHasta,onClose}){
+function ModalNoches({vehiculo,choferConfig={},fechaDesde,fechaHasta,onClose}){
   const [lista,setLista]=useState([]);
   const [loading,setLoading]=useState(true);
-  const [form,setForm]=useState({fecha:new Date().toISOString().slice(0,10),ciudad:"",importe:"",chofer_id:""});
+  const [form,setForm]=useState({fecha:new Date().toISOString().slice(0,10),ciudad:"",importe:importeDietaPorTipo(choferConfig,"nacional")||"",chofer_id:"",tipo_dieta:"nacional"});
   useEffect(()=>{
     setLoading(true);
     getNochesVehiculo(vehiculo.id)
@@ -171,7 +177,8 @@ function ModalNoches({vehiculo,choferes=[],fechaDesde,fechaHasta,onClose}){
         fecha:form.fecha,
         ciudad:form.ciudad||null,
         importe:Number(form.importe),
-        chofer_id:form.chofer_id||null
+        chofer_id:form.chofer_id||null,
+        tipo_dieta:form.tipo_dieta||"nacional"
       });
       setForm(p=>({...p,importe:"",ciudad:""}));
       const d = await getNochesVehiculo(vehiculo.id);
@@ -196,11 +203,12 @@ function ModalNoches({vehiculo,choferes=[],fechaDesde,fechaHasta,onClose}){
           <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:"#a78bfa"}}>{fmt2(total)} EUR</span>
         </div>
         {loading ? <div style={{textAlign:"center",color:"var(--text4)",padding:20}}>⏳ Cargando repostajes...</div>
-        : lista.length>0 ? (<table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Ciudad</th><th style={S.th}>Importe</th><th style={S.th}></th></tr></thead><tbody>{lista.map(x=>(<tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,color:"var(--text4)"}}>{x.ciudad||"—"}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{fmt2(x.importe)} EUR</td><td style={S.td}><button onClick={()=>del(x.id)} style={{...S.btn,padding:"2px 7px",background:"rgba(239,68,68,.1)",color:"var(--red)",border:"none",fontSize:11}}>✕</button></td></tr>))}</tbody></table>)
+        : lista.length>0 ? (<table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Tipo</th><th style={S.th}>Ciudad</th><th style={S.th}>Importe</th><th style={S.th}></th></tr></thead><tbody>{lista.map(x=>(<tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,textTransform:"capitalize"}}>{x.tipo_dieta||"nacional"}</td><td style={{...S.td,color:"var(--text4)"}}>{x.ciudad||"—"}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{fmt2(x.importe)} EUR</td><td style={S.td}><button onClick={()=>del(x.id)} style={{...S.btn,padding:"2px 7px",background:"rgba(239,68,68,.1)",color:"var(--red)",border:"none",fontSize:11}}>✕</button></td></tr>))}</tbody></table>)
         : <div style={{textAlign:"center",color:"var(--text5)",padding:"16px 0",fontSize:12}}>Sin noches registradas en este periodo</div>}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 100px auto",gap:6,alignItems:"end"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 130px 100px auto",gap:6,alignItems:"end"}}>
           <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={form.fecha} onChange={e=>setForm(p=>({...p,fecha:e.target.value}))}/></div>
           <div><label style={S.lbl}>Ciudad</label><input style={S.inp} value={form.ciudad} onChange={e=>setForm(p=>({...p,ciudad:e.target.value}))}/></div>
+          <div><label style={S.lbl}>Tipo dieta</label><select style={S.inp} value={form.tipo_dieta} onChange={e=>setForm(p=>({...p,tipo_dieta:e.target.value,importe:p.importe||importeDietaPorTipo(choferConfig,e.target.value)}))}><option value="local">Local</option><option value="nacional">Nacional</option><option value="internacional">Internacional</option></select></div>
           <div><label style={S.lbl}>Importe EUR</label><input type="number" step="0.01" style={S.inp} value={form.importe} onChange={e=>setForm(p=>({...p,importe:e.target.value}))}/></div>
           <button onClick={add} disabled={adding} style={{...S.btn,background:adding?"#666":"var(--accent)",color:"#fff",marginTop:14}}>{adding?"...":"+"}</button>
         </div>
@@ -229,18 +237,85 @@ function ModalChoferExt({chofer,onClose}){
       notify("Error al guardar: "+e.message, "error");
     }
   }
+  async function importarConvenio(e){
+    const file=e.target.files?.[0];
+    if(!file) return;
+    try{
+      const text=await file.text();
+      let patch={convenio_importado_nombre:file.name};
+      if(file.name.toLowerCase().endsWith(".json")){
+        const obj=JSON.parse(text);
+        patch={...patch,...obj};
+      }else{
+        const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+        const norm=s=>String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+        for(const line of lines){
+          const parts=line.split(/[;,]/).map(x=>x.trim());
+          if(parts.length<2) continue;
+          const key=norm(parts[0]);
+          const value=Number(String(parts[1]).replace(",","."));
+          if(!Number.isFinite(value)) continue;
+          if(key.includes("dieta")&&key.includes("local")) patch.dieta_local=value;
+          else if(key.includes("dieta")&&key.includes("intern")) patch.dieta_internacional=value;
+          else if(key.includes("dieta")||key.includes("nacional")||key.includes("noche")) patch.dieta_nacional=value;
+          else if(key.includes("km")) patch.precio_km=value;
+          else if(key.includes("dispon")&&key.includes("dia")) patch.disponibilidad_diaria=value;
+          else if(key.includes("dispon")) patch.disponibilidad_mensual=value;
+        }
+      }
+      setForm(p=>({...p,...patch}));
+      notify("Convenio cargado en la ficha. Revisa importes antes de guardar.", "success");
+    }catch(err){
+      notify("No se pudo leer el convenio. Usa CSV simple: concepto;importe", "error");
+    }finally{
+      e.target.value="";
+    }
+  }
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(400px,96vw)"}}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(680px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Config. {chofer.nombre} {chofer.apellidos||""}</div>
           <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",fontSize:18,cursor:"pointer"}}>X</button>
         </div>
         <label style={S.lbl}>Salario base (EUR/mes)</label>
         <input type="number" step="0.01" style={S.inp} value={form.salario_base} onChange={e=>setForm(p=>({...p,salario_base:Number(e.target.value)}))}/>
-        <label style={S.lbl}>Incentivo sobre ingresos del camion (%)</label>
-        <input type="number" step="0.1" min="0" max="100" style={S.inp} value={form.incentivo_pct} onChange={e=>setForm(p=>({...p,incentivo_pct:Number(e.target.value)}))}/>
-        <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>Si hay ingresos en el periodo, se aplica este % sobre el total de ingresos del camion asignado.</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
+          <div><label style={S.lbl}>Incentivo sobre ingresos (%)</label><input type="number" step="0.1" min="0" max="100" style={S.inp} value={form.incentivo_pct} onChange={e=>setForm(p=>({...p,incentivo_pct:Number(e.target.value)}))}/></div>
+          <div><label style={S.lbl}>Precio por km (EUR/km)</label><input type="number" step="0.0001" min="0" style={S.inp} value={form.precio_km||""} onChange={e=>setForm(p=>({...p,precio_km:Number(e.target.value)}))}/></div>
+          <div><label style={S.lbl}>Km que se pagan</label><select style={S.inp} value={form.km_pago_tipo||"todos"} onChange={e=>setForm(p=>({...p,km_pago_tipo:e.target.value}))}><option value="todos">Km totales</option><option value="cargado">Solo km cargado</option><option value="vacio">Solo km vacio</option></select></div>
+          <div><label style={S.lbl}>Convenio / pacto</label><input style={S.inp} value={form.convenio||""} onChange={e=>setForm(p=>({...p,convenio:e.target.value}))} placeholder="Ej: convenio provincial / acuerdo interno"/></div>
+        </div>
+
+        <div style={{marginTop:14,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:10,padding:12}}>
+          <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text4)",marginBottom:8}}>Dietas segun convenio</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8}}>
+            <div><label style={{...S.lbl,marginTop:0}}>Dieta local</label><input type="number" step="0.01" min="0" style={S.inp} value={form.dieta_local||""} onChange={e=>setForm(p=>({...p,dieta_local:Number(e.target.value)}))}/></div>
+            <div><label style={{...S.lbl,marginTop:0}}>Dieta nacional</label><input type="number" step="0.01" min="0" style={S.inp} value={form.dieta_nacional||form.precio_noche||""} onChange={e=>setForm(p=>({...p,dieta_nacional:Number(e.target.value),precio_noche:Number(e.target.value)}))}/></div>
+            <div><label style={{...S.lbl,marginTop:0}}>Dieta internacional</label><input type="number" step="0.01" min="0" style={S.inp} value={form.dieta_internacional||""} onChange={e=>setForm(p=>({...p,dieta_internacional:Number(e.target.value)}))}/></div>
+          </div>
+          <div style={{fontSize:10,color:"var(--text5)",lineHeight:1.5,marginTop:8}}>Se usan para pre-rellenar dietas en Hojas de Ruta. El importe final queda guardado por registro para justificarlo.</div>
+        </div>
+
+        <div style={{marginTop:12,background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.18)",borderRadius:10,padding:12}}>
+          <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text4)",marginBottom:8}}>Disponibilidad pactada</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8}}>
+            <div><label style={{...S.lbl,marginTop:0}}>Disponibilidad diaria</label><input type="number" step="0.01" min="0" style={S.inp} value={form.disponibilidad_diaria||""} onChange={e=>setForm(p=>({...p,disponibilidad_diaria:Number(e.target.value)}))}/></div>
+            <div><label style={{...S.lbl,marginTop:0}}>Disponibilidad mensual</label><input type="number" step="0.01" min="0" style={S.inp} value={form.disponibilidad_mensual||""} onChange={e=>setForm(p=>({...p,disponibilidad_mensual:Number(e.target.value)}))}/></div>
+          </div>
+          <div style={{fontSize:10,color:"var(--text5)",lineHeight:1.5,marginTop:8}}>Concepto separado para pactos de disponibilidad. No sustituye horas extra ni descansos; revisar convenio antes de cerrar nomina.</div>
+        </div>
+
+        <label style={S.lbl}>Notas del convenio</label>
+        <textarea style={{...S.inp,minHeight:64,resize:"vertical"}} value={form.convenio_notas||""} onChange={e=>setForm(p=>({...p,convenio_notas:e.target.value}))} placeholder="Importes, vigencia, provincia, condiciones o enlaces al convenio"/>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginTop:10,flexWrap:"wrap"}}>
+          <label style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text3)"}}>
+            Subir convenio CSV/JSON
+            <input type="file" accept=".csv,.txt,.json" onChange={importarConvenio} style={{display:"none"}}/>
+          </label>
+          {form.convenio_importado_nombre&&<div style={{fontSize:11,color:"var(--text5)"}}>Cargado: {form.convenio_importado_nombre}</div>}
+        </div>
+        <div style={{fontSize:11,color:"var(--text5)",marginTop:8}}>CSV simple aceptado: concepto;importe. Ejemplos: dieta nacional;45 | precio km;0,08 | disponibilidad diaria;12.</div>
         <button onClick={guardar} disabled={loading} style={{...S.btn,background:loading?"#666":"var(--accent)",color:"#fff",marginTop:18,width:"100%",justifyContent:"center",fontWeight:700,fontSize:13}}>{loading?"Cargando...":"Guardar"}</button>
       </div>
     </div>
@@ -342,6 +417,7 @@ export default function HojasRuta(){
     });
     const kmCargado=pedVeh.reduce((s,p)=>s+Number(p.km_ruta||p.km||0),0);
     const kmVacio=pedVeh.reduce((s,p)=>s+Number(p.km_vacio||0),0);
+    const kmTotal = kmCargado+kmVacio;
     const ingresos=pedVeh.reduce((s,p)=>s+Number(p.importe||0),0);
     const viajes=pedVeh.length;
     const precioLitro=precioCombDia(fechaDesde,gasoilCfg);
@@ -361,16 +437,20 @@ export default function HojasRuta(){
     const liquidoNeto=nominaEmitida?Number(nominaEmitida.liquido||0):(salarioBase-ssTrabajador-retencionIRPF);
     const incentivoPct=Number(choferExt.incentivo_pct||0);
     const incentivo=ingresos>0?(ingresos*incentivoPct/100):0;
-    const totalChofer=salarioBase+incentivo+costeNoches;
-    const costeEmpresaTotal=salarioBase+ssEmpresa+incentivo+costeNoches;
+    const kmPagoTipo=choferExt.km_pago_tipo||"todos";
+    const kmRetribuidos=kmPagoTipo==="cargado"?kmCargado:(kmPagoTipo==="vacio"?kmVacio:kmTotal);
+    const pagoKm=kmRetribuidos*Number(choferExt.precio_km||0);
+    const diasActivos=new Set([...pedVeh.map(p=>String(p.fecha_carga||p.fecha_pedido||"").slice(0,10)),...nochesPeriodo.map(n=>String(n.fecha||"").slice(0,10))].filter(Boolean)).size;
+    const disponibilidad=Number(choferExt.disponibilidad_mensual||0)+(Number(choferExt.disponibilidad_diaria||0)*diasActivos);
+    const totalChofer=salarioBase+incentivo+costeNoches+pagoKm+disponibilidad;
+    const costeEmpresaTotal=salarioBase+ssEmpresa+incentivo+costeNoches+pagoKm+disponibilidad;
     const totalCostes=costeGasoil+costeTaller+costeEmpresaTotal;
     const margen=ingresos-totalCostes;
-    const kmTotal = kmCargado+kmVacio;
     const eurosKmIngresos=(kmTotal)>0?ingresos/kmTotal:0;     // ingresos/km total
     const eurosKmMargen=(kmTotal)>0?margen/kmTotal:0;          // margen bruto/km
     const eurosKmCostes=(kmTotal)>0?totalCostes/kmTotal:0;     // coste/km
     const eurosKm=eurosKmIngresos; // backward compat
-    return{pedVeh,kmCargado,kmVacio,ingresos,viajes,costeGasoil,precioLitro,costeTaller,costeNoches,salarioBase,ssTrabajador,ssEmpresa,retencionIRPF,liquidoNeto,incentivoPct,incentivo,totalChofer,costeEmpresaTotal,totalCostes,margen,eurosKm,eurosKmIngresos,eurosKmMargen,eurosKmCostes};
+    return{pedVeh,kmCargado,kmVacio,kmTotal,kmPagoTipo,kmRetribuidos,pagoKm,diasActivos,disponibilidad,ingresos,viajes,costeGasoil,precioLitro,costeTaller,costeNoches,salarioBase,ssTrabajador,ssEmpresa,retencionIRPF,liquidoNeto,incentivoPct,incentivo,totalChofer,costeEmpresaTotal,totalCostes,margen,eurosKm,eurosKmIngresos,eurosKmMargen,eurosKmCostes};
   })();
 
   function imprimir(){
@@ -391,6 +471,8 @@ export default function HojasRuta(){
     w.document.write("<div class='resumen-row'><span>Noches / Dietas</span><span>"+fmt2(hoja.costeNoches)+" EUR</span></div>");
     w.document.write("<div class='resumen-row'><span>Salario base chofer</span><span>"+fmt2(hoja.salarioBase)+" EUR</span></div>");
     w.document.write("<div class='resumen-row'><span>SS empresa</span><span>"+fmt2(hoja.ssEmpresa)+" EUR</span></div>");
+    if(hoja.pagoKm>0) w.document.write("<div class='resumen-row'><span>Km retribuidos ("+fmtN(hoja.kmRetribuidos)+" km x "+fmt2(choferExt.precio_km)+" EUR/km)</span><span>"+fmt2(hoja.pagoKm)+" EUR</span></div>");
+    if(hoja.disponibilidad>0) w.document.write("<div class='resumen-row'><span>Disponibilidad pactada ("+hoja.diasActivos+" dia(s))</span><span>"+fmt2(hoja.disponibilidad)+" EUR</span></div>");
     if(hoja.incentivo>0) w.document.write("<div class='resumen-row'><span>Incentivo ("+hoja.incentivoPct+"% x "+fmt2(hoja.ingresos)+" EUR)</span><span>"+fmt2(hoja.incentivo)+" EUR</span></div>");
     w.document.write("<div class='resumen-row total'><span>TOTAL COSTES</span><span>"+fmt2(hoja.totalCostes)+" EUR</span></div>");
     w.document.write("<div class='resumen-row total' style='color:"+(hoja.margen>=0?"#166534":"#991b1b")+"'><span>MARGEN BRUTO</span><span>"+fmt2(hoja.margen)+" EUR</span></div>");
@@ -455,7 +537,7 @@ export default function HojasRuta(){
           {tab==="hoja"&&hoja&&(
             <>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:16}}>
-                {[["Viajes",hoja.viajes,"","var(--accent)"],["Km cargado",fmtN(hoja.kmCargado),"km","#10b981"],["Km vacío",fmtN(hoja.kmVacio),"km","#f59e0b"],["Gasoil",fmtN(litrosSel),"L","#f97316"],["Noches",nochesCount,"noches","#a78bfa"],["Ingresos",fmt2(hoja.ingresos),"€","#10b981"],["Costes totales",fmt2(hoja.totalCostes),"€","#ef4444"],["Margen bruto",fmt2(hoja.margen),"€",hoja.margen>=0?"#10b981":"#ef4444"],["€/km (ing.)",fmt2(hoja.eurosKmIngresos),"€/km","#8b5cf6"],["€/km (margen)",fmt2(hoja.eurosKmMargen),"€/km",hoja.eurosKmMargen>=0?"#10b981":"#ef4444"],["€/km (coste)",fmt2(hoja.eurosKmCostes),"€/km","#f97316"]].map(([l,v,u,c])=>(
+                {[["Viajes",hoja.viajes,"","var(--accent)"],["Km cargado",fmtN(hoja.kmCargado),"km","#10b981"],["Km vacío",fmtN(hoja.kmVacio),"km","#f59e0b"],["Km pagados",fmtN(hoja.kmRetribuidos),"km","#0ea5e9"],["Gasoil",fmtN(litrosSel),"L","#f97316"],["Dietas",nochesCount,"reg.","#a78bfa"],["Disponibilidad",fmt2(hoja.disponibilidad),"€","#6366f1"],["Ingresos",fmt2(hoja.ingresos),"€","#10b981"],["Costes totales",fmt2(hoja.totalCostes),"€","#ef4444"],["Margen bruto",fmt2(hoja.margen),"€",hoja.margen>=0?"#10b981":"#ef4444"],["€/km (ing.)",fmt2(hoja.eurosKmIngresos),"€/km","#8b5cf6"],["€/km (margen)",fmt2(hoja.eurosKmMargen),"€/km",hoja.eurosKmMargen>=0?"#10b981":"#ef4444"],["€/km (coste)",fmt2(hoja.eurosKmCostes),"€/km","#f97316"]].map(([l,v,u,c])=>(
                   <div key={l} style={{...S.card,padding:"12px 14px",textAlign:"center"}}>
                     <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:17,color:c}}>{v} <span style={{fontSize:11}}>{u}</span></div>
                     <div style={{fontSize:10,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>{l}</div>
@@ -465,7 +547,7 @@ export default function HojasRuta(){
               <div style={S.card}>
                 <div style={{fontWeight:700,fontSize:12,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Desglose de costes</div>
                 <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>
-                  {[["Gasoil",repostajesPeriodo.some(r=>Number(r.importe||0)>0||Number(r.precio_litro||0)>0)?fmtN(litrosSel)+"L con precio real":fmtN(litrosSel)+"L x "+fmt2(hoja.precioLitro)+" EUR/L",fmt2(hoja.costeGasoil)],["Taller / Mantenimiento","",fmt2(hoja.costeTaller)],["Noches / Dietas",nochesCount+" noches",fmt2(hoja.costeNoches)],["Salario base chofer","",fmt2(hoja.salarioBase)],["SS empresa","",fmt2(hoja.ssEmpresa)],...(hoja.incentivo>0?[["Incentivo",hoja.incentivoPct+"% x "+fmt2(hoja.ingresos)+" EUR",fmt2(hoja.incentivo)]]:[] )].map(([l,d,v])=>(
+                  {[["Gasoil",repostajesPeriodo.some(r=>Number(r.importe||0)>0||Number(r.precio_litro||0)>0)?fmtN(litrosSel)+"L con precio real":fmtN(litrosSel)+"L x "+fmt2(hoja.precioLitro)+" EUR/L",fmt2(hoja.costeGasoil)],["Taller / Mantenimiento","",fmt2(hoja.costeTaller)],["Dietas / manutencion",nochesCount+" registro(s)",fmt2(hoja.costeNoches)],["Km retribuidos",fmtN(hoja.kmRetribuidos)+" km x "+fmt2(choferExt.precio_km||0)+" EUR/km",fmt2(hoja.pagoKm)],["Disponibilidad pactada",hoja.diasActivos+" dia(s) + mensual",fmt2(hoja.disponibilidad)],["Salario base chofer","",fmt2(hoja.salarioBase)],["SS empresa","",fmt2(hoja.ssEmpresa)],...(hoja.incentivo>0?[["Incentivo",hoja.incentivoPct+"% x "+fmt2(hoja.ingresos)+" EUR",fmt2(hoja.incentivo)]]:[] )].map(([l,d,v])=>(
                     <tr key={l}><td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{l}</td><td style={{...S.td,color:"var(--text5)",fontSize:11}}>{d}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{v} EUR</td></tr>
                   ))}
                   <tr style={{background:"rgba(239,68,68,.05)"}}><td style={{...S.td,fontWeight:800,color:"var(--text)"}} colSpan={2}>TOTAL COSTES</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:15,color:"var(--red)"}}>{fmt2(hoja.totalCostes)} EUR</td></tr>
@@ -538,8 +620,8 @@ export default function HojasRuta(){
                   <div style={{background:"var(--bg3)",borderRadius:8,padding:"12px 16px",textAlign:"center"}}><div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:22,color:"#a78bfa"}}>{fmt2(total)} EUR</div><div style={{fontSize:10,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Importe total</div></div>
                 </div>
                 {lista.length===0?(<div style={{padding:20,textAlign:"center",color:"var(--text5)"}}>Sin noches registradas en este periodo para {vehiculo.matricula}</div>):(
-                  <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Ciudad</th><th style={S.th}>Importe</th></tr></thead><tbody>
-                    {lista.map(x=>(<tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,color:"var(--text4)"}}>{x.ciudad||"—"}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"#a78bfa"}}>{fmt2(x.importe)} EUR</td></tr>))}
+                  <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Tipo</th><th style={S.th}>Ciudad</th><th style={S.th}>Importe</th></tr></thead><tbody>
+                    {lista.map(x=>(<tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,textTransform:"capitalize"}}>{x.tipo_dieta||"nacional"}</td><td style={{...S.td,color:"var(--text4)"}}>{x.ciudad||"—"}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"#a78bfa"}}>{fmt2(x.importe)} EUR</td></tr>))}
                   </tbody></table>
                 )}
               </div>
@@ -573,7 +655,7 @@ export default function HojasRuta(){
                   {hoja&&(
                     <div style={{background:"var(--bg3)",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
                       <div style={{fontWeight:700,fontSize:12,color:"var(--text)",marginBottom:10}}>🏭 Desglose coste empresa</div>
-                      {[["Salario bruto",hoja.salarioBase],["+ Incentivo",hoja.incentivo],["+ Noches / Dietas",hoja.costeNoches],["+ SS empresa (29,40%)",hoja.ssEmpresa]].filter(([,v])=>v>0).map(([k,v])=>(
+                      {[["Salario bruto",hoja.salarioBase],["+ Incentivo",hoja.incentivo],["+ Dietas / manutencion",hoja.costeNoches],["+ Km retribuidos",hoja.pagoKm],["+ Disponibilidad pactada",hoja.disponibilidad],["+ SS empresa (29,40%)",hoja.ssEmpresa]].filter(([,v])=>v>0).map(([k,v])=>(
                         <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid var(--border2)"}}>
                           <span style={{color:"var(--text3)"}}>{k}</span>
                           <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:600}}>{Number(v).toLocaleString("es-ES",{minimumFractionDigits:2})} €</span>
@@ -615,7 +697,7 @@ export default function HojasRuta(){
 
       {modalGasoil&&vehiculo&&<ModalGasoil vehiculo={vehiculo} onClose={()=>{setModalGasoil(false);recargar();}}/>}
       {modalLitros&&vehiculo&&<ModalLitros vehiculo={vehiculo} fechaDesde={fechaDesde} fechaHasta={fechaHasta} onClose={total=>{setLitrosSel(total);setModalLitros(false);recargar();}}/>}
-      {modalNoches&&vehiculo&&<ModalNoches vehiculo={vehiculo} fechaDesde={fechaDesde} fechaHasta={fechaHasta} onClose={total=>{setNochesSel(total);setModalNoches(false);recargar();}}/>}
+      {modalNoches&&vehiculo&&<ModalNoches vehiculo={vehiculo} choferConfig={choferExt} fechaDesde={fechaDesde} fechaHasta={fechaHasta} onClose={total=>{setNochesSel(total);setModalNoches(false);recargar();}}/>}
       {modalChofer&&chofer&&<ModalChoferExt chofer={chofer} onClose={()=>{setModalChofer(false);recargar();}}/>}
     </div>
   );

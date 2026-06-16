@@ -448,17 +448,51 @@ function UsuariosAdmin({ saFetchFn }) {
 
 function CorreoGaunaAdmin({ saFetchFn }) {
   const [status, setStatus] = useState(null);
+  const [form, setForm] = useState({ smtp_host:"", smtp_port:"587", smtp_secure:false, smtp_user:"", smtp_pass:"", smtp_from:"", smtp_from_nombre:"Gauna - TransGest", reply_to:"", activo:true });
   const [destinatario, setDestinatario] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
 
   const cargar = useCallback(() => {
     saFetchFn("/correo/status")
-      .then(setStatus)
+      .then(data => {
+        setStatus(data);
+        const cfg = data?.config || {};
+        setForm(p => ({
+          ...p,
+          smtp_host: cfg.smtp_host || "",
+          smtp_port: String(cfg.smtp_port || "587"),
+          smtp_secure: !!cfg.smtp_secure,
+          smtp_user: cfg.smtp_user || "",
+          smtp_pass: "",
+          smtp_from: cfg.smtp_from || "",
+          smtp_from_nombre: cfg.smtp_from_nombre || "Gauna - TransGest",
+          reply_to: cfg.reply_to || "",
+          activo: cfg.activo !== false,
+        }));
+      })
       .catch(e => setMsg(e.message));
   }, [saFetchFn]);
 
   useEffect(() => { cargar(); }, [cargar]);
+  const f = k => e => setForm(p => ({ ...p, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value }));
+
+  async function guardar() {
+    setLoading(true); setMsg("");
+    try {
+      const r = await saFetchFn("/correo/config", { method:"PUT", body:form });
+      setStatus(s => ({ ...(s || {}), ok:true, provider:"gauna_db", config:r.config }));
+      setForm(p => ({ ...p, smtp_pass:"" }));
+      setMsg("Configuracion SMTP guardada.");
+      notify("SMTP de Gauna guardado.", "success");
+      cargar();
+    } catch (e) {
+      setMsg(e.message || "No se pudo guardar el SMTP");
+      notify(e.message || "No se pudo guardar el SMTP", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function probar() {
     setLoading(true); setMsg("");
@@ -475,6 +509,7 @@ function CorreoGaunaAdmin({ saFetchFn }) {
   }
 
   const input = { background:"#1e293b", border:"1px solid #334155", color:"#f1f5f9", padding:"8px 10px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+  const label = {display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"#64748b",marginBottom:4,marginTop:10};
 
   return (
     <div style={{ maxWidth:760, marginTop:30, borderTop:"1px solid #1c2740", paddingTop:22 }}>
@@ -487,9 +522,9 @@ function CorreoGaunaAdmin({ saFetchFn }) {
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:12}}>
         {[
           ["Estado", status?.ok ? "Configurado" : "Simulado", status?.ok ? "#34d399" : "#fbbf24"],
-          ["Remitente", status?.from || "-", "#94a3b8"],
-          ["Host", status?.host_configured ? "OK" : "Falta", status?.host_configured ? "#34d399" : "#f87171"],
-          ["Usuario", status?.user_configured ? "OK" : "Falta", status?.user_configured ? "#34d399" : "#f87171"],
+          ["Origen", status?.provider || "-", "#94a3b8"],
+          ["Remitente", status?.config?.smtp_from || "-", "#94a3b8"],
+          ["Host", status?.config?.smtp_host ? "OK" : "Falta", status?.config?.smtp_host ? "#34d399" : "#f87171"],
         ].map(([label,value,color])=>(
           <div key={label} style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:8,padding:"10px 12px"}}>
             <div style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em"}}>{label}</div>
@@ -497,9 +532,24 @@ function CorreoGaunaAdmin({ saFetchFn }) {
           </div>
         ))}
       </div>
-      {status?.missing?.length ? (
-        <div style={{fontSize:12,color:"#fbbf24",marginBottom:12}}>Faltan: {status.missing.join(", ")}</div>
-      ) : null}
+      <div style={{display:"grid",gridTemplateColumns:"1.2fr .45fr .55fr 1fr",gap:"0 10px",alignItems:"end",marginBottom:12}}>
+        <div><label style={label}>SMTP host</label><input style={input} value={form.smtp_host} onChange={f("smtp_host")} placeholder="smtp.tudominio.com"/></div>
+        <div><label style={label}>Puerto</label><input style={input} value={form.smtp_port} onChange={f("smtp_port")} placeholder="587"/></div>
+        <label style={{...label,display:"flex",alignItems:"center",gap:8,marginTop:28}}>
+          <input type="checkbox" checked={form.smtp_secure} onChange={f("smtp_secure")} /> SSL
+        </label>
+        <div><label style={label}>Usuario</label><input style={input} value={form.smtp_user} onChange={f("smtp_user")} placeholder="correo@gauna..."/></div>
+        <div><label style={label}>Contrasena SMTP</label><input type="password" style={input} value={form.smtp_pass} onChange={f("smtp_pass")} placeholder={status?.config?.smtp_pass_masked ? "Guardada. Rellena solo si cambia" : "Password SMTP"}/></div>
+        <div><label style={label}>Remitente</label><input style={input} value={form.smtp_from} onChange={f("smtp_from")} placeholder="correo@gauna..."/></div>
+        <div><label style={label}>Nombre remitente</label><input style={input} value={form.smtp_from_nombre} onChange={f("smtp_from_nombre")} placeholder="Gauna - TransGest"/></div>
+        <div><label style={label}>Reply-to</label><input style={input} value={form.reply_to} onChange={f("reply_to")} placeholder="opcional"/></div>
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
+        <button onClick={guardar} disabled={loading} style={{padding:"8px 14px",borderRadius:7,border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.14)",color:"#85B7EB",fontWeight:800,cursor:"pointer"}}>
+          {loading ? "Guardando..." : "Guardar SMTP"}
+        </button>
+        <span style={{fontSize:11,color:"#64748b"}}>La contrasena queda cifrada en la base de datos.</span>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center"}}>
         <input style={input} value={destinatario} onChange={e=>setDestinatario(e.target.value)} placeholder="email para prueba (vacio = superadmin)" />
         <button onClick={probar} disabled={loading} style={{padding:"8px 14px",borderRadius:7,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.14)",color:"#5eead4",fontWeight:800,cursor:"pointer"}}>
@@ -2129,6 +2179,9 @@ export default function SuperAdmin(){
   const [busqueda,setBusqueda]=useState("");
   const [filtroEstado,setFiltroEstado]=useState("todos");
   const [creatingDemo,setCreatingDemo]=useState(false);
+  const [passwordEmpresa,setPasswordEmpresa]=useState(null);
+  const [passwordValue,setPasswordValue]=useState("");
+  const [passwordSaving,setPasswordSaving]=useState(false);
 
   const cargar=useCallback(async()=>{
     if(!loggedIn)return;
@@ -2156,14 +2209,8 @@ export default function SuperAdmin(){
   const vencidas  = empresas.filter(e=>e.fecha_vencimiento&&new Date(e.fecha_vencimiento)<new Date()&&e.estado==="activo");
 
   async function entrarEmpresa(empresa) {
-    const ok = await confirmDialog({
-      title: "Entrar como soporte",
-      message: `Entrar como soporte en ${empresa.nombre}?`,
-      confirmText: "Entrar",
-      tone: "warning",
-    });
-    if (!ok) return;
     try {
+      notify(`Entrando en ${empresa.nombre}...`, "info", 2000);
       const data = await saFetch(`/empresas/${empresa.id}/impersonar`, { method:"POST" });
       if (!data?.token || !data?.user) throw new Error("La empresa no tiene un usuario activo para entrar como soporte.");
       removeToken();
@@ -2200,18 +2247,25 @@ export default function SuperAdmin(){
   }
 
   async function resetPasswordEmpresa(empresa){
+    setPasswordEmpresa(empresa);
+    setPasswordValue("");
+  }
+
+  async function confirmarResetPassword(){
+    const empresa = passwordEmpresa;
+    if(!empresa) return;
+    if(String(passwordValue || "").length < 8){
+      notify("La contrasena debe tener al menos 8 caracteres.", "warning");
+      return;
+    }
+    setPasswordSaving(true);
     try{
-      const password = await promptDialog({
-        title:"Cambiar contrasena",
-        message:`Nueva contrasena para ${empresa.nombre}. Minimo 8 caracteres.`,
-        inputType:"password",
-        placeholder:"Nueva contrasena",
-        confirmText:"Cambiar",
-      });
-      if(!password) return;
-      await saFetch(`/empresas/${empresa.id}/reset-password`,{method:"POST",body:{password}});
+      await saFetch(`/empresas/${empresa.id}/reset-password`,{method:"POST",body:{password:passwordValue}});
       notify("Contrasena actualizada.", "success");
+      setPasswordEmpresa(null);
+      setPasswordValue("");
     }catch(e){ notify(e.message || "No se pudo cambiar la contrasena", "error"); }
+    finally{ setPasswordSaving(false); }
   }
 
   async function reinvitarEmpresa(empresa){
@@ -2481,6 +2535,30 @@ export default function SuperAdmin(){
 
       {modalNueva&&<ModalNuevaEmpresa onClose={()=>setModalNueva(false)} onCreada={()=>{setModalNueva(false);cargar();}}/>}
       {editando&&<ModalEditarEmpresa empresa={editando} onClose={()=>setEditando(null)} onGuardado={()=>{setEditando(null);cargar();}}/>}
+      {passwordEmpresa&&(
+        <div style={{position:"fixed",inset:0,zIndex:7000,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
+          <form onSubmit={e=>{e.preventDefault();confirmarResetPassword();}} style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:12,padding:22,width:"min(420px,96vw)",boxShadow:"0 24px 80px rgba(0,0,0,.35)"}}>
+            <div style={{fontSize:17,fontWeight:900,color:"#e2e8f0",marginBottom:6}}>Cambiar clave</div>
+            <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.5,marginBottom:14}}>
+              Nueva contrasena para {passwordEmpresa.nombre}. El usuario principal podra entrar con ella.
+            </div>
+            <input
+              autoFocus
+              type="password"
+              value={passwordValue}
+              onChange={e=>setPasswordValue(e.target.value)}
+              placeholder="Minimo 8 caracteres"
+              style={{width:"100%",boxSizing:"border-box",background:"#1a2035",border:"1px solid #28344f",color:"#e2e8f0",padding:"11px 13px",borderRadius:8,outline:"none",fontFamily:"'DM Sans',sans-serif",fontSize:14}}
+            />
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
+              <button type="button" onClick={()=>{setPasswordEmpresa(null);setPasswordValue("");}} style={{padding:"8px 13px",borderRadius:7,border:"1px solid #334155",background:"transparent",color:"#94a3b8",fontWeight:800,cursor:"pointer"}}>Cancelar</button>
+              <button type="submit" disabled={passwordSaving} style={{padding:"8px 14px",borderRadius:7,border:"none",background:"#0f766e",color:"#fff",fontWeight:900,cursor:"pointer",opacity:passwordSaving?.7:1}}>
+                {passwordSaving ? "Guardando..." : "Cambiar clave"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

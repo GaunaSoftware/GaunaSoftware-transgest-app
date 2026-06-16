@@ -50,7 +50,10 @@ function getTransporter(config = null, cacheKey = "global") {
   return transporter;
 }
 
-function platformSmtpConfig() {
+async function platformSmtpConfig() {
+  await ensureEmailTables();
+  const saved = await getPlatformEmailConfig(true).catch(() => null);
+  if (saved?.activo && saved.smtp_host) return saved;
   const host = process.env.GAUNA_SMTP_HOST || process.env.PLATFORM_SMTP_HOST || process.env.SMTP_HOST;
   if (!host) return null;
   const port = process.env.GAUNA_SMTP_PORT || process.env.PLATFORM_SMTP_PORT || process.env.SMTP_PORT || "587";
@@ -106,9 +109,89 @@ async function ensureEmailTables() {
       sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS platform_smtp_config (
+      id BOOLEAN PRIMARY KEY DEFAULT true,
+      smtp_host VARCHAR(200),
+      smtp_port INTEGER NOT NULL DEFAULT 587,
+      smtp_secure BOOLEAN NOT NULL DEFAULT false,
+      smtp_user VARCHAR(255),
+      smtp_pass_encrypted TEXT,
+      smtp_from VARCHAR(255),
+      smtp_from_nombre VARCHAR(150),
+      reply_to VARCHAR(255),
+      activo BOOLEAN NOT NULL DEFAULT true,
+      last_test_at TIMESTAMPTZ,
+      last_test_ok BOOLEAN,
+      last_error TEXT,
+      updated_by UUID,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (id = true)
+    )
+  `);
   await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS adjuntos_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
   await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS message_id TEXT").catch(() => {});
   await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+}
+
+function publicPlatformEmailConfig(row = {}) {
+  return {
+    smtp_host: row.smtp_host || "",
+    smtp_port: String(row.smtp_port || "587"),
+    smtp_secure: !!row.smtp_secure,
+    smtp_user: row.smtp_user || "",
+    smtp_pass: "",
+    smtp_pass_masked: row.smtp_pass_encrypted ? maskSecret("************") : "",
+    smtp_from: row.smtp_from || "",
+    smtp_from_nombre: row.smtp_from_nombre || "Gauna - TransGest",
+    reply_to: row.reply_to || "",
+    activo: row.activo !== false,
+    last_test_at: row.last_test_at || null,
+    last_test_ok: row.last_test_ok,
+    last_error: row.last_error || "",
+    updated_at: row.updated_at || null,
+    source: row.smtp_host ? "db" : "empty",
+  };
+}
+
+async function getPlatformEmailConfig(includeSecret = false) {
+  await ensureEmailTables();
+  const { rows } = await db.query("SELECT * FROM platform_smtp_config WHERE id=true LIMIT 1");
+  const row = rows[0];
+  if (!row) return publicPlatformEmailConfig({});
+  const cfg = publicPlatformEmailConfig(row);
+  if (includeSecret) cfg.smtp_pass = decryptSecret(row.smtp_pass_encrypted || "");
+  return cfg;
+}
+
+async function savePlatformEmailConfig(data = {}, userId = null) {
+  await ensureEmailTables();
+  const current = await db.query("SELECT smtp_pass_encrypted FROM platform_smtp_config WHERE id=true LIMIT 1");
+  const newPass = String(data.smtp_pass || "").trim();
+  const encryptedPass = newPass ? encryptSecret(newPass) : current.rows[0]?.smtp_pass_encrypted || null;
+  const port = Number(data.smtp_port || 587);
+  const secure = data.smtp_secure !== undefined ? !!data.smtp_secure : String(data.smtp_port) === "465";
+  await db.query(`
+    INSERT INTO platform_smtp_config
+      (id,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_encrypted,smtp_from,smtp_from_nombre,reply_to,activo,updated_by,updated_at)
+    VALUES (true,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+    ON CONFLICT (id) DO UPDATE SET
+      smtp_host=$1,smtp_port=$2,smtp_secure=$3,smtp_user=$4,smtp_pass_encrypted=$5,smtp_from=$6,smtp_from_nombre=$7,reply_to=$8,
+      activo=$9,updated_by=$10,updated_at=NOW()
+  `, [
+    String(data.smtp_host || "").trim(),
+    Number.isFinite(port) ? port : 587,
+    secure,
+    String(data.smtp_user || "").trim(),
+    encryptedPass,
+    String(data.smtp_from || "").trim(),
+    String(data.smtp_from_nombre || "Gauna - TransGest").trim(),
+    String(data.reply_to || data.smtp_from || "").trim(),
+    data.activo !== false,
+    userId,
+  ]);
+  platformTransporter = null;
+  return getPlatformEmailConfig(false);
 }
 
 function publicEmailConfig(row = {}) {
@@ -194,7 +277,7 @@ async function markEmailConfigTest(empresaId, ok, error = "") {
 }
 
 async function resolveTransportConfig(empresaId, opts = {}) {
-  const platformCfg = platformSmtpConfig();
+  const platformCfg = await platformSmtpConfig();
   if (opts.forcePlatform && platformCfg?.smtp_host) {
     const host = String(platformCfg.smtp_host || "").trim().toLowerCase();
     if (!["smtp.tuproveedor.com", "smtp.example.com", "example.com"].some(token => host.includes(token))) {
@@ -689,4 +772,6 @@ module.exports = {
   getEmpresaEmailConfig,
   saveEmpresaEmailConfig,
   markEmailConfigTest,
+  getPlatformEmailConfig,
+  savePlatformEmailConfig,
 };

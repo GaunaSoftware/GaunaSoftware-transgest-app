@@ -1286,7 +1286,15 @@ export default function App() {
     return <Suspense fallback={<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#0f1420",color:"#e2e8f0",fontFamily:"DM Sans,sans-serif"}}>Cargando...</div>}><Invitacion /></Suspense>;
   }
   if (path === "/superadmin" || path.startsWith("/superadmin/")) {
-    return <Suspense fallback={<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#0f1420",color:"#e2e8f0",fontFamily:"DM Sans,sans-serif"}}>Cargando...</div>}><SuperAdmin /></Suspense>;
+    return (
+      <ThemeProvider>
+        <ToastProvider>
+          <Suspense fallback={<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#0f1420",color:"#e2e8f0",fontFamily:"DM Sans,sans-serif"}}>Cargando...</div>}>
+            <SuperAdmin />
+          </Suspense>
+        </ToastProvider>
+      </ThemeProvider>
+    );
   }
   if (path === "/web" || path.startsWith("/web/")) {
     return <Suspense fallback={<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#f8faf8",color:"#17211d",fontFamily:"DM Sans,sans-serif"}}>Cargando...</div>}><WebPublica /></Suspense>;

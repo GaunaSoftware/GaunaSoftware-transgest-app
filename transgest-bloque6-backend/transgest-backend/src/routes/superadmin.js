@@ -4,7 +4,7 @@ const jwt      = require("jsonwebtoken");
 const crypto   = require("crypto");
 const db       = require("../services/db");
 const logger   = require("../services/logger");
-const { enviarEmail } = require("../services/email");
+const { enviarEmail, getPlatformEmailConfig, savePlatformEmailConfig } = require("../services/email");
 const stripe   = require("../services/stripe");
 const { runBackup, listBackups, backupPath, getBackupStatus } = require("../services/backup");
 const {
@@ -761,18 +761,41 @@ router.get("/public/app-meta", async (req, res) => {
 
 // ── GET /superadmin/empresas — Listar todas las empresas ─────────────────
 router.get("/correo/status", superAuth, async (_req, res) => {
-  const required = ["GAUNA_SMTP_HOST", "GAUNA_SMTP_USER", "GAUNA_SMTP_PASS", "GAUNA_SMTP_FROM"];
+  const cfg = await getPlatformEmailConfig(false);
   const fallback = key => process.env[key] || process.env[key.replace("GAUNA_", "PLATFORM_")] || process.env[key.replace("GAUNA_", "")];
-  const missing = required.filter(k => !fallback(k));
+  const envHost = String(fallback("GAUNA_SMTP_HOST") || "").trim().toLowerCase();
+  const envLooksPlaceholder = ["smtp.tuproveedor.com", "smtp.example.com", "example.com"].some(token => envHost.includes(token));
+  const envConfigured = Boolean(!envLooksPlaceholder && fallback("GAUNA_SMTP_HOST") && fallback("GAUNA_SMTP_USER") && fallback("GAUNA_SMTP_PASS") && fallback("GAUNA_SMTP_FROM"));
+  const dbConfigured = Boolean(cfg.smtp_host && cfg.smtp_user && (cfg.smtp_pass_masked || cfg.smtp_pass) && cfg.smtp_from);
   res.json({
-    ok: missing.length === 0,
-    provider: missing.length === 0 ? "gauna" : "simulado",
-    from: fallback("GAUNA_SMTP_FROM") || "",
-    from_name: fallback("GAUNA_SMTP_FROM_NAME") || "Gauna - TransGest",
-    host_configured: Boolean(fallback("GAUNA_SMTP_HOST")),
-    user_configured: Boolean(fallback("GAUNA_SMTP_USER")),
-    missing,
+    ok: dbConfigured || envConfigured,
+    provider: dbConfigured ? "gauna_db" : envConfigured ? "gauna_env" : "simulado",
+    config: {
+      ...cfg,
+      smtp_host: cfg.smtp_host || fallback("GAUNA_SMTP_HOST") || "",
+      smtp_port: cfg.smtp_host ? cfg.smtp_port : String(fallback("GAUNA_SMTP_PORT") || "587"),
+      smtp_secure: cfg.smtp_host ? cfg.smtp_secure : ["true","1","yes","si"].includes(String(fallback("GAUNA_SMTP_SECURE") || "").toLowerCase()),
+      smtp_user: cfg.smtp_user || fallback("GAUNA_SMTP_USER") || "",
+      smtp_from: cfg.smtp_from || fallback("GAUNA_SMTP_FROM") || "",
+      smtp_from_nombre: cfg.smtp_from_nombre || fallback("GAUNA_SMTP_FROM_NAME") || "Gauna - TransGest",
+      reply_to: cfg.reply_to || fallback("GAUNA_SMTP_REPLY_TO") || fallback("GAUNA_SMTP_FROM") || "",
+    },
+    env_configured: envConfigured,
   });
+});
+
+router.put("/correo/config", superAuth, async (req, res) => {
+  try {
+    const saved = await savePlatformEmailConfig(req.body || {}, req.superadmin?.id || null);
+    await audit(req, "correo_gauna.config_guardada", {
+      smtp_host: saved.smtp_host ? "configurado" : "vacio",
+      smtp_user: saved.smtp_user ? "configurado" : "vacio",
+      smtp_from: saved.smtp_from || "",
+    });
+    res.json({ ok: true, config: saved });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post("/correo/test", superAuth, async (req, res) => {

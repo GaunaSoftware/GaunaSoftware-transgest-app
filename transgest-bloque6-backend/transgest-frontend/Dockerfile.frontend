@@ -1,0 +1,32 @@
+# ══════════════════════════════════════════════════════
+# TRANSGEST FRONTEND — Dockerfile multi-etapa
+# Etapa 1: compilar React
+# Etapa 2: servir con nginx
+# ══════════════════════════════════════════════════════
+
+# ── Etapa 1: Build ────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copiar dependencias primero (caché Docker)
+COPY package.json ./
+RUN npm install
+
+# Copiar código fuente y compilar
+COPY . .
+ENV CI=false
+ENV DISABLE_ESLINT_PLUGIN=true
+RUN npm run build
+
+# ── Etapa 2: Servir con nginx ─────────────────────────
+FROM nginx:alpine
+
+# Copiar el build generado
+COPY --from=builder /app/build /usr/share/nginx/html
+
+# Configuración nginx para SPA (Single Page App)
+COPY nginx-frontend.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

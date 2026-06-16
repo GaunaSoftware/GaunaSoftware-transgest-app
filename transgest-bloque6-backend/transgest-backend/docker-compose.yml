@@ -1,0 +1,199 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: transgest_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME:-transgest}
+      POSTGRES_USER:     ${DB_USER:-transgest_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-transgest_user} -d ${DB_NAME:-transgest}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [tg_net]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: transgest_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV:    production
+      PORT:        3001
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_NAME:     ${DB_NAME:-transgest}
+      DB_USER:     ${DB_USER:-transgest_user}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET:  ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      API_KEYS_ENCRYPTION_SECRET: ${API_KEYS_ENCRYPTION_SECRET:-}
+      SMTP_HOST:   ${SMTP_HOST:-}
+      SMTP_PORT:   ${SMTP_PORT:-587}
+      SMTP_USER:   ${SMTP_USER:-}
+      SMTP_PASS:   ${SMTP_PASS:-}
+      SMTP_FROM:   ${SMTP_FROM:-}
+      FRONTEND_URL: http://localhost
+      APP_URL:      ${APP_URL:-http://localhost}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost}
+      ACCOUNTING_FRONTEND_URL: ${ACCOUNTING_FRONTEND_URL:-http://localhost:8080}
+      ACCOUNTING_SSO_JWT_SECRET: ${ACCOUNTING_SSO_JWT_SECRET:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1,http://localhost:8080,http://127.0.0.1:8080}
+      ROUTING_PROVIDER: ${ROUTING_PROVIDER:-local}
+      ORS_API_KEY: ${ORS_API_KEY:-}
+      HERE_API_KEY: ${HERE_API_KEY:-}
+      ROUTING_TIMEOUT_MS: ${ROUTING_TIMEOUT_MS:-12000}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
+      LOCATEL_API_KEY: ${LOCATEL_API_KEY:-}
+      TACOGEST_API_KEY: ${TACOGEST_API_KEY:-}
+      MOVILDATA_API_KEY: ${MOVILDATA_API_KEY:-}
+      GPS_API_KEY: ${GPS_API_KEY:-}
+    networks: [tg_net]
+
+  accounting-migrator:
+    build:
+      context: ../transgest-accounting-api
+      dockerfile: Dockerfile
+    container_name: transgest_accounting_migrator
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["node", "scripts/migrate.js", "up"]
+    environment:
+      NODE_ENV: production
+      ACCOUNTING_DB_HOST: postgres
+      ACCOUNTING_DB_PORT: 5432
+      ACCOUNTING_DB_NAME: ${DB_NAME:-transgest}
+      ACCOUNTING_DB_USER: ${DB_USER:-transgest_user}
+      ACCOUNTING_DB_PASSWORD: ${DB_PASSWORD}
+      ACCOUNTING_DB_SCHEMA: accounting
+    healthcheck:
+      disable: true
+    networks: [tg_net]
+
+  accounting-db-provisioner:
+    build:
+      context: ../transgest-accounting-api
+      dockerfile: Dockerfile
+    container_name: transgest_accounting_db_provisioner
+    restart: "no"
+    depends_on:
+      accounting-migrator:
+        condition: service_completed_successfully
+    command: ["node", "scripts/provision-runtime-role.js"]
+    environment:
+      NODE_ENV: production
+      ACCOUNTING_DB_HOST: postgres
+      ACCOUNTING_DB_PORT: 5432
+      ACCOUNTING_DB_NAME: ${DB_NAME:-transgest}
+      ACCOUNTING_DB_USER: ${DB_USER:-transgest_user}
+      ACCOUNTING_DB_PASSWORD: ${DB_PASSWORD}
+      ACCOUNTING_DB_SCHEMA: accounting
+      ACCOUNTING_API_DB_USER: ${ACCOUNTING_API_DB_USER:-transgest_accounting_api}
+      ACCOUNTING_API_DB_PASSWORD: ${ACCOUNTING_API_DB_PASSWORD:-transgest_accounting_api_local}
+      ACCOUNTING_WORKER_DB_USER: ${ACCOUNTING_WORKER_DB_USER:-transgest_accounting_worker}
+      ACCOUNTING_WORKER_DB_PASSWORD: ${ACCOUNTING_WORKER_DB_PASSWORD:-transgest_accounting_worker_local}
+      ACCOUNTING_LEGACY_RUNTIME_DB_USER: ${ACCOUNTING_LEGACY_RUNTIME_DB_USER:-transgest_accounting_app}
+    healthcheck:
+      disable: true
+    networks: [tg_net]
+
+  accounting-api:
+    build:
+      context: ../transgest-accounting-api
+      dockerfile: Dockerfile
+    container_name: transgest_accounting_api
+    restart: unless-stopped
+    depends_on:
+      accounting-db-provisioner:
+        condition: service_completed_successfully
+    command: ["node", "src/server.js"]
+    environment:
+      NODE_ENV: production
+      ACCOUNTING_PORT: 3011
+      JWT_SECRET: ${JWT_SECRET}
+      ACCOUNTING_DB_HOST: postgres
+      ACCOUNTING_DB_PORT: 5432
+      ACCOUNTING_DB_NAME: ${DB_NAME:-transgest}
+      ACCOUNTING_DB_USER: ${ACCOUNTING_API_DB_USER:-transgest_accounting_api}
+      ACCOUNTING_DB_PASSWORD: ${ACCOUNTING_API_DB_PASSWORD:-transgest_accounting_api_local}
+      ACCOUNTING_DB_SCHEMA: accounting
+      ACCOUNTING_JWT_SECRET: ${ACCOUNTING_JWT_SECRET:-}
+      ACCOUNTING_SSO_JWT_SECRET: ${ACCOUNTING_SSO_JWT_SECRET:-}
+      ACCOUNTING_CORS_ORIGINS: ${ACCOUNTING_CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost,http://127.0.0.1}
+    ports:
+      - "127.0.0.1:3011:3011"
+    networks: [tg_net]
+
+  accounting-worker:
+    build:
+      context: ../transgest-accounting-api
+      dockerfile: Dockerfile
+    container_name: transgest_accounting_worker
+    restart: unless-stopped
+    depends_on:
+      accounting-api:
+        condition: service_healthy
+    command: ["node", "src/worker.js"]
+    environment:
+      NODE_ENV: production
+      ACCOUNTING_DB_HOST: postgres
+      ACCOUNTING_DB_PORT: 5432
+      ACCOUNTING_DB_NAME: ${DB_NAME:-transgest}
+      ACCOUNTING_DB_USER: ${ACCOUNTING_WORKER_DB_USER:-transgest_accounting_worker}
+      ACCOUNTING_DB_PASSWORD: ${ACCOUNTING_WORKER_DB_PASSWORD:-transgest_accounting_worker_local}
+      ACCOUNTING_DB_SCHEMA: accounting
+      ACCOUNTING_OUTBOX_CONSUMER_NAME: ${ACCOUNTING_OUTBOX_CONSUMER_NAME:-accounting-internal-v1}
+      ACCOUNTING_OUTBOX_POLL_INTERVAL_MS: ${ACCOUNTING_OUTBOX_POLL_INTERVAL_MS:-1000}
+      ACCOUNTING_OUTBOX_LEASE_SECONDS: ${ACCOUNTING_OUTBOX_LEASE_SECONDS:-60}
+      ACCOUNTING_OUTBOX_MAX_ATTEMPTS: ${ACCOUNTING_OUTBOX_MAX_ATTEMPTS:-5}
+    healthcheck:
+      disable: true
+    networks: [tg_net]
+
+  frontend:
+    build:
+      context: ../transgest-frontend
+      dockerfile: Dockerfile.frontend
+    container_name: transgest_frontend
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "80:80"
+    networks: [tg_net]
+
+  accounting-frontend:
+    build:
+      context: ../transgest-accounting-frontend
+      dockerfile: Dockerfile.frontend
+    container_name: transgest_accounting_frontend
+    restart: unless-stopped
+    depends_on: [accounting-api]
+    ports:
+      - "8080:80"
+    networks: [tg_net]
+
+volumes:
+  db_data:
+
+networks:
+  tg_net:
+    driver: bridge

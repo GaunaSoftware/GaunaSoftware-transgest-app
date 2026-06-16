@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#07090e" />
+    <title>TransGest TMS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      /* ── Focus outline stays inside modal (no overflow) ── */
+      *:focus { outline: 2px solid var(--accent, #14b8a6); outline-offset: -1px; }
+      *:focus:not(:focus-visible) { outline: none; }
+      *:focus-visible { outline: 2px solid var(--accent, #14b8a6); outline-offset: -1px; }
+      /* ── Number inputs: no leading zeros spinner ── */
+      input[type="number"] { -moz-appearance: textfield; }
+      input[type="number"]::-webkit-outer-spin-button,
+      input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+      #root { height: 100vh; }
+
+      /* ══ TEMA OSCURO (por defecto) ══ */
+      :root, [data-theme="dark"] {
+        --bg:         #18211f;
+        --bg2:        #202b28;
+        --bg3:        #263431;
+        --bg4:        #30423e;
+        --bg5:        #3a504a;
+        --border:     #38504a;
+        --border2:    #496a61;
+        --border3:    #5d8178;
+        --text:       #f4faf7;
+        --text2:      #d5e4df;
+        --text3:      #adc3bb;
+        --text4:      #8ca59b;
+        --text5:      #718b82;
+        --accent:     #0f766e;
+        --accent-l:   #14b8a6;
+        --accent-xl:  #5eead4;
+        --accent-dim: rgba(20,184,166,.16);
+        --green:      #10b981;
+        --green-dim:  rgba(16,185,129,.15);
+        --orange:     #f97316;
+        --red:        #f87171;
+        --yellow:     #fbbf24;
+        --purple:     #b48cf2;
+        --sidebar-bg: #17231f;
+        --topbar-bg:  rgba(32,43,40,.94);
+        --card-bg:    #202b28;
+        --input-bg:   #2b3b37;
+        --row-hover:  rgba(20,184,166,.08);
+        --shadow:     0 18px 48px rgba(0,0,0,.24);
+        color-scheme: dark;
+      }
+
+      /* ══ TEMA CLARO ══ */
+      [data-theme="light"] {
+        --bg:         #f5f7f7;
+        --bg2:        #ffffff;
+        --bg3:        #f7faf9;
+        --bg4:        #edf4f2;
+        --bg5:        #e3eeeb;
+        --border:     #d9e4e1;
+        --border2:    #c4d4cf;
+        --border3:    #aebfba;
+        --text:       #15201d;
+        --text2:      #2f4740;
+        --text3:      #526a62;
+        --text4:      #718980;
+        --text5:      #93a7a0;
+        --accent:     #0f766e;
+        --accent-l:   #14b8a6;
+        --accent-xl:  #0f5f55;
+        --accent-dim: rgba(20,184,166,.13);
+        --green:      #059669;
+        --green-dim:  rgba(5,150,105,.12);
+        --orange:     #ea580c;
+        --red:        #dc2626;
+        --yellow:     #d97706;
+        --purple:     #7c3aed;
+        --sidebar-bg: #10231f;
+        --topbar-bg:  #ffffff;
+        --card-bg:    #ffffff;
+        --input-bg:   #f7faf9;
+        --row-hover:  #edf7f4;
+        --shadow:     0 12px 30px rgba(19,32,29,.09);
+        color-scheme: light;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'DM Sans', sans-serif;
+        transition: background .25s, color .25s;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      ::selection { background: rgba(20,184,166,.24); color: var(--text); }
+      ::-webkit-scrollbar { width: 9px; height: 9px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--border2) 78%, transparent); border: 2px solid transparent; border-radius: 999px; background-clip: content-box; }
+      ::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 55%, var(--border2)); border: 2px solid transparent; background-clip: content-box; }
+
+      input, select, textarea {
+        border-color: var(--border2) !important;
+        background-color: var(--input-bg) !important;
+        color: var(--text) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+      }
+      input:hover, select:hover, textarea:hover { border-color: var(--border3) !important; }
+      input:focus-visible, select:focus-visible, textarea:focus-visible {
+        border-color: var(--accent-l) !important;
+        box-shadow: 0 0 0 3px rgba(20,184,166,.17), inset 0 1px 0 rgba(255,255,255,.04) !important;
+      }
+      button { transform: translateZ(0); }
+      button:not(:disabled):hover { filter: brightness(1.04); }
+      button:disabled { cursor: not-allowed !important; }
+      table { border-color: var(--border) !important; }
+      tr { transition: background-color .12s ease; }
+      thead th { backdrop-filter: blur(10px); }
+
+      /* Smooth theme transitions */
+      *, *::before, *::after {
+        transition: background-color .2s ease, border-color .2s ease, color .15s ease, box-shadow .2s ease;
+      }
+      /* But not transforms/opacity (would make animations laggy) */
+      button, a, input, select, textarea {
+        transition: background-color .15s ease, border-color .15s ease, color .1s ease, box-shadow .15s ease, outline .1s ease;
+      }
+
+      /* Light mode sidebar overrides */
+      [data-theme="light"] .tg-sidebar { background: linear-gradient(180deg,var(--sidebar-bg),#0b1714) !important; }
+      [data-theme="light"] .tg-nav-item { color: rgba(255,255,255,.65) !important; }
+      [data-theme="light"] .tg-nav-item:hover { background: rgba(255,255,255,.1) !important; color: #fff !important; }
+      [data-theme="light"] .tg-nav-item.active { background: rgba(20,184,166,.18) !important; color: #99f6e4 !important; }
+      [data-theme="light"] .tg-nav-group { color: rgba(255,255,255,.3) !important; }
+      [data-theme="light"] .tg-nav-subitem { color: rgba(255,255,255,.5) !important; }
+      [data-theme="light"] .tg-nav-subitem:hover { background: rgba(255,255,255,.08) !important; color: rgba(255,255,255,.8) !important; }
+      [data-theme="light"] .tg-nav-subitem.active { color: #99f6e4 !important; background: rgba(20,184,166,.14) !important; }
+      [data-theme="light"] .tg-nav-dot { background: rgba(255,255,255,.2) !important; }
+      [data-theme="light"] .tg-nav-subitem.active .tg-nav-dot { background: #2dd4bf !important; }
+
+      /* Print styles for invoices */
+      @media print {
+        .tg-sidebar, .tg-topbar, .tg-tabs-bar { display: none !important; }
+        .tg-main { margin-left: 0 !important; }
+        .tg-content { overflow: visible !important; }
+        body { background: #fff !important; color: #000 !important; }
+        #factura-print { color: #000 !important; background: #fff !important; }
+        #factura-print * { color: inherit !important; background: transparent !important; border-color: #ddd !important; }
+      }
+    </style>
+    <!-- iOS PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TransGest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <!-- Android Chrome -->
+  <meta name="theme-color" content="#1a1f2e">
+</head>
+  <body>
+    <noscript>Necesitas JavaScript para usar TransGest TMS.</noscript>
+    <div id="root"></div>
+  </body>
+</html>

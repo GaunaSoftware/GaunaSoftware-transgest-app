@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS accounting.processed_events;
+DROP TABLE IF EXISTS accounting.outbox_events;
+DROP TABLE IF EXISTS accounting.audit_log;
+DROP TABLE IF EXISTS accounting.accounting_periods;
+DROP TABLE IF EXISTS accounting.fiscal_years;
+DROP TABLE IF EXISTS accounting.accounting_user_roles;
+DROP TABLE IF EXISTS accounting.accounting_role_permissions;
+DROP TABLE IF EXISTS accounting.accounting_permissions;
+DROP TABLE IF EXISTS accounting.accounting_roles;
+DROP TABLE IF EXISTS accounting.accounting_users;
+DROP TABLE IF EXISTS accounting.accounting_companies;
+DROP TABLE IF EXISTS accounting.accounting_tenants;

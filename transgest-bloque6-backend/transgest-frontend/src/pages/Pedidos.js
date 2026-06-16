@@ -1,0 +1,8775 @@
+import { useDebounce } from "../hooks/useDebounce";
+import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia } from "../services/api";
+import { getLogoDataUrl } from "../services/logoHelper";
+import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { getPedidos, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
+         crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
+         getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
+         crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
+         getPuntosInteres as getPuntosInteresApi, chatIA, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getRutaOptimizadaPedido, optimizarRuta,
+         getPedidoWhatsappPreflight, enviarPedidoWhatsapp } from "../services/api";
+import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
+import { useAuth } from "../context/AuthContext";
+import { confirmDialog, notify } from "../services/notify";
+import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
+import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
+
+let puntosInteresCache = [];
+const AI_INBOX_MAX_FILE_BYTES = 6 * 1024 * 1024;
+const AI_INBOX_MAX_TOTAL_BYTES = 7 * 1024 * 1024;
+
+function formatDateInputLocal(value = new Date()) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function currentWeekRangeLocal(now = new Date()) {
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const day = base.getDay() || 7;
+  const monday = new Date(base);
+  monday.setDate(base.getDate() - day + 1);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return {
+    week: formatDateInputLocal(monday),
+    desde: formatDateInputLocal(monday),
+    hasta: formatDateInputLocal(sunday),
+  };
+}
+
+function currentMonthRangeLocal(now = new Date()) {
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return {
+    month: formatDateInputLocal(first).slice(0, 7),
+    desde: formatDateInputLocal(first),
+    hasta: formatDateInputLocal(last),
+  };
+}
+
+function addDaysLocal(dateIso, days) {
+  const base = new Date(`${String(dateIso || "").slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return "";
+  base.setDate(base.getDate() + Number(days || 0));
+  return formatDateInputLocal(base);
+}
+
+function pedidoFechaOperativaKey(pedido) {
+  return toDateInputValue(pedido?.fecha_carga || pedido?.fecha_pedido || pedido?.fecha_descarga || pedido?.fecha_entrega) || "sin-fecha";
+}
+
+function formatWeekdayLabel(dateIso) {
+  if (!dateIso || dateIso === "sin-fecha") return "Sin fecha";
+  const d = new Date(`${String(dateIso).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "Sin fecha";
+  const weekday = d.toLocaleDateString("es-ES", { weekday: "long" });
+  const date = d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
+  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${date}`;
+}
+
+function formatShortDateLabel(dateIso) {
+  if (!dateIso || dateIso === "sin-fecha") return "";
+  const d = new Date(`${String(dateIso).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
+}
+
+function startOfWeekLocal(dateIso) {
+  if (!dateIso || dateIso === "sin-fecha") return "sin-fecha";
+  const d = new Date(`${String(dateIso).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "sin-fecha";
+  const day = d.getDay() || 7;
+  d.setDate(d.getDate() - day + 1);
+  return formatDateInputLocal(d);
+}
+
+function weekIndexInRange(weekStartIso, rangeStartIso) {
+  if (!weekStartIso || weekStartIso === "sin-fecha") return null;
+  const rangeWeekStart = startOfWeekLocal(rangeStartIso || weekStartIso);
+  const a = new Date(`${rangeWeekStart}T00:00:00`);
+  const b = new Date(`${weekStartIso}T00:00:00`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+  return Math.max(1, Math.floor((b.getTime() - a.getTime()) / (7 * 86400000)) + 1);
+}
+
+function buildPedidoCalendarGroups(items, { desde, hasta, currentWeek = false } = {}) {
+  const byWeek = new Map();
+  const sorted = [...items].sort((a, b) => {
+    const da = pedidoFechaOperativaKey(a.pedido);
+    const db = pedidoFechaOperativaKey(b.pedido);
+    if (da !== db) return String(da).localeCompare(String(db));
+    return String(a.pedido?.hora_carga || "").localeCompare(String(b.pedido?.hora_carga || ""));
+  });
+  sorted.forEach(item => {
+    const dayKey = pedidoFechaOperativaKey(item.pedido);
+    const weekKey = startOfWeekLocal(dayKey);
+    if (!byWeek.has(weekKey)) byWeek.set(weekKey, new Map());
+    const days = byWeek.get(weekKey);
+    if (!days.has(dayKey)) days.set(dayKey, []);
+    days.get(dayKey).push(item);
+  });
+  return Array.from(byWeek.entries()).map(([weekKey, daysMap]) => {
+    const dayGroups = Array.from(daysMap.entries()).map(([dayKey, dayItems]) => ({
+      key: `day-${dayKey}`,
+      label: formatWeekdayLabel(dayKey),
+      count: dayItems.length,
+      items: dayItems,
+    }));
+    const total = dayGroups.reduce((sum, g) => sum + g.count, 0);
+    const idx = weekIndexInRange(weekKey, desde);
+    const weekEnd = weekKey === "sin-fecha" ? "" : addDaysLocal(weekKey, 6);
+    return {
+      key: `week-${weekKey}`,
+      label: weekKey === "sin-fecha"
+        ? "Sin fecha"
+        : currentWeek
+          ? `Semana actual (${formatShortDateLabel(weekKey)} - ${formatShortDateLabel(weekEnd)})`
+          : `Semana ${idx || ""} (${formatShortDateLabel(weekKey)} - ${formatShortDateLabel(weekEnd)})`,
+      count: total,
+      days: dayGroups,
+    };
+  }).filter(group => group.count > 0);
+}
+
+// Module-level constant - NOT inside any function so webpack keeps it
+
+// ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Numeracion ordenes de carga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+function getOrdenCargaNumero(pedido, docControl) {
+  return docControl?.orden_carga_numero || pedido?.orden_carga_numero || "";
+}
+
+function pedidoTieneFacturaFinal(pedido) {
+  const facturaId = pedido?.factura_id && pedido.factura_id !== "null";
+  const estadoFactura = String(pedido?.factura_estado || pedido?.estado_factura || "").toLowerCase();
+  if (facturaId && estadoFactura && estadoFactura !== "borrador") return true;
+  return Boolean(facturaId && pedido?.facturado);
+}
+
+function pedidoTieneFacturaBorrador(pedido) {
+  const facturaId = pedido?.factura_id && pedido.factura_id !== "null";
+  const estadoFactura = String(pedido?.factura_estado || pedido?.estado_factura || "").toLowerCase();
+  return Boolean(facturaId && estadoFactura === "borrador");
+}
+
+function isFestivoConfirmError(err) {
+  return err?.status === 409 && err?.data?.requiere_confirmacion && err?.data?.aviso_festivo;
+}
+
+async function confirmFestivoDestino(err) {
+  const aviso = err?.data?.aviso_festivo || {};
+  return confirmDialog({
+    title: "Festivo en destino",
+    message: `El destino esta en ${aviso.ccaa_label || aviso.ccaa || "la comunidad detectada"} y el ${aviso.fecha || "dia indicado"} figura como festivo (${aviso.festivo_nombre || "festivo"}).\n\nPara continuar debes leer y aceptar el aviso. Se notificara al gerente.`,
+    confirmText: "He leido el aviso y acepto",
+    cancelText: "Cancelar",
+    tone: "warning",
+  });
+}
+
+function buildPedidoDuplicado(pedido = {}) {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const clone = { ...pedido };
+  [
+    "id","numero","factura_id","factura_estado","factura_numero","facturado",
+    "created_at","updated_at","orden_carga_numero","orden_carga_generada_at",
+    "carta_porte_numero","carta_porte_generada_at","workflow_colaborador_enviado_at",
+    "workflow_colaborador_confirmado_at","workflow_colaborador_cargado_at",
+    "workflow_colaborador_en_camino_at","workflow_colaborador_descargado_at",
+    "firma_entrega","firma_colaborador","albaranes","docs","eventos"
+  ].forEach(k => { delete clone[k]; });
+  return {
+    ...clone,
+    numero: "",
+    estado: "pendiente",
+    fecha_pedido: hoy,
+    pendiente_completar: true,
+    aviso_completar: "Pedido duplicado: revisa fechas, asignacion, precio y documentacion antes de guardar.",
+    _duplicado: true,
+    _readonly: false,
+  };
+}
+
+const PEDIDOS_COLLAPSED_GROUPS_KEY = "tms_pedidos_collapsed_groups_v1";
+
+function loadPedidosCollapsedGroups() {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PEDIDOS_COLLAPSED_GROUPS_KEY) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePedidosCollapsedGroups(value) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(PEDIDOS_COLLAPSED_GROUPS_KEY, JSON.stringify(value || {})); } catch {}
+}
+
+function sumarDiasISO(fecha, dias) {
+  if (!fecha) return "";
+  const base = new Date(`${String(fecha).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return String(fecha).slice(0, 10);
+  base.setDate(base.getDate() + Number(dias || 0));
+  return base.toISOString().slice(0, 10);
+}
+
+function fileToPedidoDocBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = ev => resolve(String(ev.target?.result || "").split(",")[1] || "");
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = ev => resolve(ev.target?.result);
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function decodeDocumentBytes(buffer) {
+  const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : new Uint8Array();
+  try {
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return Array.from(bytes).map(b => String.fromCharCode(b)).join("");
+  }
+}
+
+function cleanExtractedDocumentText(text = "") {
+  return String(text || "")
+    .replace(/\0/g, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function extractPdfTextHeuristic(raw = "") {
+  const chunks = [];
+  String(raw || "").replace(/\(([^()]{2,500})\)\s*Tj/g, (_, value) => {
+    chunks.push(value.replace(/\\([()\\])/g, "$1"));
+    return "";
+  });
+  String(raw || "").replace(/\[((?:\([^()]{1,300}\)\s*){1,80})\]\s*TJ/g, (_, group) => {
+    const line = [];
+    group.replace(/\(([^()]{1,300})\)/g, (_m, value) => {
+      line.push(value.replace(/\\([()\\])/g, "$1"));
+      return "";
+    });
+    if (line.join("").trim()) chunks.push(line.join(""));
+    return "";
+  });
+  const visible = chunks.join("\n");
+  const fallback = String(raw || "").replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s+/g, " ");
+  return cleanExtractedDocumentText(visible.length > 80 ? visible : fallback.slice(0, 12000));
+}
+
+async function prepareAiInboxFile(file) {
+  const buffer = await readFileAsArrayBuffer(file);
+  const raw = decodeDocumentBytes(buffer);
+  const lower = String(file.name || "").toLowerCase();
+  const mediaType = file.type ||
+    (lower.endsWith(".pdf") ? "application/pdf" :
+     lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" :
+     lower.endsWith(".png") ? "image/png" :
+     lower.endsWith(".webp") ? "image/webp" :
+     "application/octet-stream");
+  let extractedText = "";
+  let extractionStatus = "ok";
+  if (mediaType.includes("pdf") || lower.endsWith(".pdf")) {
+    extractedText = extractPdfTextHeuristic(raw);
+    if (extractedText.length < 40) extractionStatus = "sin_texto_pdf";
+  } else if (/\.(txt|eml|csv|xml|html?)$/i.test(lower) || /^text\//i.test(mediaType) || mediaType.includes("message")) {
+    extractedText = cleanExtractedDocumentText(raw);
+  } else if (/\.(docx|xlsx|jpg|jpeg|png|webp)$/i.test(lower) || /^image\//i.test(mediaType)) {
+    extractedText = "";
+    extractionStatus = "requiere_texto_manual";
+  } else {
+    extractedText = cleanExtractedDocumentText(raw.replace(/[^\x20-\x7E\n\r\t]/g, " "));
+    if (extractedText.length < 40) extractionStatus = "texto_no_detectado";
+  }
+  return {
+    name: file.name,
+    mediaType,
+    sizeKb: Math.round(file.size / 1024),
+    base64: await fileToPedidoDocBase64(file),
+    extractedText,
+    extractionStatus,
+  };
+}
+
+function inferPedidoDocTipo(nombre = "") {
+  const lower = String(nombre || "").toLowerCase();
+  if (lower.includes("cmr")) return "CMR";
+  if (lower.includes("albar")) return "Albaran";
+  if (lower.includes("descarga") || lower.includes("foto")) return "Foto descarga";
+  if (lower.includes("pesaje") || lower.includes("bascula")) return "Pesaje";
+  if (lower.includes("incid")) return "Incidencia";
+  return "Otro";
+}
+
+function buildPedidoCopyPayload(basePedido = {}, overrides = {}) {
+  const merged = { ...buildPedidoDuplicado(basePedido), ...overrides };
+  if (merged.mantener_asignacion === false) {
+    Object.assign(merged, {
+      vehiculo_id: null,
+      chofer_id: null,
+      chofer2_id: null,
+      remolque_id: null,
+      remolque_id_manual: null,
+      colaborador_id: null,
+      precio_colaborador: null,
+      matricula_colaborador: null,
+      remolque_matricula_colaborador: null,
+      coste_gasoil: 0,
+    });
+  }
+  const {
+    remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
+    chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
+    factura_numero, facturado, cliente_email, cliente_telefono,
+    chofer2_nombre, remolque_id, mantener_asignacion, ...formClean
+  } = merged;
+  const payload = sanitizePedidoPayload({
+    ...formClean,
+    importe: calcImporte(merged),
+    puntos_carga: normalizeStopsForCopy(merged.puntos_carga, merged.origen, "carga"),
+    puntos_descarga: normalizeStopsForCopy(merged.puntos_descarga, merged.destino, "descarga"),
+    extracostes_importe: toFiniteNumber(merged.extracostes ?? merged.extracostes_importe, 0),
+    importe_revision_combustible: calcRevisionCombustible(merged),
+    importe_minimo: merged.tipo_precio === "viaje" ? toNullableNumber(merged.importe_minimo) : null,
+    minimo_unidades: merged.tipo_precio !== "viaje" ? toNullableNumber(merged.minimo_unidades) : null,
+    importe_paralizacion: toNullableNumber(merged.importe_paralizacion),
+    paralizacion_horas: toNullableNumber(merged.paralizacion_horas),
+  });
+  if (remolque_id_manual !== undefined) payload.remolque_id = remolque_id_manual || null;
+  if (payload.colaborador_id) payload.coste_gasoil = 0;
+  return payload;
+}
+
+function buildPedidoReschedulePayload(basePedido = {}, offsetDays = 1, overrides = {}) {
+  const fechaCargaBase = basePedido?.fecha_carga || basePedido?.fecha_pedido || new Date().toISOString().slice(0, 10);
+  const fechaDescargaBase = basePedido?.fecha_descarga || fechaCargaBase;
+  const cargaNorm = String(fechaCargaBase).slice(0, 10);
+  const descargaNorm = String(fechaDescargaBase).slice(0, 10);
+  const diferenciaDias = Math.round(
+    (new Date(`${descargaNorm}T00:00:00`) - new Date(`${cargaNorm}T00:00:00`)) / 86400000
+  );
+  const nextFechaCarga = sumarDiasISO(cargaNorm, offsetDays);
+  const nextFechaDescarga = sumarDiasISO(nextFechaCarga, Number.isFinite(diferenciaDias) ? diferenciaDias : 0);
+  return sanitizePedidoPayload({
+    ...basePedido,
+    ...overrides,
+    fecha_carga: nextFechaCarga,
+    fecha_descarga: nextFechaDescarga,
+    pendiente_completar: true,
+    aviso_completar: `Viaje reprogramado desde pedidos: revisar horarios, asignacion y compromiso con el cliente.`,
+    importe: calcImporte(basePedido),
+    puntos_carga: parseStops(basePedido?.puntos_carga),
+    puntos_descarga: parseStops(basePedido?.puntos_descarga),
+    extracostes_importe: toFiniteNumber(basePedido?.extracostes ?? basePedido?.extracostes_importe, 0),
+    importe_revision_combustible: calcRevisionCombustible(basePedido),
+    importe_minimo: basePedido?.tipo_precio === "viaje" ? toNullableNumber(basePedido?.importe_minimo) : null,
+    minimo_unidades: basePedido?.tipo_precio !== "viaje" ? toNullableNumber(basePedido?.minimo_unidades) : null,
+    importe_paralizacion: toNullableNumber(basePedido?.importe_paralizacion),
+    paralizacion_horas: toNullableNumber(basePedido?.paralizacion_horas),
+  });
+}
+
+function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
+  const merged = normalizePedidoTarifaDraft({ ...basePedido, ...overrides });
+  const {
+    remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
+    colaborador_nombre, chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
+    factura_numero, factura_estado, factura_id,
+    facturado, cliente_email, cliente_telefono,
+    chofer2_nombre, remolque_id,
+    created_at, updated_at, eventos, docs, albaranes,
+    workflow_colaborador_enviado_at, workflow_colaborador_confirmado_at,
+    workflow_colaborador_cargado_at, workflow_colaborador_en_camino_at,
+    workflow_colaborador_descargado_at,
+    ...formClean
+  } = merged;
+  const payload = sanitizePedidoPayload({
+    ...formClean,
+    importe: calcImporte(merged),
+    precio_colaborador: merged.colaborador_id ? (importeColaboradorCalculado(merged) || merged.precio_colaborador || null) : merged.precio_colaborador,
+    puntos_carga: parseStops(merged.puntos_carga),
+    puntos_descarga: parseStops(merged.puntos_descarga),
+    extracostes_importe: toFiniteNumber(merged.extracostes ?? merged.extracostes_importe, 0),
+    importe_revision_combustible: calcRevisionCombustible(merged),
+    importe_minimo: merged.tipo_precio === "viaje" ? toNullableNumber(merged.importe_minimo) : null,
+    minimo_unidades: merged.tipo_precio !== "viaje" ? toNullableNumber(merged.minimo_unidades) : null,
+    importe_paralizacion: toNullableNumber(merged.importe_paralizacion),
+    paralizacion_horas: toNullableNumber(merged.paralizacion_horas),
+  });
+  if (remolque_id_manual !== undefined) payload.remolque_id = remolque_id_manual || null;
+  if (payload.colaborador_id) {
+    payload.vehiculo_id = null;
+    payload.chofer_id = null;
+    payload.chofer2_id = null;
+    payload.remolque_id = null;
+    payload.coste_gasoil = 0;
+  }
+  if (_ai_meta && typeof _ai_meta === "object") {
+    payload.ai_metadata = _ai_meta;
+  }
+  return payload;
+}
+
+const PEDIDOS_CRITICAL_ALERTS_STORAGE_KEY = "tms_pedidos_critical_alerts_read";
+
+function loadReadPedidoAlerts() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(PEDIDOS_CRITICAL_ALERTS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function buildPedidoCriticalAlertKey(item) {
+  const pedido = item?.pedido || {};
+  const meta = item?.meta || item?.priorityMeta || {};
+  const flags = meta?.flags || {};
+  const reasons = Array.isArray(meta?.reasons) ? meta.reasons.map(r => r?.key || r?.label || "").filter(Boolean).sort().join("|") : "";
+  const issues = Array.isArray(meta?.validationIssues) ? meta.validationIssues.slice().sort().join("|") : "";
+  return [
+    pedido?.id || pedido?.numero || "pedido",
+    flags.overdueAssignment ? "overdue" : "",
+    flags.urgentAssignment ? "urgent" : "",
+    flags.missingVehiculo ? "vehiculo" : "",
+    flags.missingChofer ? "chofer" : "",
+    reasons,
+    issues,
+  ].filter(Boolean).join("::");
+}
+
+const ESTADOS_RAW = ["pendiente","confirmado","en_curso","descarga","entregado","cancelado","incidencia"];
+const LABEL_ESTADO = {
+  pendiente:"Pendiente", confirmado:"Confirmado", en_curso:"En curso",
+  descarga:"En descarga", entregado:"Entregado", cancelado:"Cancelado", incidencia:"Incidencia"
+};
+const COLOR_ESTADO = {
+  pendiente:"#fb8c3a", confirmado:"#3b6ef5", en_curso:"#22d3ee",
+  descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#f05252", incidencia:"#fbbf24"
+};
+const TIPOS_PRECIO = [
+  { v:"viaje",    l:"Precio por viaje (EUR fijo)" },
+  { v:"kg",       l:"Por kg (EUR/100kg)" },
+  { v:"tonelada", l:"Por toneladas (EUR/tn)" },
+  { v:"km",       l:"Por kilometro (EUR/km)" },
+  { v:"hora",     l:"Por hora (EUR/h)" },
+  { v:"palet",    l:"Por palet (EUR/palet)" },
+];
+const S = {
+  page:{flex:1,padding:"24px 28px"},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:16,color:"var(--text)"},
+  bar:{display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"},
+  btn:{padding:"8px 16px",borderRadius:7,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:6},
+  card:{background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:12,overflow:"hidden"},
+  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)",whiteSpace:"nowrap"},
+  td:{padding:"10px 14px",borderBottom:"1px solid #181e2e",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
+  input:{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  sel:{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
+  mbox:{background:"var(--bg2)",border:"1px solid #28344f",borderRadius:16,padding:28,width:"min(720px,96vw)",maxHeight:"92vh",overflowY:"auto",position:"relative"},
+  label:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:5,marginTop:12},
+  sec:{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".1em",color:"#3b6ef5",marginTop:20,marginBottom:8,paddingBottom:6,borderBottom:"1px solid #1a2d5a"},
+};
+
+function Badge({ estado }) {
+  const c = COLOR_ESTADO[estado] || "var(--text2)";
+  return <span style={{display:"inline-flex",alignItems:"center",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:`${c}1a`,color:c}}>{LABEL_ESTADO[estado]||estado}</span>;
+}
+
+function toDateInputValue(value) {
+  if (!value) return "";
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
+function buildPedidoCargaDate(pedido) {
+  const fecha = toDateInputValue(pedido?.fecha_carga || pedido?.fecha_pedido);
+  if (!fecha) return null;
+  const hora = String(pedido?.hora_carga || "00:00").slice(0, 5);
+  const dt = new Date(`${fecha}T${hora}:00`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function getPedidoOperationalFlags(pedido, now = new Date()) {
+  const cargaAt = buildPedidoCargaDate(pedido);
+  const diffHours = cargaAt ? (cargaAt.getTime() - now.getTime()) / 3600000 : null;
+  const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
+  const missingVehiculo = !pedido?.vehiculo_id && !hasCollaborator;
+  const missingChofer = !pedido?.chofer_id && !hasCollaborator;
+  const missingAssignment = missingVehiculo || missingChofer;
+  const overdueAssignment = missingAssignment && diffHours !== null && diffHours < 0;
+  const urgentAssignment = missingAssignment && diffHours !== null && diffHours >= 0 && diffHours <= 24;
+  return { missingVehiculo, missingChofer, missingAssignment, overdueAssignment, urgentAssignment, diffHours };
+}
+
+function getPedidoStateValidationIssues(pedido, targetEstado = "") {
+  const estado = String(targetEstado || pedido?.estado || "").toLowerCase();
+  const issues = [];
+  const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
+  const needsOperationalData = ["confirmado", "en_curso", "descarga", "entregado"].includes(estado);
+  const needsDeliveryData = ["descarga", "entregado"].includes(estado);
+  if (!toDateInputValue(pedido?.fecha_carga || pedido?.fecha_pedido)) issues.push("Falta fecha de carga");
+  if (needsOperationalData) {
+    if (!String(pedido?.origen || "").trim()) issues.push("Falta origen");
+    if (!String(pedido?.destino || "").trim()) issues.push("Falta destino");
+    if (!hasCollaborator && !pedido?.vehiculo_id) issues.push("Falta vehiculo");
+    if (!hasCollaborator && !pedido?.chofer_id) issues.push("Falta chofer");
+  }
+  if (needsDeliveryData && !toDateInputValue(pedido?.fecha_descarga || pedido?.fecha_entrega)) issues.push("Falta fecha de descarga");
+  return issues;
+}
+
+function getPedidoPriorityMeta(pedido, now = new Date()) {
+  const flags = getPedidoOperationalFlags(pedido, now);
+  const validationIssues = getPedidoStateValidationIssues(pedido, pedido?.estado);
+  const reasons = [
+    flags.overdueAssignment ? { key:"overdue", label:"Vencido", tone:"danger" } : null,
+    !flags.overdueAssignment && flags.urgentAssignment ? { key:"urgent", label:"Urgente", tone:"warning" } : null,
+    validationIssues.length ? { key:"data", label:"Datos pendientes", tone:"warning" } : null,
+  ].filter(Boolean);
+  const severity =
+    (flags.overdueAssignment ? 220 : flags.urgentAssignment ? 120 : 0) +
+    (validationIssues.length ? 70 : 0) +
+    (typeof flags.diffHours === "number" ? Math.max(0, 36 - Math.round(flags.diffHours)) : 0);
+  return { flags, validationIssues, reasons, severity };
+}
+function calcImporte(form) {
+  const toNum = parseLocaleNumber;
+  const precio  = toNum(form.precio_unitario, 0);
+  const cant    = toNum(form.cantidad, 0);
+  const extra   = toNum(form.extracostes ?? form.extracostes_importe, 0);
+  const descargasExtra = sumAdditionalDescargaPrices(form.puntos_descarga);
+  const minEur  = toNum(form.importe_minimo, 0);
+  const minUnits = toNum(form.minimo_unidades, 0);
+  const units = minUnits > 0 ? Math.max(cant, minUnits) : cant;
+  let base = 0;
+  if (form.tipo_precio === "viaje") base = precio;
+  else if (form.tipo_precio === "kg") base = (units / 100) * precio;
+  else base = precio * units;
+  if (form.tipo_precio === "viaje" && minEur > 0) base = Math.max(base, minEur);
+  const total = base + extra + descargasExtra;
+  const safeTotal = Number.isFinite(total) ? total : 0;
+  return safeTotal;
+}
+
+function buildClienteRiesgoPedidoAvisos(riesgo = null, importeNuevo = 0) {
+  if (!riesgo) return { avisos: [], nivel: "ok", total_proyectado: 0, riesgo_pct_actual: null, riesgo_pct_proyectado: null, requiere_confirmacion: false };
+  const pendiente = Number(riesgo.total_pendiente || 0) || 0;
+  const limite = Number(riesgo.limite_riesgo || 0) || 0;
+  const nuevo = Math.max(0, Number(importeNuevo || 0) || 0);
+  const totalProyectado = pendiente + nuevo;
+  const pctActualApi = parseLocaleNumber(riesgo.riesgo_pct, NaN);
+  const pctActual = Number.isFinite(pctActualApi)
+    ? Math.round(pctActualApi * 10) / 10
+    : limite > 0 ? Math.round((pendiente / limite) * 1000) / 10 : null;
+  const pctProyectado = limite > 0 ? Math.round((totalProyectado / limite) * 1000) / 10 : null;
+  const avisos = Array.isArray(riesgo.avisos) ? [...riesgo.avisos] : [];
+  if (limite > 0 && pctProyectado !== null && nuevo > 0) {
+    if (pctProyectado >= 100 && !avisos.some(a => a.tipo === "limite_riesgo_proyectado_critico")) {
+      avisos.push({ tipo: "limite_riesgo_proyectado_critico", nivel: "critico", mensaje: `Con este pedido el cliente superaria el limite de riesgo (${pctProyectado.toFixed(1)}%).` });
+    } else if (pctProyectado >= 80 && !avisos.some(a => a.tipo === "limite_riesgo_proyectado_alto")) {
+      avisos.push({ tipo: "limite_riesgo_proyectado_alto", nivel: "alto", mensaje: `Con este pedido el cliente quedaria cerca del limite de riesgo (${pctProyectado.toFixed(1)}%).` });
+    }
+  }
+  const nivel = avisos.some(a => a.nivel === "critico") ? "critico"
+    : avisos.some(a => a.nivel === "alto") ? "alto"
+      : avisos.some(a => a.nivel === "medio") ? "medio"
+        : "ok";
+  return {
+    avisos,
+    nivel,
+    total_proyectado: totalProyectado,
+    riesgo_pct_actual: pctActual,
+    riesgo_pct_proyectado: pctProyectado,
+    requiere_confirmacion: avisos.length > 0,
+  };
+}
+
+function formatRiskPct(pct) {
+  const n = Number(pct);
+  return Number.isFinite(n) ? `${n.toLocaleString("es-ES", { maximumFractionDigits: 1 })}%` : "Sin limite";
+}
+
+function riskPctValue(riesgoPedido = {}) {
+  const projected = Number(riesgoPedido?.riesgo_pct_proyectado);
+  if (Number.isFinite(projected)) return projected;
+  const actual = Number(riesgoPedido?.riesgo_pct_actual);
+  return Number.isFinite(actual) ? actual : 0;
+}
+
+function isRiskConfirmationFresh(ref, clienteId, riesgoPedido = {}) {
+  if (!clienteId || !ref?.current) return false;
+  const confirmedPct = Number(ref.current.get(String(clienteId)) || -1);
+  return confirmedPct >= riskPctValue(riesgoPedido) - 0.1;
+}
+
+function markRiskConfirmed(ref, clienteId, riesgoPedido = {}) {
+  if (!clienteId || !ref?.current) return;
+  const key = String(clienteId);
+  const prev = Number(ref.current.get(key) || -1);
+  ref.current.set(key, Math.max(prev, riskPctValue(riesgoPedido)));
+}
+
+function unidadesFacturablesPedido(form, minOverride = form?.minimo_unidades) {
+  const tipo = String(form?.tipo_precio || "viaje");
+  if (tipo === "viaje") return 1;
+  const cantidad = parseLocaleNumber(form?.cantidad, NaN);
+  const sugerida = parseLocaleNumber(cantidadSugeridaPorTipo(form, tipo), NaN);
+  const base = Number.isFinite(cantidad) && cantidad > 0 ? cantidad : (Number.isFinite(sugerida) ? sugerida : 0);
+  const minUnits = parseLocaleNumber(minOverride, 0);
+  return Math.max(base, Number.isFinite(minUnits) ? minUnits : 0);
+}
+
+function importeClienteColCalculado(form) {
+  const importe = calcImporte(form);
+  return importe > 0 ? Number(importe.toFixed(2)) : "";
+}
+
+function importeColaboradorCalculado(form) {
+  const unit = parseLocaleNumber(form?.precio_colaborador_unitario, NaN);
+  if (Number.isFinite(unit) && unit > 0 && form?.tipo_precio !== "viaje") {
+    const unidades = unidadesFacturablesPedido(form, form?.minimo_colaborador_unidades);
+    const total = unit * unidades;
+    return Number.isFinite(total) && total > 0 ? Number(total.toFixed(2)) : "";
+  }
+  const totalManual = parseLocaleNumber(form?.precio_colaborador, NaN);
+  return Number.isFinite(totalManual) && totalManual > 0 ? Number(totalManual.toFixed(2)) : "";
+}
+
+function syncPrecioColaboradorCalc(draft) {
+  if (!draft?.colaborador_id) return draft;
+  const total = importeColaboradorCalculado(draft);
+  return total ? { ...draft, precio_colaborador: total } : draft;
+}
+
+function getPagoColaboradorPorTonelada(form) {
+  if (!form?.colaborador_id || String(form?.tipo_precio || "") !== "tonelada") return null;
+  const unitarioManual = parseLocaleNumber(form?.precio_colaborador_unitario, NaN);
+  const minimoToneladasManual = parseLocaleNumber(form?.minimo_colaborador_unidades, NaN);
+  const minimoToneladasPedido = parseLocaleNumber(form?.minimo_unidades, NaN);
+  if (!Number.isFinite(unitarioManual) || unitarioManual <= 0) return null;
+  const minimoToneladas = Number.isFinite(minimoToneladasManual) && minimoToneladasManual > 0
+    ? minimoToneladasManual
+    : (Number.isFinite(minimoToneladasPedido) && minimoToneladasPedido > 0 ? minimoToneladasPedido : 0);
+  const toneladasFacturables = unidadesFacturablesPedido(form, minimoToneladas);
+  if (!Number.isFinite(minimoToneladas) || minimoToneladas <= 0 || !Number.isFinite(toneladasFacturables) || toneladasFacturables <= 0) return null;
+  const total = unitarioManual * toneladasFacturables;
+  return {
+    precioTonelada: unitarioManual,
+    minimoToneladas,
+    toneladasFacturables,
+    total: Number.isFinite(total) ? Number(total.toFixed(2)) : 0,
+  };
+}
+
+function getPagoColaboradorTotalCerrado(form) {
+  if (!form?.colaborador_id && !form?.colaborador_nombre) return null;
+  const total = parseLocaleNumber(form?.precio_colaborador, NaN);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  if (String(form?.tipo_precio || "") === "tonelada" && getPagoColaboradorPorTonelada(form)) return null;
+  return { total: Number(total.toFixed(2)) };
+}
+
+function syncPrecioClienteCol(draft) {
+  if (!draft?.colaborador_id) return draft;
+  const importe = importeClienteColCalculado(draft);
+  return syncPrecioColaboradorCalc({ ...draft, precio_cliente_col: importe || draft.precio_cliente_col || "" });
+}
+
+function calcRevisionCombustible(form) {
+  const pct = Number(form?.recargo_combustible_pct || 0);
+  const precioBase = Number(form?.precio_base_sin_combustible || 0);
+  if (!Number.isFinite(pct) || pct <= 0 || !Number.isFinite(precioBase) || precioBase <= 0) return 0;
+  const totalConRevision = calcImporte(form);
+  const totalSinRevision = calcImporte({ ...form, precio_unitario: precioBase });
+  const revision = totalConRevision - totalSinRevision;
+  return Number.isFinite(revision) && revision > 0 ? Math.round(revision * 100) / 100 : 0;
+}
+
+function toFiniteNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+  const n = parseLocaleNumber(value, NaN);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toNullableNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = parseLocaleNumber(value, NaN);
+  return Number.isFinite(n) ? n : null;
+}
+
+function cantidadSugeridaPorTipo(form, tipo = form?.tipo_precio) {
+  if (!tipo || tipo === "viaje") return "";
+  if (tipo === "kg") return parseLocaleNumber(form?.peso_kg || form?.kg, 0) || "";
+  if (tipo === "tonelada") {
+    const peso = parseLocaleNumber(form?.peso_kg || form?.kg, 0);
+    const toneladas = peso > 0 && peso < 1000 ? peso : peso / 1000;
+    return toneladas ? Number(toneladas.toFixed(3)) : "";
+  }
+  if (tipo === "km") return parseLocaleNumber(form?.km_ruta || form?.km, 0) || "";
+  if (tipo === "palet") return parseLocaleNumber(form?.bultos, 0) || "";
+  return parseLocaleNumber(form?.cantidad, 0) || "";
+}
+
+function normalizeMinimoUnidadesRuta(ruta = {}, tarifaTipo = ruta?.tarifa_tipo) {
+  const raw = ruta.minimo_unidades ?? ruta.minimo_facturable ?? "";
+  const value = parseLocaleNumber(raw, NaN);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  if (tarifaTipo === "tonelada" && value >= 1000) {
+    return Number((value / 1000).toFixed(3));
+  }
+  return value;
+}
+
+function routeTarifaMatchesDraft(ruta = {}, draft = {}) {
+  const tipoRuta = String(ruta.tarifa_tipo || "viaje");
+  const tipoDraft = String(draft.tipo_precio || "viaje");
+  if (tipoRuta !== tipoDraft) return false;
+  const precioRuta = parseLocaleNumber(ruta.precio_base ?? ruta.precio, NaN);
+  const precioDraft = parseLocaleNumber(draft.precio_unitario, NaN);
+  if (Number.isFinite(precioRuta) && precioRuta > 0 && Number.isFinite(precioDraft) && precioDraft > 0) {
+    const diffPct = Math.abs(precioRuta - precioDraft) / Math.max(precioRuta, precioDraft);
+    if (diffPct > 0.05) return false;
+  }
+  const minRuta = normalizeMinimoUnidadesRuta(ruta, tipoRuta);
+  const minDraft = parseLocaleNumber(draft.minimo_unidades, NaN);
+  if (tipoRuta !== "viaje" && Number.isFinite(minDraft) && minDraft > 0 && minRuta) {
+    const diff = Math.abs(Number(minRuta) - minDraft);
+    if (diff > 0.01) return false;
+  }
+  return true;
+}
+
+function formatRutaTarifaLabel(ruta = {}) {
+  const tipos = { viaje:"EUR/viaje", kg:"EUR/100kg", tonelada:"EUR/tn", km:"EUR/km", hora:"EUR/h", palet:"EUR/palet" };
+  const precio = parseLocaleNumber(ruta.precio_base ?? ruta.precio, 0);
+  const minimo = normalizeMinimoUnidadesRuta(ruta, ruta.tarifa_tipo);
+  const recargo = parseLocaleNumber(ruta.recargo_combustible_pct, 0);
+  return [
+    `${ruta.origen || "Origen"} -> ${ruta.destino || "Destino"}`,
+    precio > 0 ? `${precio.toLocaleString("es-ES", { maximumFractionDigits: 4 })} ${tipos[ruta.tarifa_tipo] || ruta.tarifa_tipo || "EUR/viaje"}` : "sin precio",
+    ruta.km ? `${ruta.km} km` : "",
+    minimo ? `min. ${minimo}` : "",
+    recargo ? `+${recargo.toLocaleString("es-ES")} % gasoil` : "",
+  ].filter(Boolean).join(" | ");
+}
+
+const NUMERIC_PEDIDO_FIELDS = new Set([
+  "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen",
+  "cantidad", "precio_unitario", "extracostes_importe",
+  "tipo_iva",
+  "precio_base_sin_combustible", "recargo_combustible_pct", "importe_revision_combustible",
+  "precio_cliente_col", "precio_colaborador", "precio_colaborador_unitario", "minimo_colaborador_unidades", "reparto_chofer1",
+  "coste_gasoil", "coste_peajes", "coste_dietas", "coste_otros",
+  "importe_minimo", "minimo_unidades", "importe_paralizacion",
+  "paralizacion_horas",
+]);
+const DATE_PEDIDO_FIELDS = new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga", "firma_fecha"]);
+const TIME_PEDIDO_FIELDS = new Set(["hora_carga", "hora_descarga"]);
+const UUID_PEDIDO_FIELDS = new Set(["cliente_id", "ruta_id", "vehiculo_id", "chofer_id", "chofer2_id", "colaborador_id", "remolque_id"]);
+
+function normalizePesoKgInput(value) {
+  if (value === null || value === undefined) return value;
+  const raw = String(value).trim().replace(/\s+/g, "");
+  if (!raw) return null;
+  const kg = parseLocaleNumber(raw, NaN);
+  if ((raw.includes(",") || raw.includes(".")) && Number.isFinite(kg) && kg > 0 && kg < 1000) return Math.round(kg * 1000);
+  return Number.isFinite(kg) ? kg : null;
+}
+
+function parseLocaleNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  let raw = String(value).trim().replace(/\s+/g, "");
+  if (!raw) return fallback;
+  const hasComma = raw.includes(",");
+  const hasDot = raw.includes(".");
+  if (hasComma && hasDot) {
+    raw = raw.replace(/\./g, "").replace(",", ".");
+  } else if (hasComma) {
+    raw = raw.replace(",", ".");
+  } else if (hasDot && /^\d{1,3}(\.\d{3}){2,}$/.test(raw)) {
+    raw = raw.replace(/\./g, "");
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function compactNumberInput(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const n = parseLocaleNumber(value, NaN);
+  if (!Number.isFinite(n)) return value;
+  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3)));
+}
+
+function normalizePedidoTarifaDraft(draft = {}) {
+  const tipo = draft.tipo_precio || "viaje";
+  const next = {
+    ...draft,
+    tipo_iva: draft.tipo_iva ?? 21,
+    iva_regimen: draft.iva_regimen || ivaOptionValue(draft),
+  };
+  for (const key of ["puntos_carga", "puntos_descarga"]) {
+    const stops = parseStops(next[key]);
+    if (stops.length) {
+      next[key] = stops.map(stop => {
+        const rawMaps = String(stop?.google_maps_url || stop?.googleMapsUrl || stop?.maps_url || "").trim();
+        if (!rawMaps || /^(https?:\/\/|geo:)/i.test(rawMaps)) return stop;
+        return { ...stop, google_maps_url: "", notas: stop.notas || rawMaps };
+      });
+    }
+  }
+  if (tipo === "tonelada") {
+    const minUnits = parseLocaleNumber(next.minimo_unidades, NaN);
+    if (Number.isFinite(minUnits) && Math.abs(minUnits) >= 1000) {
+      next.minimo_unidades = Number((minUnits / 1000).toFixed(3));
+    }
+    const minColUnits = parseLocaleNumber(next.minimo_colaborador_unidades, NaN);
+    if (Number.isFinite(minColUnits) && Math.abs(minColUnits) >= 1000) {
+      next.minimo_colaborador_unidades = Number((minColUnits / 1000).toFixed(3));
+    }
+    const cantidad = parseLocaleNumber(next.cantidad, NaN);
+    const peso = parseLocaleNumber(next.peso_kg || next.kg, NaN);
+    if (Number.isFinite(peso) && peso > 0 && (!Number.isFinite(cantidad) || cantidad <= 0 || (cantidad < 1 && peso >= 1000))) {
+      next.cantidad = peso < 1000 ? peso : Number((peso / 1000).toFixed(3));
+    }
+  }
+  return next;
+}
+
+function sanitizePedidoPayload(payload) {
+  const out = {...payload};
+  Object.entries(out).forEach(([key, value]) => {
+    if (value === "") {
+      out[key] = null;
+      return;
+    }
+    if (UUID_PEDIDO_FIELDS.has(key) && value !== null && value !== undefined) {
+      const raw = String(value).trim();
+      out[key] = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw) ? raw : null;
+      return;
+    }
+    if (DATE_PEDIDO_FIELDS.has(key) && value !== null && value !== undefined) {
+      const raw = String(value).trim();
+      const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (match) {
+        out[key] = match[1];
+      } else {
+        const parsed = new Date(raw);
+        out[key] = Number.isNaN(parsed.getTime()) ? value : parsed.toISOString().slice(0, 10);
+      }
+      return;
+    }
+    if (TIME_PEDIDO_FIELDS.has(key) && value !== null && value !== undefined) {
+      const raw = String(value).trim();
+      const match = raw.match(/(\d{2}:\d{2})/);
+      if (match) {
+        out[key] = match[1];
+      } else {
+        const parsed = new Date(raw);
+        out[key] = Number.isNaN(parsed.getTime()) ? value : parsed.toISOString().slice(11, 16);
+      }
+      return;
+    }
+    if (NUMERIC_PEDIDO_FIELDS.has(key) && value !== null && value !== undefined) {
+      const n = key === "peso_kg" ? normalizePesoKgInput(value) : parseLocaleNumber(value, NaN);
+      out[key] = Number.isFinite(n) ? (key === "bultos" ? Math.max(0, Math.round(n)) : n) : null;
+    }
+  });
+  return out;
+}
+
+function normalizePesoKgDraft(draft = {}) {
+  const normalized = normalizePesoKgInput(draft.peso_kg ?? draft.kg);
+  if (!Number.isFinite(normalized)) return draft;
+  const next = { ...draft, peso_kg: normalized };
+  if (String(next.tipo_precio || "") === "tonelada") {
+    const toneladas = normalized < 1000 ? normalized : Number((normalized / 1000).toFixed(3));
+    next.cantidad = toneladas || next.cantidad || "";
+  }
+  return syncPrecioClienteCol(syncPrecioColaboradorCalc(next));
+}
+
+function precioGasoilDefault() {
+  try {
+    const empresaCfg = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && typeof window.__TMS_EMPRESA_CONFIG === "object")
+      ? window.__TMS_EMPRESA_CONFIG
+      : {};
+    const cfg = empresaCfg?.cfg_precios?.combustible || empresaCfg?.cfg_precios?.gasoil || {};
+    return Number(cfg.precio_fijo || cfg.precio_litro || 1.45);
+  } catch { return 1.45; }
+}
+
+function consumoLitros100PorPeso(pesoKg) {
+  const toneladas = Math.max(0, parseLocaleNumber(pesoKg, 0) / 1000);
+  return Math.round((20 + (Math.min(toneladas, 30) * 7 / 24)) * 10) / 10;
+}
+
+function calcularCosteGasoil(form) {
+  const km = parseLocaleNumber(form.km_ruta, 0);
+  if (!km) return "";
+  const litros = km * consumoLitros100PorPeso(form.peso_kg) / 100;
+  return Math.round(litros * precioGasoilDefault() * 100) / 100;
+}
+
+function parseStops(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+function normalizeStopsForCopy(stops, fallbackAddress = "", tipo = "carga") {
+  const parsed = parseStops(stops)
+    .map((stop, idx) => {
+      const direccion = String(stop?.direccion || stop?.address || stop?.lugar || (idx === 0 ? fallbackAddress : "") || "").trim();
+      const googleMapsUrl = cleanMapsUrl(stop?.google_maps_url || stop?.googleMapsUrl || stop?.maps_url || stop?.metadata?.google_maps_url || "");
+      const lat = stop?.lat ?? stop?.latitud ?? stop?.metadata?.lat ?? null;
+      const lng = stop?.lng ?? stop?.longitud ?? stop?.metadata?.lng ?? null;
+      return { ...stop, direccion, google_maps_url: googleMapsUrl, lat, lng };
+    })
+    .filter(stop => stop.direccion || stop.google_maps_url || (stop.lat != null && stop.lng != null));
+  if (!parsed.length && fallbackAddress) parsed.push({ direccion: fallbackAddress, cliente_nombre: "", google_maps_url: "", tipo });
+  const seen = new Set();
+  return parsed.filter(stop => {
+    const key = [
+      normalizePlaceText(stop.direccion || stop.address || ""),
+      String(stop.google_maps_url || "").trim().toLowerCase(),
+      stop.lat ?? "",
+      stop.lng ?? "",
+    ].join("|");
+    if (!key.replace(/\|/g, "") || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function legacyPuntosInteresLoad() {
+  try { return JSON.parse(localStorage.getItem("tms_puntos_interes") || "[]"); }
+  catch { return []; }
+}
+
+function setPuntosInteresCache(next, { broadcast = true } = {}) {
+  puntosInteresCache = Array.isArray(next) ? next.slice(-200) : [];
+  if (typeof window !== "undefined") {
+    window.__TMS_PUNTOS_INTERES = puntosInteresCache;
+    if (broadcast) window.dispatchEvent(new Event("tms:puntos-interes"));
+  }
+  return puntosInteresCache;
+}
+
+function getPuntosInteres() {
+  if (puntosInteresCache.length) return puntosInteresCache;
+  if (typeof window !== "undefined" && Array.isArray(window.__TMS_PUNTOS_INTERES)) {
+    puntosInteresCache = window.__TMS_PUNTOS_INTERES.slice(-200);
+  }
+  return puntosInteresCache;
+}
+
+async function syncPuntosInteresCache(setter) {
+  const apply = (list) => {
+    const next = setPuntosInteresCache(list, { broadcast: false });
+    setter?.(next);
+    return next;
+  };
+  const legacy = legacyPuntosInteresLoad();
+  if (legacy.length && !getPuntosInteres().length) apply(legacy);
+  try {
+    let apiPuntos = await getPuntosInteresApi();
+    if (Array.isArray(apiPuntos) && apiPuntos.length) {
+      apply(apiPuntos);
+      localStorage.removeItem("tms_puntos_interes");
+      return apiPuntos;
+    }
+    if (legacy.length) {
+      const migraciones = await Promise.allSettled(
+        legacy.map(p => crearPuntoInteres(p).catch(() => null))
+      );
+      if (migraciones.some(r => r.status === "fulfilled")) {
+        apiPuntos = await getPuntosInteresApi().catch(() => legacy);
+        if (Array.isArray(apiPuntos) && apiPuntos.length) {
+          apply(apiPuntos);
+          localStorage.removeItem("tms_puntos_interes");
+          return apiPuntos;
+        }
+      }
+      return apply(legacy);
+    }
+  } catch {}
+  return apply(getPuntosInteres());
+}
+
+function direccionCompletaPunto(punto) {
+  return [
+    punto?.direccion,
+    punto?.codigo_postal,
+    punto?.ciudad,
+    punto?.provincia,
+    punto?.pais,
+  ].map(x => (x || "").trim()).filter(Boolean).join(", ");
+}
+
+function normalizePlaceText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function distinctPlaceName(name, address) {
+  const cleanName = String(name || "").replace(/\s+/g, " ").trim();
+  const cleanAddress = String(address || "").replace(/\s+/g, " ").trim();
+  if (!cleanName) return "";
+  if (!cleanAddress) return cleanName;
+  const a = normalizePlaceText(cleanName);
+  const b = normalizePlaceText(cleanAddress);
+  return a && b && (a === b || a.includes(b) || b.includes(a)) ? "" : cleanName;
+}
+
+function isValidMapsUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  return /^https?:\/\//i.test(raw) || /^geo:/i.test(raw);
+}
+
+function cleanMapsUrl(value) {
+  const raw = String(value || "").trim();
+  return isValidMapsUrl(raw) ? raw : "";
+}
+
+function resolvePuntoInteresQuery(place, puntos = null) {
+  const raw = typeof place === "object" && place !== null
+    ? String(place.address || place.direccion || place.lugar || place.name || place.nombre || "").trim()
+    : String(place || "").trim();
+  if (!raw) return "";
+  const lista = Array.isArray(puntos) ? puntos : getPuntosInteres();
+  const needle = normalizePlaceText(raw);
+  const variants = (p) => ([
+    p?.nombre,
+    p?.direccion,
+    direccionCompletaPunto(p),
+    [p?.nombre, p?.ciudad].filter(Boolean).join(" "),
+    [p?.nombre, p?.provincia].filter(Boolean).join(" "),
+    [p?.direccion, p?.ciudad].filter(Boolean).join(" "),
+    p?.ciudad,
+    p?.provincia,
+    p?.codigo_postal,
+  ].map(normalizePlaceText).filter(Boolean));
+  const exact = lista.find((p) => variants(p).some((v) => v === needle));
+  const partial = exact || lista.find((p) => variants(p).some((v) => v.includes(needle) || needle.includes(v)));
+  return (partial ? (direccionCompletaPunto(partial) || partial.direccion || raw) : raw).trim();
+}
+
+function savePuntoInteres(punto) {
+  const direccion = (punto?.direccion || direccionCompletaPunto(punto)).trim();
+  const nombre = (punto?.nombre || punto?.cliente_nombre || direccion).trim();
+  if (!direccion) return getPuntosInteres();
+  const id = punto?.id || `poi_${Date.now()}`;
+  const normalizado = {
+    id,
+    nombre,
+    direccion,
+    cif: (punto?.cif || "").trim(),
+    telefono: (punto?.telefono || "").trim(),
+    email: (punto?.email || "").trim(),
+    contacto_nombre: (punto?.contacto_nombre || "").trim(),
+    contacto_telefono: (punto?.contacto_telefono || "").trim(),
+    codigo_postal: (punto?.codigo_postal || "").trim(),
+    ciudad: (punto?.ciudad || "").trim(),
+    provincia: (punto?.provincia || "").trim(),
+    pais: (punto?.pais || "España").trim(),
+    ventana: (punto?.ventana || "").trim(),
+    notas: (punto?.notas || "").trim(),
+    tipo: punto?.tipo || "ambos",
+    cliente_id: punto?.cliente_id || "",
+    google_maps_url: cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || ""),
+    lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? null,
+    lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? null,
+  };
+  const actuales = getPuntosInteres();
+  const reemplazaPorId = actuales.some(p => String(p.id) === String(id));
+  const next = [
+    ...actuales.filter(p => reemplazaPorId
+      ? String(p.id) !== String(id)
+      : (p.direccion || "").trim().toLowerCase() !== direccion.toLowerCase()
+    ),
+    normalizado,
+  ].slice(-200);
+  return setPuntosInteresCache(next);
+}
+
+function puntoToStop(punto) {
+  return {
+    direccion: punto?.direccion || "",
+    cliente_nombre: punto?.nombre || "",
+    ventana: punto?.ventana || "",
+    notas: punto?.notas || "",
+    cif: punto?.cif || "",
+    telefono: punto?.telefono || punto?.contacto_telefono || "",
+    email: punto?.email || "",
+    google_maps_url: cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || ""),
+    lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? null,
+    lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? null,
+  };
+}
+
+function isCargaPoint(punto = {}) {
+  const tipo = String(punto?.tipo || "ambos").toLowerCase();
+  return tipo === "carga" || tipo === "ambos";
+}
+
+function getPuntosCargaCliente(clienteId, puntos = null) {
+  if (!clienteId) return [];
+  const lista = Array.isArray(puntos) ? puntos : getPuntosInteres();
+  return lista.filter(p => String(p?.cliente_id || "") === String(clienteId) && isCargaPoint(p));
+}
+
+function applyPuntoCargaToDraft(draft = {}, punto = {}) {
+  const nombre = (punto.nombre || punto.direccion || draft.origen || "").toUpperCase();
+  return {
+    ...draft,
+    origen: nombre,
+    ventana_carga: draft.ventana_carga || punto.ventana || "",
+    puntos_carga: updatePrimaryStop(
+      draft.puntos_carga,
+      puntoToStop(punto),
+      nombre
+    ),
+  };
+}
+
+function formatPaymentTerms(empresa = {}) {
+  const plazo = Number(empresa?.plazo_pago_colaboradores || 0);
+  const dias = String(empresa?.dias_pago_colaboradores || "").trim();
+  const forma = String(empresa?.forma_pago_colaboradores || "dias_fijos");
+  if (forma === "transferencia_inmediata") return "Transferencia inmediata";
+  if (forma === "fin_mes") return `Transferencia fin de mes${plazo ? ` + ${plazo} dias desde recepcion de factura` : ""}`;
+  if (forma === "dias_fijos") {
+    return `Transferencia ${plazo || 60} dias fecha recepcion factura${dias ? ` · pago dias ${dias}` : ""}`;
+  }
+  return empresa?.texto_pie || "Transferencia bancaria";
+}
+
+function formatClientPaymentTerms(empresa = {}) {
+  const custom = String(empresa?.texto_pago_clientes || "").trim();
+  if (custom) return custom;
+  const plazo = Number(empresa?.plazo_pago_clientes || 0);
+  const dias = String(empresa?.dias_pago_clientes || "").trim();
+  const forma = String(empresa?.forma_pago_clientes || "recepcion_factura");
+  if (forma === "contado") return "Pago al contado";
+  if (forma === "transferencia_inmediata") return "Transferencia inmediata";
+  if (forma === "fin_mes") return `Transferencia fin de mes${plazo ? ` + ${plazo} dias` : ""}${dias ? `; pago dias ${dias}` : ""}`;
+  if (forma === "recepcion_factura") return `Transferencia ${plazo || 60} dias fecha recepcion factura${dias ? `; pago dias ${dias}` : ""}`;
+  return "Transferencia bancaria";
+}
+
+function buildOperativaCargaLabels(pedido = {}) {
+  const labels = [];
+  if (pedido?.carga_lateral) labels.push("Carga lateral");
+  if (pedido?.carga_trasera) labels.push("Carga trasera");
+  if (pedido?.intercambio_palets) labels.push("Con intercambio de palets");
+  else labels.push("Sin intercambio de palets");
+  if (pedido?.requiere_cinchas) labels.push("Necesario llevar cinchas");
+  return labels;
+}
+
+function getPrimaryStop(stops) {
+  const parsed = parseStops(stops);
+  return parsed[0] || {};
+}
+
+function getPrimaryStopField(stops, key) {
+  return getPrimaryStop(stops)?.[key] || "";
+}
+
+function updatePrimaryStop(stops, patch = {}, fallbackAddress = "") {
+  const parsed = parseStops(stops);
+  const hasPrimary = parsed.length > 0 && isPrimaryStop(parsed[0], fallbackAddress);
+  const current = hasPrimary ? parsed[0] : {};
+  const next = {
+    ...current,
+    ...patch,
+    direccion: patch.direccion ?? current.direccion ?? fallbackAddress ?? "",
+    es_principal: true,
+  };
+  if (!next.direccion && parsed.length <= 1) return hasPrimary ? parsed.slice(1) : parsed;
+  if (hasPrimary) return [next, ...parsed.slice(1)];
+  return [next, ...parsed];
+}
+
+function isPrimaryStop(stop, fallbackAddress = "") {
+  if (!stop) return false;
+  if (stop.es_principal === true || stop.primary === true || stop.principal === true) return true;
+  if (stop.es_adicional === true || stop.additional === true) return false;
+  const fallbackText = normalizePlaceText(fallbackAddress);
+  if (!fallbackText) return false;
+  const candidates = [
+    stopAddress(stop),
+    stop.nombre,
+    stop.name,
+    stop.cliente_nombre,
+    stop.address,
+    stop.lugar,
+  ].map(normalizePlaceText).filter(Boolean);
+  return candidates.some(text => text === fallbackText || text.includes(fallbackText) || fallbackText.includes(text));
+}
+
+function splitPrimaryAndAdditionalStops(stops, fallbackAddress = "") {
+  const parsed = parseStops(stops);
+  if (!parsed.length) return { primary: null, extras: [] };
+  if (parsed.length === 1 && fallbackAddress && !parsed[0]?.es_adicional && !parsed[0]?.additional) {
+    return { primary: { ...parsed[0], es_principal: true }, extras: [] };
+  }
+  if (isPrimaryStop(parsed[0], fallbackAddress)) {
+    return { primary: { ...parsed[0], es_principal: true }, extras: parsed.slice(1) };
+  }
+  return { primary: null, extras: parsed };
+}
+
+function stopAddress(stop) {
+  return (stop?.direccion || stop?.lugar || stop?.ciudad || "").trim();
+}
+
+function findPuntoInteresForStop(stop = {}, fallback = "") {
+  const lista = getPuntosInteres();
+  if (!Array.isArray(lista) || !lista.length) return null;
+  const id = stop?.punto_interes_id || stop?.punto_id || stop?.point_id || stop?.id_punto;
+  if (id) {
+    const byId = lista.find(p => String(p.id) === String(id));
+    if (byId) return byId;
+  }
+  const candidates = [
+    stop?.cliente_nombre,
+    stop?.nombre,
+    stop?.name,
+    stopAddress(stop),
+    fallback,
+  ].map(normalizePlaceText).filter(Boolean);
+  if (!candidates.length) return null;
+  const pointVariants = (p) => ([
+    p?.nombre,
+    p?.direccion,
+    direccionCompletaPunto(p),
+    [p?.nombre, p?.ciudad].filter(Boolean).join(" "),
+    [p?.nombre, p?.provincia].filter(Boolean).join(" "),
+  ].map(normalizePlaceText).filter(Boolean));
+  return lista.find(p => {
+    const variants = pointVariants(p);
+    return candidates.some(c => variants.some(v => v === c || v.includes(c) || c.includes(v)));
+  }) || null;
+}
+
+function stopDisplayParts(stop = {}, fallback = "") {
+  const punto = findPuntoInteresForStop(stop, fallback);
+  const puntoDireccion = punto ? (direccionCompletaPunto(punto) || punto.direccion || "") : "";
+  const rawDireccion = (stopAddress(stop) || fallback || "").trim();
+  let direccion = rawDireccion;
+  if (puntoDireccion && (!direccion || normalizePlaceText(direccion) === normalizePlaceText(punto?.nombre))) {
+    direccion = puntoDireccion;
+  }
+  let nombre = (stop?.cliente_nombre || stop?.nombre || stop?.name || "").trim();
+  if (punto?.nombre && (!nombre || normalizePlaceText(nombre) === normalizePlaceText(direccion || rawDireccion))) {
+    nombre = punto.nombre;
+  }
+  nombre = distinctPlaceName(nombre, direccion);
+  return { nombre, direccion };
+}
+
+function hasRoutePlaceData(place) {
+  if (!place) return false;
+  if (typeof place === "string") return !!place.trim();
+  return !!(
+    place.address ||
+    place.direccion ||
+    cleanMapsUrl(place.google_maps_url || place.googleMapsUrl) ||
+    ((place.lat ?? place.latitud) != null && (place.lng ?? place.longitud) != null)
+  );
+}
+
+function routePlaceKey(place) {
+  if (typeof place === "string") return normalizePlaceText(place);
+  return [
+    place?.address || place?.direccion || "",
+    cleanMapsUrl(place?.google_maps_url || place?.googleMapsUrl) || "",
+    place?.lat ?? place?.latitud ?? "",
+    place?.lng ?? place?.longitud ?? "",
+  ].join("|").toLowerCase();
+}
+
+function stopToRoutePlace(stop, fallback = "", type = "Parada") {
+  const source = stop || {};
+  const { nombre, direccion } = stopDisplayParts(source, fallback);
+  return {
+    type,
+    name: nombre,
+    address: direccion,
+    google_maps_url: cleanMapsUrl(source.google_maps_url || source.googleMapsUrl || source.maps_url || source.metadata?.google_maps_url || ""),
+    lat: source.lat ?? source.latitud ?? source.metadata?.lat ?? null,
+    lng: source.lng ?? source.longitud ?? source.metadata?.lng ?? null,
+  };
+}
+
+function sumStopWeights(stops) {
+  return parseStops(stops).reduce((total, stop) => total + Number(stop.peso_kg || 0), 0);
+}
+
+function sumAdditionalDescargaPrices(stops) {
+  return parseStops(stops)
+    .slice(1)
+    .reduce((total, stop) => {
+      const n = parseLocaleNumber(stop?.precio ?? stop?.importe ?? stop?.precio_cliente, 0);
+      return total + (Number.isFinite(n) && n > 0 ? n : 0);
+    }, 0);
+}
+
+const IVA_PEDIDO_OPTIONS = [
+  { value: "general", label: "21% IVA", tipo_iva: 21, iva_regimen: "general" },
+  { value: "reducido", label: "10% IVA", tipo_iva: 10, iva_regimen: "reducido" },
+  { value: "cero", label: "0% IVA", tipo_iva: 0, iva_regimen: "cero" },
+  { value: "exento", label: "Exento", tipo_iva: 0, iva_regimen: "exento" },
+];
+
+function ivaOptionValue(data = {}) {
+  const regimen = String(data.iva_regimen || "").toLowerCase();
+  if (regimen === "exento") return "exento";
+  if (regimen === "cero") return "cero";
+  const tipo = parseLocaleNumber(data.tipo_iva, 21);
+  if (tipo === 10) return "reducido";
+  if (tipo === 0) return regimen === "exento" ? "exento" : "cero";
+  return "general";
+}
+
+function applyIvaOptionToDraft(draft = {}, value = "general") {
+  const option = IVA_PEDIDO_OPTIONS.find(o => o.value === value) || IVA_PEDIDO_OPTIONS[0];
+  return { ...draft, tipo_iva: option.tipo_iva, iva_regimen: option.iva_regimen };
+}
+
+function calcIvaPedido(form = {}, baseOverride = null) {
+  const base = Number.isFinite(Number(baseOverride)) ? Number(baseOverride) : calcImporte(form);
+  const regimen = ivaOptionValue(form);
+  const option = IVA_PEDIDO_OPTIONS.find(o => o.value === regimen) || IVA_PEDIDO_OPTIONS[0];
+  const cuota = option.tipo_iva > 0 ? base * (option.tipo_iva / 100) : 0;
+  return {
+    ...option,
+    base,
+    cuota,
+    total: base + cuota,
+    aplica: option.tipo_iva > 0,
+  };
+}
+
+function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", style, puntos: puntosProp = null }) {
+  const [puntos, setPuntos] = useState(getPuntosInteres);
+  const puntosDisponibles = Array.isArray(puntosProp) ? puntosProp : puntos;
+
+  useEffect(() => {
+    const refresh = () => setPuntos(getPuntosInteres());
+    let alive = true;
+    syncPuntosInteresCache((next) => { if (alive) setPuntos(next); });
+    window.addEventListener("tms:puntos-interes", refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener("tms:puntos-interes", refresh);
+    };
+  }, []);
+
+  if (!puntosDisponibles.length) return null;
+
+  return (
+    <select
+      value=""
+      onChange={e => {
+        const punto = puntosDisponibles.find(p => p.id === e.target.value);
+        if (punto) onPick(punto);
+      }}
+      style={style || S.sel}
+    >
+      <option value="">{placeholder}</option>
+      {puntosDisponibles.map(p => (
+        <option key={p.id} value={p.id}>{p.nombre} - {p.direccion}</option>
+      ))}
+    </select>
+  );
+}
+
+function getRoutePlaces(form) {
+  const cargas = parseStops(form.puntos_carga);
+  const descargas = parseStops(form.puntos_descarga);
+  const places = [
+    stopToRoutePlace(cargas[0], form.origen, "Carga"),
+    ...cargas.slice(1).map(stop => stopToRoutePlace(stop, stopAddress(stop), "Carga intermedia")),
+    stopToRoutePlace(descargas[0], form.destino, "Descarga"),
+    ...descargas.slice(1).map(stop => stopToRoutePlace(stop, stopAddress(stop), "Descarga intermedia")),
+  ].filter(hasRoutePlaceData);
+  const seen = new Set();
+  return places.filter(place => {
+    const key = routePlaceKey(place);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildMapsRouteUrl(places) {
+  const clean = places.map(x => {
+    if (typeof x === "object" && x !== null) {
+      const lat = Number(x.lat ?? x.latitud);
+      const lng = Number(x.lng ?? x.longitud);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) return `${lat},${lng}`;
+      return String(cleanMapsUrl(x.google_maps_url || x.googleMapsUrl) || x.address || x.direccion || x.name || "");
+    }
+    return String(x || "");
+  }).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (!clean.length) return "";
+  const origin = clean[0];
+  const destination = clean[clean.length - 1] || origin;
+  const waypoints = clean.slice(1, -1).join("|");
+  const params = new URLSearchParams({ api:"1", origin, destination, travelmode:"driving" });
+  if (waypoints) params.set("waypoints", waypoints);
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+function buildMapsSearchUrl(query) {
+  const clean = String(query || "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clean)}`;
+}
+
+function stopMapsLink(stop, fallback = "") {
+  const direct = cleanMapsUrl(stop?.google_maps_url || stop?.googleMapsUrl || stop?.maps_url || stop?.metadata?.google_maps_url || "");
+  if (direct) return direct;
+  const lat = Number(stop?.lat ?? stop?.latitud ?? stop?.metadata?.lat);
+  const lng = Number(stop?.lng ?? stop?.longitud ?? stop?.metadata?.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return buildMapsSearchUrl(`${lat},${lng}`);
+  return buildMapsSearchUrl(stopAddress(stop) || fallback);
+}
+
+function buildStopMapsRows(stops, tipo, fallback = "") {
+  return parseStops(stops).map((stop, idx) => {
+    const { nombre, direccion } = stopDisplayParts(stop, idx === 0 ? fallback : "");
+    return {
+      label: idx === 0 ? tipo : `${tipo} ${idx + 1}`,
+      nombre,
+      direccion,
+      url: stopMapsLink(stop, direccion || fallback),
+    };
+  }).filter(row => row.direccion || row.url);
+}
+
+function htmlEscape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[ch]));
+}
+
+function splitEmailList(value) {
+  return String(value || "")
+    .split(/[;,\n\r]+/)
+    .map(v => v.trim())
+    .filter(Boolean)
+    .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i);
+}
+
+function joinEmailList(values, fallback = "") {
+  const emails = values.flatMap(splitEmailList);
+  const unique = emails.filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i);
+  return unique.length ? unique.join(", ") : fallback;
+}
+
+function isMeaningfulVehicleNotice(text) {
+  const clean = (text || "").trim();
+  if (!clean) return false;
+  if (/^fix[_\s-]*test$/i.test(clean)) return false;
+  if (/^test$/i.test(clean)) return false;
+  return true;
+}
+
+
+// ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Crear pedido con IA (texto libre O archivo PDF/imagen -> campos del formulario) ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, embedded = false }) {
+  const [texto,     setTexto]     = useState("");
+  const [archivos,  setArchivos]  = useState([]);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [loading,   setLoading]   = useState(false);
+  const [preview,   setPreview]   = useState(null);
+  const [error,     setError]     = useState("");
+  const [modo,      setModo]      = useState("texto"); // texto | archivo
+  const [runs,      setRuns]      = useState([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [draggingFile, setDraggingFile] = useState(false);
+  const [aiStatus, setAiStatus] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const pedidoPreview = preview?.pedido || null;
+  const camposClave = [
+    "cliente_nombre", "origen", "destino", "fecha_carga", "hora_carga", "fecha_descarga",
+    "hora_descarga", "mercancia", "peso_kg", "bultos", "importe", "tipo_precio",
+    "precio_unitario", "referencia_cliente", "matricula_detectada", "km_ruta"
+  ];
+  const avisoTexto = item => item?.message || item?.detail || item?.label || String(item || "");
+  const visualInfo = preview?.source?.attachments?.length ? (preview?.source?.ai_visual || null) : null;
+  const statusLabel = status => ({
+    listo_para_revisar: "Listo",
+    requiere_revision: "Revisar",
+    incompleto: "Incompleto",
+    error: "Error",
+    local: "Local",
+  }[String(status || "")] || String(status || "-"));
+  const prioridadIA = priority => ({
+    alta: { label:"Alta", color:"#ef4444", bg:"rgba(239,68,68,.10)", border:"rgba(239,68,68,.28)" },
+    media: { label:"Media", color:"#f59e0b", bg:"rgba(245,158,11,.10)", border:"rgba(245,158,11,.28)" },
+    baja: { label:"Baja", color:"var(--green)", bg:"rgba(16,185,129,.09)", border:"rgba(16,185,129,.25)" },
+  }[String(priority || "media")] || { label:"Media", color:"#f59e0b", bg:"rgba(245,158,11,.10)", border:"rgba(245,158,11,.28)" });
+  const resumenRunIA = run => {
+    const summary = run?.operational_summary || {};
+    if (summary.action) return summary.action;
+    const issues = Array.isArray(run?.issues) ? run.issues : [];
+    const warnings = Array.isArray(run?.warnings) ? run.warnings : [];
+    if (issues.length) return "Completar campos bloqueantes antes de crear el pedido.";
+    if (warnings.length) return "Validar avisos de tarifa, ruta o asignacion antes de guardar.";
+    return "Revisar borrador antes de guardar.";
+  };
+  const formatRunDate = value => {
+    if (!value) return "";
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+  };
+  const describeAttachmentStatus = (a) => {
+    if (a.extractionStatus === "ok") return `${a.extractedText.length} caracteres detectados`;
+    if (/^image\//i.test(a.mediaType || "")) return "imagen lista para IA visual";
+    if (a.mediaType === "application/pdf") return "PDF listo para IA visual; fallback local si no hay API";
+    return "sin texto claro, se adjunta para revisar";
+  };
+
+  const cargarHistorialIA = useCallback(async () => {
+    setRunsLoading(true);
+    try {
+      const data = await getAiInboxRuns(8);
+      setRuns(Array.isArray(data) ? data : []);
+    } catch {
+      setRuns([]);
+    } finally {
+      setRunsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    cargarHistorialIA();
+    getAiInboxStatus().then(setAiStatus).catch(() => setAiStatus(null));
+  }, [cargarHistorialIA]);
+
+  async function interpretar() {
+    const textoLimpio = texto.trim();
+    const textosArchivo = archivos.map(a => a.extractedText).filter(Boolean);
+    const textoCombinado = [textoLimpio, ...textosArchivo.map((t, i) => `Documento ${archivos[i]?.name || i + 1}:\n${t}`)]
+      .filter(Boolean)
+      .join("\n\n---\n\n")
+      .slice(0, 20000);
+    const tieneArchivo = archivos.length > 0;
+    const tieneVisual = archivos.some(a => a.base64 && (/^image\//i.test(a.mediaType || "") || a.mediaType === "application/pdf"));
+    if (!textoCombinado.trim() && !tieneArchivo) { setError("Escribe texto o sube un email/PDF con texto legible."); return; }
+    if (!textoCombinado.trim() && tieneArchivo && !tieneVisual) {
+      setError("No he podido extraer texto del documento. Pega tambien el texto o sube una imagen/PDF compatible con IA visual.");
+      return;
+    }
+    setLoading(true); setError(""); setPreview(null);
+    try {
+      const data = await interpretarPedidoIA({
+        texto: textoCombinado,
+        source: tieneArchivo ? "email_documentos" : "texto",
+        filename: archivos.map(a => a.name).join(", ") || null,
+        attachments: archivos.map(a => ({
+          name: a.name,
+          mediaType: a.mediaType,
+          sizeKb: a.sizeKb,
+          extractionStatus: a.extractionStatus,
+          base64: (/^image\//i.test(a.mediaType || "") || a.mediaType === "application/pdf") ? a.base64 : undefined,
+        })),
+      });
+      setPreview(data);
+      cargarHistorialIA();
+    } catch(e) {
+      setError("No se pudo interpretar el pedido: " + (e.message || "verifica los datos pegados."));
+    } finally { setLoading(false); }
+  }
+
+  async function handleAiFiles(inputFiles = []) {
+    const files = Array.from(inputFiles || []);
+    if (!files.length) return;
+    setFileLoading(true);
+    setError("");
+    const next = [];
+    let totalBytes = archivos.reduce((sum, a) => sum + Number(a.rawSize || 0), 0);
+    for (const file of files) {
+      if (file.size > AI_INBOX_MAX_FILE_BYTES) {
+        setError(`${file.name}: maximo 6MB por documento en Bandeja IA.`);
+        continue;
+      }
+      if (totalBytes + file.size > AI_INBOX_MAX_TOTAL_BYTES) {
+        setError("Limite total de adjuntos alcanzado en Bandeja IA. Sube menos documentos o pega el texto principal.");
+        continue;
+      }
+      try {
+        const prepared = await prepareAiInboxFile(file);
+        prepared.rawSize = file.size;
+        next.push(prepared);
+        totalBytes += file.size;
+      } catch (err) {
+        setError(`No se pudo leer ${file.name}: ${err.message}`);
+      }
+    }
+    if (next.length) {
+      setArchivos(prev => [...prev, ...next].slice(0, 8));
+      setModo("archivo");
+    }
+    setFileLoading(false);
+  }
+
+  async function handleFile(e) {
+    await handleAiFiles(e.target.files || []);
+    e.target.value = "";
+  }
+
+  function handleDropFiles(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingFile(false);
+    handleAiFiles(e.dataTransfer?.files || []);
+  }
+
+  return (
+    <div style={embedded ? {width:"100%"} : {position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:24,width:embedded ? "100%" : "min(640px,96vw)",maxHeight:embedded ? "none" : "92vh",overflowY:embedded ? "visible" : "auto",boxSizing:"border-box"}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:6}}>Bandeja IA de pedidos</div>
+        <div style={{fontSize:12,color:"var(--text4)",marginBottom:12}}>
+          Pega el email, WhatsApp u orden de carga. La bandeja detecta cliente, ruta, matricula, tarifa, conflictos y huecos antes de abrir el pedido.
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:12,background:aiStatus?.visual_available?"rgba(16,185,129,.08)":"rgba(59,130,246,.08)",border:`1px solid ${aiStatus?.visual_available?"rgba(16,185,129,.22)":"rgba(59,130,246,.22)"}`,borderRadius:8,padding:"8px 10px"}}>
+          <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:aiStatus?.visual_available?"var(--green)":"#60a5fa"}}>
+            {aiStatus?.mode_label || "Modo basico local"}
+          </span>
+          <span style={{fontSize:12,color:"var(--text3)",lineHeight:1.35}}>
+            {aiStatus?.guidance || "Texto, emails y documentos con texto funcionan sin API externa. Imagenes o PDF escaneados requieren API visual."}
+          </span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:12,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 10px",flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Historial IA</div>
+            <div style={{fontSize:12,color:"var(--text3)"}}>
+              {runsLoading ? "Cargando ultimos analisis..." : runs.length ? `${runs.length} analisis recientes registrados` : "Sin analisis recientes registrados"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={()=>setShowHistory(v=>!v)}
+            style={{padding:"6px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:700,cursor:"pointer"}}
+          >
+            {showHistory ? "Ocultar" : "Ver historial"}
+          </button>
+        </div>
+        {showHistory && (
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+            {runs.slice(0, 6).map(run => {
+              const priority = prioridadIA(run.operational_summary?.priority);
+              const detected = Array.isArray(run.operational_summary?.detected) ? run.operational_summary.detected : [];
+              const missing = Array.isArray(run.operational_summary?.missing) ? run.operational_summary.missing : [];
+              return (
+              <div key={run.id} style={{display:"grid",gridTemplateColumns:"82px 1fr auto",gap:8,alignItems:"start",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 9px"}}>
+                <div style={{fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{formatRunDate(run.created_at)}</div>
+                <div style={{minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:2}}>
+                    <div style={{fontSize:12,fontWeight:800,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:280}}>
+                      {run.filename || run.source_type || "Analisis de pedido"}
+                    </div>
+                    <span style={{fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:priority.color,background:priority.bg,border:`1px solid ${priority.border}`,borderRadius:999,padding:"2px 6px"}}>
+                      {priority.label}
+                    </span>
+                  </div>
+                  <div style={{fontSize:10,color:"var(--text5)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {statusLabel(run.status)} | {run.provider || "parser local"} | {(run.attachments || []).length} adjunto(s)
+                    {(run.issues || []).length ? ` | ${(run.issues || []).length} pendiente(s)` : ""}
+                    {run.error ? ` | ${run.error}` : ""}
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginTop:4,lineHeight:1.35}}>{resumenRunIA(run)}</div>
+                  {(detected.length || missing.length) && (
+                    <div style={{fontSize:10,color:"var(--text5)",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {detected.length ? `Detectado: ${detected.slice(0, 2).join(", ")}` : ""}
+                      {detected.length && missing.length ? " | " : ""}
+                      {missing.length ? `Falta: ${missing.slice(0, 2).join(", ")}` : ""}
+                    </div>
+                  )}
+                </div>
+                <span style={{fontSize:11,fontWeight:800,color:Number(run.confidence || 0) >= 70 ? "var(--green)" : "#f59e0b",background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:16,padding:"3px 8px"}}>
+                  {Number(run.confidence || 0)}%
+                </span>
+              </div>
+            );})}
+            {!runs.length && <div style={{fontSize:12,color:"var(--text5)",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"9px 10px"}}>Todavia no hay analisis IA guardados en esta empresa.</div>}
+          </div>
+        )}
+
+        {/* Selector modo */}
+        <div style={{display:"flex",gap:6,marginBottom:14}}>
+          {[["texto","Texto / email"],["archivo","Documento + texto"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setModo(v)}
+              style={{padding:"6px 14px",borderRadius:8,border:`1.5px solid ${modo===v?"var(--accent)":"var(--border)"}`,
+                background:modo===v?"var(--accent)":"var(--bg3)",color:modo===v?"#fff":"var(--text3)",
+                fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+              {l}
+            </button>
+          ))}
+        </div>
+
+        {modo==="texto" && (
+          <textarea value={texto} onChange={e=>setTexto(e.target.value)}
+            placeholder={"Ej: Cliente: Transportes Garcia\nOrigen: Barcelona\nDestino: Madrid\nFecha carga: 15/06/2026 08:00\nMercancia: palets fruta\nPeso: 24000 kg\nPrecio: 850 EUR\nReferencia: OC-1234"}
+            style={{width:"100%",minHeight:132,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+        )}
+
+        {modo==="archivo" && (
+          <div
+            onDragOver={(e)=>{ e.preventDefault(); setDraggingFile(true); }}
+            onDragLeave={()=>setDraggingFile(false)}
+            onDrop={handleDropFiles}
+            style={{border:`2px dashed ${draggingFile ? "var(--accent)" : "var(--border2)"}`,borderRadius:10,padding:"24px",textAlign:"center",background:draggingFile?"rgba(59,130,246,.10)":"var(--bg3)"}}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.txt,.eml,.html,.htm,.csv,.xml,.jpg,.jpeg,.png,.webp,.docx,.xlsx,application/pdf,text/plain,message/rfc822,text/html,text/csv,application/xml,image/jpeg,image/png,image/webp,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={handleFile}
+              style={{display:"none"}}
+            />
+            <div style={{fontSize:18,fontWeight:800,marginBottom:8,color:"var(--text)"}}>{fileLoading ? "Leyendo documento..." : "Seleccionar documentos"}</div>
+            <div style={{fontWeight:600,color:"var(--text)",fontSize:13}}>Email, PDF con texto, DOCX, TXT, HTML, CSV, XML o imagen</div>
+            <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
+              PDF/email con texto no necesita API. Imagenes o PDF escaneados necesitan API visual configurada en SuperAdmin.
+            </div>
+            <button
+              type="button"
+              onClick={()=>fileInputRef.current?.click()}
+              disabled={fileLoading}
+              style={{marginTop:12,padding:"8px 14px",borderRadius:7,border:"1px solid var(--accent)",background:"rgba(59,130,246,.14)",color:"var(--accent-xl)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:800,cursor:fileLoading?"wait":"pointer"}}
+            >
+              Buscar archivo
+            </button>
+            <div style={{fontSize:10,color:"var(--text5)",marginTop:8}}>Tambien puedes arrastrar aqui los documentos. Maximo 6MB por archivo y 7MB en total.</div>
+            {archivos.length > 0 && (
+              <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:6,textAlign:"left"}}>
+                {archivos.map((a, idx)=>(
+                  <div key={`${a.name}-${idx}`} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:7}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div>
+                      <div style={{fontSize:10,color:a.extractionStatus==="ok"?"var(--green)":"#f59e0b"}}>
+                        {a.sizeKb}KB | {describeAttachmentStatus(a)}
+                      </div>
+                    </div>
+                    <button type="button" onClick={()=>setArchivos(prev=>prev.filter((_, i)=>i!==idx))} style={{background:"none",border:"none",color:"var(--text5)",cursor:"pointer",fontSize:12}}>Quitar</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea value={texto} onChange={e=>setTexto(e.target.value)}
+              placeholder={"Opcional: pega aqui el cuerpo del email o texto adicional si el documento es escaneado."}
+              style={{width:"100%",minHeight:92,marginTop:14,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box",textAlign:"left"}}/>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:8,margin:"14px 0"}}>
+          <button onClick={interpretar} disabled={loading || fileLoading || (!texto.trim() && !archivos.length)}
+            style={{padding:"8px 16px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:(loading||fileLoading)?"not-allowed":"pointer",opacity:(loading||fileLoading)?0.6:1}}>
+            {loading?"Analizando pedido...":"Analizar pedido"}
+          </button>
+          <button onClick={onClose} style={{padding:"8px 14px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+        </div>
+        {error && <div style={{color:"var(--red)",fontSize:12,marginBottom:10}}>{error}</div>}
+        {preview && (
+          <div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--green)"}}>Pedido interpretado - revisa y confirma</div>
+              <div style={{display:"inline-flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Confianza</span>
+                <span style={{fontSize:12,fontWeight:800,color:"var(--text)",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:18,padding:"4px 10px"}}>
+                  {Math.round(Math.min(100, Number(preview.confidence || 0)))}%
+                </span>
+              </div>
+            </div>
+            {visualInfo && (
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 10px",fontSize:11,color:"var(--text3)",marginBottom:10}}>
+                <span style={{fontWeight:800,color:visualInfo.ok ? "var(--green)" : "#f59e0b"}}>IA visual</span>
+                <span>
+                  {visualInfo.ok
+                    ? `Documento analizado con ${visualInfo.provider || "proveedor configurado"}`
+                    : visualInfo.reason === "sin_api_key"
+                      ? "Preparada para analizar imagen/PDF cuando se configure la API en SuperAdmin"
+                      : "No hubo JSON interpretable; se mantiene el analisis local"}
+                </span>
+              </div>
+            )}
+            {(preview.suggestions?.length > 0 || preview.warnings?.length > 0 || preview.issues?.length > 0) && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,marginBottom:12}}>
+                {preview.suggestions?.length > 0 && (
+                  <div style={{background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.25)",borderRadius:8,padding:"9px 11px"}}>
+                    <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--green)",marginBottom:5}}>Sugerencias</div>
+                    {preview.suggestions.slice(0, 4).map((x, i) => <div key={i} style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{avisoTexto(x)}</div>)}
+                  </div>
+                )}
+                {preview.warnings?.length > 0 && (
+                  <div style={{background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.28)",borderRadius:8,padding:"9px 11px"}}>
+                    <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"#f59e0b",marginBottom:5}}>Avisos</div>
+                    {preview.warnings.slice(0, 4).map((x, i) => <div key={i} style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{avisoTexto(x)}</div>)}
+                  </div>
+                )}
+                {preview.issues?.length > 0 && (
+                  <div style={{background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.26)",borderRadius:8,padding:"9px 11px"}}>
+                    <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--red)",marginBottom:5}}>Pendiente</div>
+                    {preview.issues.slice(0, 4).map((x, i) => <div key={i} style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{avisoTexto(x)}</div>)}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+              {camposClave.filter(k => pedidoPreview?.[k] !== undefined && pedidoPreview?.[k] !== null && pedidoPreview?.[k] !== "").map(k=>(
+                <div key={k} style={{background:"var(--bg4)",borderRadius:7,padding:"7px 10px"}}>
+                  <div style={{fontSize:9,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>{k.replace(/_/g," ")}</div>
+                  <div style={{fontSize:13,color:"var(--text)",fontWeight:600,marginTop:2}}>{String(pedidoPreview[k])}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.2)",borderRadius:8,padding:"9px 13px",fontSize:12,color:"var(--text3)",marginBottom:12}}>
+              {preview.next_action || "Se abrira el formulario de pedido con estos datos pre-rellenados. Puedes completar o corregir antes de guardar."}
+            </div>
+            {archivos.length > 0 && (
+              <div style={{background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.22)",borderRadius:8,padding:"8px 12px",fontSize:12,color:"var(--text3)",marginBottom:12}}>
+                Se adjuntaran {archivos.length} documento(s) al guardar el pedido. Quedaran trazados como origen Bandeja IA.
+              </div>
+            )}
+            <button onClick={()=>onCreado({
+              ...(pedidoPreview || {}),
+              _ai_meta: {
+                source: preview.source?.type || "bandeja_ia",
+                filename: preview.source?.filename || archivos.map(a => a.name).join(", ") || null,
+                confidence: Math.round(Math.min(100, Number(preview.confidence || 0))),
+                status: preview.status || "",
+                issues_count: Array.isArray(preview.issues) ? preview.issues.length : 0,
+                warnings_count: Array.isArray(preview.warnings) ? preview.warnings.length : 0,
+                attachments_count: archivos.length,
+                visual_provider: preview.source?.ai_visual?.provider || null,
+                visual_ok: Boolean(preview.source?.ai_visual?.ok),
+              },
+              _ai_docs: archivos.map(a => ({
+                nombre: a.name,
+                tipo: inferPedidoDocTipo(a.name),
+                file_base64: a.base64,
+                file_mime: a.mediaType || "application/pdf",
+                file_size_kb: a.sizeKb,
+              })),
+            })}
+              style={{padding:"9px 18px",borderRadius:7,border:"none",background:"var(--green)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+              Continuar con estos datos
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Componente edicion concepto de factura ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colaboradores = [], onClose, onCreado }) {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState({
+    cliente_nombre: "",
+    cliente_id: "",
+    ruta_id: "",
+    origen: "",
+    destino: "",
+    vehiculo_id: "",
+    chofer_id: "",
+    remolque_id_manual: "",
+    matricula_colaborador: "",
+    remolque_matricula_colaborador: "",
+    colaborador_id: "",
+    tipo_descarga: "trasera",
+    fecha_carga: hoy,
+    fecha_descarga: hoy,
+    hora_carga: "",
+    hora_descarga: "",
+    referencia_cliente: "",
+    tipo_precio: "viaje",
+    precio_unitario: "",
+    cantidad: "",
+    importe_minimo: "",
+    minimo_unidades: "",
+    precio_colaborador: "",
+    km_ruta: "",
+    cargas_extra: "",
+    descargas_extra: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [rutasCliente, setRutasCliente] = useState([]);
+  const [rutasLoading, setRutasLoading] = useState(false);
+  const [clienteRiesgoRapido, setClienteRiesgoRapido] = useState(null);
+  const [clienteRiesgoLoadingRapido, setClienteRiesgoLoadingRapido] = useState(false);
+  const [puntosCargaCliente, setPuntosCargaCliente] = useState([]);
+  const [puntosCargaLoading, setPuntosCargaLoading] = useState(false);
+  const [poiDraftRapido, setPoiDraftRapido] = useState(null);
+  const riesgoConfirmadoRapidoRef = useRef(new Map());
+  const f = k => e => setForm(p => ({ ...p, [k]: (k === "origen" || k === "destino") ? e.target.value.toUpperCase() : e.target.value }));
+  const inp = { ...S.input, boxSizing:"border-box" };
+  const cleanCliente = form.cliente_nombre.trim();
+  const matches = cleanCliente
+    ? clientes.filter(c => (c.nombre || "").toLowerCase().includes(cleanCliente.toLowerCase())).slice(0, 5)
+    : [];
+  const clienteSeleccionadoRapido = clientes.find(c => String(c.id || "") === String(form.cliente_id || ""))
+    || clientes.find(c => (c.nombre || "").trim().toLowerCase() === cleanCliente.toLowerCase())
+    || null;
+  const importeRapidoPreview = calcImporte({
+    ...form,
+    tipo_precio: form.tipo_precio || "viaje",
+    extracostes_importe: 0,
+    puntos_descarga: [],
+  });
+  const clienteRiesgoRapidoPedido = buildClienteRiesgoPedidoAvisos(clienteRiesgoRapido, importeRapidoPreview);
+  const vehiculosConjunto = vehiculos.filter(v => {
+    const clase = (v.clase || v.tipo || "").toLowerCase();
+    const mat = (v.matricula || "").toUpperCase();
+    const esRemolqueDeAlguien = vehiculos.some(t => t.remolque_id === v.id);
+    const esRemolque = clase.includes("remolque") || clase.includes("semirremolque") || clase.includes("dolly") ||
+      esRemolqueDeAlguien || /^R[-_\s]/i.test(mat) || mat.endsWith("-R") || mat.endsWith("_R");
+    return !esRemolque;
+  });
+  const vehiculoSeleccionado = vehiculos.find(v => v.id === form.vehiculo_id);
+  const choferAsignado = choferes.find(c => c.id === form.chofer_id);
+  const colaboradorSeleccionado = colaboradores.find(c => c.id === form.colaborador_id);
+  const labelConjunto = v => {
+    const remolque = v.remolque_matricula || vehiculos.find(r => r.id === v.remolque_id)?.matricula;
+    return remolque ? `${v.matricula} + ${remolque}` : v.matricula;
+  };
+  const buildCargasRapidas = () => {
+    const principal = {
+      direccion: form.origen.trim().toUpperCase(),
+      cliente_nombre: "",
+      fecha: form.fecha_carga || "",
+      hora: form.hora_carga || "",
+      ventana: "",
+      bultos: "",
+      peso_kg: "",
+      notas: "Pedido rapido",
+    };
+    const extras = String(form.cargas_extra || "")
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map((line, idx) => {
+        const [direccion, fecha = "", hora = ""] = line.split("|").map(x => x.trim());
+        return {
+          direccion: (direccion || `CARGA ${idx + 2}`).toUpperCase(),
+          cliente_nombre: "",
+          fecha: fecha || form.fecha_carga || "",
+          hora: hora || "",
+          ventana: "",
+          bultos: "",
+          peso_kg: "",
+          notas: "Carga adicional desde pedido rapido",
+        };
+      });
+    return [principal, ...extras];
+  };
+  const buildDescargasRapidas = () => {
+    const principal = {
+      direccion: form.destino.trim().toUpperCase(),
+      cliente_nombre: "",
+      fecha: form.fecha_descarga || form.fecha_carga || "",
+      hora: form.hora_descarga || "",
+      ventana: "",
+      bultos: "",
+      peso_kg: "",
+      precio: "",
+      tipo_descarga: form.tipo_descarga || "indiferente",
+      notas: form.tipo_descarga ? `Pedido rapido. Descarga ${form.tipo_descarga}` : "Pedido rapido",
+    };
+    const extras = String(form.descargas_extra || "")
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map((line, idx) => {
+        const [direccion, fecha = "", hora = ""] = line.split("|").map(x => x.trim());
+        return {
+          direccion: (direccion || `DESCARGA ${idx + 2}`).toUpperCase(),
+          cliente_nombre: "",
+          fecha: fecha || form.fecha_descarga || form.fecha_carga || "",
+          hora: hora || "",
+          ventana: "",
+          bultos: "",
+          peso_kg: "",
+          precio: "",
+          tipo_descarga: form.tipo_descarga || "indiferente",
+          notas: "Descarga adicional desde pedido rapido",
+        };
+      });
+    return [principal, ...extras];
+  };
+
+  useEffect(() => {
+    if (!clienteSeleccionadoRapido?.id) {
+      setRutasCliente([]);
+      setClienteRiesgoRapido(null);
+      setPuntosCargaCliente([]);
+      return undefined;
+    }
+    let alive = true;
+    setRutasLoading(true);
+    getRutasCliente(clienteSeleccionadoRapido.id)
+      .then(d => {
+        if (!alive) return;
+        const lista = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
+        setRutasCliente(lista.map(r => ({ ...r, id: r.ruta_id || r.id, precio_base: r.precio_base ?? r.precio ?? 0 })));
+      })
+      .catch(() => { if (alive) setRutasCliente([]); })
+      .finally(() => { if (alive) setRutasLoading(false); });
+    setClienteRiesgoLoadingRapido(true);
+    getClienteRiesgoOperativo(clienteSeleccionadoRapido.id)
+      .then(d => { if (alive) setClienteRiesgoRapido(d || null); })
+      .catch(() => { if (alive) setClienteRiesgoRapido(null); })
+      .finally(() => { if (alive) setClienteRiesgoLoadingRapido(false); });
+    setPuntosCargaLoading(true);
+    getPuntosInteresApi({ cliente_id: clienteSeleccionadoRapido.id, tipo: "carga" })
+      .then(d => {
+        if (!alive) return;
+        const lista = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
+        const cargas = lista.filter(isCargaPoint);
+        setPuntosCargaCliente(cargas);
+        if (cargas.length === 1) {
+          setForm(p => String(p.origen || "").trim() ? p : applyPuntoCargaToDraft(p, cargas[0]));
+        }
+      })
+      .catch(() => {
+        if (alive) setPuntosCargaCliente(getPuntosCargaCliente(clienteSeleccionadoRapido.id));
+      })
+      .finally(() => { if (alive) setPuntosCargaLoading(false); });
+    return () => { alive = false; };
+  }, [clienteSeleccionadoRapido?.id]);
+
+  async function resolverCliente() {
+    const exact = clientes.find(c => (c.nombre || "").trim().toLowerCase() === cleanCliente.toLowerCase());
+    if (exact) return exact;
+    const firstMatch = matches[0];
+    if (firstMatch) return firstMatch;
+    const encontrados = await getClientes(cleanCliente, "true", 1, 5).catch(() => null);
+    const remotos = Array.isArray(encontrados?.data) ? encontrados.data : Array.isArray(encontrados) ? encontrados : [];
+    if (remotos[0]) return remotos[0];
+    const nuevo = await crearCliente({
+      nombre: cleanCliente,
+      cif: "PTE" + Date.now(),
+      tipo_iva: 21,
+      iva_regimen: "general",
+      pais: "España",
+      pendiente_revision: true,
+      notas: "Creado desde pedido rapido. Completar datos fiscales.",
+    });
+    return nuevo?.data || nuevo;
+  }
+
+  async function resolverTarifaRapida(cliente) {
+    if (form.ruta_id) {
+      const selected = rutasCliente.find(r => String(r.id || r.ruta_id || "") === String(form.ruta_id));
+      if (selected) return selected;
+    }
+    const data = await getRutasCliente(cliente.id).catch(() => []);
+    const lista = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+    if (form.ruta_id) return lista.find(r => String(r.ruta_id || r.id || "") === String(form.ruta_id)) || null;
+    return null;
+  }
+
+  function aplicarTarifaRapida(ruta) {
+    if (!ruta) return;
+    setForm(p => {
+      const tarifaTipo = ruta.tarifa_tipo || p.tipo_precio || "viaje";
+      const recargoPct = parseLocaleNumber(ruta.recargo_combustible_pct, 0);
+      const precioBase = parseLocaleNumber(ruta.precio_base ?? ruta.precio, 0);
+      const precioFinal = precioBase > 0 ? Number((precioBase * (1 + (recargoPct / 100))).toFixed(4)) : precioBase;
+      const minimoUnidades = normalizeMinimoUnidadesRuta(ruta, tarifaTipo);
+      return syncCantidadRapida({
+        ...p,
+        ruta_id: ruta.id || ruta.ruta_id || "",
+        origen: (ruta.origen || p.origen || "").toUpperCase(),
+        destino: (ruta.destino || p.destino || "").toUpperCase(),
+        km_ruta: ruta.km || p.km_ruta || "",
+        tipo_precio: tarifaTipo,
+        precio_unitario: precioFinal || p.precio_unitario,
+        importe_minimo: tarifaTipo === "viaje" ? (ruta.minimo_facturable || "") : "",
+        minimo_unidades: tarifaTipo !== "viaje" ? (minimoUnidades || "") : "",
+      }, true);
+    });
+  }
+
+  function syncCantidadRapida(draft, force = false) {
+    const tipo = draft.tipo_precio || "viaje";
+    if (tipo === "viaje") return { ...draft, cantidad: force ? "" : draft.cantidad };
+    if (force || draft.cantidad === null || draft.cantidad === undefined || draft.cantidad === "") {
+      return { ...draft, cantidad: cantidadSugeridaPorTipo(draft, tipo) };
+    }
+    return draft;
+  }
+
+  async function guardarRapido() {
+    if (!cleanCliente) { notify("Indica el cliente.", "warning"); return; }
+    if (!form.origen.trim()) { notify("Indica el origen.", "warning"); return; }
+    if (!form.destino.trim()) { notify("Indica el destino.", "warning"); return; }
+    if (!form.fecha_carga) { notify("Indica la fecha de carga para que aparezca en el cuadrante.", "warning"); return; }
+    setSaving(true);
+    try {
+      const cliente = await resolverCliente();
+      if (!cliente?.id) throw new Error("No se pudo resolver el cliente.");
+      const rutasDisponiblesRaw = rutasCliente.length ? rutasCliente : await getRutasCliente(cliente.id).catch(() => []);
+      const rutasDisponibles = Array.isArray(rutasDisponiblesRaw)
+        ? rutasDisponiblesRaw
+        : Array.isArray(rutasDisponiblesRaw?.data) ? rutasDisponiblesRaw.data : [];
+      if (rutasDisponibles.length > 0 && !form.ruta_id) {
+        notify("Este cliente tiene tarifas guardadas. Selecciona una tarifa/ruta antes de crear el pedido rapido.", "warning");
+        return;
+      }
+      if (clienteRiesgoRapidoPedido?.requiere_confirmacion && !isRiskConfirmationFresh(riesgoConfirmadoRapidoRef, cliente.id, clienteRiesgoRapidoPedido)) {
+        const money = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const ok = await confirmDialog({
+          title: clienteRiesgoRapidoPedido.nivel === "critico" ? "Cliente en riesgo critico" : "Cliente con cobros/riesgo pendiente",
+          message: [
+            `Pendiente actual: ${money(clienteRiesgoRapido?.total_pendiente)} EUR`,
+            `Riesgo actual: ${formatRiskPct(clienteRiesgoRapidoPedido.riesgo_pct_actual)}`,
+            `Con este pedido: ${formatRiskPct(clienteRiesgoRapidoPedido.riesgo_pct_proyectado)} (${money(clienteRiesgoRapidoPedido.total_proyectado)} EUR expuestos)`,
+            ...clienteRiesgoRapidoPedido.avisos.map(a => `- ${a.mensaje}`),
+            "Quieres crear el pedido rapido igualmente?",
+          ].join("\n"),
+          confirmText: "Crear igualmente",
+          cancelText: "Revisar",
+          tone: "warning",
+        });
+        if (!ok) return;
+        markRiskConfirmed(riesgoConfirmadoRapidoRef, cliente.id, clienteRiesgoRapidoPedido);
+      }
+      const ruta = await resolverTarifaRapida(cliente);
+      const matriculaColaborador = String(form.matricula_colaborador || "").trim().toUpperCase();
+      const remolqueColaborador = String(form.remolque_matricula_colaborador || "").trim().toUpperCase();
+      const colaboradorId = form.colaborador_id || "";
+      const tipoPrecio = form.tipo_precio || ruta?.tarifa_tipo || "viaje";
+      const kmRuta = toNullableNumber(form.km_ruta) ?? toNullableNumber(ruta?.km);
+      const precioUnitario = toNullableNumber(form.precio_unitario) ?? toNullableNumber(ruta?.precio_base) ?? 0;
+      const minimoUnidadesRuta = normalizeMinimoUnidadesRuta(ruta || {}, tipoPrecio);
+      const tarifaDraft = syncCantidadRapida({
+        tipo_precio: tipoPrecio,
+        precio_unitario: precioUnitario,
+        cantidad: form.cantidad || "",
+        peso_kg: "",
+        bultos: "",
+        km_ruta: kmRuta || "",
+        importe_minimo: tipoPrecio === "viaje" ? (form.importe_minimo || ruta?.minimo_facturable || "") : "",
+        minimo_unidades: tipoPrecio !== "viaje" ? (form.minimo_unidades || minimoUnidadesRuta || "") : "",
+        extracostes_importe: 0,
+      }, true);
+      const importeCalculado = Number(calcImporte(tarifaDraft).toFixed(2));
+      const precioColaboradorUnitario = toNullableNumber(form.precio_colaborador);
+      const unidadesColaborador = Math.max(
+        toFiniteNumber(tarifaDraft.cantidad, 0),
+        tipoPrecio === "viaje" ? 0 : toFiniteNumber(tarifaDraft.minimo_unidades, 0)
+      );
+      const precioColaboradorTotal = precioColaboradorUnitario == null
+        ? null
+        : tipoPrecio === "viaje"
+          ? precioColaboradorUnitario
+          : Number(((tipoPrecio === "kg" ? unidadesColaborador / 100 : unidadesColaborador) * precioColaboradorUnitario).toFixed(2));
+      const conAsignacion = !!form.vehiculo_id || !!colaboradorId;
+      const aviso = conAsignacion
+        ? "Pedido rapido: completar precio, mercancia, peso, bultos, documentos y datos de facturacion."
+        : "Pedido rapido sin asignar: completar vehiculo o colaborador, chofer, precio, mercancia, peso, bultos, documentos y datos de facturacion.";
+      await crearPedido({
+        cliente_id: cliente.id,
+        ruta_id: ruta?.id || ruta?.ruta_id || null,
+        origen: form.origen.trim().toUpperCase(),
+        destino: form.destino.trim().toUpperCase(),
+        vehiculo_id: colaboradorId ? null : (form.vehiculo_id || null),
+        chofer_id: !colaboradorId && form.vehiculo_id ? (form.chofer_id || null) : null,
+        remolque_id_manual: colaboradorId ? null : (form.remolque_id_manual || null),
+        colaborador_id: colaboradorId || null,
+        matricula_colaborador: matriculaColaborador || null,
+        remolque_matricula_colaborador: remolqueColaborador || null,
+        fecha_pedido: hoy,
+        fecha_carga: form.fecha_carga,
+        fecha_descarga: form.fecha_descarga || form.fecha_carga,
+        hora_carga: form.hora_carga || null,
+        hora_descarga: form.hora_descarga || null,
+        referencia_cliente: form.referencia_cliente || null,
+        puntos_carga: buildCargasRapidas(),
+        puntos_descarga: buildDescargasRapidas(),
+        estado: conAsignacion ? "confirmado" : "pendiente",
+        importe: importeCalculado,
+        tipo_carga: "completa",
+        carga_trasera: form.tipo_descarga === "trasera",
+        carga_lateral: form.tipo_descarga === "lateral",
+        condiciones_adicionales: form.tipo_descarga ? `Tipo descarga: ${form.tipo_descarga}` : null,
+        tipo_precio: tipoPrecio,
+        precio_unitario: precioUnitario,
+        cantidad: tarifaDraft.cantidad || null,
+        importe_minimo: tipoPrecio === "viaje" ? toNullableNumber(tarifaDraft.importe_minimo) : null,
+        minimo_unidades: tipoPrecio !== "viaje" ? toNullableNumber(tarifaDraft.minimo_unidades) : null,
+        km_ruta: kmRuta,
+        precio_cliente_col: colaboradorId ? importeCalculado : null,
+        precio_colaborador: colaboradorId ? precioColaboradorTotal : null,
+        precio_colaborador_unitario: colaboradorId && tipoPrecio !== "viaje" ? precioColaboradorUnitario : null,
+        minimo_colaborador_unidades: colaboradorId && tipoPrecio !== "viaje" ? toNullableNumber(tarifaDraft.minimo_unidades) : null,
+        coste_gasoil: colaboradorId ? 0 : undefined,
+        pendiente_completar: true,
+        aviso_completar: aviso,
+        notas: aviso,
+      });
+      onCreado();
+    } catch(e) {
+      notify(e.message || "No se pudo crear el pedido rapido.", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.82)",zIndex:220,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(860px,96vw)",maxHeight:"92vh",overflowY:"auto",boxSizing:"border-box"}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:800,color:"var(--text)",marginBottom:4}}>Pedido rapido</div>
+        <div style={{fontSize:12,color:"var(--text4)",marginBottom:14}}>
+          Entra en el cuadrante de trafico y queda marcado para completar mas tarde. Si no asignas conjunto, se crea pendiente.
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div style={{gridColumn:"1/-1"}}>
+            <label style={S.label}>Cliente *</label>
+            <input list="clientes-pedido-rapido" style={inp} value={form.cliente_nombre} onChange={e=>{
+              const value = e.target.value;
+              const exact = clientes.find(c => (c.nombre || "").trim().toLowerCase() === value.trim().toLowerCase());
+              setForm(p => ({
+                ...p,
+                cliente_nombre: value,
+                cliente_id: exact?.id || "",
+                ruta_id: exact?.id === p.cliente_id ? p.ruta_id : "",
+              }));
+            }} placeholder="Nombre del cliente"/>
+            <datalist id="clientes-pedido-rapido">
+              {clientes.map(c => <option key={c.id} value={c.nombre}/>)}
+            </datalist>
+            {cleanCliente && matches.length === 0 && (
+              <div style={{fontSize:11,color:"#fbbf24",marginTop:4}}>No hay coincidencias. Se creara el cliente como pendiente de revisar.</div>
+            )}
+          </div>
+          {clienteSeleccionadoRapido?.id && (
+            <div style={{gridColumn:"1/-1",display:"grid",gap:8}}>
+              {clienteRiesgoLoadingRapido ? (
+                <div style={{padding:"8px 12px",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7,fontSize:12,color:"var(--text4)"}}>
+                  Revisando cobros pendientes y riesgo del cliente...
+                </div>
+              ) : clienteRiesgoRapido && (
+                <div style={{padding:"9px 12px",background:clienteRiesgoRapidoPedido.avisos.length ? "rgba(245,158,11,.09)" : "rgba(16,185,129,.07)",border:`1px solid ${clienteRiesgoRapidoPedido.avisos.length ? "rgba(245,158,11,.28)" : "rgba(16,185,129,.2)"}`,borderRadius:8,fontSize:12,color:"var(--text3)"}}>
+                  <div style={{display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
+                    <strong style={{color:clienteRiesgoRapidoPedido.avisos.length ? "#f59e0b" : "#10b981"}}>Riesgo cliente</strong>
+                    <span style={{fontSize:18,fontWeight:900,color:clienteRiesgoRapidoPedido.avisos.length ? "#f59e0b" : "#10b981",fontFamily:"'JetBrains Mono',monospace"}}>
+                      {formatRiskPct(clienteRiesgoRapidoPedido.riesgo_pct_actual)}
+                    </span>
+                  </div>
+                  <div style={{marginTop:4,color:"var(--text4)"}}>
+                    Pendiente: {Number(clienteRiesgoRapido.total_pendiente || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR
+                    {clienteRiesgoRapido.limite_riesgo > 0 ? ` de ${Number(clienteRiesgoRapido.limite_riesgo || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : " | sin limite configurado"}
+                    {clienteRiesgoRapidoPedido.riesgo_pct_proyectado !== null ? ` | con este pedido: ${formatRiskPct(clienteRiesgoRapidoPedido.riesgo_pct_proyectado)}` : ""}
+                  </div>
+                </div>
+              )}
+              <div>
+                <label style={S.label}>Tarifa / ruta guardada {rutasCliente.length > 0 ? "*" : ""}</label>
+                <select style={S.sel} value={form.ruta_id || ""} onChange={e=>{
+                  const ruta = rutasCliente.find(r => String(r.id || r.ruta_id || "") === String(e.target.value));
+                  if (ruta) aplicarTarifaRapida(ruta);
+                  else setForm(p => ({ ...p, ruta_id: "" }));
+                }} disabled={rutasLoading}>
+                  <option value="">{rutasLoading ? "Cargando tarifas..." : rutasCliente.length ? "Selecciona tarifa del cliente" : "Sin tarifas guardadas"}</option>
+                  {rutasCliente.map(r => <option key={r.id || r.ruta_id} value={r.id || r.ruta_id}>{formatRutaTarifaLabel(r)}</option>)}
+                </select>
+                <div style={{fontSize:11,color:rutasCliente.length ? "#fbbf24" : "var(--text5)",marginTop:4}}>
+                  {rutasCliente.length ? "Para este cliente la tarifa es obligatoria en pedido rapido." : "No hay tarifas guardadas; puedes completar el precio manualmente."}
+                </div>
+              </div>
+              <div>
+                <label style={S.label}>Punto de carga del cliente</label>
+                <div style={{display:"flex",gap:6}}>
+                  {puntosCargaCliente.length > 0 ? (
+                    <PuntoInteresPicker
+                      placeholder={puntosCargaCliente.length === 1 ? "Punto de carga cargado" : "Elegir punto de carga del cliente"}
+                      puntos={puntosCargaCliente}
+                      onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
+                      style={{...S.sel,flex:1}}
+                    />
+                  ) : (
+                    <PuntoInteresPicker
+                      placeholder={puntosCargaLoading ? "Cargando puntos..." : "Elegir entre todos los puntos"}
+                      onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
+                      style={{...S.sel,flex:1}}
+                    />
+                  )}
+                  <button type="button" onClick={()=>setPoiDraftRapido({nombre:form.origen || clienteSeleccionadoRapido.nombre,direccion:"",tipo:"carga",cliente_id:clienteSeleccionadoRapido.id,ventana:"",pais:"España"})}
+                    style={{...S.btn,background:"transparent",color:"var(--accent)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
+                    Crear punto
+                  </button>
+                </div>
+                <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
+                  {puntosCargaCliente.length > 1 ? "Este cliente tiene varios puntos de carga: elige el origen correcto." : puntosCargaCliente.length === 1 ? "Origen cargado desde el punto habitual del cliente." : "Sin puntos propios: puedes usar uno general o crear uno nuevo para este cliente."}
+                </div>
+              </div>
+            </div>
+          )}
+          <div><label style={S.label}>Origen *</label><input style={inp} value={form.origen} onChange={f("origen")} placeholder="MADRID"/></div>
+          <div><label style={S.label}>Destino *</label><input style={inp} value={form.destino} onChange={f("destino")} placeholder="VALENCIA"/></div>
+          <div>
+            <label style={S.label}>Matricula / conjunto</label>
+            <select style={S.sel} value={form.vehiculo_id} onChange={e=>{
+              const vid = e.target.value;
+              const veh = vehiculos.find(v => v.id === vid);
+              const choferId = veh?.chofer_id || choferes.find(c => c.vehiculo_id === vid)?.id || "";
+              setForm(p => ({
+                ...p,
+                vehiculo_id: vid,
+                chofer_id: choferId,
+                remolque_id_manual: veh?.remolque_id || "",
+                matricula_colaborador: vid ? "" : p.matricula_colaborador,
+                remolque_matricula_colaborador: vid ? "" : p.remolque_matricula_colaborador,
+              }));
+            }}>
+              <option value="">Selecciona matricula / conjunto</option>
+              {vehiculosConjunto.map(v => (
+                <option key={v.id} value={v.id}>
+                  {labelConjunto(v)} {v.marca ? "- " + v.marca : ""} {v.modelo || ""}
+                </option>
+              ))}
+            </select>
+              {vehiculoSeleccionado && (
+                <div style={{fontSize:11,color:"var(--text4)",marginTop:4}}>
+                  Conjunto: <strong style={{color:"var(--text3)"}}>{labelConjunto(vehiculoSeleccionado)}</strong>
+                {" | "}
+                Chofer: <strong style={{color:choferAsignado?"var(--text3)":"#fbbf24"}}>{choferAsignado ? `${choferAsignado.nombre} ${choferAsignado.apellidos || ""}`.trim() : "sin chofer asignado"}</strong>
+                </div>
+              )}
+              {!vehiculoSeleccionado && (
+                <div style={{fontSize:11,color:"#fbbf24",marginTop:4}}>
+                  Si lo dejas vacio, el viaje se crea sin asignar para planificarlo despues.
+                </div>
+              )}
+            </div>
+          <div>
+            <label style={S.label}>Matricula colaborador</label>
+            <input style={inp} value={form.matricula_colaborador} onChange={e=>{
+              const value = e.target.value.toUpperCase();
+              setForm(p=>({
+                ...p,
+                matricula_colaborador:value,
+                vehiculo_id:value.trim() ? "" : p.vehiculo_id,
+                chofer_id:value.trim() ? "" : p.chofer_id,
+                remolque_id_manual:value.trim() ? "" : p.remolque_id_manual,
+              }));
+            }} placeholder="Ej: 1234ABC"/>
+            <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>Usalo si el viaje sale con un transportista externo.</div>
+          </div>
+          <div>
+            <label style={S.label}>Colaborador</label>
+            <select style={S.sel} value={form.colaborador_id} onChange={e=>setForm(p=>({
+              ...p,
+              colaborador_id:e.target.value,
+              vehiculo_id:e.target.value ? "" : p.vehiculo_id,
+              chofer_id:e.target.value ? "" : p.chofer_id,
+              remolque_id_manual:e.target.value ? "" : p.remolque_id_manual,
+            }))}>
+              <option value="">Sin colaborador asignado</option>
+              {colaboradores.map(c => <option key={c.id} value={c.id}>{c.nombre} {c.cif ? `- ${c.cif}` : ""}</option>)}
+            </select>
+            {colaboradorSeleccionado && (
+              <div style={{fontSize:11,color:"var(--text4)",marginTop:4}}>
+                Se guardara como transporte subcontratado y cargara sus matriculas en la orden.
+              </div>
+            )}
+          </div>
+          <div>
+            <label style={S.label}>Remolque colaborador</label>
+            <input style={inp} value={form.remolque_matricula_colaborador} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:e.target.value.toUpperCase()}))} placeholder="Opcional"/>
+          </div>
+          <div>
+            <label style={S.label}>Tipo descarga</label>
+            <select style={S.sel} value={form.tipo_descarga} onChange={f("tipo_descarga")}>
+              <option value="trasera">Trasera</option>
+              <option value="lateral">Lateral</option>
+              <option value="muelle">Muelle</option>
+              <option value="grua">Grua</option>
+              <option value="indiferente">Indiferente</option>
+            </select>
+          </div>
+          <div><label style={S.label}>Fecha carga *</label><input type="date" style={inp} value={form.fecha_carga} onChange={f("fecha_carga")}/></div>
+          <div><label style={S.label}>Fecha descarga</label><input type="date" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")}/></div>
+          <div><label style={S.label}>Hora carga</label><input type="time" style={inp} value={form.hora_carga} onChange={f("hora_carga")}/></div>
+          <div><label style={S.label}>Hora descarga</label><input type="time" style={inp} value={form.hora_descarga} onChange={f("hora_descarga")}/></div>
+          <div>
+            <label style={S.label}>Tipo precio</label>
+            <select style={S.sel} value={form.tipo_precio} onChange={e=>setForm(p=>syncCantidadRapida({...p,tipo_precio:e.target.value}, true))}>
+              {TIPOS_PRECIO.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={S.label}>{form.tipo_precio==="viaje" ? "Precio viaje cliente" : form.tipo_precio==="tonelada" ? "EUR/ton cliente" : "Precio unitario cliente"}</label>
+            <input type="text" inputMode="decimal" style={inp} value={form.precio_unitario} onChange={f("precio_unitario")} placeholder="Si existe ruta, se cargara al crear"/>
+          </div>
+          {form.tipo_precio !== "viaje" && (
+            <div>
+              <label style={S.label}>{form.tipo_precio==="tonelada" ? "Toneladas" : form.tipo_precio==="km" ? "Kilometros" : form.tipo_precio==="palet" ? "Palets" : "Cantidad"}</label>
+              <input type="text" inputMode="decimal" style={inp} value={form.cantidad} onChange={f("cantidad")} placeholder="Opcional"/>
+            </div>
+          )}
+          <div>
+            <label style={S.label}>{form.tipo_precio==="viaje" ? "Minimo EUR" : "Minimo facturable"}</label>
+            <input type="text" inputMode="decimal" style={inp}
+              value={form.tipo_precio==="viaje" ? form.importe_minimo : form.minimo_unidades}
+              onChange={e=>setForm(p=>({...p,[p.tipo_precio==="viaje" ? "importe_minimo" : "minimo_unidades"]:e.target.value}))}
+              placeholder="Si existe ruta, se cargara al crear"/>
+          </div>
+          <div>
+            <label style={S.label}>{form.tipo_precio==="tonelada" ? "Pago colaborador EUR/tn" : "Pago colaborador"}</label>
+            <input type="text" inputMode="decimal" style={inp} value={form.precio_colaborador} onChange={f("precio_colaborador")} placeholder="Opcional"/>
+          </div>
+          <div>
+            <label style={S.label}>Km ruta</label>
+            <input type="text" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Si existe ruta, se cargara al crear"/>
+          </div>
+          <div style={{gridColumn:"1/-1"}}><label style={S.label}>Referencia de carga</label><input style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Referencia / carga / orden"/></div>
+          <div style={{gridColumn:"1/-1"}}>
+            <label style={S.label}>Cargas extra</label>
+            <textarea
+              style={{...inp,minHeight:72,resize:"vertical"}}
+              value={form.cargas_extra}
+              onChange={f("cargas_extra")}
+              placeholder={"Una carga adicional por linea\nFormato opcional: origen | YYYY-MM-DD | HH:MM"}
+            />
+          </div>
+          <div style={{gridColumn:"1/-1"}}>
+            <label style={S.label}>Descargas extra</label>
+            <textarea
+              style={{...inp,minHeight:84,resize:"vertical"}}
+              value={form.descargas_extra}
+              onChange={f("descargas_extra")}
+              placeholder={"Una descarga adicional por linea\nCon el destino basta; fecha y hora se pueden completar despues"}
+            />
+          </div>
+        </div>
+
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:18}}>
+          <button style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)"}} onClick={onClose} disabled={saving}>Cancelar</button>
+          <button style={{...S.btn,background:"var(--accent)",color:"#fff",opacity:saving?0.7:1}} onClick={guardarRapido} disabled={saving}>
+            {saving ? "Creando..." : "Crear rapido"}
+          </button>
+        </div>
+        {poiDraftRapido && (
+          <PuntoInteresModal
+            initial={poiDraftRapido}
+            onClose={()=>setPoiDraftRapido(null)}
+            onSave={(next, saved)=>{
+              if (saved) {
+                setPuntosCargaCliente(prev => {
+                  const exists = prev.some(p => String(p.id) === String(saved.id));
+                  return exists ? prev.map(p => String(p.id) === String(saved.id) ? saved : p) : [...prev, saved];
+                });
+                setForm(p => applyPuntoCargaToDraft(p, saved));
+              }
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PuntoInteresModal({ initial, onClose, onSave }) {
+  const [form, setForm] = useState(() => ({
+    id: initial?.id || "",
+    cliente_id: initial?.cliente_id || "",
+    nombre: initial?.nombre || initial?.cliente_nombre || "",
+    cif: initial?.cif || "",
+    direccion: initial?.direccion || "",
+    codigo_postal: initial?.codigo_postal || "",
+    ciudad: initial?.ciudad || "",
+    provincia: initial?.provincia || "",
+    pais: initial?.pais || "España",
+    telefono: initial?.telefono || "",
+    email: initial?.email || "",
+    contacto_nombre: initial?.contacto_nombre || "",
+    contacto_telefono: initial?.contacto_telefono || "",
+    ventana: initial?.ventana || "",
+    notas: initial?.notas || "",
+    tipo: initial?.tipo || "ambos",
+    google_maps_url: initial?.google_maps_url || initial?.metadata?.google_maps_url || "",
+  }));
+  const set = k => e => setForm(p => ({...p, [k]: e.target.value}));
+  const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
+  const lbl = {display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4,marginTop:10};
+
+  async function guardar() {
+    if (!form.nombre.trim()) { notify("Indica el nombre de la empresa o punto.", "warning"); return; }
+    if (!form.direccion.trim()) { notify("Indica la direccion del punto.", "warning"); return; }
+    let saved = form;
+    try {
+      saved = form.id ? await editarPuntoInteres(form.id, form) : await crearPuntoInteres(form);
+    } catch (e) {
+      notify("Punto guardado localmente, pero no se ha sincronizado con la base de datos: " + e.message, "warning");
+    }
+    const next = savePuntoInteres(saved || form);
+    onSave?.(next, saved || form);
+    onClose();
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.76)",zIndex:520,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:20,width:"min(620px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)",marginBottom:4}}>{form.id ? "Editar punto de interes" : "Guardar punto de interes"}</div>
+        <div style={{fontSize:12,color:"var(--text4)",marginBottom:12}}>Crea una ficha reutilizable para empresas donde cargas o descargas con frecuencia.</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre empresa / punto *</label><input style={inp} value={form.nombre} onChange={set("nombre")} autoFocus placeholder="Ej: Logistica Madrid Norte"/></div>
+          <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={set("cif")} /></div>
+          <div><label style={lbl}>Tipo</label><select style={inp} value={form.tipo} onChange={set("tipo")}><option value="ambos">Carga y descarga</option><option value="carga">Carga</option><option value="descarga">Descarga</option></select></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Direccion completa *</label><input style={inp} value={form.direccion} onChange={set("direccion")} placeholder="Calle, numero, poligono, nave..." /></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Enlace Google Maps</label><input style={inp} value={form.google_maps_url} onChange={set("google_maps_url")} placeholder="https://maps.google.com/..." /></div>
+          <div><label style={lbl}>Codigo postal</label><input style={inp} value={form.codigo_postal} onChange={set("codigo_postal")} /></div>
+          <div><label style={lbl}>Ciudad</label><input style={inp} value={form.ciudad} onChange={set("ciudad")} /></div>
+          <div><label style={lbl}>Provincia</label><input style={inp} value={form.provincia} onChange={set("provincia")} /></div>
+          <div><label style={lbl}>Pais</label><input style={inp} value={form.pais} onChange={set("pais")} /></div>
+          <div><label style={lbl}>Telefono empresa</label><input style={inp} value={form.telefono} onChange={set("telefono")} /></div>
+          <div><label style={lbl}>Email</label><input type="email" style={inp} value={form.email} onChange={set("email")} /></div>
+          <div><label style={lbl}>Contacto</label><input style={inp} value={form.contacto_nombre} onChange={set("contacto_nombre")} /></div>
+          <div><label style={lbl}>Telefono contacto</label><input style={inp} value={form.contacto_telefono} onChange={set("contacto_telefono")} /></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Horario / ventana habitual</label><input style={inp} value={form.ventana} onChange={set("ventana")} placeholder="Ej: 08:00-14:00" /></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Notas operativas</label><textarea style={{...inp,height:74,resize:"vertical"}} value={form.notas} onChange={set("notas")} placeholder="Ej: entrada por puerta 3, pedir referencia en garita..." /></div>
+        </div>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:16}}>
+          <button type="button" onClick={onClose} style={{...S.btn,background:"transparent",border:"1px solid var(--border2)",color:"var(--text4)"}}>Cancelar</button>
+          <button type="button" onClick={guardar} style={{...S.btn,background:"var(--accent)",color:"#fff"}}>Guardar punto</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FacturarConcepto({ pedido, onConfirm, onCancel, saving = false }) {
+  const hoy = new Date();
+  const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().slice(0,10);
+  const ultimoDia = new Date(hoy.getFullYear(), hoy.getMonth()+1, 0).toISOString().slice(0,10);
+  const fmtES = d => d ? new Date(d).toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"}) : "";
+
+  const [modo, setModo] = useState("unalinea"); // unalinea | detallado
+  const [concepto, setConcepto] = useState(
+    `VIAJES REALIZADOS DEL ${fmtES(primerDia).toUpperCase()} AL ${fmtES(ultimoDia).toUpperCase()}`
+  );
+  const [fechaDesde, setFechaDesde] = useState(primerDia);
+  const [fechaHasta, setFechaHasta] = useState(ultimoDia);
+  const [importe, setImporte] = useState(pedido.importe||0);
+
+  // Auto-update concepto when dates change
+  const actualizarConcepto = (desde, hasta) => {
+    setConcepto(`VIAJES REALIZADOS DEL ${fmtES(desde).toUpperCase()} AL ${fmtES(hasta).toUpperCase()}`);
+  };
+
+  const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 11px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
+  const lbl = {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4,marginTop:10};
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        {[["unalinea","Una linea"],["detallado","Personalizar"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setModo(v)}
+            style={{padding:"5px 12px",borderRadius:6,border:`1px solid ${modo===v?"var(--accent)":"var(--border2)"}`,
+                    background:modo===v?"var(--accent)":"var(--bg3)",color:modo===v?"#fff":"var(--text3)",
+                    fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+      {modo==="unalinea" && (
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 10px"}}>
+            <div>
+              <label style={lbl}>Desde</label>
+              <input type="date" style={inp} value={fechaDesde} onChange={e=>{setFechaDesde(e.target.value);actualizarConcepto(e.target.value,fechaHasta);}}/>
+            </div>
+            <div>
+              <label style={lbl}>Hasta</label>
+              <input type="date" style={inp} value={fechaHasta} onChange={e=>{setFechaHasta(e.target.value);actualizarConcepto(fechaDesde,e.target.value);}}/>
+            </div>
+          </div>
+          <label style={lbl}>Concepto de la factura</label>
+          <textarea value={concepto} onChange={e=>setConcepto(e.target.value)}
+            style={{...inp,minHeight:60,resize:"vertical"}}/>
+          <label style={lbl}>Importe (EUR)</label>
+          <input type="number" step="0.01" style={inp} value={importe} onChange={e=>setImporte(e.target.value)}/>
+        </div>
+      )}
+      {modo==="detallado" && (
+        <div>
+          <div style={{background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.15)",borderRadius:7,padding:"8px 12px",fontSize:12,color:"var(--text3)",marginBottom:10}}>
+            Personaliza el concepto como quieras. El importe es editable.
+          </div>
+          <label style={lbl}>Concepto *</label>
+          <textarea value={concepto} onChange={e=>setConcepto(e.target.value)} style={{...inp,minHeight:60,resize:"vertical"}}/>
+          <label style={lbl}>Importe (EUR)</label>
+          <input type="number" step="0.01" style={inp} value={importe} onChange={e=>setImporte(e.target.value)}/>
+        </div>
+      )}
+      <div style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end"}}>
+        <button style={{padding:"7px 14px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}} onClick={onCancel}>Cancelar</button>
+        <button style={{padding:"7px 14px",borderRadius:7,border:"none",background:"var(--green)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:saving?"not-allowed":"pointer",opacity:saving?0.7:1}}
+          onClick={()=>onConfirm({...pedido,conceptoFactura:concepto,importeFactura:parseFloat(importe)||pedido.importe})}
+          disabled={saving}>
+          {saving?"Creando...":"Emitir factura"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Panel de pago a colaborador con adjunto de factura y fecha de pago ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+function PagoColaboradorPanel({ pedido, onUpdated }) {
+  const [estado, setEstado] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    getPedidoColaboradorPago(pedido.id)
+      .then((data) => {
+        if (alive) {
+          setEstado(data && data.factura_nombre ? data : null);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setEstado(null);
+          setLoading(false);
+        }
+      });
+    return () => { alive = false; };
+  }, [pedido.id]);
+
+  function calcFechaPago(fechaRecepcion) {
+    const empresa = getEmpresaPerfilSync();
+    const plazo   = Number(empresa.plazo_pago_colaboradores || 60);
+    const dias    = (empresa.dias_pago_colaboradores || "15").split(",").map(d => parseInt(d.trim())).filter(d => !isNaN(d));
+    const forma   = empresa.forma_pago_colaboradores || "dias_fijos";
+
+    const base = new Date(fechaRecepcion);
+    base.setDate(base.getDate() + plazo);
+
+    if (forma === "transferencia_inmediata") return base.toISOString().slice(0, 10);
+    if (forma === "fin_mes") {
+      base.setMonth(base.getMonth() + 1, 0);
+      return base.toISOString().slice(0, 10);
+    }
+    // dias_fijos: encontrar el proximo dia de pago tras la fecha base
+    const diaBase = base.getDate();
+    const mesBase = base.getMonth();
+    const anoBase = base.getFullYear();
+    const diasOrdenados = [...dias].sort((a, b) => a - b);
+    const siguiente = diasOrdenados.find(d => d >= diaBase);
+    if (siguiente) {
+      return new Date(anoBase, mesBase, siguiente).toISOString().slice(0, 10);
+    } else {
+      // next month, first payment day
+      return new Date(anoBase, mesBase + 1, diasOrdenados[0]).toISOString().slice(0, 10);
+    }
+  }
+
+  function handleFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const hoy = new Date().toISOString().slice(0, 10);
+      const fechaPago = calcFechaPago(hoy);
+      const nuevo = {
+        factura_nombre: file.name,
+        factura_data:   reader.result,
+        fecha_recepcion: hoy,
+        fecha_pago_calculada: fechaPago,
+        importe: Number(pedido.precio_colaborador || 0),
+        pagado: false,
+      };
+      const saved = await guardarPedidoColaboradorPago(pedido.id, nuevo).catch((err) => {
+        notify(err.message || "No se pudo guardar el pago del colaborador", "error");
+        return null;
+      });
+      if (saved) {
+        setEstado(saved);
+        if (typeof onUpdated === "function") onUpdated(saved);
+      }
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function marcarPagado() {
+    const ok = await confirmDialog({
+      title: "Marcar pago",
+      message: "Marcar como pagado al colaborador?",
+      confirmText: "Marcar pagado",
+    });
+    if (!ok) return;
+    const updated = await guardarPedidoColaboradorPago(pedido.id, {
+      ...estado,
+      pagado: true,
+      fecha_pago_real: new Date().toISOString().slice(0, 10),
+    }).catch((err) => {
+      notify(err.message || "No se pudo marcar el pago", "error");
+      return null;
+    });
+    if (!updated) return;
+    setEstado(updated);
+    if (typeof onUpdated === "function") onUpdated(updated);
+  }
+
+  function verFactura() {
+    if (!estado?.factura_data) return;
+    const a = document.createElement("a");
+    a.href = estado.factura_data;
+    a.download = estado.factura_nombre;
+    a.click();
+  }
+
+  const fmt2l = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2 });
+
+  if (loading) {
+    return (
+      <div style={{ marginTop: 10, border: "1px dashed var(--border2)", borderRadius: 8, padding: "14px 16px", color: "var(--text4)", fontSize: 12 }}>
+        Cargando pago del colaborador...
+      </div>
+    );
+  }
+
+  if (!estado) {
+    return (
+      <div style={{ marginTop: 10, border: "1.5px dashed rgba(251,191,36,.4)", borderRadius: 8, padding: "14px 16px" }}>
+        <div style={{ fontWeight: 700, fontSize: 12, color: "#fbbf24", marginBottom: 6 }}>Pendiente - adjunta la factura del colaborador</div>
+        <div style={{ fontSize: 11, color: "var(--text4)", marginBottom: 10 }}>
+          Una vez recibida la factura, adjuntala aqui. El sistema calculara automaticamente la fecha de pago segun las condiciones configuradas en Mi Empresa.
+        </div>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 7, background: "rgba(251,191,36,.12)", border: "1px solid rgba(251,191,36,.3)", cursor: uploading ? "wait" : "pointer", fontSize: 12, fontWeight: 600, color: "#fbbf24", fontFamily: "'DM Sans',sans-serif" }}>
+          {uploading ? "Subiendo..." : "Adjuntar factura del colaborador"}
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.docx" onChange={handleFile} style={{ display: "none" }} disabled={uploading}/>
+        </label>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 10, background: estado.pagado ? "rgba(16,185,129,.07)" : "rgba(251,191,36,.07)", border: `1.5px solid ${estado.pagado ? "rgba(16,185,129,.3)" : "rgba(251,191,36,.35)"}`, borderRadius: 8, padding: "14px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: estado.pagado ? "#10b981" : "#fbbf24" }}>
+          {estado.pagado ? "Pagado al colaborador" : "Pendiente de pago"}
+        </div>
+        {estado.pagado && (
+          <div style={{ fontSize: 11, color: "var(--text4)" }}>Pagado el {new Date(estado.fecha_pago_real).toLocaleDateString("es-ES")}</div>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+        {[
+          ["Importe colaborador", fmt2l(estado.importe) + " EUR", "#ef4444"],
+          ["Factura recibida", new Date(estado.fecha_recepcion).toLocaleDateString("es-ES"), "var(--text)"],
+          ["Fecha pago calculada", new Date(estado.fecha_pago_calculada).toLocaleDateString("es-ES"), estado.pagado ? "#10b981" : "#f59e0b"],
+        ].map(([l, v, c]) => (
+          <div key={l} style={{ background: "var(--bg3)", borderRadius: 7, padding: "8px 10px" }}>
+            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, fontSize: 13, color: c }}>{v}</div>
+            <div style={{ fontSize: 10, color: "var(--text5)", textTransform: "uppercase", letterSpacing: ".05em", marginTop: 2 }}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={verFactura} style={{ padding: "5px 12px", borderRadius: 6, border: "1px solid var(--border2)", background: "var(--bg3)", color: "var(--text3)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          {estado.factura_nombre?.length > 20 ? estado.factura_nombre.slice(0, 20) + "..." : estado.factura_nombre}
+        </button>
+        {!estado.pagado && (
+          <button onClick={marcarPagado} style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: "rgba(16,185,129,.15)", color: "#10b981", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+            Marcar como pagado
+          </button>
+        )}
+        {!estado.pagado && (
+          <label style={{ padding: "5px 12px", borderRadius: 6, border: "1px dashed var(--border2)", background: "transparent", color: "var(--text5)", fontSize: 11, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+            Cambiar factura
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={handleFile} style={{ display: "none" }}/>
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ DescargasEditor: gestiona multiples puntos de descarga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
+  const [adding, setAdding] = useState(false);
+  const [puntosInteres, setPuntosInteres] = useState(getPuntosInteres);
+  const [newStop, setNewStop] = useState({ direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", notas:"", google_maps_url:"" });
+  const [poiDraft, setPoiDraft] = useState(null);
+  const [dragIdx, setDragIdx] = useState(null);
+  const key = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
+  const mainLugar = tipo === "carga" ? form.origen : form.destino;
+  const mainFecha = tipo === "carga" ? form.fecha_carga : form.fecha_descarga;
+  const mainHora = tipo === "carga" ? form.hora_carga : form.hora_descarga;
+  const { primary: primaryStop, extras: paradas } = splitPrimaryAndAdditionalStops(form[key], mainLugar);
+  const effectivePrimary = primaryStop
+    ? {
+        ...primaryStop,
+        direccion: stopAddress(primaryStop) || mainLugar || "",
+        fecha: primaryStop.fecha || mainFecha || "",
+        hora: primaryStop.hora || mainHora || "",
+        tipo,
+        es_principal: true,
+        es_adicional: false,
+      }
+    : (mainLugar ? { direccion: mainLugar, fecha: mainFecha || "", hora: mainHora || "", tipo, es_principal: true, es_adicional: false } : null);
+  const stopsOrdenados = effectivePrimary ? [effectivePrimary, ...paradas] : paradas;
+  const puntosFiltrados = puntosInteres.filter(p => !p.tipo || p.tipo === tipo);
+  const puntosListId = `puntos-${tipo}-${pedidoId || "nuevo"}`;
+  const normalizarBusqueda = (v) => String(v || "").trim().toLowerCase();
+  const buscarPuntoExacto = (texto) => {
+    const q = normalizarBusqueda(texto);
+    if (!q) return null;
+    return puntosFiltrados.find(p =>
+      normalizarBusqueda(p.nombre) === q ||
+      normalizarBusqueda(p.direccion) === q ||
+      normalizarBusqueda(`${p.nombre || ""} - ${p.direccion || ""}`) === q
+    ) || null;
+  };
+  const aplicarPuntoGuardado = (punto) => {
+    if (!punto) return;
+    setNewStop(prev => ({
+      ...prev,
+      ...puntoToStop(punto),
+      cliente_nombre: punto.cliente_nombre || punto.nombre || prev.cliente_nombre || "",
+    }));
+  };
+
+  useEffect(() => {
+    if (tipo !== "descarga" || !pedidoId || parseStops(form.puntos_descarga).length) return;
+    getDescargas(pedidoId)
+      .then(d => {
+        if (!Array.isArray(d) || !d.length) return;
+        setForm(p => ({...p, puntos_descarga: d.map(x => ({
+          direccion: x.direccion || "",
+          cliente_nombre: x.cliente_nombre || "",
+          fecha: x.fecha_descarga || "",
+          hora: x.hora_descarga || "",
+          ventana: [x.ventana_inicio, x.ventana_fin].filter(Boolean).join("-"),
+          bultos: x.bultos || "",
+          peso_kg: x.peso_kg || "",
+          precio: x.precio || "",
+          notas: x.notas || "",
+        }))}));
+      })
+      .catch(() => {});
+  }, [form.puntos_descarga, pedidoId, setForm, tipo]);
+
+  useEffect(() => {
+    const refresh = () => setPuntosInteres(getPuntosInteres());
+    let alive = true;
+    syncPuntosInteresCache((next) => { if (alive) setPuntosInteres(next); });
+    window.addEventListener("tms:puntos-interes", refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener("tms:puntos-interes", refresh);
+    };
+  }, []);
+
+  function setStopsOrdenados(nextStops) {
+    setForm(p => {
+      const stopsToStore = nextStops
+        .filter(stop => stopAddress(stop) || stop?.cliente_nombre || stop?.google_maps_url)
+        .map((stop, idx) => ({
+          ...stop,
+          tipo,
+          es_principal: idx === 0,
+          es_adicional: idx !== 0,
+        }));
+      const first = stopsToStore[0] || {};
+      const updated = {...p, [key]: stopsToStore};
+      if (tipo === "carga") {
+        updated.origen = stopAddress(first) || "";
+        updated.fecha_carga = first.fecha || "";
+        updated.hora_carga = first.hora || "";
+      } else {
+        updated.destino = stopAddress(first) || "";
+        updated.fecha_descarga = first.fecha || "";
+        updated.hora_descarga = first.hora || "";
+      }
+      const totalCarga = tipo === "carga" ? sumStopWeights(stopsToStore) : sumStopWeights(updated.puntos_carga);
+      const totalDescarga = tipo === "descarga" ? sumStopWeights(stopsToStore) : sumStopWeights(updated.puntos_descarga);
+      const totalPeso = totalCarga || totalDescarga;
+      if (totalPeso > 0) {
+        updated.peso_kg = totalPeso;
+        if (!updated.colaborador_id && Number(updated.km_ruta || 0) > 0) updated.coste_gasoil = calcularCosteGasoil(updated);
+      }
+      return syncPrecioClienteCol(updated);
+    });
+  }
+  function addParada() {
+    if (!newStop.direccion.trim()) { notify("La direccion es obligatoria", "warning"); return; }
+    setStopsOrdenados([...stopsOrdenados, {...newStop, direccion:newStop.direccion.trim(), es_adicional:true, es_principal:false}]);
+    setNewStop({ direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", notas:"", google_maps_url:"" });
+    setAdding(false);
+  }
+  function removeStop(idx) {
+    if (stopsOrdenados.length <= 1) return;
+    setStopsOrdenados(stopsOrdenados.filter((_, i) => i !== idx));
+  }
+  function moveStop(idx, delta) {
+    const nextIdx = idx + delta;
+    if (nextIdx < 0 || nextIdx >= stopsOrdenados.length) return;
+    const next = [...stopsOrdenados];
+    [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+    setStopsOrdenados(next);
+  }
+  function dropStop(overIdx) {
+    if (disabled || dragIdx === null || dragIdx === overIdx) return;
+    const next = [...stopsOrdenados];
+    const [moved] = next.splice(dragIdx, 1);
+    next.splice(overIdx, 0, moved);
+    setStopsOrdenados(next);
+    setDragIdx(null);
+  }
+
+  const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:6,fontSize:12,outline:"none"};
+  const label = tipo === "carga" ? "carga" : "descarga";
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+        <span style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase"}}>{tipo === "carga" ? "Carga principal" : "Descarga principal"}</span>
+        <span style={{fontSize:11,color:"var(--text5)"}}>-&gt; {mainLugar||"Sin direccion"} - {mainFecha||"Sin fecha"}{mainHora?` - ${mainHora}`:""}</span>
+      </div>
+
+      {stopsOrdenados.length > 0 && (
+        <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+          {stopsOrdenados.map((d, i) => {
+            const isPrimary = i === 0;
+            const isDragging = dragIdx === i;
+            return (
+            <div
+              key={`${key}-${i}-${stopAddress(d) || d.cliente_nombre || "stop"}`}
+              draggable={!disabled && stopsOrdenados.length > 1}
+              onDragStart={e=>{ setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
+              onDragOver={e=>{ if (!disabled && dragIdx !== null) e.preventDefault(); }}
+              onDrop={e=>{ e.preventDefault(); dropStop(i); }}
+              onDragEnd={()=>setDragIdx(null)}
+              style={{
+                background:isPrimary ? "rgba(20,184,166,.08)" : "var(--bg4)",
+                border:`1px solid ${dragIdx !== null && dragIdx !== i ? "rgba(20,184,166,.38)" : "var(--border2)"}`,
+                borderRadius:8,
+                padding:"8px 12px",
+                display:"flex",
+                gap:10,
+                alignItems:"center",
+                opacity:isDragging ? .45 : 1,
+                cursor:!disabled && stopsOrdenados.length > 1 ? "grab" : "default",
+              }}
+            >
+              <span style={{fontFamily:"monospace",fontSize:11,fontWeight:700,color:isPrimary?"var(--green)":"var(--accent)",minWidth:20}}>{i+1}</span>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{stopAddress(d)}</span>
+                  <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:isPrimary?"var(--green)":"var(--text5)"}}>
+                    {isPrimary ? "Principal" : "Secundaria"}
+                  </span>
+                </div>
+                <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
+                  {d.cliente_nombre && <span style={{marginRight:8}}>{d.cliente_nombre}</span>}
+                  {d.fecha && <span style={{marginRight:8}}>{new Date(d.fecha).toLocaleDateString("es-ES")}</span>}
+                  {d.hora && <span style={{marginRight:8}}>{d.hora}</span>}
+                  {d.ventana && <span style={{marginRight:8}}>{d.ventana}</span>}
+                  {d.bultos && <span style={{marginRight:8}}>{d.bultos} bultos</span>}
+                  {Number(d.precio||0) > 0 && <span style={{color:"var(--green)",fontWeight:700}}>+{Number(d.precio).toFixed(2)} EUR</span>}
+                </div>
+              </div>
+              {!disabled && (
+                <div style={{display:"flex",gap:2,alignItems:"center"}}>
+                  <span title="Arrastra para reordenar" style={{color:"var(--text5)",fontSize:14,padding:"0 3px"}}>::</span>
+                  <button type="button" onClick={() => moveStop(i, -1)} disabled={i===0} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===0?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Subir</button>
+                  <button type="button" onClick={() => moveStop(i, 1)} disabled={i===stopsOrdenados.length-1} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===stopsOrdenados.length-1?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Bajar</button>
+                  <button type="button" onClick={() => removeStop(i)} disabled={stopsOrdenados.length<=1} style={{background:"none",border:"none",color:stopsOrdenados.length<=1?"var(--text5)":"var(--red)",cursor:stopsOrdenados.length<=1?"not-allowed":"pointer",fontSize:14,padding:"2px 6px"}}>x</button>
+                </div>
+              )}
+            </div>
+          )})}
+        </div>
+      )}
+
+      {!disabled && (adding ? (
+        <div style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:12,marginTop:6}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:6,marginBottom:6}}>
+            {puntosFiltrados.length > 0 && (
+              <select
+                style={{...inp,gridColumn:"1/-1"}}
+                value=""
+                onChange={e=>{
+                  const punto = puntosFiltrados.find(p=>p.id===e.target.value);
+                  aplicarPuntoGuardado(punto);
+                }}
+              >
+                <option value="">Usar punto de interes guardado</option>
+                {puntosFiltrados.map(p=><option key={p.id} value={p.id}>{p.nombre} - {p.direccion}</option>)}
+              </select>
+            )}
+            <datalist id={puntosListId}>
+              {puntosFiltrados.map(p=>(
+                <option key={p.id} value={`${p.nombre || ""}${p.direccion ? " - " + p.direccion : ""}`} />
+              ))}
+            </datalist>
+            <input
+              list={puntosListId}
+              style={{...inp,gridColumn:"1/-1"}}
+              placeholder={`Buscar punto o direccion de ${label} *`}
+              value={newStop.direccion}
+              onChange={e=>{
+                const val = e.target.value;
+                const punto = buscarPuntoExacto(val);
+                if (punto) aplicarPuntoGuardado(punto);
+                else setNewStop(p=>({...p,direccion:val}));
+              }}
+              onBlur={e=>aplicarPuntoGuardado(buscarPuntoExacto(e.target.value))}
+            />
+            <input style={{...inp,gridColumn:"1/-1"}} placeholder="Enlace Google Maps (opcional)" value={newStop.google_maps_url||""} onChange={e=>setNewStop(p=>({...p,google_maps_url:e.target.value}))}/>
+            <input
+              list={puntosListId}
+              style={inp}
+              placeholder={tipo==="carga"?"Cargador / remitente":"Cliente destinatario"}
+              value={newStop.cliente_nombre}
+              onChange={e=>{
+                const val = e.target.value;
+                const punto = buscarPuntoExacto(val);
+                if (punto) aplicarPuntoGuardado(punto);
+                else setNewStop(p=>({...p,cliente_nombre:val}));
+              }}
+              onBlur={e=>aplicarPuntoGuardado(buscarPuntoExacto(e.target.value))}
+            />
+            <input type="date" style={inp} value={newStop.fecha} onChange={e=>setNewStop(p=>({...p,fecha:e.target.value}))}/>
+            <input type="time" style={inp} value={newStop.hora} onChange={e=>setNewStop(p=>({...p,hora:e.target.value}))}/>
+            <input style={inp} placeholder="Ventana (ej: 08:00-14:00)" value={newStop.ventana} onChange={e=>setNewStop(p=>({...p,ventana:e.target.value}))}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
+            <input type="number" style={inp} placeholder="Bultos" value={newStop.bultos} onChange={e=>setNewStop(p=>({...p,bultos:e.target.value}))}/>
+            <input type="number" style={inp} placeholder="Peso kg" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))}/>
+            <input type="number" step="0.01" style={inp} placeholder={`Precio ${label} EUR`} value={newStop.precio} onChange={e=>setNewStop(p=>({...p,precio:e.target.value}))}/>
+            <input style={inp} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button type="button" onClick={addParada} style={{padding:"5px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Anadir {label}</button>
+            <button type="button" onClick={()=>{
+              setPoiDraft({...newStop, nombre:newStop.cliente_nombre || newStop.direccion, tipo});
+            }} disabled={!newStop.direccion.trim()} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:newStop.direccion.trim()?"var(--accent)":"var(--text5)",fontSize:12,cursor:newStop.direccion.trim()?"pointer":"not-allowed"}}>
+              {buscarPuntoExacto(newStop.cliente_nombre || newStop.direccion) ? "Actualizar punto" : "Crear punto"}
+            </button>
+            <button type="button" onClick={()=>setAdding(false)} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={()=>setAdding(true)} style={{padding:"5px 14px",borderRadius:6,border:"1px dashed var(--border2)",background:"transparent",color:"var(--text5)",fontSize:12,cursor:"pointer",marginTop:4}}>
+          + Anadir {label} adicional
+        </button>
+      ))}
+      {poiDraft && (
+        <PuntoInteresModal
+          initial={poiDraft}
+          onClose={()=>setPoiDraft(null)}
+          onSave={(next, saved)=>{
+            setPuntosInteres(next);
+            setNewStop(p=>({...p,...puntoToStop(saved)}));
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CargasEditor(props) { return <ParadasEditor {...props} tipo="carga" />; }
+function DescargasEditor(props) { return <ParadasEditor {...props} tipo="descarga" />; }
+
+function OrdenCargaModal({ pedido, onClose }) {
+  const esColaborador = !!pedido.colaborador_id;
+  const [rutaOptimizada, setRutaOptimizada] = useState(null);
+  const [rutaOptLoading, setRutaOptLoading] = useState(false);
+  const [docControl, setDocControl] = useState(null);
+  const [docControlLoading, setDocControlLoading] = useState(false);
+  const [firmaEvidencia, setFirmaEvidencia] = useState(null);
+  const [firmaEvidenciaLoading, setFirmaEvidenciaLoading] = useState(false);
+  const { user } = useAuth();
+  const esGerente = user?.rol === "gerente";
+  const empresa = useEmpresaPerfil();
+  const numOC = getOrdenCargaNumero(pedido, docControl);
+  const pagoColaboradorTonelada = getPagoColaboradorPorTonelada(pedido);
+  const pagoColaboradorTotalCerrado = getPagoColaboradorTotalCerrado(pedido);
+  const numOCDisplay = numOC || "Generando...";
+  const referenciaPedido = pedido.referencia_cliente || pedido.numero || numOC || "";
+  const cargaPrincipal = parseStops(pedido.puntos_carga)[0] || {};
+  const descargaPrincipal = parseStops(pedido.puntos_descarga)[0] || {};
+  const cargaDisplay = stopDisplayParts(cargaPrincipal, pedido.origen || "");
+  const descargaDisplay = stopDisplayParts(descargaPrincipal, pedido.destino || "");
+  const origenOrden = cargaDisplay.direccion || pedido.origen || "";
+  const destinoOrden = descargaDisplay.direccion || pedido.destino || "";
+  const origenNombreOrden = cargaDisplay.nombre;
+  const destinoNombreOrden = descargaDisplay.nombre;
+  const destinatarioOrden = destinoNombreOrden || descargaPrincipal.cliente_nombre || pedido.destino || "";
+  const condicionesPagoColaborador = formatPaymentTerms(empresa);
+  const condicionesPagoCliente = formatClientPaymentTerms(empresa);
+  const operativaCarga = buildOperativaCargaLabels(pedido);
+  const cargaMapsRows = buildStopMapsRows(pedido.puntos_carga, "Carga", pedido.origen);
+  const descargaMapsRows = buildStopMapsRows(pedido.puntos_descarga, "Descarga", pedido.destino);
+  const allMapsRows = [
+    ...(cargaMapsRows.length ? cargaMapsRows : (origenOrden ? [{ label:"Carga", nombre:origenNombreOrden, direccion:origenOrden, url:buildMapsSearchUrl(origenOrden) }] : [])),
+    ...(descargaMapsRows.length ? descargaMapsRows : (destinoOrden ? [{ label:"Descarga", nombre:destinoNombreOrden, direccion:destinoOrden, url:buildMapsSearchUrl(destinoOrden) }] : [])),
+  ];
+  const firmaPostIntegrity = firmaEvidencia?.post_signature_integrity || null;
+  const firmaPostChanges = Array.isArray(firmaPostIntegrity?.changes) ? firmaPostIntegrity.changes : [];
+  const firmaPostModificada = !!firmaPostIntegrity?.changed_after_signature;
+
+  useEffect(() => {
+    let alive = true;
+    if (!pedido?.id) return undefined;
+    setRutaOptLoading(true);
+    getRutaOptimizadaPedido(pedido.id)
+      .then(data => { if (alive) setRutaOptimizada(data || null); })
+      .catch(() => { if (alive) setRutaOptimizada(null); })
+      .finally(() => { if (alive) setRutaOptLoading(false); });
+    return () => { alive = false; };
+  }, [pedido?.id]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!pedido?.id || (!pedido.firma_fecha && !pedido.firma_hash)) {
+      setFirmaEvidencia(null);
+      return undefined;
+    }
+    setFirmaEvidenciaLoading(true);
+    getFirmaEntregaEvidencia(pedido.id)
+      .then(data => { if (alive) setFirmaEvidencia(data || null); })
+      .catch(() => { if (alive) setFirmaEvidencia(null); })
+      .finally(() => { if (alive) setFirmaEvidenciaLoading(false); });
+    return () => { alive = false; };
+  }, [pedido?.id, pedido?.firma_fecha, pedido?.firma_hash]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!pedido?.id) return undefined;
+    setDocControlLoading(true);
+    getPedidoDocumentoControl(pedido.id)
+      .then(data => { if (alive) setDocControl(data || null); })
+      .catch(() => { if (alive) setDocControl(null); })
+      .finally(() => { if (alive) setDocControlLoading(false); });
+    return () => { alive = false; };
+  }, [pedido?.id]);
+
+  function imprimir(tipo) {
+    const w = window.open("","_blank","width=820,height=1100");
+    const esCol = tipo==="colaborador";
+    const fmtDate = d => d ? new Date(d).toLocaleDateString("es-ES") : "-";
+    const fmtEur  = v => v ? Number(v).toLocaleString("es-ES",{minimumFractionDigits:2, maximumFractionDigits:2})+" EUR" : "-";
+    const fmtEur0 = v => Number(v || 0).toLocaleString("es-ES",{minimumFractionDigits:2, maximumFractionDigits:2})+" EUR";
+    const fmtNum = v => Number(v || 0).toLocaleString("es-ES", { maximumFractionDigits: 3 });
+    const empCol  = esCol ? "#6d28d9" : "#1d4ed8";
+    const empBg   = esCol ? "#ede9fe" : "#dbeafe";
+    const empresaDireccion = [empresa.domicilio, empresa.cp, empresa.municipio, empresa.provincia, empresa.pais].filter(Boolean).join(", ");
+    const logoHtml = getLogoDataUrl() ? `<img src="${getLogoDataUrl()}" style="max-height:52px;max-width:160px;object-fit:contain;margin-bottom:6px;display:block" alt="">` : "";
+    const emailAlbaranesColaborador = joinEmailList(
+      [pedido.cliente_emails_albaranes, pedido.emails_albaranes, pedido.cliente_email_facturacion, pedido.cliente_email],
+      "TRAFICO@TRANSPORTESASENSI.COM"
+    );
+    const bloqueEmailsAlbaranes = `
+<div class="sec">
+  <div class="sec-t">Envio de albaranes</div>
+  <div class="f"><div class="fl">Destinatarios de albaranes firmados</div><div class="fv">${htmlEscape(emailAlbaranesColaborador)}</div></div>
+</div>`;
+    const fallbackRoutePlaces = getRoutePlaces({ ...pedido, origen: origenOrden, destino: destinoOrden })
+      .filter((place, idx, arr) => arr.findIndex(x => routePlaceKey(x) === routePlaceKey(place)) === idx);
+    const optimizedStops = Array.isArray(rutaOptimizada?.stops) ? rutaOptimizada.stops.filter(s => s?.address || s?.name || s) : [];
+    const routeStops = optimizedStops.length
+      ? optimizedStops.map((s, idx) => ({
+          type: s.type || (idx === 0 ? "Carga" : idx === optimizedStops.length - 1 ? "Descarga" : "Parada intermedia"),
+          name: s.name || "",
+          address: s.address || s.name || String(s || ""),
+          google_maps_url: s.google_maps_url || s.maps_url || "",
+        }))
+      : fallbackRoutePlaces.map((place, idx) => ({
+          type: idx === 0 ? "Carga" : idx === fallbackRoutePlaces.length - 1 ? "Descarga" : "Parada intermedia",
+          name: place?.name || "",
+          address: place?.address || place?.direccion || place?.google_maps_url || String(place || ""),
+          google_maps_url: place?.google_maps_url || place?.googleMapsUrl || "",
+        }));
+    const routeUrl = rutaOptimizada?.maps_url || buildMapsRouteUrl(fallbackRoutePlaces);
+    const routeProvider = rutaOptimizada?.provider_label || "Enlace orientativo";
+    const routeKm = rutaOptimizada?.distance_km || pedido.km_ruta || pedido.km || "";
+    const routeDuration = rutaOptimizada?.duration_min
+      ? `${Math.floor(Number(rutaOptimizada.duration_min) / 60)}h${Number(rutaOptimizada.duration_min) % 60 ? ` ${Number(rutaOptimizada.duration_min) % 60}min` : ""}`
+      : "";
+    const importeClienteBase = parseLocaleNumber(pedido.importe, calcImporte(pedido));
+    const ivaOrden = calcIvaPedido(pedido, importeClienteBase);
+    const bloqueEconomicoCliente = !esCol && importeClienteBase > 0 ? `
+<div class="price-box">
+  <div class="price-head"><div class="price-title">Condiciones economicas</div><div class="price-pill">Cliente</div></div>
+  <div class="g3" style="margin-top:10px">
+    <div class="price-cell"><div class="fl">Precio viaje sin IVA</div><div class="fv">${fmtEur0(ivaOrden.base)}</div></div>
+    <div class="price-cell"><div class="fl">${ivaOrden.aplica ? `IVA ${ivaOrden.tipo_iva}%` : (ivaOrden.iva_regimen === "exento" ? "IVA exento" : "IVA 0%")}</div><div class="fv">${ivaOrden.aplica ? fmtEur0(ivaOrden.cuota) : "Sin IVA"}</div></div>
+    <div class="price-cell"><div class="fl">${ivaOrden.aplica ? "Total con IVA" : "Total sin IVA"}</div><div class="fv">${fmtEur0(ivaOrden.total)}</div></div>
+  </div>
+</div>` : "";
+    const bloqueEconomicoColaborador = esCol && (pagoColaboradorTonelada || pagoColaboradorTotalCerrado) ? `
+<div class="price-box">
+  <div class="price-head"><div class="price-title">Condiciones economicas</div><div class="price-pill">Colaborador</div></div>
+  <div class="g3" style="margin-top:10px">
+    ${pagoColaboradorTonelada ? `
+    <div class="price-cell"><div class="fl">Precio acordado por tonelada</div><div class="fv">${fmtEur(pagoColaboradorTonelada.precioTonelada)} / tn</div></div>
+    <div class="price-cell"><div class="fl">Minimo facturable acordado</div><div class="fv">${fmtNum(pagoColaboradorTonelada.minimoToneladas)} tn</div></div>
+    ` : `
+    <div class="price-cell"><div class="fl">Precio acordado</div><div class="fv">${fmtEur(pagoColaboradorTotalCerrado.total)}</div></div>
+    <div class="price-cell"><div class="fl">Tipo de acuerdo</div><div class="fv">Precio cerrado</div></div>
+    `}
+    <div class="price-cell"><div class="fl">Referencia de pedido</div><div class="fv">${htmlEscape(referenciaPedido || "-")}</div></div>
+  </div>
+  <div class="notice" style="margin-top:10px"><strong>Forma de pago:</strong> ${htmlEscape(condicionesPagoColaborador)}</div>
+  <div class="notice"><strong>PENDIENTE DE PAGO</strong> - Adjuntar factura del colaborador. Enviar albaranes firmados a: ${emailAlbaranesColaborador}</div>
+</div>` : "";
+    const dcdReady = !!docControl?.status?.ready;
+    const dcdSupportUrl = docControl?.documento?.soporte_url || "";
+    const dcdCode = docControl?.documento?.codigo_control || "";
+    const dcdSystem = docControl?.documento?.sistema === "qr_url" ? "QR / URL" : "Codigo numerico";
+    const dcdScore = Number(docControlReadiness.score || 0);
+    const bloqueOperativa = `
+<div class="cond">
+  <div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#166534;margin-bottom:6px">Instrucciones operativas</div>
+  <ol>
+    ${operativaCarga.map((item) => `<li><strong>${htmlEscape(item)}</strong>.</li>`).join("")}
+  </ol>
+</div>`;
+    const bloqueCombustible = `
+<div class="cond">
+  <div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#b45309;margin-bottom:6px">Clausula de revision del combustible</div>
+  <div>
+    El precio pactado solo se ajustara por variacion del combustible si el indice G de variacion del precio medio del gasoleo publicado por la Administracion entre la fecha de esta orden de carga y la fecha de carga efectiva de la mercancia es igual o superior al 5%.
+    <br><br>El ajuste debera reflejarse en la factura correspondiente al transporte ejecutado como concepto separado e identificado. No se admitiran ajustes en facturas rectificativas o posteriores emitidas fuera del ciclo de facturacion habitual de las partes.
+    <br><br>Si el porteador hubiera percibido ayudas publicas que compensen total o parcialmente la variacion del gasoleo, el indice G se calculara sobre el precio neto tras descontar dichas ayudas.
+    <br><br>El ajuste a la baja opera en las mismas condiciones cuando la variacion sea favorable al cargador.
+  </div>
+</div>`;
+    const bloquePagoCliente = `
+<div class="cond">
+  <div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#1d4ed8;margin-bottom:6px">Condiciones de pago del servicio</div>
+  <div><strong>Forma de pago:</strong> ${htmlEscape(condicionesPagoCliente)}</div>
+</div>`;
+    const mapsRowsHtml = allMapsRows.map((item) => `
+      <div class="map-stop">
+        <div class="fl">${htmlEscape(item.label)}</div>
+        <div class="fv">${htmlEscape(item.nombre || item.direccion || "-")}</div>
+        ${item.nombre && item.direccion ? `<div class="map-address">${htmlEscape(item.direccion)}</div>` : ""}
+        ${item.url ? `<a class="map-button" href="${htmlEscape(item.url)}">Abrir ${htmlEscape(item.label)} en Google Maps</a><div class="route-link" style="font-size:9.5px;margin-top:4px">${htmlEscape(item.url)}</div>` : ""}
+      </div>
+    `).join("");
+    const mapsBlock = mapsRowsHtml ? `
+<div class="sec">
+  <div class="sec-t">Ubicaciones Google Maps</div>
+  <div class="map-grid">${mapsRowsHtml}</div>
+</div>` : "";
+    const dcdBlock = docControl?.documento ? `
+<div class="sec">
+  <div class="sec-t">Documento de control digital</div>
+  <div class="${esCol ? "g2" : "g3"}">
+    <div class="f"><div class="fl">Sistema</div><div class="fv">${dcdSystem}</div></div>
+    <div class="f"><div class="fl">Codigo control</div><div class="fv">${htmlEscape(dcdCode || "Pendiente")}</div></div>
+    ${!esCol ? `<div class="f"><div class="fl">Estado</div><div class="fv">${dcdReady ? "Listo" : "Pendiente de completar"}</div></div>
+    <div class="f"><div class="fl">Preparacion digital</div><div class="fv">${dcdScore || "-"}${dcdScore ? "%" : ""}</div></div>` : ""}
+  </div>
+  ${dcdSupportUrl ? `<div class="route-box" style="margin-top:8px"><strong>Soporte digital:</strong><br><a class="route-link" href="${htmlEscape(dcdSupportUrl)}">${htmlEscape(dcdSupportUrl)}</a></div>` : ""}
+  ${!esCol && docControlFaltantes.length ? `<div class="notice"><strong>Revision pendiente:</strong> ${htmlEscape(docControlFaltantes.join(" | "))}</div>` : ""}
+  ${!esCol && docControlAvisos.length ? `<div class="cond"><strong>Avisos eCMR/eFTI:</strong> ${htmlEscape(docControlAvisos.join(" | "))}</div>` : ""}
+</div>` : "";
+    const routeTypeCounts = {};
+    const routeStopsWithLabels = routeStops.map((stop) => {
+      const baseType = String(stop.type || "Parada").replace(/\s+\d+$/g, "");
+      routeTypeCounts[baseType] = (routeTypeCounts[baseType] || 0) + 1;
+      const address = String(stop.address || "").trim();
+      const name = distinctPlaceName(stop.name || "", address);
+      return { ...stop, name, address, displayType: routeTypeCounts[baseType] > 1 ? `${baseType} ${routeTypeCounts[baseType]}` : baseType };
+    });
+    const routeStopsHtml = routeStopsWithLabels.map((stop) => `
+      <li>
+        <strong>${htmlEscape(stop.displayType)}</strong>
+        ${stop.name ? `<div>${htmlEscape(stop.name)}</div>` : ""}
+        <div>${htmlEscape(stop.address)}</div>
+        ${stop.google_maps_url ? `<a class="map-button" href="${htmlEscape(stop.google_maps_url)}">Abrir este punto en Google Maps</a>` : ""}
+      </li>
+    `).join("");
+    w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>OC ${pedido.numero}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;color:#111827;font-size:12px;line-height:1.45}
+.sheet{position:relative;max-width:780px;margin:0 auto;background:#fff;border:1px solid #dbe3ef;border-radius:18px;padding:28px 30px 24px;box-shadow:0 24px 70px rgba(15,23,42,.14);overflow:hidden}
+.sheet:before{content:"";position:absolute;inset:0 0 auto 0;height:8px;background:linear-gradient(90deg,${empCol},#16a34a,#f59e0b)}
+.sheet:after{content:"ORDEN";position:absolute;right:-18px;top:126px;font-size:82px;font-weight:900;letter-spacing:8px;color:#0f172a;opacity:.035;transform:rotate(-90deg);pointer-events:none}
+.hdr{position:relative;display:grid;grid-template-columns:1.25fr .75fr;gap:24px;align-items:start;padding:8px 0 18px;margin-bottom:18px;border-bottom:1px solid #e5e7eb}
+.brand-block{border-left:4px solid ${empCol};padding-left:14px}
+.emp-name{font-size:21px;font-weight:900;color:#111827;letter-spacing:-.02em}
+.emp-info{font-size:10.5px;color:#64748b;margin-top:4px;line-height:1.65}
+.doc-panel{text-align:right;background:linear-gradient(180deg,${empBg},#fff);border:1px solid ${empCol}33;border-radius:12px;padding:12px 14px}
+.doc-oc{font-size:23px;font-weight:950;color:${empCol};letter-spacing:-.02em;text-align:right}
+.doc-ref{font-size:11px;color:#475569;text-align:right;margin-top:2px}
+.badge{display:inline-block;padding:5px 12px;border-radius:6px;font-size:10px;font-weight:900;background:${empCol};color:#fff;text-transform:uppercase;margin-top:8px;letter-spacing:.05em}
+.sec{position:relative;margin-bottom:15px;break-inside:avoid}
+.sec-t{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:${empCol};padding-bottom:7px;margin-bottom:9px;border-bottom:1px solid #e5e7eb}
+.sec-t:before{content:"";width:8px;height:8px;border-radius:3px;background:${empCol};display:inline-block}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.f{background:#f8fafc;border:1px solid #e5e7eb;border-radius:9px;padding:9px 11px;min-height:54px}
+.fl{font-size:8.5px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;font-weight:900;margin-bottom:3px}
+.fv{font-size:13px;font-weight:800;color:#111827;word-break:break-word}
+.fv.big{font-size:16px;color:${empCol};letter-spacing:-.01em}
+.hl{background:linear-gradient(180deg,${empBg},#fff);border:1px solid ${empCol}33;border-radius:12px;padding:13px 15px;margin:0}
+.price-box{background:linear-gradient(135deg,#ecfdf5,#fff);border:1.5px solid #86efac;border-radius:14px;padding:14px 16px;margin:12px 0;break-inside:avoid}
+.price-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.price-title{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#166534}
+.price-pill{font-size:9px;font-weight:900;color:#166534;background:#dcfce7;border:1px solid #bbf7d0;border-radius:999px;padding:3px 8px;text-transform:uppercase}
+.price-cell{background:#fff;border:1px solid #bbf7d0;border-radius:10px;padding:10px 12px}
+.notice{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:8px 11px;font-size:11px;color:#92400e;margin-top:10px}
+.cond{background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:12px 16px;margin:12px 0;font-size:11px;break-inside:avoid}
+.cond ol{padding-left:18px;margin-top:7px;line-height:1.65}
+.cond li{margin-bottom:2px}
+.firma-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:26px;padding-top:14px;border-top:1px solid #e5e7eb;break-inside:avoid}
+.firma-box{border:1px solid #d1d5db;border-radius:11px;padding:34px 10px 10px;min-height:88px;background:#f8fafc;position:relative}
+.firma-box:before{content:"";position:absolute;left:12px;right:12px;top:28px;border-top:1.5px solid #111827}
+.firma-lbl{font-size:8.5px;font-weight:900;text-transform:uppercase;color:#64748b;letter-spacing:.06em}
+.firma-name{font-size:11px;color:#111827;font-weight:700;margin-top:4px}
+.route-sheet{page-break-before:always;margin-top:24px;padding-top:10px}
+.route-head{border-left:5px solid #0f766e;padding-left:14px;margin-bottom:18px}
+.route-head h2{font-size:24px;color:#0f172a;margin:0 0 4px}
+.route-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;margin:16px 0}
+.route-kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:11px}
+.route-list{padding-left:22px;margin:12px 0}
+.route-list li{margin-bottom:10px}
+.route-list div{font-size:13px;color:#111827;font-weight:800;margin-top:2px}
+.route-box{border:1px solid #dbeafe;background:#eff6ff;border-radius:12px;padding:12px 14px;margin-top:12px;font-size:11.5px;color:#1f2937}
+.route-warn{border-color:#fde68a;background:#fffbeb;color:#92400e}
+.route-link{color:#0f766e;word-break:break-all;font-weight:700}
+.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.map-stop{background:#eff6ff;border:1px solid #bfdbfe;border-radius:11px;padding:10px 12px;break-inside:avoid}
+.map-address{font-size:11px;color:#475569;margin-top:3px}
+.map-button{display:inline-block;margin-top:8px;background:#2563eb;color:#fff;text-decoration:none;border-radius:7px;padding:7px 10px;font-size:10.5px;font-weight:900}
+@media print{@page{margin:1.05cm;size:A4}body{background:#fff;padding:0}.sheet{max-width:none;border:none;border-radius:0;padding:0;box-shadow:none}.sheet:before,.sheet:after{display:none}}
+</style></head><body>
+<main class="sheet">
+<div class="hdr">
+<div class="brand-block">${logoHtml}<div class="emp-name">${empresa.razon_social||empresa.nombre||"-"}</div>
+    <div class="emp-info">${empresa.cif?"CIF: "+empresa.cif:""}${empresaDireccion?" | "+empresaDireccion:""}<br>${empresa.telefono?"Tel: "+empresa.telefono:""}${empresa.email?" | "+empresa.email:""}</div>
+  </div>
+  <div class="doc-panel">
+    <div class="doc-oc">ORDEN DE CARGA</div>
+    <div class="doc-ref">N. OC: <strong>${numOCDisplay}</strong></div>
+    <div class="doc-ref">Ref: ${pedido.numero}</div>
+    <div class="doc-ref">${new Date().toLocaleDateString("es-ES")}</div>
+    <div class="badge">${esCol?"COLABORADOR EXTERNO":"TRANSPORTE PROPIO"}</div>
+  </div>
+</div>
+  <div class="sec">
+    <div class="sec-t">Ruta y fechas</div>
+    <div class="g2" style="margin-bottom:8px">
+      <div class="f hl"><div class="fl">Origen -> Punto de carga</div><div class="fv big">${htmlEscape(origenNombreOrden || origenOrden || "-")}</div>${origenNombreOrden && origenOrden ? `<div class="map-address">${htmlEscape(origenOrden)}</div>` : ""}${pedido.ventana_carga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_carga}</div>`:""}${cargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(cargaPrincipal.google_maps_url)}">${htmlEscape(cargaPrincipal.google_maps_url)}</a></div>`:""}</div>
+      <div class="f hl"><div class="fl">Destino -> Punto de entrega</div><div class="fv big">${htmlEscape(destinoNombreOrden || destinoOrden || "-")}</div>${destinoNombreOrden && destinoOrden ? `<div class="map-address">${htmlEscape(destinoOrden)}</div>` : ""}${pedido.ventana_descarga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_descarga}</div>`:""}${descargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(descargaPrincipal.google_maps_url)}">${htmlEscape(descargaPrincipal.google_maps_url)}</a></div>`:""}</div>
+    </div>
+    <div class="g3">
+      <div class="f"><div class="fl">Fecha carga</div><div class="fv">${fmtDate(pedido.fecha_carga)}</div></div>
+      <div class="f"><div class="fl">Hora carga</div><div class="fv">${pedido.hora_carga||"-"}</div></div>
+      <div class="f"><div class="fl">Ventana carga</div><div class="fv">${pedido.ventana_carga||"-"}</div></div>
+    </div>
+    <div class="g3" style="margin-top:8px">
+      <div class="f"><div class="fl">Fecha descarga</div><div class="fv">${fmtDate(pedido.fecha_descarga||pedido.fecha_entrega)}</div></div>
+      <div class="f"><div class="fl">Hora descarga</div><div class="fv">${pedido.hora_descarga||"-"}</div></div>
+      <div class="f"><div class="fl">Ventana descarga</div><div class="fv">${pedido.ventana_descarga||"-"}</div></div>
+    </div>
+    <div class="g3" style="margin-top:8px">
+      <div class="f"><div class="fl">KM ruta</div><div class="fv">${pedido.km_ruta||pedido.km||"-"} km</div></div>
+      <div class="f"><div class="fl">Referencia cliente</div><div class="fv">${pedido.referencia_cliente||"-"}</div></div>
+      <div class="f"><div class="fl">Estado</div><div class="fv">${pedido.estado||"-"}</div></div>
+    </div>
+</div>
+${mapsBlock}
+${!esCol ? bloqueEmailsAlbaranes : ""}
+<div class="sec">
+  <div class="sec-t">Mercancia y referencias</div>
+  <div class="g2" style="margin-bottom:8px">
+    <div class="f"><div class="fl">Pedido</div><div class="fv">${pedido.numero||"-"}</div></div>
+    <div class="f"><div class="fl">Referencia cliente</div><div class="fv">${pedido.referencia_cliente||"-"}</div></div>
+  </div>
+  <div class="f" style="margin-bottom:8px"><div class="fl">Descripcion mercancia</div><div class="fv">${pedido.mercancia||pedido.descripcion_carga||"-"}</div></div>
+  <div class="g3">
+    <div class="f"><div class="fl">Peso (kg)</div><div class="fv">${pedido.peso_kg||pedido.kg||"-"}</div></div>
+    <div class="f"><div class="fl">Bultos/Palets</div><div class="fv">${pedido.bultos||"-"}</div></div>
+    <div class="f"><div class="fl">Volumen (m3)</div><div class="fv">${pedido.volumen||"-"}</div></div>
+  </div>
+</div>
+${esCol ? `
+<div class="sec">
+  <div class="sec-t">Colaborador / Transportista subcontratado</div>
+  <div class="hl">
+    <div class="g2">
+      <div><div class="fl">Empresa colaboradora</div><div class="fv" style="font-size:16px;color:${empCol};font-weight:900">${pedido.colaborador_nombre||"-"}</div></div>
+      <div><div class="fl">Tipo operacion</div><div class="fv">Subcontratacion de porte</div></div>
+    </div>
+    <div style="font-size:11px;color:#4b5563;margin-top:8px">
+      ${pedido.colaborador_cif?`CIF/NIF: ${pedido.colaborador_cif}`:""}${pedido.colaborador_telefono?` | Tel: ${pedido.colaborador_telefono}`:""}${pedido.colaborador_email?` | Email: ${pedido.colaborador_email}`:""}
+    </div>
+  </div>
+</div>
+<div class="sec">
+  <div class="sec-t">Conjunto confirmado</div>
+  <div class="g2">
+    <div class="f"><div class="fl">Vehiculo / Tractora</div><div class="fv">${pedido.matricula_colaborador||"Pendiente de confirmar"}</div></div>
+    <div class="f"><div class="fl">Remolque</div><div class="fv">${pedido.remolque_matricula_colaborador||"Pendiente de confirmar"}</div></div>
+  </div>
+</div>
+${bloqueEconomicoColaborador}
+<div class="cond">
+  <div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#b45309;margin-bottom:6px">Condiciones para el colaborador</div>
+  <ol>
+    <li><strong>Aceptacion:</strong> La presente orden constituye un contrato de transporte de mercancias por carretera. Se considerara aceptada y vinculante salvo que el porteador comunique su rechazo expreso en el plazo de una hora desde la recepcion de esta orden.</li>
+    <li><strong>Prohibicion de subcontratacion:</strong> Queda expresamente prohibida la subcontratacion total o parcial del servicio sin autorizacion escrita previa del cargador. En caso de incumplimiento, el cargador quedara facultado para resolver el contrato, rechazar la factura emitida y no abonar cantidad alguna por el servicio, sin perjuicio de reclamar los danos y perjuicios causados. Cuando la subcontratacion hubiera sido autorizada por escrito, el cargador podra condicionar el pago de la factura del porteador a la acreditacion documental del pago efectivo al subcontratista por los servicios objeto de autorizacion.</li>
+    <li><strong>Estacionamiento y pernocta:</strong> Solo podra estacionarse o pernoctar en instalaciones cerradas con vigilancia presencial las 24 horas. Queda prohibido el estacionamiento en areas de servicio, explanadas o vias publicas sin estas caracteristicas. El incumplimiento trasladara al porteador la responsabilidad por cualquier dano, robo o perdida producidos durante el estacionamiento no autorizado.</li>
+    <li><strong>Cancelacion de la orden:</strong> El cargador podra cancelar la presente orden de transporte sin coste ni penalizacion alguna dentro de las doce horas siguientes a su emision, mediante comunicacion escrita dirigida al porteador por cualquier medio que deje constancia de su recepcion.</li>
+    <li><strong>Ley aplicable y jurisdiccion:</strong> Queda expresamente excluida la sumision a las Juntas Arbitrales del Transporte. Cualquier controversia derivada de la presente orden sera resuelta exclusivamente ante la jurisdiccion ordinaria.</li>
+    <li><strong>Retencion:</strong> Queda prohibida la retencion de la mercancia salvo en los casos expresamente autorizados por la ley.</li>
+    <li><strong>Puntualidad:</strong> La puntualidad en carga y descarga es esencial. Los retrasos no justificados pueden generar penalizaciones.</li>
+    <li><strong>Contacto con clientes:</strong> Queda expresamente prohibido el contacto directo con los clientes de la empresa contratante.</li>
+    <li><strong>Documentacion:</strong> No se pagara la factura hasta recibir todos los documentos de transporte originales firmados por el destinatario (CMR o carta de porte y albaran) en maximo 48h.</li>
+    <li><strong>Mercancia:</strong> El colaborador es responsable de la mercancia desde la carga hasta la entrega.</li>
+    <li><strong>Facturacion:</strong> Las facturas deben emitirse a: <strong>${empresa.razon_social||empresa.nombre||"-"} | CIF: ${empresa.cif||"-"}</strong>.</li>
+  </ol>
+</div>` : `
+<div class="sec">
+  <div class="sec-t">Asignacion de transporte propio</div>
+  <div class="g3">
+    <div class="f hl"><div class="fl">Vehiculo / Tractora</div><div class="fv big">${pedido.vehiculo_matricula||pedido.matricula||"Sin asignar"}</div></div>
+    <div class="f hl"><div class="fl">Remolque</div><div class="fv">${pedido.remolque_matricula||pedido.remolque_mat||"Sin remolque"}</div></div>
+    <div class="f hl"><div class="fl">Chofer principal</div><div class="fv big">${pedido.chofer_nombre||"Sin asignar"}</div></div>
+  </div>
+  ${pedido.chofer2_nombre?`<div class="f" style="margin-top:8px"><div class="fl">2o Chofer</div><div class="fv">${pedido.chofer2_nombre}</div></div>`:""}
+</div>`}
+${bloqueEconomicoCliente}
+${pedido.notas||pedido.condiciones_adicionales?`
+<div class="sec">
+  <div class="sec-t">Instrucciones</div>
+  ${pedido.notas?`<div class="f" style="margin-bottom:6px"><div class="fl">Instrucciones especiales</div><div style="white-space:pre-wrap;line-height:1.6">${pedido.notas}</div></div>`:""}
+  ${pedido.condiciones_adicionales?`<div class="f"><div class="fl">Condiciones adicionales</div><div style="white-space:pre-wrap;line-height:1.6">${pedido.condiciones_adicionales}</div></div>`:""}
+</div>`:""}
+${dcdBlock}
+${!esCol ? bloquePagoCliente : ""}
+${bloqueOperativa}
+${bloqueCombustible}
+<div class="firma-row">
+  ${esCol?`<div class="firma-box"><div class="firma-lbl">Colaborador</div><div class="firma-name">${pedido.colaborador_nombre||""}</div></div>`:`<div class="firma-box"><div class="firma-lbl">Chofer</div><div class="firma-name">${pedido.chofer_nombre||""}</div></div>`}
+  <div class="firma-box"><div class="firma-lbl">Expedidor (empresa)</div><div class="firma-name">${empresa.razon_social||empresa.nombre||""}</div></div>
+  <div class="firma-box"><div class="firma-lbl">Destinatario</div><div class="firma-name">${destinatarioOrden}</div></div>
+</div>
+${esCol ? `
+<section class="route-sheet">
+  <div class="route-head">
+    <h2>Ruta recomendada para camion</h2>
+    <div class="muted">Hoja adjunta a la orden de carga ${numOCDisplay}</div>
+  </div>
+  <div class="route-kpis">
+    <div class="route-kpi"><div class="fl">Pedido</div><div class="fv">${pedido.numero||"---"}</div></div>
+    <div class="route-kpi"><div class="fl">Proveedor</div><div class="fv">${htmlEscape(routeProvider)}</div></div>
+    <div class="route-kpi"><div class="fl">Kilometros previstos</div><div class="fv">${routeKm||"Pendiente"}${routeKm?" km":""}</div></div>
+    <div class="route-kpi"><div class="fl">Tiempo estimado</div><div class="fv">${routeDuration||"Pendiente"}</div></div>
+    <div class="route-kpi"><div class="fl">Peso</div><div class="fv">${pedido.peso_kg||pedido.kg||"Sin dato"}${pedido.peso_kg||pedido.kg?" kg":""}</div></div>
+  </div>
+  <div class="sec-t">Paradas de la ruta</div>
+  <ol class="route-list">${routeStopsHtml || "<li>Sin direcciones suficientes</li>"}</ol>
+  <div class="route-box">
+    <strong>Enlace de navegacion:</strong><br>
+    ${routeUrl ? `<a class="route-link" href="${htmlEscape(routeUrl)}">${htmlEscape(routeUrl)}</a>` : "No disponible"}
+  </div>
+  <div class="route-box route-warn">
+    <strong>Control obligatorio para camion:</strong><br>
+    Revisar galibo, MMA, restricciones locales, ADR si aplica, peajes, accesos a muelle, horarios de carga/descarga y zonas de espera. Esta ruta es orientativa y debe validarse con navegacion apta para camion cuando este disponible.
+  </div>
+</section>` : ""}
+</main>
+</body></html>`);
+    w.document.close(); w.focus(); setTimeout(()=>w.print(),350);
+  }
+
+  const S2 = {
+    modal:{position:"fixed",inset:0,background:"radial-gradient(circle at 50% 0%, rgba(59,130,246,.22), transparent 34%), rgba(2,6,23,.82)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16},
+    box:{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:0,width:"min(720px,96vw)",maxHeight:"92vh",overflowY:"auto",boxShadow:"0 28px 80px rgba(0,0,0,.38)"},
+    body:{padding:22},
+    kv:{background:"linear-gradient(180deg,var(--bg4),var(--bg3))",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",minHeight:62},
+    lbl:{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",marginBottom:4},
+    val:{fontWeight:700,color:"var(--text)",fontSize:13},
+  };
+
+  const docControlChecks = Array.isArray(docControl?.status?.checks) ? docControl.status.checks : [];
+  const docControlFaltantes = Array.isArray(docControl?.status?.faltantes) ? docControl.status.faltantes : [];
+  const docControlAvisos = Array.isArray(docControl?.status?.avisos) ? docControl.status.avisos : [];
+  const docControlReadiness = docControl?.status?.readiness || {};
+  const docControlExpediente = docControl?.expediente || null;
+  const expedienteAcciones = Array.isArray(docControlExpediente?.acciones) ? docControlExpediente.acciones : [];
+  const expedienteBloqueos = Array.isArray(docControlExpediente?.bloqueos) ? docControlExpediente.bloqueos : [];
+  const expedienteDocs = docControlExpediente?.documentos?.counts || {};
+  const expedienteTrazas = docControlExpediente?.trazabilidad || {};
+  const docControlSupportUrl = docControl?.documento?.soporte_url || "";
+  const registrarDcdEvento = useCallback((action) => {
+    if (!pedido?.id || !docControl?.documento) return;
+    registrarPedidoDocumentoControlEvento(pedido.id, { action, source:"pedidos_orden_carga" }).catch(() => {});
+  }, [pedido?.id, docControl?.documento]);
+
+  function abrirSoporteDocControl(printMode = false) {
+    if (!docControlSupportUrl) return;
+    const url = printMode
+      ? `${docControlSupportUrl}${docControlSupportUrl.includes("?") ? "&" : "?"}print=1`
+      : docControlSupportUrl;
+    registrarDcdEvento(printMode ? "impreso" : "abierto");
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function descargarSoporteDocControl() {
+    const url = docControl?.remision?.download_url || (docControlSupportUrl ? `${docControlSupportUrl}${docControlSupportUrl.includes("?") ? "&" : "?"}download=1` : "");
+    if (!url) return;
+    registrarDcdEvento("descargado");
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  async function descargarExportDocControl() {
+    if (!pedido?.id) return;
+    try {
+      const data = await getPedidoDocumentoControlExport(pedido.id);
+      const filename = data?.audit?.export_filename || `deca-efti-ecmr-${pedido.numero || pedido.id}.json`;
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify("Exportacion JSON eFTI/eCMR descargada.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo descargar la exportacion eFTI/eCMR.", "error");
+    }
+  }
+
+  async function descargarFirmaPaqueteDocControl() {
+    if (!pedido?.id) return;
+    try {
+      const data = await getPedidoDocumentoControlFirmaPaquete(pedido.id);
+      const filename = data?.document?.signature_package_filename || `deca-firma-eidas-${pedido.numero || pedido.id}.json`;
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify("Paquete de firma eIDAS descargado.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo descargar el paquete de firma eIDAS.", "error");
+    }
+  }
+
+  async function descargarInformeFirmaEvidencia() {
+    if (!pedido?.id) return;
+    try {
+      const { blob, filename } = await descargarFirmaEntregaEvidenciaInforme(pedido.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || `evidencia-firma-${pedido.numero || pedido.id}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify("Informe de evidencia de firma descargado.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo descargar el informe de evidencia de firma.", "error");
+    }
+  }
+
+  async function copiarEnlaceDocControl() {
+    if (!docControlSupportUrl) return;
+    try {
+      await navigator.clipboard.writeText(docControlSupportUrl);
+      registrarDcdEvento("copiado");
+      notify("Enlace del documento digital copiado");
+    } catch {
+      notify("No se pudo copiar el enlace", "error");
+    }
+  }
+
+  async function marcarRemisionDocControl() {
+    if (!pedido?.id || !docControl?.documento) return;
+    const ready = !!docControl?.status?.ready;
+    const faltantes = docControlFaltantes.length ? `\n\nFaltantes:\n- ${docControlFaltantes.join("\n- ")}` : "";
+    const firmaCambios = firmaPostChanges.length ? firmaPostChanges.map(c => c.label || c.field).join(", ") : "";
+    const firmaAviso = firmaPostModificada
+      ? `\n\nAviso firma: hay cambios posteriores a la firma${firmaCambios ? ` (${firmaCambios})` : ""}. Solo gerencia puede confirmar la remision formal en este estado.`
+      : "";
+    const ok = await confirmDialog({
+      title: "Marcar DCD remitido",
+      message: ready
+        ? `Se registrara en el historial del pedido que el documento de control digital ha sido remitido o puesto a disposicion por el canal indicado. Continuar?${firmaAviso}`
+        : `El Documento de Control Digital aun no esta listo. Preparacion actual: ${Number(docControlReadiness.score || 0)}%.\n\nSolo gerencia puede confirmar una remision incompleta y quedara trazado en el historial.${faltantes}${firmaAviso}`,
+      confirmText: ready && !firmaPostModificada ? "Marcar remitido" : "Confirmar con gerencia",
+      cancelText: "Cancelar",
+      tone: ready && !firmaPostModificada ? "default" : "warning",
+    });
+    if (!ok) return;
+    if (firmaPostModificada && !esGerente) {
+      notify("La remision formal con firma modificada tras la firma requiere confirmacion de gerencia.", "warning");
+      return;
+    }
+    if (!ready && !esGerente) {
+      notify("La remision incompleta del DCD requiere confirmacion de gerencia.", "warning");
+      return;
+    }
+    try {
+      await registrarPedidoDocumentoControlEvento(pedido.id, {
+        action:"remitido",
+        source:"pedidos_orden_carga",
+        confirmar_remision_incompleta: !ready && esGerente,
+        confirmar_firma_modificada: firmaPostModificada && esGerente,
+      });
+      notify(ready ? "Documento de control marcado como remitido." : "Documento de control remitido con confirmacion de gerencia.", "success");
+    } catch (e) {
+      if (e.status === 409 && e.data?.requiere_confirmacion) {
+        const cambiosFirma = Array.isArray(e.data.changes) && e.data.changes.length
+          ? ` Cambios firma: ${e.data.changes.map(c => c.label || c.field).join(" | ")}`
+          : "";
+        const detalles = Array.isArray(e.data.faltantes) && e.data.faltantes.length
+          ? ` Faltan: ${e.data.faltantes.join(" | ")}`
+          : "";
+        notify(`${e.data.error || "El DCD requiere confirmacion antes de remitir."}${cambiosFirma}${detalles}`, "warning");
+      } else {
+        notify(e.message || "No se pudo registrar la remision del DCD.", "error");
+      }
+    }
+  }
+
+  return (
+    <div style={S2.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={S2.box}>
+        <div style={{height:7,background:esColaborador?"linear-gradient(90deg,#7c3aed,#10b981,#f59e0b)":"linear-gradient(90deg,var(--accent),#10b981,#f59e0b)"}}/>
+        <div style={S2.body}>
+        {/* Header */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,marginBottom:16,padding:"14px 16px",background:"linear-gradient(180deg,var(--bg3),transparent)",border:"1px solid var(--border)",borderRadius:12}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--text)"}}>Orden de carga - {pedido.numero}</div>
+            <div style={{display:"flex",gap:8,marginTop:4,alignItems:"center"}}>
+              <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:"var(--orange)",background:"rgba(249,115,22,.1)",border:"1px solid rgba(249,115,22,.25)",borderRadius:5,padding:"2px 8px"}}>
+                N. OC: {numOCDisplay}
+              </span>
+              <span style={{fontSize:11,color:"var(--text5)"}}>Este numero se indica en la factura al cliente</span>
+            </div>
+            <div style={{marginTop:5,display:"inline-flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:20,
+              background:esColaborador?"rgba(139,92,246,.15)":"rgba(59,130,246,.12)",
+              border:`1px solid ${esColaborador?"rgba(139,92,246,.3)":"rgba(59,130,246,.3)"}`,
+              fontSize:11,fontWeight:700,color:esColaborador?"#a78bfa":"var(--accent)"}}>
+              {esColaborador?"COLABORADOR EXTERNO":"TRANSPORTE PROPIO"}
+            </div>
+            {esColaborador && (
+              <div style={{marginTop:8,fontSize:11,color:rutaOptimizada?"#10b981":"var(--text5)",fontWeight:700}}>
+                {rutaOptLoading
+                  ? "Comprobando ruta optimizada..."
+                  : rutaOptimizada
+                    ? `Se adjuntara ruta optimizada: ${rutaOptimizada.provider_label || rutaOptimizada.provider || "API"}${rutaOptimizada.distance_km ? ` | ${rutaOptimizada.distance_km} km` : ""}`
+                    : "Se adjuntara ruta orientativa. Para incluir HERE, calcula la ruta en Gestion de Trafico > Optimizacion."}
+              </div>
+            )}
+            <div style={{marginTop:10,fontSize:11,fontWeight:700,color:docControl?.status?.ready?"#10b981":docControl?.status?.level==="warning"?"#f59e0b":"var(--text5)"}}>
+              {docControlLoading
+                ? "Comprobando documento de control digital..."
+                : docControl?.status?.summary || "Documento de control digital no disponible todavia."}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>imprimir(esColaborador?"colaborador":"chofer")}
+              style={{padding:"6px 14px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:5}}>
+              {esColaborador?"Imprimir orden":"Imprimir"}
+            </button>
+            <button onClick={onClose} style={{background:"none",border:"1px solid var(--border2)",color:"var(--text4)",borderRadius:7,padding:"6px 10px",cursor:"pointer",fontSize:13}}>Cerrar</button>
+          </div>
+        </div>
+
+        <div style={{marginBottom:14,padding:"12px 14px",borderRadius:12,background:"linear-gradient(180deg,var(--bg3),transparent)",border:"1px solid var(--border)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:10,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"var(--text)"}}>Documento de Control Digital</div>
+              <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
+                Base preparada segun la normativa del documento de control electronico: codigo numerico o QR con URL HTTPS.
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {docControlSupportUrl && (
+                <button
+                  onClick={()=>abrirSoporteDocControl(false)}
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.10)",color:"#10b981",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  Abrir soporte DCD
+                </button>
+              )}
+              {docControlSupportUrl && (
+                <button
+                  onClick={()=>abrirSoporteDocControl(true)}
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.10)",color:"var(--accent)",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  Imprimir soporte
+                </button>
+              )}
+              {docControlSupportUrl && (
+                <button
+                  onClick={copiarEnlaceDocControl}
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg4)",color:"var(--text3)",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  Copiar enlace
+                </button>
+              )}
+              {docControlSupportUrl && (
+                <button
+                  onClick={descargarSoporteDocControl}
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(139,92,246,.28)",background:"rgba(139,92,246,.10)",color:"#a78bfa",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  Descargar soporte
+                </button>
+              )}
+              {docControl?.documento && (
+                <button
+                  onClick={descargarExportDocControl}
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.10)",color:"#2dd4bf",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  Export JSON eFTI/eCMR
+                </button>
+              )}
+              {docControl?.documento && (
+                <button
+                  onClick={descargarFirmaPaqueteDocControl}
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(124,58,237,.28)",background:"rgba(124,58,237,.10)",color:"#8b5cf6",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  Paquete firma eIDAS
+                </button>
+              )}
+              {(pedido.firma_fecha || pedido.firma_hash) && (
+                <button
+                  onClick={descargarInformeFirmaEvidencia}
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.10)",color:"#10b981",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  Informe evidencia firma
+                </button>
+              )}
+              {docControl?.documento && (
+                <button
+                  onClick={marcarRemisionDocControl}
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(245,158,11,.30)",background:"rgba(245,158,11,.10)",color:"#f59e0b",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  Marcar remitido
+                </button>
+              )}
+            </div>
+          </div>
+          {docControl && (
+            <>
+              {(firmaPostModificada || firmaEvidenciaLoading) && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:firmaPostModificada?"rgba(245,158,11,.10)":"rgba(59,130,246,.08)",border:`1px solid ${firmaPostModificada?"rgba(245,158,11,.28)":"rgba(59,130,246,.20)"}`,fontSize:12,color:firmaPostModificada?"#f59e0b":"var(--accent)"}}>
+                  {firmaEvidenciaLoading
+                    ? "Comprobando integridad de la firma..."
+                    : `Aviso firma: se han modificado datos sensibles despues de firmar (${firmaPostChanges.map(change => change.field).join(", ")}). Descarga el informe de evidencia antes de remitir o auditar.`}
+                </div>
+              )}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:10}}>
+                <div style={S2.kv}><div style={S2.lbl}>Sistema</div><div style={S2.val}>{docControl.documento?.sistema === "qr_url" ? "QR / URL" : "Codigo numerico"}</div></div>
+                <div style={S2.kv}><div style={S2.lbl}>Codigo control</div><div style={{...S2.val,fontFamily:"'JetBrains Mono',monospace"}}>{docControl.documento?.codigo_control || "Pendiente"}</div></div>
+                <div style={S2.kv}><div style={S2.lbl}>Estado</div><div style={{...S2.val,color:docControl.status?.ready?"#10b981":docControl.status?.level==="warning"?"#f59e0b":"var(--text)"}}>{docControl.status?.ready ? "Listo" : "Pendiente de completar"}</div></div>
+                <div style={S2.kv}><div style={S2.lbl}>Preparacion digital</div><div style={{...S2.val,color:Number(docControlReadiness.score || 0) >= 85 ? "#10b981" : "#f59e0b"}}>{Number(docControlReadiness.score || 0)}%</div></div>
+                <div style={S2.kv}><div style={S2.lbl}>Archivo soporte</div><div style={{...S2.val,fontSize:12}}>{docControl.remision?.filename || "Pendiente"}</div></div>
+              </div>
+              {docControl.repositorio && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.24)",fontSize:12,color:"var(--text3)",display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
+                  <div>
+                    <div style={{fontWeight:900,color:"#10b981",marginBottom:3}}>DCD archivado en repositorio</div>
+                    <div style={{color:"var(--text4)"}}>
+                      Estado: {docControl.repositorio.estado || "archivado"} | Activo operativo: {docControl.repositorio.activo ? "si" : "no"} | Hash: {(docControl.repositorio.payload_hash_sha256 || "").slice(0, 12) || "-"}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {docControl.repositorio.download_url && (
+                      <button type="button" onClick={()=>window.open(docControl.repositorio.download_url, "_blank", "noopener,noreferrer")}
+                        style={{padding:"6px 10px",borderRadius:7,border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.10)",color:"#10b981",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+                        Descargar archivado
+                      </button>
+                    )}
+                    {docControl.repositorio.export_url && (
+                      <button type="button" onClick={()=>window.open(docControl.repositorio.export_url, "_blank", "noopener,noreferrer")}
+                        style={{padding:"6px 10px",borderRadius:7,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.10)",color:"#2dd4bf",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+                        Export archivado
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {docControlExpediente && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(20,184,166,.07)",border:"1px solid rgba(20,184,166,.20)",fontSize:12,color:"var(--text3)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap",marginBottom:8}}>
+                    <div>
+                      <div style={{fontWeight:900,color:"var(--text)",marginBottom:3}}>Expediente DCD/eCMR</div>
+                      <div style={{color:"var(--text4)"}}>
+                        Estado: {docControlExpediente.estado || "-"} | eCMR: {docControlExpediente.ecmr?.status || "-"} | eFTI: {docControlExpediente.efti?.platform_certified_connected ? "certificado" : "preparado, sin plataforma certificada"}
+                      </div>
+                    </div>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:Number(docControlExpediente.score || 0) >= 85 ? "#10b981" : "#f59e0b"}}>
+                      {Number(docControlExpediente.score || 0)}%
+                    </div>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:8}}>
+                    <div><strong>Docs:</strong> {Number(expedienteDocs.total || 0)}</div>
+                    <div><strong>Albaran/POD/CMR:</strong> {Number(expedienteDocs.albaran || 0) + Number(expedienteDocs.pod || 0) + Number(expedienteDocs.cmr || 0)}</div>
+                    <div><strong>Remisiones:</strong> {Number(expedienteTrazas.remitido || 0)}</div>
+                    <div><strong>Descargas:</strong> {Number(expedienteTrazas.descargado || 0)}</div>
+                  </div>
+                  {expedienteBloqueos.length > 0 && (
+                    <div style={{marginBottom:6,color:"#f59e0b",fontWeight:800}}>
+                      Bloqueos: {expedienteBloqueos.join(" | ")}
+                    </div>
+                  )}
+                  {expedienteAcciones.length > 0 && (
+                    <div style={{color:"var(--text4)"}}>
+                      Siguiente accion: {expedienteAcciones[0]}
+                    </div>
+                  )}
+                </div>
+              )}
+              {docControlFaltantes.length > 0 && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.22)",fontSize:12,color:"#f59e0b"}}>
+                  Faltan datos para cumplir bien el documento digital: {docControlFaltantes.join(" | ")}
+                </div>
+              )}
+              {docControlAvisos.length > 0 && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.20)",fontSize:12,color:"var(--accent)"}}>
+                  Avisos de preparacion eCMR/eFTI: {docControlAvisos.join(" | ")}
+                </div>
+              )}
+              {docControl?.remision && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)",fontSize:12,color:"var(--text3)"}}>
+                  <div style={{fontWeight:800,color:"var(--text)",marginBottom:4}}>Canal de remision</div>
+                  <div style={{marginBottom:4}}>{docControl.remision.etiqueta}</div>
+                  <div style={{color:"var(--text4)"}}>{docControl.remision.instrucciones}</div>
+                </div>
+              )}
+              {docControl?.documento?.condiciones && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(16,185,129,.07)",border:"1px solid rgba(16,185,129,.18)",fontSize:12,color:"var(--text3)"}}>
+                  <div style={{fontWeight:800,color:"var(--text)",marginBottom:4}}>Condiciones documentadas</div>
+                  <div><strong>Pago:</strong> {docControl.documento.condiciones.forma_pago || "-"}</div>
+                  {!!docControl.documento.condiciones.operativa_carga?.length && (
+                    <div><strong>Operativa:</strong> {docControl.documento.condiciones.operativa_carga.join(" | ")}</div>
+                  )}
+                  <div style={{color:"var(--text4)",marginTop:4}}>{docControl.documento.condiciones.revision_combustible}</div>
+                </div>
+              )}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
+                {docControlChecks.map(check => (
+                  <div key={check.key} style={{padding:"8px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg4)",fontSize:11,color:check.ok?"#10b981":check.required === false ? "var(--accent)" : "var(--text4)",fontWeight:700}}>
+                    {check.ok ? "OK" : check.required === false ? "Aviso" : "Pendiente"} | {check.label}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Datos del viaje */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+          {[["Origen",origenOrden],["Destino",destinoOrden],
+              ["Fecha carga",pedido.fecha_carga?new Date(pedido.fecha_carga).toLocaleDateString("es-ES"):"-"],
+              ["Hora carga",pedido.hora_carga||"-"],
+              ["Ventana carga",pedido.ventana_carga||"-"],
+              ["Fecha descarga",pedido.fecha_descarga?new Date(pedido.fecha_descarga).toLocaleDateString("es-ES"):(pedido.fecha_entrega?new Date(pedido.fecha_entrega).toLocaleDateString("es-ES"):"-")],
+              ["Hora descarga",pedido.hora_descarga||"-"],
+              ["Ventana descarga",pedido.ventana_descarga||"-"],
+              ["Estado",pedido.estado],
+              ["Peso (kg)",pedido.peso_kg||pedido.kg||"-"],["Bultos",pedido.bultos||"-"],
+            esColaborador?["Colaborador",pedido.colaborador_nombre]:["Vehiculo",pedido.vehiculo_matricula||pedido.matricula||"-"],
+            esColaborador?["Vehiculo colaborador",pedido.matricula_colaborador||"(pendiente del colaborador)"]:["Chofer",pedido.chofer_nombre||"-"],
+            ...(esColaborador?[["Remolque colaborador",pedido.remolque_matricula_colaborador||"-"]]:[]),
+            ...(pedido.chofer2_nombre?[["2o Chofer",pedido.chofer2_nombre]]:[] ),
+          ].map(([l,v])=>(
+            <div key={l} style={S2.kv}>
+              <div style={S2.lbl}>{l}</div>
+              <div style={S2.val}>{v||"-"}</div>
+            </div>
+          ))}
+          {(pedido.notas||pedido.descripcion_carga)&&(
+            <div style={{...S2.kv,gridColumn:"1/-1"}}>
+              <div style={S2.lbl}>Mercancia / Instrucciones</div>
+              <div style={S2.val}>{pedido.mercancia||pedido.descripcion_carga||pedido.notas||"-"}</div>
+            </div>
+          )}
+          {allMapsRows.length > 0 && (
+            <div style={{...S2.kv,gridColumn:"1/-1"}}>
+              <div style={S2.lbl}>Google Maps para colaborador</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
+                {allMapsRows.map((item, idx)=>(
+                  <div key={`${item.label}-${idx}`} style={{border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg4)"}}>
+                    <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>{item.label}</div>
+                    <div style={{...S2.val,fontSize:12,marginTop:3}}>{item.nombre || item.direccion || "-"}</div>
+                    {item.nombre && item.direccion && <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{item.direccion}</div>}
+                    {item.url && (
+                      <a href={item.url} target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:7,padding:"6px 10px",borderRadius:7,background:"rgba(59,130,246,.12)",border:"1px solid rgba(59,130,246,.24)",color:"var(--accent)",fontSize:11,fontWeight:800,textDecoration:"none"}}>
+                        Abrir en Google Maps
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{...S2.kv,gridColumn:"1/-1"}}>
+            <div style={S2.lbl}>Operativa de carga</div>
+            <div style={S2.val}>{operativaCarga.join(" | ") || "-"}</div>
+          </div>
+        </div>
+
+        {!esColaborador && (
+          <div style={{background:"rgba(59,130,246,.06)",border:"1px solid rgba(59,130,246,.18)",borderRadius:10,padding:"12px 14px"}}>
+            <div style={{fontWeight:800,fontSize:12,textTransform:"uppercase",letterSpacing:".06em",color:"#60a5fa",marginBottom:8}}>Condiciones de pago</div>
+            <div style={{fontSize:12,color:"var(--text3)",background:"var(--bg3)",borderRadius:7,padding:"8px 10px"}}>
+              <strong>Forma de pago:</strong> {condicionesPagoCliente}
+            </div>
+          </div>
+        )}
+
+        {/* Seccion economica - solo si es colaborador */}
+        {esColaborador && (
+          <div style={{background:"rgba(139,92,246,.06)",border:"1px solid rgba(139,92,246,.2)",borderRadius:10,padding:"14px 16px"}}>
+            <div style={{fontWeight:800,fontSize:12,textTransform:"uppercase",letterSpacing:".06em",color:"#a78bfa",marginBottom:10}}>Condiciones economicas</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:10}}>
+              {[
+                ["Colaborador",pedido.colaborador_nombre || "Colaborador","#a78bfa"],
+                ...(pagoColaboradorTonelada ? [
+                  ["Precio por tonelada",`${pagoColaboradorTonelada.precioTonelada.toLocaleString("es-ES",{minimumFractionDigits:2})} EUR/tn`,"#10b981"],
+                  ["Minimo facturable",`${pagoColaboradorTonelada.minimoToneladas.toLocaleString("es-ES",{maximumFractionDigits:3})} tn`,"#f59e0b"],
+                ] : pagoColaboradorTotalCerrado ? [
+                  ["Precio acordado",`${pagoColaboradorTotalCerrado.total.toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})} EUR`,"#10b981"],
+                  ["Tipo de acuerdo","Precio cerrado","#f59e0b"],
+                ] : [
+                  ["Precio acordado","Pendiente","#f59e0b"],
+                ]),
+                ["Referencia",referenciaPedido,"#10b981"],
+              ].map(([l,v,c])=>(
+                <div key={l} style={{background:"var(--bg3)",borderRadius:8,padding:"10px 12px",textAlign:"center"}}>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:15,color:c}}>{v}</div>
+                  <div style={{fontSize:10,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".05em",marginTop:2}}>{l}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{fontSize:11,color:"var(--text4)",background:"var(--bg3)",borderRadius:7,padding:"8px 10px",marginBottom:10}}>
+              {pagoColaboradorTonelada
+                ? "La orden de colaborador imprimira el precio por tonelada y el minimo acordado. No mostrara el total cerrado."
+                : pagoColaboradorTotalCerrado
+                  ? "La orden de colaborador imprimira el precio cerrado acordado."
+                  : "Indica el precio acordado con el colaborador para que aparezca en la orden."}
+            </div>
+            <div style={{fontSize:11,color:"var(--text4)",background:"var(--bg3)",borderRadius:7,padding:"8px 10px",marginBottom:10}}>
+              <strong>Forma de pago:</strong> {condicionesPagoColaborador}
+            </div>
+            <PagoColaboradorPanel pedido={pedido} onUpdated={onClose}/>
+          </div>
+        )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Modal crear cliente rapido desde pedido ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
+  const [form, setForm] = useState({
+    nombre: datosIniciales?.nombre || "",
+    cif: "", email: "", telefono: "",
+    calle: "", num_ext: "", codigo_postal: "", ciudad: "", provincia: "", pais: "España",
+    forma_pago: "Transferencia bancaria", tipo_iva: 21, iva_regimen: "general",
+    contacto_nombre: "", contacto_telefono: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const fk = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
+  const lbl = {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:12};
+
+  // Detect incomplete fields
+  const camposFaltantes = [
+    !form.cif?.trim() && "CIF/NIF",
+    !form.email?.trim() && "Email",
+    !form.telefono?.trim() && "Telefono",
+    !form.codigo_postal?.trim() && "Codigo postal",
+    !form.ciudad?.trim() && "Ciudad",
+  ].filter(Boolean);
+
+  async function crear() {
+    setError("");
+    if (!form.nombre.trim()) { setError("El nombre / razon social es obligatorio."); return; }
+    if (!form.cif.trim()) { setError("El CIF/NIF es obligatorio para crear el cliente."); return; }
+    setSaving(true);
+    try {
+      const nuevo = await crearCliente({
+        ...form,
+        direccion: form.calle ? (form.calle + (form.num_ext?" "+form.num_ext:"")) : "",
+        cp: form.codigo_postal,
+        pendiente_revision: camposFaltantes.length > 0,
+      });
+      onCreado(nuevo);
+    } catch(e) { setError(e.message || "No se pudo crear el cliente."); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:24,width:"min(600px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)",marginBottom:4}}>Nuevo cliente</div>
+        <div style={{fontSize:12,color:"var(--text4)",marginBottom:16}}>
+          Rellena todos los datos posibles. Los campos incompletos generaran una notificacion para que administracion los complete.
+        </div>
+
+        {/* Datos basicos */}
+        <div style={{fontSize:11,fontWeight:700,color:"var(--accent)",marginBottom:6,marginTop:4,textTransform:"uppercase",letterSpacing:".06em"}}>Datos de empresa</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre / Razon social *</label><input style={inp} value={form.nombre} onChange={fk("nombre")} autoFocus/></div>
+          <div><label style={lbl}>CIF / NIF *</label><input style={{...inp,borderColor:!form.cif.trim()?"rgba(239,68,68,.45)":"var(--border2)"}} value={form.cif} onChange={fk("cif")} placeholder="B12345678"/></div>
+          <div><label style={lbl}>Telefono</label><input style={inp} value={form.telefono} onChange={fk("telefono")}/></div>
+          <div><label style={lbl}>Email facturacion</label><input type="email" style={inp} value={form.email} onChange={fk("email")}/></div>
+          <div><label style={lbl}>Forma de pago</label>
+            <select style={inp} value={form.forma_pago} onChange={fk("forma_pago")}>
+              {["Contado","Transferencia bancaria","30 dias","45 dias","60 dias","90 dias"].map(o=><option key={o}>{o}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Direccion */}
+        <div style={{fontSize:11,fontWeight:700,color:"var(--accent)",marginBottom:6,marginTop:16,textTransform:"uppercase",letterSpacing:".06em"}}>Direccion fiscal</div>
+        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:"0 14px"}}>
+          <div><label style={lbl}>Calle / Avenida</label><input style={inp} value={form.calle} onChange={fk("calle")} placeholder="Calle Mayor"/></div>
+          <div><label style={lbl}>N. / Piso / Pta</label><input style={inp} value={form.num_ext} onChange={fk("num_ext")} placeholder="12, 3oB"/></div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 2fr",gap:"0 14px"}}>
+          <div><label style={lbl}>Codigo postal</label><input style={inp} value={form.codigo_postal} onChange={fk("codigo_postal")} placeholder="28001"/></div>
+          <div><label style={lbl}>Ciudad</label><input style={inp} value={form.ciudad} onChange={fk("ciudad")}/></div>
+          <div><label style={lbl}>Provincia</label><input style={inp} value={form.provincia} onChange={fk("provincia")}/></div>
+        </div>
+
+        {/* Contacto */}
+        <div style={{fontSize:11,fontWeight:700,color:"var(--accent)",marginBottom:6,marginTop:16,textTransform:"uppercase",letterSpacing:".06em"}}>Contacto</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
+          <div><label style={lbl}>Nombre contacto</label><input style={inp} value={form.contacto_nombre} onChange={fk("contacto_nombre")}/></div>
+          <div><label style={lbl}>Tel. contacto</label><input style={inp} value={form.contacto_telefono} onChange={fk("contacto_telefono")}/></div>
+        </div>
+
+        {/* Warning if incomplete */}
+        {camposFaltantes.length > 0 && (
+          <div style={{marginTop:14,padding:"10px 14px",background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.25)",borderRadius:8,fontSize:12,color:"#fbbf24",display:"flex",gap:8,alignItems:"flex-start"}}>
+            <span style={{flexShrink:0}}>Aviso</span>
+            <div>
+              <div style={{fontWeight:700,marginBottom:3}}>Datos incompletos - el cliente quedara marcado para revision</div>
+              <div style={{color:"var(--text4)"}}>Faltan: {camposFaltantes.join(", ")}. Administracion recibira una notificacion para completarlos.</div>
+            </div>
+          </div>
+        )}
+        {error && (
+          <div style={{marginTop:14,padding:"10px 14px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,fontSize:12,color:"#ef4444",fontWeight:700}}>
+            {error}
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:10,marginTop:18,justifyContent:"flex-end"}}>
+          <button onClick={onClose} style={{padding:"8px 16px",borderRadius:8,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontFamily:"'DM Sans',sans-serif",fontSize:13,cursor:"pointer"}}>
+            Cancelar
+          </button>
+          <button onClick={crear} disabled={saving}
+            style={{padding:"8px 20px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer",opacity:saving?0.7:1}}>
+            {saving?"Creando...":"Crear cliente y continuar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Auto-asignacion IA ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+function ModalAutoAsignacion({ pedido, vehiculos, choferes, onAsignar, onClose }) {
+  const [loading,   setLoading]   = useState(true);
+  const [sugerencia, setSugerencia] = useState(null);
+  const [error,     setError]     = useState("");
+  const [aplicando, setAplicando] = useState(false);
+
+  const analizar = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      // Filtrar solo tractoras/camiones disponibles
+      const disponibles = vehiculos.filter(v =>
+        v.activo && v.estado === "disponible" &&
+        !v.clase?.toLowerCase().includes("remolque") &&
+        !v.clase?.toLowerCase().includes("semirremolque")
+      );
+
+      const nl = "\n";
+      const listaVeh = disponibles.map(v =>
+        "- " + v.matricula + " | " + (v.clase||v.tipo) + " | Carga max: " + (v.carga_max_kg ? v.carga_max_kg+"kg" : "-") + " | Remolque: " + (v.remolque_matricula || "ninguno")
+      ).join(nl);
+      const listaChof = choferes.filter(c=>c.activo).map(c =>
+        "- " + c.nombre + " " + (c.apellidos||"") + " | Vehiculo habitual: " + (vehiculos.find(v=>v.id===c.vehiculo_id)?.matricula || "ninguno")
+      ).join(nl);
+      const ctx = "Eres un sistema de gestion de transporte. Analiza este pedido y sugiere el mejor vehiculo y chofer disponible." + nl +
+        nl + "PEDIDO:" +
+        nl + "- Numero: " + pedido.numero +
+        nl + "- Origen: " + (pedido.origen || "-") +
+        nl + "- Destino: " + (pedido.destino || "-") +
+        nl + "- Fecha carga: " + (pedido.fecha_carga || "-") +
+        nl + "- Hora carga: " + (pedido.hora_carga || "-") +
+        nl + "- Fecha descarga: " + (pedido.fecha_descarga || "-") +
+        nl + "- Mercancia: " + (pedido.mercancia || "-") +
+        nl + "- Peso: " + (pedido.peso_kg ? pedido.peso_kg + " kg" : "-") +
+        nl + "- Bultos: " + (pedido.bultos || "-") +
+        nl + "- Notas: " + (pedido.notas || "-") +
+        nl + nl + "VEHICULOS DISPONIBLES:" + nl + listaVeh +
+        nl + nl + "CHOFERES DISPONIBLES:" + nl + listaChof +
+        nl + nl + 'Responde SOLO con JSON con estos campos: vehiculo_id, vehiculo_matricula, chofer_id, chofer_nombre, remolque_id (null si no), remolque_matricula (null si no), confianza (alta/media/baja), razon (1-2 frases en espanol), advertencias (array).';
+
+      const data = await chatIA({
+        max_tokens: 500,
+        messages: [{ role: "user", content: ctx }]
+      });
+      const text = data.content?.[0]?.text || "";
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("No se pudo obtener una sugerencia");
+      const sug = JSON.parse(match[0]);
+      // Verify IDs exist
+      if (sug.vehiculo_id && !vehiculos.find(v=>v.id===sug.vehiculo_id)) {
+        // Try to find by matricula
+        const vByMat = vehiculos.find(v=>v.matricula===sug.vehiculo_matricula);
+        if (vByMat) sug.vehiculo_id = vByMat.id;
+      }
+      if (sug.chofer_id && !choferes.find(c=>c.id===sug.chofer_id)) {
+        const cByName = choferes.find(c=>sug.chofer_nombre?.includes(c.nombre));
+        if (cByName) sug.chofer_id = cByName.id;
+      }
+      setSugerencia(sug);
+    } catch(e) {
+      setError("No se pudo obtener sugerencia: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [choferes, pedido, vehiculos]);
+
+  useEffect(() => { analizar(); }, [analizar]);
+
+  const CONFIANZA_COLOR = { alta:"#10b981", media:"#f59e0b", baja:"#f97316" };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:24,width:"min(520px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+          <span style={{fontSize:22}}>IA</span>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)"}}>Autoasignacion IA</div>
+            <div style={{fontSize:12,color:"var(--text4)"}}>{pedido.numero} | {pedido.origen} -> {pedido.destino}</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",fontSize:20,cursor:"pointer",marginLeft:"auto",padding:4}}>Cerrar</button>
+        </div>
+
+        {loading && (
+          <div style={{textAlign:"center",padding:"32px 0",color:"var(--text4)"}}>
+            <div style={{fontSize:28,marginBottom:10}}>!</div>
+            <div style={{fontSize:13}}>Analizando pedido y vehiculos disponibles...</div>
+          </div>
+        )}
+
+        {error && !loading && (
+          <div style={{padding:"12px 16px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.2)",borderRadius:9,fontSize:13,color:"#ef4444",marginTop:12}}>
+            Aviso: {error}
+            <button onClick={analizar} style={{marginLeft:12,background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontWeight:700,textDecoration:"underline",fontSize:12}}>Reintentar</button>
+          </div>
+        )}
+
+        {sugerencia && !loading && (
+          <div>
+            {/* Confianza */}
+            <div style={{display:"flex",alignItems:"center",gap:8,margin:"16px 0 12px"}}>
+              <span style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)"}}>Confianza:</span>
+              <span style={{padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:`${CONFIANZA_COLOR[sugerencia.confianza]}18`,color:CONFIANZA_COLOR[sugerencia.confianza],border:`1px solid ${CONFIANZA_COLOR[sugerencia.confianza]}40`}}>
+                {sugerencia.confianza?.toUpperCase()}
+              </span>
+            </div>
+
+            {/* Sugerencia */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+              <div style={{background:"var(--bg3)",borderRadius:9,padding:"12px 14px"}}>
+                <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:6}}>Vehiculo sugerido</div>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:"var(--text)"}}>{sugerencia.vehiculo_matricula||"-"}</div>
+                {sugerencia.remolque_matricula && (
+                  <div style={{fontSize:11,color:"#a78bfa",marginTop:3}}>Remolque: {sugerencia.remolque_matricula}</div>
+                )}
+                {!vehiculos.find(v=>v.id===sugerencia.vehiculo_id) && sugerencia.vehiculo_id && (
+                  <div style={{fontSize:10,color:"#f97316",marginTop:3}}>ID no encontrado</div>
+                )}
+              </div>
+              <div style={{background:"var(--bg3)",borderRadius:9,padding:"12px 14px"}}>
+                <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:6}}>Chofer sugerido</div>
+                <div style={{fontWeight:700,fontSize:14,color:"var(--text)"}}>{sugerencia.chofer_nombre||"-"}</div>
+                {!choferes.find(c=>c.id===sugerencia.chofer_id) && sugerencia.chofer_id && (
+                  <div style={{fontSize:10,color:"#f97316",marginTop:3}}>No encontrado</div>
+                )}
+              </div>
+            </div>
+
+            {/* Razon */}
+            <div style={{background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.15)",borderRadius:9,padding:"10px 14px",fontSize:13,color:"var(--text2)",lineHeight:1.6,marginBottom:12}}>
+              Motivo: {sugerencia.razon}
+            </div>
+
+            {/* Advertencias */}
+            {sugerencia.advertencias?.length > 0 && (
+              <div style={{background:"rgba(245,158,11,.07)",border:"1px solid rgba(245,158,11,.2)",borderRadius:9,padding:"10px 14px",marginBottom:14}}>
+                {sugerencia.advertencias.map((a,i)=>(
+                  <div key={i} style={{fontSize:12,color:"#fbbf24",display:"flex",gap:7,alignItems:"flex-start"}}>
+                    <span>Aviso</span><span>{a}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Aviso revision */}
+            <div style={{fontSize:11,color:"var(--text5)",marginBottom:16,fontStyle:"italic"}}>
+              Esta es una sugerencia automatica. Revisa que la asignacion es correcta antes de confirmar.
+            </div>
+
+            <div style={{display:"flex",gap:10}}>
+              <button
+                disabled={aplicando || !vehiculos.find(v=>v.id===sugerencia.vehiculo_id)}
+                onClick={async()=>{
+                  setAplicando(true);
+                  await onAsignar({
+                    vehiculo_id: sugerencia.vehiculo_id,
+                    chofer_id: sugerencia.chofer_id,
+                    remolque_id_manual: sugerencia.remolque_id||null,
+                  });
+                  onClose();
+                }}
+                style={{flex:1,padding:"11px 0",borderRadius:9,border:"none",background:"var(--accent)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:700,cursor:"pointer",opacity:aplicando?.7:1}}>
+                {aplicando?"Asignando...":"Aplicar asignacion"}
+              </button>
+              <button onClick={analizar} style={{padding:"11px 16px",borderRadius:9,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:13,cursor:"pointer"}}>
+                Nueva sugerencia
+              </button>
+              <button onClick={onClose} style={{padding:"11px 16px",borderRadius:9,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontFamily:"'DM Sans',sans-serif",fontSize:13,cursor:"pointer"}}>
+                Ignorar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Tab Documentos de Pedido ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+function TabDocsPedido({ pedido }) {
+  const [docs,       setDocs]       = useState([]);
+  const [uploading,  setUploading]  = useState(false);
+  const [loading,    setLoading]    = useState(true);
+
+  useEffect(()=>{
+    if(!pedido?.id) return;
+    getPedidoDocs(pedido.id)
+      .then(d=>setDocs(Array.isArray(d)?d:[]))
+      .catch(()=>setDocs([]))
+      .finally(()=>setLoading(false));
+  },[pedido?.id]);
+
+  async function subir(e) {
+    const files = Array.from(e.target.files || []);
+    if(!files.length) return;
+    setUploading(true);
+    for (const file of files) {
+      if(file.size > 3145728) { notify(`${file.name}: maximo 3MB por documento`, "warning"); continue; }
+      try {
+        const b64 = await fileToPedidoDocBase64(file);
+        const tipo = inferPedidoDocTipo(file.name);
+        const doc = await subirPedidoDoc(pedido.id, {
+          nombre: file.name,
+          tipo,
+          file_base64: b64,
+          file_mime: file.type || "application/pdf",
+          file_size_kb: Math.round(file.size/1024),
+        });
+        setDocs(p=>[...p, doc]);
+      } catch(err) { notify("Error al subir: "+err.message, "error"); }
+    }
+    setUploading(false);
+    e.target.value="";
+  }
+
+  const TIPO_COLOR = {
+    CMR:"#3b82f6", "Albaran":"#10b981", "Foto descarga":"#f59e0b",
+    Pesaje:"#8b5cf6", Incidencia:"#ef4444", Otro:"#6b7280"
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+        <div style={{fontSize:13,fontWeight:600,color:"var(--text3)"}}>Documentos del viaje</div>
+        <label style={{marginLeft:"auto",padding:"5px 12px",borderRadius:7,background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:uploading?"not-allowed":"pointer",opacity:uploading?0.6:1}}>
+          {uploading?"Subiendo...":"Adjuntar"}
+          <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" style={{display:"none"}} disabled={uploading} onChange={subir}/>
+        </label>
+      </div>
+      {loading ? (
+        <div style={{color:"var(--text5)",fontSize:12,textAlign:"center",padding:20}}>Cargando...</div>
+      ) : docs.length === 0 ? (
+        <div style={{textAlign:"center",padding:"24px 0",color:"var(--text5)"}}>
+          <div style={{fontSize:28,marginBottom:6}}>Docs</div>
+          <div style={{fontSize:12}}>Sin documentos adjuntos</div>
+          <div style={{fontSize:11,marginTop:4}}>Adjunta CMR, albaranes, fotos de descarga, etc.</div>
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {docs.map(d=>(
+            <div key={d.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--bg3)",borderRadius:8,border:"1px solid var(--border)"}}>
+              <span style={{fontSize:18}}>
+                {d.file_mime?.includes("pdf")?"PDF":d.file_mime?.startsWith("image/")?"IMG":"DOC"}
+              </span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.nombre}</div>
+                <div style={{fontSize:10,color:"var(--text5)"}}>{d.file_size_kb}KB | {new Date(d.created_at).toLocaleDateString("es-ES")}</div>
+              </div>
+              <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4,background:`${TIPO_COLOR[d.tipo]||"#6b7280"}20`,color:TIPO_COLOR[d.tipo]||"#6b7280",border:`1px solid ${TIPO_COLOR[d.tipo]||"#6b7280"}40`,flexShrink:0}}>
+                {d.tipo}
+              </span>
+              <button onClick={async()=>{
+                const ok = await confirmDialog({
+                  title: "Eliminar documento",
+                  message: "Eliminar este documento del viaje?",
+                  confirmText: "Eliminar",
+                  tone: "danger",
+                });
+                if(!ok) return;
+                await borrarPedidoDoc(d.id);
+                setDocs(p=>p.filter(x=>x.id!==d.id));
+              }} style={{background:"none",border:"none",color:"var(--text5)",cursor:"pointer",fontSize:16,padding:"0 2px",flexShrink:0}}>Eliminar</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{marginTop:12,fontSize:10,color:"var(--text5)"}}>
+        Los documentos se adjuntaran automaticamente al enviar la factura por email.
+      </div>
+    </div>
+  );
+}
+
+
+// Memoized - solo re-renderiza cuando cambia el peso, vehiculo o remolque
+const PesoAlerta = React.memo(function PesoAlerta({ pesoKg, vehiculoId, remolqueId, vehiculos }) {
+  if (!pesoKg) return null;
+  const veh = (vehiculos||[]).find(v=>v.id===vehiculoId);
+  const rem = (vehiculos||[]).find(v=>v.id===(remolqueId||veh?.remolque_id));
+  // checkNormativaPeso inlined to avoid hoisting issues with React.memo
+  const alerta = (function(pesoKg, veh, rem) {
+    const MMA_VEH = veh?.masa_total_kg ? Number(veh.masa_total_kg) : (veh?.carga_max_kg ? Number(veh.carga_max_kg) + 8000 : 0);
+    const MMA_REM = rem?.masa_total_kg ? Number(rem.masa_total_kg) : (rem?.carga_max_kg ? Number(rem.carga_max_kg) + 4000 : 0);
+    const ejes = Number(veh?.ejes||0) + Number(rem?.ejes||0);
+    const pesoTotal = Number(pesoKg||0);
+    if (!pesoTotal) return null;
+    if (pesoTotal > 44000) return { nivel:"error", mensaje:`Error: peso ${(pesoTotal/1000).toFixed(1)}t supera el maximo legal de 44t (vehiculos especiales con 6+ ejes). Requiere autorizacion especial.` };
+    if (pesoTotal > 40000 && ejes < 6) return { nivel:"error", mensaje:`Error: peso ${(pesoTotal/1000).toFixed(1)}t supera 40t. Para cargas entre 40-44t se requieren 6 ejes y autorizacion especial.` };
+    if (pesoTotal > 40000) return { nivel:"aviso", mensaje:`Aviso: peso ${(pesoTotal/1000).toFixed(1)}t entre 40-44t. Requiere autorizacion especial y 6+ ejes.` };
+    if (MMA_VEH && pesoTotal > MMA_VEH + MMA_REM) return { nivel:"error", mensaje:`Error: peso ${(pesoTotal/1000).toFixed(1)}t supera la MMA del conjunto (${((MMA_VEH+MMA_REM)/1000).toFixed(1)}t).` };
+    if (pesoTotal > 34000) return { nivel:"info", mensaje:`Info: carga pesada ${(pesoTotal/1000).toFixed(1)}t. Verifica los ejes del conjunto.` };
+    return null;
+  })(pesoKg, veh, rem);
+  if (!alerta) return null;
+  const colors = {
+    error: {bg:"rgba(239,68,68,.08)",border:"rgba(239,68,68,.3)",text:"#ef4444",icon:"Error"},
+    aviso: {bg:"rgba(245,158,11,.08)",border:"rgba(245,158,11,.3)",text:"#f59e0b",icon:"Aviso"},
+    info:  {bg:"rgba(59,130,246,.08)",border:"rgba(59,130,246,.25)",text:"#60a5fa",icon:"Info"},
+  };
+  const col = colors[alerta.nivel];
+  return (
+    <div style={{marginTop:6,padding:"7px 10px",background:col.bg,
+                 border:`1px solid ${col.border}`,borderRadius:7,fontSize:11,
+                 color:col.text,display:"flex",gap:6,alignItems:"flex-start"}}>
+      <span style={{flexShrink:0}}>{col.icon}</span>
+      <span style={{lineHeight:1.5}}>{alerta.mensaje}</span>
+    </div>
+  );
+});
+
+
+function PedidoTimeline({ pedido }) {
+  const [eventos, setEventos] = useState([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!pedido?.id) return;
+    setLoading(true);
+    getPedidoEventos(pedido.id)
+      .then(data => setEventos(Array.isArray(data) ? data : []))
+      .catch(() => setEventos([]))
+      .finally(() => setLoading(false));
+  }, [pedido?.id]);
+
+  const labelEvento = tipo => ({
+    "estado.actualizado": "Estado actualizado",
+    "pedido.creado_bandeja_ia": "Creado desde Bandeja IA",
+    "pedido.editado_estado": "Estado editado",
+    "firma.contexto_modificado": "Firma con cambios posteriores",
+    "firma.evidencia_registrada": "Evidencia de firma",
+    "factura.borrador_auto": "Borrador de factura",
+    "colaborador.factura_recibida_auto": "Factura proveedor",
+    "colaborador.workflow_enviado": "Enlace colaborador",
+    "colaborador.carga_confirmada": "Carga confirmada",
+    "colaborador.descarga_confirmada": "Descarga confirmada",
+    "documento_control.abierto": "DCD abierto",
+    "documento_control.impreso": "DCD impreso",
+    "documento_control.descargado": "DCD descargado",
+    "documento_control.copiado": "DCD enlace copiado",
+    "documento_control.compartido": "DCD compartido",
+    "documento_control.consultado": "DCD consultado",
+    "documento_control.remitido": "DCD remitido",
+  }[tipo] || String(tipo || "Evento"));
+
+  const formatoDetalleEvento = detalle => {
+    if (!detalle || typeof detalle !== "object") return "";
+    const documentos = Array.isArray(detalle.documentos_meta)
+      ? detalle.documentos_meta.map(doc => [doc.nombre, doc.size_kb ? `${doc.size_kb} KB` : ""].filter(Boolean).join(" ")).filter(Boolean).join(", ")
+      : "";
+    const campos = [
+      detalle.accion ? `Accion: ${detalle.accion}` : "",
+      detalle.canal ? `Canal: ${detalle.canal}` : "",
+      detalle.codigo_control ? `DCD: ${detalle.codigo_control}` : "",
+      detalle.source ? `Origen: ${detalle.source}` : "",
+      detalle.mensaje ? detalle.mensaje : "",
+      Array.isArray(detalle.changes) && detalle.changes.length ? `Cambios: ${detalle.changes.map(change => `${change.field}: ${change.signed || "-"} -> ${change.current || "-"}`).slice(0, 3).join(" | ")}` : "",
+      detalle.firma_nombre ? `Firmante: ${detalle.firma_nombre}` : "",
+      detalle.firma_hash ? `Hash firma: ${String(detalle.firma_hash).slice(0, 12)}...` : "",
+      detalle.filename ? `Documento: ${detalle.filename}` : "",
+      detalle.confidence !== undefined ? `Confianza: ${detalle.confidence}%` : "",
+      detalle.status ? `Estado IA: ${detalle.status}` : "",
+      detalle.attachments_count !== undefined ? `Adjuntos: ${detalle.attachments_count}` : "",
+      detalle.visual_provider ? `IA visual: ${detalle.visual_provider}` : "",
+      detalle.ready !== undefined ? `Listo: ${detalle.ready ? "si" : "no"}` : "",
+      documentos ? `Docs: ${documentos}` : "",
+    ].filter(Boolean);
+    if (campos.length) return campos.join(" / ");
+    return Object.entries(detalle)
+      .filter(([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+      .slice(0, 4)
+      .map(([k, v]) => `${k}: ${v ?? ""}`)
+      .join(" / ");
+  };
+
+  return (
+    <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>
+      <div style={{fontSize:12,fontWeight:800,color:"var(--text4)",marginBottom:10,textTransform:"uppercase",letterSpacing:".06em"}}>Trazabilidad del viaje</div>
+      {loading
+        ? <div style={{fontSize:12,color:"var(--text5)"}}>Cargando historial...</div>
+        : eventos.length===0
+          ? <div style={{fontSize:12,color:"var(--text5)"}}>Sin eventos registrados todavia.</div>
+          : <div style={{display:"grid",gap:8}}>
+              {eventos.slice(0,8).map(ev => {
+                const isAiEvent = ev.tipo === "pedido.creado_bandeja_ia";
+                const isSignatureWarning = ev.tipo === "firma.contexto_modificado";
+                return (
+                  <div key={ev.id} style={{display:"grid",gridTemplateColumns:"130px 1fr",gap:10,alignItems:"start",background:isSignatureWarning?"rgba(245,158,11,.08)":isAiEvent?"rgba(59,130,246,.08)":"var(--bg3)",border:`1px solid ${isSignatureWarning?"rgba(245,158,11,.28)":isAiEvent?"rgba(59,130,246,.25)":"#1e2d45"}`,borderRadius:8,padding:"8px 10px"}}>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text5)"}}>
+                      {ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "-"}
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:800,color:isSignatureWarning?"#f59e0b":isAiEvent?"#60a5fa":"var(--text)"}}>{labelEvento(ev.tipo)}</div>
+                      {ev.detalle && Object.keys(ev.detalle).length>0 && (
+                        <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>
+                          {formatoDetalleEvento(ev.detalle)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+      }
+    </div>
+  );
+}
+
+function PedidoRentabilidadPredictiva({ pedido }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!pedido?.id) return;
+    setLoading(true);
+    getPedidoRentabilidadPredictiva(pedido.id)
+      .then(res => setData(res && typeof res === "object" ? res : null))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [pedido?.id]);
+
+  if (!pedido?.id) return null;
+  const color = data?.margen?.color === "rojo" ? "#ef4444" : data?.margen?.color === "amarillo" ? "#f59e0b" : "#10b981";
+  const riesgos = Array.isArray(data?.riesgos) ? data.riesgos : [];
+  const acciones = Array.isArray(data?.acciones) ? data.acciones : [];
+  const fmtRent = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:12,fontWeight:800,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".06em"}}>Rentabilidad predictiva</div>
+          <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>Decision economica con precio, costes, kilometros, documentos y riesgos operativos.</div>
+        </div>
+        {data?.decision && (
+          <span style={{padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:900,textTransform:"uppercase",color,background:`${color}16`,border:`1px solid ${color}30`}}>
+            {data.decision.replace(/_/g, " ")}
+          </span>
+        )}
+      </div>
+      {loading ? (
+        <div style={{fontSize:12,color:"var(--text5)"}}>Calculando rentabilidad...</div>
+      ) : !data ? (
+        <div style={{fontSize:12,color:"var(--text5)"}}>Sin datos suficientes para calcular rentabilidad.</div>
+      ) : (
+        <>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:8}}>
+            {[
+              ["Ingreso", `${fmtRent(data.ingreso?.total)} EUR`, "#10b981"],
+              ["Coste", `${fmtRent(data.costes?.total)} EUR`, "#f59e0b"],
+              ["Margen", `${fmtRent(data.margen?.importe)} EUR`, color],
+              ["Margen %", data.margen?.pct == null ? "-" : `${fmtRent(data.margen.pct)}%`, color],
+              ["EUR/km", data.ingreso?.eur_km == null ? "-" : `${fmtRent(data.ingreso.eur_km)}`, "var(--accent)"],
+            ].map(([label,value,c]) => (
+              <div key={label} style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"9px 10px"}}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:16,color:c}}>{value}</div>
+                <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>{label}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{marginTop:10,padding:"9px 11px",borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border2)",fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
+            <strong style={{color:"var(--text)"}}>Recomendacion:</strong> {data.recomendacion || "-"}
+          </div>
+          {riesgos.length > 0 && (
+            <div style={{display:"grid",gap:6,marginTop:10}}>
+              {riesgos.slice(0,4).map(r => {
+                const rc = r.severidad === "critica" || r.severidad === "alta" ? "#ef4444" : r.severidad === "media" ? "#f59e0b" : "#3b82f6";
+                return (
+                  <div key={`${r.tipo}-${r.mensaje}`} style={{fontSize:12,color:rc,background:`${rc}12`,border:`1px solid ${rc}25`,borderRadius:8,padding:"7px 9px",fontWeight:700}}>
+                    {r.mensaje}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {acciones.length > 0 && (
+            <div style={{marginTop:8,fontSize:11,color:"var(--text5)"}}>
+              Acciones sugeridas: {acciones.slice(0,3).join(" / ")}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PedidoModal - aislado del componente padre para evitar re-renders
+// La key prop asegura nuevo estado cuando cambia el pedido editado
+// ---------------------------------------------------------------------------
+function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvinculada,
+  pedidos, clientes: clientesProp, vehiculos, choferes, rutas: rutas_prop, colaboradores, canEdit,
+  guidedActive = false, onGuidedProgress,
+}) {
+  const asignacionRef = React.useRef(null);
+  const [clientes, setClientes] = useState(clientesProp || []);
+  const [rutas,    setRutas]    = useState(rutas_prop || []);
+
+  // Sync clientes: use prop when available, fetch fresh if empty
+  useEffect(() => {
+    if (clientesProp && clientesProp.length > 0) {
+      setClientes(clientesProp);
+    } else {
+      getClientes("", "true", 1, 500)
+        .then(d => setClientes(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : []))
+        .catch(() => {});
+    }
+  }, [clientesProp]);
+
+  // Sync rutas from prop
+  useEffect(() => {
+    if (rutas_prop && rutas_prop.length > 0) setRutas(rutas_prop);
+  }, [rutas_prop]);
+
+  // Colaboradores: local state with fallback fetch
+  const [colaboradoresLocal, setColaboradoresLocal] = useState(colaboradores || []);
+  useEffect(() => {
+    if (colaboradores && colaboradores.length > 0) {
+      setColaboradoresLocal(colaboradores);
+    } else {
+      getColaboradores()
+        .then(d => setColaboradoresLocal(Array.isArray(d) ? d : []))
+        .catch(() => {});
+    }
+  }, [colaboradores]);
+
+  // Vehiculos: local state with fallback fetch (critical: modal opens before parent loads)
+  const [vehiculosLocal, setVehiculosLocal] = useState(vehiculos || []);
+  useEffect(() => {
+    if (vehiculos && vehiculos.length > 0) {
+      setVehiculosLocal(vehiculos);
+    } else {
+      getVehiculos()
+        .then(d => setVehiculosLocal(Array.isArray(d) ? d : []))
+        .catch(() => {});
+    }
+  }, [vehiculos]);
+
+  // Choferes: local state with fallback fetch
+  const [choferesLocal, setChoferesLocal] = useState(choferes || []);
+  useEffect(() => {
+    if (!editando?._focus_asignacion) return;
+    const t = window.setTimeout(() => {
+      asignacionRef.current?.scrollIntoView({ behavior:"smooth", block:"center" });
+      asignacionRef.current?.querySelector("select")?.focus();
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [editando?.id, editando?._focus_asignacion]);
+  useEffect(() => {
+    if (choferes && choferes.length > 0) {
+      setChoferesLocal(choferes);
+    } else {
+      getChoferes()
+        .then(d => setChoferesLocal(Array.isArray(d) ? d : []))
+        .catch(() => {});
+    }
+  }, [choferes]);
+
+  const [desvinculado, setDesvinculado] = useState(false);
+  const [form,       setForm]       = useState(
+    editando
+      ? normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""})
+      : { estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" }
+  );
+  const [saving,     setSaving]     = useState(false);
+  const [nombreBusqueda, setNombreBusqueda]= useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [modalNuevoCliente, setModalNuevoCliente] = useState(null);
+  const [colaboradorBusqueda, setColaboradorBusqueda] = useState("");
+  const [showColaboradorSuggestions, setShowColaboradorSuggestions] = useState(false);
+  const [creandoColaborador, setCreandoColaborador] = useState(false);
+  const [calcKm,     setCalcKm]     = useState(false);
+  const [avisoVehiculo, setAvisoVehiculo] = useState(null); // {matricula, notas}
+  const [showCostes, setShowCostes] = useState(!!(editando?.coste_gasoil || editando?.coste_peajes || editando?.coste_dietas || editando?.coste_otros));
+  const [poiDraft, setPoiDraft] = useState(null);
+  const [managePointsOpen, setManagePointsOpen] = useState(false);
+  const [notificandoColaborador, setNotificandoColaborador] = useState(false);
+  const [previsualizandoColaborador, setPrevisualizandoColaborador] = useState(false);
+  const [clienteRiesgo, setClienteRiesgo] = useState(null);
+  const [clienteRiesgoLoading, setClienteRiesgoLoading] = useState(false);
+  const [puntosCargaClienteModal, setPuntosCargaClienteModal] = useState([]);
+  const [puntosCargaClienteLoading, setPuntosCargaClienteLoading] = useState(false);
+  const [pendingDocs, setPendingDocs] = useState(() => Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
+  const initialFormRef = React.useRef(JSON.stringify(form));
+  const rutasCreadasRef = React.useRef(new Set());
+  const riesgoConfirmadoRef = React.useRef(new Map());
+
+  useEffect(() => {
+    const nextForm = editando
+      ? normalizePedidoTarifaDraft({ ...editando, remolque_id_manual: editando.remolque_id || "" })
+      : { estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, intercambio_palets:false, requiere_cinchas:true };
+    setForm(nextForm);
+    setColaboradorBusqueda("");
+    setPendingDocs(Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
+    setShowColaboradorSuggestions(false);
+    setShowCostes(!!(nextForm.coste_gasoil || nextForm.coste_peajes || nextForm.coste_dietas || nextForm.coste_otros));
+    initialFormRef.current = JSON.stringify(nextForm);
+  }, [editando]);
+
+  useEffect(() => {
+    if (!guidedActive || typeof onGuidedProgress !== "function") return;
+    onGuidedProgress(form);
+  }, [guidedActive, onGuidedProgress, form]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!form.cliente_id) {
+      setRutas([]);
+      return undefined;
+    }
+    getRutasCliente(form.cliente_id)
+      .then(d => {
+        if (!alive) return;
+        const arr = Array.isArray(d) ? d : [];
+        setRutas(arr.map(r => ({
+          ...r,
+          id: r.ruta_id || r.id,
+          precio_base: r.precio_base ?? r.precio ?? 0,
+          cliente_id: form.cliente_id,
+        })));
+      })
+      .catch(() => {
+        if (alive) setRutas([]);
+      });
+    return () => { alive = false; };
+  }, [form.cliente_id]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!form.cliente_id) {
+      setPuntosCargaClienteModal([]);
+      setPuntosCargaClienteLoading(false);
+      return undefined;
+    }
+    setPuntosCargaClienteLoading(true);
+    getPuntosInteresApi({ cliente_id: form.cliente_id, tipo: "carga" })
+      .then(d => {
+        if (!alive) return;
+        const lista = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
+        const cargas = lista.filter(isCargaPoint);
+        setPuntosCargaClienteModal(cargas);
+        if (cargas.length === 1) {
+          setForm(p => String(p.origen || "").trim() ? p : applyPuntoCargaToDraft(p, cargas[0]));
+        }
+      })
+      .catch(() => {
+        if (alive) setPuntosCargaClienteModal(getPuntosCargaCliente(form.cliente_id));
+      })
+      .finally(() => {
+        if (alive) setPuntosCargaClienteLoading(false);
+      });
+    return () => { alive = false; };
+  }, [form.cliente_id]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!form.cliente_id) {
+      setClienteRiesgo(null);
+      setClienteRiesgoLoading(false);
+      return undefined;
+    }
+    setClienteRiesgoLoading(true);
+    getClienteRiesgoOperativo(form.cliente_id)
+      .then(d => {
+        if (alive) setClienteRiesgo(d || null);
+      })
+      .catch(() => {
+        if (alive) setClienteRiesgo(null);
+      })
+      .finally(() => {
+        if (alive) setClienteRiesgoLoading(false);
+      });
+    return () => { alive = false; };
+  }, [form.cliente_id]);
+
+  const normalizarTipoRuta = (value) => String(value || "cualquiera").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const matchEndpointRuta = (actual, esperado) => {
+    const a = normalizePlaceText(actual);
+    const e = normalizePlaceText(esperado);
+    if (!e) return true;
+    if (!a) return false;
+    if (a.includes(e) || e.includes(a)) return true;
+    const stop = new Set(["de","del","la","el","los","las","s","sl","sa","sau","slu","calle","av","avenida","ctra","carretera"]);
+    const aTokens = new Set(a.split(/\W+/).filter(t => t.length >= 3 && !stop.has(t)));
+    const eTokens = e.split(/\W+/).filter(t => t.length >= 3 && !stop.has(t));
+    if (!eTokens.length) return false;
+    const hits = eTokens.filter(t => aTokens.has(t)).length;
+    return hits >= Math.min(2, eTokens.length);
+  };
+  const tipoVehiculoDeTexto = (value) => {
+    const txt = normalizarTipoRuta(value);
+    if (!txt) return "cualquiera";
+    if (txt.includes("banera") || txt.includes("bañera") || txt.includes("volquete")) return "banera";
+    if (txt.includes("taut") || txt.includes("lona") || txt.includes("curtain")) return "tautliner";
+    if (txt.includes("frigo")) return "frigorifico";
+    if (txt.includes("cisterna")) return "cisterna";
+    if (txt.includes("caja")) return "caja";
+    if (txt.includes("adr")) return "adr";
+    return txt || "cualquiera";
+  };
+  const vehiculoActual = vehiculosLocal.find(v => v.id === form.vehiculo_id);
+  const remolqueActual = vehiculosLocal.find(v => v.id === (form.remolque_id_manual || vehiculoActual?.remolque_id));
+  const tipoRemolqueActual = tipoVehiculoDeTexto([remolqueActual?.clase, remolqueActual?.tipo, remolqueActual?.marca, remolqueActual?.modelo, remolqueActual?.notas_operacion].filter(Boolean).join(" "));
+  const rutaCompatibleConConjunto = (ruta) => {
+    const requerido = tipoVehiculoDeTexto(ruta?.tipo_vehiculo);
+    if (!requerido || requerido === "cualquiera") return true;
+    if (!remolqueActual) return true;
+    return requerido === tipoRemolqueActual;
+  };
+  const rutasCompatibles = rutas.filter(rutaCompatibleConConjunto);
+  const rutaSeleccionada = rutas.find(r => r.id === form.ruta_id);
+  const clienteRiesgoPedido = buildClienteRiesgoPedidoAvisos(clienteRiesgo, calcImporte(form));
+  const rutaIncompatible = rutaSeleccionada && !rutaCompatibleConConjunto(rutaSeleccionada);
+  const remolquesCompatiblesRuta = rutaSeleccionada
+    ? vehiculosLocal.filter(v => {
+        const clase = (v.clase||v.tipo||"").toLowerCase();
+        const mat = (v.matricula||"").toUpperCase();
+        const remolqueIds = new Set(vehiculosLocal.map(x=>x.remolque_id).filter(Boolean));
+        const esRem = clase.includes("remolque") || clase.includes("semirremolque") || remolqueIds.has(v.id) || /^R[-_\s]/i.test(mat) || mat.endsWith("-R") || mat.endsWith("_R");
+        if (!esRem) return false;
+        const requerido = tipoVehiculoDeTexto(rutaSeleccionada.tipo_vehiculo);
+        return requerido === "cualquiera" || tipoVehiculoDeTexto([v.clase,v.tipo,v.marca,v.modelo,v.notas_operacion].filter(Boolean).join(" ")) === requerido;
+      })
+    : [];
+
+// ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Calcular km por carretera via OpenRouteService (gratuito) ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+async function calcularKmRuta(origen, destino, puntos = null) {
+  const lugares = Array.isArray(puntos) && puntos.length ? puntos : [origen, destino].filter(Boolean);
+  if (lugares.length < 2) return null;
+  setCalcKm(true);
+  try {
+    const stops = lugares.map((place, idx) => {
+      const raw = typeof place === "object" && place !== null ? place : { name: String(place || "").trim(), address: String(place || "").trim() };
+      const address = resolvePuntoInteresQuery(raw.address || raw.direccion || raw.name || raw.nombre || "");
+      return {
+        type: raw.type || raw.tipo || (idx === 0 ? "Carga" : idx === lugares.length - 1 ? "Descarga" : "Parada"),
+        name: raw.name || raw.nombre || raw.cliente_nombre || address,
+        address,
+        google_maps_url: raw.google_maps_url || raw.googleMapsUrl || raw.maps_url || "",
+        lat: raw.lat ?? raw.latitud ?? null,
+        lng: raw.lng ?? raw.longitud ?? null,
+      };
+    }).filter(hasRoutePlaceData);
+    const data = await optimizarRuta({ preference: "rapida", stops });
+    const km = Number(data?.distance_km || 0);
+    if (data?.warning && km) notify(data.warning, "warning");
+    if (!km) throw new Error("No se pudo calcular distancia con las direcciones indicadas.");
+    return Math.round(km);
+  } catch(e) {
+    notify("No se pudieron calcular los km automaticamente. Revisa los enlaces/coordenadas o introduce los km manualmente.", "warning");
+    return null;
+  } finally {
+    setCalcKm(false);
+  }
+}
+
+function GestionPuntosInteresModal({ onClose, onApply }) {
+  const [puntos, setPuntos] = useState(getPuntosInteres);
+  const [editing, setEditing] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    syncPuntosInteresCache((next) => setPuntos(next))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  async function removePoint(point) {
+    const ok = await confirmDialog({
+      title: "Eliminar punto guardado",
+      message: `Eliminar el punto "${point.nombre}"?`,
+      confirmText: "Eliminar",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      if (point.id && !String(point.id).startsWith("poi_")) await borrarPuntoInteres(point.id);
+    } catch (e) {
+      notify(e.message || "No se pudo eliminar en servidor.", "warning");
+    }
+    const next = setPuntosInteresCache(getPuntosInteres().filter(p => String(p.id) !== String(point.id)));
+    setPuntos(next);
+    onApply?.(next);
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",zIndex:540,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,width:"min(880px,96vw)",maxHeight:"92vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        <div style={{padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)"}}>Puntos guardados</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>Catalogo independiente de clientes para origenes, destinos y paradas habituales.</div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button type="button" onClick={()=>setEditing({ tipo:"ambos", pais:"España" })} style={{...S.btn,background:"var(--accent)",color:"#fff"}}>Nuevo punto</button>
+            <button type="button" onClick={onClose} style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)"}}>Cerrar</button>
+          </div>
+        </div>
+        <div style={{padding:20,overflowY:"auto"}}>
+          {loading ? (
+            <div style={{fontSize:12,color:"var(--text5)"}}>Cargando puntos guardados...</div>
+          ) : !puntos.length ? (
+            <div style={{fontSize:12,color:"var(--text5)"}}>Todavia no hay puntos guardados.</div>
+          ) : (
+            <div style={{display:"grid",gap:10}}>
+              {puntos.map(point => (
+                <div key={point.id} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px",display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"start"}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{point.nombre}</div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion}</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
+                      {point.tipo && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(59,130,246,.12)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.22)"}}>{point.tipo}</span>}
+                      {point.ventana && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)"}}>{point.ventana}</span>}
+                      {point.google_maps_url && <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--accent)"}}>Google Maps</a>}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:8}}>
+                    <button type="button" onClick={()=>setEditing(point)} style={{...S.btn,background:"transparent",color:"var(--accent)",border:"1px solid var(--border2)",padding:"6px 10px"}}>Editar</button>
+                    <button type="button" onClick={()=>removePoint(point)} style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",padding:"6px 10px"}}>Eliminar</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      {editing && (
+        <PuntoInteresModal
+          initial={editing}
+          onClose={()=>setEditing(null)}
+          onSave={(next)=>{ setPuntos(next); onApply?.(next); setEditing(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Calcular km en vacio: desde ultimo destino del vehiculo hasta nuevo origen ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+async function calcularKmVacio(vehiculoId, nuevoOrigen) {
+  if (!vehiculoId || !nuevoOrigen?.trim()) return null;
+  // Buscar ultimo pedido entregado de este vehiculo
+  const ultimos = (pedidos||[])
+    .filter(p => p.vehiculo_id === vehiculoId && 
+                 (p.estado === "entregado" || p.estado === "facturado") &&
+                 p.destino)
+    .sort((a,b) => new Date(b.fecha_carga||b.fecha_pedido) - new Date(a.fecha_carga||a.fecha_pedido));
+  const ultimoDestino = ultimos[0]?.destino;
+  if (!ultimoDestino) return null;
+  const km = await calcularKmRuta(ultimoDestino, nuevoOrigen);
+  return { km, desde: ultimoDestino };
+}
+
+async function maybeCrearRutaClienteDesdePedido() {
+  if (!form.origen || !form.destino || !form.cliente_id) return;
+  if (form.ruta_id) return form.ruta_id;
+  const origenN  = form.origen.trim().toLowerCase();
+  const destinoN = form.destino.trim().toLowerCase();
+  const tipoRutaActual = tipoVehiculoDeTexto([remolqueActual?.clase, remolqueActual?.tipo, remolqueActual?.marca, remolqueActual?.modelo, remolqueActual?.notas_operacion].filter(Boolean).join(" "));
+  const routeKey = `${form.cliente_id}|${origenN}|${destinoN}|${tipoRutaActual || "cualquiera"}`;
+  if (rutasCreadasRef.current.has(routeKey)) return;
+  let rutasClienteActualizadas = rutas;
+  try {
+    const fresh = await getRutasCliente(form.cliente_id);
+    if (Array.isArray(fresh)) {
+      rutasClienteActualizadas = fresh.map(r => ({
+        ...r,
+        id: r.ruta_id || r.id,
+        precio_base: r.precio_base ?? r.precio ?? 0,
+        cliente_id: form.cliente_id,
+      }));
+      setRutas(rutasClienteActualizadas);
+    }
+  } catch (e) {
+    console.warn("No se pudieron refrescar las rutas del cliente antes de guardar:", e.message);
+  }
+  const rutaExistente = rutasClienteActualizadas.find(r =>
+    matchEndpointRuta(form.origen, r.origen) &&
+    matchEndpointRuta(form.destino, r.destino) &&
+    (!r.cliente_id || r.cliente_id === form.cliente_id) &&
+    (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
+  );
+  if (rutaExistente) {
+    if (!routeTarifaMatchesDraft(rutaExistente, form)) {
+      rutasCreadasRef.current.add(routeKey);
+      notify("Existe una ruta con ese origen/destino, pero tiene otra tarifa. No se ha vinculado automaticamente.", "info");
+      return null;
+    }
+    if (!form.ruta_id && rutaExistente.id) setForm(p => ({...p, ruta_id: rutaExistente.id}));
+    rutasCreadasRef.current.add(routeKey);
+    return rutaExistente.id || null;
+  }
+  const addRoute = await confirmDialog({
+    title: "Guardar ruta del cliente",
+    message: `La ruta "${form.origen} -> ${form.destino}" no existe todavia.\n\nQuieres guardarla como ruta de este cliente para reutilizarla en futuros viajes?`,
+    confirmText: "Guardar ruta",
+    cancelText: "No guardar",
+  });
+  if (!addRoute) {
+    rutasCreadasRef.current.add(routeKey);
+    return null;
+  }
+  const origenRuta = form.origen.trim().toUpperCase();
+  const destinoRuta = form.destino.trim().toUpperCase();
+  const nueva = await crearRutaCliente(form.cliente_id, {
+    origen: origenRuta,
+    destino: destinoRuta,
+    km: toNullableNumber(form.km_ruta),
+    precio_base: toFiniteNumber(form.precio_unitario, calcImporte(form)),
+    tarifa_tipo: form.tipo_precio || "viaje",
+    tipo_vehiculo: tipoRutaActual || "cualquiera",
+    minimo_facturable: form.tipo_precio === "viaje" ? toNullableNumber(form.importe_minimo) : null,
+    minimo_unidades: form.tipo_precio !== "viaje" ? toNullableNumber(form.minimo_unidades) : null,
+    notas: "Creada automaticamente desde pedido",
+  });
+  setRutas(prev => prev.some(r => r.id === nueva.ruta_id || (
+    matchEndpointRuta(origenRuta, r.origen) &&
+    matchEndpointRuta(destinoRuta, r.destino) &&
+    (!r.cliente_id || r.cliente_id === form.cliente_id)
+  )) ? prev : [...prev, {
+    id: nueva.ruta_id,
+    origen: origenRuta,
+    destino: destinoRuta,
+    km: toNullableNumber(form.km_ruta),
+    precio_base: toFiniteNumber(form.precio_unitario, calcImporte(form)),
+    tarifa_tipo: form.tipo_precio || "viaje",
+    tipo_vehiculo: tipoRutaActual || "cualquiera",
+    minimo_facturable: form.tipo_precio === "viaje" ? toNullableNumber(form.importe_minimo) : null,
+    minimo_unidades: form.tipo_precio !== "viaje" ? toNullableNumber(form.minimo_unidades) : null,
+    cliente_id: form.cliente_id,
+  }]);
+  rutasCreadasRef.current.add(routeKey);
+  setForm(p => ({...p, ruta_id: nueva.ruta_id}));
+  return nueva.ruta_id;
+}
+
+async function requestClose() {
+  if (saving) return;
+  if (editando?._readonly && !desvinculado) { onClose(); return; }
+  const changed = JSON.stringify(form) !== initialFormRef.current;
+  if (editando && !changed) { onClose(); return; }
+  const guardarAntes = await confirmDialog({
+    title: "Cambios sin guardar",
+    message: "Hay cambios sin guardar o el pedido todavia no se ha creado.\n\nQuieres guardar antes de salir?",
+    confirmText: "Guardar y salir",
+    cancelText: "No guardar",
+    tone: "warning",
+  });
+  if (guardarAntes) {
+    await guardar();
+    return;
+  }
+  const salirSinGuardar = await confirmDialog({
+    title: "Salir sin guardar",
+    message: "Salir sin guardar el pedido?",
+    confirmText: "Salir sin guardar",
+    cancelText: "Volver",
+    tone: "danger",
+  });
+  if (salirSinGuardar) onClose();
+}
+
+async function notificarColaborador(force = false) {
+  if (!editando?.id) {
+    notify("Guarda el pedido antes de enviar el enlace al colaborador.", "warning");
+    return;
+  }
+  setNotificandoColaborador(true);
+  try {
+    const resp = await enviarWorkflowColaborador(editando.id, force);
+    notify(resp?.already ? "El colaborador ya tenia el flujo enviado." : "Email enviado al colaborador.", resp?.already ? "info" : "success");
+  } catch (e) {
+    notify(e.message || "No se pudo enviar el email al colaborador.", "error");
+  } finally {
+    setNotificandoColaborador(false);
+  }
+}
+
+async function previsualizarColaborador() {
+  if (!editando?.id) {
+    notify("Guarda el pedido antes de previsualizar el enlace del colaborador.", "warning");
+    return;
+  }
+  setPrevisualizandoColaborador(true);
+  try {
+    const data = await getWorkflowColaboradorPreview(editando.id);
+    if (!data?.html) throw new Error("El servidor no ha devuelto la previsualizacion.");
+    const w = window.open("", "_blank", "width=820,height=980");
+    if (!w) {
+      notify("El navegador ha bloqueado la ventana de previsualizacion.", "warning");
+      return;
+    }
+    w.document.write(data.html);
+    w.document.close();
+  } catch (e) {
+    notify(e.message || "No se pudo previsualizar el enlace del colaborador.", "error");
+  } finally {
+    setPrevisualizandoColaborador(false);
+  }
+}
+
+
+// eslint-disable-next-line no-unused-vars
+async function guardarLegacy() {
+  if (!form.cliente_id) { notify("Selecciona un cliente", "warning"); return; }
+  if (!form.fecha_carga) { notify("La fecha de carga es obligatoria.", "warning"); return; }
+  // BLOQUEO: solo si realmente hay factura final vinculada
+  const _tieneFacturaFinal = pedidoTieneFacturaFinal(editando);
+  if (editando && _tieneFacturaFinal && !desvinculado) {
+    notify("Este pedido esta facturado y no puede modificarse.\nSi necesitas hacer cambios, emite una factura rectificativa desde Facturacion.", "warning");
+    return; // NO cerrar el modal - solo bloquear el guardado
+  }
+  setSaving(true);
+  try {
+    // Clean payload - remove frontend-only fields not in DB schema
+    const { remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
+            chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
+            factura_numero,
+            // Computed/joined fields that are NOT DB columns:
+            facturado, cliente_email, cliente_telefono,
+            chofer2_nombre, remolque_id,
+            ...formClean } = form;
+    // precio_cliente_col and precio_colaborador ARE DB columns now - keep in formClean
+    const payload = sanitizePedidoPayload({ ...formClean, importe: calcImporte(form),
+      precio_colaborador: form.colaborador_id ? (importeColaboradorCalculado(form) || form.precio_colaborador || null) : form.precio_colaborador,
+      puntos_carga: parseStops(form.puntos_carga),
+      puntos_descarga: parseStops(form.puntos_descarga),
+      extracostes_importe: toFiniteNumber(form.extracostes ?? form.extracostes_importe, 0),
+      importe_minimo: form.tipo_precio === "viaje" ? toNullableNumber(form.importe_minimo) : null,
+      minimo_unidades: form.tipo_precio !== "viaje" ? toNullableNumber(form.minimo_unidades) : null,
+      importe_paralizacion: toNullableNumber(form.importe_paralizacion),
+      paralizacion_horas: toNullableNumber(form.paralizacion_horas),
+    });
+    // Map remolque_id_manual -> remolque_id for backend
+    if (remolque_id_manual !== undefined) payload.remolque_id = remolque_id_manual || null;
+    // Sync habitual driver in background; remolque is handled by the pedido backend payload.
+    if (form.vehiculo_id) {
+      const veh = vehiculosLocal.find(v=>v.id===form.vehiculo_id);
+      if (veh) {
+        const choferChanged  = form.chofer_id && form.chofer_id !== veh.chofer_id;
+        if (choferChanged) {
+          import("../services/api")
+            .then(({ editarVehiculo: evFn }) => evFn(form.vehiculo_id, {...veh, chofer_id: form.chofer_id}))
+            .catch(e => console.warn("No se pudo actualizar chofer del conjunto:", e.message));
+        }
+      }
+    }
+
+    let pedidoGuardado = null;
+    if (editando) {
+      pedidoGuardado = await editarPedido(editando.id, payload);
+    }
+    else {
+      pedidoGuardado = await crearPedido(payload);
+    }
+    const pedidoId = pedidoGuardado?.id || editando?.id;
+    let rutaAutoId = null;
+    try { rutaAutoId = await maybeCrearRutaClienteDesdePedido(); } catch(e) { console.warn("No se pudo crear la ruta:", e.message); }
+    if (pedidoId && rutaAutoId && !payload.ruta_id) {
+      try { await editarPedido(pedidoId, {...payload, ruta_id: rutaAutoId}); }
+      catch(e) { console.warn("No se pudo vincular la ruta al pedido:", e.message); }
+    }
+    if (pedidoId && payload.colaborador_id && Number(payload.precio_colaborador || 0)) {
+      enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
+    }
+    onSaved();
+  } catch(e) { notify(e.message, "error"); }
+  finally { setSaving(false); }
+}
+
+async function guardar() {
+  if (!form.cliente_id) { notify("Selecciona un cliente", "warning"); return; }
+  if (!form.fecha_carga) { notify("La fecha de carga es obligatoria.", "warning"); return; }
+  if (rutaIncompatible) {
+    notify("La ruta seleccionada no es compatible con el remolque actual. Cambia el remolque antes de guardar.", "warning");
+    return;
+  }
+  const tieneFacturaFinal = pedidoTieneFacturaFinal(editando);
+  if (editando?.id && tieneFacturaFinal && !desvinculado) {
+    notify("Este pedido esta facturado y no puede modificarse.\nSi necesitas hacer cambios, emite una factura rectificativa desde Facturacion.", "warning");
+    return;
+  }
+  if (clienteRiesgoPedido?.requiere_confirmacion && !isRiskConfirmationFresh(riesgoConfirmadoRef, form.cliente_id, clienteRiesgoPedido)) {
+    const money = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const detalleRiesgo = [
+      `Pendiente actual: ${money(clienteRiesgo?.total_pendiente)} EUR`,
+      clienteRiesgo?.facturas_pendientes ? `Facturas pendientes: ${clienteRiesgo.facturas_pendientes}` : null,
+      clienteRiesgo?.facturas_vencidas ? `Facturas vencidas: ${clienteRiesgo.facturas_vencidas}` : null,
+      `Riesgo actual: ${formatRiskPct(clienteRiesgoPedido.riesgo_pct_actual)}`,
+      clienteRiesgo?.limite_riesgo > 0 ? `Limite riesgo: ${money(clienteRiesgo.limite_riesgo)} EUR` : "Sin limite de riesgo configurado",
+      `Con este pedido: ${formatRiskPct(clienteRiesgoPedido.riesgo_pct_proyectado)} (${money(clienteRiesgoPedido.total_proyectado)} EUR expuestos)`,
+      "",
+      ...clienteRiesgoPedido.avisos.map(a => `- ${a.mensaje}`),
+      "",
+      "Confirma si quieres guardar igualmente el pedido.",
+    ].filter(Boolean).join("\n");
+    const ok = await confirmDialog({
+      title: clienteRiesgoPedido.nivel === "critico" ? "Cliente en riesgo critico" : "Cliente con cobros/riesgo pendiente",
+      message: detalleRiesgo,
+      confirmText: "Guardar pedido",
+      cancelText: "Revisar",
+      tone: clienteRiesgoPedido.nivel === "critico" || clienteRiesgoPedido.nivel === "alto" ? "warning" : "success",
+    });
+    if (!ok) return;
+    markRiskConfirmed(riesgoConfirmadoRef, form.cliente_id, clienteRiesgoPedido);
+  }
+  setSaving(true);
+  try {
+    const payload = buildPedidoUpdatePayload(form);
+
+    if (form.vehiculo_id) {
+      const veh = vehiculosLocal.find(v => v.id === form.vehiculo_id);
+      if (veh) {
+        const choferChanged = form.chofer_id && form.chofer_id !== veh.chofer_id;
+        if (choferChanged) {
+          import("../services/api")
+            .then(({ editarVehiculo: evFn }) => evFn(form.vehiculo_id, { ...veh, chofer_id: form.chofer_id }))
+            .catch(e => console.warn("No se pudo actualizar chofer del conjunto:", e.message));
+        }
+      }
+    }
+
+    let pedidoGuardado;
+    try {
+      pedidoGuardado = editando?.id
+        ? await editarPedido(editando.id, payload)
+        : await crearPedido(payload);
+    } catch (err) {
+      if (!isFestivoConfirmError(err) || !(await confirmFestivoDestino(err))) throw err;
+      const payloadConfirmado = { ...payload, festivo_confirmado: true };
+      pedidoGuardado = editando?.id
+        ? await editarPedido(editando.id, payloadConfirmado)
+        : await crearPedido(payloadConfirmado);
+      notify("Pedido guardado con aviso de festivo aceptado. Gerencia queda notificada.", "success");
+    }
+
+    const pedidoId = pedidoGuardado?.id || editando?.id;
+    let rutaAutoId = null;
+    try {
+      rutaAutoId = await maybeCrearRutaClienteDesdePedido();
+    } catch (e) {
+      console.warn("No se pudo crear la ruta:", e.message);
+    }
+
+    if (pedidoId && rutaAutoId && !payload.ruta_id) {
+      try {
+        await editarPedido(pedidoId, buildPedidoUpdatePayload(form, { ruta_id: rutaAutoId }));
+      } catch (e) {
+        console.warn("No se pudo vincular la ruta al pedido:", e.message);
+      }
+    }
+
+    if (pedidoId && pendingDocs.length) {
+      for (const doc of pendingDocs) {
+        await subirPedidoDoc(pedidoId, doc);
+      }
+      notify(`${pendingDocs.length} documento(s) adjuntados al pedido.`, "success");
+      setPendingDocs([]);
+    }
+
+    if (pedidoId && payload.colaborador_id && Number(payload.precio_colaborador || 0)) {
+      enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
+    }
+
+    onSaved();
+  } catch (e) {
+    notify(e.message, "error");
+  } finally {
+    setSaving(false);
+  }
+}
+
+const f = k => e => setForm(p => ({...p,[k]: (k==="origen"||k==="destino") ? e.target.value.toUpperCase() : e.target.value}));
+
+async function seleccionarDocsPendientes(e) {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  const next = [];
+  for (const file of files) {
+    if (file.size > 3145728) {
+      notify(`${file.name}: maximo 3MB por documento`, "warning");
+      continue;
+    }
+    try {
+      next.push({
+        nombre: file.name,
+        tipo: inferPedidoDocTipo(file.name),
+        file_base64: await fileToPedidoDocBase64(file),
+        file_mime: file.type || "application/pdf",
+        file_size_kb: Math.round(file.size / 1024),
+      });
+    } catch (err) {
+      notify(`No se pudo leer ${file.name}: ${err.message}`, "error");
+    }
+  }
+  if (next.length) setPendingDocs(prev => [...prev, ...next]);
+  e.target.value = "";
+}
+
+function aplicarColaborador(col) {
+  const impActual = importeClienteColCalculado(form) || Number(form.precio_unitario || 0);
+  setForm(p => ({
+    ...p,
+    colaborador_id: col?.id || "",
+    colaborador_nombre: col?.nombre || "",
+    precio_cliente_col: col?.id ? (impActual || p.precio_cliente_col || "") : "",
+    coste_gasoil: col?.id ? 0 : p.coste_gasoil,
+  }));
+  setColaboradorBusqueda("");
+  setShowColaboradorSuggestions(false);
+}
+
+async function crearColaboradorDesdePedido(nombre) {
+  const nombreLimpio = String(nombre || "").trim();
+  if (!nombreLimpio) return;
+  setCreandoColaborador(true);
+  try {
+    const nuevo = await crearColaborador({
+      tipo: "empresa",
+      nombre: nombreLimpio,
+      notas: "Creado desde pedidos. Pendiente de completar datos fiscales, contacto, pago y documentacion.",
+      pendiente_revision: true,
+      origen_creacion: "pedidos",
+    });
+    setColaboradoresLocal(prev => [nuevo, ...prev.filter(c => c.id !== nuevo.id)]);
+    aplicarColaborador(nuevo);
+    notify("Colaborador creado y asignado al pedido.", "success");
+  } catch (e) {
+    notify(e.message || "No se pudo crear el colaborador.", "error");
+  } finally {
+    setCreandoColaborador(false);
+  }
+}
+
+const syncCantidadSiVacia = (draft, force = false) => {
+  const tipo = draft.tipo_precio || "viaje";
+  if (tipo === "viaje") {
+    if (force && (draft.cantidad === null || draft.cantidad === undefined || draft.cantidad === "")) draft.cantidad = "";
+    return draft;
+  }
+  if (force || draft.cantidad === null || draft.cantidad === undefined || draft.cantidad === "") {
+    draft.cantidad = cantidadSugeridaPorTipo(draft, tipo);
+  }
+  return draft;
+};
+
+const aplicarTarifaRutaADraft = (draft, ruta) => {
+  if (!ruta) return draft;
+  const tarifaTipo = ruta.tarifa_tipo || draft.tipo_precio || "viaje";
+  const recargoPct = Number(ruta.recargo_combustible_pct || 0) || 0;
+  const precioBase = Number(ruta.precio_base || 0) || 0;
+  const precioFinal = precioBase > 0 ? Number((precioBase * (1 + (recargoPct / 100))).toFixed(4)) : precioBase;
+  const minimoUnidades = normalizeMinimoUnidadesRuta(ruta, tarifaTipo);
+  const next = {
+    ...draft,
+    tipo_precio: tarifaTipo,
+    precio_unitario: precioFinal || draft.precio_unitario,
+    precio_base_sin_combustible: precioBase || draft.precio_base_sin_combustible || "",
+    recargo_combustible_pct: recargoPct || 0,
+    importe_minimo: tarifaTipo === "viaje" ? (ruta.minimo_facturable || "") : "",
+    minimo_unidades: tarifaTipo !== "viaje" ? minimoUnidades : "",
+  };
+  if (!Number(draft.cantidad || 0)) {
+    next.cantidad = cantidadSugeridaPorTipo(next, tarifaTipo);
+  }
+  next.importe_revision_combustible = calcRevisionCombustible(next);
+  return next;
+};
+
+  // The modal JSX (extracted from Pedidos main render)
+  return (
+    <>
+<div style={S.modal}>
+          <div style={S.mbox}>
+            <div style={{position:"sticky",top:-28,zIndex:30,margin:"-28px -28px 16px",padding:"18px 28px 12px",background:"var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:12}}>
+              <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,color:"var(--text)",flex:1}}>
+                {editando?._readonly
+                  ? editando.numero
+                  : editando?._duplicado
+                    ? `Duplicar ${editando.numero || "pedido"}`
+                    : editando
+                      ? `Editar ${editando.numero}`
+                      : "Nuevo pedido"}
+              </div>
+              <button
+                type="button"
+                onClick={requestClose}
+                title="Cerrar pedido"
+                aria-label="Cerrar pedido"
+                style={{width:34,height:34,borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:20,lineHeight:"20px",cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:800}}
+              >
+                x
+              </button>
+            </div>
+            {form.pendiente_completar && (
+              <div style={{background:"rgba(251,191,36,.1)",border:"1px solid rgba(251,191,36,.28)",borderRadius:8,padding:"9px 12px",marginBottom:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                <div style={{fontSize:12,color:"#fbbf24",fontWeight:700,flex:1}}>
+                  {form.aviso_completar || "Pedido creado rapido. Completar datos antes de cerrar el trabajo."}
+                </div>
+                {!editando?._readonly && (
+                  <button type="button" onClick={()=>setForm(p=>({...p,pendiente_completar:false,aviso_completar:null}))}
+                    style={{...S.btn,background:"rgba(251,191,36,.16)",color:"#fbbf24",border:"1px solid rgba(251,191,36,.35)",padding:"5px 10px",fontSize:11}}>
+                    Marcar completado
+                  </button>
+                )}
+              </div>
+            )}
+            {editando?._readonly && !desvinculado && (
+              <div style={{background:"rgba(16,185,129,.1)",border:"1px solid rgba(16,185,129,.25)",borderRadius:8,padding:"7px 14px",marginBottom:16,fontSize:12,color:"var(--green)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span><strong>PEDIDO FACTURADO{editando.factura_numero ? ` - ${editando.factura_numero}` : ""}</strong>
+                &nbsp;| Este pedido no se puede modificar. Para corregir importes emite una factura rectificativa.</span>
+                <button onClick={async()=>{
+                  const ok = await confirmDialog({
+                    title: "Desvincular factura",
+                    message: "Esto NO elimina la factura; solo separa el pedido de ella.\nEl pedido volvera a estar editable.\n\nUsa esto solo si el pedido fue facturado por error.",
+                    confirmText: "Desvincular",
+                    tone: "danger",
+                  });
+                  if(!ok) return;
+                  try {
+                    await desvincularFacturaPedido(editando.id);
+                    setDesvinculado(true);
+                    if (typeof onFacturaDesvinculada === "function") onFacturaDesvinculada(editando.id);
+                    // Reload parent list without closing modal
+                    if (typeof onReload === "function") onReload();
+                  } catch(e) { notify("Error: "+e.message, "error"); }
+                }} style={{marginLeft:"auto",fontSize:10,padding:"3px 10px",borderRadius:5,
+                  border:"1px solid rgba(239,68,68,.4)",background:"rgba(239,68,68,.08)",
+                  color:"#ef4444",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap",
+                  fontFamily:"'DM Sans',sans-serif"}}>
+                  Desvincular factura
+                </button>
+              </div>
+            )}
+
+            <div style={S.sec}>Cliente y ruta</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div style={{gridColumn:"1/-1"}}>
+                <label style={S.label}>Cliente *</label>
+                {/* Autocomplete por nombre */}
+                <div style={{position:"relative"}}>
+                  <input
+                    placeholder="Escribe el nombre del cliente..."
+                    style={{...S.input,width:"100%"}}
+                    value={nombreBusqueda || (form.cliente_id ? clientes.find(c=>c.id===form.cliente_id)?.nombre||"" : "")}
+                    onChange={e=>{
+                      const val = e.target.value;
+                      setNombreBusqueda(val);
+                      if(!val) { setForm(p=>({...p,cliente_id:""})); }
+                      setShowSuggestions(true);
+                    }}
+                    onFocus={()=>setShowSuggestions(true)}
+                    onBlur={()=>setTimeout(()=>setShowSuggestions(false),200)}
+                  />
+                  {/* Sugerencias */}
+                  {showSuggestions && nombreBusqueda && (()=>{
+                    const sugs = clientes.filter(c=>
+                      c.nombre.toLowerCase().includes(nombreBusqueda.toLowerCase()) ||
+                      (c.cif||"").toLowerCase().includes(nombreBusqueda.toLowerCase())
+                    ).slice(0,6);
+                    if(sugs.length===0) return(
+                      <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,zIndex:50,padding:"10px 14px"}}>
+                        <div style={{fontSize:12,color:"var(--text4)",marginBottom:8}}>
+                          No hay ningun cliente con ese nombre.
+                        </div>
+                        <div style={{display:"flex",gap:8}}>
+                          <button type="button"
+                            onClick={()=>{ setModalNuevoCliente({nombre:nombreBusqueda}); setShowSuggestions(false); }}
+                            style={{...S.btn,background:"var(--accent)",color:"#fff",fontSize:12,padding:"5px 12px"}}>
+                            Crear cliente "{nombreBusqueda}"
+                          </button>
+                          <button type="button"
+                            onClick={()=>{ setNombreBusqueda(""); setShowSuggestions(false); }}
+                            style={{...S.btn,background:"transparent",border:"1px solid var(--border2)",color:"var(--text4)",fontSize:12,padding:"5px 10px"}}>
+                            Cancelar
+                          </button>
+                        </div>
+                        <div style={{fontSize:11,color:"var(--text5)",marginTop:6}}>
+                          Aviso: sin cliente no se puede crear el viaje.
+                        </div>
+                      </div>
+                    );
+                    return(
+                      <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,zIndex:50,overflow:"hidden"}}>
+                        {sugs.map(c=>(
+                          <div key={c.id}
+                            onMouseDown={()=>{
+                              setForm(p=>({
+                                ...p,
+                                cliente_id: c.id,
+                                tipo_iva: c.tipo_iva ?? p.tipo_iva ?? 21,
+                                iva_regimen: c.iva_regimen || ivaOptionValue({ tipo_iva: c.tipo_iva ?? p.tipo_iva }),
+                                ventana_carga: p.ventana_carga || c.horario_carga || "",
+                                ventana_descarga: p.ventana_descarga || c.horario_descarga || "",
+                              }));
+                              setNombreBusqueda("");
+                              setShowSuggestions(false);
+                            }}
+                            style={{padding:"9px 14px",cursor:"pointer",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}
+                            onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"}
+                            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                            <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{c.nombre}</span>
+                            {c.cif&&<span style={{fontSize:11,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{c.cif}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+                {/* Cliente seleccionado */}
+                {form.cliente_id&&!nombreBusqueda&&(()=>{
+                  const c=clientes.find(x=>x.id===form.cliente_id);
+                  if(!c) return null;
+                  return(
+                    <div style={{marginTop:6,padding:"6px 12px",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.2)",borderRadius:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:12,color:"var(--accent)",fontWeight:600}}>{c.nombre}{c.cif?" | "+c.cif:""}</span>
+                      <button type="button" onClick={()=>setForm(p=>({...p,cliente_id:""}))}
+                        style={{background:"none",border:"none",color:"var(--text5)",cursor:"pointer",fontSize:14,padding:"0 4px"}}>Quitar</button>
+                    </div>
+                  );
+                })()}
+              </div>
+              {form.cliente_id && clienteRiesgoLoading && (
+                <div style={{gridColumn:"1/-1",padding:"8px 12px",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7,fontSize:12,color:"var(--text4)"}}>
+                  Revisando cobros pendientes y limite de riesgo del cliente...
+                </div>
+              )}
+              {form.cliente_id && clienteRiesgo && (() => {
+                const nivel = clienteRiesgoPedido.nivel || "medio";
+                const danger = nivel === "critico" || nivel === "alto";
+                const color = nivel === "critico" ? "#ef4444" : danger ? "#f59e0b" : "#22c55e";
+                const money = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                return (
+                  <div style={{gridColumn:"1/-1",padding:"10px 12px",background:danger ? "rgba(245,158,11,.09)" : "rgba(34,197,94,.08)",border:`1px solid ${danger ? "rgba(245,158,11,.3)" : "rgba(34,197,94,.24)"}`,borderRadius:8,display:"grid",gap:6}}>
+                    <div style={{display:"flex",gap:8,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
+                      <strong style={{fontSize:12,color}}>Aviso de cobro/riesgo del cliente</strong>
+                      <span style={{fontSize:18,color,fontWeight:900,fontFamily:"'JetBrains Mono',monospace"}}>
+                        {formatRiskPct(clienteRiesgoPedido.riesgo_pct_actual)}
+                      </span>
+                    </div>
+                    <div style={{fontSize:11,color:"var(--text4)"}}>
+                      Pendiente: {money(clienteRiesgo.total_pendiente)} EUR
+                      {clienteRiesgo.limite_riesgo > 0 ? ` de ${money(clienteRiesgo.limite_riesgo)} EUR` : " | Sin limite de riesgo configurado"}
+                      {clienteRiesgoPedido.riesgo_pct_proyectado !== null ? ` | con este pedido: ${formatRiskPct(clienteRiesgoPedido.riesgo_pct_proyectado)}` : ""}
+                    </div>
+                    {clienteRiesgoPedido.avisos.length > 0 && (
+                      <div style={{display:"grid",gap:4}}>
+                        {clienteRiesgoPedido.avisos.map((av, idx) => (
+                          <div key={`${av.tipo}-${idx}`} style={{fontSize:12,color:"var(--text3)"}}>{av.mensaje}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {form.cliente_id && rutas.length > 0 && (
+                <div style={{gridColumn:"1/-1",padding:"8px 12px",background:"rgba(16,185,129,.07)",border:"1px solid rgba(16,185,129,.2)",borderRadius:7,fontSize:12,color:"var(--text3)"}}>
+                  Hay {rutas.length} tarifa(s) guardada(s) para este cliente. Usa "Cargar tarifa / ruta guardada" para rellenar origen, destino, km, precio, minimos y recargos.
+                </div>
+              )}
+              {/* Regla tarifaria por ruta */}
+              {form.cliente_id&&form.origen&&form.destino&&(()=>{
+                const rutaTarifa = rutasCompatibles.find(r=>{
+                  const mO = matchEndpointRuta(form.origen, r.origen);
+                  const mD = matchEndpointRuta(form.destino, r.destino);
+                  return mO&&mD&&routeTarifaMatchesDraft(r, form);
+                });
+                if(!rutaTarifa) return null;
+                const precioVista = Number(rutaTarifa.precio_base || 0) * (1 + ((Number(rutaTarifa.recargo_combustible_pct || 0) || 0) / 100));
+                const tipos={viaje:"viaje",kg:"EUR/100kg",tonelada:"EUR/tn",km:"EUR/km",hora:"EUR/h",palet:"EUR/palet"};
+                return(
+                  <div style={{gridColumn:"1/-1",padding:"8px 12px",background:"rgba(16,185,129,.07)",border:"1px solid rgba(16,185,129,.2)",borderRadius:7,display:"flex",alignItems:"center",gap:10,fontSize:12}}>
+                    <span style={{fontSize:14}}>Ruta</span>
+                    <span style={{color:"var(--text3)"}}>
+                      Regla encontrada: <strong style={{color:"#10b981"}}>{precioVista.toLocaleString("es-ES",{minimumFractionDigits:2})} EUR {tipos[rutaTarifa.tarifa_tipo]||rutaTarifa.tarifa_tipo}</strong>
+                      {Number(rutaTarifa.recargo_combustible_pct||0)>0 && <span style={{marginLeft:8,color:"#fbbf24"}}>+{Number(rutaTarifa.recargo_combustible_pct).toLocaleString("es-ES")} % combustible</span>}
+                    </span>
+                    <button type="button" onClick={()=>{
+                      setForm(p=>{
+                        const next = aplicarTarifaRutaADraft(p, rutaTarifa);
+                        return syncPrecioClienteCol(next);
+                      });
+                    }} style={{marginLeft:"auto",padding:"3px 10px",borderRadius:5,border:"none",background:"rgba(16,185,129,.2)",color:"#10b981",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      Aplicar precio
+                    </button>
+                  </div>
+                );
+              })()}
+              <div><label style={S.label}>Cargar tarifa / ruta guardada</label>
+                <select value={form.ruta_id||""} onChange={e=>{
+  const r=rutas.find(rt=>rt.id===e.target.value);
+  setForm(p=>{
+    const newForm = {...p, ruta_id:e.target.value};
+    if (r) {
+      // Auto-fill route data
+      if (r.origen)  newForm.origen  = r.origen;
+      if (r.destino) newForm.destino = r.destino;
+      if (r.km)      newForm.km_ruta = r.km;
+
+      // Auto-fill peajes cost if ruta has it
+      if (r.peajes && Number(r.peajes) > 0) {
+        newForm.coste_peajes = Number(r.peajes);
+        setShowCostes(true);
+      }
+      Object.assign(newForm, aplicarTarifaRutaADraft(newForm, r));
+
+      // Auto-fill estimated gasoil cost if km available
+      if (r.km && !newForm.colaborador_id) {
+        newForm.coste_gasoil = calcularCosteGasoil(newForm);
+        setShowCostes(true);
+      }
+    }
+    return syncPrecioClienteCol(newForm);
+  });
+}} style={S.sel}>
+                  <option value="">Sin ruta / Manual</option>
+                  {rutas.map(r=>{
+                    const compatible = rutaCompatibleConConjunto(r);
+                    const tipoReq = r.tipo_vehiculo && r.tipo_vehiculo !== "cualquiera" ? ` (${r.tipo_vehiculo})` : "";
+                    return (
+                      <option key={r.id} value={r.id} disabled={!compatible}>
+                        {r.origen} -> {r.destino}{tipoReq}{!compatible ? " - requiere cambio de remolque" : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+                <div style={{marginTop:6,fontSize:11,color:"var(--text5)"}}>
+                  Al seleccionar una ruta se cargan automaticamente origen, destino, km, precio, minimo facturable y recargo.
+                </div>
+                {form.cliente_id && rutas.length > rutasCompatibles.length && (
+                  <div style={{marginTop:6,fontSize:11,color:"var(--text5)"}}>
+                    Hay {rutas.length - rutasCompatibles.length} ruta(s) del cliente no compatibles con el remolque actual. Cambia el remolque para poder seleccionarlas.
+                  </div>
+                )}
+                {rutaIncompatible && (
+                  <div style={{marginTop:6,fontSize:11,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.22)",borderRadius:7,padding:"7px 9px"}}>
+                    La ruta exige {rutaSeleccionada.tipo_vehiculo}; el remolque actual parece {tipoRemolqueActual || "sin clasificar"}. Cambia el remolque a uno compatible antes de guardar.
+                    {remolquesCompatiblesRuta.length > 0 && (
+                      <button type="button" onClick={()=>setForm(p=>({...p,remolque_id_manual:remolquesCompatiblesRuta[0].id}))}
+                        style={{marginLeft:8,padding:"3px 8px",borderRadius:6,border:"1px solid rgba(245,158,11,.35)",background:"transparent",color:"#f59e0b",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                        Usar {remolquesCompatiblesRuta[0].matricula}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div><label style={S.label}>Referencia cliente</label><input style={S.input} value={form.referencia_cliente||""} onChange={f("referencia_cliente")} placeholder="Ref. pedido del cliente"/></div>
+              <div>
+                <label style={S.label}>Origen (carga) *</label>
+                <input style={S.input} value={form.origen||""} onChange={f("origen")}/>
+                {form.cliente_id && (
+                  <div style={{marginTop:6}}>
+                    {puntosCargaClienteModal.length > 0 ? (
+                      <PuntoInteresPicker
+                        placeholder={puntosCargaClienteModal.length === 1 ? "Punto de carga del cliente" : "Elegir punto de carga del cliente"}
+                        puntos={puntosCargaClienteModal}
+                        onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
+                        style={{...S.sel,width:"100%"}}
+                      />
+                    ) : (
+                      <div style={{fontSize:11,color:"var(--text5)",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7,padding:"7px 9px"}}>
+                        {puntosCargaClienteLoading ? "Cargando puntos de carga del cliente..." : "Este cliente no tiene puntos de carga propios. Puedes usar un punto general o crear uno nuevo."}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div style={{display:"flex",gap:6,marginTop:6}}>
+                  <PuntoInteresPicker
+                    placeholder="Usar punto como origen"
+                    onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
+                    style={{...S.sel,flex:1}}
+                  />
+                  <button type="button" onClick={()=>setPoiDraft({nombre:form.origen,direccion:"",tipo:"carga",cliente_id:form.cliente_id || "",ventana:form.ventana_carga || "",pais:"España"})} disabled={!form.origen?.trim()}
+                    style={{...S.btn,background:"transparent",color:form.origen?.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
+                    Guardar punto
+                  </button>
+                  <button type="button" onClick={()=>setManagePointsOpen(true)}
+                    style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
+                    Puntos
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label style={S.label}>Destino (entrega) *</label>
+                <input style={S.input} value={form.destino||""} onChange={f("destino")}/>
+                <div style={{display:"flex",gap:6,marginTop:6}}>
+                  <PuntoInteresPicker
+                    placeholder="Usar punto como destino"
+                    onPick={p=>setForm(x=>{
+                      return {
+                        ...x,
+                        destino:(p.nombre || p.direccion || "").toUpperCase(),
+                        ventana_descarga:x.ventana_descarga || p.ventana || "",
+                        puntos_descarga: updatePrimaryStop(
+                          x.puntos_descarga,
+                          puntoToStop(p),
+                          (p.nombre || p.direccion || "").toUpperCase()
+                        ),
+                      };
+                    })}
+                    style={{...S.sel,flex:1}}
+                  />
+                  <button type="button" onClick={()=>setPoiDraft({nombre:form.destino,direccion:"",tipo:"descarga",ventana:form.ventana_descarga || "",pais:"España"})} disabled={!form.destino?.trim()}
+                    style={{...S.btn,background:"transparent",color:form.destino?.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
+                    Guardar punto
+                  </button>
+                  <button type="button" onClick={()=>setManagePointsOpen(true)}
+                    style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
+                    Puntos
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div style={S.sec}>Planificacion</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
+              <div><label style={S.label}>Fecha pedido</label><input type="date" style={S.input} value={form.fecha_pedido||""} onChange={f("fecha_pedido")}/></div>
+              <div><label style={S.label}>Fecha carga</label><input type="date" style={S.input} value={form.fecha_carga||""} onChange={f("fecha_carga")}/></div>
+              <div><label style={S.label}>Hora carga</label><input type="time" style={S.input} value={form.hora_carga||""} onChange={f("hora_carga")}/></div>
+              <div><label style={S.label}>Ventana carga</label><input style={S.input} value={form.ventana_carga||""} onChange={f("ventana_carga")} placeholder="08:00-14:00"/></div>
+              <div><label style={S.label}>Fecha descarga</label><input type="date" style={S.input} value={form.fecha_descarga||""} onChange={f("fecha_descarga")}/></div>
+              <div><label style={S.label}>Hora descarga</label><input type="time" style={S.input} value={form.hora_descarga||""} onChange={f("hora_descarga")}/></div>
+              <div><label style={S.label}>Ventana descarga</label><input style={S.input} value={form.ventana_descarga||""} onChange={f("ventana_descarga")} placeholder="07:00-17:00"/></div>
+              <div><label style={S.label}>Estado</label>
+                <select value={form.estado||"pendiente"} onChange={f("estado")} style={S.sel}>
+                  {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
+                </select>
+              </div>
+              <div style={{gridColumn:"1/3"}}>
+                <label style={S.label}>Google Maps carga</label>
+                <input
+                  style={S.input}
+                  value={getPrimaryStopField(form.puntos_carga, "google_maps_url")}
+                  onChange={e=>setForm(p=>({
+                    ...p,
+                    puntos_carga: updatePrimaryStop(
+                      p.puntos_carga,
+                      { google_maps_url: e.target.value },
+                      p.origen || ""
+                    ),
+                  }))}
+                  placeholder="https://maps.google.com/..."
+                />
+              </div>
+              <div style={{gridColumn:"3/5"}}>
+                <label style={S.label}>Google Maps descarga</label>
+                <input
+                  style={S.input}
+                  value={getPrimaryStopField(form.puntos_descarga, "google_maps_url")}
+                  onChange={e=>setForm(p=>({
+                    ...p,
+                    puntos_descarga: updatePrimaryStop(
+                      p.puntos_descarga,
+                      { google_maps_url: e.target.value },
+                      p.destino || ""
+                    ),
+                  }))}
+                  placeholder="https://maps.google.com/..."
+                />
+              </div>
+            </div>
+
+            <div style={S.sec}>Distancias</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+              <div>
+                <label style={S.label}>
+                  Km en ruta
+                  {getRoutePlaces(form).length >= 2 && (
+                    <button type="button" onClick={async()=>{
+                      const km = await calcularKmRuta(form.origen, form.destino, getRoutePlaces(form));
+                      if(km) setForm(p=>{
+                        const next = {...p, km_ruta:km};
+                        if (!next.colaborador_id) {
+                          next.coste_gasoil = calcularCosteGasoil(next);
+                          setShowCostes(true);
+                        }
+                        return syncCantidadSiVacia(next);
+                      });
+                    }} disabled={calcKm}
+                      style={{marginLeft:8,padding:"1px 8px",borderRadius:5,border:"1px solid var(--accent)",background:"transparent",color:"var(--accent)",fontSize:10,cursor:calcKm?"not-allowed":"pointer",fontWeight:700}}>
+                      {calcKm ? "Calculando..." : "Calcular"}
+                    </button>
+                  )}
+                </label>
+                <input type="text" inputMode="decimal" style={S.input} value={form.km_ruta||""} onChange={e=>{ const km=parseLocaleNumber(e.target.value,0); setForm(p=>{ const u=syncPrecioClienteCol(syncCantidadSiVacia({...p,km_ruta:e.target.value})); if(km>0&&!u.colaborador_id){u.coste_gasoil=calcularCosteGasoil(u); setShowCostes(true);} return u; }); }}
+                  placeholder="Se calcula automaticamente"/>
+              </div>
+              <div>
+                <label style={S.label}>
+                  Km en vacio
+                  {form.vehiculo_id && form.origen && (
+                    <button type="button" onClick={async()=>{
+                      const result = await calcularKmVacio(form.vehiculo_id, form.origen);
+                      if(result) {
+                        setForm(p=>({...p, km_vacio:result.km}));
+                        if(result.km > 0)
+                          notify(`Km en vacio calculados: ${result.km} km (desde ${result.desde} hasta ${form.origen})`, "success");
+                      } else {
+                        notify("No hay viajes anteriores de este vehiculo o no se pudo calcular la distancia.", "warning");
+                      }
+                    }} disabled={calcKm}
+                      style={{marginLeft:8,padding:"1px 8px",borderRadius:5,border:"1px solid #a78bfa",background:"transparent",color:"#a78bfa",fontSize:10,cursor:calcKm?"not-allowed":"pointer",fontWeight:700}}>
+                      {calcKm ? "..." : "Calcular"}
+                    </button>
+                  )}
+                </label>
+                <input type="text" inputMode="decimal" style={S.input} value={form.km_vacio||""} onChange={f("km_vacio")}
+                  placeholder="Distancia hasta punto de carga"/>
+              </div>
+              <div style={{gridColumn:"1/-1",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"12px 14px"}}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:10}}>Operativa de carga</div>
+                <div style={{display:"flex",gap:18,flexWrap:"wrap"}}>
+                  {[
+                    ["carga_lateral","Carga lateral"],
+                    ["carga_trasera","Carga trasera"],
+                    ["intercambio_palets","Intercambio de palets"],
+                    ["requiere_cinchas","Necesario llevar cinchas"],
+                  ].map(([key,label])=>(
+                    <label key={key} style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:"var(--text3)",cursor:"pointer"}}>
+                      <input type="checkbox" checked={!!form[key]} onChange={e=>setForm(p=>({...p,[key]:e.target.checked}))} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div style={S.sec}>Puntos de carga</div>
+            <CargasEditor pedidoId={editando?.id} form={form} setForm={setForm} disabled={editando?._readonly}/>
+
+            <div style={S.sec}>Puntos de descarga</div>
+            <DescargasEditor pedidoId={editando?.id} form={form} setForm={setForm} disabled={editando?._readonly}/>
+
+            <div style={S.sec}>Mercancia</div>
+            <div style={{display:"flex",gap:16,marginBottom:10,alignItems:"center",padding:"10px 14px",background:"var(--bg4)",borderRadius:8,border:"1px solid var(--border2)"}}>
+              <span style={{fontSize:12,fontWeight:700,color:"var(--text3)"}}>Tipo de carga:</span>
+              {["completa","grupaje"].map(t=>(
+                <label key={t} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:t===(form.tipo_carga||"completa")?"700":"400",color:t===(form.tipo_carga||"completa")?"var(--accent)":"var(--text4)"}}>
+                  <input type="radio" name="tipo_carga" value={t} checked={(form.tipo_carga||"completa")===t}
+                    onChange={()=>setForm(p=>({...p,tipo_carga:t}))} style={{accentColor:"var(--accent)"}}/>
+                  {t==="completa"?"Carga completa":"Grupaje (carga parcial)"}
+                </label>
+              ))}
+              {(form.tipo_carga||"completa")==="grupaje" && (
+                <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>Se anadira a Grupajes para combinarlo con otros pedidos</span>
+              )}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+              <div style={{gridColumn:"1/-1"}}><label style={S.label}>Descripcion mercancia</label><input style={S.input} value={form.mercancia||""} onChange={f("mercancia")} placeholder="Pallets de ceramica, maquinaria..."/></div>
+                <div>
+                  <label style={S.label}>Peso (kg)</label>
+                  <input type="text" inputMode="decimal" style={S.input} value={form.peso_kg||""} onChange={e=>setForm(p=>{
+                    const next = syncPrecioClienteCol(syncCantidadSiVacia({...p, peso_kg:e.target.value}));
+                    if (!next.colaborador_id && parseLocaleNumber(next.km_ruta, 0) > 0) {
+                      next.coste_gasoil = calcularCosteGasoil(next);
+                      setShowCostes(true);
+                    }
+                    return next;
+                  })} onBlur={()=>setForm(p=>{
+                    const next = normalizePesoKgDraft(p);
+                    if (!next.colaborador_id && parseLocaleNumber(next.km_ruta, 0) > 0) next.coste_gasoil = calcularCosteGasoil(next);
+                    return next;
+                  })}/>
+                  <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>Acepta kg totales o toneladas con coma. Ej: 27,6 -> 27.600 kg.</div>
+                  <PesoAlerta
+                    pesoKg={form.peso_kg}
+                    vehiculoId={form.vehiculo_id}
+                    remolqueId={form.remolque_id_manual}
+                  vehiculos={vehiculosLocal}
+                />
+              </div>
+              <div><label style={S.label}>Bultos / Palets</label><input type="text" inputMode="decimal" style={S.input} value={form.bultos||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,bultos:e.target.value})))}/></div>
+              <div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>
+            </div>
+
+            <div style={S.sec}>Precio</div>
+            <div style={{fontSize:11,color:"var(--text5)",margin:"-6px 0 8px"}}>El porte se introduce sin IVA. Selecciona aqui si la orden va con IVA, 0% o exenta.</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+              <div><label style={S.label}>Tipo tarificacion</label>
+                <select value={form.tipo_precio||"viaje"} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,tipo_precio:e.target.value}, true)))} style={S.sel}>
+                  {TIPOS_PRECIO.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+                </select>
+              </div>
+              <div><label style={S.label}>{form.tipo_precio==="viaje"?"Precio viaje (EUR)":form.tipo_precio==="kg"?"EUR por 100 kg":form.tipo_precio==="tonelada"?"EUR por tonelada":form.tipo_precio==="km"?"EUR por km":form.tipo_precio==="palet"?"EUR por palet":"EUR por hora"}</label>
+                <input type="text" inputMode="decimal" style={S.input} value={form.precio_unitario||""} onChange={e => {
+                  const v = e.target.value;
+                  setForm(p => syncPrecioClienteCol({
+                    ...p,
+                    precio_unitario: v,
+                  }));
+                }}/>
+              </div>
+              {form.tipo_precio!=="viaje"&&<div><label style={S.label}>{form.tipo_precio==="kg"?"Peso kg":form.tipo_precio==="tonelada"?"Toneladas":form.tipo_precio==="km"?"Kilometros":form.tipo_precio==="palet"?"Palets":"Horas"}</label>
+                <input type="text" inputMode="decimal" style={S.input} value={compactNumberInput(form.cantidad)} onChange={e=>setForm(p=>syncPrecioClienteCol(syncPrecioColaboradorCalc({...p,cantidad:e.target.value})))}/>
+              </div>}
+              <div><label style={S.label}>Extracostes / Esperas (EUR)</label><input type="text" inputMode="decimal" style={S.input} value={form.extracostes ?? form.extracostes_importe ?? ""} onChange={e=>setForm(p=>syncPrecioClienteCol({...p,extracostes:e.target.value,extracostes_importe:e.target.value}))} placeholder="0.00"/></div>
+              <div>
+                <label style={S.label}>IVA del viaje</label>
+                <select value={ivaOptionValue(form)} onChange={e=>setForm(p=>applyIvaOptionToDraft(p,e.target.value))} style={S.sel}>
+                  {IVA_PEDIDO_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:8}}>
+              <div>
+                <label style={{...S.label,color:"#f59e0b"}}>{form.tipo_precio==="kg"?"Minimo facturable (kg)":form.tipo_precio==="tonelada"?"Minimo facturable (toneladas)":form.tipo_precio==="km"?"Minimo facturable (km)":form.tipo_precio==="palet"?"Minimo facturable (palets)":form.tipo_precio==="hora"?"Minimo facturable (horas)":"Minimo facturable (EUR)"}</label>
+                <input type="text" inputMode="decimal" style={S.input}
+                  value={form.tipo_precio==="viaje" ? compactNumberInput(form.importe_minimo) : compactNumberInput(form.minimo_unidades)}
+                  onChange={e=>setForm(p=>syncPrecioClienteCol(syncPrecioColaboradorCalc({...p,[p.tipo_precio==="viaje" ? "importe_minimo" : "minimo_unidades"]:e.target.value})))}
+                  placeholder="Dejar vacio si no hay minimo"/>
+                <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>
+                  {form.tipo_precio==="viaje" ? "Si el calculo queda por debajo, se cobra este importe." : "Para kg, toneladas, km, palets u horas se aplica el minimo de unidades antes de multiplicar por el precio."}
+                </div>
+              </div>
+              <div>
+                <label style={{...S.label,color:"#ef4444"}}>Importe paralizacion (EUR, sin IVA)</label>
+                <input type="text" inputMode="decimal"
+                  style={{...S.input, borderColor:"rgba(239,68,68,.35)"}}
+                  value={form.importe_paralizacion||""} onChange={f("importe_paralizacion")}
+                  placeholder="0 si no hay paralizacion"/>
+                <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>
+                  Se factura en documento separado sin IVA
+                </div>
+              </div>
+            </div>
+            {parseLocaleNumber(form.importe_paralizacion,0)>0&&(
+              <div style={{background:"rgba(239,68,68,.06)",border:"1px solid rgba(239,68,68,.2)",borderRadius:7,padding:"8px 14px",fontSize:11,color:"#ef4444",fontWeight:600,marginTop:4}}>
+                Se generara factura de paralizacion por {parseLocaleNumber(form.importe_paralizacion,0).toFixed(2)} EUR sin IVA
+              </div>
+            )}
+            {form.precio_unitario&&(
+              <div style={{background:"rgba(34,211,160,.07)",border:"1px solid rgba(34,211,160,.2)",borderRadius:8,padding:"10px 16px",marginTop:4}}>
+                {sumAdditionalDescargaPrices(form.puntos_descarga)>0&&(
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                    <span style={{fontSize:11,color:"var(--text3)"}}>Descargas adicionales incluidas</span>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--green)"}}>+{sumAdditionalDescargaPrices(form.puntos_descarga).toFixed(2)} EUR</span>
+                  </div>
+                )}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:12,color:"var(--text2)"}}>
+                    Importe viaje sin IVA
+                    {((form.tipo_precio==="viaje" && parseLocaleNumber(form.importe_minimo,0)>0 && calcImporte(form)===parseLocaleNumber(form.importe_minimo,0)) ||
+                      (form.tipo_precio!=="viaje" && parseLocaleNumber(form.minimo_unidades,0)>parseLocaleNumber(form.cantidad,0))) &&
+                      <span style={{fontSize:10,color:"#f59e0b",marginLeft:6}}>minimo</span>}
+                  </span>
+                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:18,color:"var(--green)"}}>{calcImporte(form).toFixed(2)} EUR</span>
+                </div>
+                {parseLocaleNumber(form.importe_paralizacion,0)>0&&(
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(34,211,160,.2)"}}>
+                    <span style={{fontSize:11,color:"#ef4444"}}>+ Paralizacion (sin IVA)</span>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#ef4444"}}>+{parseLocaleNumber(form.importe_paralizacion,0).toFixed(2)} EUR</span>
+                  </div>
+                )}
+                {calcRevisionCombustible(form)>0&&(
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(245,158,11,.25)"}}>
+                    <span style={{fontSize:11,color:"#f59e0b"}}>Revision combustible desglosable en factura ({Number(form.recargo_combustible_pct||0).toLocaleString("es-ES")}%)</span>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#f59e0b"}}>{calcRevisionCombustible(form).toFixed(2)} EUR</span>
+                  </div>
+                )}
+                {(()=> {
+                  const iva = calcIvaPedido(form);
+                  return (
+                    <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(34,211,160,.2)"}}>
+                      <span style={{fontSize:11,color:iva.aplica?"var(--text3)":"#64748b"}}>{iva.aplica ? `IVA ${iva.tipo_iva}%` : (iva.iva_regimen === "exento" ? "Exento de IVA" : "IVA 0%")}</span>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:iva.aplica?"var(--green)":"#64748b"}}>{iva.aplica ? `+${iva.cuota.toFixed(2)} EUR` : "Sin IVA"}</span>
+                    </div>
+                  );
+                })()}
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(34,211,160,.3)"}}>
+                  <span style={{fontSize:11,fontWeight:700,color:"var(--text3)"}}>{calcIvaPedido(form).aplica ? "TOTAL CON IVA" : "TOTAL SIN IVA"}</span>
+                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:14,color:"var(--green)"}}>{(calcIvaPedido(form).total+parseLocaleNumber(form.importe_paralizacion,0)).toFixed(2)} EUR</span>
+                </div>
+              </div>
+            )}
+
+            {/* Banner aviso operacional vehiculo */}
+            {avisoVehiculo && (
+              <div style={{
+                background:"rgba(245,158,11,.12)",
+                border:"2px solid rgba(245,158,11,.5)",
+                borderRadius:10,
+                padding:"14px 16px",
+                marginBottom:14,
+                position:"relative",
+              }}>
+                <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                  <span style={{fontSize:24,flexShrink:0}}>!</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:800,fontSize:14,color:"#f59e0b",marginBottom:6}}>
+                      Aviso para {avisoVehiculo.matricula}
+                    </div>
+                    <div style={{fontSize:13,color:"var(--text)",lineHeight:1.6,whiteSpace:"pre-line"}}>
+                      {avisoVehiculo.notas}
+                    </div>
+                    <button
+                      onClick={()=>setAvisoVehiculo(null)}
+                      style={{marginTop:10,padding:"6px 18px",borderRadius:7,border:"none",
+                        background:"#f59e0b",color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer",
+                        fontFamily:"'DM Sans',sans-serif"}}>
+                       Entendido - Continuar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Costes reales del viaje ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",
+              background:"rgba(239,68,68,.06)",border:"1px solid rgba(239,68,68,.18)",borderRadius:8,
+              padding:"8px 14px",marginBottom:showCostes?8:14}}
+              onClick={()=>setShowCostes(v=>!v)}>
+              <span style={{fontWeight:700,fontSize:12,color:"#ef4444"}}>Costes del viaje</span>
+              <span style={{fontSize:11,color:"var(--text4)"}}>
+                {(()=>{
+                  const total = [form.coste_gasoil,form.coste_peajes,form.coste_dietas,form.coste_otros]
+                    .reduce((s,v)=>s+Number(v||0),0);
+                  const ingresoTotal = calcImporte(form) + parseLocaleNumber(form.importe_paralizacion, 0);
+                  const margen = ingresoTotal - total;
+                  return total>0
+                    ? `Total costes: ${total.toFixed(2)}EUR - Margen: ${margen.toFixed(2)}EUR (${ingresoTotal>0?(margen/ingresoTotal*100).toFixed(1):0}%)`
+                    : showCostes ? "Ocultar" : "Registrar costes";
+                })()}
+              </span>
+            </div>
+            {showCostes && (
+              <div style={{background:"rgba(239,68,68,.04)",border:"1px solid rgba(239,68,68,.15)",borderRadius:8,padding:"14px",marginBottom:14}}>
+                {parseLocaleNumber(form.km_ruta, 0) > 0 && (
+                  <div style={{fontSize:11,color:"var(--text4)",marginBottom:10}}>
+                    {form.colaborador_id
+                      ? "Viaje cargado por colaborador: el coste de gasoil se mantiene a 0."
+                      : `Gasoil calculado con ${consumoLitros100PorPeso(form.peso_kg)} L/100 km segun peso (${parseLocaleNumber(form.peso_kg,0).toLocaleString("es-ES")} kg) y ${parseLocaleNumber(form.km_ruta,0).toLocaleString("es-ES")} km.`}
+                  </div>
+                )}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  {[
+                    {l:"Gasoil (EUR)",    k:"coste_gasoil"},
+                    {l:"Peajes (EUR)",     k:"coste_peajes"},
+                    {l:"Dietas (EUR)",     k:"coste_dietas"},
+                    {l:"Otros costes (EUR)", k:"coste_otros"},
+                  ].map(({l,k})=>(
+                    <div key={k}>
+                      <label style={{...S.label,color:"var(--text3)"}}>{l}</label>
+                      <input type="number" min="0" step="0.01" style={S.sel}
+                        disabled={k==="coste_gasoil" && !!form.colaborador_id}
+                        value={k==="coste_gasoil" && form.colaborador_id ? "" : form[k]||""}
+                        onChange={e=>setForm(p=>({...p,[k]:e.target.value}))}
+                        placeholder={k==="coste_gasoil" && form.colaborador_id ? "0 por colaborador" : "0.00"}/>
+                    </div>
+                  ))}
+                </div>
+                {/* Resumen margen */}
+                {(()=>{
+                  const ingreso = calcImporte(form) + parseLocaleNumber(form.importe_paralizacion, 0);
+                  const totalC  = [form.coste_gasoil,form.coste_peajes,form.coste_dietas,form.coste_otros]
+                    .reduce((s,v)=>s+Number(v||0),0);
+                  const margen  = ingreso - totalC;
+                  const pct     = ingreso>0 ? (margen/ingreso*100).toFixed(1) : 0;
+                  return ingreso>0||totalC>0 ? (
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
+                      {[
+                        {l:"Ingresos",v:`${ingreso.toFixed(2)} EUR`,c:"var(--green)"},
+                        {l:"Costes",  v:`${totalC.toFixed(2)} EUR`, c:"#ef4444"},
+                        {l:"Margen",  v:`${margen.toFixed(2)} EUR (${pct}%)`,
+                          c:margen>=0?"var(--green)":"#ef4444"},
+                      ].map(({l,v,c})=>(
+                        <div key={l} style={{background:"var(--bg3)",borderRadius:6,padding:"8px 10px",textAlign:"center"}}>
+                          <div style={{fontSize:13,fontWeight:800,color:c}}>{v}</div>
+                          <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".07em",marginTop:2}}>{l}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
+                <div>
+                  <label style={{...S.label,color:"var(--text3)"}}>Notas de costes</label>
+                  <input style={S.sel} value={form.coste_notas||""} placeholder="Ej: Conductor extra, esperas en carga..."
+                    onChange={e=>setForm(p=>({...p,coste_notas:e.target.value}))}/>
+                </div>
+              </div>
+            )}
+
+            <div style={S.sec}>Asignacion</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><label style={S.label}>Vehiculo</label>
+                <select value={form.vehiculo_id||""} onChange={e=>{
+                  const vid = e.target.value;
+                  const veh = vehiculosLocal.find(v=>v.id===vid);
+                  const prevVeh = vehiculosLocal.find(v=>v.id===form.vehiculo_id);
+                  setForm(p=>{
+                    const choferEraDelAnterior = !p.chofer_id || p.chofer_id === prevVeh?.chofer_id;
+                    const remolqueEraDelAnterior = !p.remolque_id_manual || p.remolque_id_manual === prevVeh?.remolque_id;
+                    const choferDelVehiculo = veh?.chofer_id ||
+                      choferesLocal.find(ch => ch.vehiculo_id === vid)?.id || "";
+                    return {
+                      ...p,
+                      vehiculo_id: vid,
+                      chofer_id: choferEraDelAnterior ? choferDelVehiculo : p.chofer_id,
+                      remolque_id_manual: remolqueEraDelAnterior ? (veh?.remolque_id || "") : p.remolque_id_manual,
+                    };
+                  });
+                  // Mostrar aviso operacional si el vehiculo tiene notas
+                  if (isMeaningfulVehicleNotice(veh?.notas_operacion)) {
+                    setAvisoVehiculo({ matricula: veh.matricula, notas: veh.notas_operacion });
+                  } else {
+                    setAvisoVehiculo(null);
+                  }
+                }} style={S.sel}>
+                  <option value="">Sin asignar</option>
+                  {(()=>{
+                    // Detectar remolques: por clase, por matricula R-*, o por ser remolque_id de alguien
+                    const esRemolqueDeAlguien = new Set(vehiculosLocal.map(v=>v.remolque_id).filter(Boolean));
+                    const esRemolque = v => {
+                      const clase = (v.clase||v.tipo||"").toLowerCase();
+                      const mat = (v.matricula||"").toUpperCase();
+                      return clase.includes("remolque") || clase.includes("semirremolque") || clase.includes("dolly") ||
+                             esRemolqueDeAlguien.has(v.id) ||
+                             /^R[-_\s]/i.test(mat) || mat.endsWith("-R") || mat.endsWith("_R");
+                    };
+                    return vehiculosLocal
+                      .filter(v => !esRemolque(v))
+                      .map(v => {
+                        const rem = v.remolque_matricula;
+                        const label = rem
+                          ? `${v.matricula} - ${rem}` // conjunto: tractora + remolque
+                          : v.matricula;                  // solo tractora
+                        return <option key={v.id} value={v.id}>{label}</option>;
+                      });
+                  })()}
+                </select>
+              </div>
+              <div>
+                <label style={S.label}>
+                  Chofer principal
+                  {form.vehiculo_id&&vehiculosLocal.find(v=>v.id===form.vehiculo_id)?.chofer_id&&(
+                    <span style={{marginLeft:6,fontSize:10,color:"var(--accent)",fontWeight:500}}>
+                      - auto del vehiculo
+                    </span>
+                  )}
+                </label>
+                <select value={form.chofer_id||""} onChange={f("chofer_id")} style={S.sel}>
+                  <option value="">Sin asignar</option>
+                  {choferesLocal.map(c=><option key={c.id} value={c.id}>{c.nombre} {c.apellidos||""}</option>)}
+                </select>
+              </div>
+              {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Remolque del conjunto ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+              <div>
+                <label style={S.label}>
+                  Remolque
+                  {form.vehiculo_id && vehiculosLocal.find(v=>v.id===form.vehiculo_id)?.remolque_id && (
+                    <span style={{marginLeft:6,fontSize:10,color:"#a78bfa",fontWeight:500}}>- del conjunto</span>
+                  )}
+                </label>
+                <select
+                  value={form.remolque_id_manual||vehiculosLocal.find(v=>v.id===form.vehiculo_id)?.remolque_id||""}
+                  onChange={e=>setForm(p=>({...p, remolque_id_manual: e.target.value||""}))}
+                  style={S.sel}>
+                  <option value="">Sin remolque</option>
+                  {(()=>{
+                    const remolqueIds2 = new Set(vehiculosLocal.map(v=>v.remolque_id).filter(Boolean));
+                    const esRemolque2 = v => {
+                      const clase = (v.clase||v.tipo||"").toLowerCase();
+                      const mat = (v.matricula||"").toUpperCase();
+                      return clase.includes("remolque") || clase.includes("semirremolque") || clase.includes("dolly") ||
+                             remolqueIds2.has(v.id) ||
+                             /^R[-_\s]/i.test(mat) || mat.endsWith("-R") || mat.endsWith("_R");
+                    };
+                    return vehiculosLocal.filter(v => esRemolque2(v))
+                      .map(v=>(
+                        <option key={v.id} value={v.id}>{v.matricula}{v.marca?" - "+v.marca:""}</option>
+                      ));
+                  })()}
+                </select>
+                {form.remolque_id_manual && form.vehiculo_id &&
+                 form.remolque_id_manual !== vehiculosLocal.find(v=>v.id===form.vehiculo_id)?.remolque_id && (
+                  <div style={{marginTop:4,fontSize:11,color:"#fbbf24",padding:"4px 9px",background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.2)",borderRadius:6}}>
+                    Aviso: Distinto al conjunto habitual - al guardar se actualizara el conjunto de la tractora
+                  </div>
+                )}
+              </div>
+
+              <div><label style={S.label}>2o Chofer (opcional)</label>
+                <select value={form.chofer2_id||""} onChange={f("chofer2_id")} style={S.sel}>
+                  <option value="">Sin segundo chofer</option>
+                  {choferesLocal.filter(c=>c.id!==form.chofer_id).map(c=><option key={c.id} value={c.id}>{c.nombre} {c.apellidos||""}</option>)}
+                </select>
+              </div>
+              {form.chofer2_id&&(
+                <div style={{gridColumn:"1/-1",background:"rgba(139,92,246,.06)",border:"1px solid rgba(139,92,246,.18)",borderRadius:8,padding:"10px 14px",display:"flex",alignItems:"center",gap:12}}>
+                  <span style={{fontSize:13}}></span>
+                  <div style={{flex:1,fontSize:12,color:"var(--text3)"}}>Viaje compartido entre dos choferes. El importe se repartira a partes iguales en las hojas de ruta.</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <label style={{fontSize:11,color:"var(--text4)"}}>% chofer 1:</label>
+                    <input type="number" min="0" max="100" style={{...S.input,width:60,padding:"4px 8px",fontSize:12}} value={form.reparto_chofer1||50} onChange={f("reparto_chofer1")}/>
+                    <label style={{fontSize:11,color:"var(--text4)"}}>% chofer 2:</label>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--accent)"}}>{100-Number(form.reparto_chofer1||50)}%</span>
+                  </div>
+                </div>
+              )}
+
+              {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Colaborador ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+              <div style={{gridColumn:"1/-1",background:"rgba(139,92,246,.05)",border:"1px solid rgba(139,92,246,.15)",borderRadius:9,padding:"12px 14px",marginTop:4}}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#a78bfa",marginBottom:10}}>Colaborador (transporte subcontratado)</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                  <div><label style={S.label}>Colaborador / proveedor</label>
+                    <div style={{position:"relative",marginBottom:6}}>
+                      <input
+                        style={S.input}
+                        placeholder="Buscar o crear colaborador..."
+                        value={colaboradorBusqueda}
+                        onChange={e=>{ setColaboradorBusqueda(e.target.value); setShowColaboradorSuggestions(true); }}
+                        onFocus={()=>setShowColaboradorSuggestions(true)}
+                        onBlur={()=>setTimeout(()=>setShowColaboradorSuggestions(false),200)}
+                      />
+                      {showColaboradorSuggestions && colaboradorBusqueda && (()=>{
+                        const q = colaboradorBusqueda.toLowerCase();
+                        const sugs = colaboradoresLocal.filter(c =>
+                          String(c.nombre || "").toLowerCase().includes(q) ||
+                          String(c.cif || "").toLowerCase().includes(q) ||
+                          String(c.email || "").toLowerCase().includes(q)
+                        ).slice(0,6);
+                        if (!sugs.length) return (
+                          <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,zIndex:60,padding:"10px 14px"}}>
+                            <div style={{fontSize:12,color:"var(--text4)",marginBottom:8}}>No hay ningun colaborador con ese nombre.</div>
+                            <button type="button" disabled={creandoColaborador}
+                              onMouseDown={e=>{ e.preventDefault(); crearColaboradorDesdePedido(colaboradorBusqueda); }}
+                              style={{...S.btn,background:"var(--accent)",color:"#fff",fontSize:12,padding:"5px 12px",opacity:creandoColaborador ? .7 : 1}}>
+                              {creandoColaborador ? "Creando..." : `Crear colaborador "${colaboradorBusqueda}"`}
+                            </button>
+                          </div>
+                        );
+                        return (
+                          <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,zIndex:60,overflow:"hidden"}}>
+                            {sugs.map(c=>(
+                              <div key={c.id}
+                                onMouseDown={()=>aplicarColaborador(c)}
+                                style={{padding:"9px 14px",cursor:"pointer",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}
+                                onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"}
+                                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                                <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{c.nombre}</span>
+                                {c.cif&&<span style={{fontSize:11,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{c.cif}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    <select value={form.colaborador_id||""} onChange={e=>{
+                      const col=colaboradoresLocal.find(c=>c.id===e.target.value);
+                      const impActual = importeClienteColCalculado(form) || parseLocaleNumber(form.precio_unitario, 0);
+                      setForm(p=>({
+                        ...p,
+                        colaborador_id: e.target.value,
+                        colaborador_nombre: col?.nombre||"",
+                        // Siempre sincronizar precio del viaje -> lo que cobramos al colaborador
+                        precio_cliente_col: e.target.value ? (impActual || p.precio_cliente_col || "") : "",
+                        precio_colaborador: e.target.value ? (importeColaboradorCalculado({ ...p, colaborador_id: e.target.value }) || p.precio_colaborador || "") : "",
+                        coste_gasoil: e.target.value ? 0 : p.coste_gasoil,
+                      }));
+                      setColaboradorBusqueda("");
+                    }} style={S.sel}>
+                      <option value="">Sin colaborador (chofer propio)</option>
+                      {colaboradoresLocal.map(c=><option key={c.id} value={c.id}>{c.nombre} {c.cif?`- ${c.cif}`:""}</option>)}
+                    </select>
+                  </div>
+                  {form.colaborador_id&&(<>
+                    <div>
+                      <label style={S.label}>
+                        Lo que cobramos al cliente (EUR, sin IVA)
+                        <span style={{marginLeft:4,fontSize:9,color:"var(--text5)",fontWeight:400,textTransform:"none"}}>
+                          - precio del viaje
+                        </span>
+                      </label>
+                      <input type="text" inputMode="decimal" style={S.input}
+                        value={form.precio_cliente_col||""}
+                        onChange={e=>{
+                          const v = e.target.value;
+                          setForm(p=>({
+                            ...p,
+                            precio_cliente_col: v,
+                          }));
+                        }}
+                        placeholder="Ej: 850"/>
+                    </div>
+                    {form.tipo_precio==="tonelada" ? (<>
+                      <div>
+                        <label style={S.label}>Precio acordado EUR/tonelada</label>
+                        <input type="text" inputMode="decimal" style={S.input}
+                          value={compactNumberInput(form.precio_colaborador_unitario)}
+                          onChange={e=>setForm(p=>syncPrecioColaboradorCalc({...p,precio_colaborador_unitario:e.target.value}))}
+                          placeholder="Ej: 32"/>
+                      </div>
+                      <div>
+                        <label style={S.label}>Minimo facturable acordado (toneladas)</label>
+                        <input type="text" inputMode="decimal" style={S.input}
+                          value={compactNumberInput(form.minimo_colaborador_unidades)}
+                          onChange={e=>setForm(p=>syncPrecioColaboradorCalc({...p,minimo_colaborador_unidades:e.target.value}))}
+                          placeholder="Ej: 25"/>
+                      </div>
+                      <div>
+                        <label style={S.label}>Total calculado colaborador (EUR)</label>
+                        <input type="text" inputMode="decimal" style={{...S.input,background:"var(--bg3)"}} value={compactNumberInput(form.precio_colaborador)||""}
+                          onChange={e=>setForm(p=>({...p,precio_colaborador:e.target.value,precio_colaborador_unitario:"",minimo_colaborador_unidades:""}))}
+                          placeholder="Se calcula por toneladas"/>
+                      </div>
+                    </>) : (
+                      <div><label style={S.label}>Lo que pagamos al colaborador (EUR, sin IVA)</label>
+                        <input type="text" inputMode="decimal" style={S.input} value={form.precio_colaborador||""} onChange={f("precio_colaborador")} placeholder="Ej: 650"/>
+                      </div>
+                    )}
+                    <div><label style={S.label}>Matricula tractora colaborador</label>
+                      <input style={S.input} value={form.matricula_colaborador||""} onChange={e=>setForm(p=>({...p,matricula_colaborador:e.target.value.toUpperCase()}))} placeholder="Ej: 1234-ABC"/>
+                    </div>
+                    <div><label style={S.label}>Matricula remolque colaborador</label>
+                      <input style={S.input} value={form.remolque_matricula_colaborador||""} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:e.target.value.toUpperCase()}))} placeholder="Opcional"/>
+                    </div>
+                    {(form.precio_cliente_col&&form.precio_colaborador)&&(
+                      <div style={{gridColumn:"1/-1",display:"flex",gap:16,background:"var(--bg3)",borderRadius:7,padding:"8px 14px",alignItems:"center"}}>
+                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Beneficio viaje: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:parseLocaleNumber(form.precio_cliente_col)-parseLocaleNumber(form.precio_colaborador)>=0?"var(--green)":"var(--red)"}}>{(parseLocaleNumber(form.precio_cliente_col)-parseLocaleNumber(form.precio_colaborador)).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span></div>
+                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Margen: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#f59e0b"}}>{parseLocaleNumber(form.precio_cliente_col)>0?((1-parseLocaleNumber(form.precio_colaborador)/parseLocaleNumber(form.precio_cliente_col))*100).toFixed(1):0}%</span></div>
+                        {form.tipo_precio==="tonelada" && form.precio_colaborador_unitario && (
+                          <div><span style={{fontSize:11,color:"var(--text5)"}}>Pago acordado: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--text2)"}}>{parseLocaleNumber(form.precio_colaborador_unitario,0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR/tn x {unidadesFacturablesPedido(form, form.minimo_colaborador_unidades).toLocaleString("es-ES")} tn</span></div>
+                        )}
+                        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,background:"rgba(251,191,36,.1)",border:"1px solid rgba(251,191,36,.25)",borderRadius:6,padding:"4px 10px"}}>
+                          <span style={{fontSize:12}}>!</span><span style={{fontSize:11,fontWeight:700,color:"#fbbf24"}}>Pendiente de pago al colaborador</span>
+                        </div>
+                      </div>
+                    )}
+                    <div style={{gridColumn:"1/-1",display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",background:"rgba(15,118,110,.08)",border:"1px solid rgba(15,118,110,.22)",borderRadius:8,padding:"9px 12px",flexWrap:"wrap"}}>
+                      <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
+                        Se enviara un enlace para que el colaborador confirme precio y matriculas. Despues recibira enlaces para marcar carga, en camino, descarga y subir albaranes.
+                      </div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                        <button
+                          type="button"
+                          disabled={previsualizandoColaborador || !editando?.id}
+                          onClick={previsualizarColaborador}
+                          style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",opacity:(previsualizandoColaborador || !editando?.id)?0.6:1}}
+                        >
+                          {previsualizandoColaborador ? "Abriendo..." : "Previsualizar"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={notificandoColaborador || !editando?.id}
+                          onClick={()=>notificarColaborador(true)}
+                          style={{...S.btn,background:"var(--green)",color:"#fff",opacity:(notificandoColaborador || !editando?.id)?0.6:1}}
+                        >
+                          {notificandoColaborador ? "Enviando..." : editando?.id ? "Enviar/Reenviar enlace" : "Guarda para enviar"}
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{gridColumn:"1/-1",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)",borderRadius:8,padding:"10px 12px"}}>
+                      <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--accent)",marginBottom:4}}>Forma de pago al colaborador</div>
+                      <div style={{fontSize:12,color:"var(--text3)",fontWeight:700}}>{formatPaymentTerms(getEmpresaPerfilSync())}</div>
+                    </div>
+                    <div style={{gridColumn:"1/-1",display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                      {[
+                        ["Precio y matriculas", form.colaborador_precio_confirmado_at || form.colaborador_precio_confirmado],
+                        ["Carga", form.colaborador_carga_confirmada_at],
+                        ["En camino", form.colaborador_en_camino_confirmada_at],
+                        ["Descarga y albaranes", form.colaborador_descarga_confirmada_at],
+                      ].map(([label, done])=>(
+                        <div key={label} style={{border:"1px solid "+(done?"rgba(16,185,129,.28)":"var(--border2)"),background:done?"rgba(16,185,129,.08)":"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
+                          <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:done?"var(--green)":"var(--text5)"}}>{done?"Confirmado":"Pendiente"}</div>
+                          <div style={{fontSize:12,fontWeight:700,color:"var(--text)",marginTop:2}}>{label}</div>
+                          {typeof done === "string" && <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>{new Date(done).toLocaleString("es-ES")}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </>)}
+                </div>
+              </div>
+
+              <div style={{gridColumn:"1/-1"}}><label style={S.label}>Notas / Instrucciones</label>
+                <textarea style={{...S.input,height:64,resize:"vertical"}} value={form.notas||""} onChange={f("notas")}/>
+              </div>
+              <div style={{gridColumn:"1/-1"}}>
+                <label style={S.label}>
+                  Condiciones del encargo
+                  <span style={{marginLeft:6,fontSize:9,color:"var(--text5)",fontWeight:400,
+                    textTransform:"none",letterSpacing:"normal"}}>
+                    - aparecen al pie de la orden de carga
+                  </span>
+                </label>
+                <textarea
+                  style={{...S.input,height:72,resize:"vertical",fontSize:12,color:"var(--text3)"}}
+                  value={form.condiciones_adicionales||""}
+                  onChange={f("condiciones_adicionales")}
+                  placeholder="Ej: Mercancia fragil - manipular con precaucion. Temperatura 2-8oC. Firmar albaran en destino y devolver copia..."/>
+              </div>
+            </div>
+
+            {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Documentos adjuntos ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+            <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".06em"}}>Documentacion de la carga</div>
+                  <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>CMR, albaranes, fotos, pesajes o instrucciones. Se adjuntan al pedido y a la factura.</div>
+                </div>
+                {!editando?.id && (
+                  <label style={{marginLeft:"auto",padding:"6px 12px",borderRadius:7,background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                    Adjuntar antes de crear
+                    <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" style={{display:"none"}} onChange={seleccionarDocsPendientes}/>
+                  </label>
+                )}
+              </div>
+              {editando?.id ? (
+                <TabDocsPedido pedido={editando}/>
+              ) : pendingDocs.length ? (
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {pendingDocs.map((d, idx)=>(
+                    <div key={`${d.nombre}-${idx}`} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--bg3)",borderRadius:8,border:"1px solid var(--border)"}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.nombre}</div>
+                        <div style={{fontSize:10,color:"var(--text5)"}}>{d.tipo} | {d.file_size_kb}KB | se subira al guardar</div>
+                      </div>
+                      <button type="button" onClick={()=>setPendingDocs(prev=>prev.filter((_, i)=>i!==idx))} style={{background:"none",border:"none",color:"var(--text5)",cursor:"pointer",fontSize:13}}>Quitar</button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{padding:"14px 0",fontSize:12,color:"var(--text5)"}}>Sin documentos preparados.</div>
+              )}
+            </div>
+
+            {editando?.id && <PedidoRentabilidadPredictiva pedido={editando}/>}
+            {editando?.id && <PedidoTimeline pedido={editando}/>}
+
+            <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
+              <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}} onClick={requestClose}>Salir</button>
+              {!(editando?._readonly && !desvinculado) && (
+                <button style={{...S.btn,background:"#3b6ef5",color:"#fff",opacity:saving?0.7:1}} onClick={guardar} disabled={saving}>{saving?"Guardando...":editando?"Guardar cambios":"Crear pedido"}</button>
+              )}
+            </div>
+          </div>
+        </div>
+
+      {modalNuevoCliente && (
+        <ModalNuevoClienteRapido
+          datosIniciales={modalNuevoCliente}
+          onClose={()=>setModalNuevoCliente(null)}
+          onCreado={async(nuevoCliente)=>{
+            const updated = await getClientes("","true");
+            const arr = Array.isArray(updated)?updated:(updated?.data||[]);
+            setClientes(arr);
+            const creado = arr.find(x => x.id === nuevoCliente.id) || arr.find(x=>x.nombre===nuevoCliente.nombre) || nuevoCliente;
+            setForm(p=>({
+              ...p,
+              cliente_id: creado.id || "",
+              tipo_iva: creado.tipo_iva ?? p.tipo_iva ?? 21,
+              iva_regimen: creado.iva_regimen || ivaOptionValue({ tipo_iva: creado.tipo_iva ?? p.tipo_iva }),
+            }));
+            setNombreBusqueda(nuevoCliente.nombre||"");
+            setModalNuevoCliente(null);
+          }}
+        />
+      )}
+      {poiDraft && (
+        <PuntoInteresModal
+          initial={poiDraft}
+          onClose={()=>setPoiDraft(null)}
+          onSave={(next, saved)=>{
+            if (saved.tipo === "carga") {
+              if (saved.cliente_id && String(saved.cliente_id) === String(form.cliente_id || "")) {
+                setPuntosCargaClienteModal(prev => {
+                  const exists = prev.some(p => String(p.id) === String(saved.id));
+                  return exists ? prev.map(p => String(p.id) === String(saved.id) ? saved : p) : [...prev, saved];
+                });
+              }
+              setForm(p=>({
+                ...applyPuntoCargaToDraft(p, saved),
+              }));
+            } else if (saved.tipo === "descarga") {
+              setForm(p=>({
+                ...p,
+                destino:(saved.nombre || saved.direccion || p.destino || "").toUpperCase(),
+                puntos_descarga: updatePrimaryStop(
+                  p.puntos_descarga,
+                  puntoToStop(saved),
+                  (saved.nombre || saved.direccion || p.destino || "").toUpperCase()
+                ),
+                ventana_descarga:p.ventana_descarga || saved.ventana || ""
+              }));
+            }
+          }}
+        />
+      )}
+      {managePointsOpen && (
+        <GestionPuntosInteresModal
+          onClose={()=>setManagePointsOpen(false)}
+          onApply={(next)=>setPuntosInteresCache(next)}
+        />
+      )}
+    </>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// CartaPorteModal - Genera y muestra la Carta de Porte / CMR / Albaran
+// ---------------------------------------------------------------------------
+function CartaPorteModal({ data, onClose }) {
+  const docNumero = data.carta_porte_numero || data.numero || "";
+  const pedidoNumero = data.pedido_numero || data.numero || "";
+  const [firmaMode, setFirmaMode] = React.useState(null); // null | 'remitente' | 'destinatario' | 'chofer'
+  const [firmas, setFirmas] = React.useState({
+    remitente:    data.firma_destinatario || null,
+    destinatario: data.firma_destinatario || null,
+    chofer:       null,
+  });
+  const [firmaNombre, setFirmaNombre] = React.useState('');
+  const [guardandoFirma, setGuardandoFirma] = React.useState(false);
+  const canvasRef = React.useRef(null);
+  const drawing   = React.useRef(false);
+  const lastPt    = React.useRef(null);
+
+  function canvasPos(e, canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const src  = e.touches?.[0] || e;
+    return { x: (src.clientX - rect.left) * (canvas.width / rect.width),
+             y: (src.clientY - rect.top)  * (canvas.height / rect.height) };
+  }
+  function startDraw(e)  { e.preventDefault(); drawing.current=true; lastPt.current=canvasPos(e,canvasRef.current); }
+  function moveDraw(e) {
+    e.preventDefault(); if(!drawing.current) return;
+    const ctx=canvasRef.current.getContext('2d'); const pt=canvasPos(e,canvasRef.current);
+    ctx.beginPath(); ctx.strokeStyle='#111'; ctx.lineWidth=2; ctx.lineCap='round';
+    ctx.moveTo(lastPt.current.x,lastPt.current.y); ctx.lineTo(pt.x,pt.y); ctx.stroke();
+    lastPt.current=pt;
+  }
+  function endDraw() { drawing.current=false; }
+  function clearCanvas() {
+    const c=canvasRef.current; c.getContext('2d').clearRect(0,0,c.width,c.height);
+  }
+
+  async function confirmarFirma() {
+    const canvas = canvasRef.current;
+    // Check if canvas has any drawing
+    const blank = document.createElement('canvas');
+    blank.width=canvas.width; blank.height=canvas.height;
+    if (canvas.toDataURL() === blank.toDataURL()) {
+      notify("Por favor firma en el recuadro antes de confirmar", "warning"); return;
+    }
+    const imgData = canvas.toDataURL('image/png');
+    setFirmas(prev => ({ ...prev, [firmaMode]: imgData }));
+
+    // Save destinatario signature to backend
+    if (firmaMode === 'destinatario') {
+      setGuardandoFirma(true);
+      try {
+        await guardarFirmaEntrega(data.id, {
+          firma_destinatario: imgData,
+          firma_nombre: firmaNombre || 'Destinatario',
+          source: "carta_porte",
+        });
+      } catch(e) { console.warn('Firma no guardada:', e.message); }
+      finally { setGuardandoFirma(false); }
+    }
+    setFirmaMode(null);
+  }
+
+  function imprimir() {
+    const win = window.open("","_blank","width=900,height=700");
+    win.document.write(generarHTML());
+    win.document.close();
+    win.focus();
+    setTimeout(()=>{ win.print(); }, 500);
+  }
+
+  function generarHTML() {
+    const d = data;
+    return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<title>Carta de Porte - ${docNumero}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px}
+  h1{font-size:16px;font-weight:700;text-align:center;letter-spacing:1px;margin-bottom:4px}
+  h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;color:#1e3a5f;border-bottom:1px solid #1e3a5f;padding-bottom:3px}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #1e3a5f}
+  .empresa{flex:1}
+  .doc-info{text-align:right;min-width:180px}
+  .doc-num{font-size:20px;font-weight:700;color:#1e3a5f}
+  .doc-label{font-size:9px;color:#666;letter-spacing:1px;text-transform:uppercase}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+  .box{border:1px solid #ccc;border-radius:4px;padding:10px}
+  .lbl{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+  .val{font-size:11px;font-weight:600}
+  .val-big{font-size:14px;font-weight:700;color:#1e3a5f}
+  table{width:100%;border-collapse:collapse;margin-bottom:12px}
+  th{background:#1e3a5f;color:#fff;padding:6px 8px;text-align:left;font-size:10px}
+  td{padding:6px 8px;border-bottom:1px solid #eee;font-size:11px}
+  .firma-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:20px}
+  .firma-box{border:1px solid #ccc;border-radius:4px;padding:10px;min-height:80px}
+  .firma-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+  .firma-line{margin-top:50px;border-top:1px solid #999;font-size:9px;color:#666;padding-top:3px}
+  .status{display:inline-block;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700}
+  .badge-ok{background:#d1fae5;color:#065f46}
+  .badge-warn{background:#fef3c7;color:#92400e}
+  @media print{@page{margin:1cm}body{padding:0}}
+</style></head><body>
+<div class="header">
+  <div class="empresa">
+    <div style="font-size:18px;font-weight:700;color:#1e3a5f">${d.empresa_nombre||"-"}</div>
+    <div style="color:#555">CIF: ${d.empresa_cif||"-"} - ${d.empresa_direccion||""} - Tel: ${d.empresa_telefono||"-"}</div>
+    <div style="color:#555">${d.empresa_email||""}</div>
+  </div>
+  <div class="doc-info">
+    <div class="doc-label">Carta de Porte</div>
+    <div class="doc-num">${docNumero||"-"}</div>
+    <div style="font-size:10px;color:#555;margin-top:4px">Pedido: ${pedidoNumero||"-"}</div>
+    <div style="font-size:10px;color:#555;margin-top:4px">Fecha: ${new Date().toLocaleDateString("es-ES")}</div>
+    <div style="margin-top:6px">
+      <span class="status ${["entregado","facturado"].includes(d.estado)?"badge-ok":"badge-warn"}">${(d.estado||"").toUpperCase()}</span>
+    </div>
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="box">
+    <h2>Transportista (Porteador)</h2>
+    <div class="lbl">Empresa</div><div class="val">${d.empresa_nombre||"-"}</div>
+    <div class="lbl" style="margin-top:6px">CIF</div><div class="val">${d.empresa_cif||"-"}</div>
+    <div class="lbl" style="margin-top:6px">Direccion</div><div class="val">${d.empresa_direccion||"-"}</div>
+    <div class="lbl" style="margin-top:6px">Telefono / Email</div>
+    <div class="val">${d.empresa_telefono||"-"} - ${d.empresa_email||"-"}</div>
+  </div>
+  <div class="box">
+    <h2>Remitente / Cliente</h2>
+    <div class="lbl">Empresa / Persona</div><div class="val">${d.cliente_nombre||"-"}</div>
+    <div class="lbl" style="margin-top:6px">CIF / NIF</div><div class="val">${d.cliente_cif||"-"}</div>
+    <div class="lbl" style="margin-top:6px">Direccion</div><div class="val">${d.cliente_dir||d.cliente_ciudad||"-"}</div>
+    <div class="lbl" style="margin-top:6px">Telefono / Email</div>
+    <div class="val">${d.cliente_tel||"-"} - ${d.cliente_email||"-"}</div>
+  </div>
+</div>
+
+<div class="grid2">
+  <div class="box">
+    <h2>Origen (Carga)</h2>
+    <div class="val-big">${d.origen||"-"}</div>
+    <div class="lbl" style="margin-top:8px">Fecha de carga</div>
+    <div class="val">${new Date(d.fecha_carga||Date.now()).toLocaleDateString("es-ES")}${d.hora_carga?" - "+d.hora_carga:""}</div>
+    ${d.ventana_carga?`<div class="lbl" style="margin-top:4px">Ventana horaria</div><div class="val">${d.ventana_carga}</div>`:""}
+    ${d.referencia_cliente?`<div class="lbl" style="margin-top:4px">Ref. cliente</div><div class="val">${d.referencia_cliente}</div>`:""}
+  </div>
+  <div class="box">
+    <h2>Destino (Descarga)</h2>
+    <div class="val-big">${d.destino||"-"}</div>
+    <div class="lbl" style="margin-top:8px">Fecha de entrega</div>
+    <div class="val">${d.fecha_entrega?new Date(d.fecha_entrega).toLocaleDateString("es-ES"):"-"}${d.hora_descarga?" - "+d.hora_descarga:""}</div>
+    ${d.ventana_descarga?`<div class="lbl" style="margin-top:4px">Ventana horaria</div><div class="val">${d.ventana_descarga}</div>`:""}
+  </div>
+</div>
+
+<h2>Mercancia</h2>
+<table>
+  <thead><tr>
+    <th style="width:40%">Descripcion</th><th>Bultos</th><th>Peso (kg)</th>
+    <th>Volumen (m3)</th><th>Tipo carga</th><th>Valor</th>
+  </tr></thead>
+  <tbody><tr>
+    <td>${d.mercancia||"-"}</td>
+    <td>${d.bultos||"-"}</td>
+    <td>${d.peso_kg?Number(d.peso_kg).toLocaleString("es-ES")+" kg":"-"}</td>
+    <td>${d.volumen||"-"}</td>
+    <td>${d.tipo_carga||"-"}</td>
+    <td>${d.importe?Number(d.importe).toLocaleString("es-ES",{minimumFractionDigits:2})+" EUR":"-"}</td>
+  </tr></tbody>
+</table>
+
+<div class="grid3">
+  <div class="box">
+    <h2>Vehiculo Tractor</h2>
+    <div class="val-big">${d.veh_matricula||"-"}</div>
+    <div class="val" style="color:#555">${[d.veh_marca,d.veh_modelo].filter(Boolean).join(" ")||""}</div>
+  </div>
+  <div class="box">
+    <h2>Remolque / Semirremolque</h2>
+    <div class="val-big">${d.rem_matricula||"-"}</div>
+  </div>
+  <div class="box">
+    <h2>Chofer</h2>
+    <div class="val-big">${[d.chofer_nombre,d.chofer_apellidos].filter(Boolean).join(" ")||"-"}</div>
+    ${d.chofer_dni?`<div class="lbl" style="margin-top:4px">DNI/NIE</div><div class="val">${d.chofer_dni}</div>`:""}
+    ${d.chofer_tel?`<div class="lbl" style="margin-top:4px">Telefono</div><div class="val">${d.chofer_tel}</div>`:""}
+  </div>
+</div>
+
+${d.notas?`<div class="box" style="margin-bottom:12px"><h2>Observaciones</h2><div style="white-space:pre-line">${d.notas}</div></div>`:""}
+
+<div class="firma-row">
+  <div class="firma-box">
+    <div class="firma-label">Firma Remitente</div>
+    ${firmas.remitente
+      ? `<img src="${firmas.remitente}" style="max-width:100%;max-height:60px;margin-top:4px"/>`
+      : `<div class="firma-line">Nombre y sello</div>`}
+  </div>
+  <div class="firma-box">
+    <div class="firma-label">Firma Chofer / Transportista</div>
+    ${firmas.chofer
+      ? `<img src="${firmas.chofer}" style="max-width:100%;max-height:60px;margin-top:4px"/>`
+      : `<div class="firma-line">Nombre y sello</div>`}
+  </div>
+  <div class="firma-box">
+    <div class="firma-label">Firma Destinatario</div>
+    ${firmas.destinatario
+      ? `<img src="${firmas.destinatario}" style="max-width:100%;max-height:60px;margin-top:4px"/>
+         <div style="font-size:9px;color:#555;margin-top:3px">${firmaNombre||""}</div>
+         <div style="font-size:9px;color:#555;">Fecha: ${new Date().toLocaleDateString("es-ES")}</div>`
+      : `<div class="firma-line">Nombre, sello y fecha de recepcion</div>`}
+  </div>
+</div>
+
+<div style="text-align:center;margin-top:16px;font-size:9px;color:#999;border-top:1px solid #eee;padding-top:8px">
+  Documento generado por TransGest TMS - ${new Date().toLocaleString("es-ES")}
+</div>
+</body></html>`;
+  }
+
+  const O = {
+    overlay: {position:"fixed",inset:0,background:"rgba(0,0,0,.65)",zIndex:9000,
+      display:"flex",alignItems:"center",justifyContent:"center"},
+    modal: {background:"var(--bg2)",borderRadius:14,width:"min(900px,96vw)",maxHeight:"90vh",
+      display:"flex",flexDirection:"column",border:"1px solid var(--border2)"},
+    header: {display:"flex",justifyContent:"space-between",alignItems:"center",
+      padding:"16px 20px",borderBottom:"1px solid var(--border2)"},
+    body: {overflowY:"auto",flex:1,padding:"20px"},
+    footer: {padding:"14px 20px",borderTop:"1px solid var(--border2)",
+      display:"flex",gap:10,justifyContent:"flex-end"},
+    btn: {padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",
+      fontWeight:700,fontSize:13,fontFamily:"'DM Sans',sans-serif"},
+  };
+
+  const d = data;
+  const fmt2 = v => v ? Number(v).toLocaleString("es-ES",{minimumFractionDigits:2})+" EUR" : "-";
+  const fmtD = v => v ? new Date(v).toLocaleDateString("es-ES") : "-";
+
+  return (
+    <div style={O.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={O.modal}>
+        <div style={O.header}>
+          <div>
+            <div style={{fontWeight:800,fontSize:16,color:"var(--text)"}}>Carta de Porte - {docNumero}</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>
+              Pedido {pedidoNumero} · {d.origen} -> {d.destino} · {fmtD(d.fecha_carga)}
+            </div>
+          </div>
+          <button onClick={onClose} style={{...O.btn,background:"var(--bg4)",color:"var(--text3)",padding:"6px 12px"}}>Cerrar</button>
+        </div>
+
+        <div style={O.body}>
+          {/* Preview compacto */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            {[
+              {l:"Transportista", v:d.empresa_nombre||"-"},
+              {l:"Cliente / Remitente", v:d.cliente_nombre||"-"},
+              {l:"Origen", v:d.origen||"-"},
+              {l:"Destino", v:d.destino||"-"},
+              {l:"Fecha carga", v:fmtD(d.fecha_carga)},
+              {l:"Fecha entrega", v:fmtD(d.fecha_entrega)},
+              {l:"Vehiculo", v:[d.veh_matricula,d.veh_marca,d.veh_modelo].filter(Boolean).join(" ")||"-"},
+              {l:"Remolque", v:d.rem_matricula||"-"},
+              {l:"Chofer", v:[d.chofer_nombre,d.chofer_apellidos].filter(Boolean).join(" ")||"-"},
+              {l:"Mercancia", v:d.mercancia||"-"},
+              {l:"Peso / Bultos", v:`${d.peso_kg?Number(d.peso_kg).toLocaleString("es-ES")+" kg":"-"} - ${d.bultos||"-"} bultos`},
+              {l:"Importe", v:fmt2(d.importe)},
+            ].map(({l,v})=>(
+              <div key={l} style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px"}}>
+                <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3}}>{l}</div>
+                <div style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>{v}</div>
+              </div>
+            ))}
+          </div>
+          {d.notas&&(
+            <div style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
+              <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",color:"var(--text5)",marginBottom:4}}>Observaciones</div>
+              <div style={{fontSize:12,color:"var(--text2)",whiteSpace:"pre-line"}}>{d.notas}</div>
+            </div>
+          )}
+          <div style={{fontSize:11,color:"var(--text4)",textAlign:"center",marginTop:8}}>
+            Al imprimir se generara el documento completo con campos de firma para remitente, chofer y destinatario.
+          </div>
+        </div>
+
+        {/* Firma mode: canvas pad */}
+        {firmaMode && (
+          <div style={{padding:"16px 20px",borderTop:"1px solid var(--border2)",background:"var(--bg3)"}}>
+            <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:8}}>
+              Firma de {firmaMode==="destinatario"?"Destinatario":firmaMode==="remitente"?"Remitente":"Chofer"}
+            </div>
+            <input
+              value={firmaNombre} onChange={e=>setFirmaNombre(e.target.value)}
+              placeholder="Nombre completo del firmante"
+              style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"1px solid var(--border3)",
+                background:"var(--bg4)",color:"var(--text)",fontFamily:"'DM Sans',sans-serif",
+                fontSize:12,marginBottom:8}}
+            />
+            <div style={{background:"#fff",borderRadius:8,border:"2px solid var(--border3)",overflow:"hidden",touchAction:"none"}}>
+              <canvas ref={canvasRef} width={560} height={140}
+                style={{width:"100%",height:140,display:"block",cursor:"crosshair"}}
+                onMouseDown={startDraw} onMouseMove={moveDraw} onMouseUp={endDraw} onMouseLeave={endDraw}
+                onTouchStart={startDraw} onTouchMove={moveDraw} onTouchEnd={endDraw}
+              />
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              <button onClick={clearCanvas}
+                style={{...O.btn,background:"var(--bg4)",color:"var(--text3)",border:"1px solid var(--border2)",flex:1}}>
+                Borrar
+              </button>
+              <button onClick={()=>setFirmaMode(null)}
+                style={{...O.btn,background:"var(--bg4)",color:"var(--text3)",border:"1px solid var(--border2)",flex:1}}>
+                Cancelar
+              </button>
+              <button onClick={confirmarFirma} disabled={guardandoFirma}
+                style={{...O.btn,background:"#10b981",color:"#fff",flex:2}}>
+                {guardandoFirma?"Guardando...":"Confirmar firma"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Signature status row */}
+        {!firmaMode && (
+          <div style={{padding:"12px 20px",borderTop:"1px solid var(--border2)",
+            display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+            <span style={{fontSize:11,color:"var(--text4)",marginRight:4}}>Firmas digitales:</span>
+            {[
+              {k:"remitente",    l:"Remitente"},
+              {k:"destinatario", l:"Destinatario"},
+              {k:"chofer",       l:"Chofer"},
+            ].map(({k,l})=>(
+              <button key={k} onClick={()=>{ setFirmaMode(k); setFirmaNombre(''); clearCanvas && canvasRef.current && canvasRef.current.getContext('2d').clearRect(0,0,560,140); }}
+                style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--border2)",
+                  background: firmas[k] ? "rgba(16,185,129,.15)" : "var(--bg4)",
+                  color: firmas[k] ? "var(--green)" : "var(--text3)",
+                  fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                {firmas[k] ? "OK" : "Pendiente"} {l}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div style={O.footer}>
+          <button onClick={onClose}
+            style={{...O.btn,background:"var(--bg4)",color:"var(--text3)",border:"1px solid var(--border2)"}}>
+            Cerrar
+          </button>
+          <button onClick={imprimir}
+            style={{...O.btn,background:"#f59e0b",color:"#fff"}}>
+            Imprimir / Guardar PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function readPedidosFocus() {
+  return readRuntimeFocus("tms_pedidos_focus");
+}
+
+function readGuidedPedidoTutorial() {
+  const focus = readRuntimeFocus("tms_guided_tutorial");
+  return focus?.type === "pedido_create" ? focus : null;
+}
+
+function buildGuidedPedidoProgress(form = {}, meta = {}) {
+  const precio = parseLocaleNumber(form.precio_unitario || form.importe_minimo || form.precio_cliente_col || form.importe, 0);
+  return {
+    modal: !!meta.modalOpened,
+    cliente: !!form.cliente_id,
+    ruta: !!String(form.origen || "").trim() && !!String(form.destino || "").trim(),
+    fechas: !!form.fecha_carga && !!form.fecha_descarga,
+    precio: precio > 0 || !!String(form.precio_unitario || form.importe_minimo || "").trim(),
+    asignacion: !!(form.colaborador_id || form.vehiculo_id || form.chofer_id || form.matricula_colaborador),
+    guardado: !!meta.saved,
+  };
+}
+
+const GUIDED_PEDIDO_STEPS = [
+  { key:"modal", title:"Abre un pedido nuevo", detail:"Pulsa el boton para abrir el formulario de alta." },
+  { key:"cliente", title:"Selecciona o crea el cliente", detail:"El pedido no puede guardarse sin cliente." },
+  { key:"ruta", title:"Completa origen y destino", detail:"Indica punto de carga y entrega o usa puntos guardados." },
+  { key:"fechas", title:"Marca carga y descarga", detail:"Fecha de carga y fecha de descarga dejan el viaje planificado." },
+  { key:"precio", title:"Introduce el precio", detail:"Pon precio del viaje, toneladas, km o tarifa aplicable." },
+  { key:"asignacion", title:"Asigna recurso", detail:"Elige vehiculo/chofer o colaborador subcontratado." },
+  { key:"guardado", title:"Guarda el pedido", detail:"Al guardar se completa la mision y el pedido queda creado." },
+];
+
+function GuidedPedidoTutorialPanel({ active, progress, onStart, onClose }) {
+  if (!active) return null;
+  const doneCount = GUIDED_PEDIDO_STEPS.filter(step => progress?.[step.key]).length;
+  const current = GUIDED_PEDIDO_STEPS.find(step => !progress?.[step.key]) || GUIDED_PEDIDO_STEPS[GUIDED_PEDIDO_STEPS.length - 1];
+  const complete = doneCount === GUIDED_PEDIDO_STEPS.length;
+  return (
+    <div style={{position:"fixed",right:18,bottom:18,zIndex:520,width:"min(380px,calc(100vw - 36px))",background:"var(--bg2)",border:"1px solid rgba(20,184,166,.35)",borderRadius:10,boxShadow:"0 20px 55px rgba(0,0,0,.28)",padding:14,fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+        <div style={{width:34,height:34,borderRadius:9,background:complete?"rgba(16,185,129,.16)":"rgba(20,184,166,.14)",color:complete?"#10b981":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>
+          {complete ? "OK" : doneCount + 1}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent-xl)"}}>Tutorial interactivo</div>
+          <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)",marginTop:2}}>Mision: crear pedido</div>
+          <div style={{fontSize:11,color:"var(--text5)",fontWeight:800,marginTop:3}}>{doneCount}/{GUIDED_PEDIDO_STEPS.length} objetivos completados</div>
+        </div>
+        <button type="button" onClick={onClose} title="Cerrar tutorial" style={{border:"none",background:"transparent",color:"var(--text5)",fontSize:18,fontWeight:900,cursor:"pointer",lineHeight:1}}>x</button>
+      </div>
+      <div style={{height:5,background:"var(--bg4)",borderRadius:999,overflow:"hidden",margin:"12px 0"}}>
+        <div style={{height:"100%",width:`${Math.round((doneCount / GUIDED_PEDIDO_STEPS.length) * 100)}%`,background:complete?"#10b981":"var(--accent)",transition:"width .25s ease"}} />
+      </div>
+      <div style={{border:"1px solid var(--border)",background:"var(--bg)",borderRadius:8,padding:"10px 11px",marginBottom:10}}>
+        <div style={{fontSize:12,fontWeight:900,color:complete?"#10b981":"var(--text)"}}>{complete ? "Pedido creado. Mision completada." : current.title}</div>
+        <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45,marginTop:3}}>{complete ? "Ya puedes seguir trabajando o crear otro pedido cuando quieras." : current.detail}</div>
+      </div>
+      <div style={{display:"grid",gap:6,maxHeight:220,overflowY:"auto",paddingRight:2}}>
+        {GUIDED_PEDIDO_STEPS.map(step => {
+          const done = !!progress?.[step.key];
+          const isCurrent = step.key === current.key && !complete;
+          return (
+            <div key={step.key} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 8px",borderRadius:7,border:`1px solid ${isCurrent ? "rgba(20,184,166,.32)" : "var(--border)"}`,background:isCurrent ? "rgba(20,184,166,.08)" : "transparent"}}>
+              <span style={{width:18,height:18,borderRadius:999,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,background:done?"rgba(16,185,129,.16)":"var(--bg4)",color:done?"#10b981":"var(--text5)"}}>{done ? "✓" : ""}</span>
+              <span style={{fontSize:11,fontWeight:850,color:done?"#10b981":"var(--text3)"}}>{step.title}</span>
+            </div>
+          );
+        })}
+      </div>
+      {!progress?.modal && (
+        <button type="button" onClick={onStart} style={{marginTop:12,width:"100%",padding:"10px 12px",borderRadius:8,border:"1px solid var(--accent)",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:900,cursor:"pointer"}}>
+          Empezar pedido guiado
+        </button>
+      )}
+      {complete && (
+        <button type="button" onClick={onClose} style={{marginTop:12,width:"100%",padding:"10px 12px",borderRadius:8,border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.12)",color:"#10b981",fontSize:12,fontWeight:900,cursor:"pointer"}}>
+          Cerrar mision
+        </button>
+      )}
+    </div>
+  );
+}
+
+function openPedidoInTrafico(pedido) {
+  if (!pedido?.id || typeof window === "undefined") return;
+  setRuntimeFocus("tms_trafico_focus", {
+    pedido_id: pedido.id,
+    numero: pedido.numero || "",
+    fecha_carga: toDateInputValue(pedido.fecha_carga || pedido.fecha_pedido),
+    source: "pedidos",
+  });
+  window.dispatchEvent(new CustomEvent("tms:navegar", { detail: "gestion_trafico" }));
+}
+
+export default function Pedidos() {
+  useEmpresaPerfil();
+  const { puedeEditar } = useAuth();
+  const canEdit = puedeEditar("pedidos");
+  const empresaPlan = getEmpresaPlanLocal();
+  const aiVisualPlanActivo = planHasFeature(empresaPlan, "ai");
+  const aiDisponible = true;
+  const [focusPedido] = useState(() => readPedidosFocus());
+  const [guidedPedido, setGuidedPedido] = useState(() => {
+    const focus = readGuidedPedidoTutorial();
+    return focus ? { active:true, modalOpened:false, saved:false, progress:buildGuidedPedidoProgress({}, { modalOpened:false, saved:false }) } : null;
+  });
+  const [pedidos,    setPedidos]    = useState([]);
+  const [clientes,   setClientes]   = useState([]);
+  const [vehiculos,  setVehiculos]  = useState([]);
+  const [choferes,   setChoferes]   = useState([]);
+  const [rutas,      setRutas]      = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const _rangoMesActual = currentMonthRangeLocal();
+  const _rangoSemanaActual = currentWeekRangeLocal();
+  const [filtroEst,  setFiltroEst]  = useState(() => focusPedido?.pedido_id ? "todos" : "activos");
+  const [filtroMes,  setFiltroMes]  = useState(() => focusPedido?.pedido_id ? "" : _rangoMesActual.month);
+  const [filtroFechasCustom, setFiltroFechasCustom] = useState(false);
+  const [filtroDesde, setFiltroDesde] = useState(() => focusPedido?.pedido_id ? "" : _rangoMesActual.desde);
+  const [filtroHasta, setFiltroHasta] = useState(() => focusPedido?.pedido_id ? "" : _rangoMesActual.hasta);
+  const [filtroCliente,setFiltroCliente]=useState("");
+  const [q,          setQ]          = useState(() => focusPedido?.numero || "");
+  const [soloCriticos, setSoloCriticos] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [filtroSinAsignacion, setFiltroSinAsignacion] = useState(false);
+  const [filtroPendienteCompletar, setFiltroPendienteCompletar] = useState(false);
+  const [filtroColaborador, setFiltroColaborador] = useState(false);
+  const [groupByCliente, setGroupByCliente] = useState(false);
+  const [vistaPedidos, setVistaPedidos] = useState("lista");
+  const [collapsedClientes, setCollapsedClientes] = useState(() => loadPedidosCollapsedGroups());
+  const [criticalPanelOpen, setCriticalPanelOpen] = useState(false);
+  const [readCriticalAlerts, setReadCriticalAlerts] = useState(() => loadReadPedidoAlerts());
+  const [selectedPedidoIds, setSelectedPedidoIds] = useState([]);
+  const [bulkEstado, setBulkEstado] = useState("confirmado");
+  const debouncedQ   = useDebounce(q, 350); // debounce search input 350ms
+  const [page,       setPage]       = useState(1);
+  const [cartaPorte, setCartaPorte] = useState(null); // pedido data for CMR modal
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const PAGE_SIZE = 50;
+  const [modal,      setModal]      = useState(false);
+  const [editando,   setEditando]   = useState(null);
+  const [facturando, setFacturando] = useState(null);
+  const [savingFactura, setSavingFactura] = useState(false);
+  const [ordenCarga, setOrdenCarga] = useState(null); // pedido para ver/imprimir orden de carga
+  const [aiCreando,     setAiCreando]    = useState(false); // texto libre -> pedido IA
+  const [quickCreando,  setQuickCreando] = useState(false);
+  const [copyPlan, setCopyPlan] = useState(null);
+  const [copySaving, setCopySaving] = useState(false);
+  const [bulkCopying, setBulkCopying] = useState(false);
+  const [reprogrammingPedidoId, setReprogrammingPedidoId] = useState("");
+  const [bulkRescheduling, setBulkRescheduling] = useState(false);
+  const [bulkClearing, setBulkClearing] = useState(false);
+  const [openActionMenuPedidoId, setOpenActionMenuPedidoId] = useState("");
+  const [whatsappSending, setWhatsappSending] = useState("");
+  const delayResolverRef = React.useRef(null);
+  const [delayRequest, setDelayRequest] = useState(null);
+  const [autoAsignando, setAutoAsignando] = useState(null);  // pedido para autoasignacion IA
+  const [colaboradores,setColaboradores]=useState([]);
+  const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
+
+  useEffect(() => {
+    savePedidosCollapsedGroups(collapsedClientes);
+  }, [collapsedClientes]);
+
+  const guidedPedidoActive = !!guidedPedido?.active;
+
+  const startGuidedPedido = useCallback(() => {
+    setGuidedPedido({ active:true, modalOpened:false, saved:false, progress:buildGuidedPedidoProgress({}, { modalOpened:false, saved:false }) });
+  }, []);
+
+  const openGuidedPedidoModal = useCallback(() => {
+    setEditando(null);
+    setModal(true);
+    setGuidedPedido(prev => {
+      const base = prev?.active ? prev : { active:true, saved:false, progress:{} };
+      return {
+        ...base,
+        modalOpened:true,
+        saved:false,
+        progress:buildGuidedPedidoProgress({}, { modalOpened:true, saved:false }),
+      };
+    });
+  }, []);
+
+  const updateGuidedPedidoProgress = useCallback((form = {}) => {
+    setGuidedPedido(prev => {
+      if (!prev?.active) return prev;
+      return {
+        ...prev,
+        modalOpened:true,
+        lastForm:form,
+        progress:buildGuidedPedidoProgress(form, { modalOpened:true, saved:prev.saved }),
+      };
+    });
+  }, []);
+
+  const closeGuidedPedido = useCallback(() => {
+    setGuidedPedido(null);
+    clearRuntimeFocus("tms_guided_tutorial");
+  }, []);
+
+  useEffect(() => {
+    if (guidedPedidoActive) return undefined;
+    const pending = readGuidedPedidoTutorial();
+    if (pending) startGuidedPedido();
+    const onStart = e => {
+      if (e?.detail?.type === "pedido_create") startGuidedPedido();
+    };
+    window.addEventListener("tms:guided-tutorial-start", onStart);
+    return () => window.removeEventListener("tms:guided-tutorial-start", onStart);
+  }, [guidedPedidoActive, startGuidedPedido]);
+
+  function aplicarSemanaActual() {
+    if (filtroSemanaActualActivo) {
+      setFiltroMes(_rangoMesActual.month);
+      setFiltroFechasCustom(false);
+      setFiltroDesde(_rangoMesActual.desde);
+      setFiltroHasta(_rangoMesActual.hasta);
+      setPage(1);
+      return;
+    }
+    const range = currentWeekRangeLocal();
+    setFiltroMes(range.week);
+    setFiltroFechasCustom(false);
+    setFiltroDesde(range.desde);
+    setFiltroHasta(range.hasta);
+    setPage(1);
+  }
+
+  async function enviarWhatsappPedidoAccion(pedido, target = "cliente") {
+    if (!pedido?.id || whatsappSending) return;
+    const key = `${pedido.id}:${target}`;
+    setWhatsappSending(key);
+    try {
+      const preflight = await getPedidoWhatsappPreflight(pedido.id, target);
+      if (preflight?.bloqueantes?.length) {
+        notify(preflight.bloqueantes.join(" "), "warning");
+        return;
+      }
+      const avisos = Array.isArray(preflight?.avisos) ? preflight.avisos : [];
+      const force = avisos.length > 0
+        ? await confirmDialog({
+            title: "Enviar WhatsApp",
+            message: `${avisos.join("\n")}\n\nSe registrara el envio igualmente para dejar trazabilidad.`,
+            confirmText: "Registrar envio",
+            cancelText: "Cancelar",
+            tone: "warning",
+          })
+        : true;
+      if (!force) return;
+      const res = await enviarPedidoWhatsapp(pedido.id, { target, force:true });
+      notify(res?.simulado ? "WhatsApp registrado como simulado. Faltan credenciales Meta." : "WhatsApp enviado y registrado.", res?.simulado ? "warning" : "success");
+      cargar();
+    } catch(e) {
+      notify(e.message || "No se pudo registrar el WhatsApp.", "error");
+    } finally {
+      setWhatsappSending("");
+    }
+  }
+
+  async function convertirFacturaConConcepto(pedido) {
+    if (pedidoTieneFacturaFinal(pedido) || pedidoTieneFacturaBorrador(pedido)) {
+      notify(pedidoTieneFacturaBorrador(pedido) ? "El pedido ya tiene un borrador de factura vinculado: " + (pedido.factura_numero || "borrador") : "Pedido ya facturado: " + (pedido.factura_numero || "factura emitida"), "warning");
+      return;
+    }
+
+    const estadoActual = pedido.estado;
+    const cambiaEstado = !["entregado","facturado"].includes(estadoActual);
+    const importe = Number(pedido.importeFactura || pedido.importe || 0)
+      .toLocaleString("es-ES", { minimumFractionDigits: 2 });
+    const msg = [
+      "CREAR BORRADOR DE FACTURA",
+      "Pedido:  " + pedido.numero,
+      "Cliente: " + (pedido.cliente_nombre || "-"),
+      "Importe: " + importe + " EUR",
+      "",
+      cambiaEstado ? "El pedido cambiara de \"" + estadoActual + "\" a \"Entregado\"" : "",
+      "",
+      "Se creara como BORRADOR. Administracion la emitira desde Facturacion.",
+    ].filter(Boolean).join("\n");
+    const ok = await confirmDialog({
+      title: "Crear factura borrador",
+      message: msg,
+      confirmText: "Crear borrador",
+    });
+    if (!ok) return;
+
+    const concepto = pedido.conceptoFactura ||
+      `Servicio de transporte - ${pedido.numero} - ${pedido.origen || ""}${pedido.destino ? " -> " + pedido.destino : ""}`;
+    await crearFactura({
+      cliente_id: pedido.cliente_id,
+      serie: "A",
+      fecha: new Date().toISOString().slice(0,10),
+      estado: "borrador",
+      pedidos_ids: [pedido.id],
+      lineas: [{ concepto, cantidad: 1, precio_unit: Number(pedido.importeFactura || pedido.importe || 0) }],
+      observaciones: pedido.notas || "",
+    });
+    if (cambiaEstado) await cambiarEstadoPedido(pedido.id, "entregado");
+    if (pedido.vehiculo_id && pedido.km_ruta) {
+      import("../services/api").then(m=>m.actualizarKmVehiculo(pedido.vehiculo_id, Number(pedido.km_ruta)).catch(()=>{}));
+    }
+    await cargar();
+  }
+  // Reset to page 1 when filters change
+  useEffect(() => { setPage(1); }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, filtroSinAsignacion, filtroPendienteCompletar, filtroColaborador]);
+  useEffect(() => { setSelectedPedidoIds([]); }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, filtroSinAsignacion, filtroPendienteCompletar, filtroColaborador, soloCriticos, groupByCliente]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(PEDIDOS_CRITICAL_ALERTS_STORAGE_KEY, JSON.stringify(readCriticalAlerts));
+    } catch {}
+  }, [readCriticalAlerts]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleClose = () => setOpenActionMenuPedidoId("");
+    window.addEventListener("click", handleClose);
+    return () => window.removeEventListener("click", handleClose);
+  }, []);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (filtroEst === "activos") {
+        // Don't send multi-estado to backend - filter client-side below
+      }
+      else if (filtroEst !== "todos") { params.estado = filtroEst; }
+      if (filtroDesde) params.desde = filtroDesde;
+      if (filtroHasta) params.hasta = filtroHasta;
+      if (debouncedQ) params.q = debouncedQ;
+      if (filtroCliente) params.cliente_id = filtroCliente;
+      params.page  = page;
+      params.limit = PAGE_SIZE;
+        const [p, c, v, ch, r, col, cfgEmpresa] = await Promise.all([
+          getPedidos(params),
+          getClientes(),
+          getVehiculos(),
+          getChoferes(),
+          getRutas(),
+          getColaboradores().catch(()=>[]),
+          getEmpresaConfig().catch(()=>({})),
+        ]);
+      // Handle paginated response {data, pagination} or legacy array
+      let pedidosData = Array.isArray(p) ? p : (Array.isArray(p?.data) ? p.data : []);
+      // Client-side filter for "activos" (until backend supports multi-estado ANY)
+      if (filtroEst === "activos") {
+        pedidosData = pedidosData.filter(x => ["pendiente","confirmado","en_curso","descarga"].includes(x.estado));
+      }
+      setPedidos(pedidosData);
+      if (p?.pagination) {
+        setTotalPages(p.pagination.totalPages || 1);
+        setTotalCount(p.pagination.total || pedidosData.length);
+      } else {
+        setTotalPages(1);
+        setTotalCount(pedidosData.length);
+      }
+        setClientes(Array.isArray(c?.data) ? c.data : Array.isArray(c) ? c : []);
+        setVehiculos(Array.isArray(v) ? v : []);
+        setChoferes(Array.isArray(ch) ? ch : []);
+        setRutas(Array.isArray(r) ? r : []);
+        setColaboradores(Array.isArray(col) ? col : []);
+        let cfgEmpresaObj = cfgEmpresa && typeof cfgEmpresa === "object" ? cfgEmpresa : {};
+        if (typeof window !== "undefined") window.__TMS_EMPRESA_CONFIG = cfgEmpresaObj;
+        const hasCombCfg = !!(cfgEmpresaObj?.cfg_precios?.combustible || cfgEmpresaObj?.cfg_precios?.gasoil);
+        if (!hasCombCfg) {
+          try {
+            const legacyComb = JSON.parse(localStorage.getItem("tms_gasoil_cfg") || "null");
+            if (legacyComb && typeof legacyComb === "object") {
+              const nextPrecios = {
+                ...(cfgEmpresaObj?.cfg_precios || {}),
+                combustible: legacyComb,
+              };
+              await setConfigPrecios(nextPrecios);
+              cfgEmpresaObj = { ...cfgEmpresaObj, cfg_precios: nextPrecios };
+              if (typeof window !== "undefined") window.__TMS_EMPRESA_CONFIG = cfgEmpresaObj;
+              localStorage.removeItem("tms_gasoil_cfg");
+            }
+          } catch {}
+        }
+      } catch(e) { console.error(e); }
+    finally { setLoading(false); }
+  }, [filtroEst, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    const sync = () => { cargar(); };
+    window.addEventListener("tms:facturas-changed", sync);
+    window.addEventListener("tms:pedidos-changed", sync);
+    return () => {
+      window.removeEventListener("tms:facturas-changed", sync);
+      window.removeEventListener("tms:pedidos-changed", sync);
+    };
+  }, [cargar]);
+
+  useEffect(() => {
+    if (!focusPedido?.pedido_id || loading) return;
+    const found = pedidos.find(p => String(p.id) === String(focusPedido.pedido_id));
+    if (!found) return;
+    const t = window.setTimeout(() => {
+      document.getElementById(`pedido-row-${focusPedido.pedido_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
+      clearRuntimeFocus("tms_pedidos_focus");
+    }, 180);
+    return () => window.clearTimeout(t);
+  }, [focusPedido, loading, pedidos]);
+
+  async function cambiarEstado(id, estado) {
+    const p = pedidos.find(x => x.id === id);
+    if (pedidoTieneFacturaFinal(p)) {
+      notify("No se puede cambiar el estado de un pedido facturado.", "warning");
+      return;
+    }
+    const validationIssues = getPedidoStateValidationIssues(p, estado);
+    if (validationIssues.length) {
+      notify(`No se puede pasar a "${LABEL_ESTADO[estado] || estado}" hasta completar: ${validationIssues.join(", ")}.`, "warning");
+      return;
+    }
+    // Optimistic update - UI responds instantly
+    setPedidos(prev => prev.map(x => x.id===id ? {...x, estado} : x));
+    try {
+      await cambiarEstadoPedido(id, estado);
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: id, estado, source: "pedidos-estado" } }));
+      // No need to full reload - optimistic update is correct
+    } catch(e) {
+      // Revert on error
+      setPedidos(prev => prev.map(x => x.id===id ? {...x, estado: p?.estado} : x));
+      notify(e.message, "error");
+    }
+  }
+
+
+  function abrirNuevo() {
+    setEditando(null);
+    setModal(true);
+    if (guidedPedidoActive) {
+      setGuidedPedido(prev => ({
+        ...(prev || { active:true, saved:false }),
+        modalOpened:true,
+        progress:buildGuidedPedidoProgress({}, { modalOpened:true, saved:false }),
+      }));
+    }
+  }
+  async function abrirEditar(p, options = {}) {
+    let pedidoCompleto = p;
+    if (p?.id) {
+      try {
+        const fetched = await getPedido(p.id);
+        if (fetched?.id) pedidoCompleto = fetched;
+      } catch (e) {
+        notify("No se pudo refrescar el pedido completo. Se abre la version disponible.", "warning");
+      }
+    }
+    // Solo readonly si realmente hay factura final vinculada
+    const estaFacturado = pedidoTieneFacturaFinal(pedidoCompleto);
+    setEditando(estaFacturado ? { ...pedidoCompleto, ...options, _readonly: true } : { ...pedidoCompleto, ...options });
+    setModal(true);
+  }
+
+  async function abrirOrdenCarga(p) {
+    let pedidoCompleto = p;
+    if (p?.id) {
+      try {
+        const fetched = await getPedido(p.id);
+        if (fetched?.id) pedidoCompleto = fetched;
+      } catch (e) {
+        notify("No se pudo refrescar el pedido completo. Se abre la version disponible.", "warning");
+      }
+    }
+    setOrdenCarga(normalizePedidoTarifaDraft(pedidoCompleto));
+  }
+
+  async function duplicarPedidoExistente(p) {
+    try {
+      let pedidoBase = p;
+      if (p?.id) {
+        const fetched = await getPedido(p.id);
+        if (fetched?.id) pedidoBase = fetched;
+      }
+      setEditando(buildPedidoDuplicado(pedidoBase));
+      setModal(true);
+    } catch (e) {
+      notify("No se pudo preparar el duplicado del pedido.", "error");
+    }
+  }
+
+  async function abrirCopiarPedido(p) {
+    try {
+      let pedidoBase = p;
+      if (p?.id) {
+        const fetched = await getPedido(p.id);
+        if (fetched?.id) pedidoBase = fetched;
+      }
+      setCopyPlan({
+        source: pedidoBase,
+        fecha_carga: String(pedidoBase?.fecha_carga || new Date().toISOString().slice(0, 10)).slice(0, 10),
+        semanas: 1,
+        mantener_asignacion: true,
+      });
+    } catch (e) {
+      notify("No se pudo preparar la copia del viaje.", "error");
+    }
+  }
+
+  async function confirmarCopiaPedido() {
+    if (!copyPlan?.source) return;
+    if (!copyPlan.fecha_carga) {
+      notify("Indica una fecha de carga para la copia.", "warning");
+      return;
+    }
+    const semanas = Math.max(1, Math.min(12, Number(copyPlan.semanas || 1)));
+    setCopySaving(true);
+    try {
+      const creados = [];
+      for (let i = 0; i < semanas; i += 1) {
+        const fechaCarga = sumarDiasISO(copyPlan.fecha_carga, i * 7);
+        const fechaDescargaBase = copyPlan.source?.fecha_descarga || copyPlan.source?.fecha_carga || copyPlan.fecha_carga;
+        const diferenciaDias = Math.round((new Date(`${String(fechaDescargaBase).slice(0, 10)}T00:00:00`) - new Date(`${String(copyPlan.source?.fecha_carga || copyPlan.fecha_carga).slice(0, 10)}T00:00:00`)) / 86400000);
+        const payload = buildPedidoCopyPayload(copyPlan.source, {
+          fecha_carga: fechaCarga,
+          fecha_descarga: fechaDescargaBase ? sumarDiasISO(fechaCarga, Number.isFinite(diferenciaDias) ? diferenciaDias : 0) : null,
+          pendiente_completar: true,
+          aviso_completar: semanas > 1
+            ? "Viaje copiado en serie: revisar fechas, asignacion y precio antes de cerrar."
+            : "Viaje copiado: revisar fechas, asignacion y precio antes de cerrar.",
+          mantener_asignacion: !!copyPlan.mantener_asignacion,
+          vehiculo_id: copyPlan.mantener_asignacion ? copyPlan.source?.vehiculo_id || null : null,
+          chofer_id: copyPlan.mantener_asignacion ? copyPlan.source?.chofer_id || null : null,
+          remolque_id_manual: copyPlan.mantener_asignacion ? copyPlan.source?.remolque_id || copyPlan.source?.remolque_id_manual || null : null,
+          estado: "pendiente",
+        });
+        const creado = await crearPedido(payload);
+        if (creado?.id) creados.push(creado);
+      }
+      notify(
+        semanas > 1
+          ? `Se han copiado ${creados.length} viajes semanales.`
+          : "Viaje copiado correctamente.",
+        "success"
+      );
+      setCopyPlan(null);
+      cargar();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-copy-batch" } }));
+      }
+    } catch (e) {
+      notify(e.message || "No se pudieron copiar los viajes.", "error");
+    } finally {
+      setCopySaving(false);
+    }
+  }
+
+  async function reprogramarPedidoDias(pedido, offsetDays = 1) {
+    const texto = offsetDays === 1 ? "1 dia" : `${offsetDays} dias`;
+    const ok = await confirmDialog({
+      title: "Reprogramar pedido",
+      message: `Se moveran las fechas operativas de ${pedido.numero || "este pedido"} ${texto} manteniendo la separacion entre carga y descarga.\n\nEl pedido quedara marcado para revisar horarios y compromiso con el cliente.`,
+      confirmText: "Reprogramar",
+      tone: "warning",
+    });
+    if (!ok) return;
+    setReprogrammingPedidoId(String(pedido.id));
+    try {
+      let pedidoBase = pedido;
+      if (pedido?.id) {
+        const fetched = await getPedido(pedido.id);
+        if (fetched?.id) pedidoBase = fetched;
+      }
+      await editarPedido(pedido.id, buildPedidoReschedulePayload(pedidoBase, offsetDays));
+      notify(`${pedido.numero || "Pedido"} reprogramado ${texto}.`, "success");
+      cargar();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: pedido.id, source: "pedidos-reschedule" } }));
+      }
+    } catch (e) {
+      notify(e.message || "No se pudo reprogramar el pedido.", "error");
+    } finally {
+      setReprogrammingPedidoId("");
+    }
+  }
+
+  function pedirDiasRetraso(etiqueta = "este pedido", defaultDays = 1) {
+    return new Promise(resolve => {
+      delayResolverRef.current = resolve;
+      setDelayRequest({
+        etiqueta,
+        value: String(defaultDays || 1),
+      });
+    });
+  }
+
+  function cerrarSelectorRetraso(value = null) {
+    const resolve = delayResolverRef.current;
+    delayResolverRef.current = null;
+    setDelayRequest(null);
+    if (resolve) resolve(value);
+  }
+
+  function confirmarSelectorRetraso() {
+    const days = Number(String(delayRequest?.value || "").trim().replace(",", "."));
+    if (!Number.isFinite(days) || days <= 0) {
+      notify("Introduce un numero de dias valido mayor que cero.", "warning");
+      return;
+    }
+    cerrarSelectorRetraso(Math.min(365, Math.round(days)));
+  }
+
+  async function solicitarRetrasoPedido(pedido, etiqueta) {
+    const days = await pedirDiasRetraso(etiqueta || pedido?.numero || "este pedido", 1);
+    if (days == null) return;
+    await reprogramarPedidoDias(pedido, days);
+  }
+
+  async function limpiarAsignacionPedido(pedido) {
+    if (!pedido?.id || pedidoTieneFacturaFinal(pedido) || pedidoTieneFacturaBorrador(pedido)) {
+      notify("Ese pedido no se puede desasignar desde aqui.", "warning");
+      return;
+    }
+    const ok = await confirmDialog({
+      title: "Limpiar asignacion",
+      message: `Se quitara la asignacion operativa de ${pedido.numero || "este pedido"} para volver a planificarlo.\n\nSe eliminaran vehiculo, chofer y conjunto, pero el resto del viaje seguira intacto.`,
+      confirmText: "Limpiar asignacion",
+      tone: "warning",
+    });
+    if (!ok) return;
+    setReprogrammingPedidoId(String(pedido.id));
+    try {
+      await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, {
+        vehiculo_id: "",
+        chofer_id: "",
+        remolque_id: "",
+        remolque_id_manual: "",
+        pendiente_completar: true,
+        aviso_completar: "Asignacion limpiada desde pedidos: volver a planificar recurso y horario operativo.",
+      }));
+      notify(`Asignacion limpiada en ${pedido.numero || "el pedido"}.`, "success");
+      cargar();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: pedido.id, source: "pedidos-clear-assignment" } }));
+      }
+    } catch (e) {
+      notify(e.message || "No se pudo limpiar la asignacion.", "error");
+    } finally {
+      setReprogrammingPedidoId("");
+    }
+  }
+
+  async function copiarCriticosSemanaSiguiente() {
+    const lista = pedidosCriticosOperativos
+      .map(item => item.pedido)
+      .filter(p => !pedidoTieneFacturaFinal(p));
+    if (!lista.length) {
+      notify("No hay pedidos criticos disponibles para copiar.", "info");
+      return;
+    }
+    const ok = await confirmDialog({
+      title: "Copiar pedidos criticos",
+      message: `Se copiaran ${lista.length} pedido(s) criticos a la semana siguiente manteniendo, si existe, la asignacion actual.\n\nLas copias quedaran como pendientes para revisarlas antes de cerrar.`,
+      confirmText: "Copiar semana siguiente",
+    });
+    if (!ok) return;
+    setBulkCopying(true);
+    try {
+      for (const pedido of lista) {
+        let pedidoBase = pedido;
+        if (pedido?.id) {
+          const fetched = await getPedido(pedido.id);
+          if (fetched?.id) pedidoBase = fetched;
+        }
+        const payload = buildPedidoCopyPayload(pedidoBase, {
+          fecha_carga: sumarDiasISO(pedidoBase?.fecha_carga || pedidoBase?.fecha_pedido, 7),
+          fecha_descarga: pedidoBase?.fecha_descarga
+            ? sumarDiasISO(pedidoBase.fecha_descarga, 7)
+            : sumarDiasISO(pedidoBase?.fecha_carga || pedidoBase?.fecha_pedido, 7),
+          pendiente_completar: true,
+          aviso_completar: "Viaje copiado desde pedidos: revisar fechas, asignacion y precio antes de cerrar.",
+          estado: "pendiente",
+        });
+        await crearPedido(payload);
+      }
+      notify(`Se han copiado ${lista.length} pedido(s) criticos.`, "success");
+      cargar();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-copy-criticals" } }));
+      }
+    } catch (e) {
+      notify(e.message || "No se pudieron copiar los pedidos criticos.", "error");
+    } finally {
+      setBulkCopying(false);
+    }
+  }
+
+  async function reprogramarCriticosDias(offsetDays = 1) {
+    const lista = pedidosCriticosOperativos
+      .map(item => item.pedido)
+      .filter(p => !pedidoTieneFacturaFinal(p));
+    if (!lista.length) {
+      notify("No hay pedidos criticos disponibles para reprogramar.", "info");
+      return;
+    }
+    const texto = offsetDays === 1 ? "1 dia" : `${offsetDays} dias`;
+    const ok = await confirmDialog({
+      title: "Reprogramar pedidos criticos",
+      message: `Se moveran ${lista.length} pedido(s) criticos ${texto} manteniendo la separacion entre carga y descarga.\n\nTodos quedaran marcados para revisar horarios y compromiso con el cliente.`,
+      confirmText: "Reprogramar criticos",
+      tone: "warning",
+    });
+    if (!ok) return;
+    setBulkRescheduling(true);
+    try {
+      for (const pedido of lista) {
+        let pedidoBase = pedido;
+        if (pedido?.id) {
+          const fetched = await getPedido(pedido.id);
+          if (fetched?.id) pedidoBase = fetched;
+        }
+        await editarPedido(pedido.id, buildPedidoReschedulePayload(pedidoBase, offsetDays, {
+          aviso_completar: "Viaje reprogramado en lote desde pedidos: revisar horarios, asignacion y compromiso con el cliente.",
+        }));
+      }
+      notify(`${lista.length} pedido(s) criticos reprogramados ${texto}.`, "success");
+      cargar();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-reschedule" } }));
+      }
+    } catch (e) {
+      notify(e.message || "No se pudieron reprogramar los pedidos criticos.", "error");
+    } finally {
+      setBulkRescheduling(false);
+    }
+  }
+
+  async function solicitarRetrasoCriticos() {
+    const days = await pedirDiasRetraso("los pedidos criticos visibles", 1);
+    if (days == null) return;
+    await reprogramarCriticosDias(days);
+  }
+
+  async function copiarSeleccionadosSemanaSiguiente() {
+    const lista = selectedPedidosOperables;
+    if (!lista.length) {
+      notify("Selecciona pedidos editables para copiarlos.", "info");
+      return;
+    }
+    const ok = await confirmDialog({
+      title: "Copiar pedidos seleccionados",
+      message: `Se copiaran ${lista.length} pedido(s) seleccionados a la semana siguiente manteniendo, si existe, la asignacion actual.\n\nLas copias quedaran como pendientes para revisarlas antes de cerrar.`,
+      confirmText: "Copiar seleccionados",
+    });
+    if (!ok) return;
+    setBulkCopying(true);
+    try {
+      for (const pedido of lista) {
+        let pedidoBase = pedido;
+        if (pedido?.id) {
+          const fetched = await getPedido(pedido.id);
+          if (fetched?.id) pedidoBase = fetched;
+        }
+        await crearPedido(buildPedidoCopyPayload(pedidoBase, {
+          fecha_carga: sumarDiasISO(pedidoBase?.fecha_carga || pedidoBase?.fecha_pedido, 7),
+          fecha_descarga: pedidoBase?.fecha_descarga
+            ? sumarDiasISO(pedidoBase.fecha_descarga, 7)
+            : sumarDiasISO(pedidoBase?.fecha_carga || pedidoBase?.fecha_pedido, 7),
+          pendiente_completar: true,
+          aviso_completar: "Viaje copiado desde seleccion multiple: revisar fechas, asignacion y precio antes de cerrar.",
+          estado: "pendiente",
+        }));
+      }
+      notify(`Se han copiado ${lista.length} pedido(s) seleccionados.`, "success");
+      setSelectedPedidoIds([]);
+      cargar();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-copy-selected" } }));
+      }
+    } catch (e) {
+      notify(e.message || "No se pudieron copiar los pedidos seleccionados.", "error");
+    } finally {
+      setBulkCopying(false);
+    }
+  }
+
+  async function reprogramarSeleccionadosDias(offsetDays = 1) {
+    const lista = selectedPedidosOperables;
+    if (!lista.length) {
+      notify("Selecciona pedidos editables para reprogramarlos.", "info");
+      return;
+    }
+    const texto = offsetDays === 1 ? "1 dia" : `${offsetDays} dias`;
+    const ok = await confirmDialog({
+      title: "Reprogramar pedidos seleccionados",
+      message: `Se moveran ${lista.length} pedido(s) seleccionados ${texto} manteniendo la separacion entre carga y descarga.\n\nTodos quedaran marcados para revisar horarios y compromiso con el cliente.`,
+      confirmText: "Reprogramar seleccionados",
+      tone: "warning",
+    });
+    if (!ok) return;
+    setBulkRescheduling(true);
+    try {
+      for (const pedido of lista) {
+        let pedidoBase = pedido;
+        if (pedido?.id) {
+          const fetched = await getPedido(pedido.id);
+          if (fetched?.id) pedidoBase = fetched;
+        }
+        await editarPedido(pedido.id, buildPedidoReschedulePayload(pedidoBase, offsetDays, {
+          aviso_completar: "Viaje reprogramado desde seleccion multiple: revisar horarios, asignacion y compromiso con el cliente.",
+        }));
+      }
+      notify(`${lista.length} pedido(s) seleccionados reprogramados ${texto}.`, "success");
+      setSelectedPedidoIds([]);
+      cargar();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-reschedule-selected" } }));
+      }
+    } catch (e) {
+      notify(e.message || "No se pudieron reprogramar los pedidos seleccionados.", "error");
+    } finally {
+      setBulkRescheduling(false);
+    }
+  }
+
+  async function solicitarRetrasoSeleccionados() {
+    const days = await pedirDiasRetraso("los pedidos seleccionados", 1);
+    if (days == null) return;
+    await reprogramarSeleccionadosDias(days);
+  }
+
+  async function marcarPedidoAvisoLeido(item) {
+    const pedido = item?.pedido;
+    if (!pedido?.id) return;
+    const ok = await confirmDialog({
+      title: "Marcar aviso como leido",
+      message: `El aviso de ${pedido.numero || "este pedido"} se ocultara de la bandeja de avisos hasta que cambie su situacion operativa.`,
+      confirmText: "Marcar como leido",
+    });
+    if (!ok) return;
+    const key = buildPedidoCriticalAlertKey(item);
+    setReadCriticalAlerts(prev => Array.from(new Set([...prev, key])));
+    notify(`Aviso de ${pedido.numero || "pedido"} marcado como leido.`, "success");
+  }
+
+  async function marcarPedidosAvisosVisiblesLeidos(lista = []) {
+    const visibles = (lista || []).filter(Boolean);
+    if (!visibles.length) {
+      notify("No hay avisos pendientes para marcar como leidos.", "info");
+      return;
+    }
+    const ok = await confirmDialog({
+      title: "Marcar avisos como leidos",
+      message: `Se ocultaran ${visibles.length} aviso(s) operativos visibles hasta que cambie su situacion.`,
+      confirmText: "Marcar visibles",
+    });
+    if (!ok) return;
+    setReadCriticalAlerts(prev => Array.from(new Set([
+      ...prev,
+      ...visibles.map(buildPedidoCriticalAlertKey),
+    ])));
+    notify(`${visibles.length} aviso(s) marcados como leidos.`, "success");
+  }
+
+  async function limpiarAsignacionesSeleccionadas() {
+    const lista = selectedPedidosOperables.filter(
+      p => !pedidoTieneFacturaBorrador(p) && (p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual)
+    );
+    if (!lista.length) {
+      notify("No hay asignaciones seleccionadas para limpiar.", "info");
+      return;
+    }
+    const ok = await confirmDialog({
+      title: "Limpiar asignaciones seleccionadas",
+      message: `Se limpiara la asignacion operativa de ${lista.length} pedido(s) seleccionados para volver a planificarlos sin arrastrar recursos equivocados.`,
+      confirmText: "Limpiar asignaciones",
+      tone: "warning",
+    });
+    if (!ok) return;
+    setBulkClearing(true);
+    try {
+      for (const pedido of lista) {
+        await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, {
+          vehiculo_id: "",
+          chofer_id: "",
+          remolque_id: "",
+          remolque_id_manual: "",
+          pendiente_completar: true,
+          aviso_completar: "Asignacion limpiada desde seleccion multiple: volver a planificar recurso y horario operativo.",
+        }));
+      }
+      notify(`Asignaciones limpiadas en ${lista.length} pedido(s).`, "success");
+      setSelectedPedidoIds([]);
+      cargar();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-clear-selected-assignments" } }));
+      }
+    } catch (e) {
+      notify(e.message || "No se pudieron limpiar las asignaciones seleccionadas.", "error");
+    } finally {
+      setBulkClearing(false);
+    }
+  }
+
+  async function cambiarEstadoSeleccionados() {
+    const lista = selectedPedidosOperables;
+    if (!lista.length) {
+      notify("Selecciona pedidos editables para cambiarles el estado.", "info");
+      return;
+    }
+    const evaluados = lista.map(pedido => ({
+      pedido,
+      issues: getPedidoStateValidationIssues(pedido, bulkEstado),
+    }));
+    const validos = evaluados.filter(item => item.issues.length === 0).map(item => item.pedido);
+    const invalidos = evaluados.filter(item => item.issues.length > 0);
+    if (!validos.length) {
+      const firstIssues = invalidos[0]?.issues?.join(", ");
+      notify(`No hay pedidos listos para pasar a "${LABEL_ESTADO[bulkEstado] || bulkEstado}".${firstIssues ? ` Falta completar: ${firstIssues}.` : ""}`, "warning");
+      return;
+    }
+    if (invalidos.length) {
+      notify(`${invalidos.length} pedido(s) se quedaran fuera por datos pendientes.`, "warning");
+    }
+    const ok = await confirmDialog({
+      title: "Cambiar estado en lote",
+      message: `Se cambiara el estado de ${validos.length} pedido(s) a "${LABEL_ESTADO[bulkEstado] || bulkEstado}".${invalidos.length ? ` ${invalidos.length} pedido(s) se omitiran por datos pendientes.` : ""}`,
+      confirmText: "Actualizar estados",
+    });
+    if (!ok) return;
+    setBulkRescheduling(true);
+    try {
+      for (const pedido of validos) {
+        await cambiarEstadoPedido(pedido.id, bulkEstado);
+      }
+      notify(`Estado actualizado en ${validos.length} pedido(s).`, "success");
+      setSelectedPedidoIds(prev => prev.filter(id => invalidos.some(item => item.pedido.id === id)));
+      cargar();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-state", estado: bulkEstado } }));
+      }
+    } catch (e) {
+      notify(e.message || "No se pudieron actualizar los estados seleccionados.", "error");
+    } finally {
+      setBulkRescheduling(false);
+    }
+  }
+
+  const pedidosConMeta = pedidos.map(p => ({ pedido: p, priorityMeta: getPedidoPriorityMeta(p) }));
+  const pedidosFiltrados = pedidosConMeta.filter(({ pedido, priorityMeta }) => {
+    if (filtroSinAsignacion && !priorityMeta.flags.missingAssignment) return false;
+    if (filtroPendienteCompletar && !pedido.pendiente_completar && priorityMeta.validationIssues.length === 0) return false;
+    if (filtroColaborador && !pedido.colaborador_id) return false;
+    return true;
+  });
+  const pedidosCriticosOperativos = pedidosFiltrados.filter(({ priorityMeta }) =>
+    priorityMeta.flags.overdueAssignment ||
+    priorityMeta.flags.urgentAssignment ||
+    priorityMeta.validationIssues.length > 0
+  );
+  const resumenCriticos = pedidosFiltrados.reduce((acc, item) => {
+    const { flags, validationIssues } = item.priorityMeta;
+    if (flags.overdueAssignment) acc.vencidos += 1;
+    if (!flags.overdueAssignment && flags.urgentAssignment) acc.urgentes += 1;
+    if (validationIssues.length > 0) acc.datos += 1;
+    if (flags.missingAssignment) acc.sinAsignacion += 1;
+    return acc;
+  }, { vencidos: 0, urgentes: 0, datos: 0, sinAsignacion: 0 });
+  const alertasCriticasPedidos = pedidos
+    .filter(p => !["cancelado", "entregado"].includes(String(p.estado || "").toLowerCase()) && !pedidoTieneFacturaFinal(p))
+    .map(p => ({ pedido: p, meta: getPedidoPriorityMeta(p, new Date()) }))
+    .filter(({ meta }) => meta.flags.overdueAssignment || meta.flags.urgentAssignment)
+    .sort((a, b) => b.meta.severity - a.meta.severity);
+  const alertasCriticasPendientes = alertasCriticasPedidos.filter(
+    item => !readCriticalAlerts.includes(buildPedidoCriticalAlertKey(item))
+  );
+  const totalAlertasCriticas = alertasCriticasPedidos.length;
+  const totalAlertasCriticasPendientes = alertasCriticasPendientes.length;
+  const pedidosVisibles = soloCriticos
+    ? pedidosCriticosOperativos
+    : pedidosFiltrados;
+  const pedidosAgrupados = groupByCliente
+    ? Object.entries(
+        pedidosVisibles.reduce((acc, item) => {
+          const key = item.pedido.cliente_id || item.pedido.cliente_nombre || "sin-cliente";
+          if (!acc[key]) acc[key] = { label: item.pedido.cliente_nombre || "Sin cliente", items: [] };
+          acc[key].items.push(item);
+          return acc;
+        }, {})
+      ).map(([key, group]) => ({ key, ...group }))
+    : buildPedidoCalendarGroups(pedidosVisibles, {
+        desde: filtroDesde || _rangoMesActual.desde,
+        hasta: filtroHasta || _rangoMesActual.hasta,
+        currentWeek: filtroSemanaActualActivo,
+      });
+  const pedidosRenderList = groupByCliente
+    ? pedidosAgrupados.flatMap(group => {
+        const collapsed = !!collapsedClientes[group.key];
+        return [
+          { _group: true, type: "cliente", key: group.key, label: group.label, count: group.items.length, collapsed },
+          ...(collapsed ? [] : group.items),
+        ];
+      })
+    : pedidosAgrupados.flatMap(week => {
+        const weekCollapsed = !!collapsedClientes[week.key];
+        const entries = [{ _group: true, type: "week", key: week.key, label: week.label, count: week.count, collapsed: weekCollapsed }];
+        if (weekCollapsed) return entries;
+        week.days.forEach(day => {
+          const dayCollapsed = !!collapsedClientes[day.key];
+          entries.push({ _group: true, type: "day", key: day.key, label: day.label, count: day.count, collapsed: dayCollapsed });
+          if (!dayCollapsed) entries.push(...day.items);
+        });
+        return entries;
+      });
+  const pedidosVisiblesAccionables = pedidosVisibles
+    .map(item => item.pedido)
+    .filter(Boolean);
+  const selectedPedidos = pedidosVisiblesAccionables.filter(p => selectedPedidoIds.includes(String(p.id)));
+  const selectedPedidosOperables = selectedPedidos.filter(p => !pedidoTieneFacturaFinal(p));
+  const allVisibleSelected = pedidosVisiblesAccionables.length > 0 && pedidosVisiblesAccionables.every(p => selectedPedidoIds.includes(String(p.id)));
+  const searchActive = q.trim().length > 0;
+  const searchHasMatches = searchActive && pedidosVisiblesAccionables.length > 0;
+
+  function togglePedidoSelected(pedidoId) {
+    setSelectedPedidoIds(prev => prev.includes(String(pedidoId))
+      ? prev.filter(id => id !== String(pedidoId))
+      : [...prev, String(pedidoId)]);
+  }
+
+  function toggleSelectAllVisible() {
+    if (allVisibleSelected) {
+      setSelectedPedidoIds([]);
+      return;
+    }
+    setSelectedPedidoIds(pedidosVisiblesAccionables.map(p => String(p.id)));
+  }
+
+
+  return (
+    <div style={S.page}>
+      <div style={S.title}>Pedidos / Trafico</div>
+      <div style={{display:"flex",gap:6,margin:"-6px 0 14px",flexWrap:"wrap"}}>
+        {[
+          ["lista", "Listado"],
+          ["ia", "Bandeja IA"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={()=>setVistaPedidos(key)}
+            style={{...S.btn,padding:"7px 13px",background:vistaPedidos===key?"rgba(59,130,246,.14)":"var(--bg3)",color:vistaPedidos===key?"#60a5fa":"var(--text3)",border:vistaPedidos===key?"1px solid rgba(59,130,246,.30)":"1px solid var(--border2)"}}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {totalAlertasCriticas > 0 ? (
+        <div style={{margin:"0 0 12px",padding:"10px 16px",background:"rgba(239,68,68,.05)",border:"1px solid rgba(239,68,68,.18)",borderRadius:9,display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+            <div style={{display:"flex",flexDirection:"column",gap:2}}>
+              <div style={{fontSize:12,fontWeight:800,color:"#ef4444"}}>
+                Atencion: {totalAlertasCriticasPendientes} aviso{totalAlertasCriticasPendientes !== 1 ? "s" : ""} pendiente{totalAlertasCriticasPendientes !== 1 ? "s" : ""}
+              </div>
+              <div style={{fontSize:11,color:"var(--text4)"}}>
+                {totalAlertasCriticas} pedido{totalAlertasCriticas !== 1 ? "s" : ""} critico{totalAlertasCriticas !== 1 ? "s" : ""} en total
+              </div>
+            </div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <button
+                onClick={() => setCriticalPanelOpen(v => !v)}
+                style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)"}}
+              >
+                {criticalPanelOpen ? "Ocultar avisos" : "Mostrar avisos"}
+              </button>
+              <button
+                onClick={() => marcarPedidosAvisosVisiblesLeidos(alertasCriticasPendientes)}
+                disabled={!totalAlertasCriticasPendientes}
+                style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.24)",opacity:totalAlertasCriticasPendientes?1:0.5,cursor:totalAlertasCriticasPendientes?"pointer":"not-allowed"}}
+              >
+                Marcar visibles leidos
+              </button>
+              {canEdit && totalAlertasCriticasPendientes > 0 && (
+                <>
+                  <button
+                    onClick={copiarCriticosSemanaSiguiente}
+                    disabled={bulkCopying}
+                    style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(59,130,246,.10)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.24)",opacity:bulkCopying?0.6:1,cursor:bulkCopying?"not-allowed":"pointer"}}
+                  >
+                    {bulkCopying ? "Copiando..." : "Copiar criticos"}
+                  </button>
+                  <button
+                    onClick={solicitarRetrasoCriticos}
+                    disabled={bulkRescheduling}
+                    style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(245,158,11,.10)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.24)",opacity:bulkRescheduling?0.6:1,cursor:bulkRescheduling?"not-allowed":"pointer"}}
+                  >
+                    {bulkRescheduling ? "Reprogramando..." : "Retrasar"}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          {criticalPanelOpen && (
+            totalAlertasCriticasPendientes > 0 ? alertasCriticasPendientes.slice(0,3).map(({ pedido: p, meta })=>{
+              const diffH = typeof meta.flags.diffHours === "number" ? Math.round(meta.flags.diffHours) : null;
+              const needsAssignment = meta.flags.missingVehiculo || meta.flags.missingChofer;
+              return (
+                <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:"rgba(239,68,68,.06)",borderRadius:7}}>
+                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,color:"var(--text)"}}>{p.numero}</span>
+                  <span style={{fontSize:12,color:"var(--text3)"}}>{p.origen} -> {p.destino}</span>
+                  {meta.flags.overdueAssignment ? (
+                    <span style={{fontSize:11,color:"#fca5a5"}}>{diffH !== null ? `${Math.abs(diffH)}h vencido` : "Vencido"}</span>
+                  ) : diffH !== null ? (
+                    <span style={{fontSize:11,color:"#fca5a5"}}>en {diffH}h</span>
+                  ) : null}
+                  {meta.flags.missingVehiculo && <span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:"rgba(239,68,68,.15)",color:"#f87171"}}>Sin vehiculo</span>}
+                  {meta.flags.missingChofer && <span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:"rgba(245,158,11,.15)",color:"#fbbf24"}}>Sin chofer</span>}
+                  {meta.validationIssues.length > 0 && <span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:"rgba(251,191,36,.12)",color:"#fbbf24"}}>{meta.validationIssues.length} dato{meta.validationIssues.length !== 1 ? "s" : ""} pendiente{meta.validationIssues.length !== 1 ? "s" : ""}</span>}
+                  {canEdit && (
+                    <div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                      {meta.validationIssues.length > 0 && (
+                        <button onClick={e=>{e.stopPropagation();abrirEditar(p, {_focus_asignacion: needsAssignment});}}
+                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(251,191,36,.35)",background:"rgba(251,191,36,.08)",color:"#fbbf24",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                          Completar datos
+                        </button>
+                      )}
+                      <button onClick={e=>{e.stopPropagation();openPedidoInTrafico(p);}}
+                        style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(59,130,246,.30)",background:"rgba(59,130,246,.10)",color:"#60a5fa",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        Ver en trafico
+                      </button>
+                      {needsAssignment && (
+                      <button onClick={e=>{e.stopPropagation();setAutoAsignando(p);}}
+                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(139,92,246,.4)",background:"rgba(139,92,246,.1)",color:"#a78bfa",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                          Asignar
+                        </button>
+                      )}
+                      <button onClick={e=>{e.stopPropagation();solicitarRetrasoPedido(p, p.numero || "este pedido");}}
+                        disabled={reprogrammingPedidoId === String(p.id)}
+                        style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(245,158,11,.35)",background:"rgba(245,158,11,.08)",color:"#f59e0b",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer",opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1}}>
+                        {reprogrammingPedidoId === String(p.id) ? "Moviendo..." : "Retrasar"}
+                      </button>
+                      {(p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual) && (
+                        <button onClick={e=>{e.stopPropagation();limpiarAsignacionPedido(p);}}
+                          disabled={reprogrammingPedidoId === String(p.id)}
+                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(239,68,68,.35)",background:"rgba(239,68,68,.08)",color:"#f87171",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer",opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1}}>
+                          {reprogrammingPedidoId === String(p.id) ? "Limpiando..." : "Limpiar asignacion"}
+                        </button>
+                      )}
+                      <button onClick={e=>{e.stopPropagation();abrirCopiarPedido(p);}}
+                        style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(59,130,246,.30)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        Copiar
+                      </button>
+                      <button onClick={e=>{e.stopPropagation();marcarPedidoAvisoLeido({ pedido: p, meta });}}
+                        style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(16,185,129,.30)",background:"rgba(16,185,129,.08)",color:"#10b981",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        Leido
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            }) : (
+              <div style={{padding:"8px 10px",borderRadius:7,background:"rgba(16,185,129,.06)",border:"1px solid rgba(16,185,129,.16)",fontSize:12,color:"var(--text3)"}}>
+                No quedan avisos pendientes. Los visibles ya se marcaron como revisados.
+              </div>
+            )
+          )}
+        </div>
+      ) : null}
+
+      <div style={S.bar}>
+        {canEdit && <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={abrirNuevo}>+ Nuevo pedido</button>}
+        {canEdit && <button style={{...S.btn,background:"rgba(16,185,129,.14)",color:"#10b981",border:"1px solid rgba(16,185,129,.28)"}} onClick={()=>setQuickCreando(true)}>+ Pedido rapido</button>}
+        {canEdit && aiDisponible && <button style={{...S.btn,background:"rgba(139,92,246,.15)",color:"#a78bfa",border:"1px solid rgba(139,92,246,.25)"}} onClick={()=>setVistaPedidos("ia")}>IA: email / PDF</button>}
+        <button onClick={aplicarSemanaActual}
+          title={filtroSemanaActualActivo ? "Volver al mes en curso" : "Mostrar solo la semana actual"}
+          style={{...S.btn,background:filtroSemanaActualActivo?"#059669":"rgba(148,163,184,.10)",color:filtroSemanaActualActivo?"#fff":"var(--text3)",border:filtroSemanaActualActivo?"1px solid #059669":"1px solid var(--border2)",padding:"6px 12px"}}>
+          {filtroSemanaActualActivo ? "Mes en curso" : "Semana actual"}
+        </button>
+        <input type="date" value={filtroDesde} onChange={e=>{setFiltroFechasCustom(true);setFiltroDesde(e.target.value);}}
+          style={{...S.input,width:132}} title="Desde"/>
+        <input type="date" value={filtroHasta} onChange={e=>{setFiltroFechasCustom(true);setFiltroHasta(e.target.value);}}
+          style={{...S.input,width:132}} title="Hasta"/>
+        <select value={filtroEst} onChange={e=>setFiltroEst(e.target.value)} style={{...S.input,width:150}}>
+          <option value="activos">Activos</option>
+          <option value="todos">Todos los estados</option>
+          {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
+        </select>
+        <select value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)} style={{...S.input,width:150}}>
+          <option value="">Todos los clientes</option>
+          {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar..." style={{...S.input,width:160}}/>
+        <button onClick={()=>setShowAdvancedFilters(v=>!v)}
+          style={{...S.btn,background:showAdvancedFilters?"#2563eb":"rgba(148,163,184,.10)",color:showAdvancedFilters?"#fff":"var(--text3)",border:showAdvancedFilters?"1px solid #2563eb":"1px solid var(--border2)",padding:"6px 12px"}}>
+          Filtros avanzados
+        </button>
+        <button onClick={()=>setGroupByCliente(v=>!v)}
+          disabled={filtroSemanaActualActivo}
+          title={filtroSemanaActualActivo ? "La semana actual se muestra agrupada por dias." : "Agrupar por cliente"}
+          style={{...S.btn,background:groupByCliente&&!filtroSemanaActualActivo?"#059669":"rgba(148,163,184,.10)",color:groupByCliente&&!filtroSemanaActualActivo?"#fff":"var(--text3)",border:groupByCliente&&!filtroSemanaActualActivo?"1px solid #059669":"1px solid var(--border2)",padding:"6px 12px",opacity:filtroSemanaActualActivo?0.55:1,cursor:filtroSemanaActualActivo?"not-allowed":"pointer"}}>
+          {filtroSemanaActualActivo ? "Agrupado por dia" : groupByCliente ? "Agrupado por cliente" : "Agrupar por cliente"}
+        </button>
+        <button onClick={()=>setSoloCriticos(v=>!v)}
+          style={{...S.btn,background:soloCriticos?"#dc2626":"rgba(148,163,184,.10)",color:soloCriticos?"#fff":"var(--text3)",border:soloCriticos?"1px solid #dc2626":"1px solid var(--border2)",padding:"6px 12px"}}>
+          {soloCriticos ? "Solo criticos" : "Ver criticos"}
+        </button>
+        {(filtroEst!=="activos"||filtroDesde!==_rangoMesActual.desde||filtroHasta!==_rangoMesActual.hasta||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
+          <button onClick={()=>{setFiltroEst("activos");setFiltroMes(_rangoMesActual.month);setFiltroFechasCustom(false);setFiltroDesde(_rangoMesActual.desde);setFiltroHasta(_rangoMesActual.hasta);setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);}}
+            style={{...S.btn,background:"rgba(239,68,68,.12)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",fontSize:11,padding:"4px 10px"}}>Reset</button>
+        )}
+        <span style={{
+          fontSize:12,
+          color:searchHasMatches ? "#60a5fa" : "var(--text4)",
+          marginLeft:"auto",
+          padding:searchActive ? "4px 9px" : undefined,
+          borderRadius:999,
+          background:searchHasMatches ? "rgba(59,130,246,.12)" : searchActive ? "rgba(148,163,184,.08)" : undefined,
+          border:searchHasMatches ? "1px solid rgba(59,130,246,.28)" : searchActive ? "1px solid var(--border2)" : undefined,
+          fontWeight:searchHasMatches ? 900 : 500,
+        }}>
+          {searchActive
+            ? `${pedidosVisiblesAccionables.length} coincidencia${pedidosVisiblesAccionables.length!==1?"s":""}`
+            : soloCriticos ? `${pedidosVisibles.length} critico${pedidosVisibles.length!==1?"s":""}` : (totalCount>0?`${totalCount} pedido${totalCount!==1?"s":""}`:`${pedidos.length} pedido${pedidos.length!==1?"s":""}`)}
+          {totalPages>1&&<span style={{marginLeft:6,color:"var(--text5)"}}>· pag {page}/{totalPages}</span>}
+        </span>
+      </div>
+
+      {vistaPedidos === "ia" && (
+        <div style={{margin:"0 0 16px"}}>
+          {!aiVisualPlanActivo && (
+            <div style={{background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.20)",borderRadius:9,padding:"9px 12px",color:"var(--text3)",fontSize:12,marginBottom:10}}>
+              Bandeja IA en modo basico: emails, PDF/DOCX con texto y documentos legibles funcionan sin API externa. Imagenes o PDFs escaneados necesitan IA visual configurada.
+            </div>
+          )}
+            <ModalCrearConIA
+              clientes={clientes}
+              vehiculos={vehiculos}
+              choferes={choferes}
+              embedded
+              onClose={()=>setVistaPedidos("lista")}
+              onCreado={p=>{ setVistaPedidos("lista"); setEditando({...p, _aiCreado:true}); setModal(true); }}
+            />
+        </div>
+      )}
+
+      {showAdvancedFilters && (
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"-6px 0 12px"}}>
+          <button onClick={()=>setFiltroSinAsignacion(v=>!v)}
+            style={{...S.btn,padding:"6px 12px",background:filtroSinAsignacion?"#7c3aed":"var(--bg3)",color:filtroSinAsignacion?"#fff":"var(--text3)",border:filtroSinAsignacion?"1px solid #7c3aed":"1px solid var(--border2)"}}>
+            Sin asignacion completa
+          </button>
+          <button onClick={()=>setFiltroPendienteCompletar(v=>!v)}
+            style={{...S.btn,padding:"6px 12px",background:filtroPendienteCompletar?"#b45309":"var(--bg3)",color:filtroPendienteCompletar?"#fff":"var(--text3)",border:filtroPendienteCompletar?"1px solid #b45309":"1px solid var(--border2)"}}>
+            Pendientes de completar
+          </button>
+          <button onClick={()=>setFiltroColaborador(v=>!v)}
+            style={{...S.btn,padding:"6px 12px",background:filtroColaborador?"#059669":"var(--bg3)",color:filtroColaborador?"#fff":"var(--text3)",border:filtroColaborador?"1px solid #059669":"1px solid var(--border2)"}}>
+            Solo colaborador
+          </button>
+        </div>
+      )}
+
+      {(resumenCriticos.vencidos || resumenCriticos.urgentes || resumenCriticos.datos || resumenCriticos.sinAsignacion) ? (
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"0 0 12px"}}>
+          {resumenCriticos.vencidos > 0 && <span style={{display:"inline-flex",alignItems:"center",padding:"5px 10px",borderRadius:999,border:"1px solid rgba(239,68,68,.24)",background:"rgba(239,68,68,.10)",color:"#f87171",fontSize:11,fontWeight:800}}>{resumenCriticos.vencidos} vencido{resumenCriticos.vencidos !== 1 ? "s" : ""}</span>}
+          {resumenCriticos.urgentes > 0 && <span style={{display:"inline-flex",alignItems:"center",padding:"5px 10px",borderRadius:999,border:"1px solid rgba(245,158,11,.22)",background:"rgba(245,158,11,.10)",color:"#fbbf24",fontSize:11,fontWeight:800}}>{resumenCriticos.urgentes} urgente{resumenCriticos.urgentes !== 1 ? "s" : ""}</span>}
+          {resumenCriticos.datos > 0 && <span style={{display:"inline-flex",alignItems:"center",padding:"5px 10px",borderRadius:999,border:"1px solid rgba(59,130,246,.22)",background:"rgba(59,130,246,.10)",color:"#60a5fa",fontSize:11,fontWeight:800}}>{resumenCriticos.datos} con datos pendientes</span>}
+          {resumenCriticos.sinAsignacion > 0 && <span style={{display:"inline-flex",alignItems:"center",padding:"5px 10px",borderRadius:999,border:"1px solid rgba(139,92,246,.22)",background:"rgba(139,92,246,.10)",color:"#a78bfa",fontSize:11,fontWeight:800}}>{resumenCriticos.sinAsignacion} sin asignacion completa</span>}
+          <button
+            onClick={() => setCriticalPanelOpen(v => !v)}
+            style={{...S.btn,padding:"5px 12px",fontSize:11,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)"}}
+          >
+            {criticalPanelOpen ? "Ocultar avisos" : "Mostrar avisos"}
+          </button>
+        </div>
+      ) : null}
+
+      {canEdit && selectedPedidoIds.length > 0 && (
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",margin:"0 0 12px",padding:"10px 12px",borderRadius:9,background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)"}}>
+          <span style={{fontSize:12,fontWeight:800,color:"#60a5fa"}}>
+            {selectedPedidoIds.length} seleccionado{selectedPedidoIds.length !== 1 ? "s" : ""}
+          </span>
+          <button
+            onClick={copiarSeleccionadosSemanaSiguiente}
+            disabled={bulkCopying}
+            style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(59,130,246,.10)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.24)",opacity:bulkCopying?0.6:1,cursor:bulkCopying?"not-allowed":"pointer"}}
+          >
+            {bulkCopying ? "Copiando..." : "Copiar +1 semana"}
+          </button>
+          <button
+            onClick={solicitarRetrasoSeleccionados}
+            disabled={bulkRescheduling}
+            style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(245,158,11,.10)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.24)",opacity:bulkRescheduling?0.6:1,cursor:bulkRescheduling?"not-allowed":"pointer"}}
+          >
+            {bulkRescheduling ? "Reprogramando..." : "Retrasar"}
+          </button>
+          <select
+            value={bulkEstado}
+            onChange={e => setBulkEstado(e.target.value)}
+            style={{...S.sel,width:170,padding:"5px 10px",fontSize:11}}
+          >
+            {ESTADOS_RAW.map(e => <option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
+          </select>
+          <button
+            onClick={limpiarAsignacionesSeleccionadas}
+            disabled={bulkClearing}
+            style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(239,68,68,.10)",color:"#f87171",border:"1px solid rgba(239,68,68,.24)",opacity:bulkClearing?0.6:1,cursor:bulkClearing?"not-allowed":"pointer"}}
+          >
+            {bulkClearing ? "Limpiando..." : "Limpiar asignacion"}
+          </button>
+          <button
+            onClick={cambiarEstadoSeleccionados}
+            disabled={bulkRescheduling}
+            style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.24)",opacity:bulkRescheduling?0.6:1,cursor:bulkRescheduling?"not-allowed":"pointer"}}
+          >
+            Aplicar estado
+          </button>
+          <button
+            onClick={() => setSelectedPedidoIds([])}
+            style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)"}}
+          >
+            Limpiar
+          </button>
+        </div>
+      )}
+
+      <div style={{...S.card, overflow:"visible"}}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>
+            <th style={{...S.th,width:42}}>
+              <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
+            </th>
+            {["N. Pedido","Cliente","Origen -> Destino","F. Carga","H. Carga","F. Descarga","Vehiculo","Estado","Importe","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {loading ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
+            : pedidosVisibles.length===0 ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>{soloCriticos ? "No hay pedidos criticos con los filtros actuales." : <>No hay pedidos.{canEdit&&" Crea el primero."}</>}</td></tr>
+            : pedidosRenderList.map((entry)=>{
+              if (entry?._group) {
+                const isWeek = entry.type === "week";
+                const isDay = entry.type === "day";
+                return (
+                  <tr key={`group-${entry.key}`} style={{background:isWeek ? "rgba(20,184,166,.08)" : isDay ? "var(--bg3)" : "var(--bg3)"}}>
+                    <td colSpan={11} style={{...S.td,padding:isWeek ? "9px 14px" : "8px 14px 8px 28px",borderTop:isWeek ? "1px solid rgba(20,184,166,.18)" : S.td.borderTop}}>
+                      <button
+                        onClick={() => setCollapsedClientes(prev => ({ ...prev, [entry.key]: !prev[entry.key] }))}
+                        style={{display:"flex",alignItems:"center",gap:10,width:"100%",background:"transparent",border:"none",color:"var(--text)",cursor:"pointer",padding:0,fontFamily:"'DM Sans',sans-serif"}}
+                      >
+                        <span style={{fontSize:14,color:isWeek ? "var(--green)" : "var(--accent-xl)",fontWeight:900,width:14}}>{entry.collapsed ? "+" : "-"}</span>
+                        <span style={{fontWeight:isWeek ? 950 : 850,fontSize:isWeek ? 13 : 12,textTransform:isWeek ? "uppercase" : "none",letterSpacing:isWeek ? ".04em" : 0}}>{entry.label}</span>
+                        <span style={{fontSize:11,color:"var(--text4)"}}>{entry.count} pedido{entry.count !== 1 ? "s" : ""}</span>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              }
+              const { pedido: p, priorityMeta } = entry;
+              const rowBackground =
+                String(focusPedido?.pedido_id || "") === String(p.id)
+                  ? "rgba(34,211,160,.10)"
+                  : priorityMeta.flags.overdueAssignment
+                    ? "rgba(239,68,68,.08)"
+                    : priorityMeta.flags.urgentAssignment
+                      ? "rgba(245,158,11,.07)"
+                      : undefined;
+              const rowShadow =
+                String(focusPedido?.pedido_id || "") === String(p.id)
+                  ? "inset 3px 0 0 var(--green)"
+                  : priorityMeta.flags.overdueAssignment
+                    ? "inset 3px 0 0 rgba(239,68,68,.85)"
+                    : priorityMeta.flags.urgentAssignment
+                      ? "inset 3px 0 0 rgba(245,158,11,.8)"
+                      : undefined;
+              const actionMenuOpen = openActionMenuPedidoId === String(p.id);
+              return (
+              <tr key={p.id} id={`pedido-row-${p.id}`} style={{
+                cursor:"pointer",
+                opacity:pedidoTieneFacturaFinal(p)?0.85:1,
+                background: rowBackground,
+                boxShadow: rowShadow,
+              }} onClick={()=>{
+  if (pedidoTieneFacturaFinal(p)) abrirEditar(p);
+  else abrirEditar(p);
+}}>
+                <td style={S.td} onClick={e=>e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedPedidoIds.includes(String(p.id))}
+                    onChange={() => togglePedidoSelected(p.id)}
+                  />
+                </td>
+                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)"}}>
+                  <div>{p.numero}</div>
+                  {priorityMeta.reasons.length > 0 && (
+                    <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:4}}>
+                      {priorityMeta.reasons.map(reason => (
+                        <span key={reason.key} style={{
+                          display:"inline-flex",
+                          padding:"2px 6px",
+                          borderRadius:5,
+                          background: reason.tone === "danger" ? "rgba(239,68,68,.14)" : "rgba(245,158,11,.12)",
+                          border: reason.tone === "danger" ? "1px solid rgba(239,68,68,.28)" : "1px solid rgba(245,158,11,.24)",
+                          color: reason.tone === "danger" ? "#f87171" : "#fbbf24",
+                          fontSize:9,
+                          fontFamily:"'DM Sans',sans-serif",
+                          fontWeight:800
+                        }}>
+                          {reason.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {p.pendiente_completar && (
+                    <div title={p.aviso_completar || "Pendiente de completar"} style={{marginTop:4,display:"inline-flex",padding:"2px 6px",borderRadius:5,background:"rgba(251,191,36,.14)",border:"1px solid rgba(251,191,36,.32)",color:"#fbbf24",fontSize:9,fontFamily:"'DM Sans',sans-serif",fontWeight:800}}>
+                      Completar
+                    </div>
+                  )}
+                </td>
+                <td style={{...S.td,fontWeight:600,fontSize:12}}>{p.cliente_nombre||"-"}</td>
+                <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>{p.origen&&p.destino?`${p.origen} -> ${p.destino}`:"-"}</td>
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"-"}</td>
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.hora_carga||"-"}</td>
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.fecha_descarga?new Date(p.fecha_descarga).toLocaleDateString("es-ES"):"-"}</td>
+                <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>
+                  {p.colaborador_id ? (
+                    <div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#a78bfa",marginBottom:2}}>COLABORADOR</div>
+                      <div style={{fontSize:11,color:"var(--text3)"}}>{p.colaborador_nombre||"Externo"}</div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace"}}>{p.vehiculo_matricula||"-"}</div>
+                      {p.remolque_matricula && (
+                        <div style={{fontSize:10,color:"#a78bfa",marginTop:1}}>REM {p.remolque_matricula}</div>
+                      )}
+                    </>
+                  )}
+                </td>
+                <td style={S.td}>
+                  <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-start"}}>
+                    <Badge estado={p.estado}/>
+                    {priorityMeta.validationIssues.length > 0 && (
+                      <span title={priorityMeta.validationIssues.join(" · ")} style={{fontSize:10,color:"#fbbf24",fontWeight:700}}>
+                        {priorityMeta.validationIssues.length} pendiente{priorityMeta.validationIssues.length !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{Number(p.importe||0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</td>
+                <td style={S.td} onClick={e=>e.stopPropagation()}>
+                  {pedidoTieneFacturaFinal(p)
+                    ? <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>FACTURADO</span>
+                        <span style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{p.factura_numero||""}</span>
+                      </div>
+                    : pedidoTieneFacturaBorrador(p)
+                    ? <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)"}}>BORRADOR</span><span style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{p.factura_numero||""}</span></div>
+                    : <div style={{display:"flex",gap:5,flexWrap:"wrap",position:"relative"}}>
+                        {canEdit && priorityMeta.validationIssues.length > 0 && (
+                          <button onClick={e=>{e.stopPropagation();abrirEditar(p, {_focus_asignacion: priorityMeta.flags.missingVehiculo || priorityMeta.flags.missingChofer});}}
+                            title={priorityMeta.validationIssues.join(" · ")}
+                            style={{...S.btn,background:"rgba(251,191,36,.10)",color:"#fbbf24",border:"1px solid rgba(251,191,36,.25)",padding:"3px 8px",fontSize:11}}>
+                            Completar datos
+                          </button>
+                        )}
+                        {(priorityMeta.flags.overdueAssignment || priorityMeta.flags.urgentAssignment || priorityMeta.validationIssues.length > 0) && (
+                          <button onClick={e=>{e.stopPropagation();openPedidoInTrafico(p);}}
+                            style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)",padding:"3px 8px",fontSize:11}}>
+                            Ver trafico
+                          </button>
+                        )}
+                        {canEdit && (
+                          <button onClick={e=>{e.stopPropagation();solicitarRetrasoPedido(p, p.numero || "este pedido");}}
+                            disabled={reprogrammingPedidoId === String(p.id)}
+                            title="Mover carga y descarga los dias que necesites"
+                            style={{...S.btn,background:"rgba(245,158,11,.10)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",padding:"3px 8px",fontSize:11,opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer"}}>
+                            {reprogrammingPedidoId === String(p.id) ? "Moviendo..." : "Retrasar"}
+                          </button>
+                        )}
+                        {false && canEdit && (
+                          <button onClick={e=>{e.stopPropagation();abrirCopiarPedido(p);}}
+                            title="Copiar viaje por fecha o semanas"
+                            style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"3px 8px",fontSize:11}}>
+                            Copiar
+                          </button>
+                        )}
+                        {false && canEdit && (
+                          <button onClick={e=>{e.stopPropagation();duplicarPedidoExistente(p);}}
+                            title="Duplicar pedido"
+                            style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)",padding:"3px 8px",fontSize:11}}>
+                            Duplicar
+                          </button>
+                        )}
+                        {/* Eliminar pedido cancelado */}
+                        {false && canEdit && p.estado === "cancelado" && (
+                          <button onClick={async e=>{
+                            e.stopPropagation();
+                            const ok = await confirmDialog({
+                              title: "Eliminar pedido",
+                              message: `Eliminar el pedido ${p.numero}?\n\nEsta accion no se puede deshacer.`,
+                              confirmText: "Eliminar",
+                              tone: "danger",
+                            });
+                            if(!ok) return;
+                            try { await eliminarPedido(p.id); cargar(); }
+                            catch(err){ notify("Error al eliminar: "+err.message, "error"); }
+                          }}
+                            title="Eliminar pedido cancelado"
+                            style={{...S.btn,background:"rgba(239,68,68,.1)",color:"#ef4444",border:"1px solid rgba(239,68,68,.3)",padding:"3px 9px",fontSize:11}}>
+                            Eliminar
+                          </button>
+                        )}
+                        {false && canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
+                          <button onClick={e=>{e.stopPropagation();abrirEditar(p, {_focus_asignacion:true});}}
+                            title="Cambiar vehículo o chófer"
+                            style={{...S.btn,background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)",padding:"3px 8px",fontSize:11}}>
+                            Cambio veh.
+                          </button>
+                        )}
+                        {false && canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual) && (
+                          <button onClick={e=>{e.stopPropagation();limpiarAsignacionPedido(p);}}
+                            title="Quitar asignacion para volver a planificar"
+                            disabled={reprogrammingPedidoId === String(p.id)}
+                            style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#f87171",border:"1px solid rgba(239,68,68,.25)",padding:"3px 8px",fontSize:11,opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer"}}>
+                            {reprogrammingPedidoId === String(p.id) ? "Limpiando..." : "Limpiar asignacion"}
+                          </button>
+                        )}
+                        {canEdit && (priorityMeta.flags.missingVehiculo || priorityMeta.flags.missingChofer) && (
+                          <button onClick={e=>{e.stopPropagation();setAutoAsignando(p);}}
+                            title="Autoasignacion IA"
+                            style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#a78bfa",border:"1px solid rgba(139,92,246,.25)",padding:"3px 7px",fontSize:11}}>
+                            Asignar
+                          </button>
+                        )}
+                        {canEdit&&<select value={p.estado} onChange={e=>cambiarEstado(p.id,e.target.value)} style={{...S.sel,width:130,padding:"4px 8px",fontSize:11}}>
+                          {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
+                        </select>}
+                        {canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&(p.estado==="entregado"||p.estado==="descarga")&&(
+                          <button style={{...S.btn,background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.2)",padding:"4px 10px",fontSize:11}} onClick={()=>setFacturando(p)}>Facturar</button>
+                        )}
+                        <button
+                          onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId(actionMenuOpen ? "" : String(p.id));}}
+                          style={{...S.btn,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)",padding:"4px 8px",fontSize:11}}
+                        >
+                          {actionMenuOpen ? "Cerrar" : "Mas"}
+                        </button>
+                        {actionMenuOpen && (
+                          <div onClick={e=>e.stopPropagation()} style={{position:"absolute",top:"calc(100% + 6px)",right:0,zIndex:500,minWidth:190,padding:8,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.18)",display:"flex",flexDirection:"column",gap:6}}>
+                            {canEdit && (
+                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirCopiarPedido(p);}}
+                                style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"6px 10px",fontSize:11}}>
+                                Copiar viaje
+                              </button>
+                            )}
+                            {canEdit && (
+                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");duplicarPedidoExistente(p);}}
+                                style={{...S.btn,textAlign:"left",background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)",padding:"6px 10px",fontSize:11}}>
+                                Duplicar pedido
+                              </button>
+                            )}
+                            {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
+                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirEditar(p, {_focus_asignacion:true});}}
+                                style={{...S.btn,textAlign:"left",background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)",padding:"6px 10px",fontSize:11}}>
+                                Cambiar vehiculo/chofer
+                              </button>
+                            )}
+                            {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual) && (
+                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");limpiarAsignacionPedido(p);}}
+                                disabled={reprogrammingPedidoId === String(p.id)}
+                                style={{...S.btn,textAlign:"left",background:"rgba(239,68,68,.10)",color:"#f87171",border:"1px solid rgba(239,68,68,.25)",padding:"6px 10px",fontSize:11,opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer"}}>
+                                {reprogrammingPedidoId === String(p.id) ? "Limpiando..." : "Limpiar asignacion"}
+                              </button>
+                            )}
+                            {p.cliente_telefono&&(
+                              <button
+                                style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
+                                disabled={whatsappSending === `${p.id}:cliente`}
+                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "cliente");}}>
+                                {whatsappSending === `${p.id}:cliente` ? "Registrando..." : "WhatsApp cliente"}
+                              </button>
+                            )}
+                            {p.colaborador_telefono&&(
+                              <button
+                                style={{...S.btn,textAlign:"left",background:"rgba(34,197,94,.1)",color:"#22c55e",border:"1px solid rgba(34,197,94,.25)",padding:"6px 10px",fontSize:11}}
+                                disabled={whatsappSending === `${p.id}:colaborador`}
+                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "colaborador");}}>
+                                {whatsappSending === `${p.id}:colaborador` ? "Registrando..." : "WhatsApp colaborador"}
+                              </button>
+                            )}
+                            {canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&(
+                              <button style={{...S.btn,textAlign:"left",background:"rgba(99,102,241,.1)",color:"#818cf8",border:"1px solid rgba(99,102,241,.2)",padding:"6px 10px",fontSize:11}}
+                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirOrdenCarga(p);}}>
+                                Orden de carga
+                              </button>
+                            )}
+                            <button
+                              style={{...S.btn,textAlign:"left",background:"rgba(245,158,11,.1)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",padding:"6px 10px",fontSize:11}}
+                              onClick={async e=>{
+                                e.stopPropagation();
+                                setOpenActionMenuPedidoId("");
+                                try {
+                                  const data = await getCartaPorte(p.id);
+                                  setCartaPorte(data);
+                                } catch(err) { notify("Error al cargar datos: "+err.message, "error"); }
+                              }}>
+                              Carta de porte / CMR
+                            </button>
+                            {canEdit && p.estado === "cancelado" && (
+                              <button onClick={async e=>{
+                                e.stopPropagation();
+                                setOpenActionMenuPedidoId("");
+                                const ok = await confirmDialog({
+                                  title: "Eliminar pedido",
+                                  message: `Eliminar el pedido ${p.numero}?\n\nEsta accion no se puede deshacer.`,
+                                  confirmText: "Eliminar",
+                                  tone: "danger",
+                                });
+                                if(!ok) return;
+                                try { await eliminarPedido(p.id); cargar(); }
+                                catch(err){ notify("Error al eliminar: "+err.message, "error"); }
+                              }}
+                                style={{...S.btn,textAlign:"left",background:"rgba(239,68,68,.1)",color:"#ef4444",border:"1px solid rgba(239,68,68,.3)",padding:"6px 10px",fontSize:11}}>
+                                Eliminar pedido
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {false && p.cliente_telefono&&(
+                          <a href={`https://wa.me/${(p.cliente_telefono||"").replace(/[^0-9]/g,"")}?text=${encodeURIComponent("Estimado/a "+p.cliente_nombre+", le confirmamos el pedido "+p.numero+" de "+p.origen+" a "+p.destino+". Fecha de carga: "+(p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"pendiente")+". Atentamente, TransGest TMS")}`}
+                            target="_blank" rel="noopener noreferrer"
+                            style={{...S.btn,background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"4px 8px",fontSize:11,textDecoration:"none"}}
+                            onClick={e=>e.stopPropagation()}>
+                            WhatsApp
+                          </a>
+                        )}
+                        {false && canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&(
+                          <button style={{...S.btn,background:"rgba(99,102,241,.1)",color:"#818cf8",border:"1px solid rgba(99,102,241,.2)",padding:"4px 8px",fontSize:11}}
+                            onClick={e=>{e.stopPropagation();abrirOrdenCarga(p);}}>
+                            O. carga
+                          </button>
+                        )}
+                        {false && <button
+                          title="Generar Carta de Porte / CMR / Albaran"
+                          style={{...S.btn,background:"rgba(245,158,11,.1)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",padding:"4px 8px",fontSize:11}}
+                          onClick={async e=>{
+                            e.stopPropagation();
+                            try {
+                              const data = await getCartaPorte(p.id);
+                              setCartaPorte(data);
+                            } catch(err) { notify("Error al cargar datos: "+err.message, "error"); }
+                          }}>
+                          CMR
+                        </button>}
+                      </div>
+                  }
+                </td>
+              </tr>
+            )})}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Paginacion */}
+      {totalPages>1&&(
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"12px 0",marginTop:4,flexWrap:"wrap"}}>
+          <button onClick={()=>setPage(1)} disabled={page===1}
+            style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===1?"not-allowed":"pointer",opacity:page===1?.5:1}}>
+            {"<<"}
+          </button>
+          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}
+            style={{padding:"5px 12px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===1?"not-allowed":"pointer",opacity:page===1?.5:1}}>
+            Anterior
+          </button>
+          <span style={{fontSize:13,color:"var(--text3)",fontWeight:600,padding:"0 8px"}}>
+            Pagina {page} de {totalPages} - {totalCount} pedidos
+          </span>
+          <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages}
+            style={{padding:"5px 12px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===totalPages?"not-allowed":"pointer",opacity:page===totalPages?.5:1}}>
+            Siguiente
+          </button>
+          <button onClick={()=>setPage(totalPages)} disabled={page===totalPages}
+            style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===totalPages?"not-allowed":"pointer",opacity:page===totalPages?.5:1}}>
+            {">>"}
+          </button>
+        </div>
+      )}
+
+      {copyPlan && (
+        <div style={S.modal} onClick={e=>e.target===e.currentTarget && !copySaving && setCopyPlan(null)}>
+          <div style={{...S.mbox, width:"min(520px,96vw)"}}>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:16,color:"var(--text)"}}>
+              Copiar viaje
+            </div>
+            <div style={{background:"rgba(59,110,245,.07)",border:"1px solid rgba(59,110,245,.15)",borderRadius:8,padding:"12px 16px",marginBottom:16}}>
+              <div style={{fontWeight:700,color:"var(--text)"}}>{copyPlan.source?.numero || "Pedido"}</div>
+              <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>
+                {(copyPlan.source?.origen || "-")} -> {(copyPlan.source?.destino || "-")}
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div>
+                <label style={S.lbl}>Fecha de carga inicial</label>
+                <input
+                  type="date"
+                  style={S.inp}
+                  value={copyPlan.fecha_carga || ""}
+                  onChange={e=>setCopyPlan(prev=>({...prev, fecha_carga:e.target.value}))}
+                />
+              </div>
+              <div>
+                <label style={S.lbl}>Numero de semanas</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="12"
+                  style={S.inp}
+                  value={copyPlan.semanas || 1}
+                  onChange={e=>setCopyPlan(prev=>({...prev, semanas:e.target.value}))}
+                />
+              </div>
+            </div>
+            <label style={{display:"flex",alignItems:"center",gap:10,marginTop:16,padding:"10px 12px",border:"1px solid var(--border)",borderRadius:8,background:"var(--bg3)"}}>
+              <input
+                type="checkbox"
+                checked={!!copyPlan.mantener_asignacion}
+                onChange={e=>setCopyPlan(prev=>({...prev, mantener_asignacion:e.target.checked}))}
+              />
+              <span style={{fontSize:12,color:"var(--text2)"}}>Mantener asignacion operativa en las copias</span>
+            </label>
+            <div style={{fontSize:11,color:"var(--text5)",marginTop:10}}>
+              Si lo desmarcas, las copias saldran sin vehiculo, chofer, colaborador, remolque ni matriculas manuales.
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
+              <button
+                style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}}
+                onClick={()=>setCopyPlan(null)}
+                disabled={copySaving}
+              >
+                Cancelar
+              </button>
+              <button
+                style={{...S.btn,background:"#3b6ef5",color:"#fff",opacity:copySaving?0.7:1}}
+                onClick={confirmarCopiaPedido}
+                disabled={copySaving}
+              >
+                {copySaving ? "Copiando..." : "Crear copias"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {delayRequest && (
+        <div style={S.modal} onClick={e=>e.target===e.currentTarget && cerrarSelectorRetraso(null)}>
+          <div style={{...S.mbox, width:"min(440px,96vw)"}}>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:10,color:"var(--text)"}}>
+              Retrasar carga
+            </div>
+            <div style={{fontSize:12,color:"var(--text3)",marginBottom:14}}>
+              Indica cuantos dias quieres retrasar {delayRequest.etiqueta || "este pedido"}. Se mantendra la separacion entre carga y descarga.
+            </div>
+            <label style={S.lbl}>Dias de retraso</label>
+            <input
+              type="number"
+              min="1"
+              max="365"
+              step="1"
+              autoFocus
+              style={S.inp}
+              value={delayRequest.value}
+              onChange={e=>setDelayRequest(prev=>({...prev, value:e.target.value}))}
+              onKeyDown={e=>{
+                if (e.key === "Enter") confirmarSelectorRetraso();
+                if (e.key === "Escape") cerrarSelectorRetraso(null);
+              }}
+            />
+            <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
+              <button
+                style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}}
+                onClick={()=>cerrarSelectorRetraso(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                style={{...S.btn,background:"#f59e0b",color:"#111827"}}
+                onClick={confirmarSelectorRetraso}
+              >
+                Retrasar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal && (
+        <PedidoModal
+          key={editando?.id||"new"}
+          editando={editando}
+          onClose={()=>{setModal(false);setEditando(null);}}
+          onSaved={()=>{ if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: editando?.id || null, source: "pedidos-modal-save" } })); if (guidedPedidoActive) setGuidedPedido(prev => ({ ...(prev || { active:true }), saved:true, modalOpened:true, progress:buildGuidedPedidoProgress(prev?.lastForm || {}, { modalOpened:true, saved:true }) })); setModal(false);setEditando(null);cargar();}}
+          onReload={()=>{cargar();}}
+          onFacturaDesvinculada={(pedidoId)=>{
+            setPedidos(prev=>prev.map(p=>String(p.id)===String(pedidoId)
+              ? {...p, factura_id:null, factura_estado:null, factura_numero:null, facturado:false}
+              : p
+            ));
+            setEditando(prev=>prev && String(prev.id)===String(pedidoId)
+              ? {...prev, factura_id:null, factura_estado:null, factura_numero:null, facturado:false, _readonly:false}
+              : prev
+            );
+          }}
+          pedidos={pedidos}
+          clientes={clientes}
+          vehiculos={vehiculos}
+          choferes={choferes}
+          rutas={rutas}
+          colaboradores={colaboradores}
+          canEdit={canEdit}
+          guidedActive={guidedPedidoActive}
+          onGuidedProgress={updateGuidedPedidoProgress}
+        />
+      )}
+      {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Orden de carga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+      {ordenCarga && <OrdenCargaModal pedido={ordenCarga} onClose={()=>setOrdenCarga(null)}/>}
+
+      {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Autoasignacion IA ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+      {autoAsignando && (
+        <ModalAutoAsignacion
+          pedido={autoAsignando}
+          vehiculos={vehiculos}
+          choferes={choferes}
+          onClose={()=>setAutoAsignando(null)}
+          onAsignar={async(asig)=>{
+            try {
+              await editarPedido(autoAsignando.id, buildPedidoUpdatePayload(autoAsignando, {
+                vehiculo_id: asig.vehiculo_id || autoAsignando.vehiculo_id,
+                chofer_id: asig.chofer_id || autoAsignando.chofer_id,
+                remolque_id_manual: asig.remolque_id_manual,
+              }));
+              cargar();
+            } catch(e) { notify("Error al asignar: " + e.message, "error"); }
+          }}
+        />
+      )}
+
+      {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Crear pedido con IA ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+      {aiDisponible && aiCreando && <ModalCrearConIA clientes={clientes} vehiculos={vehiculos} choferes={choferes}
+        onClose={()=>setAiCreando(false)}
+        onCreado={p=>{ setAiCreando(false); setEditando({...p, _aiCreado:true}); setModal(true); }}/>}
+
+      {quickCreando && (
+        <ModalPedidoRapido
+          clientes={clientes}
+          vehiculos={vehiculos}
+          choferes={choferes}
+          colaboradores={colaboradores}
+          onClose={()=>setQuickCreando(false)}
+          onCreado={()=>{ setQuickCreando(false); cargar(); }}
+        />
+      )}
+
+      {/* ModalNuevoClienteRapido is handled inside PedidoModal */}
+
+      {/* Modal facturar */}
+      {facturando&&(
+        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&setFacturando(null)}>
+          <div style={{...S.mbox,width:"min(520px,96vw)"}}>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:16,color:"var(--text)"}}>Emitir factura</div>
+            <div style={{background:"rgba(59,110,245,.07)",border:"1px solid rgba(59,110,245,.15)",borderRadius:8,padding:"12px 16px",marginBottom:16}}>
+              <div style={{fontWeight:600,color:"var(--text)",marginBottom:4}}>{facturando.numero} - {facturando.cliente_nombre}</div>
+              <div style={{color:"var(--text2)",fontSize:12}}>{facturando.origen} -> {facturando.destino}</div>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:"var(--green)",fontSize:20,marginTop:6}}>{Number(facturando.importe||0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</div>
+            </div>
+            <FacturarConcepto pedido={facturando} saving={savingFactura} onConfirm={async p=>{setSavingFactura(true);try{await convertirFacturaConConcepto(p);}finally{setSavingFactura(false);setFacturando(null);}}} onCancel={()=>setFacturando(null)}/>
+          </div>
+        </div>
+      )}
+
+      {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Carta de Porte / CMR modal ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+      {cartaPorte && (
+        <CartaPorteModal data={cartaPorte} onClose={()=>setCartaPorte(null)}/>
+      )}
+      <GuidedPedidoTutorialPanel
+        active={guidedPedidoActive}
+        progress={guidedPedido?.progress || {}}
+        onStart={openGuidedPedidoModal}
+        onClose={closeGuidedPedido}
+      />
+    </div>
+  );
+}
+
+
+
+
+
+

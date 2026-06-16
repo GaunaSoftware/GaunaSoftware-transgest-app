@@ -1,0 +1,45 @@
+{
+  "name": "transgest-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "lodash": "4.17.21",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-scripts": "5.0.1",
+    "recharts": "^2.12.7"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "audit:alerts": "node scripts/audit_alerts.js",
+    "audit:confirms": "node scripts/audit_confirms.js",
+    "audit:contrast": "node scripts/audit_filter_contrast.js",
+    "audit:prompts": "node scripts/audit_prompts.js",
+    "check": "node --check src/App.js && node --check src/components/ToastProvider.js && node --check src/components/ErrorBoundary.js && node --check src/components/ui.js && node --check src/pages/Usuarios.js && node --check src/pages/SuperAdmin.js && node --check src/services/api.js && node --check src/services/incidents.js && node --check src/services/notify.js && node --check scripts/audit_alerts.js && node --check scripts/audit_confirms.js && node --check scripts/audit_filter_contrast.js && node --check scripts/audit_prompts.js && npm run audit:contrast"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version"
+    ]
+  },
+  "proxy": "http://localhost:3001",
+  "_buildTime": "1775472581",
+  "overrides": {
+    "lodash": "4.17.21"
+  },
+  "devDependencies": {
+    "ajv": "^8.12.0"
+  }
+}

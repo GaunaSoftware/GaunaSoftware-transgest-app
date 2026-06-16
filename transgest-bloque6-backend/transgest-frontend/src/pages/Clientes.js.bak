@@ -1,0 +1,673 @@
+// ── Dirección desglosada ─────────────────────────────────────────────────
+const PAISES_ISO = [["ES","España"],["PT","Portugal"],["FR","Francia"],["DE","Alemania"],
+  ["IT","Italia"],["NL","Países Bajos"],["BE","Bélgica"],["PL","Polonia"],
+  ["MA","Marruecos"],["UK","Reino Unido"],["OTHER","Otro"]];
+
+function DireccionFields({ prefijo="", values={}, onChange, titulo }) {
+  const f = k => e => onChange({ [k]: e.target.value });
+  const inp = { background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)",
+    padding:"8px 12px", borderRadius:7, fontFamily:"'DM Sans',sans-serif",
+    fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+  const lbl = { display:"block", fontSize:10, fontWeight:700, textTransform:"uppercase",
+    letterSpacing:".07em", color:"var(--text5)", marginBottom:4, marginTop:8 };
+  const p = prefijo;
+  return (
+    <div style={{background:"var(--bg3)",borderRadius:10,padding:"14px 16px",border:"1px solid var(--border)"}}>
+      {titulo && <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent)",marginBottom:10}}>{titulo}</div>}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 80px 110px",gap:"0 8px"}}>
+        <div>
+          <label style={lbl}>Calle / Avenida / Vía</label>
+          <input style={inp} value={values[p+"calle"]||""} onChange={f(p+"calle")} placeholder="Calle Mayor, Av. de la Paz..."/>
+        </div>
+        <div>
+          <label style={lbl}>Nº</label>
+          <input style={inp} value={values[p+"num_ext"]||""} onChange={f(p+"num_ext")} placeholder="14"/>
+        </div>
+        <div>
+          <label style={lbl}>Piso / Puerta</label>
+          <input style={inp} value={values[p+"piso_puerta"]||""} onChange={f(p+"piso_puerta")} placeholder="2ºB"/>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"100px 1fr 1fr 110px",gap:"0 8px",marginTop:4}}>
+        <div>
+          <label style={lbl}>C. Postal</label>
+          <input style={inp} value={values[p+"cod_postal"]||""} onChange={f(p+"cod_postal")} placeholder="28001" maxLength={10}/>
+        </div>
+        <div>
+          <label style={lbl}>Municipio / Ciudad</label>
+          <input style={inp} value={values[p+"municipio"]||""} onChange={f(p+"municipio")} placeholder="Madrid"/>
+        </div>
+        <div>
+          <label style={lbl}>Provincia</label>
+          <input style={inp} value={values[p+"provincia"]||""} onChange={f(p+"provincia")} placeholder="Madrid"/>
+        </div>
+        <div>
+          <label style={lbl}>País</label>
+          <select style={inp} value={values[p+"pais_iso"]||"ES"} onChange={f(p+"pais_iso")}>
+            {PAISES_ISO.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+import { useState, useEffect, useCallback } from "react";
+import {
+  getClientes, crearCliente, editarCliente, borrarCliente,
+  getRutasCliente, crearRutaCliente, editarRutaCliente, borrarRutaCliente,
+  getPedidosCliente, crearFacturaMultiple, getRutas,
+} from "../services/api";
+import { useAuth } from "../context/AuthContext";
+
+// ── Constantes ─────────────────────────────────────────────────────────────
+const TIPOS_IVA   = ["21","10","4","0","exento"];
+const FORMAS_PAGO = ["transferencia","domiciliacion","cheque","efectivo","confirming"];
+const TIPO_PRECIO = [{v:"viaje",l:"Precio fijo por viaje"},{v:"tonelada",l:"€ por tonelada"},{v:"km",l:"€ por km"},{v:"hora",l:"€ por hora"}];
+const ESTADO_COLOR = {pendiente:"#fb8c3a",confirmado:"#3b6ef5",en_curso:"#22d3ee",descarga:"#a78bfa",entregado:"var(--green)",cancelado:"#f05252",incidencia:"#fbbf24"};
+const LABEL_ESTADO = {pendiente:"Pendiente",confirmado:"Confirmado",en_curso:"En curso",descarga:"En descarga",entregado:"Entregado",cancelado:"Cancelado",incidencia:"Incidencia"};
+const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+// ── Estilos base ───────────────────────────────────────────────────────────
+const S = {
+  page: {padding:"24px 28px"},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:16,color:"var(--text)"},
+  bar:  {display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"},
+  btn:  {padding:"8px 16px",borderRadius:7,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:6},
+  card: {background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:12,overflow:"hidden"},
+  th:   {textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)",whiteSpace:"nowrap"},
+  td:   {padding:"10px 14px",borderBottom:"1px solid #181e2e",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
+  inp:  {background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  sel:  {background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20,overflowY:"auto"},
+  mbox: {background:"var(--bg2)",border:"1px solid #28344f",borderRadius:16,padding:28,width:"min(820px,98vw)",maxHeight:"94vh",overflowY:"auto"},
+  lbl:  {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:5,marginTop:12},
+  sec:  {fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".1em",color:"#3b6ef5",marginTop:20,marginBottom:8,paddingBottom:6,borderBottom:"1px solid #1a2d5a"},
+  tab:  {padding:"7px 16px",border:"none",borderBottom:"2px solid transparent",background:"none",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"},
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// Subcomponente: Ficha de cliente (modal completo con tabs)
+// ══════════════════════════════════════════════════════════════════════
+function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
+  const { puedeEditar } = useAuth();
+  const canEdit = puedeEditar("clientes");
+  const esNuevo = !cliente;
+
+  const [tab,       setTab]       = useState("datos");
+  const [form,      setForm]      = useState(cliente || { tipo_iva:"21", pais:"ES", forma_pago:"transferencia", dias_pago:"30" });
+  const [saving,    setSaving]    = useState(false);
+
+  // Rutas del cliente
+  const [rutas,     setRutas]     = useState([]);
+  const [rutasLoad, setRutasLoad] = useState(false);
+  const [modalRuta, setModalRuta] = useState(false);
+  const [editRuta,  setEditRuta]  = useState(null);
+  const [formRuta,  setFormRuta]  = useState({});
+
+  // Historial pedidos
+  const [pedidos,   setPedidos]   = useState([]);
+  const [pedLoad,   setPedLoad]   = useState(false);
+  const [mesFiltro, setMesFiltro] = useState("");
+  const [selPedidos,setSelPedidos]= useState(new Set());
+  const [facturando,setFacturando]= useState(false);
+
+  const f  = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const fr = k => e => setFormRuta(p=>({...p,[k]:e.target.value}));
+
+  // Cargar rutas
+  const cargarRutas = useCallback(async () => {
+    if (!cliente?.id) return;
+    setRutasLoad(true);
+    try { setRutas(await getRutasCliente(cliente.id).catch(()=>[])); }
+    finally { setRutasLoad(false); }
+  }, [cliente?.id]);
+
+  // Cargar pedidos
+  const cargarPedidos = useCallback(async () => {
+    if (!cliente?.id) return;
+    setPedLoad(true);
+    const params = mesFiltro ? { mes: mesFiltro } : {};
+    try { const d = await getPedidosCliente(cliente.id, params); setPedidos(Array.isArray(d)?d:[]); }
+    catch { setPedidos([]); }
+    finally { setPedLoad(false); }
+  }, [cliente?.id, mesFiltro]);
+
+  useEffect(() => { if (tab==="rutas")    cargarRutas();  }, [tab, cargarRutas]);
+  useEffect(() => { if (tab==="pedidos")  cargarPedidos();}, [tab, cargarPedidos, mesFiltro]);
+
+  // Guardar cliente
+  async function guardarCliente() {
+    if (!form.nombre) { alert("El nombre es obligatorio"); return; }
+    setSaving(true);
+    try {
+      if (esNuevo) await crearCliente(form);
+      else         await editarCliente(cliente.id, form);
+      onSaved();
+    } catch(e) { alert(e.message); }
+    finally { setSaving(false); }
+  }
+
+  // Guardar ruta
+  async function guardarRuta() {
+    if (!formRuta.origen || !formRuta.destino) { alert("Origen y destino obligatorios"); return; }
+    setSaving(true);
+    try {
+      if (editRuta) await editarRutaCliente(cliente.id, editRuta.id, formRuta);
+      else          await crearRutaCliente(cliente.id, formRuta);
+      setModalRuta(false);
+      cargarRutas();
+    } catch(e) { alert(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function eliminarRuta(ruta) {
+    if (!window.confirm(`¿Eliminar ruta ${ruta.origen} → ${ruta.destino}?`)) return;
+    try { await borrarRutaCliente(cliente.id, ruta.id); cargarRutas(); }
+    catch(e) { alert(e.message); }
+  }
+
+  // Facturar pedidos seleccionados
+  async function facturarSeleccionados() {
+    const lista = pedidos.filter(p => selPedidos.has(p.id));
+    if (!lista.length) { alert("Selecciona al menos un pedido"); return; }
+    const mesRef = mesFiltro || new Date().toISOString().slice(0,7);
+    const base   = lista.reduce((s,p)=>s+Number(p.importe||0),0);
+    const iva    = form.tipo_iva || "21";
+    const ivaNum = iva==="exento" ? 0 : parseFloat(iva);
+    const total  = base * (1 + ivaNum/100);
+
+    setFacturando(true);
+    try {
+      await crearFacturaMultiple({
+        cliente_id:   cliente.id,
+        pedidos_ids:  lista.map(p=>p.id),
+        serie:        "A",
+        fecha:        new Date().toISOString().slice(0,10),
+        estado:       "emitida",
+        observaciones:`Servicios de transporte — ${mesRef}`,
+        lineas: lista.map(p=>({
+          concepto:    `${p.numero} — ${p.origen||""}${p.destino?" → "+p.destino:""}`,
+          cantidad:    1,
+          precio_unit: Number(p.importe || 0),
+        })),
+      });
+      setSelPedidos(new Set());
+      cargarPedidos();
+      alert(`✅ Factura creada con ${lista.length} pedido${lista.length!==1?"s":""} por ${fmt2(total)} € (IVA incl.)`);
+    } catch(e) { alert(e.message); }
+    finally { setFacturando(false); }
+  }
+
+  function togglePedido(id) {
+    setSelPedidos(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+
+  function seleccionarMes() {
+    const pendientes = pedidos.filter(p=>p.estado!=="cancelado"&&!p.facturado);
+    setSelPedidos(new Set(pendientes.map(p=>p.id)));
+  }
+
+  const TABS = [
+    {id:"datos",    l:"📋 Datos"},
+    {id:"facturacion",l:"🧾 Facturación"},
+    {id:"tarifas",  l:"💰 Tarifas"},
+    {id:"rutas",    l:"🗺️ Rutas"},
+    {id:"pedidos",  l:"📦 Histórico"},
+  ];
+
+  const totalSeleccionado = pedidos.filter(p=>selPedidos.has(p.id)).reduce((s,p)=>s+Number(p.importe||0),0);
+
+  return (
+    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={S.mbox}>
+        {/* Cabecera */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:19,fontWeight:800,color:"var(--text)"}}>
+              {esNuevo ? "Nuevo cliente" : form.nombre}
+            </div>
+            {!esNuevo && <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{form.cif||"Sin CIF"}</div>}
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",fontSize:20,cursor:"pointer",padding:4}}>✕</button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{display:"flex",gap:0,borderBottom:"1px solid #181e2e",marginBottom:18,marginTop:12}}>
+          {(esNuevo ? TABS.slice(0,3) : TABS).map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)}
+              style={{...S.tab, borderBottomColor:tab===t.id?"#3b6ef5":"transparent",
+                      color:tab===t.id?"var(--accent-xl)":"var(--text4)"}}>
+              {t.l}
+            </button>
+          ))}
+        </div>
+
+        {/* ── TAB: Datos ── */}
+        {tab==="datos" && (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div style={{gridColumn:"1/-1"}}>
+              <label style={S.lbl}>Nombre / Razón social *</label>
+              <input style={S.inp} value={form.nombre||""} onChange={f("nombre")} placeholder="Empresa S.L."/>
+            </div>
+            {[["cif","CIF / NIF","B-12345678"],["telefono","Teléfono","912 345 678"],
+              ["email","Email","contacto@empresa.com"],["web","Web","www.empresa.com"],
+              ["contacto_nombre","Persona de contacto"],["contacto_telefono","Tel. contacto"]
+            ].map(([k,l,ph])=>(
+              <div key={k}><label style={S.lbl}>{l}</label>
+              <input style={S.inp} value={form[k]||""} onChange={f(k)} placeholder={ph||""}/></div>
+            ))}
+            {/* ── Dirección social ── */}
+            <div style={{gridColumn:"1/-1"}}>
+              <DireccionFields
+                titulo="📍 Dirección social / operativa"
+                values={form}
+                onChange={vals=>setForm(p=>({...p,...vals}))}
+              />
+            </div>
+
+            {/* ── Dirección fiscal diferente ── */}
+            <div style={{gridColumn:"1/-1"}}>
+              {/* Toggle */}
+              <label style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",
+                background:form.dir_fiscal_distinta?"rgba(59,130,246,.08)":"var(--bg3)",
+                border:`1px solid ${form.dir_fiscal_distinta?"rgba(59,130,246,.3)":"var(--border)"}`,
+                borderRadius:8,cursor:"pointer",userSelect:"none",transition:"all .15s"}}>
+                <div style={{position:"relative",width:38,height:22,flexShrink:0}}>
+                  <div style={{position:"absolute",inset:0,background:form.dir_fiscal_distinta?"var(--accent)":"var(--bg4)",
+                    borderRadius:11,border:"1px solid var(--border2)",transition:"background .2s"}}/>
+                  <div style={{position:"absolute",top:3,left:form.dir_fiscal_distinta?18:3,width:16,height:16,
+                    background:"#fff",borderRadius:"50%",transition:"left .2s",
+                    boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
+                  <input type="checkbox" checked={!!form.dir_fiscal_distinta}
+                    onChange={e=>setForm(p=>({...p,dir_fiscal_distinta:e.target.checked}))}
+                    style={{position:"absolute",opacity:0,inset:0,cursor:"pointer",margin:0}}/>
+                </div>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>
+                    La dirección fiscal es diferente a la social
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text4)",marginTop:1}}>
+                    {form.dir_fiscal_distinta
+                      ? "Ambas direcciones aparecerán en la factura"
+                      : "Activa esto si la dirección de facturación es diferente"}
+                  </div>
+                </div>
+              </label>
+
+              {/* Dirección fiscal */}
+              {form.dir_fiscal_distinta && (
+                <div style={{marginTop:10}}>
+                  <DireccionFields
+                    titulo="🧾 Dirección fiscal / de facturación"
+                    prefijo="fiscal_"
+                    values={form}
+                    onChange={vals=>setForm(p=>({...p,...vals}))}
+                  />
+                </div>
+              )}
+            </div>
+            <div>
+              <label style={S.lbl}>Notas internas</label>
+              <input style={S.inp} value={form.notas||""} onChange={f("notas")} placeholder="Observaciones..."/>
+            </div>
+            <div>
+              <label style={S.lbl}>Límite de riesgo (€) — 0 = sin límite</label>
+              <input type="number" step="100" style={S.inp} value={form.limite_riesgo||""} onChange={f("limite_riesgo")} placeholder="Ej: 5000 — bloquea nuevos viajes si deuda supera este importe"/>
+              <label style={S.lbl}>Modo de facturación</label>
+              <select style={S.sel} value={form.modo_facturacion||"por_viaje"} onChange={f("modo_facturacion")}>
+                <option value="por_viaje">Por viaje (una factura por viaje)</option>
+                <option value="agrupada_linea">Agrupada — Una línea por período</option>
+                <option value="agrupada_detalle">Agrupada — Línea por cada viaje</option>
+                <option value="agrupada_kg">Agrupada por kg (con desglose de tarifas)</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: Facturación ── */}
+        {tab==="facturacion" && (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <label style={S.lbl}>Tipo de IVA</label>
+              <select value={form.tipo_iva||"21"} onChange={f("tipo_iva")} style={S.sel}>
+                {TIPOS_IVA.map(t=><option key={t} value={t}>{t==="exento"?"Exento":`${t}%`}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={S.lbl}>Días de pago</label>
+              <select value={form.dias_pago||"30"} onChange={f("dias_pago")} style={S.sel}>
+                {["0","15","30","45","60","90"].map(d=><option key={d} value={d}>{d} días</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={S.lbl}>Forma de pago</label>
+              <select value={form.forma_pago||"transferencia"} onChange={f("forma_pago")} style={S.sel}>
+                {FORMAS_PAGO.map(fp=><option key={fp} value={fp}>{fp.charAt(0).toUpperCase()+fp.slice(1)}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={S.lbl}>IBAN</label>
+              <input style={S.inp} value={form.iban||""} onChange={f("iban")} placeholder="ES91 2100 0418 ..."/>
+            </div>
+            <div style={{gridColumn:"1/-1"}}>
+              <label style={S.lbl}>Email de facturación (si diferente)</label>
+              <input style={S.inp} value={form.email_facturacion||""} onChange={f("email_facturacion")}/>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: Tarifas ── */}
+        {tab==="tarifas" && (
+          <div>
+            <div style={{background:"rgba(59,110,245,.07)",border:"1px solid rgba(59,110,245,.15)",borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:"var(--text2)"}}>
+              💡 Tarifas base del cliente. Cada ruta puede tener su propio precio específico (configúralas en la pestaña Rutas).
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div>
+                <label style={S.lbl}>Tipo de tarificación por defecto</label>
+                <select value={form.tipo_precio_defecto||"viaje"} onChange={f("tipo_precio_defecto")} style={S.sel}>
+                  {TIPO_PRECIO.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={S.lbl}>Precio base (€/{form.tipo_precio_defecto==="tonelada"?"tn":form.tipo_precio_defecto==="km"?"km":form.tipo_precio_defecto==="hora"?"h":"viaje"})</label>
+                <input type="number" step="0.0001" style={S.inp} value={form.precio_base||""} onChange={f("precio_base")} placeholder="0.00"/>
+              </div>
+              <div>
+                <label style={S.lbl}>Precio €/tn·km (tarifa kilométrica)</label>
+                <input type="number" step="0.0001" style={S.inp} value={form.precio_tn_km||""} onChange={f("precio_tn_km")} placeholder="0.0850"/>
+              </div>
+              <div>
+                <label style={S.lbl}>Mínimo facturable (€)</label>
+                <input type="number" step="0.01" style={S.inp} value={form.minimo_facturable||""} onChange={f("minimo_facturable")} placeholder="150.00"/>
+              </div>
+              <div>
+                <label style={S.lbl}>Descuento habitual (%)</label>
+                <input type="number" step="0.1" min="0" max="100" style={S.inp} value={form.descuento||""} onChange={f("descuento")} placeholder="0"/>
+              </div>
+              <div>
+                <label style={S.lbl}>Recargo combustible (%)</label>
+                <input type="number" step="0.1" min="0" style={S.inp} value={form.recargo_combustible||""} onChange={f("recargo_combustible")} placeholder="0"/>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: Rutas ── */}
+        {tab==="rutas" && (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontSize:12,color:"var(--text4)"}}>Rutas pactadas con este cliente y sus tarifas específicas</div>
+              {canEdit && (
+                <button style={{...S.btn,background:"#3b6ef5",color:"#fff",padding:"6px 14px",fontSize:12}}
+                  onClick={()=>{setEditRuta(null);setFormRuta({tipo_precio:"viaje"});setModalRuta(true);}}>
+                  + Nueva ruta
+                </button>
+              )}
+            </div>
+            {rutasLoad ? <div style={{textAlign:"center",color:"var(--text4)",padding:30}}>Cargando...</div>
+            : rutas.length===0 ? (
+              <div style={{textAlign:"center",color:"var(--text4)",padding:30,background:"var(--bg3)",borderRadius:10}}>
+                Sin rutas configuradas. {canEdit&&"Añade la primera con el botón de arriba."}
+              </div>
+            ) : (
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr>
+                  {["Origen","Destino","Km","Tiempo","Tipo precio","Precio","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {rutas.map(r=>(
+                    <tr key={r.id}>
+                      <td style={{...S.td,fontWeight:600}}>{r.origen}</td>
+                      <td style={{...S.td,fontWeight:600}}>{r.destino}</td>
+                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"var(--accent-xl)"}}>{r.km||"—"}</td>
+                      <td style={{...S.td,color:"var(--text2)"}}>{r.tiempo_h?`${r.tiempo_h}h`:"—"}</td>
+                      <td style={S.td}><span style={{fontSize:11,color:"#a78bfa"}}>{TIPO_PRECIO.find(t=>t.v===r.tipo_precio)?.l||"Viaje"}</span></td>
+                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)"}}>
+                        {r.precio?`${fmt2(r.precio)} €`:"—"}
+                      </td>
+                      <td style={S.td}>
+                        {canEdit&&<div style={{display:"flex",gap:6}}>
+                          <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"3px 9px",fontSize:11}}
+                            onClick={()=>{setEditRuta(r);setFormRuta({...r});setModalRuta(true);}}>Editar</button>
+                          <button style={{...S.btn,background:"rgba(240,82,82,.1)",color:"#f05252",padding:"3px 9px",fontSize:11}}
+                            onClick={()=>eliminarRuta(r)}>✕</button>
+                        </div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            {/* Modal ruta */}
+            {modalRuta && (
+              <div style={{...S.modal,zIndex:200}} onClick={e=>e.target===e.currentTarget&&setModalRuta(false)}>
+                <div style={{...S.mbox,width:"min(520px,96vw)"}}>
+                  <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:18,color:"var(--text)"}}>{editRuta?"Editar ruta":"Nueva ruta para "+form.nombre}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <div><label style={S.lbl}>Origen *</label><input style={S.inp} value={formRuta.origen||""} onChange={fr("origen")}/></div>
+                    <div><label style={S.lbl}>Destino *</label><input style={S.inp} value={formRuta.destino||""} onChange={fr("destino")}/></div>
+                    <div><label style={S.lbl}>Kilómetros</label><input type="number" style={S.inp} value={formRuta.km||""} onChange={fr("km")}/></div>
+                    <div><label style={S.lbl}>Tiempo estimado (h)</label><input type="number" step="0.5" style={S.inp} value={formRuta.tiempo_h||""} onChange={fr("tiempo_h")}/></div>
+                    <div><label style={S.lbl}>Peajes (€)</label><input type="number" step="0.01" style={S.inp} value={formRuta.peajes||""} onChange={fr("peajes")}/></div>
+                    <div><label style={S.lbl}>Tipo de precio</label>
+                      <select value={formRuta.tipo_precio||"viaje"} onChange={fr("tipo_precio")} style={S.sel}>
+                        {TIPO_PRECIO.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+                      </select>
+                    </div>
+                    <div><label style={S.lbl}>Precio ({formRuta.tipo_precio==="viaje"?"€ fijo":formRuta.tipo_precio==="tonelada"?"€/tn":formRuta.tipo_precio==="km"?"€/km":"€/h"})</label>
+                      <input type="number" step="0.01" style={S.inp} value={formRuta.precio||""} onChange={fr("precio")}/></div>
+                    <div><label style={S.lbl}>Notas</label><input style={S.inp} value={formRuta.notas||""} onChange={fr("notas")}/></div>
+                  </div>
+                  <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
+                    <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}} onClick={()=>setModalRuta(false)}>Cancelar</button>
+                    <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={guardarRuta} disabled={saving}>{saving?"Guardando...":editRuta?"Guardar":"Crear ruta"}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── TAB: Histórico pedidos ── */}
+        {tab==="pedidos" && (
+          <div>
+            {/* Filtros y acciones */}
+            <div style={{display:"flex",gap:10,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
+              <input type="month" value={mesFiltro} onChange={e=>setMesFiltro(e.target.value)}
+                style={{...S.inp,width:170}} title="Filtrar por mes de carga"/>
+              {mesFiltro && <button style={{...S.btn,background:"transparent",color:"var(--text4)",border:"1px solid #28344f",padding:"6px 10px",fontSize:12}} onClick={()=>setMesFiltro("")}>× Quitar filtro</button>}
+              <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"6px 12px",fontSize:12}} onClick={seleccionarMes}>Seleccionar mes actual</button>
+              {selPedidos.size > 0 && (
+                <button
+                  style={{...S.btn,background:"var(--green)",color:"var(--bg)",marginLeft:"auto",fontWeight:700}}
+                  onClick={facturarSeleccionados} disabled={facturando}>
+                  {facturando?"Creando...": `🧾 Facturar ${selPedidos.size} pedido${selPedidos.size!==1?"s":""} · ${fmt2(totalSeleccionado)} €`}
+                </button>
+              )}
+            </div>
+
+            {/* Resumen rápido */}
+            {pedidos.length > 0 && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+                {[
+                  {l:"Total período",v:`${fmt2(pedidos.reduce((s,p)=>s+Number(p.importe||0),0))} €`,c:"var(--text)"},
+                  {l:"Pedidos",      v:pedidos.length, c:"var(--accent-xl)"},
+                  {l:"Sin facturar", v:pedidos.filter(p=>!p.facturado&&p.estado!=="cancelado").length, c:"#fb8c3a"},
+                ].map((k,i)=>(
+                  <div key={i} style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px"}}>
+                    <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:800,color:k.c}}>{k.v}</div>
+                    <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",marginTop:3}}>{k.l}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={S.card}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr>
+                  <th style={{...S.th,width:36}}><input type="checkbox"
+                    checked={selPedidos.size===pedidos.filter(p=>!p.facturado&&p.estado!=="cancelado").length&&pedidos.length>0}
+                    onChange={e=>e.target.checked?seleccionarMes():setSelPedidos(new Set())}
+                    style={{accentColor:"#3b6ef5"}}/></th>
+                  {["Nº Pedido","Origen → Destino","F. Carga","Estado","Tipo precio","Importe","Facturado"].map(h=><th key={h} style={S.th}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {pedLoad ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
+                  : pedidos.length===0 ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Sin pedidos{mesFiltro?` en ${mesFiltro}`:""}</td></tr>
+                  : pedidos.map(p=>{
+                    const c = ESTADO_COLOR[p.estado]||"var(--text2)";
+                    const canSel = !p.facturado && p.estado!=="cancelado";
+                    return (
+                      <tr key={p.id} style={{opacity:p.estado==="cancelado"?.5:1}}>
+                        <td style={{...S.td,textAlign:"center"}}>
+                          {canSel && <input type="checkbox" checked={selPedidos.has(p.id)}
+                            onChange={()=>togglePedido(p.id)} style={{accentColor:"#3b6ef5"}}/>}
+                        </td>
+                        <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)"}}>{p.numero}</td>
+                        <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>{p.origen&&p.destino?`${p.origen} → ${p.destino}`:"—"}</td>
+                        <td style={{...S.td,fontSize:11,fontFamily:"'JetBrains Mono',monospace",color:"var(--text4)"}}>{p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"—"}</td>
+                        <td style={S.td}><span style={{display:"inline-flex",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:`${c}1a`,color:c}}>{LABEL_ESTADO[p.estado]||p.estado}</span></td>
+                        <td style={{...S.td,fontSize:11,color:"var(--text2)"}}>{p.tipo_precio||"viaje"}</td>
+                        <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{fmt2(p.importe)} €</td>
+                        <td style={S.td}>
+                          {p.facturado
+                            ? <span style={{display:"inline-flex",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:"rgba(34,211,160,.12)",color:"var(--green)"}}>✓ Facturado</span>
+                            : <span style={{display:"inline-flex",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:"rgba(251,140,58,.12)",color:"#fb8c3a"}}>Pendiente</span>
+                          }
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Footer botones */}
+        {(tab==="datos"||tab==="facturacion"||tab==="tarifas") && canEdit && (
+          <div style={{display:"flex",gap:10,marginTop:24,justifyContent:"flex-end",borderTop:"1px solid #181e2e",paddingTop:18}}>
+            <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}} onClick={onClose}>Cancelar</button>
+            <button style={{...S.btn,background:"#3b6ef5",color:"#fff",opacity:saving?0.7:1}} onClick={guardarCliente} disabled={saving}>
+              {saving?"Guardando...":esNuevo?"Crear cliente":"Guardar cambios"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Componente principal: Lista de clientes
+// ══════════════════════════════════════════════════════════════════════
+export default function Clientes() {
+  const { puedeEditar } = useAuth();
+  const canEdit = puedeEditar("clientes");
+  const [clientes, setClientes]   = useState([]);
+  const [loading,  setLoading]    = useState(true);
+  const [q,        setQ]          = useState("");
+  const [ficha,    setFicha]      = useState(null);  // null | "nuevo" | {cliente}
+  const [rutasG,   setRutasG]     = useState([]);
+
+  const [mostrarBaja, setMostrarBaja] = useState(false);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    try {
+      const activo = mostrarBaja ? "false" : "true";
+      const [c, r] = await Promise.all([getClientes(q, activo), getRutas().catch(()=>[])]);
+      setClientes(Array.isArray(c?.data)?c.data:Array.isArray(c)?c:[]);
+      setRutasG(Array.isArray(r)?r:[]);
+    } finally { setLoading(false); }
+  }, [q, mostrarBaja]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  async function eliminar(c) {
+    if (!window.confirm(`¿Dar de baja a "${c.nombre}"?\nEl cliente quedará desactivado pero sus datos e historial se conservarán.`)) return;
+    try { await borrarCliente(c.id); cargar(); }
+    catch(e) { alert(e.message); }
+  }
+
+  return (
+    <div style={S.page}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:0}}>
+        <div style={S.title}>🏢 Clientes</div>
+        <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"var(--text4)",cursor:"pointer",userSelect:"none"}}>
+          <input type="checkbox" checked={mostrarBaja} onChange={e=>{setMostrarBaja(e.target.checked);}}
+            style={{accentColor:"var(--accent)",cursor:"pointer"}}/>
+          Ver dados de baja
+        </label>
+      </div>
+
+      <div style={S.bar}>
+        {canEdit && (
+          <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={()=>setFicha("nuevo")}>
+            + Nuevo cliente
+          </button>
+        )}
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar por nombre, CIF..."
+          style={{...S.inp,width:260}}/>
+        <span style={{fontSize:12,color:"var(--text4)",marginLeft:"auto"}}>
+          {clientes.length} cliente{clientes.length!==1?"s":""}
+        </span>
+      </div>
+
+      <div style={S.card}>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>
+            {["Nombre","CIF","Teléfono","Email","IVA","Forma pago","País","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {loading ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
+            : clientes.length===0 ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>
+                Sin clientes. {canEdit&&"Crea el primero con el botón de arriba."}
+              </td></tr>
+            : clientes.map(c=>(
+              <tr key={c.id} style={{cursor:"pointer"}} onClick={()=>setFicha(c)}>
+                <td style={{...S.td,fontWeight:700}}>{c.nombre}</td>
+                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--text2)"}}>{c.cif||"—"}</td>
+                <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>{c.telefono||"—"}</td>
+                <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>{c.email||"—"}</td>
+                <td style={S.td}>
+                  <span style={{display:"inline-flex",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:"rgba(59,110,245,.14)",color:"var(--accent-xl)"}}>
+                    {c.tipo_iva==="exento"?"Exento":`${c.tipo_iva||"21"}%`}
+                  </span>
+                </td>
+                <td style={{...S.td,fontSize:12,color:"var(--text2)",textTransform:"capitalize"}}>{c.forma_pago||"transferencia"}</td>
+                <td style={{...S.td,fontSize:11,color:"var(--text2)"}}>
+                  {c.calle ? `${c.calle}${c.num_ext?" "+c.num_ext:""}` : c.direccion||"—"}
+                  {c.cod_postal||c.municipio ? <><br/><span style={{color:"var(--text4)"}}>{[c.cod_postal,c.municipio].filter(Boolean).join(" ")}</span></> : null}
+                </td>
+                <td style={S.td} onClick={e=>e.stopPropagation()}>
+                  <div style={{display:"flex",gap:6}}>
+                    <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"4px 10px",fontSize:11}} onClick={()=>setFicha(c)}>Abrir ficha</button>
+                    {canEdit && <button style={{...S.btn,background:"rgba(240,82,82,.1)",color:"#f05252",padding:"4px 10px",fontSize:11}} onClick={()=>eliminar(c)}>✕</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Ficha cliente */}
+      {ficha && (
+        <FichaCliente
+          cliente={ficha==="nuevo" ? null : ficha}
+          rutasGlobales={rutasG}
+          onClose={()=>setFicha(null)}
+          onSaved={()=>{ setFicha(null); cargar(); }}
+        />
+      )}
+    </div>
+  );
+}

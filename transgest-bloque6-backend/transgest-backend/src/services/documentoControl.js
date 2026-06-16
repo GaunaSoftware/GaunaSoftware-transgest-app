@@ -1,0 +1,1158 @@
+﻿const crypto = require("crypto");
+
+const DOC_CONTROL_DEFAULTS = {
+  habilitado: false,
+  sistema: "codigo_numerico", // codigo_numerico | qr_url
+  dominio_url: "",
+  dominio_comunicado: false,
+  usar_orden_carga_como_soporte: true,
+  observaciones: "",
+};
+
+function normalizeDocumentoControlConfig(raw = {}) {
+  return {
+    ...DOC_CONTROL_DEFAULTS,
+    ...(raw && typeof raw === "object" ? raw : {}),
+    dominio_comunicado: Boolean(raw?.dominio_comunicado),
+    usar_orden_carga_como_soporte: raw?.usar_orden_carga_como_soporte !== false,
+  };
+}
+
+function parseStops(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function firstStopInfo(stops = [], fallbackName = "") {
+  const stop = Array.isArray(stops) ? stops[0] || {} : {};
+  return {
+    nombre: stop.nombre || stop.name || fallbackName || "",
+    direccion: stop.direccion || stop.address || stop.nombre || stop.name || fallbackName || "",
+    cliente_nombre: stop.cliente_nombre || stop.clienteNombre || "",
+    fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || "",
+    hora: stop.hora_carga || stop.hora_descarga || stop.hora || "",
+    ventana: stop.ventana || "",
+    google_maps_url: stop.google_maps_url || stop.maps_url || "",
+  };
+}
+
+function normalizeStopList(stops = [], fallback = {}) {
+  return (Array.isArray(stops) ? stops : []).map((stop, index) => ({
+    orden: index + 1,
+    nombre: stop.nombre || stop.name || stop.cliente_nombre || "",
+    direccion: stop.direccion || stop.address || stop.nombre || stop.name || "",
+    fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || fallback.fecha || "",
+    hora: stop.hora_carga || stop.hora_descarga || stop.hora || fallback.hora || "",
+    ventana: stop.ventana || fallback.ventana || "",
+    google_maps_url: stop.google_maps_url || stop.maps_url || "",
+  })).filter(stop => stop.direccion || stop.nombre);
+}
+
+function companyName(empresa = {}) {
+  return empresa?.razon_social || empresa?.nombre || "";
+}
+
+function hasText(value) {
+  return String(value || "").trim().length > 0;
+}
+
+function hasEmail(value) {
+  const raw = String(value || "").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw);
+}
+
+function buildReadiness(checks = []) {
+  const required = checks.filter(check => check.required !== false);
+  const optional = checks.filter(check => check.required === false);
+  const requiredOk = required.filter(check => check.ok).length;
+  const optionalOk = optional.filter(check => check.ok).length;
+  const totalWeight = (required.length * 2) + optional.length;
+  const okWeight = (requiredOk * 2) + optionalOk;
+  const score = totalWeight ? Math.round((okWeight / totalWeight) * 100) : 100;
+  const byCategory = checks.reduce((acc, check) => {
+    const key = check.category || "general";
+    if (!acc[key]) acc[key] = { total: 0, ok: 0, faltantes: [] };
+    acc[key].total += 1;
+    if (check.ok) acc[key].ok += 1;
+    else acc[key].faltantes.push(check.label);
+    return acc;
+  }, {});
+  return { score, required_ok: requiredOk, required_total: required.length, optional_ok: optionalOk, optional_total: optional.length, by_category: byCategory };
+}
+
+function formatClientPaymentTerms(empresa = {}) {
+  const custom = String(empresa?.texto_pago_clientes || "").trim();
+  if (custom) return custom;
+  const plazo = Number(empresa?.plazo_pago_clientes || 0);
+  const dias = String(empresa?.dias_pago_clientes || "").trim();
+  const forma = String(empresa?.forma_pago_clientes || "recepcion_factura");
+  if (forma === "contado") return "Pago al contado";
+  if (forma === "transferencia_inmediata") return "Transferencia inmediata";
+  if (forma === "fin_mes") return `Transferencia fin de mes${plazo ? ` + ${plazo} dias` : ""}${dias ? `; pago dias ${dias}` : ""}`;
+  return `Transferencia ${plazo || 60} dias fecha recepcion factura${dias ? `; pago dias ${dias}` : ""}`;
+}
+
+function buildOperativaCargaLabels(pedido = {}) {
+  const labels = [];
+  if (pedido?.carga_lateral) labels.push("Carga lateral");
+  if (pedido?.carga_trasera) labels.push("Carga trasera");
+  labels.push(pedido?.intercambio_palets ? "Con intercambio de palets" : "Sin intercambio de palets");
+  if (pedido?.requiere_cinchas) labels.push("Necesario llevar cinchas para sujetar la mercancia");
+  return labels;
+}
+
+function detectWasteSignals(pedido = {}) {
+  const text = normalizeSearchText([
+    pedido?.origen,
+    pedido?.destino,
+    pedido?.mercancia,
+    pedido?.descripcion_carga,
+    pedido?.notas,
+    pedido?.condiciones_adicionales,
+    pedido?.referencia_cliente,
+  ].filter(Boolean).join(" "));
+  const terms = [
+    "residuo",
+    "residuos",
+    "waste",
+    "annex vii",
+    "annex 7",
+    "anexo vii",
+    "diwass",
+    "ler ",
+    "codigo ler",
+  ];
+  const detectedTerms = terms.filter(term => text.includes(term));
+  const crossBorderHints = ["francia", "portugal", "alemania", "italia", "belgica", "paises bajos", "netherlands", "france", "germany", "italy"].filter(term => text.includes(term));
+  return {
+    detected: detectedTerms.length > 0,
+    detected_terms: detectedTerms,
+    cross_border_hint: crossBorderHints.length > 0,
+    cross_border_terms: crossBorderHints,
+  };
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function detectTerms(text, terms = []) {
+  return terms.filter(term => text.includes(term));
+}
+
+function detectTransportComplianceSignals(pedido = {}) {
+  const text = normalizeSearchText([
+    pedido?.origen,
+    pedido?.destino,
+    pedido?.mercancia,
+    pedido?.descripcion_carga,
+    pedido?.notas,
+    pedido?.condiciones_adicionales,
+    pedido?.referencia_cliente,
+  ].filter(Boolean).join(" "));
+  const adrTerms = detectTerms(text, [
+    "adr",
+    "mercancia peligrosa",
+    "mercancias peligrosas",
+    "numero onu",
+    "onu ",
+    "inflamable",
+    "corrosivo",
+    "toxico",
+    "explosivo",
+  ]);
+  const zbeTerms = detectTerms(text, [
+    "madrid",
+    "barcelona",
+    "valencia",
+    "sevilla",
+    "bilbao",
+    "zaragoza",
+    "malaga",
+    "alicante",
+    "palma",
+    "vigo",
+    "valladolid",
+    "pamplona",
+  ]);
+  const internationalTerms = detectTerms(text, [
+    "francia",
+    "portugal",
+    "alemania",
+    "italia",
+    "belgica",
+    "paises bajos",
+    "netherlands",
+    "france",
+    "germany",
+    "italy",
+    "andorra",
+    "marruecos",
+  ]);
+  const cabotageTerms = detectTerms(text, [
+    "cabotaje",
+    "cabotage",
+    "servicio interior",
+    "transporte interior",
+    "segunda descarga",
+    "retorno nacional",
+  ]);
+  const pesoKg = Number(pedido?.peso_kg || pedido?.kg || 0);
+  const internacional = internationalTerms.length > 0;
+  const colaborador = !!pedido?.colaborador_id || !!pedido?.colaborador_nombre;
+  const tacografoRevision = internacional || cabotageTerms.length > 0 || (pesoKg >= 2500 && pesoKg <= 3500 && internacional);
+  const avisos = [];
+  if (adrTerms.length) avisos.push("Revisar ADR, documentacion del conductor/vehiculo y restricciones de carga antes de confirmar.");
+  if (zbeTerms.length) avisos.push("Revisar restricciones urbanas/ZBE, accesos y ventanas locales de carga/descarga.");
+  if (internacional) avisos.push("Revisar documentacion internacional, eCMR/eFTI y datos maestros de todas las partes.");
+  if (colaborador && (internacional || cabotageTerms.length)) avisos.push("Revisar cabotaje/subcontratacion y condiciones del carrier antes de asignar.");
+  if (tacografoRevision) avisos.push("Confirmar disponibilidad de tacografo/horas y descansos antes de iniciar el servicio.");
+
+  return {
+    adr: {
+      requiere_revision: adrTerms.length > 0,
+      terminos_detectados: adrTerms,
+      accion: adrTerms.length ? "Validar ADR, autorizaciones y documentacion antes de expedir." : "Sin senal automatica ADR.",
+    },
+    zbe: {
+      requiere_revision: zbeTerms.length > 0,
+      zonas_detectadas: Array.from(new Set(zbeTerms)),
+      accion: zbeTerms.length ? "Comprobar ZBE/accesos locales y etiqueta ambiental del vehiculo." : "Sin senal automatica ZBE.",
+    },
+    internacional: {
+      requiere_revision: internacional,
+      terminos_detectados: internationalTerms,
+      accion: internacional ? "Preparar eCMR/eFTI, datos maestros y soporte documental internacional." : "Sin senal automatica internacional.",
+    },
+    cabotaje: {
+      requiere_revision: colaborador && (internacional || cabotageTerms.length > 0),
+      terminos_detectados: cabotageTerms,
+      accion: colaborador && (internacional || cabotageTerms.length > 0)
+        ? "Revisar reglas de cabotaje/subcontratacion y conservar evidencia operativa."
+        : "Sin senal automatica de cabotaje.",
+    },
+    tacografo: {
+      requiere_revision: tacografoRevision,
+      motivo: tacografoRevision ? "Servicio internacional/cabotaje o indicio de vehiculo ligero regulado." : "Sin senal automatica adicional.",
+      accion: tacografoRevision ? "Comprobar tacografo, horas disponibles y descansos antes de planificar." : "Validacion ordinaria de horas si aplica.",
+    },
+    avisos,
+  };
+}
+
+function buildCodigoControl({ empresaId, pedidoId }) {
+  return crypto.createHash("sha1").update(`${empresaId}:${pedidoId}`).digest("hex").slice(0, 12).toUpperCase();
+}
+
+function buildPublicToken({ empresaId, pedidoId }) {
+  const secret = process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`${empresaId}:${pedidoId}`)
+    .digest("hex");
+}
+
+function buildLegacyPublicToken({ empresaId, pedidoId }) {
+  const secret = process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+  return crypto.createHash("sha256").update(`${empresaId}:${pedidoId}:${secret}`).digest("hex");
+}
+
+function buildPublicVerificationCode({ empresaId, pedidoId }) {
+  const secret = process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`verify:${empresaId}:${pedidoId}`)
+    .digest("hex")
+    .slice(0, 16)
+    .toUpperCase();
+}
+
+function safeTokenEqual(expectedHex, receivedToken) {
+  const expected = Buffer.from(String(expectedHex || ""), "hex");
+  const received = Buffer.from(String(receivedToken || ""), "hex");
+  return expected.length > 0 && expected.length === received.length && crypto.timingSafeEqual(expected, received);
+}
+
+function safeTextEqual(expected, received) {
+  const a = Buffer.from(String(expected || ""));
+  const b = Buffer.from(String(received || ""));
+  return a.length > 0 && a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function verifyPublicToken({ empresaId, pedidoId, token }) {
+  if (!token) return false;
+  return (
+    safeTokenEqual(buildPublicToken({ empresaId, pedidoId }), token) ||
+    safeTokenEqual(buildLegacyPublicToken({ empresaId, pedidoId }), token)
+  );
+}
+
+function verifyPublicVerificationCode({ empresaId, pedidoId, code }) {
+  if (!code) return true;
+  return safeTextEqual(buildPublicVerificationCode({ empresaId, pedidoId }), String(code).trim().toUpperCase());
+}
+
+function isLocalhostBase(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function buildPublicUrl({ empresaId, pedidoId, config, appBaseUrl }) {
+  const cfg = normalizeDocumentoControlConfig(config);
+  const configuredBase = String(cfg.dominio_url || "").trim();
+  const runtimeBase = String(appBaseUrl || "").trim();
+  const baseSource = configuredBase && !(isLocalhostBase(configuredBase) && runtimeBase && !isLocalhostBase(runtimeBase))
+    ? configuredBase
+    : runtimeBase;
+  const base = String(baseSource || "").trim().replace(/\/$/, "");
+  if (!base) return "";
+  const token = buildPublicToken({ empresaId, pedidoId });
+  const verify = buildPublicVerificationCode({ empresaId, pedidoId });
+  return `${base}/api/v1/pedidos/public/documento-control/${empresaId}/${pedidoId}?token=${token}&verify=${verify}`;
+}
+
+function sanitizeFilenamePart(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function buildDocumentoControlFilename(documento = {}) {
+  const ref = sanitizeFilenamePart(documento?.referencia_pedido || "pedido");
+  const code = sanitizeFilenamePart(documento?.codigo_control || "control");
+  return `deca-${ref}-${code}.html`;
+}
+
+function buildDocumentoControlExportFilename(documento = {}) {
+  const ref = sanitizeFilenamePart(documento?.referencia_pedido || "pedido");
+  const code = sanitizeFilenamePart(documento?.codigo_control || "control");
+  return `deca-efti-ecmr-${ref}-${code}.json`;
+}
+
+function buildDocumentoControlSignaturePackageFilename(documento = {}) {
+  const ref = sanitizeFilenamePart(documento?.referencia_pedido || "pedido");
+  const code = sanitizeFilenamePart(documento?.codigo_control || "control");
+  return `deca-firma-eidas-${ref}-${code}.json`;
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sha256Hex(value) {
+  return crypto.createHash("sha256").update(typeof value === "string" ? value : stableJson(value)).digest("hex");
+}
+
+function docFieldOk(value) {
+  return String(value || "").trim().length > 0;
+}
+
+function buildEcmrConsignmentNote(documento = {}) {
+  const requiredFields = [
+    { key: "sender", label: "Remitente/cargador", ok: docFieldOk(documento.cargador_contractual?.nombre) },
+    { key: "carrier", label: "Transportista", ok: docFieldOk(documento.transportista_efectivo?.nombre) },
+    { key: "consignee", label: "Destinatario", ok: docFieldOk(documento.destino?.destinatario || documento.destino?.nombre) },
+    { key: "taking_over_place", label: "Lugar de carga", ok: docFieldOk(documento.origen?.direccion) },
+    { key: "delivery_place", label: "Lugar de entrega", ok: docFieldOk(documento.destino?.direccion) },
+    { key: "date", label: "Fecha de transporte", ok: docFieldOk(documento.fecha_transporte) },
+    { key: "goods", label: "Naturaleza de la mercancia", ok: docFieldOk(documento.mercancia?.descripcion) },
+    { key: "weight", label: "Peso/cantidad", ok: !!documento.mercancia?.peso_kg },
+    { key: "vehicle", label: "Matricula tractora", ok: docFieldOk(documento.vehiculo?.tractora) },
+  ];
+  const faltantes = requiredFields.filter(f => !f.ok).map(f => f.label);
+  return {
+    profile: "eCMR-preparado",
+    certified_provider_connected: false,
+    status: faltantes.length ? "incompleto" : "preparado_para_firma_y_proveedor",
+    nota: "Carta de porte electronica preparatoria. La validez avanzada requiere acuerdo de partes, firma/evidencia y proveedor o plataforma aplicable cuando proceda.",
+    required_fields: requiredFields,
+    missing_fields: faltantes,
+    consignment: {
+      sender: documento.cargador_contractual || {},
+      carrier: documento.transportista_efectivo || {},
+      consignee: {
+        nombre: documento.destino?.destinatario || documento.destino?.nombre || "",
+        direccion: documento.destino?.direccion || "",
+      },
+      taking_over: {
+        place: documento.origen?.direccion || "",
+        date: documento.horarios?.fecha_carga || documento.fecha_transporte || "",
+        time_window: documento.horarios?.hora_carga || documento.horarios?.ventana_carga || "",
+      },
+      delivery: {
+        place: documento.destino?.direccion || "",
+        date: documento.horarios?.fecha_descarga || "",
+        time_window: documento.horarios?.hora_descarga || documento.horarios?.ventana_descarga || "",
+      },
+      goods: documento.mercancia || {},
+      vehicle: documento.vehiculo || {},
+      references: {
+        codigo_control: documento.codigo_control || "",
+        referencia_pedido: documento.referencia_pedido || "",
+        verification_code: documento.verificacion?.codigo_verificacion || "",
+      },
+    },
+  };
+}
+
+function classifyTransportDoc(doc = {}) {
+  const text = normalizeSearchText([doc.tipo, doc.nombre, doc.notas].filter(Boolean).join(" "));
+  if (text.includes("cmr") || text.includes("carta porte") || text.includes("carta de porte")) return "cmr";
+  if (text.includes("pod") || text.includes("proof of delivery") || text.includes("entrega")) return "pod";
+  if (text.includes("albar")) return "albaran";
+  if (text.includes("pesaje") || text.includes("peso")) return "pesaje";
+  if (text.includes("foto")) return "foto";
+  return "otro";
+}
+
+function summarizeDocumentosTransporte(documentos = []) {
+  const items = (Array.isArray(documentos) ? documentos : []).map(doc => ({
+    id: doc.id || "",
+    nombre: doc.nombre || "",
+    tipo: doc.tipo || "",
+    clase: classifyTransportDoc(doc),
+    mime: doc.file_mime || doc.mime || "",
+    size_kb: Number(doc.file_size_kb || 0),
+    created_at: doc.created_at || null,
+  }));
+  const counts = items.reduce((acc, item) => {
+    acc[item.clase] = (acc[item.clase] || 0) + 1;
+    acc.total += 1;
+    return acc;
+  }, { total: 0, albaran: 0, pod: 0, cmr: 0, pesaje: 0, foto: 0, otro: 0 });
+  return { counts, items };
+}
+
+function summarizeDocumentControlEvents(eventos = []) {
+  const items = (Array.isArray(eventos) ? eventos : []).map(ev => ({
+    tipo: ev.tipo || "",
+    created_at: ev.created_at || null,
+    actor_tipo: ev.actor_tipo || "",
+    detalle: ev.detalle && typeof ev.detalle === "object" ? ev.detalle : {},
+  }));
+  const findLast = (prefix) => items.find(ev => String(ev.tipo || "").startsWith(prefix)) || null;
+  return {
+    total: items.length,
+    remitido: items.filter(ev => ev.tipo === "documento_control.remitido").length,
+    consultado: items.filter(ev => ["documento_control.consultado", "documento_control.abierto"].includes(ev.tipo)).length,
+    descargado: items.filter(ev => ev.tipo === "documento_control.descargado").length,
+    impreso: items.filter(ev => ev.tipo === "documento_control.impreso").length,
+    firma: items.filter(ev => String(ev.tipo || "").startsWith("firma.")).length,
+    last_documento_control: findLast("documento_control."),
+    last_firma: findLast("firma."),
+    items: items.slice(0, 25),
+  };
+}
+
+function buildDocumentoControlExpediente(payload = {}, options = {}) {
+  const documento = payload.documento || {};
+  const status = payload.status || {};
+  const docs = summarizeDocumentosTransporte(options.documentos || []);
+  const eventos = summarizeDocumentControlEvents(options.eventos || []);
+  const firma = options.firma || {};
+  const postFirma = options.postSignatureIntegrity || {};
+  const ecmr = buildEcmrConsignmentNote(documento);
+  const hasPod = (docs.counts.albaran || 0) + (docs.counts.pod || 0) + (docs.counts.cmr || 0) > 0;
+  const checks = [
+    { key: "dcd_ready", label: "DCD listo", ok: !!status.ready, required: true },
+    { key: "support_url", label: "Soporte tokenizado disponible", ok: docFieldOk(documento.soporte_url), required: true },
+    { key: "verification_code", label: "Codigo de verificacion", ok: docFieldOk(documento.verificacion?.codigo_verificacion), required: true },
+    { key: "ecmr_ready", label: "Datos minimos eCMR completos", ok: ecmr.status !== "incompleto", required: true },
+    { key: "remision_trace", label: "Remision formal trazada", ok: eventos.remitido > 0, required: false },
+    { key: "pod_or_cmr", label: "Albaran/POD/CMR adjunto", ok: hasPod, required: false },
+    { key: "signature_evidence", label: "Evidencia de firma registrada", ok: !!(firma.firma_hash || firma.firma_fecha), required: false },
+    { key: "signature_integrity", label: "Sin cambios posteriores a la firma", ok: !postFirma.changed_after_signature, required: false },
+  ];
+  const required = checks.filter(c => c.required !== false);
+  const optional = checks.filter(c => c.required === false);
+  const score = Math.round((((required.filter(c => c.ok).length * 2) + optional.filter(c => c.ok).length) / ((required.length * 2) + optional.length || 1)) * 100);
+  const bloqueos = checks.filter(c => c.required !== false && !c.ok).map(c => c.label);
+  const avisos = checks.filter(c => c.required === false && !c.ok).map(c => c.label);
+  const acciones = [];
+  if (!status.ready) acciones.push("Completar los faltantes obligatorios del DCD antes de remitir.");
+  if (ecmr.missing_fields.length) acciones.push(`Completar datos eCMR: ${ecmr.missing_fields.join(", ")}.`);
+  if (!eventos.remitido) acciones.push("Marcar remision formal cuando el documento se haya enviado o puesto a disposicion.");
+  if (!hasPod) acciones.push("Adjuntar albaran/POD/CMR firmado al entregar el viaje.");
+  if (postFirma.changed_after_signature) acciones.push("Revisar cambios posteriores a la firma y descargar informe de evidencia.");
+  if (!acciones.length) acciones.push("Expediente documental completo para operativa interna. Pendiente solo de proveedor certificado si se exige integracion oficial.");
+  return {
+    schema: "transgest.documento_control.expediente.v1",
+    generated_at: new Date().toISOString(),
+    estado: bloqueos.length ? "requiere_completar" : avisos.length ? "operativo_con_avisos" : "completo",
+    score,
+    checks,
+    bloqueos,
+    avisos,
+    acciones,
+    dcd: {
+      codigo_control: documento.codigo_control || "",
+      soporte_url: documento.soporte_url || "",
+      ready: !!status.ready,
+      readiness_score: status.readiness?.score ?? null,
+      faltantes: status.faltantes || [],
+    },
+    ecmr,
+    efti: {
+      exportable: !!documento.codigo_control,
+      platform_certified_connected: false,
+      profile: "eFTI-ready interno",
+      note: "Preparado para intercambio estructurado. La aceptacion oficial B2A dependera de plataforma eFTI certificada.",
+    },
+    firma: {
+      registrada: !!(firma.firma_hash || firma.firma_fecha),
+      firma_fecha: firma.firma_fecha || null,
+      firma_nombre: firma.firma_nombre || "",
+      firma_hash: firma.firma_hash || "",
+      post_signature_integrity: postFirma || null,
+    },
+    documentos: docs,
+    trazabilidad: eventos,
+  };
+}
+
+function buildDocumentoControlStructuredExport(payload = {}) {
+  const documento = payload.documento || {};
+  const status = payload.status || {};
+  const generatedAt = new Date().toISOString();
+  const ecmrConsignmentNote = buildEcmrConsignmentNote(documento);
+  const exportData = {
+    schema: {
+      name: "transgest.documento_control.interoperable",
+      version: "2026.06",
+      profile: "DCD-ES/eCMR/eFTI-ready",
+      language: "es",
+    },
+    regulatory_context: {
+      documento_control_espana_obligatorio_desde: status.normativa?.documento_control_obligatorio_desde || "2026-10-05",
+      diwass_eannex_vii_entrada_vigor: status.normativa?.diwass_eannex_vii_entrada_vigor || "2026-05-21",
+      diwass_eannex_vii_transicion_hasta: status.normativa?.diwass_eannex_vii_transicion_hasta || "2026-12-31",
+      efti_ue_plena_aplicacion_desde: status.normativa?.efti_plena_aplicacion_desde || "2027-07-09",
+      firma_minima_objetivo: documento.preparacion_digital?.firma_eidas?.minimo_objetivo || "firma electronica avanzada",
+      nota: "Exportacion preparatoria para interoperabilidad B2B/B2A. La remision oficial dependera de proveedor/plataforma certificada aplicable.",
+    },
+    identifiers: {
+      codigo_control: documento.codigo_control || "",
+      codigo_verificacion: documento.verificacion?.codigo_verificacion || "",
+      referencia_pedido: documento.referencia_pedido || "",
+      orden_carga_numero: payload.orden_carga_numero || "",
+      soporte_url: documento.soporte_url || "",
+      qr_url: documento.qr_url || "",
+      canal_remision: payload.remision?.canal || "",
+    },
+    parties: {
+      cargador_contractual: documento.cargador_contractual || {},
+      transportista_efectivo: documento.transportista_efectivo || {},
+      destinatario: {
+        nombre: documento.destino?.destinatario || documento.destino?.nombre || "",
+        direccion: documento.destino?.direccion || "",
+      },
+    },
+    transport: {
+      fecha_transporte: documento.fecha_transporte || "",
+      horarios: documento.horarios || {},
+      origen: documento.origen || {},
+      destino: documento.destino || {},
+      cargas: Array.isArray(documento.cargas) ? documento.cargas : [],
+      descargas: Array.isArray(documento.descargas) ? documento.descargas : [],
+      vehiculo: documento.vehiculo || {},
+    },
+    goods: documento.mercancia || {},
+    ecmr_consignment_note: ecmrConsignmentNote,
+    efti_dataset: {
+      platform_certified_connected: false,
+      machine_readable: true,
+      data_model_status: "preparado_para_mapeo_certificado",
+      authority_access: {
+        tokenized_support_url: documento.verificacion?.url_segura || "",
+        verification_code: documento.verificacion?.codigo_verificacion || "",
+        noindex: true,
+        cache_policy: "no-store",
+      },
+    },
+    waste_annex_vii: {
+      potentially_applicable: !!documento.preparacion_digital?.diwass_annex_vii?.senal_residuo,
+      cross_border_hint: !!documento.preparacion_digital?.diwass_annex_vii?.indicio_transfronterizo,
+      detected_terms: documento.preparacion_digital?.diwass_annex_vii?.terminos_detectados || [],
+      required_if_applicable: documento.preparacion_digital?.diwass_annex_vii?.datos_requeridos_si_aplica || [],
+      status: documento.preparacion_digital?.diwass_annex_vii?.senal_residuo
+        ? "requiere_revision_operativa"
+        : "sin_senal_automatica_de_residuos",
+    },
+    compliance_operativo: documento.preparacion_digital?.cumplimiento_operativo || {},
+    commercial_terms: documento.condiciones || {},
+    digital_readiness: {
+      ready: !!status.ready,
+      score: status.readiness?.score ?? null,
+      faltantes: Array.isArray(status.faltantes) ? status.faltantes : [],
+      avisos: Array.isArray(status.avisos) ? status.avisos : [],
+      checks: Array.isArray(status.checks) ? status.checks.map(check => ({
+        key: check.key,
+        ok: !!check.ok,
+        required: check.required !== false,
+        label: check.label,
+        category: check.category || "general",
+      })) : [],
+    },
+    signature_envelope: {
+      status: "pendiente_proveedor",
+      required_level: documento.preparacion_digital?.firma_eidas?.minimo_objetivo || "firma electronica avanzada",
+      signer_identity: null,
+      timestamp: null,
+      evidence_hash: null,
+    },
+    verification: {
+      status: documento.verificacion?.url_segura ? "verificable_con_enlace_tokenizado" : "pendiente_url_publica",
+      tokenized_public_url: documento.verificacion?.url_segura || "",
+      verification_code: documento.verificacion?.codigo_verificacion || "",
+      noindex: true,
+      cache_policy: "no-store",
+    },
+    audit: {
+      generated_at: generatedAt,
+      generator: "TransGest",
+      export_filename: buildDocumentoControlExportFilename(documento),
+    },
+  };
+  exportData.audit.integrity_hash_sha256 = crypto
+    .createHash("sha256")
+    .update(stableJson(exportData))
+    .digest("hex");
+  return exportData;
+}
+
+function normalizeSignatureEvidence(evidence = null) {
+  if (!evidence) return null;
+  if (typeof evidence === "object") return evidence;
+  if (typeof evidence === "string") {
+    try {
+      const parsed = JSON.parse(evidence);
+      return parsed && typeof parsed === "object" ? parsed : { raw: evidence };
+    } catch {
+      return { raw: evidence };
+    }
+  }
+  return { raw: String(evidence) };
+}
+
+function buildDocumentoControlSignaturePackage(payload = {}, firma = {}) {
+  const documento = payload.documento || {};
+  const structuredExport = buildDocumentoControlStructuredExport(payload);
+  const evidence = normalizeSignatureEvidence(firma?.evidencia || firma?.firma_evidencia || null);
+  const evidenceHash = firma?.firma_hash || evidence?.integrity_hash_sha256 || evidence?.hash_sha256 || "";
+  const signers = Array.isArray(structuredExport.signature_envelope?.signers)
+    ? structuredExport.signature_envelope.signers
+    : [
+        { role: "cargador", required: true, name: documento.cargador_contractual?.nombre || "" },
+        { role: "transportista", required: true, name: documento.transportista_efectivo?.nombre || "" },
+        { role: "destinatario", required: false, name: documento.destino?.destinatario || documento.destino?.nombre || "" },
+      ];
+  const payloadToSign = {
+    document_type: "documento_control_digital",
+    identifiers: structuredExport.identifiers,
+    parties: structuredExport.parties,
+    transport: structuredExport.transport,
+    goods: structuredExport.goods,
+    verification: structuredExport.verification,
+    structured_export_hash_sha256: structuredExport.audit?.integrity_hash_sha256 || "",
+  };
+  const checks = [
+    { key: "dcd_ready", ok: !!payload.status?.ready, required: false, label: "Documento de Control Digital completo" },
+    { key: "verification_code", ok: !!documento.verificacion?.codigo_verificacion, required: true, label: "Codigo de verificacion seguro generado" },
+    { key: "support_url", ok: !!documento.soporte_url, required: true, label: "Soporte publico tokenizado disponible" },
+    { key: "required_signers", ok: signers.filter(s => s.required !== false).every(s => !!String(s.name || "").trim()), required: true, label: "Firmantes requeridos identificados" },
+    { key: "provider_connected", ok: false, required: false, label: "Proveedor eIDAS conectado" },
+    { key: "existing_signature_evidence", ok: !!evidenceHash, required: false, label: "Evidencia de firma registrada" },
+  ];
+  const packageData = {
+    schema: {
+      name: "transgest.documento_control.signature_package",
+      version: "2026.06",
+      profile: "eIDAS-advanced-signature-ready",
+      language: "es",
+    },
+    document: {
+      type: "documento_control_digital",
+      codigo_control: documento.codigo_control || "",
+      referencia_pedido: documento.referencia_pedido || "",
+      verification_code: documento.verificacion?.codigo_verificacion || "",
+      support_url: documento.soporte_url || "",
+      export_hash_sha256: structuredExport.audit?.integrity_hash_sha256 || "",
+      signature_package_filename: buildDocumentoControlSignaturePackageFilename(documento),
+    },
+    signature_policy: {
+      target_level: documento.preparacion_digital?.firma_eidas?.minimo_objetivo || "firma electronica avanzada",
+      regulation: "eIDAS",
+      timestamp_required: true,
+      identity_validation_required: true,
+      provider_status: "pending_provider_integration",
+      allowed_provider_types: ["firma_electronica_avanzada", "sello_tiempo_cualificado", "validacion_identidad_firmante"],
+      note: "Paquete preparatorio. La firma legal debe ejecutarse con proveedor eIDAS y conservar su evidencia tecnica.",
+    },
+    signers_required: signers,
+    evidence_current: evidenceHash
+      ? {
+          status: "firma_registrada_en_transgest",
+          signer_name: firma?.firma_nombre || evidence?.firmante?.nombre || "",
+          signed_at: firma?.firma_fecha || evidence?.fecha || "",
+          evidence_hash_sha256: evidenceHash,
+          evidence,
+        }
+      : {
+          status: "pendiente_firma_proveedor",
+          signer_name: "",
+          signed_at: "",
+          evidence_hash_sha256: "",
+          evidence: null,
+        },
+    payload_to_sign: payloadToSign,
+    hashes: {
+      payload_hash_sha256: sha256Hex(payloadToSign),
+      structured_export_hash_sha256: structuredExport.audit?.integrity_hash_sha256 || "",
+    },
+    checks,
+    next_action: evidenceHash
+      ? "Conservar este paquete junto a la evidencia del proveedor eIDAS y bloquear cambios posteriores al documento firmado."
+      : "Enviar payload_to_sign al proveedor de firma avanzada eIDAS, registrar identidad, sello de tiempo y evidencia tecnica devuelta.",
+    audit: {
+      generated_at: new Date().toISOString(),
+      generator: "TransGest",
+    },
+  };
+  packageData.hashes.signature_package_hash_sha256 = sha256Hex(packageData);
+  return packageData;
+}
+
+function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente = {}, colaborador = {}, appBaseUrl = "" }) {
+  const config = normalizeDocumentoControlConfig(empresa?.documento_control);
+  const cargas = parseStops(pedido?.puntos_carga);
+  const descargas = parseStops(pedido?.puntos_descarga);
+  const carga = firstStopInfo(cargas, pedido?.origen || "");
+  const descarga = firstStopInfo(descargas, pedido?.destino || "");
+  const esColaborador = Boolean(pedido?.colaborador_id);
+  const wasteSignals = detectWasteSignals(pedido);
+  const complianceSignals = detectTransportComplianceSignals(pedido);
+
+  const cargador = esColaborador
+    ? {
+        nombre: companyName(empresa),
+        nif: empresa?.cif || "",
+        domicilio: [empresa?.domicilio, empresa?.cp, empresa?.municipio, empresa?.provincia, empresa?.pais].filter(Boolean).join(", "),
+        contacto: empresa?.contacto || empresa?.responsable || "",
+        email: empresa?.email || empresa?.email_admin || "",
+        telefono: empresa?.telefono || "",
+      }
+    : {
+        nombre: cliente?.nombre || companyName(empresa),
+        nif: cliente?.cif || "",
+        domicilio: [cliente?.direccion, cliente?.cp, cliente?.poblacion, cliente?.provincia, cliente?.pais].filter(Boolean).join(", "),
+        contacto: cliente?.contacto || "",
+        email: cliente?.email_facturacion || cliente?.email || "",
+        telefono: cliente?.telefono || "",
+      };
+
+  const transportista = esColaborador
+    ? {
+        nombre: colaborador?.nombre || pedido?.colaborador_nombre || "",
+        nif: colaborador?.cif || pedido?.colaborador_cif || "",
+        domicilio: [colaborador?.direccion, colaborador?.cp, colaborador?.poblacion, colaborador?.provincia, colaborador?.pais].filter(Boolean).join(", "),
+        contacto: colaborador?.contacto || "",
+        email: colaborador?.email || "",
+        telefono: colaborador?.telefono || "",
+      }
+    : {
+        nombre: companyName(empresa),
+        nif: empresa?.cif || "",
+        domicilio: [empresa?.domicilio, empresa?.cp, empresa?.municipio, empresa?.provincia, empresa?.pais].filter(Boolean).join(", "),
+        contacto: empresa?.contacto || empresa?.responsable || "",
+        email: empresa?.email || empresa?.email_admin || "",
+        telefono: empresa?.telefono || "",
+      };
+
+  const matriculaTractora = pedido?.matricula_colaborador || pedido?.vehiculo_matricula || pedido?.matricula || "";
+  const matriculaRemolque = pedido?.remolque_matricula_colaborador || pedido?.remolque_matricula || pedido?.remolque_mat || "";
+  const pesoKg = Number(pedido?.peso_kg || pedido?.kg || 0);
+  const codigoControl = buildCodigoControl({ empresaId, pedidoId: pedido?.id });
+  const publicUrl = buildPublicUrl({ empresaId, pedidoId: pedido?.id, config, appBaseUrl });
+  const verificationCode = buildPublicVerificationCode({ empresaId, pedidoId: pedido?.id });
+
+  const documento = {
+    codigo_control: codigoControl,
+    sistema: config.sistema,
+    soporte_url: publicUrl,
+    qr_url: config.sistema === "qr_url" ? publicUrl : "",
+    referencia_pedido: pedido?.numero || pedido?.referencia_cliente || "",
+    fecha_transporte: pedido?.fecha_carga || pedido?.fecha_servicio || pedido?.fecha_descarga || "",
+    horarios: {
+      fecha_carga: pedido?.fecha_carga || carga.fecha || "",
+      hora_carga: pedido?.hora_carga || carga.hora || "",
+      ventana_carga: pedido?.ventana_carga || carga.ventana || "",
+      fecha_descarga: pedido?.fecha_descarga || pedido?.fecha_entrega || descarga.fecha || "",
+      hora_descarga: pedido?.hora_descarga || descarga.hora || "",
+      ventana_descarga: pedido?.ventana_descarga || descarga.ventana || "",
+    },
+    cargador_contractual: cargador,
+    transportista_efectivo: transportista,
+    origen: {
+      nombre: carga.nombre || pedido?.origen || "",
+      direccion: carga.direccion || pedido?.origen || "",
+      google_maps_url: carga.google_maps_url || "",
+    },
+    destino: {
+      nombre: descarga.nombre || pedido?.destino || "",
+      direccion: descarga.direccion || pedido?.destino || "",
+      destinatario: descarga.cliente_nombre || pedido?.destino || "",
+      google_maps_url: descarga.google_maps_url || "",
+    },
+    cargas: normalizeStopList(cargas, {
+      fecha: pedido?.fecha_carga || "",
+      hora: pedido?.hora_carga || "",
+      ventana: pedido?.ventana_carga || "",
+    }),
+    descargas: normalizeStopList(descargas, {
+      fecha: pedido?.fecha_descarga || pedido?.fecha_entrega || "",
+      hora: pedido?.hora_descarga || "",
+      ventana: pedido?.ventana_descarga || "",
+    }),
+    mercancia: {
+      descripcion: pedido?.mercancia || pedido?.descripcion_carga || "",
+      peso_kg: pesoKg || null,
+      bultos: pedido?.bultos || null,
+    },
+    vehiculo: {
+      tractora: matriculaTractora,
+      remolque: matriculaRemolque,
+    },
+    verificacion: {
+      codigo_verificacion: verificationCode,
+      algoritmo: "HMAC-SHA256",
+      url_segura: publicUrl,
+      tokenizado: !!publicUrl,
+      noindex: true,
+      cache_policy: "no-store",
+    },
+    observaciones: pedido?.notas || pedido?.condiciones_adicionales || config.observaciones || "",
+    condiciones: {
+      forma_pago: formatClientPaymentTerms(empresa),
+      operativa_carga: buildOperativaCargaLabels(pedido),
+      revision_combustible: "El precio pactado solo se ajustara por variacion del combustible si el indice G de variacion del precio medio del gasoleo publicado por la Administracion entre la fecha de esta orden de carga y la fecha de carga efectiva de la mercancia es igual o superior al 5%. El ajuste debera reflejarse en la factura correspondiente al transporte ejecutado como concepto separado e identificado. No se admitiran ajustes en facturas rectificativas o posteriores emitidas fuera del ciclo de facturacion habitual de las partes. Si el porteador hubiera percibido ayudas publicas que compensen total o parcialmente la variacion del gasoleo, el indice G se calculara sobre el precio neto tras descontar dichas ayudas. El ajuste a la baja opera en las mismas condiciones cuando la variacion sea favorable al cargador.",
+      clausulas_orden_carga: [
+        { titulo: "Aceptacion", texto: "La presente orden constituye un contrato de transporte de mercancias por carretera. Se considerara aceptada y vinculante salvo que el porteador comunique su rechazo expreso en el plazo de una hora desde la recepcion de esta orden." },
+        { titulo: "Documentacion", texto: "No se pagara la factura hasta recibir todos los documentos de transporte originales firmados por el destinatario (CMR o carta de porte y albaran) en maximo 48h." },
+        { titulo: "Prohibicion de subcontratacion", texto: "Queda expresamente prohibida la subcontratacion total o parcial del servicio sin autorizacion escrita previa del cargador. En caso de incumplimiento, el cargador quedara facultado para resolver el contrato, rechazar la factura emitida y no abonar cantidad alguna por el servicio, sin perjuicio de reclamar los danos y perjuicios causados. Cuando la subcontratacion hubiera sido autorizada por escrito, el cargador podra condicionar el pago de la factura del porteador a la acreditacion documental del pago efectivo al subcontratista por los servicios objeto de autorizacion." },
+        { titulo: "Estacionamiento y pernocta", texto: "Solo podra estacionarse o pernoctar en instalaciones cerradas con vigilancia presencial las 24 horas. Queda prohibido el estacionamiento en areas de servicio, explanadas o vias publicas sin estas caracteristicas. El incumplimiento trasladara al porteador la responsabilidad por cualquier dano, robo o perdida producidos durante el estacionamiento no autorizado." },
+        { titulo: "Cancelacion de la orden", texto: "El cargador podra cancelar la presente orden de transporte sin coste ni penalizacion alguna dentro de las doce horas siguientes a su emision, mediante comunicacion escrita dirigida al porteador por cualquier medio que deje constancia de su recepcion." },
+        { titulo: "Ley aplicable y jurisdiccion", texto: "Queda expresamente excluida la sumision a las Juntas Arbitrales del Transporte. Cualquier controversia derivada de la presente orden sera resuelta exclusivamente ante la jurisdiccion ordinaria." },
+        { titulo: "Retencion", texto: "Queda prohibida la retencion de la mercancia salvo en los casos expresamente autorizados por la ley." },
+      ],
+    },
+    preparacion_digital: {
+      documento_control: {
+        fecha_obligacion_espana: "2026-10-05",
+        soporte: config.sistema === "qr_url" ? "QR/URL HTTPS" : "codigo numerico y soporte descargable",
+      },
+      firma_eidas: {
+        minimo_objetivo: "firma electronica avanzada",
+        pendiente_integracion: true,
+      },
+      efti_ecmr: {
+        fecha_aplicacion_ue: "2027-07-09",
+        pendiente_plataforma_certificada: true,
+      },
+      diwass_annex_vii: {
+        aplica_si_residuos_transfronterizos: true,
+        entrada_vigor_diwass: "2026-05-21",
+        transicion_annex_vii_hasta: "2026-12-31",
+        senal_residuo: wasteSignals.detected,
+        indicio_transfronterizo: wasteSignals.cross_border_hint,
+        terminos_detectados: wasteSignals.detected_terms,
+        datos_requeridos_si_aplica: [
+          "codigo LER/residuo",
+          "productor o poseedor inicial",
+          "destinatario/instalacion de valorizacion o eliminacion",
+          "transportistas intervinientes",
+          "cantidades y embalaje",
+          "firmas y aceptaciones de partes",
+        ],
+      },
+      cumplimiento_operativo: {
+        estado: complianceSignals.avisos.length ? "requiere_revision" : "sin_senales_automaticas",
+        enfoque: "Checklist preventivo. No sustituye validacion legal o documental humana.",
+        adr: complianceSignals.adr,
+        zbe: complianceSignals.zbe,
+        internacional: complianceSignals.internacional,
+        cabotaje: complianceSignals.cabotaje,
+        tacografo: complianceSignals.tacografo,
+        avisos: complianceSignals.avisos,
+      },
+    },
+  };
+
+  const checks = [
+    { key: "habilitado", ok: !!config.habilitado, label: "Modulo activado", category: "sistema" },
+    { key: "cargador_nombre", ok: hasText(documento.cargador_contractual.nombre), label: "Cargador contractual identificado", category: "datos_maestros" },
+    { key: "cargador_nif", ok: hasText(documento.cargador_contractual.nif), label: "NIF del cargador contractual", category: "datos_maestros" },
+    { key: "cargador_domicilio", ok: hasText(documento.cargador_contractual.domicilio), label: "Domicilio del cargador contractual", category: "datos_maestros" },
+    { key: "cargador_contacto", ok: hasText(documento.cargador_contractual.contacto), label: "Contacto del cargador", category: "datos_maestros", required: false },
+    { key: "cargador_email", ok: hasEmail(documento.cargador_contractual.email), label: "Email valido del cargador", category: "datos_maestros", required: false },
+    { key: "transportista_nombre", ok: hasText(documento.transportista_efectivo.nombre), label: "Transportista efectivo identificado", category: "datos_maestros" },
+    { key: "transportista_nif", ok: hasText(documento.transportista_efectivo.nif), label: "NIF del transportista efectivo", category: "datos_maestros" },
+    { key: "transportista_domicilio", ok: hasText(documento.transportista_efectivo.domicilio), label: "Domicilio del transportista efectivo", category: "datos_maestros" },
+    { key: "transportista_contacto", ok: hasText(documento.transportista_efectivo.contacto), label: "Contacto del transportista", category: "datos_maestros", required: false },
+    { key: "transportista_email", ok: hasEmail(documento.transportista_efectivo.email), label: "Email valido del transportista", category: "datos_maestros", required: false },
+    { key: "origen", ok: hasText(documento.origen.direccion), label: "Origen con direccion", category: "operativa" },
+    { key: "destino", ok: hasText(documento.destino.direccion), label: "Destino con direccion", category: "operativa" },
+    { key: "destinatario", ok: hasText(documento.destino.destinatario), label: "Destinatario de la mercancia", category: "datos_maestros" },
+    { key: "mercancia", ok: hasText(documento.mercancia.descripcion), label: "Naturaleza de la mercancia", category: "mercancia" },
+    { key: "peso", ok: !!documento.mercancia.peso_kg, label: "Peso o magnitud del envio", category: "mercancia" },
+    { key: "bultos", ok: hasText(documento.mercancia.bultos), label: "Bultos/unidades del envio", category: "mercancia", required: false },
+    { key: "fecha", ok: hasText(documento.fecha_transporte), label: "Fecha de transporte", category: "operativa" },
+    { key: "hora_carga", ok: hasText(documento.horarios.hora_carga) || hasText(documento.horarios.ventana_carga), label: "Hora o ventana de carga", category: "operativa" },
+    { key: "hora_descarga", ok: hasText(documento.horarios.hora_descarga) || hasText(documento.horarios.ventana_descarga), label: "Hora o ventana de descarga", category: "operativa" },
+    { key: "vehiculo", ok: hasText(documento.vehiculo.tractora), label: "Matricula del vehiculo tractor", category: "vehiculo" },
+    { key: "remolque", ok: hasText(documento.vehiculo.remolque), label: "Matricula de remolque si aplica", category: "vehiculo", required: false },
+    { key: "forma_pago", ok: hasText(documento.condiciones.forma_pago), label: "Condiciones de pago del servicio", category: "condiciones" },
+    { key: "firma_avanzada", ok: false, label: "Proveedor de firma avanzada eIDAS integrado", category: "firma", required: false },
+    { key: "efti_platform", ok: false, label: "Preparado para plataforma eFTI/e-CMR certificada", category: "interoperabilidad", required: false },
+    { key: "diwass_annex_vii", ok: !wasteSignals.detected || wasteSignals.cross_border_hint, label: "Revision DIWASS/eAnnex VII si hay residuos transfronterizos", category: "interoperabilidad", required: false },
+    { key: "cumplimiento_operativo", ok: complianceSignals.avisos.length === 0, label: "Revision ADR/ZBE/tacografo/cabotaje si hay senales", category: "cumplimiento", required: false },
+  ];
+
+  if (config.sistema === "qr_url") {
+    checks.push(
+      { key: "dominio_url", ok: /^https:\/\//i.test(config.dominio_url || ""), label: "Dominio HTTPS configurado", category: "sistema" },
+      { key: "dominio_comunicado", ok: !!config.dominio_comunicado, label: "Dominio comunicado al Ministerio", category: "sistema" },
+      { key: "qr_public_url", ok: !!publicUrl, label: "URL publica para QR", category: "sistema" },
+    );
+  }
+
+  const faltantes = checks.filter(check => check.required !== false && !check.ok).map(check => check.label);
+  const avisos = checks.filter(check => check.required === false && !check.ok).map(check => check.label);
+  const readiness = buildReadiness(checks);
+  const level = !config.habilitado ? "warning" : faltantes.length ? "warning" : "ok";
+
+  return {
+    config,
+    documento,
+    orden_carga_numero: pedido?.orden_carga_numero || "",
+    orden_carga_generada_at: pedido?.orden_carga_generada_at || null,
+    status: {
+      level,
+      ready: config.habilitado && !faltantes.length,
+      readiness,
+      summary: !config.habilitado
+        ? "Documento de control digital no activado para esta empresa."
+        : faltantes.length
+          ? `Faltan ${faltantes.length} datos para dejar el DeCA listo.`
+          : avisos.length
+            ? `Documento de control listo. ${avisos.length} avisos de preparacion digital/e-CMR.`
+            : "Documento de control digital listo para este pedido.",
+      checks,
+      faltantes,
+      avisos,
+      normativa: {
+        soporte: config.sistema === "qr_url" ? "QR con URL en dominio HTTPS comunicado" : "Codigo numerico para remision DeCA/PDF-A",
+        pdf: "PDF/A maximo 4 MB cuando se remita a inspeccion mediante codigo numerico.",
+        documento_control_obligatorio_desde: "2026-10-05",
+        diwass_eannex_vii_entrada_vigor: "2026-05-21",
+        diwass_eannex_vii_transicion_hasta: "2026-12-31",
+        efti_plena_aplicacion_desde: "2027-07-09",
+      },
+    },
+    remision: {
+      canal: config.sistema === "qr_url" ? "qr_url" : "codigo_numerico",
+      etiqueta: config.sistema === "qr_url" ? "QR con URL HTTPS comunicada" : "Codigo numerico / soporte imprimible",
+      filename: buildDocumentoControlFilename(documento),
+      download_url: documento.soporte_url ? `${documento.soporte_url}${documento.soporte_url.includes("?") ? "&" : "?"}download=1` : "",
+      instrucciones: config.sistema === "qr_url"
+        ? "Mantener disponible el soporte en dominio HTTPS comunicado y accesible mediante QR o URL."
+        : "Usar soporte imprimible y conservar version apta para remision/archivo. Para inspeccion por codigo, preparar PDF/A maximo 4 MB.",
+    },
+  };
+}
+
+function buildDocumentoControlHtml({
+  documento,
+  empresaNombre = "TransGest TMS",
+  generatedAt = new Date().toISOString(),
+  autoPrint = false,
+}) {
+  const fecha = documento?.fecha_transporte ? new Date(`${documento.fecha_transporte}T12:00:00`).toLocaleDateString("es-ES") : "-";
+  const fechaCarga = documento?.horarios?.fecha_carga ? new Date(`${documento.horarios.fecha_carga}T12:00:00`).toLocaleDateString("es-ES") : "-";
+  const fechaDescarga = documento?.horarios?.fecha_descarga ? new Date(`${documento.horarios.fecha_descarga}T12:00:00`).toLocaleDateString("es-ES") : "-";
+  const horaCarga = documento?.horarios?.hora_carga || documento?.horarios?.ventana_carga || "-";
+  const horaDescarga = documento?.horarios?.hora_descarga || documento?.horarios?.ventana_descarga || "-";
+  const peso = documento?.mercancia?.peso_kg ? `${Number(documento.mercancia.peso_kg).toLocaleString("es-ES")} kg` : "-";
+  const ecmr = buildEcmrConsignmentNote(documento || {});
+  const buildStopsRows = (items = []) => (Array.isArray(items) && items.length ? items : []).map(item => `
+    <tr>
+      <td>${escapeHtml(item.orden || "")}</td>
+      <td>${escapeHtml(item.nombre || "-")}</td>
+      <td>${escapeHtml(item.direccion || "-")}${item.google_maps_url ? `<br><a href="${escapeHtml(item.google_maps_url)}">${escapeHtml(item.google_maps_url)}</a>` : ""}</td>
+      <td>${escapeHtml(item.fecha || "-")}</td>
+      <td>${escapeHtml(item.hora || item.ventana || "-")}</td>
+    </tr>
+  `).join("");
+  const qrBlock = documento?.qr_url
+    ? `<div class="note"><strong>QR / URL de acceso:</strong><br><a href="${escapeHtml(documento.qr_url)}">${escapeHtml(documento.qr_url)}</a></div>`
+    : `<div class="note"><strong>Codigo numerico de control:</strong> ${escapeHtml(documento?.codigo_control || "-")}</div>`;
+  const supportBlock = documento?.soporte_url
+    ? `<div class="note"><strong>Soporte digital:</strong><br><a href="${escapeHtml(documento.soporte_url)}">${escapeHtml(documento.soporte_url)}</a></div>`
+    : "";
+  const verificationBlock = documento?.verificacion?.codigo_verificacion
+    ? `<div class="note"><strong>Verificacion para inspeccion:</strong><br>
+      Codigo de verificacion: <strong>${escapeHtml(documento.verificacion.codigo_verificacion)}</strong><br>
+      Acceso protegido por token y politica no-index/no-cache.
+    </div>`
+    : "";
+  const operativa = Array.isArray(documento?.condiciones?.operativa_carga) ? documento.condiciones.operativa_carga : [];
+  const clausulasOrden = Array.isArray(documento?.condiciones?.clausulas_orden_carga) ? documento.condiciones.clausulas_orden_carga : [];
+  const condicionesBlock = `<div class="note"><strong>Condiciones del servicio:</strong><br>
+    Forma de pago: ${escapeHtml(documento?.condiciones?.forma_pago || "-")}<br>
+    ${operativa.length ? `Operativa: ${escapeHtml(operativa.join(" | "))}<br>` : ""}
+    ${escapeHtml(documento?.condiciones?.revision_combustible || "")}
+    ${clausulasOrden.length ? `<ul>${clausulasOrden.map(clausula => `<li><strong>${escapeHtml(clausula.titulo || "")}:</strong> ${escapeHtml(clausula.texto || "")}</li>`).join("")}</ul>` : ""}
+  </div>`;
+  const prep = documento?.preparacion_digital || {};
+  const cumplimiento = prep?.cumplimiento_operativo || {};
+  const cumplimientoAvisos = Array.isArray(cumplimiento.avisos) ? cumplimiento.avisos : [];
+  const cumplimientoBlock = `<div class="note"><strong>Checklist de cumplimiento operativo:</strong><br>
+    Estado: ${escapeHtml(cumplimiento.estado || "sin_senales_automaticas")}.<br>
+    ADR: ${cumplimiento?.adr?.requiere_revision ? "revisar antes de confirmar" : "sin senal automatica"}.<br>
+    ZBE/accesos urbanos: ${cumplimiento?.zbe?.requiere_revision ? `revisar ${escapeHtml((cumplimiento.zbe.zonas_detectadas || []).join(", "))}` : "sin senal automatica"}.<br>
+    Internacional/eCMR/eFTI: ${cumplimiento?.internacional?.requiere_revision ? "revisar documentacion internacional" : "sin senal automatica"}.<br>
+    Cabotaje/subcontratacion: ${cumplimiento?.cabotaje?.requiere_revision ? "revisar carrier y reglas aplicables" : "sin senal automatica"}.<br>
+    Tacografo/horas: ${cumplimiento?.tacografo?.requiere_revision ? "confirmar horas, descansos y dispositivo" : "validacion ordinaria si aplica"}.
+    ${cumplimientoAvisos.length ? `<ul>${cumplimientoAvisos.map(aviso => `<li>${escapeHtml(aviso)}</li>`).join("")}</ul>` : ""}
+  </div>`;
+  const preparacionBlock = `<div class="note"><strong>Preparacion normativa digital:</strong><br>
+    Documento de Control digital en Espana: obligatorio desde ${escapeHtml(prep?.documento_control?.fecha_obligacion_espana || "2026-10-05")}.<br>
+    Firma objetivo: ${escapeHtml(prep?.firma_eidas?.minimo_objetivo || "firma electronica avanzada")}.<br>
+    eFTI/e-CMR: plena aplicacion prevista desde ${escapeHtml(prep?.efti_ecmr?.fecha_aplicacion_ue || "2027-07-09")}.<br>
+    DIWASS Annex VII: revisar si hay residuos transfronterizos; entrada en vigor ${escapeHtml(prep?.diwass_annex_vii?.entrada_vigor_diwass || "2026-05-21")} y transicion Annex VII hasta ${escapeHtml(prep?.diwass_annex_vii?.transicion_annex_vii_hasta || "2026-12-31")}.<br>
+    Senal residuos: ${prep?.diwass_annex_vii?.senal_residuo ? "requiere revision" : "sin senal automatica"}.
+  </div>`;
+  const ecmrBlock = `<div class="note"><strong>Preparacion para certificacion eCMR:</strong><br>
+    Estado: ${escapeHtml(ecmr.status || "pendiente")}. Proveedor certificado conectado: ${ecmr.certified_provider_connected ? "si" : "no"}.<br>
+    ${ecmr.missing_fields?.length ? `Faltantes: ${escapeHtml(ecmr.missing_fields.join(" | "))}<br>` : "Datos minimos eCMR completos para preparacion interna.<br>"}
+    Nota: ${escapeHtml(ecmr.nota || "")}
+  </div>`;
+  const controls = `<div class="actions no-print">
+    <button onclick="window.print()">Imprimir</button>
+    ${documento?.soporte_url ? `<button onclick="navigator.clipboard && navigator.clipboard.writeText(${JSON.stringify(documento.soporte_url)})">Copiar enlace</button>` : ""}
+  </div>`;
+  const printScript = autoPrint
+    ? `<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),280));</script>`
+    : "";
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Documento de control ${escapeHtml(documento?.referencia_pedido || "")}</title>
+  <style>
+    body{font-family:Arial,sans-serif;color:#111827;padding:28px;background:#f8fafc}
+    .actions{display:flex;gap:8px;justify-content:flex-end;max-width:900px;margin:0 auto 14px}
+    .actions button{border:1px solid #0f766e;background:#ecfeff;color:#0f766e;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer}
+    .sheet{max-width:900px;margin:0 auto;background:#fff;border:1px solid #dbe3ef;border-radius:14px;padding:24px 26px}
+    .top{display:flex;justify-content:space-between;gap:20px;border-bottom:2px solid #0f766e;padding-bottom:14px;margin-bottom:18px}
+    h1{font-size:24px;margin:0 0 4px}
+    .sub{font-size:12px;color:#64748b}
+    .code{font-size:22px;font-weight:800;color:#0f766e}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+    .box{border:1px solid #e5e7eb;border-radius:10px;padding:12px}
+    .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;font-weight:700;margin-bottom:6px}
+    .val{font-size:14px;font-weight:700;color:#111827}
+    .note{margin-top:14px;padding:12px 14px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;font-size:12px;word-break:break-all}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:12px}
+    th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+    .no-print{display:flex}
+    @media print{body{padding:0;background:#fff}.sheet{max-width:none;border:none;border-radius:0;padding:0}.no-print{display:none!important}}
+  </style></head><body>${controls}<main class="sheet">
+  <div class="top">
+    <div><h1>Documento de control digital</h1><div class="sub">${escapeHtml(empresaNombre)} · Transporte publico de mercancias por carretera</div></div>
+    <div><div class="lbl">Codigo de control</div><div class="code">${escapeHtml(documento?.codigo_control || "-")}</div><div class="sub">${escapeHtml(documento?.sistema || "")}</div></div>
+  </div>
+  <div class="grid">
+    <div class="box"><div class="lbl">Cargador contractual</div><div class="val">${escapeHtml(documento?.cargador_contractual?.nombre || "-")}</div><div class="sub">${escapeHtml(documento?.cargador_contractual?.nif || "-")} · ${escapeHtml(documento?.cargador_contractual?.domicilio || "-")}</div><div class="sub">${escapeHtml([documento?.cargador_contractual?.contacto, documento?.cargador_contractual?.email, documento?.cargador_contractual?.telefono].filter(Boolean).join(" · ") || "Contacto no informado")}</div></div>
+    <div class="box"><div class="lbl">Transportista efectivo</div><div class="val">${escapeHtml(documento?.transportista_efectivo?.nombre || "-")}</div><div class="sub">${escapeHtml(documento?.transportista_efectivo?.nif || "-")} · ${escapeHtml(documento?.transportista_efectivo?.domicilio || "-")}</div><div class="sub">${escapeHtml([documento?.transportista_efectivo?.contacto, documento?.transportista_efectivo?.email, documento?.transportista_efectivo?.telefono].filter(Boolean).join(" · ") || "Contacto no informado")}</div></div>
+  </div>
+  <div class="grid">
+    <div class="box"><div class="lbl">Origen</div><div class="val">${escapeHtml(documento?.origen?.nombre || documento?.origen?.direccion || "-")}</div><div class="sub">${escapeHtml(documento?.origen?.direccion || "-")}</div>${documento?.origen?.google_maps_url ? `<div class="sub"><a href="${escapeHtml(documento.origen.google_maps_url)}">${escapeHtml(documento.origen.google_maps_url)}</a></div>` : ""}</div>
+    <div class="box"><div class="lbl">Destino</div><div class="val">${escapeHtml(documento?.destino?.nombre || documento?.destino?.direccion || "-")}</div><div class="sub">${escapeHtml(documento?.destino?.direccion || "-")}</div>${documento?.destino?.google_maps_url ? `<div class="sub"><a href="${escapeHtml(documento.destino.google_maps_url)}">${escapeHtml(documento.destino.google_maps_url)}</a></div>` : ""}</div>
+  </div>
+  <div class="grid">
+    <div class="box"><div class="lbl">Carga</div><div class="val">${escapeHtml(fechaCarga)}</div><div class="sub">Hora / ventana: ${escapeHtml(horaCarga)}</div></div>
+    <div class="box"><div class="lbl">Descarga</div><div class="val">${escapeHtml(fechaDescarga)}</div><div class="sub">Hora / ventana: ${escapeHtml(horaDescarga)}</div></div>
+  </div>
+  <table>
+    <thead><tr><th>Referencia</th><th>Fecha transporte</th><th>Mercancia</th><th>Peso</th><th>Tractora</th><th>Remolque</th></tr></thead>
+    <tbody><tr><td>${escapeHtml(documento?.referencia_pedido || "-")}</td><td>${escapeHtml(fecha)}</td><td>${escapeHtml(documento?.mercancia?.descripcion || "-")}</td><td>${escapeHtml(peso)}</td><td>${escapeHtml(documento?.vehiculo?.tractora || "-")}</td><td>${escapeHtml(documento?.vehiculo?.remolque || "-")}</td></tr></tbody>
+  </table>
+  ${(documento?.cargas?.length || documento?.descargas?.length) ? `
+  <table>
+    <thead><tr><th colspan="5">Puntos de carga</th></tr><tr><th>#</th><th>Nombre</th><th>Direccion</th><th>Fecha</th><th>Hora / ventana</th></tr></thead>
+    <tbody>${buildStopsRows(documento?.cargas) || `<tr><td colspan="5">Sin puntos adicionales.</td></tr>`}</tbody>
+  </table>
+  <table>
+    <thead><tr><th colspan="5">Puntos de descarga</th></tr><tr><th>#</th><th>Nombre</th><th>Direccion</th><th>Fecha</th><th>Hora / ventana</th></tr></thead>
+    <tbody>${buildStopsRows(documento?.descargas) || `<tr><td colspan="5">Sin puntos adicionales.</td></tr>`}</tbody>
+  </table>` : ""}
+  ${qrBlock}
+  ${supportBlock}
+  ${verificationBlock}
+  ${condicionesBlock}
+  ${ecmrBlock}
+  ${cumplimientoBlock}
+  ${preparacionBlock}
+  ${documento?.observaciones ? `<div class="note"><strong>Observaciones:</strong><br>${escapeHtml(documento.observaciones)}</div>` : ""}
+  <div class="sub" style="margin-top:16px">Generado: ${escapeHtml(new Date(generatedAt).toLocaleString("es-ES"))}</div>
+  </main>${printScript}</body></html>`;
+}
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+module.exports = {
+  DOC_CONTROL_DEFAULTS,
+  normalizeDocumentoControlConfig,
+  detectWasteSignals,
+  detectTransportComplianceSignals,
+  buildDocumentoControlPayload,
+  buildDocumentoControlExpediente,
+  buildDocumentoControlStructuredExport,
+  buildDocumentoControlSignaturePackage,
+  buildDocumentoControlHtml,
+  buildDocumentoControlFilename,
+  buildDocumentoControlExportFilename,
+  buildDocumentoControlSignaturePackageFilename,
+  buildPublicToken,
+  buildPublicVerificationCode,
+  verifyPublicToken,
+  verifyPublicVerificationCode,
+  buildPublicUrl,
+};
+

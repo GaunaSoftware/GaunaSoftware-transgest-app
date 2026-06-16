@@ -1,0 +1,103 @@
+version: "3.9"
+
+# ══════════════════════════════════════════════════════
+# TRANSGEST TMS — Docker Compose completo
+# Incluye: PostgreSQL + API Backend + Frontend React
+#
+# USO:
+#   1. Coloca este archivo en la carpeta transgest-backend/
+#   2. Coloca la carpeta transgest-frontend/ al lado
+#   3. docker-compose up -d
+#   4. Abre http://localhost
+# ══════════════════════════════════════════════════════
+
+services:
+
+  # ── Base de datos ─────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: transgest_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${DB_NAME:-transgest}
+      POSTGRES_USER:     ${DB_USER:-transgest_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-transgest_user} -d ${DB_NAME:-transgest}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [tg_net]
+
+  # ── API Backend ────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: transgest_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV:    production
+      PORT:        3001
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_NAME:     ${DB_NAME:-transgest}
+      DB_USER:     ${DB_USER:-transgest_user}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET:  ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      SMTP_HOST:   ${SMTP_HOST:-}
+      SMTP_PORT:   ${SMTP_PORT:-587}
+      SMTP_USER:   ${SMTP_USER:-}
+      SMTP_PASS:   ${SMTP_PASS:-}
+      SMTP_FROM:   ${SMTP_FROM:-}
+      FRONTEND_URL: http://localhost
+    networks: [tg_net]
+
+  # ── Frontend React ─────────────────────────────────────
+  frontend:
+    build:
+      context: ../transgest-frontend
+      dockerfile: Dockerfile.frontend
+    container_name: transgest_frontend
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "80:80"
+    networks: [tg_net]
+
+  # ── Backups automáticos ────────────────────────────────
+  backup:
+    image: postgres:16-alpine
+    container_name: transgest_backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD:       ${DB_PASSWORD}
+      DB_HOST:          postgres
+      DB_USER:          ${DB_USER:-transgest_user}
+      DB_NAME:          ${DB_NAME:-transgest}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - backups:/backups
+    entrypoint: ["sh", "-c", "chmod +x /backup.sh && /backup.sh"]
+    networks: [tg_net]
+
+volumes:
+  db_data:
+  backups:
+
+networks:
+  tg_net:
+    driver: bridge

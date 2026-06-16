@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Build outputs
+dist/
+build/
+.next/
+.vercel/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporary files
+tmp/
+temp/
+uploads/
+
+# Local databases
+*.sqlite
+*.db
+
+# Coverage
+coverage/
+
+# AWS / credentials
+.aws/
+credentials
+config
+*.pem
+*.key
+# Visual/browser test temporary profiles
+visual-check/
+**/visual-check/
+chrome-profile-run/
+**/chrome-profile-run/
+
+# Browser/cache generated files
+Default/
+Extensions/
+
+visual-check/
+**/visual-check/

@@ -1,0 +1,464 @@
+import { useState, useEffect } from "react";
+import { useAuth } from "../context/AuthContext";
+import { useTheme } from "../context/ThemeContext";
+import { BRAND_NAME, getBrandDisplayName, getBrandVersionLabel } from "../branding";
+import { getPublicAppMeta } from "../services/api";
+import { getEmpresaPlanLocal } from "../utils/planFeatures";
+import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
+
+const ROL_LABEL = { gerente:"Gerente", contable:"Contable", trafico:"Tráfico", visualizador:"Visualizador", chofer:"Chófer", cliente:"Cliente" };
+const ROL_COLOR = { gerente:"#0f766e", contable:"#10b981", trafico:"#f97316", visualizador:"#64746f", chofer:"#f97316", cliente:"#14b8a6" };
+
+const GRUPO_COLOR = {
+  Principal:     "#0f766e",
+  Operaciones:   "#14b8a6",
+  Flota:         "#f97316",
+  Finanzas:      "#10b981",
+  Comercial:     "#d97706",
+  Gestión:       "#6b7280",
+  "Gestión documental": "#6b7280",
+  Administración:"#10b981",
+  Consulta:      "#6b7280",
+};
+
+const CSS = `
+  .tg-sidebar { width:252px; background:linear-gradient(180deg,var(--sidebar-bg),#14201d); border-right:1px solid rgba(255,255,255,.08); height:100vh; position:fixed; top:0; left:0; z-index:20; display:flex; flex-direction:column; font-family:'DM Sans',sans-serif; overflow:hidden; box-shadow:16px 0 42px rgba(0,0,0,.14); }
+  .tg-sidebar::before { content:""; position:absolute; inset:0 0 auto 0; height:4px; background:linear-gradient(90deg,var(--accent),var(--green),var(--orange)); pointer-events:none; }
+  .tg-sidebar-scroll { flex:1; overflow-y:auto; padding:10px 0 12px; }
+  .tg-sidebar-scroll::-webkit-scrollbar { width:3px; }
+  .tg-sidebar-scroll::-webkit-scrollbar-track { background:transparent; }
+  .tg-sidebar-scroll::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
+  .tg-nav-group { font-size:9px; font-weight:900; letter-spacing:.14em; text-transform:uppercase; padding:16px 18px 7px; color:rgba(255,255,255,.38); }
+  .tg-nav-item { position:relative; display:flex; align-items:center; gap:10px; padding:9px 12px 9px 14px; margin:2px 10px; border-radius:8px; cursor:pointer; transition:background .12s, color .12s, transform .12s; font-size:13px; color:rgba(255,255,255,.67); font-weight:650; border:1px solid transparent; background:none; width:calc(100% - 20px); text-align:left; }
+  .tg-nav-item, .tg-nav-subitem { text-decoration:none; box-sizing:border-box; }
+  .tg-nav-item:hover { background:rgba(255,255,255,.07); color:#fff; transform:translateX(2px); }
+  .tg-nav-item.active { background:rgba(20,184,166,.14); color:#fff; border-color:rgba(20,184,166,.22); box-shadow:inset 3px 0 0 var(--accent-l); }
+  .tg-nav-item-icon { width:18px; height:18px; flex-shrink:0; display:flex; align-items:center; justify-content:center; opacity:.9; color:var(--accent-xl); }
+  .tg-nav-item-label { flex:1; }
+  .tg-nav-badge { font-size:9px; font-weight:800; padding:1px 6px; border-radius:4px; background:var(--bg4); color:var(--text5); letter-spacing:.04em; flex-shrink:0; }
+  .tg-nav-item.active .tg-nav-badge { background:var(--accent-dim); color:var(--accent-xl); }
+  .tg-nav-chevron { width:14px; height:14px; flex-shrink:0; transition:transform .18s; opacity:.4; }
+  .tg-nav-chevron.open { transform:rotate(90deg); }
+  .tg-nav-sub { overflow:hidden; margin:1px 12px 4px 22px; padding-left:9px; border-left:1px solid rgba(255,255,255,.08); }
+  .tg-nav-subitem { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:7px; cursor:pointer; font-size:12px; color:rgba(255,255,255,.52); font-weight:600; transition:background .12s, color .12s; border:none; background:none; width:100%; text-align:left; }
+  .tg-nav-subitem:hover { background:rgba(255,255,255,.06); color:rgba(255,255,255,.82); }
+  .tg-nav-subitem.active { color:var(--accent-xl); background:rgba(20,184,166,.11); }
+  .tg-nav-dot { width:5px; height:5px; border-radius:50%; background:var(--border2); flex-shrink:0; transition:background .12s; }
+  .tg-nav-subitem.active .tg-nav-dot { background:var(--accent-l); box-shadow:0 0 6px rgba(20,184,166,.45); }
+  .tg-topbar { height:58px; background:var(--topbar-bg); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 20px 0 18px; gap:12px; flex-shrink:0; font-family:'DM Sans',sans-serif; box-shadow:0 8px 24px rgba(10,20,18,.035); backdrop-filter:blur(14px); }
+  .tg-main { margin-left:252px; width:calc(100% - 252px); display:flex; flex-direction:column; height:100vh; overflow:hidden; background:var(--bg); }
+  .tg-content { flex:1; overflow-y:auto; background:radial-gradient(circle at 14% 0%, rgba(20,184,166,.10), transparent 28%), linear-gradient(180deg,var(--bg),var(--bg3)); display:flex; flex-direction:column; }
+  .tg-content::-webkit-scrollbar { width:5px; }
+  .tg-content::-webkit-scrollbar-track { background:transparent; }
+  .tg-content::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
+  .tg-notif-dot { position:absolute; top:3px; right:3px; width:7px; height:7px; background:var(--red); border-radius:50%; border:2px solid var(--topbar-bg); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+`;
+
+function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendientes = 0, tallerPendientes = 0, vehiculoAlertas = 0, solicitudesPendientes = 0, excepcionesPendientes = 0, colaboradoresPendientes = 0 }) {
+  const hasChildren = item.children?.length > 0;
+  const childActive = hasChildren && item.children.some(c => c.id === vistaActiva);
+  const isActive    = vistaActiva === item.id;
+  const [open, setOpen] = useState(childActive || isActive);
+
+  useEffect(() => {
+    if (childActive) setOpen(true);
+  }, [childActive]);
+
+  function handleClick() {
+    if (hasChildren) {
+      setOpen(o => !o);
+    } else if (item.href) {
+      return;
+    } else {
+      setVista(item.id);
+    }
+  }
+
+  const isAvisos    = item.id === "avisos";
+  const isClientes  = item.id === "clientes";
+  const isTaller    = item.id === "taller";
+  const isVehiculos = item.id === "vehiculos";
+  const isSolicitudes = item.id === "solicitudes";
+  const isExcepciones = item.id === "excepciones";
+  const isColaboradores = item.id === "colaboradores";
+  const showBadge         = isAvisos    && avisosCriticos > 0;
+  const showClientesBadge = isClientes  && clientesPendientes > 0;
+  const showTallerBadge   = isTaller    && tallerPendientes > 0;
+  const showVehBadge      = isVehiculos && vehiculoAlertas > 0;
+  const showSolicitudesBadge = isSolicitudes && solicitudesPendientes > 0;
+  const showExcepcionesBadge = isExcepciones && excepcionesPendientes > 0;
+  const showColaboradoresBadge = isColaboradores && colaboradoresPendientes > 0;
+
+  return (
+    <>
+      {item.href && !hasChildren ? (
+        <a
+          className={`tg-nav-item ${(isActive || (hasChildren && childActive)) ? "active" : ""}`}
+          href={item.href}
+          target={item.external ? "_blank" : undefined}
+          rel={item.external ? "noopener noreferrer" : undefined}
+        >
+          <span className="tg-nav-item-icon">{item.icon}</span>
+          <span className="tg-nav-item-label">{item.label}</span>
+        </a>
+      ) : (
+      <button
+        className={`tg-nav-item ${(isActive || (hasChildren && childActive)) ? "active" : ""}`}
+        onClick={handleClick}
+      >
+        <span className="tg-nav-item-icon">{item.icon}</span>
+        <span className="tg-nav-item-label">{item.label}</span>
+        {showBadge && (
+          <span style={{ fontSize:9, fontWeight:800, padding:"1px 6px", borderRadius:20,
+                         background:"rgba(240,82,82,.15)", color:"#f05252", flexShrink:0 }}>
+            {avisosCriticos}
+          </span>
+        )}
+        {showClientesBadge && (
+          <span style={{ fontSize:9, fontWeight:800, padding:"2px 6px", borderRadius:20,
+                         background:"rgba(251,191,36,.2)", color:"#f59e0b",
+                         flexShrink:0, animation:"pulse 2s infinite" }}>
+            {clientesPendientes}
+          </span>
+        )}
+        {showTallerBadge && (
+          <span style={{ fontSize:9, fontWeight:800, padding:"2px 6px", borderRadius:20,
+                         background:"rgba(239,68,68,.15)", color:"#ef4444", flexShrink:0 }}>
+            {tallerPendientes}
+          </span>
+        )}
+        {showVehBadge && (
+          <span style={{ fontSize:9, fontWeight:800, padding:"2px 6px", borderRadius:20,
+                         background:"rgba(245,158,11,.2)", color:"#f59e0b", flexShrink:0 }}>
+            {vehiculoAlertas}
+          </span>
+        )}
+        {showSolicitudesBadge && (
+          <span style={{ fontSize:9, fontWeight:900, padding:"2px 6px", borderRadius:20,
+                         background:"rgba(20,184,166,.18)", color:"#5eead4",
+                         flexShrink:0, animation:"pulse 2s infinite" }}>
+            {solicitudesPendientes}
+          </span>
+        )}
+        {showExcepcionesBadge && (
+          <span style={{ fontSize:9, fontWeight:900, padding:"2px 6px", borderRadius:20,
+                         background:"rgba(239,68,68,.18)", color:"#ef4444", flexShrink:0 }}>
+            {excepcionesPendientes}
+          </span>
+        )}
+        {showColaboradoresBadge && (
+          <span style={{ fontSize:9, fontWeight:900, padding:"2px 6px", borderRadius:20,
+                         background:"rgba(245,158,11,.2)", color:"#f59e0b",
+                         flexShrink:0, animation:"pulse 2s infinite" }}>
+            {colaboradoresPendientes}
+          </span>
+        )}
+        {item.badge && !showBadge && !showClientesBadge && !showSolicitudesBadge && !showExcepcionesBadge && !showColaboradoresBadge && (
+          <span className="tg-nav-badge">B{item.badge}</span>
+        )}
+        {hasChildren && (
+          <svg className={`tg-nav-chevron ${open?"open":""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        )}
+      </button>
+      )}
+
+      {hasChildren && open && (
+        <div className="tg-nav-sub">
+          {item.children.map(sub => (
+            sub.href ? (
+            <a
+              key={sub.id}
+              className={`tg-nav-subitem ${vistaActiva === sub.id ? "active" : ""}`}
+              href={sub.href}
+              target={sub.external ? "_blank" : undefined}
+              rel={sub.external ? "noopener noreferrer" : undefined}
+            >
+              <span className="tg-nav-dot"/>
+              <span style={{flex:1}}>{sub.label}</span>
+            </a>
+            ) : (
+            <button
+              key={sub.id}
+              className={`tg-nav-subitem ${vistaActiva === sub.id ? "active" : ""}`}
+              onClick={() => setVista(sub.id)}
+            >
+              <span className="tg-nav-dot"/>
+              <span style={{flex:1}}>{sub.label}</span>
+                {sub.id === "excepciones" && excepcionesPendientes > 0 && (
+                  <span style={{ fontSize:9, fontWeight:900, padding:"1px 6px", borderRadius:20,
+                                 background:"rgba(239,68,68,.18)", color:"#ef4444", flexShrink:0 }}>
+                    {excepcionesPendientes}
+                  </span>
+                )}
+            </button>
+            )
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+export default function Layout({ children, vistaActiva, setVista, modulos, avisosCriticos = 0, clientesPendientes = 0, tallerPendientes = 0, vehiculoAlertas = 0, solicitudesPendientes = 0, excepcionesPendientes = 0, colaboradoresPendientes = 0 }) {
+  // Roles que usan pantalla completa sin sidebar (móvil-first)
+  const { user, logout } = useAuth();
+  const { toggle, isDark } = useTheme();
+  const brandDisplayName = getBrandDisplayName(getEmpresaPlanLocal());
+  const [appMeta, setAppMeta] = useState(null);
+  const versionLabel = getBrandVersionLabel(appMeta);
+  const [tabs, setTabs] = useState(() => {
+    const defaultId = vistaActiva || "dashboard";
+    return [{ id: defaultId, label: getLabelForId(defaultId, modulos) }];
+  });
+  const [activeTab, setActiveTab] = useState(vistaActiva);
+  const FULLSCREEN_ROLES = ["chofer", "cliente"];
+  // Sync tabs when vista changes externally
+  useEffect(() => {
+    if (!vistaActiva) return;
+    setActiveTab(vistaActiva);
+    setTabs(prev => {
+      if (prev.some(t => t.id === vistaActiva)) return prev;
+      const label = getLabelForId(vistaActiva, modulos);
+      return [...prev, { id: vistaActiva, label }];
+    });
+  }, [vistaActiva, modulos]);
+
+  useEffect(() => {
+    getPublicAppMeta().then(setAppMeta).catch(() => {});
+  }, []);
+
+  if (user && FULLSCREEN_ROLES.includes(user.rol)) {
+    return (
+      <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif" }}>
+        {children}
+      </div>
+    );
+  }
+
+  function getLabelForId(id, mods) {
+    for (const g of (mods || [])) {
+      for (const item of g.items) {
+        if (item.id === id) return item.label;
+        if (item.children) {
+          const sub = item.children.find(c => c.id === id);
+          if (sub) return sub.label;
+        }
+      }
+    }
+    return id;
+  }
+
+  function handleSetVista(id) {
+    setVista(id);
+  }
+
+  function closeTab(tabId) {
+    setTabs(prev => {
+      const next = prev.filter(t => t.id !== tabId);
+      if (activeTab === tabId && next.length > 0) {
+        const lastTab = next[next.length - 1];
+        setActiveTab(lastTab.id);
+        setVista(lastTab.id);
+      }
+      return next;
+    });
+  }
+
+  function activateTab(tabId) {
+    setActiveTab(tabId);
+    setVista(tabId);
+  }
+
+  // Get current label for breadcrumb
+  const currentLabel = getLabelForId(vistaActiva, modulos);
+
+  return (
+    <>
+      <style>{CSS}</style>
+      <div style={{ height:"100vh", overflow:"hidden" }}>
+
+        {/* ══════════ SIDEBAR ══════════ */}
+        <div className="tg-sidebar">
+          {/* Logo */}
+          <div style={{ padding:"20px 16px 16px", borderBottom:"1px solid rgba(255,255,255,.08)", flexShrink:0 }}>
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-start", gap:5 }}>
+              <img
+                src={transgestLogoWhite}
+                alt={brandDisplayName}
+                style={{ width:"100%", maxWidth:182, height:"auto", display:"block" }}
+              />
+              <div style={{
+                display:"inline-flex",
+                alignItems:"center",
+                minHeight:24,
+                padding:"0 10px",
+                borderRadius:999,
+                background:"rgba(20,184,166,.14)",
+                border:"1px solid rgba(94,234,212,.18)",
+                color:"rgba(204,251,241,.9)",
+                fontSize:10,
+                fontWeight:900,
+                letterSpacing:0,
+              }}>
+                {brandDisplayName} · {versionLabel}
+              </div>
+            </div>
+          </div>
+
+          {/* Nav */}
+          <div className="tg-sidebar-scroll">
+            {modulos.map(grupo => (
+              <div key={grupo.titulo}>
+                <div className="tg-nav-group" style={{ color: GRUPO_COLOR[grupo.titulo] ? `${GRUPO_COLOR[grupo.titulo]}99` : "var(--text5)" }}>
+                  {grupo.titulo}
+                </div>
+                {grupo.items.map(item => (
+                  <NavItem
+                    key={item.id}
+                    item={item}
+                    vistaActiva={vistaActiva}
+                    setVista={handleSetVista}
+                    avisosCriticos={avisosCriticos}
+                    clientesPendientes={clientesPendientes}
+                    tallerPendientes={tallerPendientes}
+                    vehiculoAlertas={vehiculoAlertas}
+                    solicitudesPendientes={solicitudesPendientes}
+                    excepcionesPendientes={excepcionesPendientes}
+                    colaboradoresPendientes={colaboradoresPendientes}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {/* User footer */}
+          <div style={{ padding:"12px 14px", borderTop:"1px solid rgba(255,255,255,.08)", flexShrink:0, background:"rgba(255,255,255,.025)" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:9 }}>
+              <div style={{
+                width:30, height:30, borderRadius:7, flexShrink:0,
+                background: ROL_COLOR[user?.rol] || "#0f766e",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:11, fontWeight:800, color:"#fff", fontFamily:"'Syne',sans-serif",
+              }}>
+                {user?.nombre?.slice(0,2)?.toUpperCase() || "??"}
+              </div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12, fontWeight:600, color:"#ffffff", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                  {user?.nombre?.split(" ")[0]}
+                </div>
+                <div style={{ fontSize:10, color:ROL_COLOR[user?.rol]||"#14b8a6", fontWeight:700 }}>{ROL_LABEL[user?.rol]}</div>
+              </div>
+              <button onClick={logout} title="Cerrar sesión"
+                style={{ background:"none", border:"none", padding:4, cursor:"pointer", color:"rgba(255,255,255,0.5)",
+                         borderRadius:5, transition:"color .15s" }}
+                onMouseEnter={e=>e.currentTarget.style.color="#f05252"}
+                onMouseLeave={e=>e.currentTarget.style.color="rgba(255,255,255,0.5)"}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ══════════ MAIN AREA ══════════ */}
+        <div className="tg-main">
+
+          {/* Topbar */}
+          <div className="tg-topbar">
+            {/* Breadcrumb */}
+            <div style={{ flex:1, display:"flex", alignItems:"center", gap:6, fontSize:12, color:"var(--text4)" }}>
+              <span style={{ color:"var(--text4)" }}>{BRAND_NAME}</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+              <span style={{ color:"var(--accent-xl)", fontWeight:600 }}>{currentLabel}</span>
+            </div>
+
+            {/* Tabs de navegación rápida */}
+            <div style={{ display:"flex", gap:2, alignItems:"center", flex:2, overflowX:"auto", padding:"0 4px" }}>
+              {tabs.map(tab => (
+                <div key={tab.id} style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
+                  <button
+                    onClick={() => activateTab(tab.id)}
+                    style={{
+                      padding:"4px 10px", borderRadius:"5px 5px 0 0", border:"none",
+                      background: activeTab===tab.id ? "var(--accent-dim)" : "transparent",
+                      color: activeTab===tab.id ? "var(--accent-xl)" : "var(--text4)",
+                      fontSize:12, fontWeight:500, cursor:"pointer", fontFamily:"'DM Sans',sans-serif",
+                      display:"flex", alignItems:"center", gap:5, transition:"all .12s",
+                    }}>
+                    {tab.label}
+                    {tab.id !== "dashboard" && (
+                      <span
+                        onClick={e => { e.stopPropagation(); closeTab(tab.id); }}
+                        style={{ width:14, height:14, display:"flex", alignItems:"center", justifyContent:"center",
+                                 borderRadius:3, color:"var(--text4)", cursor:"pointer", fontSize:10,
+                                 lineHeight:1 }}
+                        onMouseEnter={e=>e.currentTarget.style.color="#f05252"}
+                        onMouseLeave={e=>e.currentTarget.style.color="var(--text4)"}>
+                        ✕
+                      </span>
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Bell + user */}
+            <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+              {/* Theme toggle */}
+              <button
+                onClick={toggle}
+                title={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+                style={{
+                  background:"none", border:"1px solid var(--border2)", borderRadius:7,
+                  width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center",
+                  cursor:"pointer", color:"var(--text3)", transition:"all .15s", flexShrink:0,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor="var(--accent-l)"; e.currentTarget.style.color="var(--accent-xl)"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor="var(--border2)"; e.currentTarget.style.color="var(--text3)"; }}
+              >
+                {isDark
+                  ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                  : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                }
+              </button>
+              <div style={{ position:"relative", cursor:"pointer", padding:5 }} onClick={() => setVista("avisos")}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ color:"var(--text4)" }}>
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                {avisosCriticos > 0 && <div className="tg-notif-dot"/>}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:7, cursor:"pointer", padding:"3px 6px",
+                            borderRadius:7, border:"1px solid var(--border)" }}>
+                <div style={{
+                  width:24, height:24, borderRadius:6, flexShrink:0,
+                  background: ROL_COLOR[user?.rol] || "#0f766e",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  fontSize:9, fontWeight:800, color:"#fff", fontFamily:"'Syne',sans-serif",
+                }}>
+                  {user?.nombre?.slice(0,2)?.toUpperCase() || "??"}
+                </div>
+                <div>
+                  <div style={{ fontSize:12, fontWeight:600, color:"var(--text)", lineHeight:1.2 }}>{user?.nombre?.split(" ")[0]}</div>
+                  <div style={{ fontSize:9, color:"var(--text5)", textTransform:"capitalize" }}>{ROL_LABEL[user?.rol]}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="tg-content">
+            {children}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}

@@ -1,0 +1,6 @@
+node_modules/
+.env
+logs/
+nginx/ssl/
+backups/
+*.sql.gz

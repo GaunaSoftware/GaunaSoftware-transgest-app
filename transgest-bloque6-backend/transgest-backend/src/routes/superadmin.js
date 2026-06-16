@@ -760,6 +760,40 @@ router.get("/public/app-meta", async (req, res) => {
 });
 
 // ── GET /superadmin/empresas — Listar todas las empresas ─────────────────
+router.get("/correo/status", superAuth, async (_req, res) => {
+  const required = ["GAUNA_SMTP_HOST", "GAUNA_SMTP_USER", "GAUNA_SMTP_PASS", "GAUNA_SMTP_FROM"];
+  const fallback = key => process.env[key] || process.env[key.replace("GAUNA_", "PLATFORM_")] || process.env[key.replace("GAUNA_", "")];
+  const missing = required.filter(k => !fallback(k));
+  res.json({
+    ok: missing.length === 0,
+    provider: missing.length === 0 ? "gauna" : "simulado",
+    from: fallback("GAUNA_SMTP_FROM") || "",
+    from_name: fallback("GAUNA_SMTP_FROM_NAME") || "Gauna - TransGest",
+    host_configured: Boolean(fallback("GAUNA_SMTP_HOST")),
+    user_configured: Boolean(fallback("GAUNA_SMTP_USER")),
+    missing,
+  });
+});
+
+router.post("/correo/test", superAuth, async (req, res) => {
+  const destinatario = String(req.body?.destinatario || req.superadmin?.email || "").trim().toLowerCase();
+  if (!destinatario) return res.status(400).json({ error: "Indica un destinatario" });
+  try {
+    const mail = await enviarEmail({
+      trigger: "correo_gauna_test",
+      destinatario,
+      plantilla: "invitacion_usuario",
+      datos: { nombre: "Test", empresa: "Gauna / TransGest", url: `${appUrl()}/superadmin` },
+      force_platform: true,
+      meta: { test: true, superadmin: req.superadmin?.email || "" },
+    });
+    await audit(req, "correo_gauna.test", { destinatario, simulado: !!mail.simulado });
+    res.json({ ok: true, email: mail });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/usuarios-admin", superAuth, async (req, res) => {
   const { rows } = await db.query(
     "SELECT id,nombre,email,rol,activo,created_at FROM superadmins ORDER BY created_at DESC"
@@ -1501,7 +1535,7 @@ router.delete("/empresas/:id", superAuth, async (req, res) => {
 
 // ── POST /superadmin/facturas-suscripcion — Emitir factura a empresa ─────
 router.post("/empresas/:id/impersonar", superAuth, async (req, res) => {
-  const { rows } = await db.query(
+  let { rows } = await db.query(
     `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.empresa_id, e.plan, e.nombre AS empresa
      FROM usuarios u
      JOIN empresas e ON e.id=u.empresa_id
@@ -1510,9 +1544,24 @@ router.post("/empresas/:id/impersonar", superAuth, async (req, res) => {
      LIMIT 1`,
     [req.params.id]
   );
-  const user = rows[0];
+  let user = rows[0];
   if (!user) {
-    return res.status(404).json({ error: "No hay usuarios en esta empresa para acceder" });
+    const empresaRes = await db.query("SELECT id,nombre,plan,email_admin FROM empresas WHERE id=$1", [req.params.id]);
+    const empresa = empresaRes.rows[0];
+    if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
+    const email = String(empresa.email_admin || `soporte.${empresa.id}@transgest.local`).trim().toLowerCase();
+    const hash = await bcrypt.hash(crypto.randomBytes(24).toString("hex"), 12);
+    const created = await db.query(
+      `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,debe_cambiar_password)
+       VALUES ('Soporte TransGest', $1, $1, $2, 'gerente', $3, true, true)
+       RETURNING id,nombre,email,username,rol,empresa_id`,
+      [email, hash, empresa.id]
+    );
+    user = {
+      ...created.rows[0],
+      plan: empresa.plan,
+      empresa: empresa.nombre,
+    };
   }
 
   const token = jwt.sign(

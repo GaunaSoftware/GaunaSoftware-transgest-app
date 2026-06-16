@@ -446,6 +446,71 @@ function UsuariosAdmin({ saFetchFn }) {
   );
 }
 
+function CorreoGaunaAdmin({ saFetchFn }) {
+  const [status, setStatus] = useState(null);
+  const [destinatario, setDestinatario] = useState("");
+  const [msg, setMsg] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const cargar = useCallback(() => {
+    saFetchFn("/correo/status")
+      .then(setStatus)
+      .catch(e => setMsg(e.message));
+  }, [saFetchFn]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  async function probar() {
+    setLoading(true); setMsg("");
+    try {
+      const r = await saFetchFn("/correo/test", { method:"POST", body:{ destinatario } });
+      setMsg(r.email?.simulado ? "Email simulado. Faltan variables SMTP de Gauna." : "Email de prueba enviado.");
+      notify(r.email?.simulado ? "Email simulado: revisa variables SMTP." : "Email de prueba enviado.", r.email?.simulado ? "warning" : "success");
+      cargar();
+    } catch (e) {
+      setMsg(e.message || "No se pudo enviar el test");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const input = { background:"#1e293b", border:"1px solid #334155", color:"#f1f5f9", padding:"8px 10px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+
+  return (
+    <div style={{ maxWidth:760, marginTop:30, borderTop:"1px solid #1c2740", paddingTop:22 }}>
+      <div style={{ fontSize:16, fontWeight:800, color:"#f1f5f9", marginBottom:6 }}>
+        Correo Gauna
+      </div>
+      <div style={{ fontSize:12, color:"#94a3b8", marginBottom:14 }}>
+        Se usa para invitaciones, avisos de pago y comunicaciones de plataforma. Las claves se configuran en Render con variables GAUNA_SMTP_*.
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:12}}>
+        {[
+          ["Estado", status?.ok ? "Configurado" : "Simulado", status?.ok ? "#34d399" : "#fbbf24"],
+          ["Remitente", status?.from || "-", "#94a3b8"],
+          ["Host", status?.host_configured ? "OK" : "Falta", status?.host_configured ? "#34d399" : "#f87171"],
+          ["Usuario", status?.user_configured ? "OK" : "Falta", status?.user_configured ? "#34d399" : "#f87171"],
+        ].map(([label,value,color])=>(
+          <div key={label} style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:8,padding:"10px 12px"}}>
+            <div style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em"}}>{label}</div>
+            <div style={{fontSize:13,color,fontWeight:800,marginTop:4}}>{value}</div>
+          </div>
+        ))}
+      </div>
+      {status?.missing?.length ? (
+        <div style={{fontSize:12,color:"#fbbf24",marginBottom:12}}>Faltan: {status.missing.join(", ")}</div>
+      ) : null}
+      <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center"}}>
+        <input style={input} value={destinatario} onChange={e=>setDestinatario(e.target.value)} placeholder="email para prueba (vacio = superadmin)" />
+        <button onClick={probar} disabled={loading} style={{padding:"8px 14px",borderRadius:7,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.14)",color:"#5eead4",fontWeight:800,cursor:"pointer"}}>
+          {loading ? "Enviando..." : "Probar correo"}
+        </button>
+      </div>
+      {msg && <div style={{fontSize:12,color:msg.includes("enviado")?"#34d399":"#fbbf24",marginTop:10}}>{msg}</div>}
+    </div>
+  );
+}
+
 function IntegracionesAdmin({ saFetchFn }) {
   const [data, setData] = useState(null);
   const [salud, setSalud] = useState(null);
@@ -2134,6 +2199,36 @@ export default function SuperAdmin(){
     }
   }
 
+  async function resetPasswordEmpresa(empresa){
+    try{
+      const password = await promptDialog({
+        title:"Cambiar contrasena",
+        message:`Nueva contrasena para ${empresa.nombre}. Minimo 8 caracteres.`,
+        inputType:"password",
+        placeholder:"Nueva contrasena",
+        confirmText:"Cambiar",
+      });
+      if(!password) return;
+      await saFetch(`/empresas/${empresa.id}/reset-password`,{method:"POST",body:{password}});
+      notify("Contrasena actualizada.", "success");
+    }catch(e){ notify(e.message || "No se pudo cambiar la contrasena", "error"); }
+  }
+
+  async function reinvitarEmpresa(empresa){
+    try{
+      const r = await saFetch(`/empresas/${empresa.id}/reinvitar`,{method:"POST",body:{email:empresa.email_admin}});
+      if(r.invitacion_url && r.email?.simulado) notify("Invitacion generada en modo simulado:\n\n"+r.invitacion_url, "success", 12000);
+      else notify("Invitacion enviada.", "success");
+    }catch(e){ notify(e.message || "No se pudo reenviar la invitacion", "error"); }
+  }
+
+  async function enviarAvisoPagoEmpresa(empresa, tipo="auto"){
+    try{
+      const r = await saFetch(`/empresas/${empresa.id}/billing/recordatorio`,{method:"POST",body:{tipo}});
+      notify(r.checkout_url ? "Aviso enviado con enlace de pago." : "Aviso enviado.", "success");
+    }catch(e){ notify(e.message || "No se pudo enviar el aviso", "error"); }
+  }
+
   const S={
     card:{background:"#141c2e",border:"1px solid #1c2740",borderRadius:12,padding:"14px 18px",marginBottom:12},
     th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",borderBottom:"1px solid #1c2740",whiteSpace:"nowrap"},
@@ -2343,8 +2438,11 @@ export default function SuperAdmin(){
                             </span>
                           </td>
                           <td style={{...S.td,textAlign:"right"}}>
-                            <div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+                            <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap"}}>
                               <button onClick={()=>entrarEmpresa(e)} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"#34d399",border:"1px solid rgba(16,185,129,.25)"}}>Entrar</button>
+                              <button onClick={()=>resetPasswordEmpresa(e)} style={{...S.btn,background:"rgba(20,184,166,.10)",color:"#5eead4",border:"1px solid rgba(20,184,166,.22)"}}>Clave</button>
+                              <button onClick={()=>reinvitarEmpresa(e)} style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#85B7EB",border:"1px solid rgba(59,130,246,.22)"}}>Invitar</button>
+                              <button onClick={()=>enviarAvisoPagoEmpresa(e, "auto")} style={{...S.btn,background:"rgba(245,158,11,.10)",color:"#fbbf24",border:"1px solid rgba(245,158,11,.22)"}}>Aviso pago</button>
                               <button onClick={()=>setEditando(e)} style={{...S.btn,background:"#1e2d45",color:"#94a3b8",border:"1px solid #1c2740"}}>Gestionar</button>
                             </div>
                           </td>
@@ -2360,6 +2458,7 @@ export default function SuperAdmin(){
         {tab==="config"&&(
           <div style={{padding:"24px 0"}}>
             <UsuariosAdmin saFetchFn={saFetch}/>
+            <CorreoGaunaAdmin saFetchFn={saFetch}/>
           </div>
         )}
         {tab==="integraciones"&&(

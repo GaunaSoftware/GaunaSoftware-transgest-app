@@ -166,6 +166,12 @@ function estadoCuentaFacturas(facturas = []) {
   };
 }
 
+function matchesSearch(item, query, fields = []) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return true;
+  return fields.some(field => String(item?.[field] || "").toLowerCase().includes(q));
+}
+
 function buildEstadoCuentaReportHtml({ facturas = [], empresa = {}, user = {} } = {}) {
   const estado = estadoCuentaFacturas(facturas);
   const generated = new Date().toLocaleString("es-ES");
@@ -338,6 +344,7 @@ export default function PortalClientes() {
   const [descargandoManifest, setDescargandoManifest] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("seguimiento");
+  const [q, setQ] = useState("");
   const [pedSel, setPedSel] = useState(null);
   const [pedidoEventosAbierto, setPedidoEventosAbierto] = useState(null);
   const [solicitudEventosAbierta, setSolicitudEventosAbierta] = useState(null);
@@ -370,6 +377,9 @@ export default function PortalClientes() {
   const solicitudesConvertidas = solicitudes.filter(s => s.estado === "convertida");
   const reprogramacionesPendientes = solicitudes.filter(s => s.fecha_propuesta && (!s.decision_cliente || s.decision_cliente === "pendiente"));
   const movimientosSolicitudes = solicitudes.reduce((sum, s) => sum + Number(s.eventos_count || 0), 0);
+  const pedidosFiltrados = pedidos.filter(p => matchesSearch(p, q, ["numero", "referencia_cliente", "origen", "destino", "mercancia", "vehiculo_matricula", "estado"]));
+  const facturasFiltradas = facturas.filter(f => matchesSearch(f, q, ["numero", "estado", "forma_pago"]));
+  const solicitudesFiltradas = solicitudes.filter(s => matchesSearch(s, q, ["referencia_cliente", "origen", "destino", "mercancia", "estado", "pedido_numero", "respuesta"]));
 
   async function verAlbaranes(pedidoId) {
     if (!pedidoId) return;
@@ -674,6 +684,21 @@ export default function PortalClientes() {
           ))}
         </div>
 
+        <div style={{ ...S.card, display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:10, alignItems:"center", marginBottom:16 }}>
+          <input
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder="Buscar viajes, facturas, solicitudes, referencias..."
+            style={{ background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)", borderRadius:8, padding:"10px 12px", outline:"none", fontFamily:"'DM Sans',sans-serif", fontSize:13, minWidth:0 }}
+          />
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"flex-end" }}>
+            <button style={S.btn} onClick={cargar} disabled={loading}>{loading ? "Actualizando..." : "Actualizar"}</button>
+            <button style={{ ...S.btn, background:"var(--accent)", color:"#fff", borderColor:"var(--accent)" }} onClick={() => setTab("nuevo")}>Nuevo servicio</button>
+            <button style={S.btn} onClick={() => setTab("cuenta")}>Estado de cuenta</button>
+            <button style={S.btn} onClick={() => setTab("albaranes")}>Documentos</button>
+          </div>
+        </div>
+
         {accionesPortal.length > 0 && (
           <div style={{ ...S.card, marginBottom: 16 }}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
@@ -721,7 +746,7 @@ export default function PortalClientes() {
 
         {!loading && tab === "seguimiento" && (
           <div>
-            {pedidos.length === 0 ? <Empty text="Todavia no hay viajes registrados." /> : pedidos.map(p => {
+            {pedidosFiltrados.length === 0 ? <Empty text={q ? "No hay viajes que coincidan con la busqueda." : "Todavia no hay viajes registrados."} /> : pedidosFiltrados.map(p => {
               const estado = ESTADOS[p.estado] || ESTADOS.pendiente;
               const stIdx = Math.max(0, TIMELINE.findIndex(([k]) => k === p.estado));
               const dcd = docControl[p.id];
@@ -833,7 +858,7 @@ export default function PortalClientes() {
                 </div>
               ))}
             </div>
-            {pedidos.length === 0 ? <Empty text="No hay viajes con documentacion." /> : pedidos.map(p => {
+            {pedidosFiltrados.length === 0 ? <Empty text={q ? "No hay documentos que coincidan con la busqueda." : "No hay viajes con documentacion."} /> : pedidosFiltrados.map(p => {
               const albs = docs[p.id] || [];
               const resumen = docsByPedido[p.id] || {};
               return (
@@ -874,10 +899,10 @@ export default function PortalClientes() {
 
         {!loading && tab === "facturas" && (
           <div style={S.card}>
-            {facturas.length === 0 ? <Empty text="No hay facturas emitidas." /> : (
+            {facturasFiltradas.length === 0 ? <Empty text={q ? "No hay facturas que coincidan con la busqueda." : "No hay facturas emitidas."} /> : (
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead><tr>{["Factura", "Fecha", "Vencimiento", "Base", "IVA", "Total", "Estado", "Acciones"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-                <tbody>{facturas.map(f => {
+                <tbody>{facturasFiltradas.map(f => {
                   const e = ESTADOS[f.estado] || { l: f.estado || "-", c: "var(--text4)" };
                   return (
                     <tr key={f.id}>
@@ -958,7 +983,7 @@ export default function PortalClientes() {
 
         {!loading && tab === "solicitudes" && (
           <div style={S.card}>
-            {solicitudes.length > 0 && (
+            {solicitudesFiltradas.length > 0 && (
               <div style={{ marginBottom:12, paddingBottom:10, borderBottom:"1px solid var(--border2)" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", marginBottom:10 }}>
                   <div>
@@ -987,7 +1012,7 @@ export default function PortalClientes() {
                 )}
               </div>
             )}
-            {solicitudes.length === 0 ? <Empty text="No has enviado solicitudes." /> : solicitudes.map(s => {
+            {solicitudesFiltradas.length === 0 ? <Empty text={q ? "No hay solicitudes que coincidan con la busqueda." : "No has enviado solicitudes."} /> : solicitudesFiltradas.map(s => {
               const e = ESTADOS[s.estado] || ESTADOS.pendiente;
               return (
                 <div key={s.id} style={{ borderBottom: "1px solid var(--border2)", padding: "11px 0" }}>

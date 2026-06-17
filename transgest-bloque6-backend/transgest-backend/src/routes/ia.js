@@ -13,6 +13,53 @@ const IA_LIMITES_PLAN = {
   enterprise: 1000,
 };
 
+function stripCodeFence(text) {
+  return String(text || "").replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+}
+
+function tryJson(text) {
+  try { return JSON.parse(stripCodeFence(text)); } catch { return null; }
+}
+
+function extractModelText(provider, data = {}) {
+  if (provider === "openai" || provider === "ai_generic") {
+    return data?.choices?.[0]?.message?.content || "";
+  }
+  if (Array.isArray(data?.content)) {
+    return data.content.map(p => p?.text || "").join("\n");
+  }
+  return data?.text || "";
+}
+
+function heuristicDocumentParse(text = "") {
+  const src = String(text || "");
+  const norm = src.replace(/\r/g, "\n");
+  const find = (patterns) => {
+    for (const p of patterns) {
+      const m = norm.match(p);
+      if (m?.[1]) return String(m[1]).trim();
+    }
+    return "";
+  };
+  const amount = find([/(?:importe|total|precio)\s*[:\-]?\s*([0-9]+(?:[.,][0-9]{1,2})?)/i]);
+  const weight = find([/(?:peso|toneladas|tn|t)\s*[:\-]?\s*([0-9]+(?:[.,][0-9]{1,3})?)/i]);
+  const ref = find([/(?:referencia|ref\.?|pedido|orden)\s*[:\-]?\s*([A-Z0-9._/-]{3,})/i]);
+  const date = find([/(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/]);
+  return {
+    tipo_documento: src.toLowerCase().includes("factura") ? "factura" : src.toLowerCase().includes("albar") ? "albaran" : "pedido",
+    confianza: 0.35,
+    cliente: find([/(?:cliente|cargador)\s*[:\-]?\s*(.+)/i]),
+    origen: find([/(?:origen|carga|recogida)\s*[:\-]?\s*(.+)/i]),
+    destino: find([/(?:destino|descarga|entrega)\s*[:\-]?\s*(.+)/i]),
+    fecha_carga: date,
+    referencia_cliente: ref,
+    mercancia: find([/(?:mercancia|producto|material)\s*[:\-]?\s*(.+)/i]),
+    peso: weight,
+    importe: amount,
+    observaciones: "Extraccion heuristica sin IA configurada. Revisar antes de crear registros.",
+  };
+}
+
 async function comprobarCupoIA(req) {
   const empresaId = req.user?.empresa_id;
   if (!empresaId) return;
@@ -142,6 +189,115 @@ router.post("/chat", async (req, res) => {
     proxyReq.write(body);
     proxyReq.end();
   } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/documento/extraer", async (req, res) => {
+  const { texto = "", tipo = "pedido", nombre = "", mime = "", contexto = {} } = req.body || {};
+  const cleanText = String(texto || "").trim().slice(0, 60000);
+  if (!cleanText) return res.status(400).json({ error: "Texto del documento requerido" });
+
+  let iaConfig;
+  try {
+    await comprobarCupoIA(req);
+    iaConfig = await getIaRuntimeConfig(req.user?.empresa_id);
+    if (iaConfig.apiKey) await assertApiUsageAllowed(req.user?.empresa_id, iaConfig.provider);
+  } catch (err) {
+    if (err.status === 403 || err.status === 429) {
+      return res.json({ ok:true, modo:"heuristico", resultado: heuristicDocumentParse(cleanText), avisos:[err.message] });
+    }
+    return res.status(err.status || 500).json({ error: err.message });
+  }
+
+  if (!iaConfig.apiKey) {
+    return res.json({
+      ok: true,
+      modo: "heuristico",
+      resultado: heuristicDocumentParse(cleanText),
+      avisos: ["IA no configurada. Se ha usado extraccion heuristica."],
+    });
+  }
+
+  const system = `Eres un extractor documental para un TMS de transporte en España. Devuelve solo JSON valido, sin markdown. Extrae datos para crear pedidos, facturas o albaranes. Usa null si no aparece. Normaliza importes con punto decimal y fechas ISO yyyy-mm-dd si puedes.`;
+  const userPrompt = `Tipo esperado: ${tipo}
+Nombre archivo: ${nombre}
+MIME: ${mime}
+Contexto: ${JSON.stringify(contexto || {})}
+
+Devuelve este JSON:
+{
+  "tipo_documento":"pedido|factura|albaran|correo|otro",
+  "confianza":0.0,
+  "cliente":null,
+  "referencia_cliente":null,
+  "origen":null,
+  "destino":null,
+  "fecha_carga":null,
+  "hora_carga":null,
+  "fecha_descarga":null,
+  "hora_descarga":null,
+  "mercancia":null,
+  "peso_kg":null,
+  "toneladas":null,
+  "bultos":null,
+  "matricula":null,
+  "remolque":null,
+  "chofer":null,
+  "importe":null,
+  "tipo_iva":null,
+  "factura_numero":null,
+  "albaran_numero":null,
+  "emails_detectados":[],
+  "telefonos_detectados":[],
+  "observaciones":null,
+  "faltantes":[]
+}
+
+Texto:
+${cleanText}`;
+
+  try {
+    let remoteData;
+    if (iaConfig.provider === "openai" || iaConfig.provider === "ai_generic") {
+      const baseUrl = iaConfig.provider === "openai" ? "https://api.openai.com/v1" : (iaConfig.baseUrl || "https://api.openai.com/v1");
+      const proxyRes = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json", Authorization:`Bearer ${iaConfig.apiKey}` },
+        body: JSON.stringify({
+          model: iaConfig.model || "gpt-4o-mini",
+          response_format: { type:"json_object" },
+          messages: normalizeOpenAiMessages([{ role:"user", content:userPrompt }], system),
+          max_tokens: 1800,
+        }),
+      });
+      remoteData = await proxyRes.json().catch(() => ({}));
+      if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
+    } else {
+      const proxyRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type":"application/json",
+          "x-api-key": iaConfig.apiKey,
+          "anthropic-version":"2023-06-01",
+        },
+        body: JSON.stringify({
+          model: iaConfig.model || "claude-sonnet-4-20250514",
+          max_tokens: 1800,
+          system,
+          messages: [{ role:"user", content:userPrompt }],
+        }),
+      });
+      remoteData = await proxyRes.json().catch(() => ({}));
+      if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
+    }
+    await recordApiUsage(req.user?.empresa_id, iaConfig.provider, 1).catch(() => {});
+    const parsed = tryJson(extractModelText(iaConfig.provider, remoteData));
+    if (!parsed) {
+      return res.json({ ok:true, modo:"heuristico", resultado: heuristicDocumentParse(cleanText), avisos:["La IA no devolvio JSON valido. Se ha usado extraccion heuristica."], raw: remoteData });
+    }
+    res.json({ ok:true, modo:"ia", resultado: parsed });
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });

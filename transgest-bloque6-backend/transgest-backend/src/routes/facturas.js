@@ -4,7 +4,7 @@ const db      = require("../services/db");
 const logger  = require("../services/logger");
 const { authenticate, GERENTE_O_CONTABLE, SOLO_GERENTE, PUEDE_CAMBIAR_ESTADO_FACTURA } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
-const { ensureFacturaFiscalRecord, getEmpresaFiscalConfig, buildFiscalStatus, sanitizeFiscalConfigForClient } = require("../services/fiscal");
+const { ensureFacturaFiscalRecord, getEmpresaFiscalConfig, buildFiscalStatus, sanitizeFiscalConfigForClient, buildFiscalXml } = require("../services/fiscal");
 const { processPendingFiscalQueue } = require("../services/fiscalProcessor");
 const { getVerifactiRecordStatus } = require("../services/fiscalProviderVerifacti");
 const { markQueueAccepted, markQueuePending, markQueueError, logFiscalEvent } = require("../services/fiscalQueueState");
@@ -567,6 +567,31 @@ router.post("/fiscal/procesar-cola", GERENTE_O_CONTABLE, async (req, res) => {
   res.json(result);
 });
 
+router.get("/fiscal/export-lote.xml", GERENTE_O_CONTABLE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  const { desde, hasta, estado = "todos", modo = "todos" } = req.query;
+  const params = [empresaId];
+  const where = ["frf.empresa_id=$1"];
+  if (desde) { params.push(desde); where.push(`f.fecha >= $${params.length}`); }
+  if (hasta) { params.push(hasta); where.push(`f.fecha <= $${params.length}`); }
+  if (estado !== "todos") { params.push(estado); where.push(`frf.estado_envio = $${params.length}`); }
+  if (modo !== "todos") { params.push(modo); where.push(`frf.modo = $${params.length}`); }
+  const { rows } = await db.query(
+    `SELECT frf.*, f.numero, f.fecha
+       FROM factura_registros_fiscales frf
+       JOIN facturas f ON f.id=frf.factura_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY f.fecha ASC, f.numero ASC
+      LIMIT 500`,
+    params
+  );
+  const body = rows.map(r => buildFiscalXml(r).replace(/^<\?xml[^>]*>\s*/i, "")).join("\n");
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<TransGestLoteFiscal generated_at="${new Date().toISOString()}" total="${rows.length}">\n${body}\n</TransGestLoteFiscal>`;
+  res.setHeader("Content-Type", "application/xml; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="lote-fiscal-transgest-${new Date().toISOString().slice(0,10)}.xml"`);
+  res.send(xml);
+});
+
 router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   const empresaId = req.empresaId || req.user.empresa_id;
   const { rows } = await db.query(`
@@ -664,6 +689,23 @@ router.get("/:id/fiscal", GERENTE_O_CONTABLE, async (req, res) => {
     eventos: eventos.rows,
     envios: envios.rows,
   });
+});
+
+router.get("/:id/fiscal/xml", GERENTE_O_CONTABLE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  const { rows } = await db.query(
+    `SELECT frf.*, f.numero
+       FROM factura_registros_fiscales frf
+       JOIN facturas f ON f.id=frf.factura_id
+      WHERE frf.factura_id=$1 AND frf.empresa_id=$2`,
+    [req.params.id, empresaId]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "La factura no tiene registro fiscal." });
+  const xml = buildFiscalXml(rows[0]);
+  const safeNumero = String(rows[0].numero || req.params.id).replace(/[^a-zA-Z0-9._-]+/g, "-");
+  res.setHeader("Content-Type", "application/xml; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="fiscal-${safeNumero}.xml"`);
+  res.send(xml);
 });
 
 router.post("/:id/fiscal/requeue", SOLO_GERENTE, async (req, res) => {

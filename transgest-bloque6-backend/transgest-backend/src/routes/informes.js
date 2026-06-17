@@ -37,6 +37,108 @@ function round2(value) {
   return Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 }
 
+router.get("/bi/resumen", async (req, res) => {
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const { desde, hasta } = rangoPeriodo(String(req.query.periodo || "90d"));
+  const params = [empresaId, desde, hasta];
+  const [pedidos, facturas, clientes, rutas, incidencias] = await Promise.all([
+    db.query(`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE estado='cancelado')::int AS cancelados,
+        COUNT(*) FILTER (WHERE estado IN ('entregado','facturado'))::int AS completados,
+        COALESCE(SUM(importe),0)::numeric AS venta,
+        COALESCE(SUM(precio_colaborador),0)::numeric AS coste_colaborador,
+        COALESCE(SUM(km),0)::numeric AS km,
+        COALESCE(AVG(NULLIF(km,0)),0)::numeric AS km_medio,
+        COALESCE(AVG(EXTRACT(EPOCH FROM (fecha_descarga::timestamp - fecha_carga::timestamp))/86400) FILTER (WHERE fecha_descarga IS NOT NULL AND fecha_carga IS NOT NULL),0)::numeric AS dias_medio
+      FROM pedidos
+      WHERE empresa_id=$1 AND COALESCE(fecha_carga, fecha_pedido, created_at::date) BETWEEN $2 AND $3
+    `, params),
+    db.query(`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE estado IN ('emitida','enviada','vencida','reclamada','sin_cobrar'))::int AS pendientes,
+        COUNT(*) FILTER (WHERE estado IN ('vencida','reclamada','sin_cobrar'))::int AS vencidas,
+        COALESCE(SUM(total),0)::numeric AS facturado,
+        COALESCE(SUM(total) FILTER (WHERE estado IN ('emitida','enviada','vencida','reclamada','sin_cobrar')),0)::numeric AS pendiente_cobro,
+        COALESCE(SUM(total) FILTER (WHERE estado IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
+      FROM facturas
+      WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND estado <> 'borrador'
+    `, params),
+    db.query(`
+      SELECT c.id, c.nombre,
+             COUNT(p.id)::int AS pedidos,
+             COALESCE(SUM(p.importe),0)::numeric AS venta,
+             COALESCE(SUM(p.precio_colaborador),0)::numeric AS coste,
+             COALESCE(SUM(p.importe - COALESCE(p.precio_colaborador,0)),0)::numeric AS margen,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS deuda_vencida
+        FROM clientes c
+        LEFT JOIN pedidos p ON p.cliente_id=c.id AND p.empresa_id=c.empresa_id AND COALESCE(p.fecha_carga,p.fecha_pedido,p.created_at::date) BETWEEN $2 AND $3
+        LEFT JOIN facturas f ON f.cliente_id=c.id AND f.empresa_id=c.empresa_id AND f.fecha BETWEEN $2 AND $3
+       WHERE c.empresa_id=$1
+       GROUP BY c.id,c.nombre
+       HAVING COUNT(p.id)>0 OR COALESCE(SUM(f.total),0)>0
+       ORDER BY margen DESC NULLS LAST
+       LIMIT 12
+    `, params),
+    db.query(`
+      SELECT COALESCE(NULLIF(origen,''),'Sin origen') AS origen,
+             COALESCE(NULLIF(destino,''),'Sin destino') AS destino,
+             COUNT(*)::int AS viajes,
+             COALESCE(AVG(NULLIF(km,0)),0)::numeric AS km_medio,
+             COALESCE(SUM(importe),0)::numeric AS venta,
+             COALESCE(SUM(importe - COALESCE(precio_colaborador,0)),0)::numeric AS margen
+        FROM pedidos
+       WHERE empresa_id=$1 AND COALESCE(fecha_carga,fecha_pedido,created_at::date) BETWEEN $2 AND $3
+         AND estado <> 'cancelado'
+       GROUP BY 1,2
+       ORDER BY viajes DESC, margen DESC
+       LIMIT 10
+    `, params),
+    db.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE estado='pendiente')::int AS solicitudes_pendientes,
+        (SELECT COUNT(*) FROM factura_registros_fiscales WHERE empresa_id=$1 AND estado_envio='error')::int AS errores_fiscales,
+        (SELECT COUNT(*) FROM pedido_docs pd JOIN pedidos p ON p.id=pd.pedido_id WHERE pd.empresa_id=$1 AND pd.created_at::date BETWEEN $2 AND $3)::int AS documentos_periodo
+      FROM portal_solicitudes_cliente
+      WHERE empresa_id=$1 AND created_at::date BETWEEN $2 AND $3
+    `, params).catch(() => ({ rows:[{}] })),
+  ]);
+  const p = pedidos.rows[0] || {};
+  const venta = Number(p.venta || 0);
+  const coste = Number(p.coste_colaborador || 0);
+  const margen = venta - coste;
+  res.json({
+    periodo: { desde, hasta },
+    kpis: {
+      pedidos: Number(p.total || 0),
+      completados: Number(p.completados || 0),
+      cancelados: Number(p.cancelados || 0),
+      venta: round2(venta),
+      coste_colaborador: round2(coste),
+      margen: round2(margen),
+      margen_pct: venta > 0 ? round2((margen / venta) * 100) : 0,
+      eur_km: Number(p.km || 0) > 0 ? round2(venta / Number(p.km || 0)) : 0,
+      km_medio: round2(p.km_medio),
+      dias_medio: round2(p.dias_medio),
+      facturado: round2(facturas.rows[0]?.facturado),
+      pendiente_cobro: round2(facturas.rows[0]?.pendiente_cobro),
+      vencido: round2(facturas.rows[0]?.vencido),
+    },
+    clientes: clientes.rows.map(r => ({
+      ...r,
+      venta: round2(r.venta),
+      coste: round2(r.coste),
+      margen: round2(r.margen),
+      margen_pct: Number(r.venta || 0) > 0 ? round2((Number(r.margen || 0) / Number(r.venta || 0)) * 100) : 0,
+      deuda_vencida: round2(r.deuda_vencida),
+    })),
+    rutas: rutas.rows.map(r => ({ ...r, venta: round2(r.venta), margen: round2(r.margen), km_medio: round2(r.km_medio) })),
+    alertas: incidencias.rows[0] || {},
+  });
+});
+
 function hasText(value) {
   return String(value || "").trim().length > 0;
 }

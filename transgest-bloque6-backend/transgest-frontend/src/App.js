@@ -39,6 +39,7 @@ const Empresa             = lazy(() => import("./pages/Empresa"));
 const CuadranteSemanal    = lazy(() => import("./pages/CuadranteSemanal"));
 const HojasRuta           = lazy(() => import("./pages/HojasRuta"));
 const GastosEstructura    = lazy(() => import("./pages/GastosEstructura"));
+const ControlHorario      = lazy(() => import("./pages/ControlHorario"));
 const GestionTrafico      = lazy(() => import("./pages/GestionTrafico"));
 const Nominas             = lazy(() => import("./pages/Nominas"));
 const AppChofer           = lazy(() => import("./pages/AppChofer"));
@@ -173,7 +174,7 @@ const MODULOS_POR_PLAN = {
     basico: [
       "dashboard","control_tower","copiloto_operativo","agenda","pedidos","plan_diario","gestion_trafico","calculador_portes","palets","app_chofer",
       "clientes","colaboradores","vehiculos","choferes","taller","grupajes","solicitudes",
-      "hojas_ruta","nominas","documentos","avisos","facturacion","contabilidad","empresa",
+      "hojas_ruta","nominas","control_horario","documentos","avisos","facturacion","contabilidad","empresa",
       "usuarios","actividad","importacion","mi_cuenta",
       "cuadrante_grupo","plan_diario","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
       "facturacion_grupo"
@@ -181,7 +182,7 @@ const MODULOS_POR_PLAN = {
     profesional: [
       "dashboard","control_tower","copiloto_operativo","agenda","pedidos","plan_diario","gestion_trafico","rutas_recomendadas","calculador_portes","palets","app_chofer",
       "clientes","tarifas","colaboradores","vehiculos","choferes","taller","grupajes","rutas","solicitudes",
-      "explotacion","hojas_ruta","gastos_estructura","nominas",
+      "explotacion","hojas_ruta","gastos_estructura","nominas","control_horario",
       "documentos","avisos","facturacion","contabilidad","informes","excepciones","objetivos",
     "empresa","usuarios","actividad","importacion","mi_cuenta",
     "cuadrante_grupo","plan_diario","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
@@ -211,9 +212,9 @@ function filtrarModulosPorPlan(modulos, plan) {
 }
 
 const ROLE_NAV_FALLBACK_PERMISSIONS = {
-  gerente: ["contabilidad", "nominas", "hojas_ruta"],
-  contable: ["contabilidad", "nominas"],
-  administrativo: ["contabilidad", "nominas"],
+  gerente: ["contabilidad", "nominas", "hojas_ruta", "control_horario"],
+  contable: ["contabilidad", "nominas", "control_horario"],
+  administrativo: ["contabilidad", "nominas", "control_horario"],
   trafico: ["hojas_ruta"],
   visualizador: ["hojas_ruta"],
 };
@@ -279,6 +280,7 @@ const MODULOS_GERENTE = [
     { id:"hojas_ruta", icon:IC.docs, label:"Hojas de Ruta" },
     { id:"gastos_estructura", icon:IC.facturacion, label:"Gastos de Estructura" },
     { id:"nominas", icon:IC.facturacion, label:"Nominas" },
+    { id:"control_horario", icon:IC.cuadrante, label:"Control horario" },
   ]},
   { titulo:"Finanzas", items:[
     { id:"facturacion_grupo", icon:IC.facturacion, label:"Facturacion", children:[
@@ -311,6 +313,7 @@ const MODULOS_CONTABLE = [
     { id:"facturacion", icon:IC.facturacion, label:"Gestion financiera" },
     { id:"contabilidad", icon:IC.facturacion, label:"Contabilidad" },
     { id:"nominas", icon:IC.facturacion, label:"Nominas" },
+    { id:"control_horario", icon:IC.cuadrante, label:"Control horario" },
     { id:"informes", icon:IC.rendimiento, label:"Informes" },
     { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
     { id:"documentos", icon:IC.docs, label:"Documentos" },
@@ -355,6 +358,7 @@ const MODULOS_TRAFICO = [
     { id:"taller", icon:IC.taller, label:"Taller" },
     { id:"explotacion", icon:IC.explotacion, label:"Explotacion" },
     { id:"hojas_ruta", icon:IC.docs, label:"Hojas de Ruta" },
+    { id:"control_horario", icon:IC.cuadrante, label:"Control horario" },
   ]},
   { titulo:"Gestion", items:[
     { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
@@ -437,6 +441,7 @@ const VISTAS = {
   cuadrante_choferes:  <CuadranteChoferes />,
   empresa:             <Empresa />,
   hojas_ruta:          <HojasRuta />,
+  control_horario:     <ControlHorario />,
   gestion_trafico:     <GestionTrafico />,
   rutas_recomendadas:  <GestionTrafico initialVista="optimizacion" />,
   rutas_recomendadas_chofer: <GestionTrafico initialVista="optimizacion" soloOptimizacion />,
@@ -484,6 +489,7 @@ const GUIDED_MODULE_LABELS = {
   hojas_ruta: "Hojas de ruta",
   gastos_estructura: "Gastos de estructura",
   nominas: "Nominas",
+  control_horario: "Control horario",
   facturacion: "Facturacion",
   contabilidad: "Contabilidad",
   informes: "Informes",

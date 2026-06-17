@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getFacturas, getPedidos, getVehiculos, getChoferes, getTallerEstado, getInformeGestion, getRentabilidadOperativa, getCargasRetorno, prepararSolicitudRetornoCarrier, enviarSolicitudRetornoCarrier, actualizarSolicitudRetornoCarrier, getScoringOperativo, getEmisionesOperativas, getDatosMaestrosReadiness, getCumplimientoEuropeo, getObjetivos, setObjetivo, getEmpresaConfig, setConfigPrecios } from "../services/api";
+import { getFacturas, getPedidos, getVehiculos, getChoferes, getTallerEstado, getInformeGestion, getBiResumen, getRentabilidadOperativa, getCargasRetorno, prepararSolicitudRetornoCarrier, enviarSolicitudRetornoCarrier, actualizarSolicitudRetornoCarrier, getScoringOperativo, getEmisionesOperativas, getDatosMaestrosReadiness, getCumplimientoEuropeo, getObjetivos, setObjetivo, getEmpresaConfig, setConfigPrecios } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
@@ -193,6 +193,7 @@ export default function Informes() {
   const [objForm,  setObjForm]  = useState({});
   const [taller, setTaller] = useState({ stock:[], reparaciones:[] });
   const [kpisBackend, setKpisBackend] = useState(null);
+  const [biResumen, setBiResumen] = useState(null);
   const [rentabilidadOperativa, setRentabilidadOperativa] = useState(null);
   const [cargasRetorno, setCargasRetorno] = useState(null);
   const [scoringOperativo, setScoringOperativo] = useState(null);
@@ -258,14 +259,16 @@ export default function Informes() {
     let alive = true;
     Promise.all([
       getInformeGestion(period).catch(() => null),
+      getBiResumen(period).catch(() => null),
       getRentabilidadOperativa(period).catch(() => null),
       getCargasRetorno(period).catch(() => null),
       getScoringOperativo(period).catch(() => null),
       getEmisionesOperativas(period).catch(() => null),
       getCumplimientoEuropeo(period === "7d" ? 15 : period === "30d" ? 45 : period === "90d" ? 90 : 120).catch(() => null),
-    ]).then(([k, rent, retornos, scoring, emisiones, cumplimiento]) => {
+    ]).then(([k, bi, rent, retornos, scoring, emisiones, cumplimiento]) => {
       if (!alive) return;
       setKpisBackend(k);
+      setBiResumen(bi);
       setRentabilidadOperativa(rent);
       setCargasRetorno(retornos);
       setScoringOperativo(scoring);
@@ -675,6 +678,63 @@ export default function Informes() {
                     </div>
                 }
               </div>
+
+              {biResumen && (
+                <div style={S.card}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
+                    <div>
+                      <div style={S.sec}>Pulso BI</div>
+                      <div style={{fontSize:12,color:"var(--text4)"}}>
+                        Periodo {biResumen.periodo?.desde || "-"} a {biResumen.periodo?.hasta || "-"}
+                      </div>
+                    </div>
+                    <div style={{fontSize:11,color:"var(--text5)",fontWeight:800,textTransform:"uppercase"}}>
+                      {Number(biResumen.alertas?.errores_fiscales || 0) > 0 ? `${biResumen.alertas.errores_fiscales} errores fiscales` : "Fiscalidad sin bloqueos"}
+                    </div>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:12}}>
+                    {[
+                      { l:"Margen", v:`${fmt2(biResumen.kpis?.margen)} EUR`, c:Number(biResumen.kpis?.margen || 0) >= 0 ? "var(--green)" : "var(--red)" },
+                      { l:"Margen %", v:`${fmt2(biResumen.kpis?.margen_pct)}%`, c:Number(biResumen.kpis?.margen_pct || 0) >= 0 ? "var(--green)" : "var(--red)" },
+                      { l:"EUR/km", v:fmt2(biResumen.kpis?.eur_km), c:"var(--accent-xl)" },
+                      { l:"Vencido", v:`${fmt2(biResumen.kpis?.vencido)} EUR`, c:Number(biResumen.kpis?.vencido || 0) > 0 ? "#ef4444" : "var(--green)" },
+                      { l:"Pedidos", v:fmtN(biResumen.kpis?.pedidos), c:"var(--text)" },
+                    ].map((k,i)=>(
+                      <div key={i} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px"}}>
+                        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:17,fontWeight:900,color:k.c}}>{k.v}</div>
+                        <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",marginTop:4}}>{k.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"minmax(260px,1fr) minmax(260px,1fr)",gap:12}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:11,fontWeight:900,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Clientes por margen y riesgo</div>
+                      {(biResumen.clientes || []).slice(0,5).map(c=>(
+                        <div key={c.id || c.nombre} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,borderBottom:"1px solid var(--border)",padding:"7px 0"}}>
+                          <div style={{minWidth:0}}>
+                            <div style={{fontSize:12,fontWeight:800,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
+                            <div style={{fontSize:10,color:"var(--text5)"}}>{fmtN(c.pedidos)} viajes · margen {fmt2(c.margen_pct)}%</div>
+                          </div>
+                          <div style={{textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:Number(c.deuda_vencida || 0) > 0 ? "#ef4444" : "var(--green)",fontWeight:900}}>
+                            {fmt2(c.deuda_vencida || 0)} EUR venc.
+                          </div>
+                        </div>
+                      ))}
+                      {!(biResumen.clientes || []).length && <div style={{fontSize:12,color:"var(--text5)"}}>Sin clientes con movimiento en el periodo.</div>}
+                    </div>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:11,fontWeight:900,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Rutas con mas actividad</div>
+                      {(biResumen.rutas || []).slice(0,5).map((r,i)=>(
+                        <div key={`${r.origen}-${r.destino}-${i}`} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,borderBottom:"1px solid var(--border)",padding:"7px 0"}}>
+                          <div style={{fontSize:12,color:"var(--text2)",minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.origen} -> {r.destino}</div>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--accent-xl)",fontWeight:900}}>{fmtN(r.viajes)} viajes</div>
+                        </div>
+                      ))}
+                      {!(biResumen.rutas || []).length && <div style={{fontSize:12,color:"var(--text5)"}}>Sin rutas en el periodo.</div>}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
                 <div style={S.card}>

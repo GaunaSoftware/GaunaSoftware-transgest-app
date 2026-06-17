@@ -597,6 +597,9 @@ function buildFacturaFiscalPayload({ factura, cliente, empresaPerfil, lineas, co
     version: 1,
     sistema: config.modo,
     entorno: config.entorno,
+    software_nombre: config.verifactu?.software_nombre || FISCAL_DEFAULTS.verifactu.software_nombre,
+    software_id: config.verifactu?.software_id || FISCAL_DEFAULTS.verifactu.software_id,
+    software_version: config.verifactu?.software_version || FISCAL_DEFAULTS.verifactu.software_version,
     expedicion: {
       fecha_generacion: new Date().toISOString(),
       fecha_factura: factura.fecha,
@@ -648,6 +651,121 @@ function buildFacturaFiscalPayload({ factura, cliente, empresaPerfil, lineas, co
   ].join("|");
 
   return { payload, huella, qrText };
+}
+
+function xmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function tag(name, value) {
+  return `<${name}>${xmlEscape(value)}</${name}>`;
+}
+
+function buildVerifactuXmlFromPayload(payload = {}, record = {}) {
+  const e = payload.expedicion || {};
+  const emisor = payload.emisor || {};
+  const receptor = payload.receptor || {};
+  const importes = payload.importes || {};
+  const lineas = Array.isArray(payload.lineas) ? payload.lineas : [];
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<TransGestVerifactuRegistro version="1.0">
+  <Cabecera>
+    ${tag("Sistema", "VERIFACTU")}
+    ${tag("Entorno", payload.entorno || record.entorno || "pruebas")}
+    ${tag("FechaGeneracion", e.fecha_generacion || new Date().toISOString())}
+    ${tag("SoftwareNombre", payload.software_nombre || "TransGest")}
+    ${tag("SoftwareId", payload.software_id || "transgest-tms")}
+  </Cabecera>
+  <Factura>
+    ${tag("FacturaId", e.factura_id || record.factura_id || "")}
+    ${tag("Serie", e.serie || "")}
+    ${tag("Numero", e.numero || "")}
+    ${tag("FechaExpedicion", e.fecha_factura || "")}
+    ${tag("TipoFactura", e.rectificativa_de ? "R1" : "F1")}
+    ${e.rectificativa_de ? tag("RectificativaDe", e.rectificativa_de) : ""}
+  </Factura>
+  <Emisor>
+    ${tag("Nombre", emisor.nombre || "")}
+    ${tag("NIF", emisor.nif || "")}
+  </Emisor>
+  <Receptor>
+    ${tag("Nombre", receptor.nombre || "")}
+    ${tag("NIF", receptor.nif || "")}
+    ${tag("Email", receptor.email || "")}
+  </Receptor>
+  <Desglose>
+    ${tag("BaseImponible", Number(importes.base_imponible || 0).toFixed(2))}
+    ${tag("TipoIVA", Number(importes.tipo_iva || 0).toFixed(2))}
+    ${tag("CuotaIVA", Number(importes.cuota_iva || 0).toFixed(2))}
+    ${tag("Total", Number(importes.total || 0).toFixed(2))}
+    ${tag("Moneda", importes.moneda || "EUR")}
+  </Desglose>
+  <Lineas>
+    ${lineas.map(l => `<Linea orden="${xmlEscape(l.orden || "")}">
+      ${tag("Concepto", l.concepto || "")}
+      ${tag("Cantidad", Number(l.cantidad || 0).toFixed(2))}
+      ${tag("PrecioUnitario", Number(l.precio_unitario || 0).toFixed(4))}
+      ${tag("Subtotal", Number(l.subtotal || 0).toFixed(2))}
+    </Linea>`).join("\n    ")}
+  </Lineas>
+  <Encadenado>
+    ${tag("Huella", record.huella || "")}
+    ${tag("HashAnterior", record.hash_anterior || "")}
+    ${tag("QR", record.qr_text || "")}
+  </Encadenado>
+</TransGestVerifactuRegistro>`;
+}
+
+function buildSiiXmlFromPayload(payload = {}, record = {}) {
+  const e = payload.expedicion || {};
+  const emisor = payload.emisor || {};
+  const receptor = payload.receptor || {};
+  const importes = payload.importes || {};
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<TransGestSiiFacturaEmitida version="1.0">
+  <Cabecera>
+    ${tag("Sistema", "SII")}
+    ${tag("Entorno", payload.entorno || record.entorno || "pruebas")}
+    ${tag("TitularNombre", emisor.nombre || "")}
+    ${tag("TitularNIF", emisor.nif || "")}
+  </Cabecera>
+  <RegistroLRFacturasEmitidas>
+    <IDFactura>
+      ${tag("IDEmisorFactura", emisor.nif || "")}
+      ${tag("NumSerieFacturaEmisor", e.numero || "")}
+      ${tag("FechaExpedicionFacturaEmisor", e.fecha_factura || "")}
+    </IDFactura>
+    ${tag("TipoFactura", e.rectificativa_de ? "R1" : "F1")}
+    ${tag("ClaveRegimenEspecialOTrascendencia", "01")}
+    <Contraparte>
+      ${tag("NombreRazon", receptor.nombre || "")}
+      ${tag("NIF", receptor.nif || "")}
+    </Contraparte>
+    <Importes>
+      ${tag("BaseImponible", Number(importes.base_imponible || 0).toFixed(2))}
+      ${tag("TipoImpositivo", Number(importes.tipo_iva || 0).toFixed(2))}
+      ${tag("CuotaRepercutida", Number(importes.cuota_iva || 0).toFixed(2))}
+      ${tag("ImporteTotal", Number(importes.total || 0).toFixed(2))}
+    </Importes>
+    <TrazabilidadTransGest>
+      ${tag("FacturaId", e.factura_id || record.factura_id || "")}
+      ${tag("Huella", record.huella || "")}
+      ${tag("HashAnterior", record.hash_anterior || "")}
+    </TrazabilidadTransGest>
+  </RegistroLRFacturasEmitidas>
+</TransGestSiiFacturaEmitida>`;
+}
+
+function buildFiscalXml(record = {}) {
+  const payload = record.payload || {};
+  return String(record.modo || payload.sistema || "").toLowerCase() === "sii"
+    ? buildSiiXmlFromPayload(payload, record)
+    : buildVerifactuXmlFromPayload(payload, record);
 }
 
 async function appendFiscalEvent(client, recordId, facturaId, empresaId, eventType, detail = {}) {
@@ -796,4 +914,5 @@ module.exports = {
   saveEmpresaFiscalTestResult,
   getEmpresaFiscalQueueSummary,
   ensureFacturaFiscalRecord,
+  buildFiscalXml,
 };

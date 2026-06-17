@@ -138,7 +138,7 @@ export function setUser(u) {
 
 // ── Fetch base ────────────────────────────────────────
 async function apiFetch(path, options = {}) {
-  const { silentSuccess = false, ...fetchOptions } = options;
+  const { silentSuccess = false, silentError = false, ...fetchOptions } = options;
   const token = getToken();
   let res;
   try {
@@ -154,7 +154,7 @@ async function apiFetch(path, options = {}) {
   } catch (e) {
     const message = friendlyApiError(e.message, 0, null, path);
     rememberApiError({ status: 0, path, request_id: null, error: e.message || null });
-    notifyError(message);
+    if (!silentError) notifyError(message);
     throw new Error(message);
   }
 
@@ -195,7 +195,7 @@ async function apiFetch(path, options = {}) {
       request_id: requestId,
       error: data.error || data.message || data.mensaje || validationMsg || data.raw_text || null
     });
-    if (!data.requiere_confirmacion) notifyError(message, res.status);
+    if (!data.requiere_confirmacion && !silentError) notifyError(message, res.status);
     const err = new Error(message);
     err.status = res.status;
     err.data = data;
@@ -396,6 +396,8 @@ export const getFactura     = (id)        => apiFetch(`/facturas/${id}`);
 export const getFacturaFiscal = (id)      => apiFetch(`/facturas/${id}/fiscal`);
 export const reencolarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/requeue`, { method:"POST", body:{} });
 export const sincronizarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/sincronizar`, { method:"POST", body:{} });
+export const facturaFiscalXmlUrl = (id) => `${BASE}/api/v1/facturas/${encodeURIComponent(id)}/fiscal/xml`;
+export const facturasFiscalLoteXmlUrl = (params={}) => `${BASE}/api/v1/facturas/fiscal/export-lote.xml?${new URLSearchParams(params)}`;
 export const getControlCobros = ()        => apiFetch("/facturas/control-cobros");
 export const getBloqueosDocumentalesCobro = () => apiFetch("/facturas/bloqueos-documentales");
 export const getControlCobrosConfig = ()  => apiFetch("/facturas/control-cobros/config");
@@ -535,6 +537,7 @@ export const borrarDocChofer   = (choferId, docId)   => apiFetch(`/docs/chofer/$
 // ── Informes ──────────────────────────────────────────
 export const getDashboard   = (desde,hasta) => apiFetch(`/informes/dashboard?desde=${desde}&hasta=${hasta}`);
 export const getInformeGestion = (period="30d") => apiFetch(`/informes/gestion?period=${encodeURIComponent(period)}`);
+export const getBiResumen = (periodo="30d") => apiFetch(`/informes/bi/resumen?periodo=${encodeURIComponent(periodo)}`, { silentSuccess:true });
 export const getRentabilidadOperativa = (period="30d") => apiFetch(`/informes/rentabilidad-operativa?period=${encodeURIComponent(period)}`);
 export const getCargasRetorno = (period="30d") => apiFetch(`/informes/cargas-retorno?period=${encodeURIComponent(period)}`);
 export const prepararSolicitudRetornoCarrier = (data) => apiFetch("/informes/cargas-retorno/solicitud", { method:"POST", body:data });
@@ -551,7 +554,7 @@ export const actualizarExcepcionOperativa = (key, data) => apiFetch(`/informes/e
 export const getNotificaciones = (limit=50) => apiFetch(`/notificaciones?limit=${encodeURIComponent(limit)}`);
 export const marcarNotificacionLeida = (id) => apiFetch(`/notificaciones/${encodeURIComponent(id)}/leida`, { method:"PATCH", body:{} });
 export const marcarTodasNotificacionesLeidas = () => apiFetch("/notificaciones/leer-todas", { method:"POST", body:{} });
-export const getAvisosOperativosColaboradores = () => apiFetch("/notificaciones/operativas/colaboradores", { silentSuccess:true });
+export const getAvisosOperativosColaboradores = () => apiFetch("/notificaciones/operativas/colaboradores", { silentSuccess:true, silentError:true });
 export const getAvisosOperativosIgnorados = (params={}) => apiFetch(`/notificaciones/operativas/ignorados?${new URLSearchParams(params)}`, { silentSuccess:true });
 export const crearAgendaAvisoOperativoColaborador = (alert, data = {}) =>
   apiFetch("/notificaciones/operativas/colaboradores/agenda", { method:"POST", body:{ alert, ...data } });
@@ -644,6 +647,14 @@ export const getEmpresaFiscalConfig = () => apiFetch("/empresa/fiscal-config");
 export const saveEmpresaFiscalConfig = (data) => apiFetch("/empresa/fiscal-config", { method:"PUT", body:data });
 export const testEmpresaFiscalConfig = () => apiFetch("/empresa/fiscal-config/test", { method:"POST", body:{} });
 export const getEmpresaFiscalQueueSummary = () => apiFetch("/empresa/fiscal-config/queue-summary");
+
+export const getMiControlHorario = () => apiFetch("/control-horario/mi-jornada", { silentSuccess:true });
+export const ficharControlHorario = (data) => apiFetch("/control-horario/fichar", { method:"POST", body:data });
+export const getControlHorario = (params={}) => apiFetch(`/control-horario?${new URLSearchParams(params)}`, { silentSuccess:true });
+export const getControlHorarioResumen = (params={}) => apiFetch(`/control-horario/resumen?${new URLSearchParams(params)}`, { silentSuccess:true });
+export const editarControlHorario = (id, data) => apiFetch(`/control-horario/${id}`, { method:"PUT", body:data });
+export const controlHorarioCsvUrl = (params={}) => `${BASE}/api/v1/control-horario/export.csv?${new URLSearchParams(params)}`;
+export const extraerDocumentoIA = (data) => apiFetch("/ia/documento/extraer", { method:"POST", body:data, silentSuccess:true });
 export const getEmpresaIntegracionesStatus = () => apiFetch("/empresa/integraciones/status");
 
 // ── Config email (local) ──────────────────────────────

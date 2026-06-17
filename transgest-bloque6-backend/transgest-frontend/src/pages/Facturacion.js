@@ -1,6 +1,6 @@
 import { getLogoDataUrl } from "../services/logoHelper";
 import { useState, useEffect, useCallback , useMemo } from "react";
-import { getFacturas, getFactura, getFacturaFiscal, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig } from "../services/api";
+import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
@@ -1994,6 +1994,52 @@ export default function Facturacion() {
     }
   }
 
+  async function descargarXmlFiscal(facturaId) {
+    try {
+      const token = localStorage.getItem("tms_token") || "";
+      const res = await fetch(facturaFiscalXmlUrl(facturaId), { headers:{ Authorization:`Bearer ${token}` } });
+      if (!res.ok) throw new Error("No se pudo descargar el XML fiscal.");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `fiscal-${facturaId}.xml`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify("XML fiscal descargado.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo descargar el XML fiscal.", "error");
+    }
+  }
+
+  async function descargarLoteXmlFiscal() {
+    try {
+      const token = localStorage.getItem("tms_token") || "";
+      const params = {
+        desde: fechaDesde || "",
+        hasta: fechaHasta || "",
+        estado: fiscalEstadoFiltro || "todos",
+        modo: fiscalModoFiltro || "todos",
+      };
+      const res = await fetch(facturasFiscalLoteXmlUrl(params), { headers:{ Authorization:`Bearer ${token}` } });
+      if (!res.ok) throw new Error("No se pudo descargar el lote XML fiscal.");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `lote-fiscal-${new Date().toISOString().slice(0,10)}.xml`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify("Lote XML fiscal descargado.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo descargar el lote XML fiscal.", "error");
+    }
+  }
+
   function descargarInformeCobros() {
     try {
       const html = buildCobrosReportHtml({ controlCobros, cobrosCfg, facturas });
@@ -2435,6 +2481,9 @@ export default function Facturacion() {
               Procesar cola fiscal
             </button>
           )}
+          <button onClick={descargarLoteXmlFiscal} style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)"}}>
+            Descargar lote XML
+          </button>
           {[
             ["Aceptados", fiscalInfo.aceptados, "var(--green)"],
             ["Pendientes", fiscalInfo.pendientes, "#f59e0b"],
@@ -2470,6 +2519,9 @@ export default function Facturacion() {
                 <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
                   <button onClick={()=>abrirFacturaPorId(item.factura_id)} style={{...S.btn,background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.25)",padding:"5px 8px"}}>
                     Ver factura
+                  </button>
+                  <button onClick={()=>descargarXmlFiscal(item.factura_id)} style={{...S.btn,background:"rgba(148,163,184,.12)",color:"var(--text3)",border:"1px solid rgba(148,163,184,.25)",padding:"5px 8px"}}>
+                    XML
                   </button>
                   {canEdit && item.estado_envio !== "aceptado" && (
                     <button

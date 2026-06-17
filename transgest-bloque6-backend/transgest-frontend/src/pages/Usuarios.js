@@ -58,6 +58,7 @@ const MODULOS_PERM = [
   ["facturacion", "Facturacion"],
   ["contabilidad", "Contabilidad"],
   ["nominas", "Nominas"],
+  ["control_horario", "Control horario"],
   ["informes", "Informes KPI"],
   ["excepciones", "Excepciones operativas"],
   ["documentos", "Documentos"],
@@ -76,16 +77,16 @@ const ALL_MODULE_IDS = MODULOS_PERM.map(m => m.id);
 const ROLE_PRESETS = {
   gerente: { ver: ALL_MODULE_IDS, editar: ALL_MODULE_IDS },
   contable: {
-    ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","nominas","informes","documentos","avisos","empresa","mi_cuenta"],
-    editar: ["agenda","clientes","facturacion","contabilidad","nominas","documentos","avisos","mi_cuenta"],
+    ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","nominas","control_horario","informes","documentos","avisos","empresa","mi_cuenta"],
+    editar: ["agenda","clientes","facturacion","contabilidad","nominas","control_horario","documentos","avisos","mi_cuenta"],
   },
   trafico: {
-    ver: ["agenda","dashboard","control_tower","copiloto_operativo","pedidos","plan_diario","solicitudes","gestion_trafico","calculador_portes","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","taller","hojas_ruta","documentos","avisos","mi_cuenta"],
-    editar: ["agenda","control_tower","copiloto_operativo","pedidos","plan_diario","solicitudes","gestion_trafico","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","hojas_ruta","documentos","avisos","mi_cuenta"],
+    ver: ["agenda","dashboard","control_tower","copiloto_operativo","pedidos","plan_diario","solicitudes","gestion_trafico","calculador_portes","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","taller","hojas_ruta","control_horario","documentos","avisos","mi_cuenta"],
+    editar: ["agenda","control_tower","copiloto_operativo","pedidos","plan_diario","solicitudes","gestion_trafico","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","hojas_ruta","control_horario","documentos","avisos","mi_cuenta"],
   },
   administrativo: {
-    ver: ["agenda","dashboard","pedidos","plan_diario","solicitudes","clientes","rutas","vehiculos","choferes","palets","facturacion","contabilidad","nominas","informes","documentos","avisos","empresa","mi_cuenta"],
-    editar: ["agenda","pedidos","plan_diario","solicitudes","clientes","palets","facturacion","documentos","avisos","mi_cuenta"],
+    ver: ["agenda","dashboard","pedidos","plan_diario","solicitudes","clientes","rutas","vehiculos","choferes","palets","facturacion","contabilidad","nominas","control_horario","informes","documentos","avisos","empresa","mi_cuenta"],
+    editar: ["agenda","pedidos","plan_diario","solicitudes","clientes","palets","facturacion","control_horario","documentos","avisos","mi_cuenta"],
   },
   responsable_taller: {
     ver: ["agenda","dashboard","vehiculos","choferes","taller","documentos","avisos","mi_cuenta"],

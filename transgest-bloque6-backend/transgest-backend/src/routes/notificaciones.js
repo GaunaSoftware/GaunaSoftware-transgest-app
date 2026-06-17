@@ -36,6 +36,50 @@ function daysFromToday(value) {
 }
 
 async function ensureAvisosOperativosSchema() {
+  await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_precio_confirmado_at TIMESTAMPTZ").catch(() => {});
+  await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_carga_confirmada_at TIMESTAMPTZ").catch(() => {});
+  await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_en_camino_confirmada_at TIMESTAMPTZ").catch(() => {});
+  await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_descarga_confirmada_at TIMESTAMPTZ").catch(() => {});
+  await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_workflow_enviado_at TIMESTAMPTZ").catch(() => {});
+  await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_colaborador NUMERIC(10,2)").catch(() => {});
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS pedido_colaborador_pagos (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      pedido_id UUID NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+      empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      colaborador_id UUID REFERENCES colaboradores(id) ON DELETE SET NULL,
+      factura_nombre VARCHAR(255),
+      factura_data TEXT,
+      fecha_recepcion DATE,
+      fecha_pago_calculada DATE,
+      fecha_pago_real DATE,
+      importe NUMERIC(12,2) DEFAULT 0,
+      pagado BOOLEAN NOT NULL DEFAULT false,
+      documentacion_recibida BOOLEAN NOT NULL DEFAULT false,
+      fecha_documentacion_recepcion DATE,
+      notas_pago TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (pedido_id, empresa_id)
+    )
+  `).catch(() => {});
+  await db.query("ALTER TABLE pedido_colaborador_pagos ADD COLUMN IF NOT EXISTS factura_nombre VARCHAR(255)").catch(() => {});
+  await db.query("ALTER TABLE pedido_colaborador_pagos ADD COLUMN IF NOT EXISTS factura_data TEXT").catch(() => {});
+  await db.query("ALTER TABLE pedido_colaborador_pagos ADD COLUMN IF NOT EXISTS documentacion_recibida BOOLEAN NOT NULL DEFAULT false").catch(() => {});
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS pedido_docs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      pedido_id UUID NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+      empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      nombre VARCHAR(255) NOT NULL,
+      tipo VARCHAR(80),
+      file_base64 TEXT,
+      file_mime VARCHAR(120),
+      file_size_kb INTEGER,
+      notas TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {});
   await db.query(`
     CREATE TABLE IF NOT EXISTS avisos_operativos_ignorados (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -181,7 +225,9 @@ async function listarAvisosColaboradores(req) {
   if (!empresaId || !usuarioId) return { items: [], resumen: {} };
   if (!ROLES_OPERATIVOS.has(rol)) return { items: [], resumen: { total: 0 } };
 
-  const { rows } = await db.query(
+  let rows = [];
+  try {
+    const result = await db.query(
     `SELECT p.id, p.numero, p.estado, p.fecha_pedido, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
             p.precio_colaborador, p.colaborador_id,
             p.colaborador_workflow_enviado_at, p.colaborador_precio_confirmado_at,
@@ -213,7 +259,15 @@ async function listarAvisosColaboradores(req) {
       ORDER BY COALESCE(p.fecha_carga,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
       LIMIT 250`,
     [empresaId]
-  );
+    );
+    rows = result.rows || [];
+  } catch (error) {
+    if (["42703", "42P01", "42883"].includes(error.code)) {
+      console.warn("[avisos_colaboradores] esquema incompleto; se omiten avisos operativos", error.message);
+      return { items: [], resumen: { total: 0, warning: "schema_pending" } };
+    }
+    throw error;
+  }
 
   const ignored = await db.query(
     "SELECT alert_key FROM avisos_operativos_ignorados WHERE empresa_id=$1 AND usuario_id=$2",

@@ -53,6 +53,7 @@ const agendaRoutes        = require("./routes/agenda");
 const accountingSsoRoutes = require("./routes/accounting_sso");
 const whatsappRoutes      = require("./routes/whatsapp");
 const planDiarioRoutes    = require("./routes/plan_diario");
+const controlHorarioRoutes = require("./routes/control_horario");
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -260,6 +261,7 @@ safeUse(`${api}/actividad`,      authenticate, requireModulePermission("activida
 safeUse(`${api}/portal-cliente`, authenticate, portalClientePermission, clientePortalRoutes);
 safeUse(`${api}/agenda`,         authenticate, requireModulePermission("agenda"), agendaRoutes);
 safeUse(`${api}/plan-diario`,    authenticate, requireModulePermission("plan_diario"), planDiarioRoutes);
+safeUse(`${api}/control-horario`, authenticate, requireModulePermission("control_horario"), controlHorarioRoutes);
 safeUse(`${api}/accounting`,      accountingSsoRoutes);
 safeUse(`${api}`,               authenticate, requireModulePermission("gestion_trafico"), descargasRoutes);
 

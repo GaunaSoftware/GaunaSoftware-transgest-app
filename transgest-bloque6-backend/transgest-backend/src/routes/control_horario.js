@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../services/db");
 const { authenticate } = require("../middleware/auth");
+const { crearNotificacion } = require("../services/notificaciones");
 
 const router = express.Router();
 router.use(authenticate);
@@ -33,6 +34,14 @@ function ensureSchema() {
       await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS pausa_total_min INTEGER NOT NULL DEFAULT 0");
       await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS modalidad VARCHAR(30) NOT NULL DEFAULT 'oficina'");
       await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS ubicacion TEXT");
+      await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS entrada_lat NUMERIC(11,8)");
+      await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS entrada_lng NUMERIC(11,8)");
+      await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS entrada_accuracy_m NUMERIC(10,2)");
+      await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS salida_lat NUMERIC(11,8)");
+      await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS salida_lng NUMERIC(11,8)");
+      await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS salida_accuracy_m NUMERIC(10,2)");
+      await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS ubicacion_estado VARCHAR(40)");
+      await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS ubicacion_distancia_m INTEGER");
       await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS ajuste_motivo TEXT");
       await db.query("ALTER TABLE oficina_fichajes ADD COLUMN IF NOT EXISTS ajustado_por UUID REFERENCES usuarios(id) ON DELETE SET NULL");
       await db.query("CREATE INDEX IF NOT EXISTS idx_oficina_fichajes_empresa_fecha ON oficina_fichajes(empresa_id, fecha DESC)");
@@ -79,6 +88,92 @@ function minutesBetween(a, b) {
   return Math.max(0, Math.round((dbb - da) / 60000));
 }
 
+function numOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeGps(raw = {}) {
+  const lat = numOrNull(raw.lat ?? raw.latitude);
+  const lng = numOrNull(raw.lng ?? raw.lon ?? raw.longitude);
+  if (lat == null || lng == null) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return {
+    lat,
+    lng,
+    accuracy_m: Math.max(0, Math.round(Number(raw.accuracy ?? raw.accuracy_m ?? 0) || 0)),
+  };
+}
+
+function distanceMeters(a, b) {
+  if (!a || !b) return null;
+  const toRad = (v) => (Number(v) * Math.PI) / 180;
+  const r = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * r * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x)));
+}
+
+async function getControlConfig(empresaId, client = db) {
+  const { rows } = await client.query("SELECT cfg_precios FROM empresas WHERE id=$1", [empresaId]).catch(() => ({ rows: [] }));
+  const cfg = rows[0]?.cfg_precios && typeof rows[0].cfg_precios === "object" ? rows[0].cfg_precios : {};
+  const control = cfg.control_horario && typeof cfg.control_horario === "object" ? cfg.control_horario : {};
+  const lat = numOrNull(control.base_lat);
+  const lng = numOrNull(control.base_lng);
+  const radio = Math.max(50, Math.round(Number(control.radio_m || 250) || 250));
+  return {
+    base_lat: lat,
+    base_lng: lng,
+    radio_m: radio,
+    nombre_base: String(control.nombre_base || "Base empresa").trim() || "Base empresa",
+    configurada: lat != null && lng != null,
+  };
+}
+
+function evalUbicacion(gps, cfg) {
+  if (!gps) return { estado: "sin_ubicacion", distancia_m: null, fuera_radio: false };
+  if (!cfg?.configurada) return { estado: "sin_base_configurada", distancia_m: null, fuera_radio: false };
+  const distancia = distanceMeters(gps, { lat: cfg.base_lat, lng: cfg.base_lng });
+  const fuera = distancia != null && distancia > Number(cfg.radio_m || 250);
+  return { estado: fuera ? "fuera_radio" : "ok", distancia_m: distancia, fuera_radio: fuera };
+}
+
+async function notificarGerenciaUbicacion({ req, usuarioNombre, accion, gps, evalGps, cfg }) {
+  if (!evalGps?.fuera_radio) return;
+  const empresaIdValue = empresaId(req);
+  const { rows } = await db.query(
+    `SELECT id FROM usuarios
+      WHERE empresa_id=$1
+        AND rol='gerente'
+        AND activo IS DISTINCT FROM false`,
+    [empresaIdValue]
+  ).catch(() => ({ rows: [] }));
+  const titulo = "Fichaje fuera de ubicacion";
+  const mensaje = `${usuarioNombre || req.user?.nombre || "Usuario"} ha fichado ${accion} a ${evalGps.distancia_m || "?"} m de ${cfg.nombre_base || "la base"}.`;
+  await Promise.all(rows.map(g => crearNotificacion({
+    empresa_id: empresaIdValue,
+    usuario_id: g.id,
+    tipo: "control_horario_ubicacion",
+    titulo,
+    mensaje,
+    data: {
+      accion,
+      usuario_id: req.user.id,
+      usuario_nombre: usuarioNombre || req.user?.nombre || "",
+      lat: gps?.lat,
+      lng: gps?.lng,
+      accuracy_m: gps?.accuracy_m,
+      distancia_m: evalGps.distancia_m,
+      radio_m: cfg.radio_m,
+      dedupe_key: `control_horario_ubicacion:${req.user.id}:${dateOnly()}:${accion}`,
+    },
+    created_by: req.user.id,
+  }).catch(() => null)));
+}
+
 function computeRow(row = {}) {
   const now = new Date();
   const pausaLive = row.pausa_inicio_at && !row.salida_at ? minutesBetween(row.pausa_inicio_at, now) : 0;
@@ -120,6 +215,28 @@ router.get("/mi-jornada", async (req, res) => {
   res.json(await getToday(req));
 });
 
+router.get("/config", async (req, res) => {
+  await ensureSchema();
+  res.json(await getControlConfig(empresaId(req)));
+});
+
+router.put("/config", async (req, res) => {
+  await ensureSchema();
+  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia/administracion puede configurar la ubicacion de control horario." });
+  const gps = normalizeGps(req.body || {});
+  if (!gps) return res.status(400).json({ error: "Ubicacion GPS no valida." });
+  const radio = Math.max(50, Math.round(Number(req.body?.radio_m || 250) || 250));
+  const nombre = String(req.body?.nombre_base || "Base empresa").trim().slice(0, 80) || "Base empresa";
+  const cfg = { base_lat: gps.lat, base_lng: gps.lng, radio_m: radio, nombre_base: nombre };
+  await db.query(
+    `UPDATE empresas
+        SET cfg_precios=jsonb_set(COALESCE(cfg_precios,'{}'::jsonb), '{control_horario}', $1::jsonb, true)
+      WHERE id=$2`,
+    [JSON.stringify(cfg), empresaId(req)]
+  );
+  res.json({ ...cfg, configurada: true });
+});
+
 router.post("/fichar", async (req, res) => {
   await ensureSchema();
   const accion = String(req.body?.accion || "").trim().toLowerCase();
@@ -128,8 +245,14 @@ router.post("/fichar", async (req, res) => {
     : "oficina";
   const ubicacion = String(req.body?.ubicacion || "").trim().slice(0, 240);
   const notas = String(req.body?.notas || "").trim().slice(0, 500);
+  const gps = normalizeGps(req.body?.ubicacion_gps || req.body?.gps || req.body || {});
+  if (["entrada", "salida"].includes(accion) && !gps) {
+    return res.status(400).json({ error: "Activa la ubicacion del navegador para fichar entrada o salida." });
+  }
 
   const out = await db.transaction(async (client) => {
+    const cfg = await getControlConfig(empresaId(req), client);
+    const evalGps = evalUbicacion(gps, cfg);
     let jornada = await getToday(req, client);
     if (!jornada && accion !== "entrada") {
       const err = new Error("Primero debes fichar entrada.");
@@ -139,19 +262,24 @@ router.post("/fichar", async (req, res) => {
 
     if (accion === "entrada") {
       const { rows } = await client.query(
-        `INSERT INTO oficina_fichajes (empresa_id,usuario_id,fecha,entrada_at,estado,modalidad,ubicacion,notas)
-         VALUES ($1,$2,CURRENT_DATE,NOW(),'abierto',$3,$4,$5)
+        `INSERT INTO oficina_fichajes (empresa_id,usuario_id,fecha,entrada_at,estado,modalidad,ubicacion,notas,entrada_lat,entrada_lng,entrada_accuracy_m,ubicacion_estado,ubicacion_distancia_m)
+         VALUES ($1,$2,CURRENT_DATE,NOW(),'abierto',$3,$4,$5,$6,$7,$8,$9,$10)
          ON CONFLICT (empresa_id, usuario_id, fecha) DO UPDATE
            SET entrada_at=COALESCE(oficina_fichajes.entrada_at, NOW()),
                estado=CASE WHEN oficina_fichajes.salida_at IS NULL THEN 'abierto' ELSE oficina_fichajes.estado END,
                modalidad=EXCLUDED.modalidad,
                ubicacion=COALESCE(NULLIF(EXCLUDED.ubicacion,''), oficina_fichajes.ubicacion),
                notas=COALESCE(NULLIF(EXCLUDED.notas,''), oficina_fichajes.notas),
+               entrada_lat=COALESCE(oficina_fichajes.entrada_lat, EXCLUDED.entrada_lat),
+               entrada_lng=COALESCE(oficina_fichajes.entrada_lng, EXCLUDED.entrada_lng),
+               entrada_accuracy_m=COALESCE(oficina_fichajes.entrada_accuracy_m, EXCLUDED.entrada_accuracy_m),
+               ubicacion_estado=EXCLUDED.ubicacion_estado,
+               ubicacion_distancia_m=EXCLUDED.ubicacion_distancia_m,
                updated_at=NOW()
          RETURNING *`,
-        [empresaId(req), req.user.id, modalidad, ubicacion, notas]
+        [empresaId(req), req.user.id, modalidad, ubicacion, notas, gps?.lat || null, gps?.lng || null, gps?.accuracy_m || null, evalGps.estado, evalGps.distancia_m]
       );
-      await logEvento(client, req, rows[0].id, req.user.id, "entrada", { modalidad, ubicacion });
+      await logEvento(client, req, rows[0].id, req.user.id, "entrada", { modalidad, ubicacion, gps, ubicacion_estado: evalGps.estado, distancia_m: evalGps.distancia_m });
       return computeRow(rows[0]);
     }
 
@@ -190,16 +318,32 @@ router.post("/fichar", async (req, res) => {
                 pausa_inicio_at=NULL,
                 estado='cerrado',
                 notas=COALESCE(NULLIF($2,''), notas),
+                salida_lat=$5,
+                salida_lng=$6,
+                salida_accuracy_m=$7,
+                ubicacion_estado=$8,
+                ubicacion_distancia_m=$9,
                 updated_at=NOW()
           WHERE id=$3 AND empresa_id=$4 RETURNING *`,
-        [extra, notas, jornada.id, empresaId(req)]
+        [extra, notas, jornada.id, empresaId(req), gps?.lat || null, gps?.lng || null, gps?.accuracy_m || null, evalGps.estado, evalGps.distancia_m]
       );
-      await logEvento(client, req, jornada.id, req.user.id, "salida", { pausa_extra_min: extra });
+      await logEvento(client, req, jornada.id, req.user.id, "salida", { pausa_extra_min: extra, gps, ubicacion_estado: evalGps.estado, distancia_m: evalGps.distancia_m });
       return computeRow(rows[0]);
     }
 
     throw Object.assign(new Error("Accion de fichaje no valida."), { status: 400 });
   });
+  if (["entrada", "salida"].includes(accion) && out?.ubicacion_estado === "fuera_radio") {
+    const cfg = await getControlConfig(empresaId(req));
+    await notificarGerenciaUbicacion({
+      req,
+      usuarioNombre: req.user?.nombre || out?.usuario_nombre || "",
+      accion,
+      gps,
+      evalGps: { fuera_radio: true, distancia_m: Number(out.ubicacion_distancia_m || 0) || null },
+      cfg,
+    });
+  }
   res.json(out);
 });
 
@@ -317,7 +461,8 @@ router.get("/export.csv", async (req, res) => {
   const { rows } = await db.query(
     `SELECT f.fecha, u.nombre, u.email, u.rol, f.entrada_at, f.salida_at, f.pausa_total_min,
             GREATEST(0, ROUND(EXTRACT(EPOCH FROM (COALESCE(f.salida_at,NOW())-f.entrada_at))/60 - f.pausa_total_min))::int AS trabajado_min,
-            f.estado, f.modalidad, f.ubicacion, f.notas
+            f.estado, f.modalidad, f.ubicacion, f.ubicacion_estado, f.ubicacion_distancia_m,
+            f.entrada_lat, f.entrada_lng, f.salida_lat, f.salida_lng, f.notas
        FROM oficina_fichajes f JOIN usuarios u ON u.id=f.usuario_id
       WHERE f.empresa_id=$1 AND f.fecha BETWEEN $2 AND $3
       ORDER BY f.fecha DESC, u.nombre`,
@@ -325,8 +470,8 @@ router.get("/export.csv", async (req, res) => {
   );
   const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const csv = [
-    ["fecha","usuario","email","rol","entrada","salida","pausa_min","trabajado_min","estado","modalidad","ubicacion","notas"].map(esc).join(";"),
-    ...rows.map(r => [r.fecha, r.nombre, r.email, r.rol, r.entrada_at, r.salida_at, r.pausa_total_min, r.trabajado_min, r.estado, r.modalidad, r.ubicacion, r.notas].map(esc).join(";")),
+    ["fecha","usuario","email","rol","entrada","salida","pausa_min","trabajado_min","estado","modalidad","ubicacion","ubicacion_estado","distancia_base_m","entrada_lat","entrada_lng","salida_lat","salida_lng","notas"].map(esc).join(";"),
+    ...rows.map(r => [r.fecha, r.nombre, r.email, r.rol, r.entrada_at, r.salida_at, r.pausa_total_min, r.trabajado_min, r.estado, r.modalidad, r.ubicacion, r.ubicacion_estado, r.ubicacion_distancia_m, r.entrada_lat, r.entrada_lng, r.salida_lat, r.salida_lng, r.notas].map(esc).join(";")),
   ].join("\n");
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="control-horario-${desde}-${hasta}.csv"`);

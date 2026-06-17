@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getControlHorario, getControlHorarioResumen, getMiControlHorario, ficharControlHorario, editarControlHorario, controlHorarioCsvUrl } from "../services/api";
+import { getControlHorario, getControlHorarioResumen, getMiControlHorario, ficharControlHorario, editarControlHorario, controlHorarioCsvUrl, getControlHorarioConfig, saveControlHorarioConfig } from "../services/api";
 import { notify } from "../services/notify";
 import { useAuth } from "../context/AuthContext";
 
@@ -37,6 +37,24 @@ function monthStartIso() {
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
 }
 
+function pedirUbicacion() {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      reject(new Error("Este navegador no permite obtener ubicacion."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      }),
+      err => reject(new Error(err?.message || "No se pudo obtener la ubicacion.")),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+    );
+  });
+}
+
 export default function ControlHorario() {
   const { user } = useAuth();
   const canManage = ["gerente", "contable", "administrativo"].includes(user?.rol);
@@ -50,6 +68,8 @@ export default function ControlHorario() {
   const [notas, setNotas] = useState("");
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);
+  const [gpsStatus, setGpsStatus] = useState("");
+  const [controlCfg, setControlCfg] = useState(null);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -62,6 +82,7 @@ export default function ControlHorario() {
       setMiJornada(m);
       setResumen(r);
       setItems(Array.isArray(l) ? l : []);
+      getControlHorarioConfig().then(setControlCfg).catch(() => {});
     } finally {
       setLoading(false);
     }
@@ -82,12 +103,40 @@ export default function ControlHorario() {
   async function fichar(accion) {
     if (accion === "entrada" && miJornada?.salida_at) return;
     try {
-      await ficharControlHorario({ accion, modalidad, ubicacion, notas });
+      let ubicacion_gps = null;
+      if (["entrada", "salida"].includes(accion)) {
+        setGpsStatus("Solicitando ubicacion...");
+        ubicacion_gps = await pedirUbicacion();
+        setGpsStatus(`Ubicacion capturada (${Math.round(Number(ubicacion_gps.accuracy || 0))} m).`);
+      }
+      await ficharControlHorario({ accion, modalidad, ubicacion, notas, ubicacion_gps });
       notify("Fichaje registrado.", "success");
       setNotas("");
       await cargar();
     } catch (e) {
+      setGpsStatus(e.message || "No se pudo obtener la ubicacion.");
       notify(e.message || "No se pudo registrar el fichaje.", "error");
+    }
+  }
+
+  async function fijarBaseEmpresa() {
+    if (!canManage) return;
+    try {
+      setGpsStatus("Solicitando ubicacion para fijar base...");
+      const gps = await pedirUbicacion();
+      const saved = await saveControlHorarioConfig({
+        lat: gps.lat,
+        lng: gps.lng,
+        accuracy: gps.accuracy,
+        radio_m: controlCfg?.radio_m || 250,
+        nombre_base: controlCfg?.nombre_base || "Base empresa",
+      });
+      setControlCfg(saved);
+      setGpsStatus("Base de control horario actualizada.");
+      notify("Ubicacion base guardada.", "success");
+    } catch (e) {
+      setGpsStatus(e.message || "No se pudo fijar la base.");
+      notify(e.message || "No se pudo fijar la ubicacion base.", "error");
     }
   }
 
@@ -140,6 +189,27 @@ export default function ControlHorario() {
             <Mini label="Salida" value={fmtDt(miJornada?.salida_at)} />
             <Mini label="Pausas" value={minToClock(miJornada?.pausa_total_live_min)} />
           </div>
+          <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 10px",marginBottom:10,display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Ubicacion de fichaje</div>
+              <div style={{fontSize:12,color:controlCfg?.configurada ? "var(--text3)" : "#f59e0b",fontWeight:800,marginTop:2}}>
+                {controlCfg?.configurada
+                  ? `${controlCfg.nombre_base || "Base empresa"} · radio ${controlCfg.radio_m || 250} m`
+                  : "Base GPS de empresa sin configurar"}
+              </div>
+              {gpsStatus && <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{gpsStatus}</div>}
+              {miJornada?.ubicacion_estado && (
+                <div style={{fontSize:11,color:miJornada.ubicacion_estado==="fuera_radio" ? "#ef4444" : "var(--green)",fontWeight:800,marginTop:3}}>
+                  Ultimo control: {miJornada.ubicacion_estado}{miJornada.ubicacion_distancia_m != null ? ` · ${miJornada.ubicacion_distancia_m} m` : ""}
+                </div>
+              )}
+            </div>
+            {canManage && (
+              <button onClick={fijarBaseEmpresa} style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)"}}>
+                Usar mi ubicacion como base
+              </button>
+            )}
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8,marginBottom:10}}>
             <div><label style={S.lbl}>Modalidad</label><select style={{...S.inp,width:"100%"}} value={modalidad} onChange={e=>setModalidad(e.target.value)}><option value="oficina">Oficina</option><option value="teletrabajo">Teletrabajo</option><option value="visita">Visita</option><option value="otro">Otro</option></select></div>
             <div><label style={S.lbl}>Ubicacion</label><input style={{...S.inp,width:"100%"}} value={ubicacion} onChange={e=>setUbicacion(e.target.value)} placeholder="Oficina, casa, cliente..." /></div>
@@ -190,7 +260,7 @@ export default function ControlHorario() {
         {loading ? <div style={{color:"var(--text4)",fontSize:12}}>Cargando...</div> : (
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",minWidth:860}}>
-              <thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Usuario</th><th style={S.th}>Entrada</th><th style={S.th}>Salida</th><th style={S.th}>Pausa</th><th style={S.th}>Trabajado</th><th style={S.th}>Estado</th><th style={S.th}>Modalidad</th><th style={S.th}>Acciones</th></tr></thead>
+              <thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Usuario</th><th style={S.th}>Entrada</th><th style={S.th}>Salida</th><th style={S.th}>Pausa</th><th style={S.th}>Trabajado</th><th style={S.th}>Estado</th><th style={S.th}>Modalidad</th><th style={S.th}>Ubicacion</th><th style={S.th}>Acciones</th></tr></thead>
               <tbody>
                 {items.map(row => (
                   <tr key={row.id}>
@@ -202,10 +272,15 @@ export default function ControlHorario() {
                     <td style={S.td}><b>{minToClock(row.trabajado_min)}</b></td>
                     <td style={S.td}><span style={{color:row.estado==="cerrado"?"var(--green)":"#f59e0b",fontWeight:900}}>{row.en_pausa ? "pausa" : row.estado}</span></td>
                     <td style={S.td}>{row.modalidad || "-"}</td>
+                    <td style={S.td}>
+                      <span style={{color:row.ubicacion_estado==="fuera_radio"?"#ef4444":"var(--text3)",fontWeight:800}}>{row.ubicacion_estado || "-"}</span>
+                      {row.ubicacion_distancia_m != null && <div style={{color:"var(--text5)",fontSize:10}}>{row.ubicacion_distancia_m} m</div>}
+                      {row.ubicacion && <div style={{color:"var(--text5)",fontSize:10}}>{row.ubicacion}</div>}
+                    </td>
                     <td style={S.td}>{canManage && <button onClick={()=>setEdit({...row, motivo:""})} style={{...S.btn,padding:"5px 8px",background:"var(--bg4)",color:"var(--text)",border:"1px solid var(--border2)"}}>Editar</button>}</td>
                   </tr>
                 ))}
-                {!items.length && <tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Sin fichajes en el periodo.</td></tr>}
+                {!items.length && <tr><td colSpan={10} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Sin fichajes en el periodo.</td></tr>}
               </tbody>
             </table>
           </div>

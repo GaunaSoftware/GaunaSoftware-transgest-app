@@ -49,8 +49,8 @@ router.get("/bi/resumen", async (req, res) => {
         COUNT(*) FILTER (WHERE estado IN ('entregado','facturado'))::int AS completados,
         COALESCE(SUM(importe),0)::numeric AS venta,
         COALESCE(SUM(precio_colaborador),0)::numeric AS coste_colaborador,
-        COALESCE(SUM(km),0)::numeric AS km,
-        COALESCE(AVG(NULLIF(km,0)),0)::numeric AS km_medio,
+        COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)),0)::numeric AS km,
+        COALESCE(AVG(NULLIF(COALESCE(km_ruta,0) + COALESCE(km_vacio,0),0)),0)::numeric AS km_medio,
         COALESCE(AVG(EXTRACT(EPOCH FROM (fecha_descarga::timestamp - fecha_carga::timestamp))/86400) FILTER (WHERE fecha_descarga IS NOT NULL AND fecha_carga IS NOT NULL),0)::numeric AS dias_medio
       FROM pedidos
       WHERE empresa_id=$1 AND COALESCE(fecha_carga, fecha_pedido, created_at::date) BETWEEN $2 AND $3
@@ -86,7 +86,7 @@ router.get("/bi/resumen", async (req, res) => {
       SELECT COALESCE(NULLIF(origen,''),'Sin origen') AS origen,
              COALESCE(NULLIF(destino,''),'Sin destino') AS destino,
              COUNT(*)::int AS viajes,
-             COALESCE(AVG(NULLIF(km,0)),0)::numeric AS km_medio,
+             COALESCE(AVG(NULLIF(COALESCE(km_ruta,0) + COALESCE(km_vacio,0),0)),0)::numeric AS km_medio,
              COALESCE(SUM(importe),0)::numeric AS venta,
              COALESCE(SUM(importe - COALESCE(precio_colaborador,0)),0)::numeric AS margen
         FROM pedidos

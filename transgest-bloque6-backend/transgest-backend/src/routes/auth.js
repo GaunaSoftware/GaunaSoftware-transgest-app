@@ -15,11 +15,21 @@ async function ensureAuthSchema() {
   if (authSchemaReady) return;
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trafico_config JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS logo_base64 TEXT").catch(() => {});
+  await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
   authSchemaReady = true;
 }
 
 function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function logoDataUrl(row = {}) {
+  const logo = String(row.logo_base64 || "").trim();
+  if (!logo) return "";
+  if (logo.startsWith("data:")) return logo;
+  const mime = String(row.logo_mime || "image/png").trim() || "image/png";
+  return `data:${mime};base64,${logo}`;
 }
 
 async function auditLogin({ user, identifier, ok, req, motivo }) {
@@ -44,6 +54,35 @@ async function auditLogin({ user, identifier, ok, req, motivo }) {
 }
 
 // ── POST /api/v1/auth/login ───────────────────────────
+router.get("/login-brand", async (req, res) => {
+  const identifier = String(req.query.identifier || req.query.email || req.query.usuario || "").trim().toLowerCase();
+  if (!identifier || identifier.length < 3) return res.json({ found: false });
+  try {
+    await ensureAuthSchema();
+    const { rows } = await db.query(
+      `SELECT e.nombre, e.razon_social, e.logo_base64, e.cfg_precios->>'logo_mime' AS logo_mime,
+              u.rol
+         FROM usuarios u
+         JOIN empresas e ON e.id=u.empresa_id
+        WHERE (LOWER(u.email)=$1 OR LOWER(u.username)=$1)
+          AND u.activo IS DISTINCT FROM false
+        LIMIT 1`,
+      [identifier]
+    );
+    const row = rows[0];
+    if (!row) return res.json({ found: false });
+    res.json({
+      found: true,
+      empresa_nombre: row.nombre || row.razon_social || "",
+      portal_cliente: ["cliente", "cliente_portal"].includes(String(row.rol || "").toLowerCase()),
+      logo_url: logoDataUrl(row),
+    });
+  } catch (err) {
+    logger.debug("login_brand omitido: " + err.message);
+    res.json({ found: false });
+  }
+});
+
 router.post("/login",
   body("email").optional().isString().trim().isLength({ min: 1 }),
   body("usuario").optional().isString().trim().isLength({ min: 1 }),

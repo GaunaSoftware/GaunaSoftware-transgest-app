@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { BRAND_NAME, getBrandDisplayName, getBrandVersionLabel } from "../branding";
-import { getPublicAppMeta, healthCheck } from "../services/api";
+import { getLoginBrand, getPublicAppMeta, healthCheck } from "../services/api";
 import { confirmDialog } from "../services/notify";
 import { getEmpresaPlanLocal } from "../utils/planFeatures";
 import transgestLogoDark from "../assets/brand/transgest_logo_dark.svg";
@@ -16,6 +16,7 @@ const S = {
   logo: { textAlign:"center", marginBottom:28, display:"flex", flexDirection:"column", alignItems:"center", gap:8 },
   logoBox: { display:"flex", flexDirection:"column", alignItems:"center", gap:12, width:"100%" },
   logoImage: { width:"100%", maxWidth:290, height:"auto", display:"block" },
+  companyLogoImage: { width:"100%", maxWidth:230, maxHeight:120, objectFit:"contain", display:"block" },
   logoEdition: { display:"inline-flex", alignItems:"center", minHeight:28, padding:"0 12px", borderRadius:999, background:"rgba(15,118,110,.12)", color:"#0f766e", fontSize:11, fontWeight:900, letterSpacing:".04em", border:"1px solid rgba(15,118,110,.18)" },
   logoSub:  { fontSize:12, color:"var(--text4)", marginTop:2 },
   err: { background:"rgba(240,82,82,.1)", border:"1px solid rgba(240,82,82,.25)",
@@ -43,6 +44,7 @@ export default function Login() {
   const plan = getEmpresaPlanLocal();
   const brandDisplayName = getBrandDisplayName(plan);
   const [appMeta, setAppMeta] = useState(null);
+  const [loginBrand, setLoginBrand] = useState(null);
   const versionLabel = getBrandVersionLabel(appMeta);
   const [email, setEmail] = useState("");
   const [pass,  setPass]  = useState("");
@@ -71,6 +73,24 @@ export default function Login() {
     checkServerStatus();
     getPublicAppMeta().then(setAppMeta).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const identifier = email.trim();
+    if (identifier.length < 3) {
+      setLoginBrand(null);
+      return undefined;
+    }
+    let alive = true;
+    const timer = setTimeout(() => {
+      getLoginBrand(identifier)
+        .then(data => { if (alive) setLoginBrand(data?.found ? data : null); })
+        .catch(() => { if (alive) setLoginBrand(null); });
+    }, 350);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [email]);
 
   async function handleLogin(e) {
     e?.preventDefault();
@@ -110,10 +130,22 @@ export default function Login() {
         {/* Logo */}
         <div style={S.logo}>
           <div style={S.logoBox} aria-label={`${brandDisplayName} ${versionLabel}`}>
-            <img src={transgestLogoDark} alt={brandDisplayName} style={S.logoImage} />
-            <div style={S.logoEdition}>{brandDisplayName} · {versionLabel}</div>
+            <img
+              src={loginBrand?.logo_url || transgestLogoDark}
+              alt={loginBrand?.empresa_nombre || brandDisplayName}
+              style={loginBrand?.logo_url ? S.companyLogoImage : S.logoImage}
+            />
+            <div style={S.logoEdition}>
+              {loginBrand?.portal_cliente && loginBrand?.empresa_nombre
+                ? `Portal cliente - ${loginBrand.empresa_nombre}`
+                : `${brandDisplayName} - ${versionLabel}`}
+            </div>
           </div>
-          <div style={S.logoSub}>Sistema de gestion de transporte</div>
+          <div style={S.logoSub}>
+            {loginBrand?.empresa_nombre && !loginBrand?.portal_cliente
+              ? `Acceso ${loginBrand.empresa_nombre}`
+              : "Sistema de gestion de transporte"}
+          </div>
         </div>
 
         {error && <div style={S.err}>{error}</div>}

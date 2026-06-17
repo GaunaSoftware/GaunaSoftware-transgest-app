@@ -536,22 +536,22 @@ export const borrarDocChofer   = (choferId, docId)   => apiFetch(`/docs/chofer/$
 
 // ── Informes ──────────────────────────────────────────
 export const getDashboard   = (desde,hasta) => apiFetch(`/informes/dashboard?desde=${desde}&hasta=${hasta}`);
-export const getInformeGestion = (period="30d") => apiFetch(`/informes/gestion?period=${encodeURIComponent(period)}`);
-export const getBiResumen = (periodo="30d") => apiFetch(`/informes/bi/resumen?periodo=${encodeURIComponent(periodo)}`, { silentSuccess:true });
-export const getRentabilidadOperativa = (period="30d") => apiFetch(`/informes/rentabilidad-operativa?period=${encodeURIComponent(period)}`);
-export const getCargasRetorno = (period="30d") => apiFetch(`/informes/cargas-retorno?period=${encodeURIComponent(period)}`);
+export const getInformeGestion = (period="30d") => apiFetch(`/informes/gestion?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
+export const getBiResumen = (periodo="30d") => apiFetch(`/informes/bi/resumen?periodo=${encodeURIComponent(periodo)}`, { silentSuccess:true, silentError:true });
+export const getRentabilidadOperativa = (period="30d") => apiFetch(`/informes/rentabilidad-operativa?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
+export const getCargasRetorno = (period="30d") => apiFetch(`/informes/cargas-retorno?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
 export const prepararSolicitudRetornoCarrier = (data) => apiFetch("/informes/cargas-retorno/solicitud", { method:"POST", body:data });
 export const enviarSolicitudRetornoCarrier = (data) => apiFetch("/informes/cargas-retorno/solicitud/enviar", { method:"POST", body:data });
 export const actualizarSolicitudRetornoCarrier = (id, data) => apiFetch(`/informes/cargas-retorno/solicitudes/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
-export const getScoringOperativo = (period="90d") => apiFetch(`/informes/scoring-operativo?period=${encodeURIComponent(period)}`);
-export const getEmisionesOperativas = (period="90d") => apiFetch(`/informes/emisiones-operativas?period=${encodeURIComponent(period)}`);
-export const getDatosMaestrosReadiness = () => apiFetch("/informes/datos-maestros-readiness");
-export const getCumplimientoEuropeo = (days=45) => apiFetch(`/informes/cumplimiento-europeo?days=${encodeURIComponent(days)}`);
-export const getControlTower = (period="7d") => apiFetch(`/informes/control-tower?period=${encodeURIComponent(period)}`);
-export const getCopilotoOperativo = (period="7d") => apiFetch(`/informes/copiloto-operativo?period=${encodeURIComponent(period)}`);
-export const getExcepcionesOperativas = () => apiFetch("/informes/excepciones");
+export const getScoringOperativo = (period="90d") => apiFetch(`/informes/scoring-operativo?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
+export const getEmisionesOperativas = (period="90d") => apiFetch(`/informes/emisiones-operativas?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
+export const getDatosMaestrosReadiness = () => apiFetch("/informes/datos-maestros-readiness", { silentSuccess:true, silentError:true });
+export const getCumplimientoEuropeo = (days=45) => apiFetch(`/informes/cumplimiento-europeo?days=${encodeURIComponent(days)}`, { silentSuccess:true, silentError:true });
+export const getControlTower = (period="7d") => apiFetch(`/informes/control-tower?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
+export const getCopilotoOperativo = (period="7d") => apiFetch(`/informes/copiloto-operativo?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
+export const getExcepcionesOperativas = () => apiFetch("/informes/excepciones", { silentSuccess:true, silentError:true });
 export const actualizarExcepcionOperativa = (key, data) => apiFetch(`/informes/excepciones/${encodeURIComponent(key)}`, { method:"PATCH", body:data });
-export const getNotificaciones = (limit=50) => apiFetch(`/notificaciones?limit=${encodeURIComponent(limit)}`);
+export const getNotificaciones = (limit=50) => apiFetch(`/notificaciones?limit=${encodeURIComponent(limit)}`, { silentSuccess:true, silentError:true });
 export const marcarNotificacionLeida = (id) => apiFetch(`/notificaciones/${encodeURIComponent(id)}/leida`, { method:"PATCH", body:{} });
 export const marcarTodasNotificacionesLeidas = () => apiFetch("/notificaciones/leer-todas", { method:"POST", body:{} });
 export const getAvisosOperativosColaboradores = () => apiFetch("/notificaciones/operativas/colaboradores", { silentSuccess:true, silentError:true });
@@ -580,7 +580,7 @@ export const responderPortalClienteReprogramacion = (id, data) => apiFetch(`/por
 export const getPortalPedidoAlbaranes = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/albaranes`);
 export const getPortalPedidoEventos = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/eventos`);
 export const getPortalPedidoDocumentoControl = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/documento-control`);
-export const getPortalSolicitudesAdmin = (params={}) => apiFetch(`/portal-cliente/admin/solicitudes?${new URLSearchParams(params)}`);
+export const getPortalSolicitudesAdmin = (params={}) => apiFetch(`/portal-cliente/admin/solicitudes?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
 export const actualizarPortalSolicitudAdmin = (id, data) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
 export const convertirPortalSolicitudAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/convertir`, { method:"POST", body:{} });
 export const getPortalSolicitudEventosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/eventos`);
@@ -610,6 +610,12 @@ export const getPublicAppMeta = async () => {
   const meta = data?.app_meta || {};
   if (typeof window !== "undefined") window.__TMS_APP_META = meta;
   return meta;
+};
+export const getLoginBrand = async (identifier) => {
+  const q = new URLSearchParams({ identifier: String(identifier || "").trim() });
+  const res = await fetch(`${BASE}/api/v1/auth/login-brand?${q.toString()}`);
+  if (!res.ok) return { found:false };
+  return fixMojibakePayload(await res.json().catch(() => ({ found:false })));
 };
 
 // ── Rutas por cliente ─────────────────────────────────
@@ -652,6 +658,8 @@ export const getMiControlHorario = () => apiFetch("/control-horario/mi-jornada",
 export const ficharControlHorario = (data) => apiFetch("/control-horario/fichar", { method:"POST", body:data });
 export const getControlHorario = (params={}) => apiFetch(`/control-horario?${new URLSearchParams(params)}`, { silentSuccess:true });
 export const getControlHorarioResumen = (params={}) => apiFetch(`/control-horario/resumen?${new URLSearchParams(params)}`, { silentSuccess:true });
+export const getControlHorarioConfig = () => apiFetch("/control-horario/config", { silentSuccess:true, silentError:true });
+export const saveControlHorarioConfig = (data) => apiFetch("/control-horario/config", { method:"PUT", body:data });
 export const editarControlHorario = (id, data) => apiFetch(`/control-horario/${id}`, { method:"PUT", body:data });
 export const controlHorarioCsvUrl = (params={}) => `${BASE}/api/v1/control-horario/export.csv?${new URLSearchParams(params)}`;
 export const extraerDocumentoIA = (data) => apiFetch("/ia/documento/extraer", { method:"POST", body:data, silentSuccess:true });

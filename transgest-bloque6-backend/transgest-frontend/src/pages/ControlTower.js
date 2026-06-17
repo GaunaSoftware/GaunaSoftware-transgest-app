@@ -214,7 +214,18 @@ export default function ControlTower() {
         <div style={{color:"var(--text4)",padding:40,textAlign:"center"}}>Cargando Control Tower...</div>
       ) : visible.length === 0 ? (
         <div style={S.card}>
-          <div style={{fontSize:13,color:"var(--green)",fontWeight:800}}>No hay senales en esta vista.</div>
+          <div style={{fontSize:14,color:"var(--green)",fontWeight:900,marginBottom:6}}>Sin senales activas en esta vista</div>
+          <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:12}}>
+            No se han detectado retrasos, incidencias, margen bajo, documentos pendientes, cobros en riesgo o GPS sin senal para este filtro.
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button onClick={()=>navegar("gestion_trafico")} style={{border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:7,padding:"7px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Abrir trafico
+            </button>
+            <button onClick={()=>navegar("excepciones")} style={{border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:7,padding:"7px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Ver excepciones
+            </button>
+          </div>
         </div>
       ) : (
         <div style={{display:"grid",gap:16}}>

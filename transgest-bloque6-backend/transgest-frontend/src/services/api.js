@@ -25,9 +25,11 @@ function rememberApiError(entry) {
   const item = {
     ts: new Date().toISOString(),
     status: entry.status || 0,
+    method: entry.method || "GET",
     path: entry.path || "",
     request_id: entry.request_id || null,
     error: entry.error || null,
+    message: entry.message || null,
   };
   window.__TMS_LAST_API_ERROR = item;
   try {
@@ -140,6 +142,7 @@ export function setUser(u) {
 async function apiFetch(path, options = {}) {
   const { silentSuccess = false, silentError = false, ...fetchOptions } = options;
   const token = getToken();
+  const method = String(fetchOptions.method || "GET").toUpperCase();
   let res;
   try {
     res = await fetch(`${BASE}/api/v1${path}`, {
@@ -153,7 +156,7 @@ async function apiFetch(path, options = {}) {
     });
   } catch (e) {
     const message = friendlyApiError(e.message, 0, null, path);
-    rememberApiError({ status: 0, path, request_id: null, error: e.message || null });
+    rememberApiError({ status: 0, method, path, request_id: null, error: e.message || null, message });
     if (!silentError) notifyError(message);
     throw new Error(message);
   }
@@ -191,18 +194,20 @@ async function apiFetch(path, options = {}) {
     );
     rememberApiError({
       status: res.status,
+      method,
       path,
       request_id: requestId,
-      error: data.error || data.message || data.mensaje || validationMsg || data.raw_text || null
+      error: data.error || data.message || data.mensaje || validationMsg || data.raw_text || null,
+      message,
     });
-    if (!data.requiere_confirmacion && !silentError) notifyError(message, res.status);
+    const autoNotify = method !== "GET" || res.status < 500;
+    if (!data.requiere_confirmacion && !silentError && autoNotify) notifyError(message, res.status);
     const err = new Error(message);
     err.status = res.status;
     err.data = data;
     err.request_id = requestId;
     throw err;
   }
-  const method = String(fetchOptions.method || "GET").toUpperCase();
   if (!silentSuccess && ["POST","PUT","PATCH","DELETE"].includes(method) && !path.startsWith("/auth/")) {
     const msg = method === "DELETE" ? "Eliminado correctamente." : "Cambios guardados correctamente.";
     notifySuccess(data?.message || data?.mensaje || msg);
@@ -340,8 +345,15 @@ export const enlazarPedidoRetorno = (id, data) => apiFetch(`/pedidos/${id}/ida-r
 export const desvincularPedidoRetorno = (id) => apiFetch(`/pedidos/${id}/ida-retorno`, { method:"DELETE" });
 export const getPedidoRentabilidadPredictiva = (id) => apiFetch(`/pedidos/${id}/rentabilidad-predictiva`);
 export const getPedidoDocumentoControl = (id) => apiFetch(`/pedidos/${id}/documento-control-digital`);
+export const generarPedidoDocumentoControl = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/generar`, { method:"POST", body:{}, silentSuccess:true });
 export const getPedidoDocumentoControlExport = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/export`);
 export const getPedidoDocumentoControlFirmaPaquete = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/firma-paquete`);
+export const getPedidoRegulatoryCoreExport = (id, params = {}) =>
+  apiFetch(`/pedidos/${id}/regulatory-core/export?${new URLSearchParams(params)}`, { silentSuccess:true });
+export const getPedidoRegulatoryPayload = (id, type) =>
+  apiFetch(`/pedidos/${id}/regulatory-core/payload/${encodeURIComponent(type)}`, { silentSuccess:true });
+export const crearPedidoRegulatoryTransmissionDraft = (id, data = {}) =>
+  apiFetch(`/pedidos/${id}/regulatory-core/transmission-draft`, { method:"POST", body:data, silentSuccess:true });
 export const getDocumentoControlRepositorio = (params = {}) => apiFetch(`/pedidos/documento-control-repositorio?${new URLSearchParams(params)}`);
 export const getDocumentoControlRepositorioDetalle = (id) => apiFetch(`/pedidos/documento-control-repositorio/${encodeURIComponent(id)}`);
 export const registrarPedidoDocumentoControlEvento = (id, data={}) =>
@@ -481,6 +493,12 @@ export const getChoferJornadaApp = () => apiFetch("/choferes/app/jornada");
 export const iniciarChoferJornada = (data) => apiFetch("/choferes/app/jornada/iniciar", { method:"POST", body:data, silentSuccess:true });
 export const cambiarChoferJornadaActividad = (data) => apiFetch("/choferes/app/jornada/actividad", { method:"POST", body:data, silentSuccess:true });
 export const cerrarChoferJornada = (data) => apiFetch("/choferes/app/jornada/cerrar", { method:"POST", body:data, silentSuccess:true });
+export const getChoferVacaciones = (estado = "todas") => apiFetch(`/choferes/vacaciones?estado=${encodeURIComponent(estado)}`, { silentSuccess:true });
+export const resolverChoferVacaciones = (id, data) => apiFetch(`/choferes/vacaciones/${id}/resolver`, { method:"POST", body:data });
+export const adjudicarChoferVacaciones = (data) => apiFetch("/choferes/vacaciones/adjudicar", { method:"POST", body:data });
+export const getChoferVacacionesApp = () => apiFetch("/choferes/app/vacaciones", { silentSuccess:true });
+export const solicitarChoferVacacionesApp = (data) => apiFetch("/choferes/app/vacaciones", { method:"POST", body:data });
+export const firmarChoferVacacionesApp = (id, data) => apiFetch(`/choferes/app/vacaciones/${id}/firma-aceptacion`, { method:"POST", body:data });
 
 // ── Colaboradores ─────────────────────────────────────
 export const getColaboradorVehiculos  = (cid)       => apiFetch(`/colaboradores/${cid}/vehiculos`);
@@ -526,7 +544,7 @@ export const crearColaboradorDocumento = (id, data) => apiFetch(`/colaboradores/
 export const borrarColaboradorDocumento = (id, docId) => apiFetch(`/colaboradores/${id}/documentos/${docId}`, { method:"DELETE" });
 
 // ── Documentos ────────────────────────────────────────
-export const getDocsProximosVencer = ()   => apiFetch("/docs/proximos-vencer");
+export const getDocsProximosVencer = ()   => apiFetch("/docs/proximos-vencer", { silentSuccess:true, silentError:true });
 export const getDocsVehiculo = (id)       => apiFetch(`/docs/vehiculo/${id}`);
 export const getDocsChofer   = (id)       => apiFetch(`/docs/chofer/${id}`);
 export const crearDocVehiculo= (id,data)  => apiFetch(`/docs/vehiculo/${id}`, { method:"POST", body:data });
@@ -560,9 +578,9 @@ export const crearAgendaAvisoOperativoColaborador = (alert, data = {}) =>
   apiFetch("/notificaciones/operativas/colaboradores/agenda", { method:"POST", body:{ alert, ...data } });
 export const ignorarAvisoOperativoColaborador = (alert, motivo = "") =>
   apiFetch("/notificaciones/operativas/colaboradores/ignorar", { method:"POST", body:{ alert, motivo } });
-export const getActividad = (params={}) => apiFetch(`/actividad?${new URLSearchParams(params)}`);
-export const getAgendaUsuarios = () => apiFetch("/agenda/usuarios");
-export const getAgendaEventos = (params={}) => apiFetch(`/agenda?${new URLSearchParams(params)}`);
+export const getActividad = (params={}) => apiFetch(`/actividad?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
+export const getAgendaUsuarios = () => apiFetch("/agenda/usuarios", { silentSuccess:true, silentError:true });
+export const getAgendaEventos = (params={}) => apiFetch(`/agenda?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
 export const crearAgendaEvento = (data) => apiFetch("/agenda", { method:"POST", body:data });
 export const editarAgendaEvento = (id, data) => apiFetch(`/agenda/${id}`, { method:"PATCH", body:data });
 export const borrarAgendaEvento = (id) => apiFetch(`/agenda/${id}`, { method:"DELETE" });
@@ -660,6 +678,11 @@ export const getControlHorario = (params={}) => apiFetch(`/control-horario?${new
 export const getControlHorarioResumen = (params={}) => apiFetch(`/control-horario/resumen?${new URLSearchParams(params)}`, { silentSuccess:true });
 export const getControlHorarioConfig = () => apiFetch("/control-horario/config", { silentSuccess:true, silentError:true });
 export const saveControlHorarioConfig = (data) => apiFetch("/control-horario/config", { method:"PUT", body:data });
+export const getTeletrabajoSolicitudes = (params={}) => apiFetch(`/control-horario/teletrabajo?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
+export const crearTeletrabajoSolicitud = (data) => apiFetch("/control-horario/teletrabajo", { method:"POST", body:data });
+export const resolverTeletrabajoSolicitud = (id, data) => apiFetch(`/control-horario/teletrabajo/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
+export const getJornadaConfig = (params={}) => apiFetch(`/control-horario/jornada-config?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
+export const saveJornadaConfig = (data) => apiFetch("/control-horario/jornada-config", { method:"PUT", body:data });
 export const editarControlHorario = (id, data) => apiFetch(`/control-horario/${id}`, { method:"PUT", body:data });
 export const controlHorarioCsvUrl = (params={}) => `${BASE}/api/v1/control-horario/export.csv?${new URLSearchParams(params)}`;
 export const extraerDocumentoIA = (data) => apiFetch("/ia/documento/extraer", { method:"POST", body:data, silentSuccess:true });
@@ -733,10 +756,10 @@ export const setConfigAlertas      = (data)    => apiFetch("/empresa/config/aler
 export const getCalendarioLaboral  = (params={}) => apiFetch(`/empresa/calendario-laboral?${new URLSearchParams(params)}`);
 export const getCalendarioLaboralCcaa = ()     => apiFetch("/empresa/calendario-laboral/ccaa");
 export const actualizarKmVehiculo  = (id, km)  => apiFetch(`/vehiculos/${id}/km`, { method:"PATCH", body:{ km_actuales: km } });
-export const getAlertasDocVehiculos = ()       => apiFetch("/vehiculos/alertas-doc");
+export const getAlertasDocVehiculos = ()       => apiFetch("/vehiculos/alertas-doc", { silentSuccess:true, silentError:true });
 
 // ── Taller ────────────────────────────────────────────
-export const getTallerEstado       = ()        => apiFetch("/taller/estado");
+export const getTallerEstado       = ()        => apiFetch("/taller/estado", { silentSuccess:true, silentError:true });
 export const guardarTallerEstado   = (data)    => apiFetch("/taller/estado", { method:"PUT", body:data });
 export const getTallerSolicitudes  = ()        => apiFetch("/taller/solicitudes");
 export const crearTallerSolicitud  = (data)    => apiFetch("/taller/solicitudes", { method:"POST", body:data });
@@ -808,11 +831,11 @@ export const crearTractoraPeriodo = (data)    => apiFetch("/empresa/tractora-per
 export const eliminarPedido = (id) => apiFetch(`/pedidos/${id}`, {method:"DELETE"});
 
 // ── Clientes pendientes revisión ─────────────────────────────────────────
-export const getClientesPendientesRevision = () => apiFetch("/clientes/pendientes-revision");
+export const getClientesPendientesRevision = () => apiFetch("/clientes/pendientes-revision", { silentSuccess:true, silentError:true });
 export const marcarClienteRevisado = (id)   => apiFetch(`/clientes/${id}/revision`, {method:"PATCH"});
 
 // ── Desvincular pedido de factura ────────────────────────────────────────
-export const getColaboradoresPendientesRevision = () => apiFetch("/colaboradores/pendientes-revision");
+export const getColaboradoresPendientesRevision = () => apiFetch("/colaboradores/pendientes-revision", { silentSuccess:true, silentError:true });
 export const marcarColaboradorRevisado = (id) => apiFetch(`/colaboradores/${id}/revision`, {method:"PATCH"});
 
 export const desvincularFacturaPedido = (id) => apiFetch(`/pedidos/${id}/factura`, { method: 'DELETE' });

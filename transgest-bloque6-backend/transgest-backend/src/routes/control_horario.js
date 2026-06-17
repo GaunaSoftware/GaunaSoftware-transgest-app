@@ -59,6 +59,35 @@ function ensureSchema() {
         )
       `);
       await db.query("CREATE INDEX IF NOT EXISTS idx_oficina_fichaje_eventos_fichaje ON oficina_fichaje_eventos(fichaje_id, created_at DESC)");
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS oficina_teletrabajo_solicitudes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+          fecha DATE NOT NULL,
+          motivo TEXT,
+          estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+          resuelto_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+          resuelto_at TIMESTAMPTZ,
+          comentario_resolucion TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await db.query("CREATE INDEX IF NOT EXISTS idx_teletrabajo_empresa_estado ON oficina_teletrabajo_solicitudes(empresa_id, estado, fecha)").catch(() => {});
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS oficina_jornada_config (
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+          hora_entrada VARCHAR(5) NOT NULL DEFAULT '08:00',
+          hora_salida VARCHAR(5) NOT NULL DEFAULT '17:00',
+          pausa_min INTEGER NOT NULL DEFAULT 60,
+          extras_requieren_aprobacion BOOLEAN NOT NULL DEFAULT true,
+          updated_by UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (empresa_id, usuario_id)
+        )
+      `);
     }).catch(err => {
       schemaReady = null;
       throw err;
@@ -174,6 +203,24 @@ async function notificarGerenciaUbicacion({ req, usuarioNombre, accion, gps, eva
   }).catch(() => null)));
 }
 
+async function notificarGerentes(req, { tipo, titulo, mensaje, data = {} }) {
+  const empresaIdValue = empresaId(req);
+  const { rows } = await db.query(
+    `SELECT id FROM usuarios
+      WHERE empresa_id=$1 AND rol='gerente' AND activo IS DISTINCT FROM false`,
+    [empresaIdValue]
+  ).catch(() => ({ rows: [] }));
+  await Promise.all(rows.map(g => crearNotificacion({
+    empresa_id: empresaIdValue,
+    usuario_id: g.id,
+    tipo,
+    titulo,
+    mensaje,
+    data,
+    created_by: req.user?.id || null,
+  }).catch(() => null)));
+}
+
 function computeRow(row = {}) {
   const now = new Date();
   const pausaLive = row.pausa_inicio_at && !row.salida_at ? minutesBetween(row.pausa_inicio_at, now) : 0;
@@ -235,6 +282,120 @@ router.put("/config", async (req, res) => {
     [JSON.stringify(cfg), empresaId(req)]
   );
   res.json({ ...cfg, configurada: true });
+});
+
+router.get("/teletrabajo", async (req, res) => {
+  await ensureSchema();
+  const eid = empresaId(req);
+  const desde = req.query.desde || dateOnly(new Date(Date.now() - 30 * 86400000));
+  const hasta = req.query.hasta || dateOnly(new Date(Date.now() + 45 * 86400000));
+  const params = [eid, desde, hasta];
+  const where = ["s.empresa_id=$1", "s.fecha BETWEEN $2 AND $3"];
+  if (!canManage(req)) {
+    params.push(req.user.id);
+    where.push(`s.usuario_id=$${params.length}`);
+  }
+  const { rows } = await db.query(
+    `SELECT s.*, u.nombre AS usuario_nombre, u.email AS usuario_email, r.nombre AS resuelto_por_nombre
+       FROM oficina_teletrabajo_solicitudes s
+       JOIN usuarios u ON u.id=s.usuario_id
+       LEFT JOIN usuarios r ON r.id=s.resuelto_por
+      WHERE ${where.join(" AND ")}
+      ORDER BY s.fecha DESC, s.created_at DESC`,
+    params
+  );
+  res.json(rows);
+});
+
+router.post("/teletrabajo", async (req, res) => {
+  await ensureSchema();
+  const fecha = dateOnly(req.body?.fecha);
+  const motivo = String(req.body?.motivo || "").trim().slice(0, 500);
+  const { rows } = await db.query(
+    `INSERT INTO oficina_teletrabajo_solicitudes (empresa_id,usuario_id,fecha,motivo)
+     VALUES ($1,$2,$3,$4)
+     RETURNING *`,
+    [empresaId(req), req.user.id, fecha, motivo]
+  );
+  await notificarGerentes(req, {
+    tipo: "teletrabajo_solicitud",
+    titulo: "Solicitud de teletrabajo",
+    mensaje: `${req.user?.nombre || req.user?.email || "Empleado"} solicita teletrabajar el ${fecha}.`,
+    data: { solicitud_id: rows[0].id, fecha, usuario_id: req.user.id, dedupe_key: `teletrabajo:${rows[0].id}` },
+  });
+  res.status(201).json(rows[0]);
+});
+
+router.patch("/teletrabajo/:id", async (req, res) => {
+  await ensureSchema();
+  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia/administracion puede resolver teletrabajo." });
+  const estado = String(req.body?.estado || "").toLowerCase();
+  if (!["aprobada", "rechazada"].includes(estado)) return res.status(400).json({ error: "Estado no valido." });
+  const comentario = String(req.body?.comentario || "").trim().slice(0, 500);
+  const { rows } = await db.query(
+    `UPDATE oficina_teletrabajo_solicitudes
+        SET estado=$1, comentario_resolucion=$2, resuelto_por=$3, resuelto_at=NOW(), updated_at=NOW()
+      WHERE id=$4 AND empresa_id=$5
+      RETURNING *`,
+    [estado, comentario, req.user.id, req.params.id, empresaId(req)]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "Solicitud no encontrada." });
+  await crearNotificacion({
+    empresa_id: empresaId(req),
+    usuario_id: rows[0].usuario_id,
+    tipo: "teletrabajo_resuelta",
+    titulo: estado === "aprobada" ? "Teletrabajo aprobado" : "Teletrabajo rechazado",
+    mensaje: `Tu solicitud de teletrabajo del ${dateOnly(rows[0].fecha)} ha sido ${estado}.`,
+    data: { solicitud_id: rows[0].id, estado, comentario },
+    created_by: req.user.id,
+  }).catch(() => null);
+  res.json(rows[0]);
+});
+
+router.get("/jornada-config", async (req, res) => {
+  await ensureSchema();
+  const usuarioId = canManage(req) && req.query.usuario_id ? req.query.usuario_id : req.user.id;
+  const { rows } = await db.query(
+    `SELECT jc.*, u.nombre AS usuario_nombre
+       FROM usuarios u
+       LEFT JOIN oficina_jornada_config jc ON jc.usuario_id=u.id AND jc.empresa_id=u.empresa_id
+      WHERE u.empresa_id=$1 AND u.id=$2`,
+    [empresaId(req), usuarioId]
+  );
+  const row = rows[0] || {};
+  res.json({
+    usuario_id: usuarioId,
+    usuario_nombre: row.usuario_nombre || "",
+    hora_entrada: row.hora_entrada || "08:00",
+    hora_salida: row.hora_salida || "17:00",
+    pausa_min: Number(row.pausa_min || 60),
+    extras_requieren_aprobacion: row.extras_requieren_aprobacion !== false,
+  });
+});
+
+router.put("/jornada-config", async (req, res) => {
+  await ensureSchema();
+  const usuarioId = canManage(req) && req.body?.usuario_id ? req.body.usuario_id : req.user.id;
+  const hhmm = (value, fallback) => (/^\d{2}:\d{2}$/.test(String(value || "")) ? String(value) : fallback);
+  const entrada = hhmm(req.body?.hora_entrada, "08:00");
+  const salida = hhmm(req.body?.hora_salida, "17:00");
+  const pausa = Math.max(0, Math.min(240, Math.round(Number(req.body?.pausa_min || 60) || 60)));
+  const extras = req.body?.extras_requieren_aprobacion !== false;
+  const { rows } = await db.query(
+    `INSERT INTO oficina_jornada_config
+      (empresa_id,usuario_id,hora_entrada,hora_salida,pausa_min,extras_requieren_aprobacion,updated_by,updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+     ON CONFLICT (empresa_id, usuario_id) DO UPDATE SET
+      hora_entrada=EXCLUDED.hora_entrada,
+      hora_salida=EXCLUDED.hora_salida,
+      pausa_min=EXCLUDED.pausa_min,
+      extras_requieren_aprobacion=EXCLUDED.extras_requieren_aprobacion,
+      updated_by=EXCLUDED.updated_by,
+      updated_at=NOW()
+     RETURNING *`,
+    [empresaId(req), usuarioId, entrada, salida, pausa, extras, req.user.id]
+  );
+  res.json(rows[0]);
 });
 
 router.post("/fichar", async (req, res) => {

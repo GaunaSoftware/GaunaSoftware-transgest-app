@@ -5,7 +5,7 @@ import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, eliminarP
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidos, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
-         getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
+         getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          getPuntosInteres as getPuntosInteresApi, chatIA, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getRutaOptimizadaPedido, optimizarRuta,
          getPedidoWhatsappPreflight, enviarPedidoWhatsapp } from "../services/api";
@@ -3546,6 +3546,9 @@ ${esCol ? `
   const docControlAvisos = Array.isArray(docControl?.status?.avisos) ? docControl.status.avisos : [];
   const docControlReadiness = docControl?.status?.readiness || {};
   const docControlExpediente = docControl?.expediente || null;
+  const regulatoryCore = docControl?.regulatory_core || null;
+  const regulatoryPayloads = Array.isArray(regulatoryCore?.payloads) ? regulatoryCore.payloads : [];
+  const regulatoryChecklist = Array.isArray(regulatoryCore?.checklist?.items) ? regulatoryCore.checklist.items : [];
   const expedienteAcciones = Array.isArray(docControlExpediente?.acciones) ? docControlExpediente.acciones : [];
   const expedienteBloqueos = Array.isArray(docControlExpediente?.bloqueos) ? docControlExpediente.bloqueos : [];
   const expedienteDocs = docControlExpediente?.documentos?.counts || {};
@@ -3572,6 +3575,20 @@ ${esCol ? `
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
+  async function generarDeCADocControl() {
+    if (!pedido?.id) return;
+    try {
+      setDocControlLoading(true);
+      const data = await generarPedidoDocumentoControl(pedido.id);
+      setDocControl(data || null);
+      notify("DeCA generado y archivado en repositorio.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo generar el DeCA.", "error");
+    } finally {
+      setDocControlLoading(false);
+    }
+  }
+
   async function descargarExportDocControl() {
     if (!pedido?.id) return;
     try {
@@ -3589,6 +3606,57 @@ ${esCol ? `
       notify("Exportacion JSON eFTI/eCMR descargada.", "success");
     } catch (e) {
       notify(e.message || "No se pudo descargar la exportacion eFTI/eCMR.", "error");
+    }
+  }
+
+  function descargarJsonLocal(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function descargarPaqueteRegulatorio() {
+    if (!pedido?.id) return;
+    try {
+      const data = await getPedidoRegulatoryCoreExport(pedido.id);
+      const filename = `transgest-regulatory-package-${pedido.numero || pedido.id}.json`;
+      descargarJsonLocal(data, filename);
+      notify("Paquete regulatorio descargado.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo descargar el paquete regulatorio.", "error");
+    }
+  }
+
+  async function descargarPayloadRegulatorio(type) {
+    if (!pedido?.id || !type) return;
+    try {
+      const data = await getPedidoRegulatoryPayload(pedido.id, type);
+      const filename = `transgest-${type}-payload-${pedido.numero || pedido.id}.json`;
+      descargarJsonLocal(data, filename);
+      notify(`Payload ${String(type).toUpperCase()} descargado.`, "success");
+    } catch (e) {
+      notify(e.message || `No se pudo descargar el payload ${type}.`, "error");
+    }
+  }
+
+  async function crearBorradorTransmisionRegulatoria(payloadType = "efti") {
+    if (!pedido?.id) return;
+    try {
+      const data = await crearPedidoRegulatoryTransmissionDraft(pedido.id, {
+        payload_type: payloadType,
+        provider: "certified_platform_pending",
+      });
+      notify(`Borrador ${payloadType.toUpperCase()} preparado: ${data?.draft?.provider || "proveedor pendiente"}.`, "success");
+      const refreshed = await getPedidoDocumentoControl(pedido.id).catch(() => null);
+      if (refreshed) setDocControl(refreshed);
+    } catch (e) {
+      notify(e.message || "No se pudo crear el borrador de transmisión regulatoria.", "error");
     }
   }
 
@@ -3744,6 +3812,14 @@ ${esCol ? `
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {docControl?.documento && (
+                <button
+                  onClick={generarDeCADocControl}
+                  disabled={docControlLoading}
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(16,185,129,.28)",background:docControlLoading?"rgba(148,163,184,.12)":"rgba(16,185,129,.10)",color:docControlLoading?"var(--text5)":"#10b981",fontSize:12,fontWeight:700,cursor:docControlLoading?"wait":"pointer"}}>
+                  {docControlLoading ? "Generando..." : "Generar DeCA"}
+                </button>
+              )}
               {docControlSupportUrl && (
                 <button
                   onClick={()=>abrirSoporteDocControl(false)}
@@ -3869,6 +3945,54 @@ ${esCol ? `
                   {expedienteAcciones.length > 0 && (
                     <div style={{color:"var(--text4)"}}>
                       Siguiente accion: {expedienteAcciones[0]}
+                    </div>
+                  )}
+                </div>
+              )}
+              {regulatoryPayloads.length > 0 && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.20)",fontSize:12,color:"var(--text3)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:7}}>
+                    <div style={{fontWeight:900,color:"var(--text)"}}>Nucleo regulatorio interno</div>
+                    {regulatoryCore?.checklist?.status && (
+                      <div style={{fontSize:11,fontWeight:900,color:regulatoryCore.checklist.status === "ready" ? "#10b981" : "#f59e0b"}}>
+                        {regulatoryCore.checklist.status === "ready" ? "Listo" : "Requiere revision"}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
+                    {regulatoryPayloads.map((p) => (
+                      <div key={p.payload_type} style={{padding:"8px 10px",borderRadius:7,background:"var(--bg3)",border:"1px solid var(--border)"}}>
+                        <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"var(--text5)",letterSpacing:".04em"}}>{p.payload_type}</div>
+                        <div style={{fontWeight:900,color:p.status === "requires_review" ? "#f59e0b" : "#10b981"}}>{p.status || "prepared"}</div>
+                        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"var(--text5)"}}>v{p.version || 1} · {(p.hash_sha256 || "").slice(0, 10) || "-"}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:9}}>
+                    <button onClick={descargarPaqueteRegulatorio} style={{border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.10)",color:"var(--accent)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      Paquete regulatorio
+                    </button>
+                    {["efti","ecmr","diwass"].map(type => (
+                      <button key={type} onClick={()=>descargarPayloadRegulatorio(type)} style={{border:"1px solid var(--border)",background:"var(--bg3)",color:"var(--text3)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                        JSON {type.toUpperCase()}
+                      </button>
+                    ))}
+                    <button onClick={()=>crearBorradorTransmisionRegulatoria("efti")} style={{border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#0f766e",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      Borrador envío eFTI
+                    </button>
+                  </div>
+                  {regulatoryChecklist.length > 0 && (
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8,marginTop:8}}>
+                      {regulatoryChecklist.map((item) => {
+                        const color = item.status === "ready" || item.status === "prepared" ? "#10b981" : item.status === "not_applicable" ? "var(--text5)" : "#f59e0b";
+                        return (
+                          <div key={item.key} title={item.detail || ""} style={{padding:"8px 10px",borderRadius:7,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                            <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"var(--text5)",letterSpacing:".04em"}}>{item.label}</div>
+                            <div style={{fontWeight:900,color}}>{item.status || "-"}</div>
+                            {!!item.missing?.length && <div style={{fontSize:10,color:"#f59e0b"}}>{item.missing.join(", ")}</div>}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

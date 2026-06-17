@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { getChoferes, editarChofer, getVehiculos } from "../services/api";
+import { useState, useEffect, useRef } from "react";
+import { getChoferes, editarChofer, getVehiculos, getChoferVacaciones, resolverChoferVacaciones, adjudicarChoferVacaciones } from "../services/api";
 import { notify } from "../services/notify";
 
 const ESTADOS_CHOFER = [
@@ -268,19 +268,110 @@ function FichaChofer({ chofer, onClose, onSaved, vehiculos=[] }) {
 // ══════════════════════════════════════════════════════════════════════
 // Componente principal
 // ══════════════════════════════════════════════════════════════════════
+function SignaturePad({ onChange }) {
+  const ref = useRef(null);
+  const drawing = useRef(false);
+  const last = useRef(null);
+  function pos(e) {
+    const rect = ref.current.getBoundingClientRect();
+    const src = e.touches?.[0] || e;
+    return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+  }
+  function start(e) { e.preventDefault(); drawing.current = true; last.current = pos(e); }
+  function move(e) {
+    e.preventDefault();
+    if (!drawing.current) return;
+    const ctx = ref.current.getContext("2d");
+    const p = pos(e);
+    ctx.beginPath();
+    ctx.strokeStyle = "#111";
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.moveTo(last.current.x, last.current.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    last.current = p;
+    onChange?.(ref.current.toDataURL("image/png"));
+  }
+  function end() { drawing.current = false; }
+  function clear() {
+    ref.current.getContext("2d").clearRect(0,0,320,150);
+    onChange?.("");
+  }
+  return (
+    <div>
+      <canvas ref={ref} width={320} height={150}
+        style={{width:"100%",height:150,border:"1px solid var(--border2)",borderRadius:8,background:"#fff",touchAction:"none"}}
+        onMouseDown={start} onMouseMove={move} onMouseUp={end}
+        onTouchStart={start} onTouchMove={move} onTouchEnd={end}/>
+      <button type="button" onClick={clear} style={{...S.btn,marginTop:6,background:"var(--bg3)",color:"var(--text4)",border:"1px solid var(--border2)",fontSize:11}}>
+        Borrar firma
+      </button>
+    </div>
+  );
+}
+
+function ModalAdjudicarVacaciones({ choferes, onClose, onSaved }) {
+  const [form, setForm] = useState({ chofer_id:"", fecha_inicio:new Date().toISOString().slice(0,10), fecha_fin:"", motivo:"", observaciones:"", nombre_firma:"", firma_png:"" });
+  const [saving, setSaving] = useState(false);
+  const f = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  async function guardar() {
+    if (!form.chofer_id || !form.fecha_inicio || !form.fecha_fin) { notify("Elige chofer y fechas", "warning"); return; }
+    setSaving(true);
+    try {
+      const firma = form.firma_png ? { firma_png: form.firma_png, nombre: form.nombre_firma || "Firma en oficina", at: new Date().toISOString(), origen:"cuadrante" } : null;
+      await adjudicarChoferVacaciones({ chofer_id: form.chofer_id, fecha_inicio: form.fecha_inicio, fecha_fin: form.fecha_fin, motivo: form.motivo, observaciones: form.observaciones, firma });
+      notify("Vacaciones registradas", "success");
+      onSaved();
+    } catch(e) { notify(e.message, "error"); }
+    finally { setSaving(false); }
+  }
+  return (
+    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{...S.mbox,width:"min(520px,96vw)"}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--text)",marginBottom:14}}>Adjudicar vacaciones</div>
+        <label style={S.lbl}>Chofer</label>
+        <select value={form.chofer_id} onChange={f("chofer_id")} style={S.sel}>
+          <option value="">Seleccionar...</option>
+          {choferes.map(c=><option key={c.id} value={c.id}>{c.nombre}{c.apellidos ? " "+c.apellidos : ""}</option>)}
+        </select>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div><label style={S.lbl}>Inicio</label><input type="date" value={form.fecha_inicio} onChange={f("fecha_inicio")} style={S.inp}/></div>
+          <div><label style={S.lbl}>Fin</label><input type="date" value={form.fecha_fin} onChange={f("fecha_fin")} style={S.inp}/></div>
+        </div>
+        <label style={S.lbl}>Motivo</label>
+        <input value={form.motivo} onChange={f("motivo")} style={S.inp} placeholder="Vacaciones anuales, acuerdo interno..."/>
+        <label style={S.lbl}>Observaciones</label>
+        <textarea value={form.observaciones} onChange={f("observaciones")} style={{...S.inp,height:70,resize:"vertical"}}/>
+        <label style={S.lbl}>Firma directa del chofer (opcional)</label>
+        <input value={form.nombre_firma} onChange={f("nombre_firma")} style={S.inp} placeholder="Nombre y apellidos de quien firma"/>
+        <div style={{marginTop:8}}><SignaturePad onChange={firma_png=>setForm(p=>({...p,firma_png}))}/></div>
+        <div style={{fontSize:11,color:"var(--text5)",marginTop:6}}>Si no se firma ahora, quedará aprobada pendiente de firma en la app del chofer.</div>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:16}}>
+          <button style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)"}} onClick={onClose}>Cancelar</button>
+          <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} disabled={saving} onClick={guardar}>{saving ? "Guardando..." : "Guardar"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CuadranteChoferes() {
   const [choferes,  setChoferes]  = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [ficha,     setFicha]     = useState(null);
   const [filtroEst, setFiltroEst] = useState("todos");
+  const [vacaciones, setVacaciones] = useState([]);
+  const [modalVacaciones, setModalVacaciones] = useState(false);
 
   function cargar() {
     setLoading(true);
-    Promise.all([getChoferes().catch(()=>[]), getVehiculos().catch(()=>[])])
-      .then(([ch, vh]) => {
+    Promise.all([getChoferes().catch(()=>[]), getVehiculos().catch(()=>[]), getChoferVacaciones().catch(()=>[])])
+      .then(([ch, vh, vac]) => {
         setChoferes(Array.isArray(ch)?ch:[]);
         setVehiculos(Array.isArray(vh)?vh:[]);
+        setVacaciones(Array.isArray(vac)?vac:[]);
       }).finally(()=>setLoading(false));
   }
   useEffect(cargar, []);
@@ -292,10 +383,63 @@ export default function CuadranteChoferes() {
     return (c.avisos||[]).filter(a => !a.fecha_fin || new Date(a.fecha_fin) >= ahora);
   }
 
+  async function resolverVacacion(item, estado) {
+    try {
+      const observaciones = estado === "rechazada" ? window.prompt("Motivo del rechazo (opcional)") || "" : "";
+      await resolverChoferVacaciones(item.id, { estado, observaciones });
+      notify(estado === "aprobada" ? "Vacaciones aprobadas. Pendiente firma si no estaba firmada." : "Solicitud rechazada", "success");
+      cargar();
+    } catch(e) { notify(e.message, "error"); }
+  }
+
+  const pendientesVacaciones = vacaciones.filter(v => ["pendiente","aprobada_pendiente_firma"].includes(v.estado));
+
   return (
     <div style={S.page}>
       <div style={S.title}>Estado de Chóferes</div>
       <div style={S.sub}>Cuadrante - Disponibilidad, rutas activas y avisos de ausencias</div>
+
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:14,marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>Control de vacaciones</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Solicitudes de chofer, aprobación, adjudicación y firma.</div>
+          </div>
+          <button onClick={()=>setModalVacaciones(true)} style={{...S.btn,background:"var(--accent)",color:"#fff"}}>
+            Adjudicar vacaciones
+          </button>
+        </div>
+        {pendientesVacaciones.length === 0 ? (
+          <div style={{fontSize:12,color:"var(--text5)",padding:"7px 0"}}>Sin vacaciones pendientes de resolver o firmar.</div>
+        ) : (
+          <div style={{display:"grid",gap:8}}>
+            {pendientesVacaciones.slice(0, 6).map(v => {
+              const chofer = `${v.chofer_nombre || ""} ${v.chofer_apellidos || ""}`.trim() || "Chofer";
+              const pendienteFirma = v.estado === "aprobada_pendiente_firma";
+              return (
+                <div key={v.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"center",border:"1px solid var(--border)",borderRadius:8,padding:"9px 11px",background:"var(--bg3)"}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>{chofer}</div>
+                    <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>
+                      {String(v.fecha_inicio || "").slice(0,10)} a {String(v.fecha_fin || "").slice(0,10)} · {Number(v.dias || 0)} dias · {pendienteFirma ? "pendiente firma del chofer" : "pendiente aprobacion"}
+                    </div>
+                    {v.motivo && <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>{v.motivo}</div>}
+                  </div>
+                  {pendienteFirma ? (
+                    <span style={{fontSize:10,fontWeight:900,color:"#60a5fa",background:"rgba(59,130,246,.12)",border:"1px solid rgba(59,130,246,.25)",borderRadius:999,padding:"4px 9px"}}>Falta firma</span>
+                  ) : (
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>resolverVacacion(v, "aprobada")} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)",fontSize:11,padding:"5px 9px"}}>Aprobar</button>
+                      <button onClick={()=>resolverVacacion(v, "rechazada")} style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.25)",fontSize:11,padding:"5px 9px"}}>Rechazar</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {pendientesVacaciones.length > 6 && <div style={{fontSize:11,color:"var(--text5)"}}>+ {pendientesVacaciones.length - 6} solicitudes mas</div>}
+          </div>
+        )}
+      </div>
 
       {/* Filtros */}
       <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
@@ -366,6 +510,13 @@ export default function CuadranteChoferes() {
 
       {ficha && (
         <FichaChofer chofer={ficha} onClose={()=>setFicha(null)} onSaved={()=>{setFicha(null);cargar();}} vehiculos={vehiculos}/>
+      )}
+      {modalVacaciones && (
+        <ModalAdjudicarVacaciones
+          choferes={choferes.filter(c => c.activo !== false)}
+          onClose={()=>setModalVacaciones(false)}
+          onSaved={()=>{setModalVacaciones(false);cargar();}}
+        />
       )}
     </div>
   );

@@ -67,7 +67,10 @@ const MODULE_IDS = [
   "actividad",
   "importacion",
   "portal-cliente",
+  "portal_cliente",
   "ia",
+  "app_chofer",
+  "rutas_recomendadas_chofer",
   "mi_cuenta",
 ];
 
@@ -93,8 +96,8 @@ const ROLE_PERMISSION_PRESETS = {
     ver: ["agenda","dashboard","pedidos","plan_diario","gestion_trafico","clientes","rutas","vehiculos","choferes","hojas_ruta","informes","documentos","avisos","mi_cuenta"],
     editar: ["mi_cuenta"],
   },
-  chofer: { ver: ["pedidos","documentos","avisos","mi_cuenta"], editar: ["pedidos","mi_cuenta"] },
-  cliente: { ver: ["portal-cliente","mi_cuenta"], editar: ["portal-cliente","mi_cuenta"] },
+  chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","mi_cuenta"], editar: ["app_chofer","mi_cuenta"] },
+  cliente: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
 };
 
 let authChoferSchemaReady = false;
@@ -158,6 +161,7 @@ function presetPermisosRol(rol) {
 
 function normalizePermissionsForRole(permisos, rol) {
   const base = presetPermisosRol(rol);
+  if (["chofer", "cliente", "cliente_portal"].includes(String(rol || "").toLowerCase())) return base;
   const raw = permisos && typeof permisos === "object" && !Array.isArray(permisos) ? permisos : {};
   const modulos = raw.modulos && typeof raw.modulos === "object" ? raw.modulos : raw;
   for (const id of MODULE_IDS) {

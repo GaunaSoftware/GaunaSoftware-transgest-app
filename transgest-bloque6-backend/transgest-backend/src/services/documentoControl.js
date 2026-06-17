@@ -339,7 +339,7 @@ function sanitizeFilenamePart(value) {
 function buildDocumentoControlFilename(documento = {}) {
   const ref = sanitizeFilenamePart(documento?.referencia_pedido || "pedido");
   const code = sanitizeFilenamePart(documento?.codigo_control || "control");
-  return `deca-${ref}-${code}.html`;
+  return `deca-${ref}-${code}.pdf`;
 }
 
 function buildDocumentoControlExportFilename(documento = {}) {
@@ -1127,6 +1127,146 @@ function buildDocumentoControlHtml({
   <div class="sub" style="margin-top:16px">Generado: ${escapeHtml(new Date(generatedAt).toLocaleString("es-ES"))}</div>
   </main>${printScript}</body></html>`;
 }
+
+async function generateDocumentoControlPdf({
+  documento,
+  empresaNombre = "TransGest TMS",
+  generatedAt = new Date().toISOString(),
+}) {
+  const PDFDocument = require("pdfkit");
+  const QRCode = require("qrcode");
+  const pdfDate = new Date(generatedAt);
+  const qrUrl = documento?.qr_url || documento?.soporte_url || "";
+  const qrDataUrl = qrUrl
+    ? await QRCode.toDataURL(qrUrl, { errorCorrectionLevel: "M", margin: 1, width: 180 })
+    : "";
+  const qrBuffer = qrDataUrl ? Buffer.from(qrDataUrl.split(",")[1] || "", "base64") : null;
+  const doc = new PDFDocument({
+    size: "A4",
+    margin: 42,
+    info: {
+      Title: `DeCA ${documento?.referencia_pedido || documento?.codigo_control || ""}`.trim(),
+      Author: empresaNombre || "TransGest TMS",
+      Subject: "Documento de control digital de transporte",
+      Keywords: "DeCA,DCD,Documento de control,TransGest",
+      Creator: "TransGest",
+      Producer: "TransGest PDF service",
+      CreationDate: pdfDate,
+      ModDate: pdfDate,
+    },
+  });
+  const chunks = [];
+  doc.on("data", chunk => chunks.push(chunk));
+  const done = new Promise((resolve, reject) => {
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+
+  const fmtDate = (value) => {
+    if (!value) return "-";
+    const date = new Date(String(value).includes("T") ? value : `${value}T12:00:00`);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("es-ES");
+  };
+  const text = (value) => String(value ?? "").trim() || "-";
+  const peso = documento?.mercancia?.peso_kg ? `${Number(documento.mercancia.peso_kg).toLocaleString("es-ES")} kg` : "-";
+  const writeLine = (label, value, opts = {}) => {
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#64748b").text(label.toUpperCase(), { continued: false });
+    doc.font("Helvetica").fontSize(opts.size || 10).fillColor("#111827").text(text(value), {
+      width: opts.width || 500,
+      lineGap: 1.5,
+    });
+    doc.moveDown(0.45);
+  };
+  const section = (title) => {
+    doc.moveDown(0.8);
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#0f766e").text(title);
+    doc.moveTo(42, doc.y + 4).lineTo(553, doc.y + 4).strokeColor("#cbd5e1").lineWidth(0.7).stroke();
+    doc.moveDown(0.65);
+  };
+  const ensureSpace = (height = 120) => {
+    if (doc.y + height > doc.page.height - 52) doc.addPage();
+  };
+  const writeStops = (title, items = []) => {
+    if (!Array.isArray(items) || !items.length) return;
+    section(title);
+    items.forEach((item, idx) => {
+      ensureSpace(52);
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#111827")
+        .text(`${idx + 1}. ${text(item.nombre)}`, { width: 500 });
+      doc.font("Helvetica").fontSize(9).fillColor("#334155")
+        .text(text(item.direccion), { width: 500 });
+      doc.font("Helvetica").fontSize(8).fillColor("#64748b")
+        .text(`Fecha: ${text(item.fecha)}  Hora/ventana: ${text(item.hora || item.ventana)}`);
+      doc.moveDown(0.45);
+    });
+  };
+
+  doc.font("Helvetica-Bold").fontSize(18).fillColor("#0f172a").text("Documento de Control Digital (DeCA)", 42, 42, { width: 360 });
+  doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(empresaNombre, { width: 360 });
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f766e").text("Codigo de control", 420, 42, { width: 130, align: "right" });
+  doc.font("Helvetica-Bold").fontSize(12).fillColor("#111827").text(text(documento?.codigo_control), 350, 57, { width: 200, align: "right" });
+  doc.font("Helvetica").fontSize(8).fillColor("#64748b").text(`Generado: ${pdfDate.toLocaleString("es-ES")}`, 350, 75, { width: 200, align: "right" });
+  doc.moveDown(2.2);
+
+  if (qrBuffer) {
+    doc.image(qrBuffer, 430, 98, { width: 96, height: 96 });
+    doc.font("Helvetica").fontSize(7).fillColor("#64748b").text("QR de descarga/verificacion", 398, 198, { width: 150, align: "center" });
+  }
+
+  section("Partes");
+  writeLine("Cargador contractual", `${text(documento?.cargador_contractual?.nombre)} | ${text(documento?.cargador_contractual?.nif)}`);
+  writeLine("Domicilio cargador", documento?.cargador_contractual?.domicilio);
+  writeLine("Transportista efectivo", `${text(documento?.transportista_efectivo?.nombre)} | ${text(documento?.transportista_efectivo?.nif)}`);
+  writeLine("Domicilio transportista", documento?.transportista_efectivo?.domicilio);
+
+  section("Viaje y mercancia");
+  writeLine("Referencia pedido", documento?.referencia_pedido);
+  writeLine("Fecha transporte", fmtDate(documento?.fecha_transporte));
+  writeLine("Carga", `${text(documento?.origen?.nombre)} - ${text(documento?.origen?.direccion)} | ${fmtDate(documento?.horarios?.fecha_carga)} ${text(documento?.horarios?.hora_carga || documento?.horarios?.ventana_carga)}`);
+  writeLine("Descarga", `${text(documento?.destino?.nombre)} - ${text(documento?.destino?.direccion)} | ${fmtDate(documento?.horarios?.fecha_descarga)} ${text(documento?.horarios?.hora_descarga || documento?.horarios?.ventana_descarga)}`);
+  writeLine("Mercancia", documento?.mercancia?.descripcion);
+  writeLine("Peso / bultos", `${peso} | ${text(documento?.mercancia?.bultos)}`);
+  writeLine("Vehiculo", `Tractora: ${text(documento?.vehiculo?.tractora)} | Remolque: ${text(documento?.vehiculo?.remolque)}`);
+
+  writeStops("Puntos de carga", documento?.cargas);
+  writeStops("Puntos de descarga", documento?.descargas);
+
+  ensureSpace(130);
+  section("Verificacion y soporte");
+  writeLine("URL segura", documento?.soporte_url || qrUrl, { size: 8, width: 500 });
+  writeLine("Codigo de verificacion", documento?.verificacion?.codigo_verificacion);
+  writeLine("Politica de acceso", "Enlace tokenizado, noindex, no-store. La descarga publica puede desactivarse; el repositorio interno conserva el documento.");
+
+  ensureSpace(150);
+  section("Condiciones y observaciones");
+  writeLine("Forma de pago", documento?.condiciones?.forma_pago);
+  writeLine("Observaciones", documento?.observaciones || "-");
+  if (documento?.condiciones?.revision_combustible) writeLine("Revision combustible", documento.condiciones.revision_combustible, { size: 8 });
+
+  doc.font("Helvetica").fontSize(7).fillColor("#64748b")
+    .text("Documento generado automaticamente por TransGest. Validez operativa vinculada a los datos guardados y al historial de modificaciones del pedido.", 42, 792, { width: 510, align: "center" });
+  doc.end();
+  const buffer = await done;
+  return {
+    buffer,
+    base64: buffer.toString("base64"),
+    mime: "application/pdf",
+    filename: buildDocumentoControlFilename(documento || {}),
+    hash_sha256: crypto.createHash("sha256").update(buffer).digest("hex"),
+    metadata: {
+      title: doc.info.Title,
+      author: doc.info.Author,
+      subject: doc.info.Subject,
+      creator: doc.info.Creator,
+      producer: doc.info.Producer,
+      creation_date: pdfDate.toISOString(),
+      modification_date: pdfDate.toISOString(),
+      qr_url: qrUrl || "",
+      filename: buildDocumentoControlFilename(documento || {}),
+    },
+  };
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -1146,6 +1286,7 @@ module.exports = {
   buildDocumentoControlStructuredExport,
   buildDocumentoControlSignaturePackage,
   buildDocumentoControlHtml,
+  generateDocumentoControlPdf,
   buildDocumentoControlFilename,
   buildDocumentoControlExportFilename,
   buildDocumentoControlSignaturePackageFilename,

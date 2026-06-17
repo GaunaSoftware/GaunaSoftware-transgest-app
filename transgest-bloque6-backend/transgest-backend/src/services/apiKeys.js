@@ -243,6 +243,20 @@ async function resolveApiKey(empresaId, provider) {
   return { ...global, config: company };
 }
 
+async function resolveBestApiKey(empresaId, preferredProvider, candidates = []) {
+  const safe = [...new Set([preferredProvider, ...candidates].filter(Boolean))];
+  for (const provider of safe) {
+    const resolved = await resolveApiKey(empresaId, provider);
+    if (resolved.key) return { ...resolved, provider };
+    if (resolved.source === "disabled" || resolved.source === "company_missing") {
+      continue;
+    }
+  }
+  const provider = safe[0] || preferredProvider;
+  const resolved = provider ? await resolveApiKey(empresaId, provider) : { key: "", source: "none" };
+  return { ...resolved, provider };
+}
+
 async function publicStatusForProvider(provider, empresaId = null) {
   const global = await getGlobalApiKey(provider);
   const company = empresaId ? await getCompanyApiConfig(empresaId, provider) : null;
@@ -275,5 +289,6 @@ module.exports = {
   assertApiUsageAllowed,
   recordApiUsage,
   resolveApiKey,
+  resolveBestApiKey,
   publicStatusForProvider,
 };

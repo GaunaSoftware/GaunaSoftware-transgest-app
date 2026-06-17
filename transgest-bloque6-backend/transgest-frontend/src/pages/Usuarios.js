@@ -17,11 +17,11 @@ const ROLES = [
 const LABEL = {
   gerente: "Gerente",
   contable: "Contable",
-  trafico: "Trafico",
+  trafico: "Tráfico",
   administrativo: "Administrativo",
   responsable_taller: "Resp. Taller",
   visualizador: "Visualizador",
-  chofer: "Chofer",
+  chofer: "Chófer",
   cliente: "Cliente",
 };
 
@@ -44,20 +44,20 @@ const MODULOS_PERM = [
   ["pedidos", "Pedidos"],
   ["plan_diario", "Plan diario"],
   ["solicitudes", "Solicitudes clientes"],
-  ["gestion_trafico", "Cuadrante trafico"],
+  ["gestion_trafico", "Cuadrante tráfico"],
   ["calculador_portes", "Calculador de portes"],
   ["clientes", "Clientes"],
   ["rutas", "Rutas"],
   ["grupajes", "Grupajes"],
-  ["palets", "Almacen / palets"],
+  ["palets", "Almacén / palets"],
   ["colaboradores", "Colaboradores"],
-  ["vehiculos", "Vehiculos"],
-  ["choferes", "Choferes"],
+  ["vehiculos", "Vehículos"],
+  ["choferes", "Chóferes"],
   ["taller", "Taller"],
   ["hojas_ruta", "Hojas de ruta"],
-  ["facturacion", "Facturacion"],
+  ["facturacion", "Facturación"],
   ["contabilidad", "Contabilidad"],
-  ["nominas", "Nominas"],
+  ["nominas", "Nóminas"],
   ["control_horario", "Control horario"],
   ["informes", "Informes KPI"],
   ["excepciones", "Excepciones operativas"],
@@ -66,8 +66,10 @@ const MODULOS_PERM = [
   ["empresa", "Mi empresa"],
   ["usuarios", "Usuarios y roles"],
   ["actividad", "Registro de actividad"],
-  ["importacion", "Importacion"],
-  ["portal-cliente", "Portal cliente"],
+  ["importacion", "Importación"],
+  ["portal_cliente", "Portal cliente"],
+  ["app_chofer", "App chófer"],
+  ["rutas_recomendadas_chofer", "Ruta recomendada chófer"],
   ["ia", "Asistente IA"],
   ["mi_cuenta", "Mi cuenta"],
 ].map(([id, label]) => ({ id, label }));
@@ -96,8 +98,8 @@ const ROLE_PRESETS = {
     ver: ["agenda","dashboard","control_tower","pedidos","plan_diario","gestion_trafico","clientes","rutas","vehiculos","choferes","hojas_ruta","informes","documentos","avisos","mi_cuenta"],
     editar: ["mi_cuenta"],
   },
-  chofer: { ver: ["pedidos","documentos","avisos","mi_cuenta"], editar: ["pedidos","mi_cuenta"] },
-  cliente: { ver: ["portal-cliente","mi_cuenta"], editar: ["portal-cliente","mi_cuenta"] },
+  chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","mi_cuenta"], editar: ["app_chofer","mi_cuenta"] },
+  cliente: { ver: ["portal_cliente","mi_cuenta"], editar: ["portal_cliente","mi_cuenta"] },
 };
 
 function permisosDesdeListas(ver = [], editar = []) {
@@ -302,11 +304,11 @@ export default function Usuarios() {
       title: "Nueva contrasena temporal",
       message: `Usuario: ${u.nombre}\nMinimo 8 caracteres.`,
       inputType: "password",
-      placeholder: "Contrasena temporal",
+      placeholder: "Contraseña temporal",
       confirmText: "Actualizar",
     });
-    if(!pw||pw.length<8){notify("Contrasena demasiado corta", "warning");return;}
-    try{await resetPassword(u.id,pw);notify("Contrasena actualizada", "success");}catch(e){notify(e.message, "error");}
+    if(!pw||pw.length<8){notify("Contraseña demasiado corta", "warning");return;}
+    try{await resetPassword(u.id,pw);notify("Contraseña actualizada", "success");}catch(e){notify(e.message, "error");}
   }
 
   return (
@@ -369,7 +371,7 @@ export default function Usuarios() {
               <input style={{...S.input,borderColor:errors.email?"#ef4444":"#28344f"}} type="email" value={form.email||""} onChange={f("email")} placeholder="correo@empresa.com"/>
             </FormField>
             {!editando&&<>
-              <FormField label="Contrasena temporal" required error={errors.password} hint="Minimo 8 caracteres.">
+              <FormField label="Contraseña temporal" required error={errors.password} hint="Mínimo 8 caracteres.">
                 <input style={{...S.input,borderColor:errors.password?"#ef4444":"#28344f"}} type="password" value={form.password||""} onChange={f("password")}/>
               </FormField>
             </>}

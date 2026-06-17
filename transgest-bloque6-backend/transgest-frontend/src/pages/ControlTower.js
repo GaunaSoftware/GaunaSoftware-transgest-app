@@ -17,7 +17,7 @@ const SEV = {
   info: { label:"Info", color:"var(--accent-l)" },
 };
 
-const PERIODS = { "7d":"7 dias", mes:"Este mes", "30d":"30 dias" };
+const PERIODS = { "7d":"7 días", mes:"Este mes", "30d":"30 días" };
 
 function navegar(view) {
   window.dispatchEvent(new CustomEvent("tms:navegar", { detail: view }));
@@ -117,6 +117,92 @@ function TowerItem({ item }) {
   );
 }
 
+function MetricBox({ label, value, detail, color = "var(--accent-xl)" }) {
+  return (
+    <div style={{border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px",background:"var(--bg3)",minHeight:74}}>
+      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:900,color}}>{Number(value || 0)}</div>
+      <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginTop:2}}>{label}</div>
+      {detail && <div style={{fontSize:11,color:"var(--text4)",marginTop:4,lineHeight:1.25}}>{detail}</div>}
+    </div>
+  );
+}
+
+function FlowPanel({ flujo = [] }) {
+  const rows = Array.isArray(flujo) ? flujo : [];
+  const max = Math.max(1, ...rows.map(r => Number(r.total || 0)));
+  return (
+    <div style={S.card}>
+      <div style={S.sec}>Visibilidad extremo a extremo</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
+        {rows.map(row => {
+          const total = Number(row.total || 0);
+          return (
+            <div key={row.key} style={{border:"1px solid var(--border)",borderRadius:8,padding:"9px 10px",background:"var(--bg3)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+                <span style={{fontSize:11,fontWeight:900,color:"var(--text)",whiteSpace:"nowrap"}}>{row.label}</span>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:900,color:"var(--accent-xl)"}}>{total}</span>
+              </div>
+              <div style={{height:5,background:"var(--bg4)",borderRadius:99,overflow:"hidden",marginTop:8}}>
+                <div style={{height:"100%",width:`${Math.max(4, total / max * 100)}%`,background:"var(--accent)",borderRadius:99}} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DecisionsPanel({ decisiones = [] }) {
+  const rows = Array.isArray(decisiones) ? decisiones.slice(0, 5) : [];
+  return (
+    <div style={S.card}>
+      <div style={S.sec}>Gestión proactiva</div>
+      {rows.length === 0 ? (
+        <div style={{fontSize:12,color:"var(--text4)"}}>Sin decisiones urgentes. Operación estable para el filtro actual.</div>
+      ) : (
+        <div style={{display:"grid",gap:8}}>
+          {rows.map((d, idx) => {
+            const sev = SEV[d.severity] || SEV.info;
+            return (
+              <button key={d.id || idx} onClick={()=>navegar(d.view || "gestion_trafico")}
+                style={{textAlign:"left",border:`1px solid ${sev.color}35`,background:`${sev.color}0f`,borderRadius:8,padding:"9px 11px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+                  <span style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{d.title}</span>
+                  <span style={{fontSize:10,fontWeight:900,color:sev.color,textTransform:"uppercase"}}>{sev.label}</span>
+                </div>
+                <div style={{fontSize:11,color:"var(--text4)",marginTop:3,lineHeight:1.3}}>{d.recommended_action}</div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventsPanel({ eventos = [] }) {
+  const rows = Array.isArray(eventos) ? eventos.slice(0, 8) : [];
+  return (
+    <div style={S.card}>
+      <div style={S.sec}>Eventos recientes</div>
+      {rows.length === 0 ? (
+        <div style={{fontSize:12,color:"var(--text4)"}}>Aún no hay eventos recientes de app, portal, WhatsApp o pedidos.</div>
+      ) : rows.map(ev => (
+        <div key={ev.id} style={{display:"grid",gridTemplateColumns:"92px 1fr",gap:10,borderTop:"1px solid var(--border)",padding:"8px 0"}}>
+          <div style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>
+            {ev.created_at ? new Date(ev.created_at).toLocaleTimeString("es-ES", { hour:"2-digit", minute:"2-digit" }) : "--:--"}
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{ev.pedido_numero || "Pedido"} · {ev.tipo}</div>
+            <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{ev.ruta}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ControlTower() {
   const [period, setPeriod] = useState("7d");
   const [tab, setTab] = useState("todas");
@@ -141,11 +227,18 @@ export default function ControlTower() {
   const resumen = data?.resumen || {};
   const kpis = data?.kpis || {};
   const vistas = data?.vistas || {};
+  const flujo = Array.isArray(data?.flujo_operativo) ? data.flujo_operativo : [];
+  const recursos = data?.recursos || {};
+  const visibilidad = data?.visibilidad || {};
+  const decisiones = Array.isArray(data?.decisiones) ? data.decisiones : [];
+  const eventos = Array.isArray(data?.eventos_recientes) ? data.eventos_recientes : [];
   const grupos = useMemo(() => ({
     todas: items,
     hoy: items.filter(item => Array.isArray(item?.buckets) && item.buckets.includes("hoy")),
     riesgos: items.filter(item => Array.isArray(item?.buckets) && item.buckets.includes("riesgos")),
     rentabilidad: items.filter(item => Array.isArray(item?.buckets) && item.buckets.includes("rentabilidad")),
+    recursos: items.filter(item => Array.isArray(item?.buckets) && item.buckets.includes("recursos")),
+    documentos: items.filter(item => Array.isArray(item?.buckets) && item.buckets.includes("documentos")),
     incidencias,
   }), [items, incidencias]);
   const visible = grupos[tab] || items;
@@ -164,7 +257,7 @@ export default function ControlTower() {
       <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:18}}>
         <div>
           <div style={S.title}>Control Tower</div>
-          <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Prioridades de trafico, margen, documentos, cobros y GPS.</div>
+          <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Prioridades de tráfico, margen, documentos, cobros y GPS.</div>
         </div>
         <div style={{display:"flex",gap:5,background:"var(--bg3)",padding:4,borderRadius:9,border:"1px solid var(--border)"}}>
           {Object.entries(PERIODS).map(([key,label])=>(
@@ -192,6 +285,29 @@ export default function ControlTower() {
         </div>
       </div>
 
+      {!loading && data && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12,marginBottom:12}}>
+          <div style={{display:"grid",gap:12}}>
+            <FlowPanel flujo={flujo} />
+            <div style={{...S.card}}>
+              <div style={S.sec}>Flota, recursos y señales</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
+                <MetricBox label="Disponibles" value={recursos.disponibles} detail={`${recursos.choferes_activos || 0} choferes activos`} color="var(--green)" />
+                <MetricBox label="En ruta" value={recursos.en_ruta} detail="Chóferes ocupados" color="var(--accent-xl)" />
+                <MetricBox label="Vacaciones" value={recursos.vacaciones} detail={`${recursos.solicitudes_vacaciones || 0} solicitudes`} color="#8b5cf6" />
+                <MetricBox label="GPS OK" value={visibilidad.gps_ok} detail={`${visibilidad.gps_enlazados || 0} enlazados`} color="var(--green)" />
+                <MetricBox label="Sin señal" value={visibilidad.gps_sin_senal} detail="Revisar localización" color="#f97316" />
+                <MetricBox label="Esperas" value={visibilidad.esperas_activas} detail="Carga/descarga" color="#ef4444" />
+              </div>
+            </div>
+          </div>
+          <div style={{display:"grid",gap:12}}>
+            <DecisionsPanel decisiones={decisiones} />
+            <EventsPanel eventos={eventos} />
+          </div>
+        </div>
+      )}
+
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
         <div style={{display:"flex",gap:6,background:"var(--bg3)",padding:4,borderRadius:8,border:"1px solid var(--border)",flexWrap:"wrap"}}>
           {[
@@ -199,6 +315,8 @@ export default function ControlTower() {
             ["hoy", `Hoy (${vistas.hoy ?? grupos.hoy.length})`],
             ["riesgos", `Riesgos (${vistas.riesgos ?? grupos.riesgos.length})`],
             ["rentabilidad", `Rentabilidad (${vistas.rentabilidad ?? grupos.rentabilidad.length})`],
+            ["recursos", `Recursos (${vistas.recursos ?? grupos.recursos.length})`],
+            ["documentos", `Docs (${vistas.documentos ?? grupos.documentos.length})`],
             ["incidencias", `Incidencias (${vistas.incidencias ?? incidencias.length})`],
           ].map(([key,label])=>(
             <button key={key} onClick={()=>setTab(key)}
@@ -207,20 +325,20 @@ export default function ControlTower() {
             </button>
           ))}
         </div>
-        <div style={{fontSize:11,color:"var(--text5)",fontWeight:800}}>{visible.length} senales visibles</div>
+        <div style={{fontSize:11,color:"var(--text5)",fontWeight:800}}>{visible.length} señales visibles</div>
       </div>
 
       {loading ? (
         <div style={{color:"var(--text4)",padding:40,textAlign:"center"}}>Cargando Control Tower...</div>
       ) : visible.length === 0 ? (
         <div style={S.card}>
-          <div style={{fontSize:14,color:"var(--green)",fontWeight:900,marginBottom:6}}>Sin senales activas en esta vista</div>
+          <div style={{fontSize:14,color:"var(--green)",fontWeight:900,marginBottom:6}}>Sin señales activas en esta vista</div>
           <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:12}}>
-            No se han detectado retrasos, incidencias, margen bajo, documentos pendientes, cobros en riesgo o GPS sin senal para este filtro.
+            No se han detectado retrasos, incidencias, margen bajo, documentos pendientes, cobros en riesgo, preparación regulatoria o GPS sin señal para este filtro.
           </div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <button onClick={()=>navegar("gestion_trafico")} style={{border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:7,padding:"7px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-              Abrir trafico
+              Abrir tráfico
             </button>
             <button onClick={()=>navegar("excepciones")} style={{border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:7,padding:"7px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               Ver excepciones

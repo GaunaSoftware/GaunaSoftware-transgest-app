@@ -15,6 +15,7 @@ const banksRoutes = require("./routes/banks");
 const chartTemplatesRoutes = require("./routes/chartTemplates");
 const companiesRoutes = require("./routes/companies");
 const dashboardRoutes = require("./routes/dashboard");
+const externalIntegrationsRoutes = require("./routes/externalIntegrations");
 const journalEntriesRoutes = require("./routes/journalEntries");
 const ledgerRoutes = require("./routes/ledger");
 const maturitiesRoutes = require("./routes/maturities");
@@ -62,6 +63,7 @@ function createApp() {
   app.use("/api/v1", banksRoutes);
   app.use("/api/v1", chartTemplatesRoutes);
   app.use("/api/v1", dashboardRoutes);
+  app.use("/api/v1", externalIntegrationsRoutes);
   app.use("/api/v1", journalEntriesRoutes);
   app.use("/api/v1", ledgerRoutes);
   app.use("/api/v1", maturitiesRoutes);

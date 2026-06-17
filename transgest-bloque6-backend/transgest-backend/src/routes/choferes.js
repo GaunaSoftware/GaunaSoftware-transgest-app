@@ -10,10 +10,13 @@ async function ensureChoferesTransparencySchema() {
   if (schemaReady) return;
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS sexo VARCHAR(30)").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS puesto_valor VARCHAR(120)").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS estado VARCHAR(40) NOT NULL DEFAULT 'disponible'").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS avisos JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
   schemaReady = true;
 }
 
 let jornadaSchemaReady = false;
+let vacacionesSchemaReady = false;
 async function ensureChoferJornadaSchema() {
   if (jornadaSchemaReady) return;
   await db.query(`
@@ -40,6 +43,36 @@ async function ensureChoferJornadaSchema() {
   await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_abierta ON chofer_jornadas(empresa_id, chofer_id, estado) WHERE estado='abierta'").catch(() => {});
   await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_fecha ON chofer_jornadas(empresa_id, chofer_id, inicio_at DESC)").catch(() => {});
   jornadaSchemaReady = true;
+}
+
+async function ensureChoferVacacionesSchema() {
+  if (vacacionesSchemaReady) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS chofer_vacaciones_solicitudes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      chofer_id UUID NOT NULL REFERENCES choferes(id) ON DELETE CASCADE,
+      usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+      estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+      fecha_inicio DATE NOT NULL,
+      fecha_fin DATE NOT NULL,
+      dias NUMERIC(8,2) NOT NULL DEFAULT 0,
+      motivo TEXT,
+      firma_solicitud JSONB NOT NULL DEFAULT '{}'::jsonb,
+      firma_aceptacion JSONB NOT NULL DEFAULT '{}'::jsonb,
+      aprobado_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+      aprobado_at TIMESTAMPTZ,
+      rechazado_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+      rechazado_at TIMESTAMPTZ,
+      observaciones TEXT,
+      aviso_id VARCHAR(80),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_empresa_estado ON chofer_vacaciones_solicitudes(empresa_id, estado, fecha_inicio)").catch(() => {});
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_chofer ON chofer_vacaciones_solicitudes(empresa_id, chofer_id, fecha_inicio DESC)").catch(() => {});
+  vacacionesSchemaReady = true;
 }
 
 async function resolveChoferApp(req) {
@@ -274,6 +307,60 @@ function requireChoferApp(req, res, next) {
   next();
 }
 
+function calcVacationDays(inicio, fin) {
+  const a = new Date(`${String(inicio || "").slice(0, 10)}T00:00:00Z`);
+  const b = new Date(`${String(fin || "").slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(a.getTime()) || !Number.isFinite(b.getTime()) || b < a) return 0;
+  return Math.floor((b.getTime() - a.getTime()) / 86400000) + 1;
+}
+
+async function notifyVacacionesGerenciaTrafico(empresaId, solicitud, chofer, action, actorId = null) {
+  const nombre = `${chofer?.nombre || ""} ${chofer?.apellidos || ""}`.trim() || "Chofer";
+  const title = action === "solicitada" ? "Nueva solicitud de vacaciones" : action === "aprobada" ? "Vacaciones aprobadas" : "Solicitud de vacaciones actualizada";
+  const msg = `${nombre}: ${solicitud.fecha_inicio} a ${solicitud.fecha_fin} (${Number(solicitud.dias || 0)} dias).`;
+  const { rows } = await db.query(
+    "SELECT id FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('gerente','trafico')",
+    [empresaId]
+  ).catch(() => ({ rows: [] }));
+  await Promise.all(rows.map(u => crearNotificacion({
+    empresa_id: empresaId,
+    usuario_id: u.id,
+    tipo: "chofer_vacaciones_" + action,
+    titulo: title,
+    mensaje: msg,
+    data: { solicitud_id: solicitud.id, chofer_id: solicitud.chofer_id, fecha_inicio: solicitud.fecha_inicio, fecha_fin: solicitud.fecha_fin },
+    created_by: actorId,
+  }).catch(() => null)));
+}
+
+async function syncAvisoVacacionesChofer({ empresaId, solicitud, aprobadoPor = null }) {
+  if (!solicitud?.chofer_id) return null;
+  const avisoId = solicitud.aviso_id || `vac-${solicitud.id}`;
+  const { rows } = await db.query("SELECT avisos FROM choferes WHERE id=$1 AND empresa_id=$2 LIMIT 1", [solicitud.chofer_id, empresaId]);
+  const avisos = Array.isArray(rows[0]?.avisos) ? rows[0].avisos : [];
+  const nextAviso = {
+    id: avisoId,
+    tipo: "vacaciones",
+    fecha_inicio: String(solicitud.fecha_inicio).slice(0, 10),
+    fecha_fin: String(solicitud.fecha_fin).slice(0, 10),
+    descripcion: `Vacaciones aprobadas (${Number(solicitud.dias || 0)} dias)`,
+    origen: "solicitud_chofer",
+    solicitud_id: solicitud.id,
+    firmado: !!solicitud.firma_aceptacion?.hash_sha256,
+    aprobado_por: aprobadoPor || solicitud.aprobado_por || null,
+  };
+  const merged = avisos.filter(a => String(a.id) !== String(avisoId));
+  merged.push(nextAviso);
+  await db.query(
+    "UPDATE choferes SET avisos=$1::jsonb, estado='vacaciones' WHERE id=$2 AND empresa_id=$3",
+    [JSON.stringify(merged), solicitud.chofer_id, empresaId]
+  );
+  if (!solicitud.aviso_id) {
+    await db.query("UPDATE chofer_vacaciones_solicitudes SET aviso_id=$1, updated_at=NOW() WHERE id=$2 AND empresa_id=$3", [avisoId, solicitud.id, empresaId]).catch(() => {});
+  }
+  return nextAviso;
+}
+
 router.get("/", async (req,res)=>{
   await ensureChoferesTransparencySchema();
   const empresaId = req.empresaId || req.user?.empresa_id;
@@ -307,6 +394,195 @@ router.get("/app/jornada", requireChoferApp, async (req, res) => {
     [empresaId, chofer.id]
   );
   res.json({ chofer, jornada: serializeJornada(rows[0]) });
+});
+
+router.get("/vacaciones", GERENTE_O_TRAFICO, async (req, res) => {
+  await ensureChoferVacacionesSchema();
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const estado = String(req.query.estado || "").trim().toLowerCase();
+  const where = ["s.empresa_id=$1"];
+  const params = [empresaId];
+  if (estado && estado !== "todas") {
+    params.push(estado);
+    where.push(`s.estado=$${params.length}`);
+  }
+  const { rows } = await db.query(`
+    SELECT s.*, ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.email AS chofer_email,
+           u.nombre AS aprobado_por_nombre
+      FROM chofer_vacaciones_solicitudes s
+      JOIN choferes ch ON ch.id=s.chofer_id AND ch.empresa_id=s.empresa_id
+      LEFT JOIN usuarios u ON u.id=s.aprobado_por
+     WHERE ${where.join(" AND ")}
+     ORDER BY CASE s.estado WHEN 'pendiente' THEN 0 WHEN 'aprobada_pendiente_firma' THEN 1 WHEN 'aprobada_firmada' THEN 2 ELSE 3 END,
+              s.fecha_inicio ASC, s.created_at DESC
+     LIMIT 300
+  `, params);
+  res.json(rows);
+});
+
+router.get("/app/vacaciones", requireChoferApp, async (req, res) => {
+  await ensureChoferVacacionesSchema();
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const chofer = await resolveChoferApp(req);
+  if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
+  const { rows } = await db.query(
+    `SELECT * FROM chofer_vacaciones_solicitudes
+      WHERE empresa_id=$1 AND chofer_id=$2
+      ORDER BY created_at DESC
+      LIMIT 50`,
+    [empresaId, chofer.id]
+  );
+  res.json({ chofer, solicitudes: rows });
+});
+
+router.post("/app/vacaciones", requireChoferApp, async (req, res) => {
+  await ensureChoferVacacionesSchema();
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const chofer = await resolveChoferApp(req);
+  if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
+  const inicio = String(req.body?.fecha_inicio || "").slice(0, 10);
+  const fin = String(req.body?.fecha_fin || inicio).slice(0, 10);
+  const dias = calcVacationDays(inicio, fin);
+  if (!dias) return res.status(400).json({ error: "Fechas de vacaciones no validas" });
+  const firma = req.body?.firma && typeof req.body.firma === "object" ? req.body.firma : {};
+  const firmaPayload = {
+    ...firma,
+    signed_at: new Date().toISOString(),
+    signed_by_user_id: req.user?.id || null,
+    chofer_id: chofer.id,
+    type: "solicitud_vacaciones",
+  };
+  firmaPayload.hash_sha256 = require("crypto").createHash("sha256").update(JSON.stringify(firmaPayload)).digest("hex");
+  const { rows } = await db.query(
+    `INSERT INTO chofer_vacaciones_solicitudes
+      (empresa_id,chofer_id,usuario_id,estado,fecha_inicio,fecha_fin,dias,motivo,firma_solicitud)
+     VALUES ($1,$2,$3,'pendiente',$4,$5,$6,$7,$8::jsonb)
+     RETURNING *`,
+    [empresaId, chofer.id, req.user?.id || null, inicio, fin, dias, req.body?.motivo || null, JSON.stringify(firmaPayload)]
+  );
+  await notifyVacacionesGerenciaTrafico(empresaId, rows[0], chofer, "solicitada", req.user?.id || null).catch(() => {});
+  res.status(201).json({ chofer, solicitud: rows[0] });
+});
+
+router.post("/app/vacaciones/:id/firma-aceptacion", requireChoferApp, async (req, res) => {
+  await ensureChoferVacacionesSchema();
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const chofer = await resolveChoferApp(req);
+  if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
+  const current = await db.query(
+    `SELECT * FROM chofer_vacaciones_solicitudes WHERE id=$1 AND empresa_id=$2 AND chofer_id=$3 LIMIT 1`,
+    [req.params.id, empresaId, chofer.id]
+  );
+  const solicitud = current.rows[0];
+  if (!solicitud) return res.status(404).json({ error: "Solicitud no encontrada" });
+  if (solicitud.estado !== "aprobada_pendiente_firma") return res.status(400).json({ error: "Esta solicitud no esta pendiente de firma" });
+  const firmaPayload = {
+    ...(req.body?.firma || {}),
+    signed_at: new Date().toISOString(),
+    signed_by_user_id: req.user?.id || null,
+    chofer_id: chofer.id,
+    solicitud_id: solicitud.id,
+    type: "aceptacion_vacaciones",
+  };
+  firmaPayload.hash_sha256 = require("crypto").createHash("sha256").update(JSON.stringify(firmaPayload)).digest("hex");
+  const { rows } = await db.query(
+    `UPDATE chofer_vacaciones_solicitudes
+        SET estado='aprobada_firmada', firma_aceptacion=$4::jsonb, updated_at=NOW()
+      WHERE id=$1 AND empresa_id=$2 AND chofer_id=$3
+      RETURNING *`,
+    [solicitud.id, empresaId, chofer.id, JSON.stringify(firmaPayload)]
+  );
+  await syncAvisoVacacionesChofer({ empresaId, solicitud: rows[0] }).catch(() => {});
+  await notifyVacacionesGerenciaTrafico(empresaId, rows[0], chofer, "aprobada", req.user?.id || null).catch(() => {});
+  res.json({ chofer, solicitud: rows[0] });
+});
+
+router.post("/vacaciones/:id/resolver", GERENTE_O_TRAFICO, async (req, res) => {
+  await ensureChoferVacacionesSchema();
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const estadoSolicitado = String(req.body?.estado || "").toLowerCase();
+  const accion = String(req.body?.accion || (estadoSolicitado === "rechazada" ? "rechazar" : "aprobar")).toLowerCase();
+  const current = await db.query(
+    `SELECT s.*, ch.nombre, ch.apellidos
+       FROM chofer_vacaciones_solicitudes s
+       JOIN choferes ch ON ch.id=s.chofer_id AND ch.empresa_id=s.empresa_id
+      WHERE s.id=$1 AND s.empresa_id=$2
+      LIMIT 1`,
+    [req.params.id, empresaId]
+  );
+  const solicitud = current.rows[0];
+  if (!solicitud) return res.status(404).json({ error: "Solicitud no encontrada" });
+  if (accion === "rechazar") {
+    const { rows } = await db.query(
+      `UPDATE chofer_vacaciones_solicitudes
+          SET estado='rechazada', rechazado_por=$3, rechazado_at=NOW(), observaciones=$4, updated_at=NOW()
+        WHERE id=$1 AND empresa_id=$2
+        RETURNING *`,
+      [solicitud.id, empresaId, req.user?.id || null, req.body?.observaciones || null]
+    );
+    return res.json(rows[0]);
+  }
+  const firmaDirecta = req.body?.firma && typeof req.body.firma === "object" ? req.body.firma : null;
+  let firmaAceptacion = {};
+  let estado = "aprobada_pendiente_firma";
+  if (firmaDirecta) {
+    firmaAceptacion = {
+      ...firmaDirecta,
+      signed_at: new Date().toISOString(),
+      signed_by_user_id: req.user?.id || null,
+      chofer_id: solicitud.chofer_id,
+      solicitud_id: solicitud.id,
+      type: "aceptacion_vacaciones_directa",
+    };
+    firmaAceptacion.hash_sha256 = require("crypto").createHash("sha256").update(JSON.stringify(firmaAceptacion)).digest("hex");
+    estado = "aprobada_firmada";
+  }
+  const { rows } = await db.query(
+    `UPDATE chofer_vacaciones_solicitudes
+        SET estado=$3, aprobado_por=$4, aprobado_at=NOW(), observaciones=$5,
+            firma_aceptacion=CASE WHEN $6::jsonb <> '{}'::jsonb THEN $6::jsonb ELSE firma_aceptacion END,
+            updated_at=NOW()
+      WHERE id=$1 AND empresa_id=$2
+      RETURNING *`,
+    [solicitud.id, empresaId, estado, req.user?.id || null, req.body?.observaciones || null, JSON.stringify(firmaAceptacion)]
+  );
+  if (estado === "aprobada_firmada") {
+    await syncAvisoVacacionesChofer({ empresaId, solicitud: rows[0], aprobadoPor: req.user?.id || null }).catch(() => {});
+  }
+  await notifyVacacionesGerenciaTrafico(empresaId, rows[0], solicitud, "aprobada", req.user?.id || null).catch(() => {});
+  res.json(rows[0]);
+});
+
+router.post("/vacaciones/adjudicar", GERENTE_O_TRAFICO, async (req, res) => {
+  await ensureChoferVacacionesSchema();
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const choferId = req.body?.chofer_id;
+  const inicio = String(req.body?.fecha_inicio || "").slice(0, 10);
+  const fin = String(req.body?.fecha_fin || inicio).slice(0, 10);
+  const dias = calcVacationDays(inicio, fin);
+  if (!choferId || !dias) return res.status(400).json({ error: "Indica chofer y fechas validas" });
+  const ch = await db.query("SELECT * FROM choferes WHERE id=$1 AND empresa_id=$2 LIMIT 1", [choferId, empresaId]);
+  const chofer = ch.rows[0];
+  if (!chofer) return res.status(404).json({ error: "Chofer no encontrado" });
+  const firmaAceptacion = req.body?.firma ? {
+    ...req.body.firma,
+    signed_at: new Date().toISOString(),
+    signed_by_user_id: req.user?.id || null,
+    chofer_id: chofer.id,
+    type: "adjudicacion_vacaciones_directa",
+  } : {};
+  if (req.body?.firma) firmaAceptacion.hash_sha256 = require("crypto").createHash("sha256").update(JSON.stringify(firmaAceptacion)).digest("hex");
+  const estado = req.body?.firma ? "aprobada_firmada" : "aprobada_pendiente_firma";
+  const { rows } = await db.query(
+    `INSERT INTO chofer_vacaciones_solicitudes
+      (empresa_id,chofer_id,usuario_id,estado,fecha_inicio,fecha_fin,dias,motivo,firma_aceptacion,aprobado_por,aprobado_at,observaciones)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$3,NOW(),$10)
+     RETURNING *`,
+    [empresaId, chofer.id, req.user?.id || null, estado, inicio, fin, dias, req.body?.motivo || "Adjudicadas por empresa", JSON.stringify(firmaAceptacion), req.body?.observaciones || null]
+  );
+  if (estado === "aprobada_firmada") await syncAvisoVacacionesChofer({ empresaId, solicitud: rows[0], aprobadoPor: req.user?.id || null }).catch(() => {});
+  await notifyVacacionesGerenciaTrafico(empresaId, rows[0], chofer, "aprobada", req.user?.id || null).catch(() => {});
+  res.status(201).json(rows[0]);
 });
 
 router.post("/app/jornada/iniciar", requireChoferApp, async (req, res) => {
@@ -516,11 +792,23 @@ router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
 router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
   try {
     await ensureChoferesTransparencySchema();
-    const {nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,activo,notas,tipo_contrato,salario,sexo,puesto_valor}=req.body;
+    const {nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,activo,notas,tipo_contrato,salario,sexo,puesto_valor,estado,avisos}=req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
     const {rows}=await db.query(
-      "UPDATE choferes SET nombre=$1,apellidos=$2,dni=$3,telefono=$4,email=$5,vehiculo_id=$6,categoria_carnet=$7,activo=$8,notas=$9,tipo_contrato=$10,salario=$11,sexo=$12,puesto_valor=$13 WHERE id=$14 AND empresa_id=$15 RETURNING *",
-      [nombre,apellidos||null,dni||null,telefono||null,email||null,vehiculo_id||null,categoria_carnet||"C+E",activo!==undefined?activo:true,notas||null,tipo_contrato||null,salario||null,sexo||null,puesto_valor||null,req.params.id,empresaId]
+      `UPDATE choferes
+          SET nombre=$1,apellidos=$2,dni=$3,telefono=$4,email=$5,vehiculo_id=$6,categoria_carnet=$7,
+              activo=$8,notas=$9,tipo_contrato=$10,salario=$11,sexo=$12,puesto_valor=$13,
+              estado=COALESCE(NULLIF($14,''), estado),
+              avisos=COALESCE($15::jsonb, avisos)
+        WHERE id=$16 AND empresa_id=$17
+        RETURNING *`,
+      [
+        nombre,apellidos||null,dni||null,telefono||null,email||null,vehiculo_id||null,categoria_carnet||"C+E",
+        activo!==undefined?activo:true,notas||null,tipo_contrato||null,salario||null,sexo||null,puesto_valor||null,
+        estado || null,
+        Array.isArray(avisos) ? JSON.stringify(avisos.slice(0, 120)) : null,
+        req.params.id,empresaId,
+      ]
     );
     if(!rows[0]) return res.status(404).json({error:"No encontrado"});
     res.json(rows[0]);

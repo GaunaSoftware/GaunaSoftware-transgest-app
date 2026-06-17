@@ -9,6 +9,7 @@ import {
   createJournalReversalDraft,
   createMaturity,
   createParty,
+  downloadAdvisorPackageFile,
   downloadBalanceSheetCsv,
   downloadBankTransactionsCsv,
   downloadJournalEntriesCsv,
@@ -18,6 +19,7 @@ import {
   downloadProfitLossCsv,
   downloadTrialBalanceCsv,
   exchangeSsoToken,
+  getAdvisorPackage,
   getAccounts,
   getAuditLog,
   getBankAccounts,
@@ -27,6 +29,7 @@ import {
   getBalanceSheet,
   getCompanies,
   getDashboard,
+  getExternalIntegrations,
   getFiscalYears,
   getMe,
   getOutboxEvents,
@@ -74,6 +77,7 @@ const tabs = [
   { id: "companies", label: "Empresas" },
   { id: "periods", label: "Ejercicios y periodos" },
   { id: "audit", label: "Auditoria" },
+  { id: "integrations", label: "Asesoria" },
   { id: "events", label: "Integracion" },
 ];
 
@@ -142,9 +146,42 @@ const bankTransactionStatusLabels = {
   ignored: "Ignorado",
 };
 
+const integrationCategoryLabels = {
+  advisor_suite: "Asesoria",
+  cloud_accounting: "Cloud contable",
+  cloud_erp: "ERP cloud",
+  cloud_invoicing: "Facturacion cloud",
+  desktop_cloud_connected: "Escritorio + cloud",
+  desktop_cloud_hybrid: "Hibrido",
+  erp: "ERP",
+  open_source_erp: "Open source",
+};
+
+const integrationModeLabels = {
+  api_with_outbox: "API con outbox",
+  advisor_export: "Paquete asesoria",
+  bidirectional_with_approval: "Bidireccional con aprobacion",
+  export_first: "Export first",
+  file_import_export: "Ficheros import/export",
+  fiscal_boundary_export: "Frontera fiscal",
+  plugin_or_api: "Plugin o API",
+};
+
+const integrationStatusLabels = {
+  candidate: "Candidato",
+  planned: "Planificado",
+  research: "En estudio",
+};
+
 function maturityStatusTone(status) {
   if (status === "pending") return "warning";
   if (status === "settled") return "ok";
+  return "neutral";
+}
+
+function integrationStatusTone(status) {
+  if (status === "planned") return "ok";
+  if (status === "research") return "warning";
   return "neutral";
 }
 
@@ -510,6 +547,21 @@ export default function App() {
   const [outboxStatus, setOutboxStatus] = useState(null);
   const [outboxFilters, setOutboxFilters] = useState({ status: "", event_type: "", limit: 25 });
   const [outboxRetry, setOutboxRetry] = useState(null);
+  const [integrationCatalog, setIntegrationCatalog] = useState({ data: [], summary: null, catalog_version: "" });
+  const [integrationsLoading, setIntegrationsLoading] = useState(false);
+  const [integrationsStatus, setIntegrationsStatus] = useState(null);
+  const [integrationFilters, setIntegrationFilters] = useState({ q: "", status: "", category: "" });
+  const [advisorPackage, setAdvisorPackage] = useState(null);
+  const [advisorPackageLoading, setAdvisorPackageLoading] = useState(false);
+  const [advisorPackageStatus, setAdvisorPackageStatus] = useState(null);
+  const [advisorPackageDownloading, setAdvisorPackageDownloading] = useState(null);
+  const [advisorPackageFilters, setAdvisorPackageFilters] = useState({
+    fiscal_year_id: "",
+    period_id: "",
+    date_from: "",
+    date_to: "",
+    include_empty: "false",
+  });
 
   const selectedCompany = useMemo(
     () => companies.find(c => c.id === selectedCompanyId) || null,
@@ -558,6 +610,7 @@ export default function App() {
   const selectedLedgerPeriods = periods.filter(period => period.fiscal_year_id === ledgerFilters.fiscal_year_id);
   const selectedReportsYear = fiscalYears.find(year => year.id === reportsFilters.fiscal_year_id);
   const selectedReportsPeriods = periods.filter(period => period.fiscal_year_id === reportsFilters.fiscal_year_id);
+  const selectedAdvisorPackagePeriods = periods.filter(period => period.fiscal_year_id === advisorPackageFilters.fiscal_year_id);
   const overviewFiscalYears = Number(dashboard?.fiscal_years?.total ?? fiscalYears.length);
   const overviewActivePeriods = Number(dashboard?.periods?.open ?? activePeriods);
   const overviewLockedPeriods = Number(
@@ -716,6 +769,47 @@ export default function App() {
       });
     } finally {
       setOutboxLoading(false);
+    }
+  }
+
+  async function refreshIntegrations(nextFilters = integrationFilters) {
+    if (!session) return;
+    setIntegrationsLoading(true);
+    setIntegrationsStatus(null);
+    try {
+      const result = await getExternalIntegrations(nextFilters);
+      setIntegrationCatalog({
+        data: result.data || [],
+        summary: result.summary || null,
+        catalog_version: result.catalog_version || "",
+        disclaimer: result.disclaimer || "",
+      });
+    } catch (err) {
+      setIntegrationCatalog({ data: [], summary: null, catalog_version: "" });
+      setIntegrationsStatus({
+        tone: err.status === 403 ? "danger" : "warning",
+        text: err.message,
+      });
+    } finally {
+      setIntegrationsLoading(false);
+    }
+  }
+
+  async function refreshAdvisorPackage(nextFilters = advisorPackageFilters) {
+    if (!session || !selectedCompanyId) return;
+    setAdvisorPackageLoading(true);
+    setAdvisorPackageStatus(null);
+    try {
+      const result = await getAdvisorPackage(nextFilters);
+      setAdvisorPackage(result);
+    } catch (err) {
+      setAdvisorPackage(null);
+      setAdvisorPackageStatus({
+        tone: err.status === 403 ? "danger" : "warning",
+        text: err.message,
+      });
+    } finally {
+      setAdvisorPackageLoading(false);
     }
   }
 
@@ -1167,6 +1261,15 @@ export default function App() {
   }, [activeTab, selectedCompanyId, canReadOutbox]);
 
   useEffect(() => {
+    if (activeTab === "integrations") {
+      refreshPeriods();
+      refreshIntegrations();
+      refreshAdvisorPackage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, session?.user?.id, selectedCompanyId]);
+
+  useEffect(() => {
     if (activeTab === "accounts" || activeTab === "overview") {
       refreshAccounts();
     }
@@ -1225,6 +1328,7 @@ export default function App() {
     setJournalFilters(prev => prev.fiscal_year_id ? prev : { ...prev, fiscal_year_id: defaultYear });
     setLedgerFilters(prev => prev.fiscal_year_id ? prev : { ...prev, fiscal_year_id: defaultYear });
     setReportsFilters(prev => prev.fiscal_year_id ? prev : { ...prev, fiscal_year_id: defaultYear });
+    setAdvisorPackageFilters(prev => prev.fiscal_year_id ? prev : { ...prev, fiscal_year_id: defaultYear });
     setJournalForm(prev => {
       if (prev.fiscal_year_id) return prev;
       const year = fiscalYears.find(item => item.id === defaultYear);
@@ -1236,6 +1340,13 @@ export default function App() {
     if (activeTab === "journal" && journalForm.fiscal_year_id) refreshJournalAccounts(journalForm.fiscal_year_id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, journalForm.fiscal_year_id, selectedCompanyId]);
+
+  useEffect(() => {
+    if (activeTab === "integrations" && advisorPackageFilters.fiscal_year_id) {
+      refreshAdvisorPackage(advisorPackageFilters);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, advisorPackageFilters.fiscal_year_id]);
 
   async function handleSelectCompany(id) {
     setError(null);
@@ -1339,6 +1450,37 @@ export default function App() {
   async function handleOutboxFilter(event) {
     event.preventDefault();
     await refreshOutbox(outboxFilters);
+  }
+
+  async function handleIntegrationFilter(event) {
+    event.preventDefault();
+    await refreshIntegrations(integrationFilters);
+  }
+
+  async function clearIntegrationFilters() {
+    const nextFilters = { q: "", status: "", category: "" };
+    setIntegrationFilters(nextFilters);
+    await refreshIntegrations(nextFilters);
+  }
+
+  async function handleAdvisorPackageFilter(event) {
+    event.preventDefault();
+    await refreshAdvisorPackage(advisorPackageFilters);
+  }
+
+  async function handleDownloadAdvisorPackageFile(item) {
+    if (!item?.available || !item.path) return;
+    setAdvisorPackageDownloading(item.id);
+    setAdvisorPackageStatus(null);
+    try {
+      const result = await downloadAdvisorPackageFile(item.path);
+      saveBlob(result.blob, result.filename || `${item.id}.csv`);
+      setAdvisorPackageStatus({ tone: "ok", text: `${item.label} descargado para el paquete de asesoria.` });
+    } catch (err) {
+      setAdvisorPackageStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setAdvisorPackageDownloading(null);
+    }
   }
 
   async function handleOutboxRetry(event) {
@@ -3462,6 +3604,162 @@ export default function App() {
                   <EmptyState title="Sin registros" detail="No hay eventos de auditoria para los filtros actuales." />
                 )}
               </>
+            )}
+          </section>
+        )}
+
+        {activeTab === "integrations" && (
+          <section className="panel panel-full">
+            <div className="panel-heading">
+              <div>
+                <h2>Exportaciones para asesoria</h2>
+                <p>Paquetes CSV y referencia de conectores externos. La activacion, priorizacion y gobierno de integraciones con otros programas se realiza desde Superadmin.</p>
+              </div>
+              {integrationsLoading && <StatusBadge tone="neutral" text="Cargando" />}
+            </div>
+            <form className="integration-filters" onSubmit={handleIntegrationFilter}>
+              <label>
+                <span>Buscar</span>
+                <input
+                  value={integrationFilters.q}
+                  onChange={e => setIntegrationFilters(prev => ({ ...prev, q: e.target.value }))}
+                  placeholder="Sage, Holded, API, asesoria..."
+                />
+              </label>
+              <label>
+                <span>Estado</span>
+                <select value={integrationFilters.status} onChange={e => setIntegrationFilters(prev => ({ ...prev, status: e.target.value }))}>
+                  <option value="">Todos</option>
+                  {Object.entries(integrationStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>Categoria</span>
+                <select value={integrationFilters.category} onChange={e => setIntegrationFilters(prev => ({ ...prev, category: e.target.value }))}>
+                  <option value="">Todas</option>
+                  {Object.entries(integrationCategoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <button type="submit">Filtrar</button>
+              <button type="button" className="secondary" onClick={clearIntegrationFilters}>Limpiar</button>
+            </form>
+            {integrationsStatus && <div className="form-status"><StatusBadge tone={integrationsStatus.tone} text={integrationsStatus.text} /></div>}
+            <div className="integration-summary-strip">
+              <div><span>Catalogo</span><strong>{integrationCatalog.catalog_version || "-"}</strong></div>
+              <div><span>Conectores</span><strong>{integrationCatalog.summary?.total || integrationCatalog.data.length}</strong></div>
+              <div><span>API + outbox</span><strong>{integrationCatalog.summary?.by_mode?.api_with_outbox || 0}</strong></div>
+              <div><span>Export first</span><strong>{integrationCatalog.summary?.by_mode?.export_first || 0}</strong></div>
+            </div>
+            {integrationCatalog.disclaimer && (
+              <div className="scope-note">{integrationCatalog.disclaimer}</div>
+            )}
+            <div className="scope-note">
+              Esta pantalla no administra conectores externos. Superadmin gobierna catalogo, activacion y modo permitido; Contabilidad solo ejecuta exportaciones autorizadas bajo permisos y auditoria.
+            </div>
+            <div className="advisor-package-panel">
+              <div className="panel-heading compact">
+                <div>
+                  <h2>Paquete asesoria</h2>
+                  <p>Genera un manifiesto de CSV descargables para asesoria o importacion en programas externos. Mantiene permisos, auditoria y filtros por ejercicio.</p>
+                </div>
+                {advisorPackageLoading && <StatusBadge tone="neutral" text="Preparando" />}
+              </div>
+              <form className="advisor-package-filters" onSubmit={handleAdvisorPackageFilter}>
+                <label>
+                  <span>Ejercicio</span>
+                  <select
+                    value={advisorPackageFilters.fiscal_year_id}
+                    onChange={e => setAdvisorPackageFilters(prev => ({ ...prev, fiscal_year_id: e.target.value, period_id: "" }))}
+                  >
+                    <option value="">Selecciona ejercicio</option>
+                    {fiscalYears.map(year => <option key={year.id} value={year.id}>{year.year_label}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>Periodo</span>
+                  <select
+                    value={advisorPackageFilters.period_id}
+                    onChange={e => setAdvisorPackageFilters(prev => ({ ...prev, period_id: e.target.value }))}
+                    disabled={!advisorPackageFilters.fiscal_year_id}
+                  >
+                    <option value="">Todos</option>
+                    {selectedAdvisorPackagePeriods.map(period => <option key={period.id} value={period.id}>{period.name}</option>)}
+                  </select>
+                </label>
+                <label><span>Desde</span><input type="date" value={advisorPackageFilters.date_from} onChange={e => setAdvisorPackageFilters(prev => ({ ...prev, date_from: e.target.value }))} /></label>
+                <label><span>Hasta</span><input type="date" value={advisorPackageFilters.date_to} onChange={e => setAdvisorPackageFilters(prev => ({ ...prev, date_to: e.target.value }))} /></label>
+                <label>
+                  <span>Cuentas vacias</span>
+                  <select value={advisorPackageFilters.include_empty} onChange={e => setAdvisorPackageFilters(prev => ({ ...prev, include_empty: e.target.value }))}>
+                    <option value="false">Ocultar</option>
+                    <option value="true">Incluir</option>
+                  </select>
+                </label>
+                <button type="submit">Actualizar paquete</button>
+              </form>
+              {advisorPackageStatus && <div className="form-status"><StatusBadge tone={advisorPackageStatus.tone} text={advisorPackageStatus.text} /></div>}
+              {advisorPackage && (
+                <>
+                  <div className="advisor-package-summary">
+                    <div><span>Disponibles</span><strong>{advisorPackage.available_count}</strong></div>
+                    <div><span>Bloqueados</span><strong>{advisorPackage.blocked_count}</strong></div>
+                    <div><span>Empresa</span><strong>{advisorPackage.selected_company?.name || selectedCompany?.name || "-"}</strong></div>
+                  </div>
+                  <div className="advisor-export-list">
+                    {advisorPackage.exports.map(item => (
+                      <div className={`advisor-export-row${item.available ? "" : " disabled"}`} key={item.id}>
+                        <div>
+                          <strong>{item.label}</strong>
+                          <small>{item.available ? item.description : item.blocked_reasons.join(", ")}</small>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!item.available || advisorPackageDownloading === item.id}
+                          onClick={() => handleDownloadAdvisorPackageFile(item)}
+                        >
+                          {advisorPackageDownloading === item.id ? "Descargando" : "CSV"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <small className="advisor-package-disclaimer">{advisorPackage.disclaimer}</small>
+                </>
+              )}
+            </div>
+            {integrationCatalog.data.length ? (
+              <div className="integration-grid">
+                {integrationCatalog.data.map(item => (
+                  <article className="integration-card" key={item.id}>
+                    <div className="integration-card-heading">
+                      <div>
+                        <span className="eyebrow">Prioridad {item.priority}</span>
+                        <h3>{item.name}</h3>
+                        <small>{item.vendor} | {integrationCategoryLabels[item.category] || item.category}</small>
+                      </div>
+                      <StatusBadge tone={integrationStatusTone(item.status)} text={integrationStatusLabels[item.status] || item.status} />
+                    </div>
+                    <div className="integration-mode">
+                      <span>Modo definido por Superadmin</span>
+                      <strong>{integrationModeLabels[item.recommended_mode] || item.recommended_mode}</strong>
+                    </div>
+                    <div className="integration-tags">
+                      {item.connectors.map(connector => <span key={connector}>{connector}</span>)}
+                    </div>
+                    <p>{item.notes}</p>
+                    <div className="integration-detail">
+                      <strong>Flujos previstos</strong>
+                      <small>{item.flows.join(", ")}</small>
+                    </div>
+                    <div className="integration-detail">
+                      <strong>Riesgos</strong>
+                      <small>{item.risks.join(", ")}</small>
+                    </div>
+                    <a href={item.source_url} target="_blank" rel="noreferrer">Fuente del proveedor</a>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <EmptyState title="Sin conectores" detail="No hay conectores para los filtros actuales." />
             )}
           </section>
         )}

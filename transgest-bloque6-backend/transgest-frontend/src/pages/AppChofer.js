@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada } from "../services/api";
+import { getPedidos, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -258,6 +258,57 @@ function FirmaCanvas({ pedido, onFirma, onCancel }){
           <button onClick={limpiar} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Borrar</button>
           <button onClick={onCancel} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
           <button onClick={confirmar} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Confirmar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FirmaLaboralCanvas({ title = "Firma", detail = "", defaultName = "", onFirma, onCancel }){
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const lastPt = useRef(null);
+  const [firmaNombre, setFirmaNombre] = useState(defaultName || "");
+
+  function getPos(e, canvas){
+    const rect = canvas.getBoundingClientRect();
+    const src = e.touches?.[0] || e;
+    return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+  }
+  function start(e){ e.preventDefault(); drawing.current=true; lastPt.current=getPos(e,canvasRef.current); }
+  function move(e){
+    e.preventDefault();
+    if(!drawing.current) return;
+    const ctx=canvasRef.current.getContext("2d");
+    const pt=getPos(e,canvasRef.current);
+    ctx.beginPath(); ctx.strokeStyle="#111"; ctx.lineWidth=2.5; ctx.lineCap="round";
+    ctx.moveTo(lastPt.current.x,lastPt.current.y);
+    ctx.lineTo(pt.x,pt.y); ctx.stroke();
+    lastPt.current=pt;
+  }
+  function end(){ drawing.current=false; }
+  function limpiar(){ const ctx=canvasRef.current.getContext("2d"); ctx.clearRect(0,0,300,150); }
+  function confirmar(){
+    const nombre = String(firmaNombre || "").trim();
+    if (!nombre) { notify("Indica nombre y apellidos para firmar", "warning"); return; }
+    onFirma?.({ firma_png: canvasRef.current.toDataURL("image/png"), nombre, user_agent: navigator.userAgent, at: new Date().toISOString() });
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:520,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"#fff",borderRadius:12,padding:16,width:"min(360px,95vw)"}}>
+        <div style={{fontWeight:800,fontSize:15,color:"#111",marginBottom:6,textAlign:"center"}}>{title}</div>
+        {detail && <div style={{fontSize:11,color:"#666",marginBottom:10,textAlign:"center",lineHeight:1.35}}>{detail}</div>}
+        <input value={firmaNombre} onChange={e=>setFirmaNombre(e.target.value)} placeholder="Nombre y apellidos"
+          style={{width:"100%",boxSizing:"border-box",border:"1px solid #ddd",borderRadius:8,padding:"9px 10px",fontSize:13,marginBottom:10,color:"#111"}}/>
+        <canvas ref={canvasRef} width={300} height={150}
+          style={{border:"2px solid #ddd",borderRadius:8,width:"100%",height:150,touchAction:"none",background:"#fafafa"}}
+          onMouseDown={start} onMouseMove={move} onMouseUp={end}
+          onTouchStart={start} onTouchMove={move} onTouchEnd={end}/>
+        <div style={{display:"flex",gap:8,marginTop:12}}>
+          <button onClick={limpiar} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Borrar</button>
+          <button onClick={onCancel} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+          <button onClick={confirmar} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>Firmar</button>
         </div>
       </div>
     </div>
@@ -1632,10 +1683,136 @@ function JornadaChofer({ jornadaInfo, onRefresh }) {
   );
 }
 
+function VacacionesChofer({ items = [], chofer, onRefresh }) {
+  const [form, setForm] = useState({
+    fecha_inicio: new Date().toISOString().slice(0,10),
+    fecha_fin: "",
+    motivo: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [firma, setFirma] = useState(null);
+  const [firmaPendiente, setFirmaPendiente] = useState(null);
+  const nombreChofer = `${chofer?.nombre || ""} ${chofer?.apellidos || ""}`.trim();
+  const estados = {
+    pendiente: ["Pendiente", "#f59e0b"],
+    aprobada_pendiente_firma: ["Aprobada, falta firma", "#3b82f6"],
+    aprobada_firmada: ["Aprobada y firmada", "#10b981"],
+    rechazada: ["Rechazada", "#ef4444"],
+  };
+
+  async function enviarSolicitud(firmaData) {
+    setSaving(true);
+    try {
+      await solicitarChoferVacacionesApp({ ...form, firma: firmaData });
+      setForm({ fecha_inicio: new Date().toISOString().slice(0,10), fecha_fin: "", motivo: "" });
+      setFirma(null);
+      notify("Solicitud de vacaciones enviada", "success");
+      await onRefresh();
+    } catch (e) {
+      notify(e.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function firmarAceptacion(item, firmaData) {
+    setSaving(true);
+    try {
+      await firmarChoferVacacionesApp(item.id, { firma: firmaData });
+      setFirmaPendiente(null);
+      notify("Hoja de vacaciones firmada", "success");
+      await onRefresh();
+    } catch (e) {
+      notify(e.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)"}}>Vacaciones</div>
+        <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
+          Solicita vacaciones y firma la solicitud desde la app. Si gerencia aprueba sin firma directa, aparecerá aquí para firmar la aceptación.
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}>
+          <div>
+            <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Inicio</label>
+            <input type="date" value={form.fecha_inicio} onChange={e=>setForm(p=>({...p,fecha_inicio:e.target.value}))}
+              style={{width:"100%",boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)"}} />
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Fin</label>
+            <input type="date" value={form.fecha_fin} onChange={e=>setForm(p=>({...p,fecha_fin:e.target.value}))}
+              style={{width:"100%",boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)"}} />
+          </div>
+        </div>
+        <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"}}>Motivo / notas</label>
+        <textarea value={form.motivo} onChange={e=>setForm(p=>({...p,motivo:e.target.value}))} placeholder="Opcional"
+          style={{width:"100%",boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)",minHeight:70,resize:"vertical",fontFamily:"'DM Sans',sans-serif"}} />
+        <button disabled={saving || !form.fecha_inicio || !form.fecha_fin} onClick={()=>setFirma("solicitud")}
+          style={{width:"100%",marginTop:12,padding:"12px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",opacity:saving ? .6 : 1}}>
+          Solicitar y firmar
+        </button>
+      </div>
+
+      <div style={{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+        <div style={{fontWeight:900,fontSize:13,color:"var(--text)",marginBottom:8}}>Mis solicitudes</div>
+        {items.length === 0 ? (
+          <div style={{fontSize:12,color:"var(--text5)"}}>Sin solicitudes registradas.</div>
+        ) : items.map(item => {
+          const [label, color] = estados[item.estado] || [item.estado || "Estado", "var(--text5)"];
+          return (
+            <div key={item.id} style={{borderTop:"1px solid var(--border)",padding:"10px 0"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}>
+                <div>
+                  <div style={{fontWeight:900,fontSize:13,color:"var(--text)"}}>
+                    {String(item.fecha_inicio || "").slice(0,10)} a {String(item.fecha_fin || "").slice(0,10)}
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{Number(item.dias || 0)} días {item.motivo ? `- ${item.motivo}` : ""}</div>
+                </div>
+                <span style={{fontSize:10,fontWeight:900,color,background:`${color}18`,border:`1px solid ${color}30`,borderRadius:99,padding:"3px 8px",whiteSpace:"nowrap"}}>{label}</span>
+              </div>
+              {item.estado === "aprobada_pendiente_firma" && (
+                <button disabled={saving} onClick={()=>setFirmaPendiente(item)}
+                  style={{marginTop:8,padding:"9px 11px",borderRadius:8,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.10)",color:"#10b981",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  Firmar aceptación
+                </button>
+              )}
+              {item.observaciones && <div style={{fontSize:11,color:"var(--text4)",marginTop:6}}>Gerencia: {item.observaciones}</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {firma && (
+        <FirmaLaboralCanvas
+          title="Firmar solicitud de vacaciones"
+          detail={`${form.fecha_inicio} a ${form.fecha_fin}. Esta firma acredita que solicitas estos días.`}
+          defaultName={nombreChofer}
+          onCancel={()=>setFirma(null)}
+          onFirma={enviarSolicitud}
+        />
+      )}
+      {firmaPendiente && (
+        <FirmaLaboralCanvas
+          title="Firmar hoja de vacaciones"
+          detail={`${String(firmaPendiente.fecha_inicio || "").slice(0,10)} a ${String(firmaPendiente.fecha_fin || "").slice(0,10)}. Firma la aceptación de vacaciones aprobadas.`}
+          defaultName={nombreChofer}
+          onCancel={()=>setFirmaPendiente(null)}
+          onFirma={(data)=>firmarAceptacion(firmaPendiente, data)}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function AppChofer(){
   const { user, logout } = useAuth();
   const [pedidos,   setPedidos]   = useState([]);
   const [solicitudesChofer, setSolicitudesChofer] = useState([]);
+  const [vacacionesChofer, setVacacionesChofer] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [filtroFecha,setFiltroFecha]=useState("semana"); // hoy | semana | todos
   const [tab,       setTab]       = useState("activos"); // activos | historial | solicitud
@@ -1664,6 +1841,9 @@ export default function AppChofer(){
       const solicitudes = await getTallerSolicitudes().catch(() => []);
       const nextSolicitudes = Array.isArray(solicitudes) ? solicitudes.slice(0, 50) : [];
       setSolicitudesChofer(nextSolicitudes);
+      const vacaciones = await getChoferVacacionesApp().catch(() => []);
+      const vacacionesArr = Array.isArray(vacaciones) ? vacaciones : Array.isArray(vacaciones?.solicitudes) ? vacaciones.solicitudes : [];
+      setVacacionesChofer(vacacionesArr.slice(0, 50));
     }catch(e){ console.error(e); }
     finally{ setLoading(false); }
   }, [user?.id, user?.chofer_id]);
@@ -1751,6 +1931,7 @@ export default function AppChofer(){
 
   const enCurso = pedidos.filter(p=>["en_curso","descarga"].includes(p.estado)).length;
   const solicitudesAbiertas = solicitudesChofer.filter(s => !["resuelto","cerrado","cancelado"].includes(String(s.estado || "").toLowerCase())).length;
+  const vacacionesFirmaPendiente = vacacionesChofer.filter(v => v.estado === "aprobada_pendiente_firma").length;
   const solicitudCritica = solicitudesChofer.find(s => String(s.urgencia || "").toLowerCase() === "critica" && !["resuelto","cerrado","cancelado"].includes(String(s.estado || "").toLowerCase()));
   const vehiculoSolicitud = pedidos.find(p=>p.vehiculo_id&&["en_curso","confirmado"].includes(p.estado))
     || (jornadaInfo?.chofer?.vehiculo_id ? {
@@ -1877,12 +2058,17 @@ export default function AppChofer(){
 
       {/* Tabs */}
       <div style={{display:"flex",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-        {[["activos","Activos"],["jornada","Jornada"],["historial","Historial"],["solicitud","Mecanico"]].map(([id,l])=>(
+        {[["activos","Activos"],["jornada","Jornada"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Mecanico"]].map(([id,l])=>(
           <button key={id} onClick={()=>setTab(id)}
             style={{flex:1,padding:"11px",border:"none",borderBottom:`2px solid ${tab===id?"var(--accent)":"transparent"}`,
               color:tab===id?"var(--accent)":"var(--text4)",background:"transparent",
               fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>
             {l}
+            {id==="vacaciones" && vacacionesFirmaPendiente > 0 && (
+              <span style={{marginLeft:6,padding:"1px 6px",borderRadius:20,background:"rgba(59,130,246,.16)",color:"#60a5fa",fontSize:10,fontWeight:900}}>
+                {vacacionesFirmaPendiente}
+              </span>
+            )}
             {id==="solicitud" && solicitudesAbiertas > 0 && (
               <span style={{marginLeft:6,padding:"1px 6px",borderRadius:20,background:"rgba(239,68,68,.16)",color:"#ef4444",fontSize:10,fontWeight:900}}>
                 {solicitudesAbiertas}
@@ -1891,6 +2077,13 @@ export default function AppChofer(){
           </button>
         ))}
       </div>
+
+      {vacacionesFirmaPendiente > 0 && tab !== "vacaciones" && (
+        <button onClick={()=>setTab("vacaciones")}
+          style={{width:"100%",textAlign:"left",background:"rgba(59,130,246,.12)",border:"none",borderBottom:"1px solid rgba(59,130,246,.25)",padding:"9px 16px",color:"#60a5fa",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          Tienes vacaciones aprobadas pendientes de firma. Toca para firmar la hoja.
+        </button>
+      )}
 
       {solicitudCritica && tab !== "solicitud" && (
         <button onClick={()=>setTab("solicitud")}
@@ -1913,7 +2106,7 @@ export default function AppChofer(){
       </div>
 
       {/* Lista viajes */}
-      {tab!=="solicitud" && tab!=="jornada" && (
+      {tab!=="solicitud" && tab!=="jornada" && tab!=="vacaciones" && (
         <div style={{padding:"12px 16px"}}>
           {loading?(
             <div style={{padding:40,textAlign:"center",color:"var(--text5)"}}>Cargando viajes...</div>
@@ -1949,6 +2142,10 @@ export default function AppChofer(){
 
       {tab==="jornada" && (
         <JornadaChofer jornadaInfo={jornadaInfo} onRefresh={cargar} />
+      )}
+
+      {tab==="vacaciones" && (
+        <VacacionesChofer items={vacacionesChofer} chofer={jornadaInfo?.chofer || user} onRefresh={cargar} />
       )}
 
     {/* Modal camara */}

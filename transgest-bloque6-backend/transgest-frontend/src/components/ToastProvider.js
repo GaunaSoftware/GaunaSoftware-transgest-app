@@ -22,6 +22,36 @@ function typeFromMessage(message) {
   return "info";
 }
 
+function readRecentApiErrors() {
+  try {
+    const rows = JSON.parse(localStorage.getItem("tms_api_errors") || "[]");
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function isGenericPassiveLoadError(message, type) {
+  if (type !== "error") return false;
+  const text = String(message || "").toLowerCase();
+  const genericServerError = text.includes("no se pudo completar") && (
+    text.includes("problema interno del servidor") ||
+    text.includes("codigo de seguimiento")
+  );
+  const networkLoadError = text.includes("no se pudo conectar con el servidor") ||
+    text.includes("la conexion con el servidor se ha cortado");
+  if (!genericServerError && !networkLoadError) return false;
+  const recent = readRecentApiErrors();
+  const now = Date.now();
+  return recent.some((item) => {
+    const ageMs = now - new Date(item.ts || 0).getTime();
+    const method = String(item.method || "GET").toUpperCase();
+    const status = Number(item.status || 0);
+    const sameMessage = !item.message || String(item.message || "").toLowerCase() === text;
+    return ageMs >= 0 && ageMs < 12000 && method === "GET" && sameMessage && (status === 0 || status >= 500);
+  });
+}
+
 export default function ToastProvider({ children }) {
   const [items, setItems] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
@@ -31,8 +61,13 @@ export default function ToastProvider({ children }) {
   const notify = useCallback((message, type = "info", timeout = 5200) => {
     const text = String(message || "").trim();
     if (!text) return null;
+    if (isGenericPassiveLoadError(text, type)) return null;
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    setItems(prev => [...prev.slice(-4), { id, message:text, type }]);
+    setItems(prev => {
+      const duplicate = prev.some(item => item.type === type && item.message === text);
+      if (duplicate) return prev;
+      return [...prev.slice(-4), { id, message:text, type }];
+    });
     if (timeout) {
       window.setTimeout(() => setItems(prev => prev.filter(item => item.id !== id)), timeout);
     }

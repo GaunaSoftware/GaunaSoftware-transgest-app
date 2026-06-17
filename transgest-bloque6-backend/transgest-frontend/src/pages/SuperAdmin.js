@@ -71,6 +71,23 @@ const PLAN_COLOR   = {basico:"#6b7280",profesional:"#3b82f6",enterprise:"#8b5cf6
 const ESTADO_COLOR = {activo:"#10b981",suspendido:"#f59e0b",cancelado:"#ef4444"};
 const PLANES_OPTS  = ["basico","profesional","enterprise"];
 const PLAN_PRICES  = {basico:99,profesional:199,enterprise:399};
+const ACCOUNTING_MAPPING_ITEM_LABELS = {
+  chart_of_accounts:"Plan contable",
+  parties:"Terceros",
+  taxes:"Impuestos",
+  journal_entries:"Diario",
+  bank_transactions:"Bancos",
+  documents:"Documentos",
+};
+const defaultAccountingMappingItems = () => Object.keys(ACCOUNTING_MAPPING_ITEM_LABELS).reduce((acc, key) => {
+  acc[key] = false;
+  return acc;
+}, {});
+const normalizeAccountingMappingItems = value => ({
+  ...defaultAccountingMappingItems(),
+  ...(value && typeof value === "object" ? value : {}),
+});
+const countAccountingMappingItems = value => Object.values(normalizeAccountingMappingItems(value)).filter(Boolean).length;
 const monthlyPlanValue = (plan, ciclo="mensual") => {
   const base = PLAN_PRICES[plan] || 0;
   return ciclo === "anual" ? (base * 12 * 0.85) / 12 : base;
@@ -564,7 +581,21 @@ function CorreoGaunaAdmin({ saFetchFn }) {
 function IntegracionesAdmin({ saFetchFn }) {
   const [data, setData] = useState(null);
   const [salud, setSalud] = useState(null);
+  const [accountingIntegrations, setAccountingIntegrations] = useState(null);
   const [integrationTab, setIntegrationTab] = useState("version");
+  const [accountingCompanyId, setAccountingCompanyId] = useState("");
+  const [accountingForm, setAccountingForm] = useState({
+    connector_id:"",
+    status:"not_configured",
+    mode:"advisor_export",
+    owner_email:"",
+    advisor_name:"",
+    mapping_status:"pending",
+    mapping_items:defaultAccountingMappingItems(),
+    notes:"",
+  });
+  const [accountingSaving, setAccountingSaving] = useState(false);
+  const [accountingFilters, setAccountingFilters] = useState({ q:"", connector_id:"", status:"" });
   const [empresaId, setEmpresaId] = useState("");
   const [provider, setProvider] = useState("here");
   const [form, setForm] = useState({ use_global:true, activo:true, api_key:"", limite_mensual:0 });
@@ -590,10 +621,13 @@ function IntegracionesAdmin({ saFetchFn }) {
     Promise.all([
       saFetchFn("/integraciones"),
       saFetchFn("/integraciones/salud").catch(() => null),
-    ]).then(([d, saludData]) => {
+      saFetchFn("/integraciones/contabilidad").catch(() => null),
+    ]).then(([d, saludData, accountingData]) => {
       setData(d);
       setSalud(saludData);
+      setAccountingIntegrations(accountingData);
       if (!empresaId && d.empresas?.[0]) setEmpresaId(d.empresas[0].id);
+      if (!accountingCompanyId && d.empresas?.[0]) setAccountingCompanyId(d.empresas[0].id);
       if (d.ai) setAiForm({ provider:d.ai.provider || "anthropic", base_url:d.ai.base_url || "", model:d.ai.model || "" });
       if (d.app_meta) setAppMetaForm({
         brand_name: d.app_meta.brand_name || "TransGest",
@@ -603,7 +637,7 @@ function IntegracionesAdmin({ saFetchFn }) {
         fiscal_software_id: d.app_meta.fiscal_software_id || "transgest-tms",
       });
     }).finally(()=>setLoading(false));
-  }, [saFetchFn, empresaId]);
+  }, [saFetchFn, empresaId, accountingCompanyId]);
 
   useEffect(()=>{ cargar(); }, [cargar]);
 
@@ -931,7 +965,42 @@ function IntegracionesAdmin({ saFetchFn }) {
     }
   }
 
-  if (loading && !data) return <div style={SaaS.empty}>Cargando integraciones...</div>;
+  async function guardarIntegracionContableEmpresa() {
+    if (!accountingCompanyId) return;
+    setAccountingSaving(true);
+    try {
+      await saFetchFn(`/integraciones/contabilidad/empresas/${accountingCompanyId}`, { method:"PUT", body:accountingForm });
+      notify("Integracion contable de empresa guardada en Superadmin.", "success");
+      cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo guardar la integracion contable.", "error");
+    } finally {
+      setAccountingSaving(false);
+    }
+  }
+
+  async function descargarSeguimientoContable() {
+    try {
+      const res = await fetch(`${BASE}/api/v1/superadmin/integraciones/contabilidad/export.csv`, {
+        headers: { "Authorization": "Bearer " + saToken() },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "No se pudo descargar el CSV.");
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const filename = disposition.match(/filename="?([^"]+)"?/i)?.[1] || `integraciones-contables-${new Date().toISOString().slice(0,10)}.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      notify(e.message || "No se pudo descargar el seguimiento contable.", "error");
+    }
+  }
 
   const input = {background:"#1a2035",border:"1px solid #28344f",color:"#e2e8f0",padding:"8px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
   const saludIntegraciones = salud || null;
@@ -1008,7 +1077,93 @@ function IntegracionesAdmin({ saFetchFn }) {
     ["salud", "Salud APIs"],
     ["version", "Version programa"],
     ["empresa", "Empresas y APIs"],
+    ["contabilidad", "Contabilidad externa"],
   ];
+  const accountingCatalog = accountingIntegrations || {};
+  const accountingItems = Array.isArray(accountingCatalog.integrations) ? accountingCatalog.integrations : [];
+  const accountingSummary = accountingCatalog.summary || {};
+  const accountingCompanySettings = Array.isArray(accountingCatalog.company_settings) ? accountingCatalog.company_settings : [];
+  const accountingCompanySummary = accountingCatalog.company_summary || {};
+  const accountingHistory = Array.isArray(accountingCatalog.history) ? accountingCatalog.history : [];
+  const visibleAccountingSettings = accountingCompanySettings.filter(item => {
+    const q = String(accountingFilters.q || "").trim().toLowerCase();
+    if (accountingFilters.connector_id && item.connector_id !== accountingFilters.connector_id) return false;
+    if (accountingFilters.status && item.status !== accountingFilters.status) return false;
+    if (!q) return true;
+    return [
+      item.empresa_nombre,
+      item.connector_name,
+      item.owner_email,
+      item.advisor_name,
+      item.notes,
+    ].join(" ").toLowerCase().includes(q);
+  });
+  const selectedAccountingSetting = accountingCompanySettings.find(item => String(item.empresa_id) === String(accountingCompanyId));
+  const accountingConnectorUrl = accountingCatalog.urls?.connectors || "http://localhost:8080/?tab=integrations";
+  const accountingStatusLabel = {
+    planned:"Planificado",
+    research:"En estudio",
+    active:"Activo",
+    paused:"Pausado",
+    not_configured:"Sin configurar",
+    assessing:"Evaluando",
+    export_ready:"Exportacion lista",
+    pilot:"Piloto",
+  };
+  const accountingConfigStatusLabel = {
+    not_configured:"Sin configurar",
+    assessing:"Evaluando",
+    export_ready:"Exportacion lista",
+    pilot:"Piloto",
+    active:"Activo",
+    paused:"Pausado",
+  };
+  const accountingMappingStatusLabel = {
+    pending:"Pendiente",
+    drafted:"Borrador",
+    validated:"Validado",
+  };
+  const selectedAccountingMappingItems = normalizeAccountingMappingItems(accountingForm.mapping_items);
+  const selectedAccountingMappingReadyCount = countAccountingMappingItems(selectedAccountingMappingItems);
+  const accountingModeLabel = {
+    export_first:"Exportar primero",
+    advisor_export:"Paquete asesoria",
+    api_with_outbox:"API + outbox",
+    bidirectional_with_approval:"Bidireccional con aprobacion",
+    file_import_export:"Ficheros import/export",
+    fiscal_boundary_export:"Frontera fiscal",
+    plugin_or_api:"Plugin/API",
+  };
+  const openAccountingConnectors = () => {
+    if (typeof window !== "undefined") window.open(accountingConnectorUrl, "_blank", "noopener,noreferrer");
+  };
+  useEffect(() => {
+    setAccountingForm({
+      connector_id: selectedAccountingSetting?.connector_id || "",
+      status: selectedAccountingSetting?.status || "not_configured",
+      mode: selectedAccountingSetting?.mode || "advisor_export",
+      owner_email: selectedAccountingSetting?.owner_email || "",
+      advisor_name: selectedAccountingSetting?.advisor_name || "",
+      mapping_status: selectedAccountingSetting?.mapping_status || "pending",
+      mapping_items: normalizeAccountingMappingItems(selectedAccountingSetting?.mapping_items),
+      notes: selectedAccountingSetting?.notes || "",
+    });
+  }, [
+    selectedAccountingSetting?.empresa_id,
+    selectedAccountingSetting?.updated_at,
+    selectedAccountingSetting?.connector_id,
+    selectedAccountingSetting?.status,
+    selectedAccountingSetting?.mode,
+    selectedAccountingSetting?.owner_email,
+    selectedAccountingSetting?.advisor_name,
+    selectedAccountingSetting?.mapping_status,
+    selectedAccountingSetting?.mapping_items,
+    selectedAccountingSetting?.mapping_ready_count,
+    selectedAccountingSetting?.notes,
+    accountingCompanyId,
+  ]);
+
+  if (loading && !data) return <div style={SaaS.empty}>Cargando integraciones...</div>;
 
   return (
     <div style={SaaS.card}>
@@ -1112,6 +1267,334 @@ function IntegracionesAdmin({ saFetchFn }) {
         ) : (
           <div style={{fontSize:12,color:"#94a3b8",padding:"10px 0"}}>No se pudo cargar el diagnostico de integraciones.</div>
         )}
+      </div>
+
+      <div style={{display:integrationTab==="contabilidad" ? "block" : "none",background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
+          <div>
+            <div style={{fontWeight:900,color:"#e2e8f0",fontSize:15}}>Integraciones contables externas</div>
+            <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,maxWidth:860}}>
+              Superadmin gobierna el catalogo, la priorizacion y la activacion de conectores. Contabilidad ejecuta exportaciones y futuras sincronizaciones sin permitir escrituras directas en tablas contables.
+            </div>
+          </div>
+          <button onClick={openAccountingConnectors} style={{...SaaS.btnOk,padding:"8px 12px"}}>
+            Abrir conectores contables
+          </button>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:12}}>
+          {[
+            ["Catalogo", accountingSummary.total || accountingItems.length || 0, "#93c5fd", accountingCatalog.catalog_version || "-"],
+            ["Planificados", accountingSummary.by_status?.planned || 0, "#34d399", "conector priorizable"],
+            ["En estudio", accountingSummary.by_status?.research || 0, "#fbbf24", "requiere validacion"],
+            ["Empresas configuradas", accountingCompanySummary.with_connector || 0, "#5eead4", `${accountingCompanySummary.active || 0} activas`],
+          ].map(([label, value, color, detail]) => (
+            <div key={label} style={{background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:10}}>
+              <div style={{fontSize:10,color:"#64748b",fontWeight:900,textTransform:"uppercase"}}>{label}</div>
+              <div style={{fontSize:18,fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color,marginTop:4}}>{value}</div>
+              <div style={{fontSize:10,color:"#64748b",marginTop:4}}>{detail}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12,marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Ficha por empresa</div>
+              <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4}}>
+                Define que programa mantiene el cliente, modo autorizado y estado del mapeo. Esto no activa escrituras automaticas.
+              </div>
+            </div>
+            <button onClick={guardarIntegracionContableEmpresa} disabled={accountingSaving || !accountingCompanyId} style={{...SaaS.btnOk,padding:"8px 12px",opacity:accountingSaving ? .7 : 1}}>
+              {accountingSaving ? "Guardando..." : "Guardar ficha"}
+            </button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(220px,1.2fr) minmax(190px,1fr) minmax(150px,.7fr) minmax(170px,.8fr)",gap:8,alignItems:"end",marginBottom:9}}>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Empresa</label>
+              <select style={input} value={accountingCompanyId} onChange={e=>setAccountingCompanyId(e.target.value)}>
+                {(data?.empresas || []).map(e => <option key={e.id} value={e.id}>{e.nombre} - {e.plan}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Programa contable</label>
+              <select
+                style={input}
+                value={accountingForm.connector_id}
+                onChange={e=>{
+                  const connector = accountingItems.find(item => item.id === e.target.value);
+                  setAccountingForm(prev => ({
+                    ...prev,
+                    connector_id:e.target.value,
+                    mode: connector?.recommended_mode || prev.mode || "advisor_export",
+                    status: e.target.value && prev.status === "not_configured" ? "assessing" : prev.status,
+                  }));
+                }}
+              >
+                <option value="">Sin programa definido</option>
+                {accountingItems.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Estado</label>
+              <select style={input} value={accountingForm.status} onChange={e=>setAccountingForm(prev=>({...prev,status:e.target.value}))}>
+                {Object.entries(accountingConfigStatusLabel).map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Mapeo</label>
+              <select style={input} value={accountingForm.mapping_status} onChange={e=>setAccountingForm(prev=>({...prev,mapping_status:e.target.value}))}>
+                {Object.entries(accountingMappingStatusLabel).map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(180px,.85fr) minmax(190px,.9fr) minmax(190px,.9fr) minmax(260px,1.2fr)",gap:8,alignItems:"end"}}>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Modo permitido</label>
+              <select style={input} value={accountingForm.mode} onChange={e=>setAccountingForm(prev=>({...prev,mode:e.target.value}))}>
+                {Object.entries(accountingModeLabel).map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Responsable</label>
+              <input style={input} value={accountingForm.owner_email} onChange={e=>setAccountingForm(prev=>({...prev,owner_email:e.target.value}))} placeholder="soporte@transgest..." />
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Asesoria / partner</label>
+              <input style={input} value={accountingForm.advisor_name} onChange={e=>setAccountingForm(prev=>({...prev,advisor_name:e.target.value}))} placeholder="Asesoria cliente" />
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Notas</label>
+              <input style={input} value={accountingForm.notes} onChange={e=>setAccountingForm(prev=>({...prev,notes:e.target.value}))} placeholder="Formato, version, restricciones..." />
+            </div>
+          </div>
+          <div style={{marginTop:10,padding:"10px 11px",border:"1px solid #1f2b43",borderRadius:8,background:"#0f1726"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:900,color:"#e2e8f0"}}>Modulos mapeados</div>
+                <div style={{fontSize:10,color:"#64748b",lineHeight:1.45,marginTop:3}}>
+                  Marca solo bloques ya revisados con asesor, proveedor o plantilla real.
+                </div>
+              </div>
+              <span style={{fontSize:11,fontWeight:900,color:"#5eead4",background:"rgba(20,184,166,.10)",border:"1px solid rgba(20,184,166,.22)",borderRadius:999,padding:"5px 9px"}}>
+                {selectedAccountingMappingReadyCount}/6 listos
+              </span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:7}}>
+              {Object.entries(ACCOUNTING_MAPPING_ITEM_LABELS).map(([key, label]) => {
+                const checked = !!selectedAccountingMappingItems[key];
+                return (
+                  <label
+                    key={key}
+                    style={{
+                      display:"flex",
+                      alignItems:"center",
+                      gap:8,
+                      cursor:"pointer",
+                      border:`1px solid ${checked ? "rgba(20,184,166,.34)" : "#22304a"}`,
+                      background:checked ? "rgba(20,184,166,.10)" : "#121b2d",
+                      color:checked ? "#ccfbf1" : "#cbd5e1",
+                      borderRadius:7,
+                      padding:"8px 9px",
+                      fontSize:11,
+                      fontWeight:800,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={e=>setAccountingForm(prev=>({
+                        ...prev,
+                        mapping_items:{
+                          ...normalizeAccountingMappingItems(prev.mapping_items),
+                          [key]:e.target.checked,
+                        },
+                      }))}
+                      style={{accentColor:"#14b8a6"}}
+                    />
+                    {label}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginTop:9}}>
+            Ultima actualizacion: {selectedAccountingSetting?.updated_at ? new Date(selectedAccountingSetting.updated_at).toLocaleString("es-ES") : "sin guardar"}.
+          </div>
+        </div>
+
+        <div style={{background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12,marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Seguimiento de empresas</div>
+              <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4}}>
+                Filtra clientes por programa contable, estado y responsable antes de planificar exportaciones o pilotos.
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button
+                onClick={descargarSeguimientoContable}
+                style={{...SaaS.btnOk,padding:"7px 10px"}}
+              >
+                CSV seguimiento
+              </button>
+              <button
+                onClick={()=>setAccountingFilters({ q:"", connector_id:"", status:"" })}
+                style={{...SaaS.btn,padding:"7px 10px"}}
+              >
+                Limpiar filtros
+              </button>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(180px,1fr) minmax(170px,.8fr) minmax(150px,.7fr)",gap:8,alignItems:"end",marginBottom:10}}>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Buscar</label>
+              <input style={input} value={accountingFilters.q} onChange={e=>setAccountingFilters(prev=>({...prev,q:e.target.value}))} placeholder="Empresa, responsable, asesoria..." />
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Programa</label>
+              <select style={input} value={accountingFilters.connector_id} onChange={e=>setAccountingFilters(prev=>({...prev,connector_id:e.target.value}))}>
+                <option value="">Todos</option>
+                {accountingItems.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Estado</label>
+              <select style={input} value={accountingFilters.status} onChange={e=>setAccountingFilters(prev=>({...prev,status:e.target.value}))}>
+                <option value="">Todos</option>
+                {Object.entries(accountingConfigStatusLabel).map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{overflowX:"auto",border:"1px solid #1f2b43",borderRadius:8}}>
+            <table style={{width:"100%",borderCollapse:"collapse",minWidth:860}}>
+              <thead>
+                <tr>
+                  <th style={SaaS.th}>Empresa</th>
+                  <th style={SaaS.th}>Programa</th>
+                  <th style={SaaS.th}>Estado</th>
+                  <th style={SaaS.th}>Modo</th>
+                  <th style={SaaS.th}>Mapeo</th>
+                  <th style={SaaS.th}>Modulos</th>
+                  <th style={SaaS.th}>Responsable</th>
+                  <th style={SaaS.th}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleAccountingSettings.slice(0, 12).map(item => {
+                  const statusColor = item.status === "active" ? "#34d399" : item.status === "pilot" || item.status === "export_ready" ? "#5eead4" : item.status === "paused" ? "#f87171" : item.status === "assessing" ? "#fbbf24" : "#94a3b8";
+                  return (
+                    <tr key={item.empresa_id}>
+                      <td style={{...SaaS.td,color:"#e2e8f0",fontWeight:800}}>{item.empresa_nombre}</td>
+                      <td style={SaaS.td}>{item.connector_name || "Sin definir"}</td>
+                      <td style={SaaS.td}><span style={{fontSize:10,fontWeight:900,color:statusColor,background:`${statusColor}14`,border:`1px solid ${statusColor}33`,borderRadius:999,padding:"4px 8px"}}>{accountingConfigStatusLabel[item.status] || item.status}</span></td>
+                      <td style={SaaS.td}>{accountingModeLabel[item.mode] || item.mode}</td>
+                      <td style={SaaS.td}>{accountingMappingStatusLabel[item.mapping_status] || item.mapping_status}</td>
+                      <td style={SaaS.td}>{Number(item.mapping_ready_count || 0)}/6</td>
+                      <td style={SaaS.td}>{item.owner_email || item.advisor_name || "-"}</td>
+                      <td style={{...SaaS.td,textAlign:"right"}}>
+                        <button
+                          onClick={()=>{ setAccountingCompanyId(item.empresa_id); setAccountingFilters(prev=>({...prev,q:""})); }}
+                          style={{...SaaS.btn,padding:"5px 9px"}}
+                        >
+                          Editar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!visibleAccountingSettings.length && (
+                  <tr><td style={{...SaaS.td,textAlign:"center",color:"#64748b"}} colSpan={8}>Sin empresas para los filtros actuales.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {visibleAccountingSettings.length > 12 && (
+            <div style={{fontSize:11,color:"#64748b",marginTop:8}}>Mostrando 12 de {visibleAccountingSettings.length} empresas filtradas.</div>
+          )}
+        </div>
+
+        {!!accountingHistory.length && (
+          <div style={{background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12,marginBottom:12}}>
+            <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0",marginBottom:8}}>Ultimos cambios</div>
+            <div style={{display:"grid",gap:7}}>
+              {accountingHistory.slice(0, 5).map(item => (
+                <div key={item.id} style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",border:"1px solid #1f2b43",borderRadius:7,padding:"8px 10px",background:"#0f1726"}}>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:900,color:"#e2e8f0"}}>{item.empresa_nombre || "Empresa"}</div>
+                    <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45}}>
+                      {(item.detalle?.connector_name || item.detalle?.connector_id || "sin conector")} - {accountingConfigStatusLabel[item.detalle?.status] || item.detalle?.status || "sin estado"} - {accountingMappingStatusLabel[item.detalle?.mapping_status] || item.detalle?.mapping_status || "mapeo pendiente"} - {Number(item.detalle?.mapping_ready_count || 0)}/6 modulos
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right",fontSize:11,color:"#64748b"}}>
+                    <div>{item.created_at ? new Date(item.created_at).toLocaleString("es-ES") : "-"}</div>
+                    <div>{item.actor_email || "superadmin"}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:8,marginBottom:12}}>
+          <div style={{background:"rgba(16,185,129,.07)",border:"1px solid rgba(16,185,129,.20)",borderRadius:8,padding:11}}>
+            <div style={{fontSize:11,color:"#34d399",fontWeight:900,textTransform:"uppercase",marginBottom:6}}>Permitido</div>
+            {(accountingCatalog.allowed_paths || ["exportacion_csv_excel","paquete_asesoria","api_con_outbox_idempotente"]).slice(0,4).map(item => (
+              <div key={item} style={{fontSize:11,color:"#cbd5e1",lineHeight:1.5}}>OK {String(item).replace(/_/g, " ")}</div>
+            ))}
+          </div>
+          <div style={{background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.20)",borderRadius:8,padding:11}}>
+            <div style={{fontSize:11,color:"#fca5a5",fontWeight:900,textTransform:"uppercase",marginBottom:6}}>Bloqueado</div>
+            {(accountingCatalog.blocked_paths || ["insert_directo_tablas_contables","doble_emision_facturas_fiscales","credenciales_compartidas_entre_empresas"]).slice(0,4).map(item => (
+              <div key={item} style={{fontSize:11,color:"#cbd5e1",lineHeight:1.5}}>No {String(item).replace(/_/g, " ")}</div>
+            ))}
+          </div>
+        </div>
+
+        {accountingItems.length ? (
+          <div style={{overflowX:"auto",border:"1px solid #22304a",borderRadius:8}}>
+            <table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}>
+              <thead>
+                <tr>
+                  <th style={SaaS.th}>Prioridad</th>
+                  <th style={SaaS.th}>Programa</th>
+                  <th style={SaaS.th}>Estado</th>
+                  <th style={SaaS.th}>Modo recomendado</th>
+                  <th style={SaaS.th}>Flujos</th>
+                  <th style={SaaS.th}>Riesgo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accountingItems.map(item => {
+                  const statusColor = item.status === "planned" ? "#34d399" : item.status === "research" ? "#fbbf24" : "#94a3b8";
+                  return (
+                    <tr key={item.id}>
+                      <td style={{...SaaS.td,fontFamily:"'JetBrains Mono',monospace",color:"#e2e8f0"}}>{item.priority}</td>
+                      <td style={{...SaaS.td,color:"#e2e8f0",fontWeight:800}}>
+                        <div>{item.name}</div>
+                        <div style={{fontSize:10,color:"#64748b",fontWeight:700}}>{item.vendor} - {item.connector}</div>
+                      </td>
+                      <td style={SaaS.td}>
+                        <span style={{fontSize:10,fontWeight:900,color:statusColor,background:`${statusColor}14`,border:`1px solid ${statusColor}33`,borderRadius:999,padding:"4px 8px"}}>
+                          {accountingStatusLabel[item.status] || item.status}
+                        </span>
+                      </td>
+                      <td style={{...SaaS.td,color:"#cbd5e1"}}>{accountingModeLabel[item.recommended_mode] || item.recommended_mode}</td>
+                      <td style={{...SaaS.td,color:"#94a3b8",maxWidth:240}}>{(item.flows || []).slice(0,5).join(", ")}</td>
+                      <td style={{...SaaS.td,color:"#fbbf24",maxWidth:260}}>{item.risk}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={SaaS.empty}>No se pudo cargar el catalogo contable desde Superadmin.</div>
+        )}
+
+        <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginTop:12}}>
+          {accountingCatalog.disclaimer || "Catalogo tecnico preliminar. No declara certificacion, homologacion ni cumplimiento legal."}
+        </div>
       </div>
 
       <div style={{display:integrationTab==="empresa" ? "block" : "none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>

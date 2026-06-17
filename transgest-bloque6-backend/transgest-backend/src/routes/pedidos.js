@@ -8,9 +8,16 @@ const { getPaginationParams, paginatedResponse } = require("../services/paginate
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
 const { crearNotificacion } = require("../services/notificaciones");
-const { buildDocumentoControlPayload, buildDocumentoControlExpediente, buildDocumentoControlStructuredExport, buildDocumentoControlSignaturePackage, buildDocumentoControlHtml, buildDocumentoControlFilename, buildDocumentoControlExportFilename, verifyPublicToken, verifyPublicVerificationCode } = require("../services/documentoControl");
+const { buildDocumentoControlPayload, buildDocumentoControlExpediente, buildDocumentoControlStructuredExport, buildDocumentoControlSignaturePackage, buildDocumentoControlHtml, generateDocumentoControlPdf, buildDocumentoControlFilename, buildDocumentoControlExportFilename, verifyPublicToken, verifyPublicVerificationCode } = require("../services/documentoControl");
+const {
+  syncPedidoRegulatoryCore,
+  getPedidoRegulatoryCoreSummary,
+  buildRegulatoryTransportPackage,
+  getRegulatoryPayloadForExport,
+  createRegulatoryTransmissionDraft,
+} = require("../services/regulatoryCore");
 const { getEmpresaCalendarForDate, inferCcaaFromText } = require("../services/calendarioLaboral");
-const { resolveApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
+const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
 
 const router = express.Router();
 let colaboradorWorkflowSchemaPromise = null;
@@ -1046,6 +1053,7 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
   const expedienteData = await getPedidoDocumentoControlExpedienteData(ctx.pedido.id, empresaId);
   const postSignatureIntegrity = buildFirmaPostSignatureIntegrity(ctx.pedido, ctx.pedido?.firma_evidencia || null);
   const repositorio = await getDocumentoControlRepositorioByPedido(ctx.pedido.id, empresaId).catch(() => null);
+  const regulatoryCore = await getPedidoRegulatoryCoreSummary(ctx.pedido.id, empresaId).catch(() => null);
   return {
     ...payload,
     repositorio: repositorio ? {
@@ -1057,7 +1065,10 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
       retencion_politica: repositorio.retencion_politica,
       payload_hash_sha256: repositorio.payload_hash_sha256,
       html_hash_sha256: repositorio.html_hash_sha256,
-      filename: repositorio.filename,
+      pdf_hash_sha256: repositorio.pdf_hash_sha256,
+      public_activo: repositorio.public_activo,
+      public_expires_at: repositorio.public_expires_at,
+      filename: repositorio.pdf_filename || repositorio.filename,
       download_url: `/api/v1/pedidos/documento-control-repositorio/${encodeURIComponent(repositorio.id)}/descargar`,
       export_url: `/api/v1/pedidos/documento-control-repositorio/${encodeURIComponent(repositorio.id)}/export`,
     } : null,
@@ -1071,6 +1082,7 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
       },
       postSignatureIntegrity,
     }),
+    regulatory_core: regulatoryCore,
   };
 }
 
@@ -1092,6 +1104,16 @@ async function ensureDocumentoControlRepositorioSchema() {
           export_json JSONB NOT NULL DEFAULT '{}'::jsonb,
           html TEXT NOT NULL,
           filename VARCHAR(240) NOT NULL,
+          pdf_base64 TEXT,
+          pdf_mime VARCHAR(80) NOT NULL DEFAULT 'application/pdf',
+          pdf_filename VARCHAR(240),
+          pdf_hash_sha256 VARCHAR(64),
+          public_activo BOOLEAN NOT NULL DEFAULT true,
+          public_expires_at TIMESTAMPTZ,
+          public_desactivado_at TIMESTAMPTZ,
+          public_desactivado_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+          created_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          updated_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
           export_filename VARCHAR(240) NOT NULL,
           payload_hash_sha256 VARCHAR(64) NOT NULL,
           html_hash_sha256 VARCHAR(64) NOT NULL,
@@ -1109,8 +1131,37 @@ async function ensureDocumentoControlRepositorioSchema() {
       await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS export_json JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
       await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS export_filename VARCHAR(240) NOT NULL DEFAULT 'dcd-export.json'").catch(() => {});
       await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS retencion_politica VARCHAR(80) NOT NULL DEFAULT 'indefinida_empresa'").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS pdf_base64 TEXT").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS pdf_mime VARCHAR(80) NOT NULL DEFAULT 'application/pdf'").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS pdf_filename VARCHAR(240)").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS pdf_hash_sha256 VARCHAR(64)").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS public_activo BOOLEAN NOT NULL DEFAULT true").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS public_expires_at TIMESTAMPTZ").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS public_desactivado_at TIMESTAMPTZ").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS public_desactivado_por UUID REFERENCES usuarios(id) ON DELETE SET NULL").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS created_metadata JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+      await db.query("ALTER TABLE documento_control_repositorio ADD COLUMN IF NOT EXISTS updated_metadata JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS documento_control_repositorio_historial (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          repo_id UUID NOT NULL REFERENCES documento_control_repositorio(id) ON DELETE CASCADE,
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          pedido_id UUID NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+          version INTEGER NOT NULL,
+          action VARCHAR(80) NOT NULL DEFAULT 'snapshot',
+          payload_hash_sha256 VARCHAR(64),
+          html_hash_sha256 VARCHAR(64),
+          pdf_hash_sha256 VARCHAR(64),
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_by UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (repo_id, version)
+        )
+      `).catch(() => {});
       await db.query("CREATE INDEX IF NOT EXISTS idx_dcd_repo_empresa_estado ON documento_control_repositorio(empresa_id, estado, updated_at DESC)").catch(() => {});
       await db.query("CREATE INDEX IF NOT EXISTS idx_dcd_repo_empresa_codigo ON documento_control_repositorio(empresa_id, codigo_control)").catch(() => {});
+      await db.query("CREATE INDEX IF NOT EXISTS idx_dcd_repo_public_expires ON documento_control_repositorio(empresa_id, public_activo, public_expires_at)").catch(() => {});
+      await db.query("CREATE INDEX IF NOT EXISTS idx_dcd_repo_historial_repo ON documento_control_repositorio_historial(repo_id, version DESC)").catch(() => {});
     })().catch((error) => {
       documentoControlRepositorioSchemaPromise = null;
       throw error;
@@ -1128,6 +1179,49 @@ async function getDocumentoControlRepositorioByPedido(pedidoId, empresaId) {
       LIMIT 1`,
     [pedidoId, empresaId]
   );
+  return rows[0] || null;
+}
+
+function buildDocumentoControlPublicExpiresAt(pedido = {}) {
+  const candidates = [
+    pedido?.fecha_descarga,
+    pedido?.fecha_entrega,
+    pedido?.fecha_carga,
+    pedido?.fecha_servicio,
+  ].filter(Boolean);
+  const nowPlus7 = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const dateCandidates = candidates
+    .map(value => new Date(String(value).includes("T") ? value : `${value}T23:59:59`))
+    .filter(date => !Number.isNaN(date.getTime()))
+    .map(date => new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000));
+  return dateCandidates.reduce((max, date) => (date > max ? date : max), nowPlus7);
+}
+
+async function insertDocumentoControlRepoHistory(repo = {}, metadata = {}, userId = null, action = "snapshot") {
+  if (!repo?.id) return null;
+  await ensureDocumentoControlRepositorioSchema();
+  const { rows } = await db.query(`
+    WITH next_version AS (
+      SELECT COALESCE(MAX(version), 0) + 1 AS version
+        FROM documento_control_repositorio_historial
+       WHERE repo_id=$1
+    )
+    INSERT INTO documento_control_repositorio_historial
+      (repo_id,empresa_id,pedido_id,version,action,payload_hash_sha256,html_hash_sha256,pdf_hash_sha256,metadata,created_by)
+    SELECT $1,$2,$3,version,$4,$5,$6,$7,$8::jsonb,$9
+      FROM next_version
+    RETURNING id, version
+  `, [
+    repo.id,
+    repo.empresa_id,
+    repo.pedido_id,
+    action,
+    repo.payload_hash_sha256 || null,
+    repo.html_hash_sha256 || null,
+    repo.pdf_hash_sha256 || null,
+    JSON.stringify(metadata || {}),
+    userId || null,
+  ]);
   return rows[0] || null;
 }
 
@@ -1162,15 +1256,22 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
     generatedAt: new Date().toISOString(),
     autoPrint: false,
   });
+  const generatedAt = new Date().toISOString();
+  const pdf = await generateDocumentoControlPdf({
+    documento: payload.documento,
+    empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
+    generatedAt,
+  });
   const payloadHash = sha256Hex(stableJson({ payload, expediente, exportData }));
   const htmlHash = sha256Hex(html);
   const filename = buildDocumentoControlFilename(payload.documento);
   const exportFilename = buildDocumentoControlExportFilename(payload.documento);
+  const publicExpiresAt = buildDocumentoControlPublicExpiresAt(ctx.pedido);
   const { rows } = await db.query(`
     INSERT INTO documento_control_repositorio
-      (empresa_id,pedido_id,codigo_control,pedido_numero,cliente_nombre,estado,activo,payload,expediente,export_json,html,filename,export_filename,payload_hash_sha256,html_hash_sha256,archivado_at,archivado_por,retencion_minima_hasta,retencion_politica)
+      (empresa_id,pedido_id,codigo_control,pedido_numero,cliente_nombre,estado,activo,payload,expediente,export_json,html,filename,pdf_base64,pdf_mime,pdf_filename,pdf_hash_sha256,public_activo,public_expires_at,created_metadata,updated_metadata,export_filename,payload_hash_sha256,html_hash_sha256,archivado_at,archivado_por,retencion_minima_hasta,retencion_politica)
     VALUES
-      ($1,$2,$3,$4,$5,'archivado',false,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,NOW(),$14,(CURRENT_DATE + INTERVAL '1 year')::date,'indefinida_empresa')
+      ($1,$2,$3,$4,$5,'archivado',false,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,true,$15,$16::jsonb,$16::jsonb,$17,$18,$19,NOW(),$20,(CURRENT_DATE + INTERVAL '1 year')::date,'minimo_1_ano')
     ON CONFLICT (empresa_id,pedido_id)
     DO UPDATE SET
       codigo_control=EXCLUDED.codigo_control,
@@ -1183,15 +1284,25 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
       export_json=EXCLUDED.export_json,
       html=EXCLUDED.html,
       filename=EXCLUDED.filename,
+      pdf_base64=EXCLUDED.pdf_base64,
+      pdf_mime=EXCLUDED.pdf_mime,
+      pdf_filename=EXCLUDED.pdf_filename,
+      pdf_hash_sha256=EXCLUDED.pdf_hash_sha256,
+      public_activo=CASE
+        WHEN documento_control_repositorio.public_desactivado_at IS NULL THEN true
+        ELSE documento_control_repositorio.public_activo
+      END,
+      public_expires_at=GREATEST(COALESCE(documento_control_repositorio.public_expires_at, EXCLUDED.public_expires_at), EXCLUDED.public_expires_at),
+      updated_metadata=EXCLUDED.updated_metadata,
       export_filename=EXCLUDED.export_filename,
       payload_hash_sha256=EXCLUDED.payload_hash_sha256,
       html_hash_sha256=EXCLUDED.html_hash_sha256,
       archivado_at=COALESCE(documento_control_repositorio.archivado_at, NOW()),
       archivado_por=COALESCE(documento_control_repositorio.archivado_por, EXCLUDED.archivado_por),
       retencion_minima_hasta=COALESCE(documento_control_repositorio.retencion_minima_hasta, EXCLUDED.retencion_minima_hasta),
-      retencion_politica='indefinida_empresa',
+      retencion_politica='minimo_1_ano',
       updated_at=NOW()
-    RETURNING id,codigo_control,estado,activo,filename,payload_hash_sha256,html_hash_sha256,archivado_at,retencion_minima_hasta
+    RETURNING id,empresa_id,pedido_id,codigo_control,estado,activo,filename,pdf_filename,payload_hash_sha256,html_hash_sha256,pdf_hash_sha256,public_activo,public_expires_at,archivado_at,retencion_minima_hasta
   `, [
     empresaId,
     pedidoId,
@@ -1203,6 +1314,12 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
     JSON.stringify(exportData),
     html,
     filename,
+    pdf.base64,
+    pdf.mime,
+    pdf.filename,
+    pdf.hash_sha256,
+    publicExpiresAt,
+    JSON.stringify(pdf.metadata || {}),
     exportFilename,
     payloadHash,
     htmlHash,
@@ -1210,6 +1327,21 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
   ]);
   const repo = rows[0] || null;
   if (repo) {
+    await syncPedidoRegulatoryCore({
+      empresaId,
+      pedidoId,
+      payload,
+      structuredExport: exportData,
+      repository: repo,
+      userId: userId || null,
+      reason: motivo,
+    }).catch(e => logger.warn("No se pudo sincronizar nucleo regulatorio:", e.message));
+    await insertDocumentoControlRepoHistory(repo, {
+      motivo,
+      pdf_metadata: pdf.metadata || {},
+      public_expires_at: repo.public_expires_at || publicExpiresAt,
+      retencion_minima_hasta: repo.retencion_minima_hasta,
+    }, userId || null, "archivar").catch(() => {});
     await logPedidoEvento(pedidoId, empresaId, "documento_control.archivado", {
       motivo,
       repositorio_id: repo.id,
@@ -1218,8 +1350,11 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
       activo: repo.activo,
       payload_hash_sha256: repo.payload_hash_sha256,
       html_hash_sha256: repo.html_hash_sha256,
+      pdf_hash_sha256: repo.pdf_hash_sha256,
+      public_activo: repo.public_activo,
+      public_expires_at: repo.public_expires_at,
       retencion_minima_hasta: repo.retencion_minima_hasta,
-      retencion_politica: "indefinida_empresa",
+      retencion_politica: "minimo_1_ano",
     }, "sistema", userId || null).catch(() => {});
   }
   return repo;
@@ -2340,7 +2475,21 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
     if (!ctx?.pedido) return res.status(404).send("Pedido no encontrado");
     const isDownload = ["1", "true", "yes"].includes(String(req.query.download || "").toLowerCase());
     const isPrint = ["1", "true", "yes"].includes(String(req.query.print || "").toLowerCase());
-    if (archived?.html) {
+    const wantsHtml = isPrint || ["html", "1", "true"].includes(String(req.query.html || req.query.format || "").toLowerCase());
+    if (archived?.html || archived?.pdf_base64) {
+      const publicExpired = archived.public_expires_at && new Date(archived.public_expires_at).getTime() < Date.now();
+      if (archived.public_activo === false || publicExpired) {
+        await logPedidoEvento(pedidoId, empresaId, "documento_control.publico_bloqueado", {
+          source: "public_documento_control_repositorio",
+          repositorio_id: archived.id,
+          codigo_control: archived.codigo_control || null,
+          public_activo: archived.public_activo,
+          public_expires_at: archived.public_expires_at,
+          motivo: archived.public_activo === false ? "desactivado" : "caducado",
+          user_agent: String(req.get("user-agent") || "").slice(0, 180),
+        }, "publico").catch(() => {});
+        return res.status(410).send("La descarga publica del DeCA ya no esta activa. Solicita el documento a la empresa transportista.");
+      }
       const eventoArchivado = isDownload ? "documento_control.descargado" : isPrint ? "documento_control.impreso" : "documento_control.consultado";
       await logPedidoEvento(pedidoId, empresaId, eventoArchivado, {
         source: "public_documento_control_repositorio",
@@ -2353,13 +2502,20 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
         download: isDownload,
         user_agent: String(req.get("user-agent") || "").slice(0, 180),
       }, "publico");
-      if (isDownload) {
-        res.setHeader("Content-Disposition", `attachment; filename="${archived.filename || "documento-control.html"}"`);
-      }
       res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("X-DCD-Repository-State", archived.estado || "archivado");
       res.setHeader("X-DCD-Archived", "true");
+      res.setHeader("X-DCD-Public-Expires-At", archived.public_expires_at || "");
+      if (archived.pdf_base64 && !wantsHtml) {
+        const pdfBuffer = Buffer.from(archived.pdf_base64, "base64");
+        res.setHeader("Content-Disposition", `${isDownload ? "attachment" : "inline"}; filename="${archived.pdf_filename || archived.filename || "documento-control.pdf"}"`);
+        res.setHeader("Content-Type", archived.pdf_mime || "application/pdf");
+        return res.send(pdfBuffer);
+      }
+      if (isDownload) {
+        res.setHeader("Content-Disposition", `attachment; filename="${archived.filename || "documento-control.html"}"`);
+      }
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.send(archived.html);
     }
@@ -2384,6 +2540,16 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
     }
     res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
     res.setHeader("Cache-Control", "private, no-store");
+    if (!wantsHtml) {
+      const pdf = await generateDocumentoControlPdf({
+        documento: payload.documento,
+        empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
+        generatedAt: new Date().toISOString(),
+      });
+      res.setHeader("Content-Disposition", `${isDownload ? "attachment" : "inline"}; filename="${pdf.filename}"`);
+      res.setHeader("Content-Type", pdf.mime);
+      return res.send(pdf.buffer);
+    }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(buildDocumentoControlHtml({
       documento: payload.documento,
@@ -2727,8 +2893,8 @@ async function getPedidoAiRuntimeConfig(empresaId) {
   const provider = ["anthropic", "openai", "ai_generic"].includes(providerRaw) ? providerRaw : "anthropic";
   const baseUrl = String(await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || "") || "").replace(/\/$/, "");
   const model = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "");
-  const keyInfo = await resolveApiKey(empresaId, provider);
-  return { provider, baseUrl, model, apiKey: keyInfo.key || "", source: keyInfo.source };
+  const keyInfo = await resolveBestApiKey(empresaId, provider, ["openai", "ai_generic", "anthropic"]);
+  return { provider: keyInfo.provider || provider, baseUrl, model, apiKey: keyInfo.key || "", source: keyInfo.source };
 }
 
 function buildAiPedidoExtractionPrompt(texto = "") {
@@ -3840,7 +4006,8 @@ router.get("/documento-control-repositorio", GERENTE_O_TRAFICO, async (req, res)
     }
     const { rows } = await db.query(`
       SELECT id, pedido_id, codigo_control, pedido_numero, cliente_nombre, estado, activo,
-             filename, export_filename, payload_hash_sha256, html_hash_sha256,
+             filename, pdf_filename, export_filename, payload_hash_sha256, html_hash_sha256, pdf_hash_sha256,
+             public_activo, public_expires_at, public_desactivado_at,
              archivado_at, retencion_minima_hasta, retencion_politica, created_at, updated_at
         FROM documento_control_repositorio
        WHERE ${where.join(" AND ")}
@@ -3854,7 +4021,7 @@ router.get("/documento-control-repositorio", GERENTE_O_TRAFICO, async (req, res)
         tenant_isolation: "empresa_id",
         storage: "repositorio propio TransGest por empresa",
         external_provider_required: false,
-        finalized_trip_policy: "Al entregar el viaje, el DCD queda archivado/desactivado para edicion operativa y se conserva descargable.",
+        finalized_trip_policy: "Al entregar el viaje, el DCD queda archivado/desactivado para edicion operativa. La descarga publica puede caducar/desactivarse y el PDF interno se conserva minimo 1 ano.",
       },
     });
   } catch (e) {
@@ -3868,15 +4035,26 @@ router.get("/documento-control-repositorio/:repoId", GERENTE_O_TRAFICO, async (r
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows } = await db.query(
       `SELECT id, empresa_id, pedido_id, codigo_control, pedido_numero, cliente_nombre, estado, activo,
-              payload, expediente, export_json, filename, export_filename, payload_hash_sha256, html_hash_sha256,
-              archivado_at, archivado_por, retencion_minima_hasta, retencion_politica, created_at, updated_at
+              payload, expediente, export_json, filename, pdf_mime, pdf_filename, payload_hash_sha256, html_hash_sha256, pdf_hash_sha256,
+              public_activo, public_expires_at, public_desactivado_at, created_metadata, updated_metadata,
+              export_filename, archivado_at, archivado_por, retencion_minima_hasta, retencion_politica, created_at, updated_at
          FROM documento_control_repositorio
         WHERE id=$1 AND empresa_id=$2
         LIMIT 1`,
       [req.params.repoId, empresaId]
     );
-    if (!rows[0]) return res.status(404).json({ error: "DCD no encontrado en el repositorio" });
-    res.json(rows[0]);
+    const repo = rows[0];
+    if (!repo) return res.status(404).json({ error: "DCD no encontrado en el repositorio" });
+    const hist = await db.query(`
+      SELECT h.id,h.version,h.action,h.payload_hash_sha256,h.html_hash_sha256,h.pdf_hash_sha256,h.metadata,h.created_at,
+             u.nombre AS created_by_nombre,u.rol AS created_by_rol
+        FROM documento_control_repositorio_historial h
+        LEFT JOIN usuarios u ON u.id=h.created_by
+       WHERE h.repo_id=$1 AND h.empresa_id=$2
+       ORDER BY h.version DESC
+       LIMIT 100
+    `, [repo.id, empresaId]).catch(() => ({ rows: [] }));
+    res.json({ ...repo, historial: hist.rows || [] });
   } catch (e) {
     res.status(500).json({ error: e.message || "No se pudo cargar el DCD archivado" });
   }
@@ -3887,7 +4065,7 @@ router.get("/documento-control-repositorio/:repoId/descargar", GERENTE_O_TRAFICO
     await ensureDocumentoControlRepositorioSchema();
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows } = await db.query(
-      `SELECT id, pedido_id, codigo_control, html, filename, estado, activo
+      `SELECT id, pedido_id, codigo_control, html, filename, pdf_base64, pdf_mime, pdf_filename, estado, activo
          FROM documento_control_repositorio
         WHERE id=$1 AND empresa_id=$2
         LIMIT 1`,
@@ -3901,12 +4079,63 @@ router.get("/documento-control-repositorio/:repoId/descargar", GERENTE_O_TRAFICO
       estado: repo.estado,
       activo: repo.activo,
     }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
-    res.setHeader("Content-Disposition", `attachment; filename="${repo.filename || "documento-control.html"}"`);
     res.setHeader("Cache-Control", "private, no-store");
+    if (repo.pdf_base64 && !["html", "1", "true"].includes(String(req.query.html || req.query.format || "").toLowerCase())) {
+      res.setHeader("Content-Disposition", `attachment; filename="${repo.pdf_filename || repo.filename || "documento-control.pdf"}"`);
+      res.setHeader("Content-Type", repo.pdf_mime || "application/pdf");
+      return res.send(Buffer.from(repo.pdf_base64, "base64"));
+    }
+    res.setHeader("Content-Disposition", `attachment; filename="${repo.filename || "documento-control.html"}"`);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(repo.html);
   } catch (e) {
     res.status(500).send(e.message || "No se pudo descargar el DCD archivado");
+  }
+});
+
+router.patch("/documento-control-repositorio/:repoId/publico", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    await ensureDocumentoControlRepositorioSchema();
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const activo = req.body?.activo !== false;
+    const expiresAtRaw = req.body?.public_expires_at || req.body?.expires_at || null;
+    const expiresAt = expiresAtRaw ? new Date(expiresAtRaw) : null;
+    const { rows } = await db.query(`
+      UPDATE documento_control_repositorio
+         SET public_activo=$3,
+             public_expires_at=CASE
+               WHEN $4::timestamptz IS NOT NULL THEN $4::timestamptz
+               ELSE public_expires_at
+             END,
+             public_desactivado_at=CASE WHEN $3=false THEN NOW() ELSE NULL END,
+             public_desactivado_por=CASE WHEN $3=false THEN $5 ELSE NULL END,
+             updated_at=NOW()
+       WHERE id=$1 AND empresa_id=$2
+       RETURNING id,empresa_id,pedido_id,codigo_control,public_activo,public_expires_at,public_desactivado_at,payload_hash_sha256,html_hash_sha256,pdf_hash_sha256
+    `, [
+      req.params.repoId,
+      empresaId,
+      activo,
+      expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : null,
+      req.user?.id || null,
+    ]);
+    const repo = rows[0];
+    if (!repo) return res.status(404).json({ error: "DCD no encontrado en el repositorio" });
+    await insertDocumentoControlRepoHistory(repo, {
+      public_activo: repo.public_activo,
+      public_expires_at: repo.public_expires_at,
+      public_desactivado_at: repo.public_desactivado_at,
+    }, req.user?.id || null, activo ? "reactivar_descarga_publica" : "desactivar_descarga_publica").catch(() => {});
+    await logPedidoEvento(repo.pedido_id, empresaId, activo ? "documento_control.publico_reactivado" : "documento_control.publico_desactivado", {
+      repositorio_id: repo.id,
+      codigo_control: repo.codigo_control,
+      public_activo: repo.public_activo,
+      public_expires_at: repo.public_expires_at,
+      public_desactivado_at: repo.public_desactivado_at,
+    }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+    res.json({ ok: true, data: repo });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudo cambiar la descarga publica del DCD" });
   }
 });
 
@@ -3972,6 +4201,29 @@ router.get("/:id/documento-control-digital", async (req, res) => {
   }
 });
 
+router.post("/:id/documento-control-digital/generar", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
+    if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    const repo = await archivarDocumentoControlPedido({
+      pedidoId: req.params.id,
+      empresaId,
+      appBaseUrl: publicBaseUrl(req),
+      userId: req.user?.id || null,
+      motivo: "generacion_manual",
+    });
+    const refreshed = await getPedidoDocumentoControlContext(req.params.id, empresaId);
+    res.json({
+      ok: true,
+      repositorio: repo,
+      ...(await buildPedidoDocumentoControlResponse(req, refreshed || ctx, empresaId)),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudo generar el DeCA" });
+  }
+});
+
 router.get("/:id/documento-control-digital/export", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
@@ -3986,6 +4238,14 @@ router.get("/:id/documento-control-digital/export", GERENTE_O_TRAFICO, async (re
       appBaseUrl: publicBaseUrl(req),
     });
     const exportData = buildDocumentoControlStructuredExport(payload);
+    await syncPedidoRegulatoryCore({
+      empresaId,
+      pedidoId: req.params.id,
+      payload,
+      structuredExport: exportData,
+      userId: req.user?.id || null,
+      reason: "export_documento_control",
+    }).catch(e => logger.warn("No se pudo sincronizar payload eFTI/DIWASS:", e.message));
     await logPedidoEvento(req.params.id, empresaId, "documento_control.exportado", {
       codigo_control: payload.documento?.codigo_control || "",
       formato: "json_efti_ecmr_ready",
@@ -4029,6 +4289,143 @@ router.get("/:id/documento-control-digital/firma-paquete", GERENTE_O_TRAFICO, as
     res.json(signaturePackage);
   } catch (e) {
     res.status(500).json({ error: e.message || "No se pudo generar el paquete de firma eIDAS" });
+  }
+});
+
+router.get("/:id/regulatory-core", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
+    if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    const payload = buildDocumentoControlPayload({
+      empresaId,
+      pedido: ctx.pedido,
+      empresa: ctx.empresa,
+      cliente: ctx.cliente,
+      colaborador: ctx.colaborador,
+      appBaseUrl: publicBaseUrl(req),
+    });
+    const structuredExport = buildDocumentoControlStructuredExport(payload);
+    const synced = await syncPedidoRegulatoryCore({
+      empresaId,
+      pedidoId: req.params.id,
+      payload,
+      structuredExport,
+      userId: req.user?.id || null,
+      reason: "regulatory_core_view",
+    });
+    const summary = await getPedidoRegulatoryCoreSummary(req.params.id, empresaId);
+    res.json({ ok: true, synced, summary });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudo preparar el nucleo regulatorio" });
+  }
+});
+
+async function syncRegulatoryCoreForPedido(req, pedidoId, empresaId, reason = "regulatory_core_sync") {
+  const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
+  if (!ctx?.pedido) return null;
+  const payload = buildDocumentoControlPayload({
+    empresaId,
+    pedido: ctx.pedido,
+    empresa: ctx.empresa,
+    cliente: ctx.cliente,
+    colaborador: ctx.colaborador,
+    appBaseUrl: publicBaseUrl(req),
+  });
+  const structuredExport = buildDocumentoControlStructuredExport(payload);
+  await syncPedidoRegulatoryCore({
+    empresaId,
+    pedidoId,
+    payload,
+    structuredExport,
+    userId: req.user?.id || null,
+    reason,
+  });
+  return { ctx, payload, structuredExport };
+}
+
+router.get("/:id/regulatory-core/export", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const synced = await syncRegulatoryCoreForPedido(req, req.params.id, empresaId, "regulatory_transport_package_export");
+    if (!synced?.ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    const pkg = await buildRegulatoryTransportPackage(req.params.id, empresaId, {
+      includePayloadBodies: req.query?.include_payloads !== "false",
+    });
+    if (!pkg) return res.status(404).json({ error: "Paquete regulatorio no encontrado" });
+    await logPedidoEvento(req.params.id, empresaId, "regulatory_core.package_exported", {
+      package_hash_sha256: pkg.package_hash_sha256,
+      checklist_status: pkg.regulatory_readiness?.checklist_status || "",
+      include_payloads: req.query?.include_payloads !== "false",
+    }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+    const filename = `transgest-regulatory-package-${synced.ctx.pedido.numero || req.params.id}.json`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/[^a-zA-Z0-9._-]+/g, "-")}"`);
+    res.json(pkg);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "No se pudo exportar el paquete regulatorio" });
+  }
+});
+
+router.get("/:id/regulatory-core/payload/:type", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const synced = await syncRegulatoryCoreForPedido(req, req.params.id, empresaId, `regulatory_payload_${req.params.type}_export`);
+    if (!synced?.ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    const payload = await getRegulatoryPayloadForExport(req.params.id, empresaId, req.params.type);
+    if (!payload) return res.status(404).json({ error: "Payload regulatorio no encontrado" });
+    await logPedidoEvento(req.params.id, empresaId, "regulatory_core.payload_exported", {
+      payload_type: payload.payload_type,
+      version: payload.version,
+      hash_sha256: payload.hash_sha256,
+      status: payload.status,
+    }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+    const filename = `transgest-${payload.payload_type}-payload-${synced.ctx.pedido.numero || req.params.id}-v${payload.version || 1}.json`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/[^a-zA-Z0-9._-]+/g, "-")}"`);
+    res.json({
+      schema: `transgest.regulatory.payload_export.${payload.payload_type}.v1`,
+      exported_at: new Date().toISOString(),
+      pedido_id: req.params.id,
+      pedido_numero: synced.ctx.pedido.numero || null,
+      payload,
+      governance: {
+        official_exchange: "No enviado a plataforma externa en esta exportacion.",
+        hash_sha256: payload.hash_sha256,
+        version: payload.version,
+      },
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "No se pudo exportar el payload regulatorio" });
+  }
+});
+
+router.post("/:id/regulatory-core/transmission-draft", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const payloadType = String(req.body?.payload_type || "efti").trim().toLowerCase();
+    const provider = String(req.body?.provider || "certified_platform_pending").trim();
+    const synced = await syncRegulatoryCoreForPedido(req, req.params.id, empresaId, `regulatory_transmission_draft_${payloadType}`);
+    if (!synced?.ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    const draft = await createRegulatoryTransmissionDraft({
+      empresaId,
+      pedidoId: req.params.id,
+      payloadType,
+      provider,
+      userId: req.user?.id || null,
+    });
+    await logPedidoEvento(req.params.id, empresaId, "regulatory_core.transmission_draft_created", {
+      payload_type: draft?.payload_type,
+      provider: draft?.provider,
+      status: draft?.status,
+      request_hash_sha256: draft?.request_hash_sha256,
+      idempotency_key: draft?.idempotency_key,
+    }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+    res.status(201).json({
+      ok: true,
+      draft,
+      note: "Borrador creado. No se ha enviado informacion a una plataforma externa.",
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "No se pudo crear el borrador de transmision regulatoria" });
   }
 });
 

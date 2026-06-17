@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getControlHorario, getControlHorarioResumen, getMiControlHorario, ficharControlHorario, editarControlHorario, controlHorarioCsvUrl, getControlHorarioConfig, saveControlHorarioConfig } from "../services/api";
+import { getControlHorario, getControlHorarioResumen, getMiControlHorario, ficharControlHorario, editarControlHorario, controlHorarioCsvUrl, getControlHorarioConfig, saveControlHorarioConfig, getTeletrabajoSolicitudes, crearTeletrabajoSolicitud, resolverTeletrabajoSolicitud, getJornadaConfig, saveJornadaConfig } from "../services/api";
 import { notify } from "../services/notify";
 import { useAuth } from "../context/AuthContext";
 
@@ -40,7 +40,7 @@ function monthStartIso() {
 function pedirUbicacion() {
   return new Promise((resolve, reject) => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
-      reject(new Error("Este navegador no permite obtener ubicacion."));
+      reject(new Error("Este navegador no permite obtener ubicación."));
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -49,7 +49,7 @@ function pedirUbicacion() {
         lng: pos.coords.longitude,
         accuracy: pos.coords.accuracy,
       }),
-      err => reject(new Error(err?.message || "No se pudo obtener la ubicacion.")),
+      err => reject(new Error(err?.message || "No se pudo obtener la ubicación.")),
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
     );
   });
@@ -70,6 +70,9 @@ export default function ControlHorario() {
   const [edit, setEdit] = useState(null);
   const [gpsStatus, setGpsStatus] = useState("");
   const [controlCfg, setControlCfg] = useState(null);
+  const [teletrabajo, setTeletrabajo] = useState([]);
+  const [teleForm, setTeleForm] = useState({ fecha: todayIso(), motivo: "" });
+  const [jornadaCfg, setJornadaCfg] = useState({ hora_entrada:"08:00", hora_salida:"17:00", pausa_min:60, extras_requieren_aprobacion:true });
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -83,6 +86,8 @@ export default function ControlHorario() {
       setResumen(r);
       setItems(Array.isArray(l) ? l : []);
       getControlHorarioConfig().then(setControlCfg).catch(() => {});
+      getTeletrabajoSolicitudes({ desde, hasta }).then(d=>setTeletrabajo(Array.isArray(d)?d:[])).catch(()=>{});
+      getJornadaConfig().then(d=>setJornadaCfg(p=>({...p,...(d||{})}))).catch(()=>{});
     } finally {
       setLoading(false);
     }
@@ -105,16 +110,16 @@ export default function ControlHorario() {
     try {
       let ubicacion_gps = null;
       if (["entrada", "salida"].includes(accion)) {
-        setGpsStatus("Solicitando ubicacion...");
+        setGpsStatus("Solicitando ubicación...");
         ubicacion_gps = await pedirUbicacion();
-        setGpsStatus(`Ubicacion capturada (${Math.round(Number(ubicacion_gps.accuracy || 0))} m).`);
+        setGpsStatus(`Ubicación capturada (${Math.round(Number(ubicacion_gps.accuracy || 0))} m).`);
       }
       await ficharControlHorario({ accion, modalidad, ubicacion, notas, ubicacion_gps });
       notify("Fichaje registrado.", "success");
       setNotas("");
       await cargar();
     } catch (e) {
-      setGpsStatus(e.message || "No se pudo obtener la ubicacion.");
+      setGpsStatus(e.message || "No se pudo obtener la ubicación.");
       notify(e.message || "No se pudo registrar el fichaje.", "error");
     }
   }
@@ -122,7 +127,7 @@ export default function ControlHorario() {
   async function fijarBaseEmpresa() {
     if (!canManage) return;
     try {
-      setGpsStatus("Solicitando ubicacion para fijar base...");
+      setGpsStatus("Solicitando ubicación para fijar base...");
       const gps = await pedirUbicacion();
       const saved = await saveControlHorarioConfig({
         lat: gps.lat,
@@ -133,10 +138,10 @@ export default function ControlHorario() {
       });
       setControlCfg(saved);
       setGpsStatus("Base de control horario actualizada.");
-      notify("Ubicacion base guardada.", "success");
+      notify("Ubicación base guardada.", "success");
     } catch (e) {
       setGpsStatus(e.message || "No se pudo fijar la base.");
-      notify(e.message || "No se pudo fijar la ubicacion base.", "error");
+      notify(e.message || "No se pudo fijar la ubicación base.", "error");
     }
   }
 
@@ -167,6 +172,37 @@ export default function ControlHorario() {
     }
   }
 
+  async function solicitarTeletrabajo() {
+    try {
+      await crearTeletrabajoSolicitud(teleForm);
+      notify("Solicitud de teletrabajo enviada.", "success");
+      setTeleForm({ fecha: todayIso(), motivo: "" });
+      await cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo solicitar teletrabajo.", "error");
+    }
+  }
+
+  async function resolverTeletrabajo(id, estado) {
+    try {
+      await resolverTeletrabajoSolicitud(id, { estado });
+      notify("Solicitud actualizada.", "success");
+      await cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo resolver la solicitud.", "error");
+    }
+  }
+
+  async function guardarJornadaConfig() {
+    try {
+      await saveJornadaConfig(jornadaCfg);
+      notify("Jornada tipo guardada.", "success");
+      await cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo guardar la jornada tipo.", "error");
+    }
+  }
+
   return (
     <div style={S.page}>
       <div style={S.title}>Control horario oficina</div>
@@ -191,7 +227,7 @@ export default function ControlHorario() {
           </div>
           <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 10px",marginBottom:10,display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
             <div>
-              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Ubicacion de fichaje</div>
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Ubicación de fichaje</div>
               <div style={{fontSize:12,color:controlCfg?.configurada ? "var(--text3)" : "#f59e0b",fontWeight:800,marginTop:2}}>
                 {controlCfg?.configurada
                   ? `${controlCfg.nombre_base || "Base empresa"} · radio ${controlCfg.radio_m || 250} m`
@@ -206,13 +242,13 @@ export default function ControlHorario() {
             </div>
             {canManage && (
               <button onClick={fijarBaseEmpresa} style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)"}}>
-                Usar mi ubicacion como base
+                Usar mi ubicación como base
               </button>
             )}
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8,marginBottom:10}}>
             <div><label style={S.lbl}>Modalidad</label><select style={{...S.inp,width:"100%"}} value={modalidad} onChange={e=>setModalidad(e.target.value)}><option value="oficina">Oficina</option><option value="teletrabajo">Teletrabajo</option><option value="visita">Visita</option><option value="otro">Otro</option></select></div>
-            <div><label style={S.lbl}>Ubicacion</label><input style={{...S.inp,width:"100%"}} value={ubicacion} onChange={e=>setUbicacion(e.target.value)} placeholder="Oficina, casa, cliente..." /></div>
+            <div><label style={S.lbl}>Ubicación</label><input style={{...S.inp,width:"100%"}} value={ubicacion} onChange={e=>setUbicacion(e.target.value)} placeholder="Oficina, casa, cliente..." /></div>
           </div>
           <textarea style={{...S.inp,width:"100%",minHeight:68,boxSizing:"border-box"}} value={notas} onChange={e=>setNotas(e.target.value)} placeholder="Notas de jornada, incidencia o disponibilidad..." />
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
@@ -255,12 +291,58 @@ export default function ControlHorario() {
         </div>
       </div>
 
+      <div style={{display:"grid",gridTemplateColumns:"minmax(280px,1fr) minmax(280px,1fr)",gap:14,alignItems:"start"}}>
+        <div style={S.card}>
+          <div style={{fontSize:14,fontWeight:900,color:"var(--text)",marginBottom:8}}>Teletrabajo</div>
+          <div style={{display:"grid",gridTemplateColumns:"150px 1fr",gap:8,marginBottom:8}}>
+            <div><label style={S.lbl}>Día</label><input type="date" style={{...S.inp,width:"100%"}} value={teleForm.fecha} onChange={e=>setTeleForm(p=>({...p,fecha:e.target.value}))} /></div>
+            <div><label style={S.lbl}>Motivo</label><input style={{...S.inp,width:"100%"}} value={teleForm.motivo} onChange={e=>setTeleForm(p=>({...p,motivo:e.target.value}))} placeholder="Motivo o contexto..." /></div>
+          </div>
+          <button onClick={solicitarTeletrabajo} style={{...S.btn,background:"var(--accent)",color:"#fff",marginBottom:12}}>Solicitar teletrabajo</button>
+          <div style={{display:"grid",gap:6}}>
+            {teletrabajo.slice(0, canManage ? 8 : 4).map(s => (
+              <div key={s.id} style={{borderTop:"1px solid var(--border)",paddingTop:7,fontSize:12,color:"var(--text3)",display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+                <span>
+                  <b>{canManage ? (s.usuario_nombre || "Empleado") + " · " : ""}{s.fecha ? new Date(s.fecha).toLocaleDateString("es-ES") : "-"}</b>
+                  <span style={{color:s.estado==="aprobada"?"var(--green)":s.estado==="rechazada"?"#ef4444":"#f59e0b",fontWeight:900}}> · {s.estado}</span>
+                  {s.motivo ? <div style={{fontSize:11,color:"var(--text5)"}}>{s.motivo}</div> : null}
+                </span>
+                {canManage && s.estado === "pendiente" && (
+                  <span style={{display:"flex",gap:5}}>
+                    <button onClick={()=>resolverTeletrabajo(s.id,"aprobada")} style={{...S.btn,padding:"5px 8px",background:"rgba(16,185,129,.14)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>Aceptar</button>
+                    <button onClick={()=>resolverTeletrabajo(s.id,"rechazada")} style={{...S.btn,padding:"5px 8px",background:"rgba(239,68,68,.12)",color:"#ef4444",border:"1px solid rgba(239,68,68,.25)"}}>Rechazar</button>
+                  </span>
+                )}
+              </div>
+            ))}
+            {!teletrabajo.length && <div style={{fontSize:12,color:"var(--text5)"}}>Sin solicitudes en el periodo.</div>}
+          </div>
+        </div>
+
+        <div style={S.card}>
+          <div style={{fontSize:14,fontWeight:900,color:"var(--text)",marginBottom:8}}>Jornada tipo</div>
+          <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:10}}>
+            La jornada fija sirve como referencia. Si se olvida apertura o cierre, se avisará, pero no contará como hora extra salvo ajuste/aprobación.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,alignItems:"end"}}>
+            <Field label="Entrada" type="time" value={jornadaCfg.hora_entrada} onChange={v=>setJornadaCfg(p=>({...p,hora_entrada:v}))} />
+            <Field label="Salida" type="time" value={jornadaCfg.hora_salida} onChange={v=>setJornadaCfg(p=>({...p,hora_salida:v}))} />
+            <Field label="Pausa min" type="number" value={jornadaCfg.pausa_min} onChange={v=>setJornadaCfg(p=>({...p,pausa_min:v}))} />
+            <button onClick={guardarJornadaConfig} style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",height:36}}>Guardar</button>
+          </div>
+          <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,color:"var(--text3)",marginTop:10}}>
+            <input type="checkbox" checked={jornadaCfg.extras_requieren_aprobacion !== false} onChange={e=>setJornadaCfg(p=>({...p,extras_requieren_aprobacion:e.target.checked}))} />
+            Las horas extra requieren aprobación
+          </label>
+        </div>
+      </div>
+
       <div style={S.card}>
         <div style={{fontSize:14,fontWeight:900,color:"var(--text)",marginBottom:10}}>Jornadas registradas</div>
         {loading ? <div style={{color:"var(--text4)",fontSize:12}}>Cargando...</div> : (
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",minWidth:860}}>
-              <thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Usuario</th><th style={S.th}>Entrada</th><th style={S.th}>Salida</th><th style={S.th}>Pausa</th><th style={S.th}>Trabajado</th><th style={S.th}>Estado</th><th style={S.th}>Modalidad</th><th style={S.th}>Ubicacion</th><th style={S.th}>Acciones</th></tr></thead>
+              <thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Usuario</th><th style={S.th}>Entrada</th><th style={S.th}>Salida</th><th style={S.th}>Pausa</th><th style={S.th}>Trabajado</th><th style={S.th}>Estado</th><th style={S.th}>Modalidad</th><th style={S.th}>Ubicación</th><th style={S.th}>Acciones</th></tr></thead>
               <tbody>
                 {items.map(row => (
                   <tr key={row.id}>

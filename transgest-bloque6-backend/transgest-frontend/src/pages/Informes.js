@@ -975,21 +975,44 @@ export default function Informes() {
                   zbe: "ZBE",
                   internacional: "Internacional",
                   cabotaje: "Cabotaje",
-                  tacografo: "Tacografo",
+                  tacografo: "Tacógrafo",
                   diwass: "DIWASS/eAnnex VII",
+                  deca: "DeCA pendiente",
+                  efti: "eFTI pendiente",
+                  ecmr: "eCMR",
+                  regulatory_blocking: "Bloqueo checklist",
                 };
                 const sevColor = sev => sev === "alta" ? "var(--red)" : sev === "media" ? "#f59e0b" : "var(--accent-xl)";
+                const statusColor = status => {
+                  const key = String(status || "").toLowerCase();
+                  if (["ready","prepared","archived","not_applicable"].includes(key)) return "var(--green)";
+                  if (["missing","requires_review","requires_preparation"].includes(key)) return "var(--red)";
+                  return "#f59e0b";
+                };
+                const statusLabel = status => ({
+                  ready: "Listo",
+                  prepared: "Preparado",
+                  archived: "Archivado",
+                  missing: "Pendiente",
+                  requires_review: "Revisar",
+                  requires_preparation: "Preparar",
+                  not_applicable: "No aplica",
+                }[String(status || "")] || status || "-");
                 return (
                   <>
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:10, marginBottom:16 }}>
                       {[
                         { l:"Viajes revisados", v:resumen.total_viajes || 0, c:"var(--accent-xl)" },
-                        { l:"Con senales", v:resumen.con_senales || 0, c:Number(resumen.con_senales||0)>0?"#f59e0b":"var(--green)" },
+                        { l:"Con señales", v:resumen.con_senales || 0, c:Number(resumen.con_senales||0)>0?"#f59e0b":"var(--green)" },
                         { l:"Prioridad alta", v:resumen.alta || 0, c:Number(resumen.alta||0)>0?"var(--red)":"var(--green)" },
+                        { l:"Regulatorio listo", v:resumen.regulatory_ready || 0, c:"var(--green)" },
+                        { l:"DeCA pendiente", v:resumen.deca_pendiente || 0, c:Number(resumen.deca_pendiente||0)>0?"#f59e0b":"var(--green)" },
+                        { l:"eFTI pendiente", v:resumen.efti_pendiente || 0, c:Number(resumen.efti_pendiente||0)>0?"#f59e0b":"var(--green)" },
                         { l:"ADR", v:resumen.adr || 0, c:Number(resumen.adr||0)>0?"var(--red)":"var(--text)" },
                         { l:"DIWASS", v:resumen.diwass || 0, c:Number(resumen.diwass||0)>0?"var(--red)":"var(--text)" },
+                        { l:"Bloqueos", v:resumen.bloqueos_regulatorios || 0, c:Number(resumen.bloqueos_regulatorios||0)>0?"var(--red)":"var(--green)" },
                         { l:"ZBE", v:resumen.zbe || 0, c:Number(resumen.zbe||0)>0?"#f59e0b":"var(--text)" },
-                        { l:"Tacografo", v:resumen.tacografo || 0, c:Number(resumen.tacografo||0)>0?"#f59e0b":"var(--text)" },
+                        { l:"Tacógrafo", v:resumen.tacografo || 0, c:Number(resumen.tacografo||0)>0?"#f59e0b":"var(--text)" },
                       ].map((k,i)=>(
                         <div key={i} style={S.card}>
                           <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:20, fontWeight:800, color:k.c }}>{k.v}</div>
@@ -1001,7 +1024,10 @@ export default function Informes() {
                     <div style={S.card}>
                       <div style={S.sec}>MARCO PREVENTIVO EUROPEO</div>
                       <div style={{ fontSize:12, color:"var(--text3)", lineHeight:1.5 }}>
-                        Documento de control obligatorio desde {data.marco_normativo?.documento_control_obligatorio_desde || "2026-10-05"}; DIWASS/eAnnex VII desde {data.marco_normativo?.diwass_eannex_vii_entrada_vigor || "2026-05-21"}; eFTI desde {data.marco_normativo?.efti_plena_aplicacion_desde || "2027-07-09"}. La deteccion es preventiva y debe confirmarse por el usuario antes de operar.
+                        Documento de control obligatorio desde {data.marco_normativo?.documento_control_obligatorio_desde || "2026-10-05"}; DIWASS/eAnnex VII desde {data.marco_normativo?.diwass_eannex_vii_entrada_vigor || "2026-05-21"}; eFTI desde {data.marco_normativo?.efti_plena_aplicacion_desde || "2027-07-09"}. La detección es preventiva y debe confirmarse por el usuario antes de operar.
+                      </div>
+                      <div style={{ fontSize:12, color:"var(--text3)", lineHeight:1.5, marginTop:8 }}>
+                        El núcleo interno comprueba PDF DeCA archivado, QR/URL, payload eFTI, eCMR, DIWASS, ADR y el historial de versiones del viaje cuando ya se haya generado documentación.
                       </div>
                       <div style={{ fontSize:11, color:"var(--text5)", marginTop:8, fontFamily:"'JetBrains Mono',monospace" }}>
                         Periodo {data.periodo?.desde || "-"} a {data.periodo?.hasta || "-"} - actualizado {data.generated_at ? new Date(data.generated_at).toLocaleString("es-ES") : "-"}
@@ -1017,7 +1043,7 @@ export default function Informes() {
                         <div style={{fontSize:11,color:"var(--text5)",fontWeight:800}}>{acciones.length} accion{acciones.length!==1?"es":""}</div>
                       </div>
                       {acciones.length===0 ? (
-                        <div style={{color:"var(--green)",fontSize:12,fontWeight:700,padding:"8px 0"}}>Sin senales preventivas relevantes en el periodo.</div>
+                        <div style={{color:"var(--green)",fontSize:12,fontWeight:700,padding:"8px 0"}}>Sin señales preventivas relevantes en el periodo.</div>
                       ) : (
                         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:8}}>
                           {acciones.map((a,i)=>(
@@ -1037,15 +1063,15 @@ export default function Informes() {
                       <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
                         <div>
                           <div style={S.sec}>VIAJES A REVISAR</div>
-                          <div style={{fontSize:12,color:"var(--text4)"}}>Senales detectadas en viajes proximos o abiertos.</div>
+                          <div style={{fontSize:12,color:"var(--text4)"}}>Señales detectadas en viajes próximos o abiertos.</div>
                         </div>
                         <div style={{fontSize:11,color:"var(--text5)",fontWeight:800}}>{viajes.length} viaje{viajes.length!==1?"s":""}</div>
                       </div>
                       {viajes.length===0 ? (
-                        <div style={{color:"var(--green)",fontSize:12,fontWeight:700,padding:"12px 0"}}>No hay viajes con senales de cumplimiento en el periodo.</div>
+                        <div style={{color:"var(--green)",fontSize:12,fontWeight:700,padding:"12px 0"}}>No hay viajes con señales de cumplimiento en el periodo.</div>
                       ) : (
                         <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                          <thead><tr>{["Riesgo","Viaje","Ruta","Cliente","Senales","Accion"].map(h=>(
+                          <thead><tr>{["Riesgo","Viaje","Ruta","Cliente","Señales","Regulatorio","Acción"].map(h=>(
                             <th key={h} style={{ textAlign:"left", padding:"8px 10px", fontSize:10, fontWeight:700, textTransform:"uppercase", color:"var(--text5)", borderBottom:"1px solid var(--border)" }}>{h}</th>
                           ))}</tr></thead>
                           <tbody>
@@ -1067,15 +1093,34 @@ export default function Informes() {
                                 <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
                                   <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
                                     {Object.entries(v.flags || {}).filter(([,ok])=>ok).map(([key])=>(
-                                      <span key={key} style={{ fontSize:10, fontWeight:900, color:key==="adr"||key==="cabotaje"||key==="diwass"?"var(--red)":"#f59e0b", border:"1px solid var(--border)", background:"var(--bg4)", borderRadius:999, padding:"2px 7px" }}>
+                                      <span key={key} style={{ fontSize:10, fontWeight:900, color:key==="adr"||key==="cabotaje"||key==="diwass"||key==="regulatory_blocking"?"var(--red)":"#f59e0b", border:"1px solid var(--border)", background:"var(--bg4)", borderRadius:999, padding:"2px 7px" }}>
                                         {flagLabels[key] || key}
                                       </span>
                                     ))}
                                   </div>
                                 </td>
+                                <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)", minWidth:180 }}>
+                                  <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                                    {[
+                                      ["DeCA", v.regulatory_core?.deca?.status],
+                                      ["eFTI", v.regulatory_core?.payloads?.efti?.status || "missing"],
+                                      ["eCMR", v.regulatory_core?.payloads?.ecmr?.status || (v.flags?.internacional ? "missing" : "not_applicable")],
+                                      ["DIWASS", v.regulatory_core?.payloads?.diwass?.status || (v.flags?.diwass ? "missing" : "not_applicable")],
+                                    ].map(([label,status]) => (
+                                      <span key={label} title={`${label}: ${statusLabel(status)}`} style={{ fontSize:10, fontWeight:900, color:statusColor(status), border:"1px solid var(--border)", background:"var(--bg4)", borderRadius:999, padding:"2px 7px" }}>
+                                        {label}: {statusLabel(status)}
+                                      </span>
+                                    ))}
+                                  </div>
+                                  {v.regulatory_core?.latest_audit_at && (
+                                    <div style={{ fontSize:10, color:"var(--text5)", marginTop:5 }}>
+                                      Sync {new Date(v.regulatory_core.latest_audit_at).toLocaleString("es-ES")}
+                                    </div>
+                                  )}
+                                </td>
                                 <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
                                   <button onClick={()=>abrirCumplimientoEnTrafico(v)} style={{...S.btn,background:"rgba(245,158,11,.12)",color:"#b45309",border:"1px solid rgba(245,158,11,.28)"}}>
-                                    Revisar en trafico
+                                    Revisar en tráfico
                                   </button>
                                 </td>
                               </tr>

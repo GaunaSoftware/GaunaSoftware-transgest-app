@@ -3,7 +3,7 @@ const router  = express.Router();
 const { authenticate } = require("../middleware/auth");
 const https   = require("https");
 const db      = require("../services/db");
-const { resolveApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
+const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
 
 router.use(authenticate);
 
@@ -100,14 +100,38 @@ async function getIaRuntimeConfig(empresaId) {
   const baseUrl = String(await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || "") || "").replace(/\/$/, "");
   const model = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "");
   const safeProvider = ["anthropic", "openai", "ai_generic"].includes(provider) ? provider : "anthropic";
-  const keyInfo = await resolveApiKey(empresaId, safeProvider);
-  return { provider: safeProvider, baseUrl, model, apiKey: keyInfo.key };
+  const keyInfo = await resolveBestApiKey(empresaId, safeProvider, ["openai", "ai_generic", "anthropic"]);
+  return { provider: keyInfo.provider || safeProvider, baseUrl, model, apiKey: keyInfo.key, keySource: keyInfo.source };
 }
 
 function normalizeOpenAiMessages(messages, system) {
   const list = Array.isArray(messages) ? [...messages] : [];
   if (system) list.unshift({ role: "system", content: system });
   return list;
+}
+
+function normalizeAttachments(raw = []) {
+  return (Array.isArray(raw) ? raw : []).map(a => ({
+    base64: String(a?.base64 || "").replace(/^data:[^;]+;base64,/, ""),
+    mediaType: String(a?.mediaType || a?.mime || "").toLowerCase(),
+    name: String(a?.name || a?.nombre || "").slice(0, 120),
+  })).filter(a => a.base64 && a.mediaType.startsWith("image/") && a.base64.length <= 7_000_000);
+}
+
+function buildOpenAiDocumentContent(prompt, attachments = []) {
+  const content = [{ type: "text", text: prompt }];
+  for (const a of attachments) {
+    content.push({ type: "image_url", image_url: { url: `data:${a.mediaType};base64,${a.base64}` } });
+  }
+  return content;
+}
+
+function buildAnthropicDocumentContent(prompt, attachments = []) {
+  const content = [{ type: "text", text: prompt }];
+  for (const a of attachments) {
+    content.push({ type: "image", source: { type: "base64", media_type: a.mediaType, data: a.base64 } });
+  }
+  return content;
 }
 
 // POST /ia/chat — proxy to Anthropic API
@@ -196,7 +220,8 @@ router.post("/chat", async (req, res) => {
 router.post("/documento/extraer", async (req, res) => {
   const { texto = "", tipo = "pedido", nombre = "", mime = "", contexto = {} } = req.body || {};
   const cleanText = String(texto || "").trim().slice(0, 60000);
-  if (!cleanText) return res.status(400).json({ error: "Texto del documento requerido" });
+  const attachments = normalizeAttachments(req.body?.attachments || req.body?.adjuntos || []);
+  if (!cleanText && !attachments.length) return res.status(400).json({ error: "Texto o imagen del documento requerido" });
 
   let iaConfig;
   try {
@@ -255,7 +280,7 @@ Devuelve este JSON:
 }
 
 Texto:
-${cleanText}`;
+${cleanText || "(Documento aportado como imagen adjunta. Lee la imagen y extrae los datos visibles.)"}`;
 
   try {
     let remoteData;
@@ -267,7 +292,7 @@ ${cleanText}`;
         body: JSON.stringify({
           model: iaConfig.model || "gpt-4o-mini",
           response_format: { type:"json_object" },
-          messages: normalizeOpenAiMessages([{ role:"user", content:userPrompt }], system),
+          messages: normalizeOpenAiMessages([{ role:"user", content:buildOpenAiDocumentContent(userPrompt, attachments) }], system),
           max_tokens: 1800,
         }),
       });
@@ -285,7 +310,7 @@ ${cleanText}`;
           model: iaConfig.model || "claude-sonnet-4-20250514",
           max_tokens: 1800,
           system,
-          messages: [{ role:"user", content:userPrompt }],
+          messages: [{ role:"user", content:buildAnthropicDocumentContent(userPrompt, attachments) }],
         }),
       });
       remoteData = await proxyRes.json().catch(() => ({}));

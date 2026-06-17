@@ -78,6 +78,29 @@ export async function exchangeSsoToken(ssoToken) {
 export const getMe = () => apiFetch("/auth/me");
 export const getCompanies = () => apiFetch("/companies");
 export const getDashboard = () => apiFetch("/dashboard");
+export const getExternalIntegrations = (filters = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value).trim());
+    }
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/external-integrations${suffix}`);
+};
+
+export const getAdvisorPackage = (filters = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value).trim());
+    }
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/external-integrations/advisor-package${suffix}`);
+};
+
+export const downloadAdvisorPackageFile = path => downloadFile(path);
 
 export async function selectCompany(companyId) {
   const data = await apiFetch("/companies/select", {

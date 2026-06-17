@@ -32,6 +32,13 @@ const { processPendingFiscalQueue } = require("../services/fiscalProcessor");
 const { getVerifactiRecordStatus } = require("../services/fiscalProviderVerifacti");
 const { markQueueAccepted, markQueuePending, markQueueError, logFiscalEvent } = require("../services/fiscalQueueState");
 const { CCAA, buildCalendarResponse, fallbackSpanishHolidays, fetchSpainHolidays, normalizeCcaa, normalizeYear } = require("../services/calendarioLaboral");
+const {
+  ACCOUNTING_MAPPING_ITEM_LABELS,
+  buildAccountingIntegrationsGovernance,
+  listCompanyAccountingIntegrationConfigs,
+  summarizeCompanyAccountingSettings,
+  upsertCompanyAccountingIntegrationConfig,
+} = require("../services/accountingIntegrationsCatalog");
 
 const router = express.Router();
 
@@ -478,6 +485,18 @@ function safeFilename(value, fallback = "salud-saas.html") {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
   return clean || fallback;
+}
+
+function csvCell(value) {
+  const clean = String(value ?? "").replace(/\r?\n/g, " ").trim();
+  return `"${clean.replace(/"/g, '""')}"`;
+}
+
+function buildCsv(headers = [], rows = []) {
+  return [
+    headers.map(csvCell).join(";"),
+    ...rows.map(row => headers.map(header => csvCell(row[header])).join(";")),
+  ].join("\n");
 }
 
 async function buildSaasHealthRows() {
@@ -1734,6 +1753,124 @@ router.get("/integraciones/salud", superAuth, async (req, res, next) => {
   try {
     const report = await buildIntegracionesSalud();
     res.json(report);
+  } catch (e) { next(e); }
+});
+
+router.get("/integraciones/contabilidad", superAuth, async (req, res, next) => {
+  try {
+    const governance = buildAccountingIntegrationsGovernance();
+    const companySettings = await listCompanyAccountingIntegrationConfigs();
+    const history = await db.query(`
+      SELECT
+        a.id,
+        a.empresa_id,
+        e.nombre AS empresa_nombre,
+        a.actor_email,
+        a.detalle,
+        a.created_at
+      FROM audit_log_saas a
+      LEFT JOIN empresas e ON e.id=a.empresa_id
+      WHERE a.accion='integracion.contabilidad.empresa_actualizada'
+      ORDER BY a.created_at DESC
+      LIMIT 50
+    `).catch(() => ({ rows: [] }));
+    await audit(req, "integracion.contabilidad.catalogo_consultado", {
+      catalog_version: governance.catalog_version,
+      total: governance.summary?.total || 0,
+    });
+    res.json({
+      ...governance,
+      company_settings: companySettings,
+      company_summary: summarizeCompanyAccountingSettings(companySettings),
+      history: history.rows,
+    });
+  } catch (e) { next(e); }
+});
+
+router.get("/integraciones/contabilidad/export.csv", superAuth, async (req, res, next) => {
+  try {
+    const companySettings = await listCompanyAccountingIntegrationConfigs();
+    const statusLabel = {
+      not_configured: "Sin configurar",
+      assessing: "Evaluando",
+      export_ready: "Exportacion lista",
+      pilot: "Piloto",
+      active: "Activo",
+      paused: "Pausado",
+    };
+    const modeLabel = {
+      export_first: "Exportar primero",
+      advisor_export: "Paquete asesoria",
+      api_with_outbox: "API + outbox",
+      bidirectional_with_approval: "Bidireccional con aprobacion",
+      file_import_export: "Ficheros import/export",
+      fiscal_boundary_export: "Frontera fiscal",
+      plugin_or_api: "Plugin/API",
+    };
+    const mappingLabel = {
+      pending: "Pendiente",
+      drafted: "Borrador",
+      validated: "Validado",
+    };
+    const formatMappingItems = item => Object.entries(item.mapping_items || {})
+      .filter(([, ready]) => ready)
+      .map(([key]) => ACCOUNTING_MAPPING_ITEM_LABELS[key] || key)
+      .join(", ");
+    const headers = [
+      "Empresa",
+      "Programa",
+      "Estado",
+      "Modo",
+      "Mapeo",
+      "Mapeados",
+      "Modulos mapeados",
+      "Responsable",
+      "Asesoria",
+      "Notas",
+      "Actualizado",
+    ];
+    const rows = companySettings.map(item => ({
+      Empresa: item.empresa_nombre || "",
+      Programa: item.connector_name || "",
+      Estado: statusLabel[item.status] || item.status || "",
+      Modo: modeLabel[item.mode] || item.mode || "",
+      Mapeo: mappingLabel[item.mapping_status] || item.mapping_status || "",
+      Mapeados: `${Number(item.mapping_ready_count || 0)}/6`,
+      "Modulos mapeados": formatMappingItems(item),
+      Responsable: item.owner_email || "",
+      Asesoria: item.advisor_name || "",
+      Notas: item.notes || "",
+      Actualizado: item.updated_at ? new Date(item.updated_at).toISOString() : "",
+    }));
+    await audit(req, "integracion.contabilidad.export_csv", {
+      total: rows.length,
+      configured: rows.filter(row => row.Programa).length,
+    });
+    const filename = safeFilename(`integraciones-contables-${new Date().toISOString().slice(0, 10)}.csv`, "integraciones-contables.csv");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(`\uFEFF${buildCsv(headers, rows)}`);
+  } catch (e) { next(e); }
+});
+
+router.put("/integraciones/contabilidad/empresas/:empresaId", superAuth, async (req, res, next) => {
+  try {
+    const empresa = await db.query("SELECT id,nombre FROM empresas WHERE id=$1", [req.params.empresaId]);
+    if (!empresa.rows[0]) return res.status(404).json({ error: "Empresa no encontrada" });
+    const config = await upsertCompanyAccountingIntegrationConfig(
+      req.params.empresaId,
+      req.body || {},
+      req.superadmin?.id || null
+    );
+    await audit(req, "integracion.contabilidad.empresa_actualizada", {
+      connector_id: config.connector_id,
+      connector_name: config.connector_name,
+      status: config.status,
+      mode: config.mode,
+      mapping_status: config.mapping_status,
+      mapping_ready_count: config.mapping_ready_count,
+    }, req.params.empresaId);
+    res.json({ ok: true, config: { ...config, empresa_nombre: empresa.rows[0].nombre } });
   } catch (e) { next(e); }
 });
 

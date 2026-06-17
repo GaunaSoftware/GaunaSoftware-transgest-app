@@ -5,6 +5,7 @@ const { authenticate, GERENTE_O_CONTABLE, GERENTE_O_TRAFICO, SOLO_GERENTE } = re
 const { crearNotificacion } = require("../services/notificaciones");
 const { enviarEmail } = require("../services/email");
 const { detectTransportComplianceSignals, detectWasteSignals } = require("../services/documentoControl");
+const { ensureRegulatoryCoreSchema } = require("../services/regulatoryCore");
 
 const router = express.Router();
 router.use((req, res, next) => {
@@ -308,6 +309,30 @@ function controlTowerNextActions(item = {}) {
       { key: "revisar_gps", label: "Revisar GPS", view: "vehiculos", primary: true },
       { key: "contactar_conductor", label: "Contactar conductor", view: "gestion_trafico" },
     ],
+    deca_pendiente: [
+      { key: "generar_deca", label: "Generar DeCA", view: "pedidos", primary: true },
+      { key: "revisar_dcd", label: "Revisar DCD", view: "pedidos" },
+    ],
+    efti_pendiente: [
+      { key: "preparar_efti", label: "Preparar eFTI", view: "pedidos", primary: true },
+      { key: "revisar_datos", label: "Revisar datos maestros", view: "pedidos" },
+    ],
+    regulatory_blocking: [
+      { key: "resolver_checklist", label: "Resolver checklist", view: "pedidos", primary: true },
+      { key: "abrir_cumplimiento", label: "Abrir cumplimiento", view: "gestion_trafico" },
+    ],
+    espera_carga: [
+      { key: "confirmar_espera", label: "Confirmar espera", view: "gestion_trafico", primary: true },
+      { key: "avisar_cliente", label: "Avisar cliente", view: "pedidos" },
+    ],
+    espera_descarga: [
+      { key: "confirmar_espera", label: "Confirmar espera", view: "gestion_trafico", primary: true },
+      { key: "avisar_cliente", label: "Avisar cliente", view: "pedidos" },
+    ],
+    vacaciones_pendientes: [
+      { key: "resolver_vacaciones", label: "Resolver vacaciones", view: "choferes", primary: true },
+      { key: "ver_cuadrante", label: "Ver cuadrante", view: "cuadrante_choferes" },
+    ],
   };
   return actionsByType[item.type] || [openPedido];
 }
@@ -318,10 +343,10 @@ function controlTowerBuckets(item = {}) {
   const severity = String(item.severity || "").toLowerCase();
   const buckets = new Set();
 
-  if (["incidencia_pedido", "retraso", "sin_asignar", "gps_sin_senal"].includes(type)) {
+  if (["incidencia_pedido", "retraso", "sin_asignar", "gps_sin_senal", "espera_carga", "espera_descarga"].includes(type)) {
     buckets.add("hoy");
   }
-  if (["critica", "alta"].includes(severity) || ["pod_pendiente", "facturacion_inconsistente", "gps_sin_senal"].includes(type)) {
+  if (["critica", "alta"].includes(severity) || ["pod_pendiente", "facturacion_inconsistente", "gps_sin_senal", "deca_pendiente", "efti_pendiente", "regulatory_blocking", "vacaciones_pendientes"].includes(type)) {
     buckets.add("riesgos");
   }
   if (
@@ -334,6 +359,12 @@ function controlTowerBuckets(item = {}) {
   }
   if (type === "incidencia_pedido") {
     buckets.add("incidencias");
+  }
+  if (area.includes("recursos") || ["vacaciones_pendientes"].includes(type)) {
+    buckets.add("recursos");
+  }
+  if (area.includes("cumplimiento") || ["deca_pendiente", "efti_pendiente", "regulatory_blocking"].includes(type)) {
+    buckets.add("documentos");
   }
 
   return Array.from(buckets);
@@ -2516,6 +2547,7 @@ router.get("/cumplimiento-europeo", authenticate, GERENTE_O_TRAFICO, cacheMiddle
   const desdeStr = desde.toISOString().slice(0, 10);
   const hastaStr = hasta.toISOString().slice(0, 10);
   try {
+    await ensureRegulatoryCoreSchema().catch(() => {});
     const { rows } = await db.query(`
       SELECT p.id, p.numero, p.origen, p.destino, p.estado::text AS estado,
              p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
@@ -2537,6 +2569,122 @@ router.get("/cumplimiento-europeo", authenticate, GERENTE_O_TRAFICO, cacheMiddle
        LIMIT 300
     `, [empresaId, desdeStr, hastaStr]);
 
+    const pedidoIds = rows.map(r => r.id).filter(Boolean);
+    const regulatoryByPedido = new Map();
+    const ensureReg = id => {
+      const key = String(id);
+      if (!regulatoryByPedido.has(key)) {
+        regulatoryByPedido.set(key, {
+          payloads: {},
+          documents: {},
+          checklist: null,
+          waste: null,
+          adr: null,
+          latest_audit_at: null,
+        });
+      }
+      return regulatoryByPedido.get(key);
+    };
+
+    if (pedidoIds.length) {
+      const [payloads, documents, wasteRows, adrRows, audits] = await Promise.all([
+        db.query(`
+          SELECT pedido_id,payload_type,status,version,hash_sha256,validation,updated_at
+            FROM regulatory_payloads
+           WHERE empresa_id=$1 AND pedido_id = ANY($2::uuid[])
+        `, [empresaId, pedidoIds]).catch(() => ({ rows: [] })),
+        db.query(`
+          SELECT pedido_id,document_type,status,filename,mime,hash_sha256,url,metadata,updated_at
+            FROM regulatory_documents
+           WHERE empresa_id=$1 AND pedido_id = ANY($2::uuid[])
+        `, [empresaId, pedidoIds]).catch(() => ({ rows: [] })),
+        db.query(`
+          SELECT pedido_id,is_waste,procedure_type,waste_code,hazardous,annex_vii,notification_required,validation,updated_at
+            FROM regulatory_waste_details
+           WHERE empresa_id=$1 AND pedido_id = ANY($2::uuid[])
+        `, [empresaId, pedidoIds]).catch(() => ({ rows: [] })),
+        db.query(`
+          SELECT pedido_id,adr_applicable,un_number,adr_class,validation,updated_at
+            FROM regulatory_dangerous_goods_details
+           WHERE empresa_id=$1 AND pedido_id = ANY($2::uuid[])
+        `, [empresaId, pedidoIds]).catch(() => ({ rows: [] })),
+        db.query(`
+          SELECT DISTINCT ON (pedido_id) pedido_id,detail,created_at
+            FROM regulatory_audit_logs
+           WHERE empresa_id=$1 AND pedido_id = ANY($2::uuid[])
+           ORDER BY pedido_id, created_at DESC
+        `, [empresaId, pedidoIds]).catch(() => ({ rows: [] })),
+      ]);
+      for (const p of payloads.rows || []) {
+        ensureReg(p.pedido_id).payloads[p.payload_type] = {
+          status: p.status,
+          version: Number(p.version || 1),
+          hash_sha256: p.hash_sha256 || "",
+          validation: p.validation || {},
+          updated_at: p.updated_at,
+        };
+      }
+      for (const d of documents.rows || []) {
+        ensureReg(d.pedido_id).documents[d.document_type] = {
+          status: d.status,
+          filename: d.filename || "",
+          mime: d.mime || "",
+          hash_sha256: d.hash_sha256 || "",
+          url: d.url || "",
+          metadata: d.metadata || {},
+          updated_at: d.updated_at,
+        };
+      }
+      for (const w of wasteRows.rows || []) ensureReg(w.pedido_id).waste = w;
+      for (const a of adrRows.rows || []) ensureReg(a.pedido_id).adr = a;
+      for (const audit of audits.rows || []) {
+        const reg = ensureReg(audit.pedido_id);
+        reg.latest_audit_at = audit.created_at;
+        reg.checklist = audit.detail?.checklist || null;
+      }
+    }
+
+    const makeRegulatoryStatus = (pedidoId, flags) => {
+      const reg = regulatoryByPedido.get(String(pedidoId)) || { payloads: {}, documents: {}, checklist: null, waste: null, adr: null };
+      const deca = reg.documents?.deca || null;
+      const efti = reg.payloads?.efti || null;
+      const ecmr = reg.payloads?.ecmr || null;
+      const diwass = reg.payloads?.diwass || null;
+      const blocking = Array.isArray(reg.checklist?.blocking) ? reg.checklist.blocking : [];
+      const ecmrMissing = Array.isArray(ecmr?.validation?.missing) ? ecmr.validation.missing : [];
+      const diwassMissing = Array.isArray(diwass?.validation?.missing) ? diwass.validation.missing : [];
+      const adrMissing = Array.isArray(reg.adr?.validation?.missing) ? reg.adr.validation.missing : [];
+      const generated = !!(deca?.hash_sha256 || deca?.filename);
+      return {
+        status: reg.checklist?.status || (generated && efti ? "ready" : "requires_preparation"),
+        ready: !!generated && !!efti && blocking.length === 0,
+        latest_audit_at: reg.latest_audit_at || null,
+        deca: {
+          ready: generated,
+          status: deca?.status || "missing",
+          filename: deca?.filename || "",
+          hash_sha256: deca?.hash_sha256 || "",
+          updated_at: deca?.updated_at || null,
+        },
+        payloads: {
+          efti: efti || null,
+          ecmr: ecmr || null,
+          diwass: diwass || null,
+        },
+        checklist: reg.checklist,
+        blocking,
+        requires_review: {
+          deca: !generated,
+          efti: !efti,
+          ecmr: !!(flags.internacional && ecmrMissing.length),
+          diwass: !!(flags.diwass || reg.waste?.is_waste) && (!diwass || diwass.status === "requires_review" || diwassMissing.length > 0),
+          adr: !!(flags.adr || reg.adr?.adr_applicable) && adrMissing.length > 0,
+        },
+        waste: reg.waste,
+        adr: reg.adr,
+      };
+    };
+
     const items = rows.map(p => {
       const compliance = detectTransportComplianceSignals(p);
       const wasteSignals = detectWasteSignals(p);
@@ -2548,10 +2696,18 @@ router.get("/cumplimiento-europeo", authenticate, GERENTE_O_TRAFICO, cacheMiddle
         tacografo: !!compliance.tacografo?.requiere_revision,
         diwass: !!wasteSignals.detected,
       };
-      const count = Object.values(flags).filter(Boolean).length;
-      const prioridad = flags.adr || flags.cabotaje || flags.diwass
+      const regulatory = makeRegulatoryStatus(p.id, flags);
+      const regulatoryFlags = {
+        deca: !!regulatory.requires_review.deca,
+        efti: !!regulatory.requires_review.efti,
+        ecmr: !!regulatory.requires_review.ecmr,
+        regulatory_blocking: !!(regulatory.blocking || []).length,
+      };
+      const allFlags = { ...flags, ...regulatoryFlags };
+      const count = Object.values(allFlags).filter(Boolean).length;
+      const prioridad = flags.adr || flags.cabotaje || flags.diwass || regulatory.requires_review.diwass || regulatory.requires_review.adr
         ? "alta"
-        : flags.internacional || flags.tacografo || flags.zbe
+        : flags.internacional || flags.tacografo || flags.zbe || regulatoryFlags.deca || regulatoryFlags.efti || regulatoryFlags.ecmr || regulatoryFlags.regulatory_blocking
           ? "media"
           : "baja";
       return {
@@ -2567,8 +2723,9 @@ router.get("/cumplimiento-europeo", authenticate, GERENTE_O_TRAFICO, cacheMiddle
         fecha_carga: p.fecha_carga,
         fecha_descarga: p.fecha_descarga || p.fecha_entrega || null,
         prioridad,
-        score_riesgo: count ? Math.min(100, 35 + count * 15 + (flags.adr ? 20 : 0) + (flags.cabotaje ? 15 : 0) + (flags.diwass ? 20 : 0)) : 0,
-        flags,
+        score_riesgo: count ? Math.min(100, 25 + count * 12 + (flags.adr ? 20 : 0) + (flags.cabotaje ? 15 : 0) + (flags.diwass ? 20 : 0) + (regulatoryFlags.regulatory_blocking ? 10 : 0)) : 0,
+        flags: allFlags,
+        regulatory_core: regulatory,
         cumplimiento: {
           ...compliance,
           diwass_eannex_vii: {
@@ -2592,11 +2749,12 @@ router.get("/cumplimiento-europeo", authenticate, GERENTE_O_TRAFICO, cacheMiddle
         },
         accion_recomendada: count
           ? "Revisar y documentar los avisos antes de confirmar, asignar o remitir el documento digital."
-          : "Sin senales automaticas; mantener comprobaciones ordinarias de operativa.",
+          : "Sin señales automáticas; mantener comprobaciones ordinarias de operativa.",
       };
     });
     const conSenales = items.filter(i => Object.values(i.flags).some(Boolean));
     const countFlag = key => conSenales.filter(i => i.flags[key]).length;
+    const regCount = (predicate) => items.filter(predicate).length;
     const resumen = {
       total_viajes: items.length,
       con_senales: conSenales.length,
@@ -2607,11 +2765,21 @@ router.get("/cumplimiento-europeo", authenticate, GERENTE_O_TRAFICO, cacheMiddle
       cabotaje: countFlag("cabotaje"),
       tacografo: countFlag("tacografo"),
       diwass: countFlag("diwass"),
+      deca_pendiente: countFlag("deca"),
+      efti_pendiente: countFlag("efti"),
+      ecmr_revision: countFlag("ecmr"),
+      bloqueos_regulatorios: countFlag("regulatory_blocking"),
+      regulatory_ready: regCount(i => i.regulatory_core?.ready),
+      regulatory_preparacion: regCount(i => !i.regulatory_core?.ready),
       alta: conSenales.filter(i => i.prioridad === "alta").length,
       media: conSenales.filter(i => i.prioridad === "media").length,
       baja: conSenales.filter(i => i.prioridad === "baja").length,
     };
     const acciones = [];
+    if (resumen.deca_pendiente) acciones.push({ type: "deca", severity: "media", title: `${resumen.deca_pendiente} viaje(s) sin DeCA archivado`, recommendation: "Generar el PDF nativo DeCA/DCD, guardarlo en repositorio, activar URL/QR durante el servicio y conservarlo internamente." });
+    if (resumen.efti_pendiente) acciones.push({ type: "efti", severity: "media", title: `${resumen.efti_pendiente} viaje(s) sin payload eFTI interno`, recommendation: "Preparar dataset eFTI interno para futura pasarela certificada y mantener trazabilidad de versiones." });
+    if (resumen.ecmr_revision) acciones.push({ type: "ecmr", severity: "media", title: `${resumen.ecmr_revision} viaje(s) con eCMR a revisar`, recommendation: "Completar datos de carta de porte internacional y preparar interoperabilidad con proveedor eCMR certificado si aplica." });
+    if (resumen.bloqueos_regulatorios) acciones.push({ type: "regulatory_blocking", severity: "alta", title: `${resumen.bloqueos_regulatorios} viaje(s) con bloqueos regulatorios`, recommendation: "Resolver los elementos marcados en checklist antes de cerrar la preparacion documental." });
     if (resumen.adr) acciones.push({ type: "adr", severity: "alta", title: `${resumen.adr} viaje(s) con senal ADR`, recommendation: "Validar carta ADR, conductor, vehiculo, instrucciones escritas y restricciones antes de expedir." });
     if (resumen.cabotaje) acciones.push({ type: "cabotaje", severity: "alta", title: `${resumen.cabotaje} viaje(s) con riesgo de cabotaje/subcontratacion`, recommendation: "Revisar carrier, reglas aplicables y evidencia documental antes de asignar." });
     if (resumen.diwass) acciones.push({ type: "diwass", severity: "alta", title: `${resumen.diwass} viaje(s) con senal DIWASS/eAnnex VII`, recommendation: "Confirmar si es traslado transfronterizo de residuos, completar codigo LER, partes, transportistas, destino y firmas antes de operar." });
@@ -2626,7 +2794,7 @@ router.get("/cumplimiento-europeo", authenticate, GERENTE_O_TRAFICO, cacheMiddle
         documento_control_obligatorio_desde: "2026-10-05",
         diwass_eannex_vii_entrada_vigor: "2026-05-21",
         efti_plena_aplicacion_desde: "2027-07-09",
-        nota: "Deteccion preventiva por senales del pedido. No sustituye validacion legal humana ni integraciones certificadas.",
+        nota: "Detección preventiva por señales del pedido. No sustituye validación legal humana ni integraciones certificadas.",
       },
       resumen,
       acciones,
@@ -2808,8 +2976,9 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
     const period = String(req.query.period || "7d");
     const { desde, hasta } = rangoPeriodo(period);
     const safeRows = (promise) => promise.then(r => r.rows || []).catch(() => []);
+    await ensureRegulatoryCoreSchema().catch(() => {});
 
-    const [kpiRows, incidencias, retrasos, sinAsignar, margen, docs, facturacionInconsistente, cobros, gps] = await Promise.all([
+    const [kpiRows, proximos, incidencias, retrasos, sinAsignar, margen, docs, facturacionInconsistente, cobros, gps, regulatoryDocs] = await Promise.all([
       safeRows(db.query(`
         SELECT
           COUNT(*) FILTER (WHERE p.estado::text NOT IN ('cancelado','entregado','facturado') AND p.factura_id IS NULL)::int AS activos,
@@ -2824,6 +2993,24 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
         FROM pedidos p
         LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
         WHERE p.empresa_id=$1
+      `, [empresaId])),
+      safeRows(db.query(`
+        SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga, p.estado::text AS estado,
+               c.nombre AS cliente_nombre,
+               v.matricula AS vehiculo_matricula,
+               ch.nombre AS chofer_nombre,
+               col.nombre AS colaborador_nombre
+          FROM pedidos p
+          LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
+          LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+          LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+          LEFT JOIN colaboradores col ON col.id=p.colaborador_id AND col.empresa_id=p.empresa_id
+         WHERE p.empresa_id=$1
+           AND p.estado::text NOT IN ('cancelado','facturado')
+           AND p.factura_id IS NULL
+           AND COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date) BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+         ORDER BY COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
+         LIMIT 16
       `, [empresaId])),
       safeRows(db.query(`
         SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga, p.estado::text AS estado,
@@ -2962,10 +3149,141 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
          ORDER BY ubicacion_ts NULLS FIRST, matricula
          LIMIT 20
       `, [empresaId])),
+      safeRows(db.query(`
+        SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.estado::text AS estado,
+               c.nombre AS cliente_nombre,
+               d.id AS deca_repo_id,
+               d.pdf_hash_sha256 AS deca_hash,
+               d.pdf_filename AS deca_filename,
+               e.status AS efti_status,
+               e.hash_sha256 AS efti_hash,
+               latest.detail->'checklist' AS checklist,
+               latest.detail->'checklist'->>'status' AS checklist_status,
+               latest.created_at AS checklist_updated_at
+          FROM pedidos p
+          LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
+          LEFT JOIN LATERAL (
+            SELECT id, pdf_hash_sha256, pdf_filename
+              FROM documento_control_repositorio dcr
+             WHERE dcr.pedido_id=p.id
+               AND dcr.empresa_id=p.empresa_id
+               AND dcr.activo IS DISTINCT FROM false
+             ORDER BY dcr.updated_at DESC NULLS LAST, dcr.archivado_at DESC NULLS LAST, dcr.created_at DESC NULLS LAST
+             LIMIT 1
+          ) d ON true
+          LEFT JOIN regulatory_payloads e ON e.pedido_id=p.id AND e.empresa_id=p.empresa_id AND e.payload_type='efti'
+          LEFT JOIN LATERAL (
+            SELECT detail, created_at
+              FROM regulatory_audit_logs ral
+             WHERE ral.pedido_id=p.id AND ral.empresa_id=p.empresa_id
+             ORDER BY created_at DESC
+             LIMIT 1
+          ) latest ON true
+         WHERE p.empresa_id=$1
+           AND p.estado::text NOT IN ('cancelado','facturado')
+           AND p.factura_id IS NULL
+           AND COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date) BETWEEN CURRENT_DATE - INTERVAL '1 day' AND CURRENT_DATE + INTERVAL '10 days'
+           AND (
+             NULLIF(d.pdf_hash_sha256,'') IS NULL
+             OR e.id IS NULL
+             OR COALESCE(latest.detail->'checklist'->>'status','') = 'requires_review'
+           )
+         ORDER BY COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
+         LIMIT 30
+      `, [empresaId])),
+    ]);
+
+    const [flujo, recursos, eventosRecientes, esperas, vacacionesPendientes, gpsResumen] = await Promise.all([
+      safeRows(db.query(`
+        SELECT
+          COALESCE(NULLIF(p.estado::text,''),'pendiente') AS estado,
+          COUNT(*)::int AS total
+        FROM pedidos p
+        WHERE p.empresa_id=$1
+          AND p.factura_id IS NULL
+          AND p.estado::text NOT IN ('cancelado','facturado')
+          AND COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date)
+              BETWEEN CURRENT_DATE - INTERVAL '2 days' AND CURRENT_DATE + INTERVAL '10 days'
+        GROUP BY COALESCE(NULLIF(p.estado::text,''),'pendiente')
+      `, [empresaId])),
+      safeRows(db.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE ch.activo IS DISTINCT FROM false)::int AS choferes_activos,
+          COUNT(*) FILTER (WHERE ch.activo IS DISTINCT FROM false AND COALESCE(ch.estado,'disponible')='disponible')::int AS disponibles,
+          COUNT(*) FILTER (WHERE ch.activo IS DISTINCT FROM false AND COALESCE(ch.estado,'disponible')='en_ruta')::int AS en_ruta,
+          COUNT(*) FILTER (WHERE ch.activo IS DISTINCT FROM false AND COALESCE(ch.estado,'disponible')='vacaciones')::int AS vacaciones,
+          COUNT(*) FILTER (WHERE ch.activo IS DISTINCT FROM false AND COALESCE(ch.estado,'disponible') IN ('baja','ausencia'))::int AS ausencias,
+          COUNT(*) FILTER (WHERE ch.activo IS DISTINCT FROM false AND ch.vehiculo_id IS NULL)::int AS sin_tractora
+        FROM choferes ch
+        WHERE ch.empresa_id=$1
+      `, [empresaId])),
+      safeRows(db.query(`
+        SELECT e.id, e.pedido_id, e.tipo, e.actor_tipo, e.detalle, e.created_at,
+               p.numero AS pedido_numero, p.estado::text AS pedido_estado,
+               COALESCE(p.origen,'') AS origen, COALESCE(p.destino,'') AS destino
+        FROM pedido_eventos e
+        JOIN pedidos p ON p.id=e.pedido_id AND p.empresa_id=e.empresa_id
+        WHERE e.empresa_id=$1
+          AND p.estado::text NOT IN ('cancelado')
+          AND e.created_at >= NOW() - INTERVAL '48 hours'
+        ORDER BY e.created_at DESC
+        LIMIT 18
+      `, [empresaId])),
+      safeRows(db.query(`
+        SELECT s.pedido_id AS id, p.numero, p.origen, p.destino, p.estado::text AS estado,
+               c.nombre AS cliente_nombre,
+               ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos,
+               s.data->>'aviso_espera_carga_at' AS aviso_espera_carga_at,
+               s.data->>'aviso_espera_descarga_at' AS aviso_espera_descarga_at,
+               s.data->>'carga_iniciada_at' AS carga_iniciada_at,
+               s.data->>'posicionado_descarga_at' AS posicionado_descarga_at,
+               CASE
+                 WHEN COALESCE(s.data->>'aviso_espera_descarga','false')='true' THEN 'descarga'
+                 ELSE 'carga'
+               END AS tipo_espera
+        FROM pedido_chofer_pasos s
+        JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
+        LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
+        LEFT JOIN choferes ch ON ch.id=COALESCE(s.chofer_id,p.chofer_id) AND ch.empresa_id=p.empresa_id
+        WHERE s.empresa_id=$1
+          AND p.estado::text NOT IN ('cancelado','facturado')
+          AND (
+            COALESCE(s.data->>'aviso_espera_carga','false')='true'
+            OR COALESCE(s.data->>'aviso_espera_descarga','false')='true'
+          )
+          AND s.updated_at >= NOW() - INTERVAL '48 hours'
+        ORDER BY s.updated_at DESC
+        LIMIT 12
+      `, [empresaId])),
+      safeRows(db.query(`
+        SELECT s.*, ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos
+        FROM chofer_vacaciones_solicitudes s
+        JOIN choferes ch ON ch.id=s.chofer_id AND ch.empresa_id=s.empresa_id
+        WHERE s.empresa_id=$1
+          AND s.estado IN ('pendiente','aprobada_pendiente_firma')
+        ORDER BY s.fecha_inicio ASC, s.created_at ASC
+        LIMIT 16
+      `, [empresaId])),
+      safeRows(db.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false)::int AS vehiculos_activos,
+          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL)::int AS gps_enlazados,
+          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND ubicacion_ts >= NOW() - INTERVAL '6 hours')::int AS gps_ok,
+          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND (ubicacion_ts IS NULL OR ubicacion_ts < NOW() - INTERVAL '6 hours'))::int AS gps_sin_senal
+        FROM vehiculos
+        WHERE empresa_id=$1
+      `, [empresaId])),
     ]);
 
     const items = [];
     const add = (item) => items.push(enrichControlTowerItem({ id: `${item.type}-${item.entity_id || item.title}-${items.length}`, ...item }));
+    for (const p of proximos) add({
+      type: "viaje_programado", area: "Trafico", severity: "info", view: "gestion_trafico", entity_id: p.id,
+      title: `Viaje ${p.numero || ""} programado`,
+      description: `${p.cliente_nombre || "Cliente"} - ${p.origen || "-"} > ${p.destino || "-"} - ${p.vehiculo_matricula || p.colaborador_nombre || "sin recurso visible"}`,
+      action: "Abrir planificacion",
+      score: 25,
+    });
     const incidenciaItems = incidencias.map((p, index) => ({
       id: `incidencia_pedido-${p.id || "sin-id"}-${index}`,
       type: "incidencia_pedido", area: "Trafico", severity: "critica", view: "pedidos", entity_id: p.id,
@@ -2989,6 +3307,36 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       action: "Asignar camion, chofer o colaborador",
       score: 85,
     });
+    for (const p of esperas) {
+      const tipo = p.tipo_espera === "descarga" ? "descarga" : "carga";
+      const chofer = `${p.chofer_nombre || ""} ${p.chofer_apellidos || ""}`.trim();
+      add({
+        type: tipo === "descarga" ? "espera_descarga" : "espera_carga",
+        area: "Tiempo real",
+        severity: "alta",
+        view: "gestion_trafico",
+        entity_id: p.id,
+        title: `Espera de ${tipo} en ${p.numero || "pedido"}`,
+        description: `${p.cliente_nombre || "Cliente"} - ${p.origen || "-"} > ${p.destino || "-"}${chofer ? ` - ${chofer}` : ""}. Revisar paralizacion y aviso al cliente.`,
+        action: "Gestionar espera",
+        score: 86,
+      });
+    }
+    for (const s of vacacionesPendientes) {
+      const fechaInicio = s.fecha_inicio ? String(s.fecha_inicio).slice(0, 10) : "-";
+      const chofer = `${s.chofer_nombre || ""} ${s.chofer_apellidos || ""}`.trim() || "Chofer";
+      add({
+        type: "vacaciones_pendientes",
+        area: "Recursos",
+        severity: s.estado === "pendiente" ? "media" : "baja",
+        view: "choferes",
+        entity_id: s.id,
+        title: s.estado === "pendiente" ? `Vacaciones pendientes: ${chofer}` : `Vacaciones aprobadas sin firma: ${chofer}`,
+        description: `${fechaInicio} a ${String(s.fecha_fin || "").slice(0, 10) || "-"} - ${Number(s.dias || 0)} dias. ${s.estado === "pendiente" ? "Resolver para cuadrar flota." : "Pendiente firma del chofer."}`,
+        action: "Resolver vacaciones",
+        score: s.estado === "pendiente" ? 62 : 42,
+      });
+    }
     for (const p of margen) {
       const margenValue = Number(p.margen || 0);
       const sinPrecio = Number(p.ingreso || 0) <= 0;
@@ -3034,6 +3382,45 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       action: "Revisar enlace GPS",
       score: !v.ubicacion_ts || Number(v.horas_sin_senal || 0) >= 24 ? 78 : 58,
     });
+    for (const p of regulatoryDocs) {
+      const route = `${p.origen || "-"} > ${p.destino || "-"}`;
+      if (!p.deca_hash) add({
+        type: "deca_pendiente",
+        area: "Cumplimiento",
+        severity: "media",
+        view: "pedidos",
+        entity_id: p.id,
+        title: `DeCA pendiente en ${p.numero || "pedido"}`,
+        description: `${p.cliente_nombre || "Cliente"} - ${route}. Generar PDF nativo, QR/URL y repositorio antes del servicio.`,
+        action: "Generar DeCA",
+        score: 72,
+      });
+      if (!p.efti_hash) add({
+        type: "efti_pendiente",
+        area: "Cumplimiento",
+        severity: "media",
+        view: "pedidos",
+        entity_id: p.id,
+        title: `Payload eFTI pendiente en ${p.numero || "pedido"}`,
+        description: `${p.cliente_nombre || "Cliente"} - falta dataset interno para interoperar con plataforma certificada cuando aplique.`,
+        action: "Preparar eFTI",
+        score: 64,
+      });
+      if (p.checklist_status === "requires_review") {
+        const blocking = Array.isArray(p.checklist?.blocking) ? p.checklist.blocking.join(", ") : "checklist";
+        add({
+          type: "regulatory_blocking",
+          area: "Cumplimiento",
+          severity: "alta",
+          view: "pedidos",
+          entity_id: p.id,
+          title: `Checklist regulatorio bloqueado en ${p.numero || "pedido"}`,
+          description: `${p.cliente_nombre || "Cliente"} - pendiente resolver: ${blocking}.`,
+          action: "Resolver checklist",
+          score: 90,
+        });
+      }
+    }
 
     const order = { critica: 0, alta: 1, media: 2, baja: 3, info: 4 };
     items.sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9) || Number(b.score || 0) - Number(a.score || 0));
@@ -3048,9 +3435,56 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
         acc[bucket] = (acc[bucket] || 0) + 1;
       }
       return acc;
-    }, { todas: items.length, hoy: 0, riesgos: 0, rentabilidad: 0, incidencias: incidenciaItems.length });
+    }, { todas: items.length, hoy: 0, riesgos: 0, rentabilidad: 0, recursos: 0, documentos: 0, incidencias: incidenciaItems.length });
 
     const k = kpiRows[0] || {};
+    const flujoMap = new Map((flujo || []).map(r => [String(r.estado || "pendiente"), Number(r.total || 0)]));
+    const flujoOperativo = [
+      ["pendiente", "Pendientes"],
+      ["confirmado", "Confirmados"],
+      ["en_curso", "En ruta"],
+      ["descarga", "Descarga"],
+      ["entregado", "Entregados"],
+      ["incidencia", "Incidencias"],
+    ].map(([key, label]) => ({ key, label, total: Number(flujoMap.get(key) || 0) }));
+    const recursosRow = recursos[0] || {};
+    const gpsRow = gpsResumen[0] || {};
+    const recursosResumen = {
+      choferes_activos: Number(recursosRow.choferes_activos || 0),
+      disponibles: Number(recursosRow.disponibles || 0),
+      en_ruta: Number(recursosRow.en_ruta || 0),
+      vacaciones: Number(recursosRow.vacaciones || 0),
+      ausencias: Number(recursosRow.ausencias || 0),
+      sin_tractora: Number(recursosRow.sin_tractora || 0),
+      solicitudes_vacaciones: vacacionesPendientes.length,
+    };
+    const visibilidadResumen = {
+      vehiculos_activos: Number(gpsRow.vehiculos_activos || 0),
+      gps_enlazados: Number(gpsRow.gps_enlazados || 0),
+      gps_ok: Number(gpsRow.gps_ok || 0),
+      gps_sin_senal: Number(gpsRow.gps_sin_senal || 0),
+      esperas_activas: esperas.length,
+    };
+    const decisiones = items.slice(0, 8).map(item => ({
+      id: item.id,
+      severity: item.severity,
+      area: item.area,
+      title: item.title,
+      impact: item.description,
+      recommended_action: item.next_actions?.[0]?.label || item.action || "Abrir",
+      view: item.next_actions?.[0]?.view || item.view || "gestion_trafico",
+    }));
+    const eventos = (eventosRecientes || []).map(ev => ({
+      id: ev.id,
+      pedido_id: ev.pedido_id,
+      pedido_numero: ev.pedido_numero,
+      tipo: ev.tipo,
+      actor_tipo: ev.actor_tipo,
+      detalle: ev.detalle || {},
+      created_at: ev.created_at,
+      ruta: `${ev.origen || "-"} > ${ev.destino || "-"}`,
+      estado: ev.pedido_estado,
+    }));
     res.json({
       period,
       generated_at: new Date().toISOString(),
@@ -3063,6 +3497,11 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       },
       resumen,
       vistas,
+      flujo_operativo: flujoOperativo,
+      recursos: recursosResumen,
+      visibilidad: visibilidadResumen,
+      decisiones,
+      eventos_recientes: eventos,
       incidencias: incidenciaItems,
       items,
     });

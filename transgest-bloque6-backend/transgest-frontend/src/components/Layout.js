@@ -22,7 +22,8 @@ const GRUPO_COLOR = {
 };
 
 const CSS = `
-  .tg-sidebar { width:252px; background:linear-gradient(180deg,var(--sidebar-bg),#14201d); border-right:1px solid rgba(255,255,255,.08); height:100vh; position:fixed; top:0; left:0; z-index:20; display:flex; flex-direction:column; font-family:'DM Sans',sans-serif; overflow:hidden; box-shadow:16px 0 42px rgba(0,0,0,.14); }
+  .tg-sidebar { width:252px; background:linear-gradient(180deg,var(--sidebar-bg),#14201d); border-right:1px solid rgba(255,255,255,.08); height:100vh; position:fixed; top:0; left:0; z-index:20; display:flex; flex-direction:column; font-family:'DM Sans',sans-serif; overflow:hidden; box-shadow:16px 0 42px rgba(0,0,0,.14); transition:width .18s ease, transform .2s ease; }
+  .tg-sidebar.collapsed { width:76px; }
   .tg-sidebar::before { content:""; position:absolute; inset:0 0 auto 0; height:4px; background:linear-gradient(90deg,var(--accent),var(--green),var(--orange)); pointer-events:none; }
   .tg-sidebar-scroll { flex:1; overflow-y:auto; padding:10px 0 12px; }
   .tg-sidebar-scroll::-webkit-scrollbar { width:3px; }
@@ -35,6 +36,13 @@ const CSS = `
   .tg-nav-item.active { background:rgba(20,184,166,.14); color:#fff; border-color:rgba(20,184,166,.22); box-shadow:inset 3px 0 0 var(--accent-l); }
   .tg-nav-item-icon { width:18px; height:18px; flex-shrink:0; display:flex; align-items:center; justify-content:center; opacity:.9; color:var(--accent-xl); }
   .tg-nav-item-label { flex:1; }
+  .tg-sidebar.collapsed .tg-brand-wordmark, .tg-sidebar.collapsed .tg-brand-pill, .tg-sidebar.collapsed .tg-nav-group, .tg-sidebar.collapsed .tg-nav-item-label, .tg-sidebar.collapsed .tg-nav-badge, .tg-sidebar.collapsed .tg-nav-chevron, .tg-sidebar.collapsed .tg-nav-sub, .tg-sidebar.collapsed .tg-sidebar-user-copy { display:none !important; }
+  .tg-sidebar.collapsed .tg-sidebar-brand { padding:18px 12px 12px !important; }
+  .tg-sidebar.collapsed .tg-brand-mark { display:flex !important; }
+  .tg-sidebar.collapsed .tg-nav-item { width:44px; height:42px; margin:4px auto; padding:0; justify-content:center; border-radius:10px; }
+  .tg-sidebar.collapsed .tg-sidebar-footer { padding:12px 10px !important; }
+  .tg-sidebar.collapsed .tg-sidebar-footer > div { justify-content:center; }
+  .tg-sidebar.collapsed .tg-sidebar-footer button { display:none !important; }
   .tg-nav-badge { font-size:9px; font-weight:800; padding:1px 6px; border-radius:4px; background:var(--bg4); color:var(--text5); letter-spacing:.04em; flex-shrink:0; }
   .tg-nav-item.active .tg-nav-badge { background:var(--accent-dim); color:var(--accent-xl); }
   .tg-nav-chevron { width:14px; height:14px; flex-shrink:0; transition:transform .18s; opacity:.4; }
@@ -46,13 +54,50 @@ const CSS = `
   .tg-nav-dot { width:5px; height:5px; border-radius:50%; background:var(--border2); flex-shrink:0; transition:background .12s; }
   .tg-nav-subitem.active .tg-nav-dot { background:var(--accent-l); box-shadow:0 0 6px rgba(20,184,166,.45); }
   .tg-topbar { height:58px; background:var(--topbar-bg); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 20px 0 18px; gap:12px; flex-shrink:0; font-family:'DM Sans',sans-serif; box-shadow:0 8px 24px rgba(10,20,18,.035); backdrop-filter:blur(14px); }
+  .tg-sidebar-toggle, .tg-mobile-menu-btn { width:34px; height:34px; border:1px solid var(--border2); border-radius:8px; background:var(--bg2); color:var(--text3); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all .15s; flex-shrink:0; }
+  .tg-sidebar-toggle { margin:0 16px 10px; }
+  .tg-sidebar.collapsed > .tg-sidebar-toggle { margin:0 auto 10px; }
+  .tg-sidebar-toggle:hover, .tg-mobile-menu-btn:hover { border-color:var(--accent-l); color:var(--accent-xl); background:var(--accent-dim); }
+  .tg-mobile-menu-btn { display:none; }
+  .tg-sidebar-backdrop { display:none; }
   .tg-main { margin-left:252px; width:calc(100% - 252px); display:flex; flex-direction:column; height:100vh; overflow:hidden; background:var(--bg); }
+  .tg-main.sidebar-collapsed { margin-left:76px; width:calc(100% - 76px); }
   .tg-content { flex:1; overflow-y:auto; background:radial-gradient(circle at 14% 0%, rgba(20,184,166,.10), transparent 28%), linear-gradient(180deg,var(--bg),var(--bg3)); display:flex; flex-direction:column; }
   .tg-content::-webkit-scrollbar { width:5px; }
   .tg-content::-webkit-scrollbar-track { background:transparent; }
   .tg-content::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
   .tg-notif-dot { position:absolute; top:3px; right:3px; width:7px; height:7px; background:var(--red); border-radius:50%; border:2px solid var(--topbar-bg); }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+  @media (max-width: 1180px) {
+    .tg-topbar { padding:0 12px; gap:8px; }
+    .tg-topbar-tabs { flex:1 1 auto !important; max-width:42vw; }
+  }
+  @media (max-width: 1024px) {
+    .tg-mobile-menu-btn { display:flex; }
+    .tg-sidebar-toggle { display:none; }
+    .tg-sidebar, .tg-sidebar.collapsed { width:min(86vw, 316px); transform:translateX(-105%); z-index:80; }
+    .tg-sidebar.mobile-open { transform:translateX(0); }
+    .tg-sidebar.collapsed .tg-brand-wordmark, .tg-sidebar.collapsed .tg-brand-pill, .tg-sidebar.collapsed .tg-nav-group, .tg-sidebar.collapsed .tg-nav-item-label, .tg-sidebar.collapsed .tg-nav-badge, .tg-sidebar.collapsed .tg-nav-chevron, .tg-sidebar.collapsed .tg-sidebar-user-copy { display:flex !important; }
+    .tg-sidebar.collapsed .tg-nav-group { display:block !important; }
+    .tg-sidebar.collapsed .tg-nav-sub { display:block !important; }
+    .tg-sidebar.collapsed .tg-sidebar-footer button { display:flex !important; }
+    .tg-sidebar.collapsed .tg-brand-mark { display:none !important; }
+    .tg-sidebar.collapsed .tg-sidebar-brand { padding:20px 16px 16px !important; }
+    .tg-sidebar.collapsed .tg-nav-item { width:calc(100% - 20px); height:auto; margin:2px 10px; padding:9px 12px 9px 14px; justify-content:flex-start; }
+    .tg-sidebar-backdrop.mobile-open { display:block; position:fixed; inset:0; z-index:70; background:rgba(6,12,10,.58); backdrop-filter:blur(2px); }
+    .tg-main, .tg-main.sidebar-collapsed { margin-left:0; width:100%; }
+    .tg-topbar-tabs { display:none !important; }
+    .tg-topbar-breadcrumb { min-width:0; }
+    .tg-topbar-breadcrumb .tg-brand-breadcrumb { display:none; }
+    .tg-current-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .tg-content { min-width:0; }
+  }
+  @media (max-width: 640px) {
+    .tg-topbar { height:54px; }
+    .tg-user-meta { display:none; }
+    .tg-user-chip { padding:3px !important; }
+    .tg-current-label { max-width:48vw; }
+  }
 `;
 
 function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendientes = 0, tallerPendientes = 0, vehiculoAlertas = 0, solicitudesPendientes = 0, excepcionesPendientes = 0, colaboradoresPendientes = 0 }) {
@@ -96,6 +141,7 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
         <a
           className={`tg-nav-item ${(isActive || (hasChildren && childActive)) ? "active" : ""}`}
           href={item.href}
+          title={item.label}
           target={item.external ? "_blank" : undefined}
           rel={item.external ? "noopener noreferrer" : undefined}
         >
@@ -106,6 +152,7 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
       <button
         className={`tg-nav-item ${(isActive || (hasChildren && childActive)) ? "active" : ""}`}
         onClick={handleClick}
+        title={item.label}
       >
         <span className="tg-nav-item-icon">{item.icon}</span>
         <span className="tg-nav-item-label">{item.label}</span>
@@ -208,6 +255,10 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
   const { toggle, isDark } = useTheme();
   const brandDisplayName = getBrandDisplayName(getEmpresaPlanLocal());
   const [appMeta, setAppMeta] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem("tg_sidebar_collapsed") === "1"; } catch { return false; }
+  });
   const versionLabel = getBrandVersionLabel(appMeta);
   const [tabs, setTabs] = useState(() => {
     const defaultId = vistaActiva || "dashboard";
@@ -229,6 +280,14 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
   useEffect(() => {
     getPublicAppMeta().then(setAppMeta).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem("tg_sidebar_collapsed", sidebarCollapsed ? "1" : "0"); } catch {}
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [vistaActiva]);
 
   if (user && FULLSCREEN_ROLES.includes(user.rol)) {
     return (
@@ -253,6 +312,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
 
   function handleSetVista(id) {
     setVista(id);
+    setMobileMenuOpen(false);
   }
 
   function closeTab(tabId) {
@@ -270,6 +330,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
   function activateTab(tabId) {
     setActiveTab(tabId);
     setVista(tabId);
+    setMobileMenuOpen(false);
   }
 
   // Get current label for breadcrumb
@@ -281,16 +342,34 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
       <div style={{ height:"100vh", overflow:"hidden" }}>
 
         {/* ══════════ SIDEBAR ══════════ */}
-        <div className="tg-sidebar">
+        <div className={`tg-sidebar-backdrop ${mobileMenuOpen ? "mobile-open" : ""}`} onClick={() => setMobileMenuOpen(false)} />
+        <div className={`tg-sidebar ${sidebarCollapsed ? "collapsed" : ""} ${mobileMenuOpen ? "mobile-open" : ""}`}>
           {/* Logo */}
-          <div style={{ padding:"20px 16px 16px", borderBottom:"1px solid rgba(255,255,255,.08)", flexShrink:0 }}>
+          <div className="tg-sidebar-brand" style={{ padding:"20px 16px 16px", borderBottom:"1px solid rgba(255,255,255,.08)", flexShrink:0 }}>
             <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-start", gap:5 }}>
+              <div className="tg-brand-mark" style={{
+                display:"none",
+                width:38,
+                height:38,
+                borderRadius:10,
+                background:"rgba(20,184,166,.18)",
+                border:"1px solid rgba(94,234,212,.18)",
+                alignItems:"center",
+                justifyContent:"center",
+                color:"#ccfbf1",
+                fontSize:15,
+                fontWeight:900,
+                fontFamily:"'Syne',sans-serif",
+              }}>
+                TG
+              </div>
               <img
+                className="tg-brand-wordmark"
                 src={transgestLogoWhite}
                 alt={brandDisplayName}
                 style={{ width:"100%", maxWidth:182, height:"auto", display:"block" }}
               />
-              <div style={{
+              <div className="tg-brand-pill" style={{
                 display:"inline-flex",
                 alignItems:"center",
                 minHeight:24,
@@ -307,6 +386,20 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
               </div>
             </div>
           </div>
+
+              <button
+                className="tg-sidebar-toggle"
+                type="button"
+                title={sidebarCollapsed ? "Expandir menu" : "Plegar menu"}
+                onClick={() => setSidebarCollapsed(v => !v)}
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  {sidebarCollapsed
+                    ? <><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></>
+                    : <><line x1="5" y1="6" x2="19" y2="6"/><line x1="5" y1="12" x2="15" y2="12"/><line x1="5" y1="18" x2="19" y2="18"/></>
+                  }
+                </svg>
+              </button>
 
           {/* Nav */}
           <div className="tg-sidebar-scroll">
@@ -335,7 +428,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
           </div>
 
           {/* User footer */}
-          <div style={{ padding:"12px 14px", borderTop:"1px solid rgba(255,255,255,.08)", flexShrink:0, background:"rgba(255,255,255,.025)" }}>
+          <div className="tg-sidebar-footer" style={{ padding:"12px 14px", borderTop:"1px solid rgba(255,255,255,.08)", flexShrink:0, background:"rgba(255,255,255,.025)" }}>
             <div style={{ display:"flex", alignItems:"center", gap:9 }}>
               <div style={{
                 width:30, height:30, borderRadius:7, flexShrink:0,
@@ -345,7 +438,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
               }}>
                 {user?.nombre?.slice(0,2)?.toUpperCase() || "??"}
               </div>
-              <div style={{ flex:1, minWidth:0 }}>
+              <div className="tg-sidebar-user-copy" style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:12, fontWeight:600, color:"#ffffff", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                   {user?.nombre?.split(" ")[0]}
                 </div>
@@ -366,21 +459,31 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
         </div>
 
         {/* ══════════ MAIN AREA ══════════ */}
-        <div className="tg-main">
+        <div className={`tg-main ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
 
           {/* Topbar */}
           <div className="tg-topbar">
+            <button
+              className="tg-mobile-menu-btn"
+              type="button"
+              title="Abrir menu"
+              onClick={() => setMobileMenuOpen(true)}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
+              </svg>
+            </button>
             {/* Breadcrumb */}
-            <div style={{ flex:1, display:"flex", alignItems:"center", gap:6, fontSize:12, color:"var(--text4)" }}>
-              <span style={{ color:"var(--text4)" }}>{BRAND_NAME}</span>
+            <div className="tg-topbar-breadcrumb" style={{ flex:1, display:"flex", alignItems:"center", gap:6, fontSize:12, color:"var(--text4)" }}>
+              <span className="tg-brand-breadcrumb" style={{ color:"var(--text4)" }}>{BRAND_NAME}</span>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="9 18 15 12 9 6"/>
               </svg>
-              <span style={{ color:"var(--accent-xl)", fontWeight:600 }}>{currentLabel}</span>
+              <span className="tg-current-label" style={{ color:"var(--accent-xl)", fontWeight:600 }}>{currentLabel}</span>
             </div>
 
             {/* Tabs de navegación rápida */}
-            <div style={{ display:"flex", gap:2, alignItems:"center", flex:2, overflowX:"auto", padding:"0 4px" }}>
+            <div className="tg-topbar-tabs" style={{ display:"flex", gap:2, alignItems:"center", flex:2, overflowX:"auto", padding:"0 4px" }}>
               {tabs.map(tab => (
                 <div key={tab.id} style={{ display:"flex", alignItems:"center", flexShrink:0 }}>
                   <button
@@ -435,7 +538,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
                 </svg>
                 {avisosCriticos > 0 && <div className="tg-notif-dot"/>}
               </div>
-              <div style={{ display:"flex", alignItems:"center", gap:7, cursor:"pointer", padding:"3px 6px",
+              <div className="tg-user-chip" style={{ display:"flex", alignItems:"center", gap:7, cursor:"pointer", padding:"3px 6px",
                             borderRadius:7, border:"1px solid var(--border)" }}>
                 <div style={{
                   width:24, height:24, borderRadius:6, flexShrink:0,
@@ -445,7 +548,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
                 }}>
                   {user?.nombre?.slice(0,2)?.toUpperCase() || "??"}
                 </div>
-                <div>
+                <div className="tg-user-meta">
                   <div style={{ fontSize:12, fontWeight:600, color:"var(--text)", lineHeight:1.2 }}>{user?.nombre?.split(" ")[0]}</div>
                   <div style={{ fontSize:9, color:"var(--text5)", textTransform:"capitalize" }}>{ROL_LABEL[user?.rol]}</div>
                 </div>

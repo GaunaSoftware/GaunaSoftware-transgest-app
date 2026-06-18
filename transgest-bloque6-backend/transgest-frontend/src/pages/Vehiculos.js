@@ -35,18 +35,80 @@ function inferVehiculoDocTipo(nombre = "") {
 }
 
 const S = {
-  page:  { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },
-  title: { fontFamily:"'Syne',sans-serif", fontSize:20, fontWeight:800, color:"var(--text)", marginBottom:20 },
-  btn:   { padding:"7px 14px", borderRadius:7, border:"none", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:5 },
-  inp:   { background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)", padding:"8px 11px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" },
-  sel:   { background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)", padding:"8px 11px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" },
+  page:  { flex:1, padding:"30px 36px", fontFamily:"'DM Sans',sans-serif", background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)", minHeight:"100vh" },
+  title: { fontFamily:"'Syne',sans-serif", fontSize:30, fontWeight:900, color:"#0f172a", marginBottom:6, letterSpacing:"-.02em" },
+  btn:   { padding:"10px 15px", borderRadius:8, border:"1px solid var(--border2)", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:7, boxShadow:"0 8px 18px rgba(15,23,42,.04)" },
+  inp:   { background:"#fff", border:"1px solid #cfdbe5", color:"#0f172a", padding:"11px 13px", borderRadius:8, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", boxShadow:"0 6px 14px rgba(15,23,42,.03)" },
+  sel:   { background:"#fff", border:"1px solid #cfdbe5", color:"#0f172a", padding:"11px 13px", borderRadius:8, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", boxShadow:"0 6px 14px rgba(15,23,42,.03)" },
   lbl:   { display:"block", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:".07em", color:"var(--text4)", marginBottom:4, marginTop:10 },
   modal: { position:"fixed", inset:0, background:"rgba(0,0,0,.8)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:12 },
   sec:   { fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:12, color:"var(--text3)", marginTop:20, marginBottom:8, paddingBottom:6, borderBottom:"1px solid var(--border)" },
   grid2: { display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0px 12px" },
   grid3: { display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"0px 12px" },
-  badge: { display:"inline-flex", alignItems:"center", padding:"2px 9px", borderRadius:20, fontSize:11, fontWeight:700 },
+  badge: { display:"inline-flex", alignItems:"center", padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:800 },
 };
+
+function UiIcon({ name = "truck", color = "currentColor", size = 22 }) {
+  const common = { fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round" };
+  const icons = {
+    pin: (
+      <>
+        <path {...common} d="M12 21s7-6.1 7-12a7 7 0 1 0-14 0c0 5.9 7 12 7 12Z" />
+        <circle {...common} cx="12" cy="9" r="2.5" />
+      </>
+    ),
+    truck: (
+      <>
+        <path {...common} d="M3 7h11v9H3z" />
+        <path {...common} d="M14 10h4l3 3v3h-7z" />
+        <circle {...common} cx="7" cy="18" r="2" />
+        <circle {...common} cx="17" cy="18" r="2" />
+      </>
+    ),
+    link: (
+      <>
+        <path {...common} d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1.1 1.1" />
+        <path {...common} d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1.1-1.1" />
+      </>
+    ),
+    clock: (
+      <>
+        <circle {...common} cx="12" cy="12" r="8" />
+        <path {...common} d="M12 8v5l3 2" />
+      </>
+    ),
+    signal: (
+      <>
+        <path {...common} d="M4 14a8 8 0 0 1 16 0" />
+        <path {...common} d="M8 14a4 4 0 0 1 8 0" />
+        <circle {...common} cx="12" cy="17" r="1" />
+      </>
+    ),
+    signalOff: (
+      <>
+        <path {...common} d="M4 4l16 16" />
+        <path {...common} d="M4 14a8 8 0 0 1 8-8" />
+        <path {...common} d="M17 11a8 8 0 0 1 3 3" />
+        <path {...common} d="M8 14a4 4 0 0 1 4-4" />
+      </>
+    ),
+    database: (
+      <>
+        <ellipse {...common} cx="12" cy="5" rx="7" ry="3" />
+        <path {...common} d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5" />
+        <path {...common} d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6" />
+      </>
+    ),
+    warning: (
+      <>
+        <path {...common} d="M12 3 2.8 19h18.4L12 3Z" />
+        <path {...common} d="M12 9v4" />
+        <path {...common} d="M12 17h.01" />
+      </>
+    ),
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">{icons[name] || icons.truck}</svg>;
+}
 
 const CLASES_VEHICULO = [
   "Tractora", "Camion rigido", "Furgon", "Furgoneta",
@@ -241,47 +303,57 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
     notify(`Importacion aplicada: ${applied} enlace(s). Ignorados: ${ignored}.`, applied ? "success" : "warning");
   }
 
-  const chip = (label, value, tone) => (
-    <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px"}}>
-      <div style={{fontSize:9,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em"}}>{label}</div>
-      <div style={{fontSize:16,color:tone||"var(--text)",fontWeight:900,fontFamily:"'JetBrains Mono',monospace"}}>{value}</div>
+  const chip = (label, value, tone, icon) => (
+    <div style={{background:"rgba(255,255,255,.94)",border:"1px solid #dbe5ec",borderRadius:9,padding:"15px 18px",display:"flex",alignItems:"center",gap:14,minHeight:62,boxShadow:"0 12px 26px rgba(15,23,42,.04)"}}>
+      <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:`${tone || "#0f766e"}14`,color:tone || "#0f766e",flexShrink:0}}>
+        <UiIcon name={icon} color={tone || "#0f766e"} size={23} />
+      </div>
+      <div>
+        <div style={{fontSize:10,color:"#64748b",fontWeight:900,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</div>
+        <div style={{fontSize:21,color:tone||"#0f172a",fontWeight:900,fontFamily:"'JetBrains Mono',monospace",lineHeight:1.1}}>{value}</div>
+      </div>
     </div>
   );
 
   return (
-    <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:14,marginBottom:14}}>
-      <div style={{display:"flex",gap:12,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
-        <div>
-          <div style={{fontSize:14,fontWeight:900,color:"var(--text)",fontFamily:"'Syne',sans-serif"}}>GPS y matriculas</div>
-            <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
-              Asocia cada tractora/camion con el IMEI o ID que usa el proveedor GPS activo. Si no hay IMEI/ID, no se intenta obtener senal GPS.
+    <div style={{background:"rgba(255,255,255,.96)",border:"1px solid #dbe5ec",borderRadius:12,padding:"24px 26px",marginBottom:18,boxShadow:"0 18px 42px rgba(15,23,42,.06)"}}>
+      <div style={{display:"flex",gap:18,alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",marginBottom:18}}>
+        <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
+          <div style={{width:50,height:50,borderRadius:12,display:"grid",placeItems:"center",background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",boxShadow:"0 14px 28px rgba(15,118,110,.22)"}}>
+            <UiIcon name="pin" color="#fff" size={26} />
+          </div>
+          <div>
+            <div style={{fontSize:30,fontWeight:900,color:"#0f172a",fontFamily:"'Syne',sans-serif",letterSpacing:"-.02em"}}>GPS y matrículas</div>
+            <div style={{fontSize:14,color:"#64748b",marginTop:5,maxWidth:880,lineHeight:1.45}}>
+              Asocia cada vehículo con el ID que usa el proveedor GPS activo. Normalmente será la matrícula, pero algunos proveedores usan un código interno.
             </div>
           </div>
+        </div>
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            <div style={{...S.sel,width:220,display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--bg2)",cursor:"default"}}>
+            <div style={{...S.sel,width:250,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"default",fontWeight:800}}>
               <span>{GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin proveedor activo"}</span>
             </div>
             {canEdit && (
-              <button onClick={onSync} disabled={syncing || !activeProvider} style={{...S.btn,background:"var(--bg2)",color:"var(--text)",border:"1px solid var(--border2)"}}>
-              {syncing ? "Localizando..." : "Localizar senal GPS"}
+              <button onClick={onSync} disabled={syncing || !activeProvider} style={{...S.btn,background:"#fff",color:"#334155",border:"1px solid #cfdbe5"}}>
+              {syncing ? "Sincronizando..." : "Sincronizar GPS"}
               </button>
             )}
           {canEdit && (
-            <button onClick={guardarCambios} disabled={savingBulk || !dirtyLinks.length} style={{...S.btn,background:dirtyLinks.length?"rgba(16,185,129,.14)":"var(--bg3)",color:dirtyLinks.length?"var(--green)":"var(--text5)",border:"1px solid rgba(16,185,129,.24)"}}>
+            <button onClick={guardarCambios} disabled={savingBulk || !dirtyLinks.length} style={{...S.btn,background:dirtyLinks.length?"rgba(16,185,129,.14)":"rgba(15,118,110,.08)",color:dirtyLinks.length?"#059669":"#8bb8b1",border:"1px solid rgba(15,118,110,.18)"}}>
               {savingBulk ? "Guardando..." : `Guardar cambios${dirtyLinks.length ? ` (${dirtyLinks.length})` : ""}`}
             </button>
           )}
           {canEdit && (
-            <button onClick={usarMatriculasComoId} style={{...S.btn,background:"var(--bg2)",color:"var(--text)",border:"1px solid var(--border2)"}}>
+            <button onClick={usarMatriculasComoId} style={{...S.btn,background:"#fff",color:"#0f172a",border:"1px solid #cfdbe5"}}>
               Usar matriculas
             </button>
           )}
           {canEdit && (
-            <button onClick={()=>setImportOpen(o=>!o)} style={{...S.btn,background:"var(--bg2)",color:"var(--text)",border:"1px solid var(--border2)"}}>
+            <button onClick={()=>setImportOpen(o=>!o)} style={{...S.btn,background:"#fff",color:"#0f172a",border:"1px solid #cfdbe5"}}>
               Pegar listado
             </button>
           )}
-          <button onClick={()=>setOpen(o=>!o)} style={{...S.btn,background:"var(--accent)",color:"#fff"}}>
+          <button onClick={()=>setOpen(o=>!o)} style={{...S.btn,background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",border:"1px solid #0f766e"}}>
             {open ? "Cerrar enlaces" : "Gestionar enlaces"}
           </button>
         </div>
@@ -306,14 +378,14 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
         </div>
       )}
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginTop:12}}>
-        {chip("Vehiculos", status?.counts?.activos ?? vehiculos.length)}
-        {chip("Enlazados", status?.counts?.enlazados ?? mapped, "var(--green)")}
-        {chip("Pendientes", status?.counts?.pendientes ?? pendientes, (status?.counts?.pendientes ?? pendientes) ? "#f59e0b" : "var(--green)")}
-        {chip("Senal reciente", status?.counts?.senal_reciente ?? 0, (status?.counts?.senal_reciente ?? 0) ? "var(--green)" : "var(--text5)")}
-        {chip("Sin senal", status?.counts?.sin_senal_reciente ?? 0, (status?.counts?.sin_senal_reciente ?? 0) ? "var(--red)" : "var(--green)")}
-        {chip("Nunca recibida", status?.counts?.nunca_senal ?? 0, (status?.counts?.nunca_senal ?? 0) ? "#f59e0b" : "var(--green)")}
-        {chip("Proveedor activo", GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin elegir", "var(--accent-xl)")}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(185px,1fr))",gap:12,marginTop:12}}>
+        {chip("Vehiculos", status?.counts?.activos ?? vehiculos.length, "#475569", "truck")}
+        {chip("Enlazados", status?.counts?.enlazados ?? mapped, "#10b981", "link")}
+        {chip("Pendientes", status?.counts?.pendientes ?? pendientes, (status?.counts?.pendientes ?? pendientes) ? "#0f766e" : "#10b981", "clock")}
+        {chip("Senal reciente", status?.counts?.senal_reciente ?? 0, (status?.counts?.senal_reciente ?? 0) ? "#0f766e" : "#64748b", "signal")}
+        {chip("Sin senal", status?.counts?.sin_senal_reciente ?? 0, (status?.counts?.sin_senal_reciente ?? 0) ? "#ef4444" : "#10b981", "signalOff")}
+        {chip("Nunca recibida", status?.counts?.nunca_senal ?? 0, (status?.counts?.nunca_senal ?? 0) ? "#f97316" : "#10b981", "signalOff")}
+        {chip("Proveedor activo", GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin elegir", "#0f766e", "database")}
       </div>
 
       {(status?.last_position || status?.webhook) && (
@@ -344,16 +416,23 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
       )}
 
       {status?.warnings?.length > 0 && (
-        <div style={{marginTop:10,background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.28)",borderRadius:8,padding:"9px 11px"}}>
-          <div style={{fontSize:11,fontWeight:900,color:"#f59e0b",marginBottom:4}}>Diagnostico GPS</div>
-          {status.warnings.map((w, i) => <div key={i} style={{fontSize:11,color:"var(--text3)",lineHeight:1.45}}>{w}</div>)}
+        <div style={{marginTop:16,background:"linear-gradient(90deg,rgba(251,146,60,.10),rgba(255,247,237,.72))",border:"1px solid rgba(251,146,60,.35)",borderRadius:10,padding:"18px 20px",display:"grid",gridTemplateColumns:"minmax(260px,.65fr) minmax(320px,1fr)",gap:22,alignItems:"start"}}>
+          <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
+            <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:"rgba(251,146,60,.12)",color:"#f97316",flexShrink:0}}>
+              <UiIcon name="warning" color="#f97316" size={24} />
+            </div>
+            <div>
+              <div style={{fontSize:14,fontWeight:900,color:"#ea580c",marginBottom:8}}>Diagnostico GPS</div>
+              {status.warnings.map((w, i) => <div key={i} style={{fontSize:13,color:"#475569",lineHeight:1.5}}>{w}</div>)}
+            </div>
+          </div>
           {status?.signal_help && (
-            <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid rgba(245,158,11,.20)"}}>
-              <div style={{fontSize:11,color:"var(--text)",fontWeight:800,lineHeight:1.45}}>
+            <div style={{borderLeft:"1px solid rgba(251,146,60,.28)",paddingLeft:20}}>
+              <div style={{fontSize:13,color:"#1e293b",fontWeight:900,lineHeight:1.45,marginBottom:7}}>
                 {status.signal_help.meaning}
               </div>
               {(status.signal_help.likely_causes || []).slice(0, 4).map((cause, i) => (
-                <div key={i} style={{fontSize:11,color:"var(--text4)",lineHeight:1.45}}>
+                <div key={i} style={{fontSize:13,color:"#475569",lineHeight:1.5}}>
                   - {cause}
                 </div>
               ))}
@@ -363,14 +442,24 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
       )}
 
       {status?.stale_vehicles?.length > 0 && (
-        <div style={{marginTop:10,background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.22)",borderRadius:8,padding:"9px 11px"}}>
-          <div style={{fontSize:11,fontWeight:900,color:"var(--red)",marginBottom:4}}>Vehiculos sin senal reciente</div>
-          {status.stale_vehicles.slice(0, 6).map(v => (
-            <div key={v.id} style={{fontSize:11,color:"var(--text3)",lineHeight:1.45}}>
-              {v.matricula} - {GPS_PROVIDER_LABELS[v.gps_provider] || v.gps_provider} / {v.gps_external_id}
-              {v.ubicacion_ts ? ` - ultima senal ${new Date(v.ubicacion_ts).toLocaleString("es-ES")}` : " - sin senal recibida"}
+        <div style={{marginTop:12,background:"linear-gradient(90deg,rgba(239,68,68,.08),rgba(254,242,242,.80))",border:"1px solid rgba(239,68,68,.24)",borderRadius:10,padding:"18px 20px",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:16,alignItems:"center"}}>
+          <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:"rgba(239,68,68,.10)",color:"#ef4444"}}>
+            <UiIcon name="signalOff" color="#ef4444" size={24} />
+          </div>
+          <div>
+            <div style={{fontSize:14,fontWeight:900,color:"#dc2626",marginBottom:8}}>Vehículos sin señal reciente</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:"2px 26px"}}>
+              {status.stale_vehicles.slice(0, 6).map(v => (
+                <div key={v.id} style={{fontSize:12,color:"#475569",lineHeight:1.5}}>
+                  - {v.matricula} - {GPS_PROVIDER_LABELS[v.gps_provider] || v.gps_provider} / {v.gps_external_id}
+                  {v.ubicacion_ts ? ` - ultima senal ${new Date(v.ubicacion_ts).toLocaleString("es-ES")}` : " - sin senal recibida"}
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+          <button type="button" onClick={()=>setOpen(true)} style={{...S.btn,background:"#fff",color:"#334155",border:"1px solid #cfdbe5",boxShadow:"none",whiteSpace:"nowrap"}}>
+            Ver todos ({status.stale_vehicles.length})
+          </button>
         </div>
       )}
 
@@ -1529,11 +1618,11 @@ export default function Vehiculos() {
 
   return (
     <div style={S.page}>
-      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-        <div style={S.title}>Flota de vehiculos</div>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18, flexWrap:"wrap" }}>
+        <div style={S.title}>Vehículos</div>
 
         {/* Filtros tipo - separador visual */}
-        <div style={{ display:"flex", gap:4, marginLeft:8, background:"var(--bg3)", padding:"3px 4px", borderRadius:8, border:"1px solid var(--border)" }}>
+        <div style={{ display:"flex", gap:4, marginLeft:8, background:"#fff", padding:"4px", borderRadius:9, border:"1px solid #dbe5ec", boxShadow:"0 8px 18px rgba(15,23,42,.04)" }}>
           {[
             ["todos",     "Todos"],
             ["tractoras", "Tractoras"],
@@ -1543,10 +1632,10 @@ export default function Vehiculos() {
             <button key={id}
               onClick={() => { setFiltroTipo(id); setFiltroEstado("todos"); }}
               style={{ ...S.btn,
-                background: filtroTipo===id ? "var(--accent)" : "transparent",
+                background: filtroTipo===id ? "linear-gradient(135deg,#0f766e,#0d9488)" : "transparent",
                 color:      filtroTipo===id ? "#fff" : "var(--text3)",
                 border:     "none",
-                padding: "4px 12px", fontSize:12, borderRadius:6,
+                padding: "7px 13px", fontSize:12, borderRadius:7, boxShadow:"none",
               }}>
               {label}
             </button>
@@ -1555,7 +1644,7 @@ export default function Vehiculos() {
 
         {/* Subfiltro estado - separador visual, solo si no es "baja" */}
         {filtroTipo !== "baja" && (
-          <div style={{ display:"flex", gap:4, background:"var(--bg3)", padding:"3px 4px", borderRadius:8, border:"1px solid var(--border)" }}>
+          <div style={{ display:"flex", gap:4, background:"#fff", padding:"4px", borderRadius:9, border:"1px solid #dbe5ec", boxShadow:"0 8px 18px rgba(15,23,42,.04)" }}>
             {[
               ["todos",      "Todos"],
               ["disponible", "Disponible"],
@@ -1568,7 +1657,7 @@ export default function Vehiculos() {
                   background: filtroEstado===id ? "var(--bg2)" : "transparent",
                   color:      filtroEstado===id ? "var(--text)" : "var(--text4)",
                   border:     "none",
-                  padding: "4px 10px", fontSize:12, borderRadius:6,
+                  padding: "7px 12px", fontSize:12, borderRadius:7, boxShadow:"none",
                   display:"flex", alignItems:"center", gap:5,
                 }}>
                 {id !== "todos" && (
@@ -1585,7 +1674,7 @@ export default function Vehiculos() {
 
         {/* Boton nuevo - al final */}
         {canEdit && (
-          <button style={{ ...S.btn, background:"var(--accent)", color:"#fff", marginLeft:"auto" }}
+          <button style={{ ...S.btn, background:"linear-gradient(135deg,#0f766e,#0d9488)", color:"#fff", border:"1px solid #0f766e", marginLeft:"auto" }}
             onClick={() => { setEditando(null); setModal(true); }}>
             + Nuevo vehiculo
           </button>
@@ -1621,41 +1710,42 @@ export default function Vehiculos() {
         : filtrados.length === 0
         ? <div style={{ color:"var(--text4)", padding:20 }}>Sin vehiculos en este filtro.</div>
         : (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:12 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(286px,1fr))", gap:14 }}>
             {filtrados.map(v => {
               const esRemolque = v.clase?.includes("Remolque") || v.clase?.includes("Semi");
               return (
                 <div key={v.id} id={`vehiculo-card-${v.id}`} style={{
-                                          background:String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(34,211,160,.10)" : "var(--card-bg)",
-                                          border:`1px solid ${String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(34,211,160,.65)" : "var(--border)"}`,
+                                          background:String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.10)" : "rgba(255,255,255,.96)",
+                                          border:`1px solid ${String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.65)" : "#dbe5ec"}`,
                                           borderRadius:12, padding:16,
-                                          cursor:"pointer", transition:"border-color .15s" }}
+                                          cursor:"pointer", transition:"border-color .15s, box-shadow .15s", boxShadow:"0 12px 26px rgba(15,23,42,.05)" }}
                   onClick={() => { setEditando(v); setModal(true); }}
                   onMouseEnter={e => e.currentTarget.style.borderColor="var(--accent-l)"}
-                  onMouseLeave={e => e.currentTarget.style.borderColor=String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(34,211,160,.65)" : "var(--border)"}>
+                  onMouseLeave={e => e.currentTarget.style.borderColor=String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.65)" : "#dbe5ec"}>
 
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
                     <div>
-                      <div style={{ fontFamily:"'JetBrains Mono',monospace", fontWeight:700, fontSize:16, color:"var(--accent-xl)" }}>{v.matricula}</div>
+                      <div style={{ fontFamily:"'JetBrains Mono',monospace", fontWeight:900, fontSize:18, color:"#134e4a" }}>{v.matricula}</div>
                       <div style={{ fontSize:12, color:"var(--text2)", marginTop:2 }}>
                         {v.marca||""} {v.modelo||""} {v.anio?`(${v.anio})`:""}
                       </div>
                     </div>
-                    <span style={{ ...S.badge, background:`${EC[v.estado]||"var(--text4)"}1a`, color:EC[v.estado]||"var(--text4)" }}>
+                    <span style={{ ...S.badge, background:"transparent", color:EC[v.estado]||"var(--text4)", padding:0, gap:6 }}>
+                      <span style={{width:7,height:7,borderRadius:"50%",background:EC[v.estado]||"var(--text4)",display:"inline-block"}} />
                       {v.estado?.replace("_"," ")||"-"}
                     </span>
                   </div>
 
                   {/* Clase */}
                   <div style={{ fontSize:11, color:"var(--text4)", marginBottom:8, display:"flex", gap:8, flexWrap:"wrap" }}>
-                    <span style={{ background:"var(--bg4)", padding:"1px 8px", borderRadius:10, border:"1px solid var(--border)" }}>
+                    <span style={{ background:"#f1f5f9", padding:"3px 9px", borderRadius:10, border:"1px solid #e2e8f0" }}>
                       {claseCorta(v.clase)}
                     </span>
                     {v.combustible && <span style={{ color:"var(--text5)" }}>{v.combustible}</span>}
                     {v.potencia_cv && <span style={{ color:"var(--text5)" }}>{v.potencia_cv} CV</span>}
                   </div>
 
-                  <div style={{marginBottom:8,background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:6,padding:"6px 10px"}}>
+                  <div style={{marginBottom:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:7,padding:"8px 10px"}}>
                     <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Ubicacion</div>
                     <div style={{fontSize:12,fontWeight:700,color:v.ubicacion_actual?"var(--text)":"var(--text5)"}}>
                       {v.ubicacion_actual || "Sin datos GPS"}
@@ -1674,7 +1764,7 @@ export default function Vehiculos() {
                   {/* Masa/KM */}
                   <div style={{ display:"flex", gap:0, marginBottom:10 }}>
                     {(v.tara_kg||v.masa_total_kg) && (
-                      <div style={{ flex:1, background:"var(--bg4)", borderRadius:"6px 0 0 6px", padding:"6px 10px", borderRight:"1px solid var(--border)" }}>
+                      <div style={{ flex:1, background:"#f8fafc", borderRadius:"7px 0 0 7px", padding:"8px 10px", borderRight:"1px solid #e2e8f0" }}>
                         <div style={{ fontSize:9, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em" }}>TARA / MMA</div>
                         <div style={{ fontSize:13, fontWeight:700, color:"var(--text)", fontFamily:"'JetBrains Mono',monospace" }}>
                           {v.tara_kg?.toLocaleString("es-ES")||"-"} / {v.masa_total_kg?.toLocaleString("es-ES")||"-"} kg
@@ -1682,7 +1772,7 @@ export default function Vehiculos() {
                       </div>
                     )}
                     {!esRemolque && (
-                      <div style={{ flex:1, background:"var(--bg4)", borderRadius: (v.tara_kg||v.masa_total_kg)?"0 6px 6px 0":"6px", padding:"6px 10px" }}>
+                      <div style={{ flex:1, background:"#f8fafc", borderRadius: (v.tara_kg||v.masa_total_kg)?"0 7px 7px 0":"7px", padding:"8px 10px" }}>
                         <div style={{ fontSize:9, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em" }}>KILOMETROS</div>
                         <div style={{ fontSize:13, fontWeight:700, color:"var(--text)", fontFamily:"'JetBrains Mono',monospace" }}>
                           {v.km_actuales?.toLocaleString("es-ES")||"-"} km

@@ -4,15 +4,15 @@ import { notify } from "../services/notify";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 
 const S = {
-  page: { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },
-  title: { fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:900, color:"var(--text)", marginBottom:4 },
+  page: { flex:1, padding:"24px 30px", fontFamily:"'DM Sans',sans-serif", background:"linear-gradient(180deg, rgba(248,250,252,.92), rgba(255,255,255,.98))" },
+  title: { fontFamily:"'Syne',sans-serif", fontSize:30, fontWeight:900, color:"var(--text)", marginBottom:4 },
   sub: { fontSize:12, color:"var(--text4)", marginBottom:16 },
-  bar: { display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:12 },
-  btn: { padding:"7px 12px", borderRadius:7, border:"1px solid var(--border2)", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", background:"var(--bg3)", color:"var(--text3)" },
-  input: { background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)", padding:"7px 10px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", boxSizing:"border-box" },
-  panel: { background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:8, overflow:"hidden" },
-  th: { textAlign:"left", padding:"9px 10px", fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:".06em", color:"var(--text4)", background:"var(--bg3)", borderBottom:"1px solid var(--border)", whiteSpace:"nowrap" },
-  td: { padding:"9px 10px", borderBottom:"1px solid var(--border)", fontSize:12, color:"var(--text2)", verticalAlign:"top" },
+  bar: { display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom:22 },
+  btn: { padding:"10px 14px", borderRadius:8, border:"1px solid var(--border2)", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", background:"var(--bg3)", color:"var(--text3)" },
+  input: { background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)", padding:"10px 12px", borderRadius:8, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", boxSizing:"border-box" },
+  panel: { background:"var(--card-bg)", border:"1px solid var(--border)", borderRadius:12, overflow:"hidden", boxShadow:"0 12px 34px rgba(15,23,42,.06)" },
+  th: { textAlign:"left", padding:"13px 14px", fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:".06em", color:"var(--text4)", background:"rgba(248,250,252,.86)", borderBottom:"1px solid var(--border)", whiteSpace:"nowrap" },
+  td: { padding:"13px 14px", borderBottom:"1px solid var(--border)", fontSize:12, color:"var(--text2)", verticalAlign:"top" },
 };
 
 const STATE = {
@@ -113,39 +113,29 @@ function AlertBadge({ aviso }) {
   );
 }
 
-function initialsFromName(value) {
-  const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
-  return (parts[0]?.[0] || "").concat(parts[1]?.[0] || "").toUpperCase() || "";
-}
-
 function ChoferAvatar({ row }) {
   const name = row?.chofer_nombre || "Sin chofer";
   const src = row?.chofer_foto_url || row?.chofer_avatar_url || row?.chofer_foto || row?.foto_url || "";
-  const initials = initialsFromName(name);
   const baseStyle = {
-    width:32,
-    height:32,
+    width:34,
+    height:34,
     borderRadius:"50%",
     flexShrink:0,
-    border:"1px solid rgba(20,184,166,.25)",
-    background:"linear-gradient(135deg, rgba(20,184,166,.16), rgba(59,130,246,.10))",
-    color:"var(--accent-xl)",
+    border:"1px solid rgba(148,163,184,.26)",
+    background:"linear-gradient(180deg, #eef7f5 0%, #e2ebe9 100%)",
+    color:"#7a8b8a",
     display:"inline-flex",
     alignItems:"center",
     justifyContent:"center",
-    fontSize:11,
-    fontWeight:900,
     overflow:"hidden",
   };
   if (src) return <img src={src} alt={name} style={{ ...baseStyle, objectFit:"cover", background:"var(--bg3)" }} />;
   return (
     <span style={baseStyle} title={name}>
-      {initials || (
-        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M20 21a8 8 0 0 0-16 0" />
-          <circle cx="12" cy="8" r="4" />
-        </svg>
-      )}
+      <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <circle cx="12" cy="8.2" r="4.1" fill="currentColor" opacity=".78" />
+        <path d="M4.6 21.2c.9-4.1 3.7-6.4 7.4-6.4s6.5 2.3 7.4 6.4" fill="currentColor" opacity=".78" />
+      </svg>
     </span>
   );
 }
@@ -220,12 +210,28 @@ function PedidoMini({ pedido, onOpen, draggable = false, onDragStart, onDragOver
   );
 }
 
-function Kpi({ label, value, tone = "info" }) {
+function KpiIcon({ icon }) {
+  const common = { width:26, height:26, viewBox:"0 0 24 24", fill:"none", stroke:"currentColor", strokeWidth:"1.8", strokeLinecap:"round", strokeLinejoin:"round", "aria-hidden":"true" };
+  if (icon === "truck") return <svg {...common}><path d="M3 7h10v9H3z" /><path d="M13 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="2" /><circle cx="17" cy="18" r="2" /></svg>;
+  if (icon === "work") return <svg {...common}><path d="M9 6h6" /><path d="M10 4h4v4h-4z" /><rect x="4" y="7" width="16" height="13" rx="2" /><path d="m9 13 2 2 4-5" /></svg>;
+  if (icon === "empty") return <svg {...common}><circle cx="12" cy="12" r="8" /><path d="m9 9 6 6" /><path d="m15 9-6 6" /></svg>;
+  if (icon === "alert") return <svg {...common}><path d="M12 4 3 20h18L12 4Z" /><path d="M12 9v5" /><path d="M12 17h.01" /></svg>;
+  if (icon === "bell") return <svg {...common}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></svg>;
+  return <svg {...common}><path d="M16 21v-2a4 4 0 0 0-8 0v2" /><circle cx="12" cy="7" r="4" /></svg>;
+}
+
+function Kpi({ label, value, tone = "info", icon = "truck", caption = "" }) {
   const s = ALERT[tone] || ALERT.info;
   return (
-    <div style={{ border:`1px solid ${s.border}`, background:s.bg, borderRadius:8, padding:"10px 12px", minHeight:54 }}>
-      <div style={{ fontSize:10, color:"var(--text4)", fontWeight:900, textTransform:"uppercase", letterSpacing:".06em" }}>{label}</div>
-      <div style={{ marginTop:4, fontFamily:"'JetBrains Mono',monospace", fontSize:20, fontWeight:900, color:s.color }}>{value}</div>
+    <div style={{ border:"1px solid var(--border)", background:"var(--card-bg)", borderRadius:12, padding:"18px 20px", minHeight:82, display:"flex", alignItems:"center", gap:16, boxShadow:"0 10px 28px rgba(15,23,42,.05)" }}>
+      <div style={{ width:52, height:52, borderRadius:"50%", display:"inline-flex", alignItems:"center", justifyContent:"center", color:s.color, background:s.bg, border:`1px solid ${s.border}`, flexShrink:0 }}>
+        <KpiIcon icon={icon} />
+      </div>
+      <div>
+        <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:24, lineHeight:1, fontWeight:900, color:s.color }}>{value}</div>
+        <div style={{ marginTop:7, fontSize:10, color:"var(--text4)", fontWeight:900, textTransform:"uppercase", letterSpacing:".06em" }}>{label}</div>
+        {caption && <div style={{ marginTop:3, fontSize:11, color:"var(--text4)" }}>{caption}</div>}
+      </div>
     </div>
   );
 }
@@ -440,13 +446,13 @@ export default function PlanDiario() {
         <button onClick={cargar} style={S.btn}>Actualizar</button>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(6, minmax(120px, 1fr))", gap:10, marginBottom:12 }}>
-        <Kpi label="Tractoras" value={resumen.tractoras ?? resumen.vehiculos ?? 0} tone="info" />
-        <Kpi label="Con trabajo" value={resumen.con_trabajo || 0} tone="ok" />
-        <Kpi label="Sin trabajo" value={resumen.sin_trabajo || 0} tone="info" />
-        <Kpi label="Avisos rojos" value={resumen.avisos_rojos || 0} tone={(resumen.avisos_rojos || 0) ? "danger" : "ok"} />
-        <Kpi label="Avisos" value={resumen.avisos_amarillos || 0} tone={(resumen.avisos_amarillos || 0) ? "warning" : "ok"} />
-        <Kpi label="Sin asignar" value={resumen.pedidos_sin_asignar || 0} tone={(resumen.pedidos_sin_asignar || 0) ? "warning" : "ok"} />
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(6, minmax(140px, 1fr))", gap:14, marginBottom:18 }}>
+        <Kpi label="Tractoras" value={resumen.tractoras ?? resumen.vehiculos ?? 0} tone="info" icon="truck" caption="Disponibles" />
+        <Kpi label="Con trabajo" value={resumen.con_trabajo || 0} tone="ok" icon="work" caption="Asignadas hoy" />
+        <Kpi label="Sin trabajo" value={resumen.sin_trabajo || 0} tone="info" icon="empty" caption="Sin asignar" />
+        <Kpi label="Avisos rojos" value={resumen.avisos_rojos || 0} tone={(resumen.avisos_rojos || 0) ? "danger" : "ok"} icon="alert" caption="Criticos" />
+        <Kpi label="Avisos" value={resumen.avisos_amarillos || 0} tone={(resumen.avisos_amarillos || 0) ? "warning" : "ok"} icon="bell" caption="Informativos" />
+        <Kpi label="Sin asignar" value={resumen.pedidos_sin_asignar || 0} tone={(resumen.pedidos_sin_asignar || 0) ? "warning" : "ok"} icon="users" caption="Pendientes" />
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"minmax(0, 1fr) 320px", gap:12, alignItems:"start" }}>
@@ -537,7 +543,7 @@ export default function PlanDiario() {
                         onClick={() => copiarPlanChofer(row)}
                         style={{ ...S.btn, marginTop:7, width:"100%", padding:"6px 8px", background:"rgba(16,185,129,.10)", color:"#10b981", border:"1px solid rgba(16,185,129,.24)" }}
                       >
-                        Copiar plan WhatsApp
+                        Enviar plan por WhatsApp
                       </button>
                     </td>
                   </tr>

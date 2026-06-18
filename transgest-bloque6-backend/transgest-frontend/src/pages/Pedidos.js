@@ -79,6 +79,20 @@ function formatShortDateLabel(dateIso) {
   return d.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
 }
 
+function monthKeyLocal(dateIso) {
+  if (!dateIso || dateIso === "sin-fecha") return "sin-fecha";
+  const raw = String(dateIso).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return "sin-fecha";
+  return `${raw.slice(0, 7)}-01`;
+}
+
+function formatMonthLabel(dateIso) {
+  if (!dateIso || dateIso === "sin-fecha") return "Sin fecha";
+  const d = new Date(`${String(dateIso).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "Sin fecha";
+  return d.toLocaleDateString("es-ES", { month: "long", year: "numeric" }).toUpperCase();
+}
+
 function startOfWeekLocal(dateIso) {
   if (!dateIso || dateIso === "sin-fecha") return "sin-fecha";
   const d = new Date(`${String(dateIso).slice(0, 10)}T00:00:00`);
@@ -97,8 +111,17 @@ function weekIndexInRange(weekStartIso, rangeStartIso) {
   return Math.max(1, Math.floor((b.getTime() - a.getTime()) / (7 * 86400000)) + 1);
 }
 
+function weekIndexInMonth(dateIso) {
+  if (!dateIso || dateIso === "sin-fecha") return null;
+  const day = new Date(`${String(dateIso).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(day.getTime())) return null;
+  const firstDay = new Date(day.getFullYear(), day.getMonth(), 1);
+  const offset = firstDay.getDay() || 7;
+  return Math.ceil((day.getDate() + offset - 1) / 7);
+}
+
 function buildPedidoCalendarGroups(items, { desde, hasta, currentWeek = false } = {}) {
-  const byWeek = new Map();
+  const byMonth = new Map();
   const sorted = [...items].sort((a, b) => {
     const da = pedidoFechaOperativaKey(a.pedido);
     const db = pedidoFechaOperativaKey(b.pedido);
@@ -108,30 +131,43 @@ function buildPedidoCalendarGroups(items, { desde, hasta, currentWeek = false } 
   sorted.forEach(item => {
     const dayKey = pedidoFechaOperativaKey(item.pedido);
     const weekKey = startOfWeekLocal(dayKey);
+    const monthKey = monthKeyLocal(dayKey);
+    if (!byMonth.has(monthKey)) byMonth.set(monthKey, new Map());
+    const byWeek = byMonth.get(monthKey);
     if (!byWeek.has(weekKey)) byWeek.set(weekKey, new Map());
     const days = byWeek.get(weekKey);
     if (!days.has(dayKey)) days.set(dayKey, []);
     days.get(dayKey).push(item);
   });
-  return Array.from(byWeek.entries()).map(([weekKey, daysMap]) => {
-    const dayGroups = Array.from(daysMap.entries()).map(([dayKey, dayItems]) => ({
-      key: `day-${dayKey}`,
-      label: formatWeekdayLabel(dayKey),
-      count: dayItems.length,
-      items: dayItems,
-    }));
-    const total = dayGroups.reduce((sum, g) => sum + g.count, 0);
-    const idx = weekIndexInRange(weekKey, desde);
-    const weekEnd = weekKey === "sin-fecha" ? "" : addDaysLocal(weekKey, 6);
+  return Array.from(byMonth.entries()).map(([monthKey, weeksMap]) => {
+    const weeks = Array.from(weeksMap.entries()).map(([weekKey, daysMap]) => {
+      const dayGroups = Array.from(daysMap.entries()).map(([dayKey, dayItems]) => ({
+        key: `day-${dayKey}`,
+        label: formatWeekdayLabel(dayKey),
+        count: dayItems.length,
+        items: dayItems,
+      }));
+      const total = dayGroups.reduce((sum, g) => sum + g.count, 0);
+      const firstDayKey = dayGroups[0]?.key?.replace(/^day-/, "") || weekKey;
+      const lastDayKey = dayGroups[dayGroups.length - 1]?.key?.replace(/^day-/, "") || addDaysLocal(weekKey, 6);
+      const idx = weekIndexInMonth(firstDayKey) || weekIndexInRange(weekKey, desde);
+      return {
+        key: `week-${monthKey}-${weekKey}`,
+        label: weekKey === "sin-fecha"
+          ? "Sin fecha"
+          : currentWeek
+            ? `Semana actual (${formatShortDateLabel(firstDayKey)} - ${formatShortDateLabel(lastDayKey)})`
+            : `Semana ${idx || ""} (${formatShortDateLabel(firstDayKey)} - ${formatShortDateLabel(lastDayKey)})`,
+        count: total,
+        days: dayGroups,
+      };
+    }).filter(group => group.count > 0);
+    const total = weeks.reduce((sum, g) => sum + g.count, 0);
     return {
-      key: `week-${weekKey}`,
-      label: weekKey === "sin-fecha"
-        ? "Sin fecha"
-        : currentWeek
-          ? `Semana actual (${formatShortDateLabel(weekKey)} - ${formatShortDateLabel(weekEnd)})`
-          : `Semana ${idx || ""} (${formatShortDateLabel(weekKey)} - ${formatShortDateLabel(weekEnd)})`,
+      key: `month-${monthKey}`,
+      label: formatMonthLabel(monthKey),
       count: total,
-      days: dayGroups,
+      weeks,
     };
   }).filter(group => group.count > 0);
 }
@@ -8162,14 +8198,19 @@ export default function Pedidos() {
           ...(collapsed ? [] : group.items),
         ];
       })
-    : pedidosAgrupados.flatMap(week => {
-        const weekCollapsed = !!collapsedClientes[week.key];
-        const entries = [{ _group: true, type: "week", key: week.key, label: week.label, count: week.count, collapsed: weekCollapsed }];
-        if (weekCollapsed) return entries;
-        week.days.forEach(day => {
-          const dayCollapsed = !!collapsedClientes[day.key];
-          entries.push({ _group: true, type: "day", key: day.key, label: day.label, count: day.count, collapsed: dayCollapsed });
-          if (!dayCollapsed) entries.push(...day.items);
+    : pedidosAgrupados.flatMap(month => {
+        const monthCollapsed = !!collapsedClientes[month.key];
+        const entries = [{ _group: true, type: "month", key: month.key, label: month.label, count: month.count, collapsed: monthCollapsed }];
+        if (monthCollapsed) return entries;
+        month.weeks.forEach(week => {
+          const weekCollapsed = !!collapsedClientes[week.key];
+          entries.push({ _group: true, type: "week", key: week.key, label: week.label, count: week.count, collapsed: weekCollapsed });
+          if (weekCollapsed) return;
+          week.days.forEach(day => {
+            const dayCollapsed = !!collapsedClientes[day.key];
+            entries.push({ _group: true, type: "day", key: day.key, label: day.label, count: day.count, collapsed: dayCollapsed });
+            if (!dayCollapsed) entries.push(...day.items);
+          });
         });
         return entries;
       });
@@ -8496,17 +8537,18 @@ export default function Pedidos() {
             : pedidosVisibles.length===0 ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>{soloCriticos ? "No hay pedidos criticos con los filtros actuales." : <>No hay pedidos.{canEdit&&" Crea el primero."}</>}</td></tr>
             : pedidosRenderList.map((entry)=>{
               if (entry?._group) {
+                const isMonth = entry.type === "month";
                 const isWeek = entry.type === "week";
                 const isDay = entry.type === "day";
                 return (
-                  <tr key={`group-${entry.key}`} style={{background:isWeek ? "rgba(20,184,166,.08)" : isDay ? "var(--bg3)" : "var(--bg3)"}}>
-                    <td colSpan={11} style={{...S.td,padding:isWeek ? "9px 14px" : "8px 14px 8px 28px",borderTop:isWeek ? "1px solid rgba(20,184,166,.18)" : S.td.borderTop}}>
+                  <tr key={`group-${entry.key}`} style={{background:isMonth ? "rgba(15,118,110,.12)" : isWeek ? "rgba(20,184,166,.08)" : isDay ? "var(--bg3)" : "var(--bg3)"}}>
+                    <td colSpan={11} style={{...S.td,padding:isMonth ? "10px 14px" : isWeek ? "9px 14px 9px 24px" : "8px 14px 8px 38px",borderTop:(isMonth || isWeek) ? "1px solid rgba(20,184,166,.18)" : S.td.borderTop}}>
                       <button
                         onClick={() => setCollapsedClientes(prev => ({ ...prev, [entry.key]: !prev[entry.key] }))}
                         style={{display:"flex",alignItems:"center",gap:10,width:"100%",background:"transparent",border:"none",color:"var(--text)",cursor:"pointer",padding:0,fontFamily:"'DM Sans',sans-serif"}}
                       >
-                        <span style={{fontSize:14,color:isWeek ? "var(--green)" : "var(--accent-xl)",fontWeight:900,width:14}}>{entry.collapsed ? "+" : "-"}</span>
-                        <span style={{fontWeight:isWeek ? 950 : 850,fontSize:isWeek ? 13 : 12,textTransform:isWeek ? "uppercase" : "none",letterSpacing:isWeek ? ".04em" : 0}}>{entry.label}</span>
+                        <span style={{fontSize:14,color:(isMonth || isWeek) ? "var(--green)" : "var(--accent-xl)",fontWeight:900,width:14}}>{entry.collapsed ? "+" : "-"}</span>
+                        <span style={{fontWeight:isMonth ? 950 : isWeek ? 900 : 850,fontSize:isMonth ? 13 : isWeek ? 12 : 12,textTransform:(isMonth || isWeek) ? "uppercase" : "none",letterSpacing:(isMonth || isWeek) ? ".04em" : 0}}>{entry.label}</span>
                         <span style={{fontSize:11,color:"var(--text4)"}}>{entry.count} pedido{entry.count !== 1 ? "s" : ""}</span>
                       </button>
                     </td>

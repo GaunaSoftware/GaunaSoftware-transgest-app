@@ -259,16 +259,74 @@ function intervencionApiToLocal(r) {
   };
 }
 
+function costeIntervencion(r) {
+  const total = Number(r?.coste_total);
+  if (Number.isFinite(total) && total > 0) return total;
+  const manoObra = Number(r?.coste_mano_obra || 0);
+  const piezas = (Array.isArray(r?.piezas_usadas) ? r.piezas_usadas : [])
+    .reduce((sum, p) => {
+      const cantidad = Number(p.cantidad_usada ?? p.cantidad ?? 0);
+      const precio = Number(p.precio_unitario || 0);
+      return sum + (cantidad * precio);
+    }, 0);
+  return manoObra + piezas;
+}
+
+function resumenGastoTaller(reparaciones = []) {
+  const month = new Date().toISOString().slice(0, 7);
+  return reparaciones.reduce((acc, r) => {
+    const coste = costeIntervencion(r);
+    acc.total += coste;
+    if (String(r?.fecha || "").slice(0, 7) === month) acc.mes += coste;
+    acc.manoObra += Number(r?.coste_mano_obra || 0);
+    acc.piezas += Math.max(0, coste - Number(r?.coste_mano_obra || 0));
+    return acc;
+  }, { total:0, mes:0, manoObra:0, piezas:0 });
+}
+
+function TallerIcon({ name = "tool", color = "#0f766e", size = 24 }) {
+  const common = { fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round" };
+  const shapes = {
+    tool: <path {...common} d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l2.6-2.6a6 6 0 0 1-7.9 7.9l-6.8 6.8a2 2 0 0 1-2.8-2.8l6.8-6.8a6 6 0 0 1 7.9-7.9l-2.8 2.8Z" />,
+    money: (
+      <>
+        <rect {...common} x="3" y="6" width="18" height="12" rx="2" />
+        <circle {...common} cx="12" cy="12" r="3" />
+      </>
+    ),
+    cube: (
+      <>
+        <path {...common} d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
+        <path {...common} d="M4 7.5 12 12l8-4.5" />
+        <path {...common} d="M12 12v9" />
+      </>
+    ),
+    layers: (
+      <>
+        <path {...common} d="m12 3 9 5-9 5-9-5 9-5Z" />
+        <path {...common} d="m3 13 9 5 9-5" />
+      </>
+    ),
+    clock: (
+      <>
+        <circle {...common} cx="12" cy="12" r="8" />
+        <path {...common} d="M12 8v5l3 2" />
+      </>
+    ),
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">{shapes[name] || shapes.tool}</svg>;
+}
+
 const S = {
-  page: {flex:1, padding:"22px 26px",fontFamily:"'DM Sans',sans-serif"},
-  title:{fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:800,color:"var(--text)",marginBottom:4},
-  sub:  {fontSize:12,color:"var(--text4)",marginBottom:20},
-  card: {background:"var(--bg2)",border:"1px solid #141a28",borderRadius:12,overflow:"hidden",marginBottom:14},
-  th:   {textAlign:"left",padding:"8px 13px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",borderBottom:"1px solid #141a28",background:"var(--bg3)",whiteSpace:"nowrap"},
-  td:   {padding:"9px 13px",borderBottom:"1px solid #0f1520",fontSize:13,color:"var(--text2)",verticalAlign:"middle"},
-  btn:  {padding:"7px 14px",borderRadius:7,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:5},
-  inp:  {background:"var(--bg4)",border:"1px solid #1e2d45",color:"var(--text)",padding:"7px 11px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
-  sel:  {background:"var(--bg4)",border:"1px solid #1e2d45",color:"var(--text)",padding:"7px 11px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  page: {flex:1, padding:"30px 36px",fontFamily:"'DM Sans',sans-serif",background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)",minHeight:"100vh"},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:32,fontWeight:900,color:"#0f172a",marginBottom:6,letterSpacing:"-.02em"},
+  sub:  {fontSize:15,color:"#64748b",marginBottom:28},
+  card: {background:"rgba(255,255,255,.95)",border:"1px solid #dbe5ec",borderRadius:12,overflow:"hidden",marginBottom:14,boxShadow:"0 14px 32px rgba(15,23,42,.05)"},
+  th:   {textAlign:"left",padding:"13px 16px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"#64748b",borderBottom:"1px solid #dbe5ec",background:"rgba(248,250,252,.9)",whiteSpace:"nowrap"},
+  td:   {padding:"12px 16px",borderBottom:"1px solid #e5edf2",fontSize:13,color:"#334155",verticalAlign:"middle"},
+  btn:  {padding:"10px 15px",borderRadius:8,border:"1px solid #cfdbe5",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:7,boxShadow:"0 8px 18px rgba(15,23,42,.04)"},
+  inp:  {background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 13px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxShadow:"0 6px 14px rgba(15,23,42,.03)"},
+  sel:  {background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 13px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxShadow:"0 6px 14px rgba(15,23,42,.03)"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
   mbox: {background:"var(--bg2)",border:"1px solid #1e2d45",borderRadius:14,padding:26,width:"min(660px,96vw)",maxHeight:"92vh",overflowY:"auto"},
   lbl:  {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4,marginTop:10},
@@ -1660,58 +1718,58 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
   tractoras.forEach(v=>{ Object.values(neumaticosVehiculos?.[v.id] || {}).forEach(d=>{ if(d.marca) marcaCount[d.marca]=(marcaCount[d.marca]||0)+1; }); });
   const topMarcas = Object.entries(marcaCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
 
-  const inp={background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:6,fontSize:12,outline:"none"};
-  const btn={padding:"6px 14px",borderRadius:7,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"'DM Sans',sans-serif"};
+  const inp={background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 13px",borderRadius:8,fontSize:13,outline:"none",boxShadow:"0 6px 14px rgba(15,23,42,.03)"};
+  const btn={padding:"11px 16px",borderRadius:8,border:"1px solid #cfdbe5",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"'DM Sans',sans-serif",boxShadow:"0 8px 18px rgba(15,23,42,.04)"};
 
   return (
     <div>
       {/* Header controls */}
-      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:14,flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:22,flexWrap:"wrap"}}>
         <select value={vSel} onChange={e=>setVSel(e.target.value)} style={{...inp,minWidth:150,fontWeight:700}}>
           {tractoras.map(v=><option key={v.id} value={v.id}>{v.matricula}</option>)}
         </select>
         {["diagrama","stock","estadisticas"].map(t=>(
           <button key={t} onClick={()=>setTabN(t)}
-            style={{...btn,background:tabN===t?"var(--accent)":"var(--bg4)",color:tabN===t?"#fff":"var(--text3)",border:"1px solid var(--border2)"}}>
+            style={{...btn,background:tabN===t?"linear-gradient(135deg,#0f766e,#0d9488)":"#f1f5f9",color:tabN===t?"#fff":"#64748b",border:"1px solid #dbe5ec"}}>
             {t==="diagrama"?"Diagrama":t==="stock"?"Stock":"Estadisticas"}
           </button>
         ))}
-        <button onClick={()=>setModalStock(true)} style={{...btn,background:"rgba(16,185,129,.15)",color:"var(--green)",border:"1px solid rgba(16,185,129,.3)",marginLeft:"auto"}}>
+        <button onClick={()=>setModalStock(true)} style={{...btn,background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",border:"1px solid #0f766e",marginLeft:"auto"}}>
           + Añadir al stock
         </button>
         {/* Stock badge */}
-        <div style={{fontSize:12,color:"var(--text5)"}}>
-          Stock: <strong style={{color:stock.length>0?"var(--green)":"var(--red)"}}>{stock.reduce((s,x)=>s+x.cantidad,0)} ud.</strong>
+        <div style={{fontSize:14,color:"#64748b"}}>
+          Stock: <strong style={{color:stock.length>0?"#0f766e":"#ef4444"}}>{stock.reduce((s,x)=>s+x.cantidad,0)} ud.</strong>
         </div>
       </div>
 
       {/* DIAGRAMA TAB */}
       {tabN==="diagrama" && (
-        <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:16}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 360px",gap:18}}>
           {/* SVG */}
-          <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:16}}>
-            <div style={{fontSize:12,color:"var(--text5)",marginBottom:8}}>
+          <div style={{background:"rgba(255,255,255,.95)",border:"1px solid #dbe5ec",borderRadius:12,padding:22,boxShadow:"0 14px 32px rgba(15,23,42,.05)"}}>
+            <div style={{fontSize:15,color:"#64748b",marginBottom:12}}>
               Haz clic en las ruedas para seleccionarlas -> selecciona un neumático del stock -> registrar cambio
             </div>
-            <svg viewBox="0 0 580 280" style={{width:"100%",maxWidth:580}}>
-              <rect x="60" y="110" width="240" height="60" rx="8" fill="var(--bg4)" stroke="var(--border2)" strokeWidth="1.5"/>
-              <rect x="60" y="90" width="110" height="80" rx="6" fill="var(--bg3)" stroke="var(--border2)" strokeWidth="1.5"/>
+            <svg viewBox="0 0 580 280" style={{width:"100%",maxWidth:760,display:"block",margin:"22px auto 10px"}}>
+              <rect x="60" y="110" width="240" height="60" rx="8" fill="#f8fafc" stroke="#94a3b8" strokeWidth="1.5"/>
+              <rect x="60" y="90" width="110" height="80" rx="6" fill="#f8fafc" stroke="#94a3b8" strokeWidth="1.5"/>
               <rect x="68" y="96" width="48" height="32" rx="3" fill="rgba(96,165,250,.25)" stroke="rgba(96,165,250,.4)" strokeWidth="1"/>
-              <rect x="305" y="105" width="210" height="70" rx="6" fill="var(--bg4)" stroke="var(--border2)" strokeWidth="1.5"/>
-              <line x1="300" y1="140" x2="310" y2="140" stroke="var(--border2)" strokeWidth="3"/>
-              <text x="115" y="148" textAnchor="middle" fill="var(--text5)" fontSize="9" fontFamily="sans-serif">TRACTOR</text>
-              <text x="410" y="148" textAnchor="middle" fill="var(--text5)" fontSize="9" fontFamily="sans-serif">SEMIRREMOLQUE</text>
+              <rect x="305" y="105" width="210" height="70" rx="6" fill="#f8fafc" stroke="#94a3b8" strokeWidth="1.5"/>
+              <line x1="300" y1="140" x2="310" y2="140" stroke="#94a3b8" strokeWidth="3"/>
+              <text x="115" y="148" textAnchor="middle" fill="#475569" fontSize="10" fontFamily="sans-serif">TRACTOR</text>
+              <text x="410" y="148" textAnchor="middle" fill="#475569" fontSize="10" fontFamily="sans-serif">SEMIRREMOLQUE</text>
               {posAll.map(pos=>{
                 const hasTyre = !!vehData[pos.id];
                 const isSelected = sel.has(pos.id);
                 const age = hasTyre && vehData[pos.id]?.fecha ?
                   Math.floor((new Date()-new Date(vehData[pos.id].fecha))/(1000*60*60*24*30)) : null;
                 const fillColor = isSelected ? "#3b82f6" :
-                  hasTyre ? (age>24?"#ef4444":age>18?"#f59e0b":"#22c55e") : "var(--bg3)";
+                  hasTyre ? (age>24?"#ef4444":age>18?"#f59e0b":"#22c55e") : "#f1f5f9";
                 return (
                   <g key={pos.id} onClick={()=>togglePos(pos.id)} style={{cursor:"pointer"}}>
-                    <circle cx={pos.x} cy={pos.y} r={pos.r} fill={fillColor} stroke={isSelected?"#93c5fd":"var(--border2)"} strokeWidth={isSelected?2.5:1.5} opacity={0.9}/>
-                    <circle cx={pos.x} cy={pos.y} r={pos.r*0.45} fill="none" stroke={isSelected?"#fff":"var(--border2)"} strokeWidth="1"/>
+                    <circle cx={pos.x} cy={pos.y} r={pos.r} fill={fillColor} stroke={isSelected?"#3b82f6":"#94a3b8"} strokeWidth={isSelected?2.5:1.5} opacity={0.95}/>
+                    <circle cx={pos.x} cy={pos.y} r={pos.r*0.45} fill="none" stroke={isSelected?"#fff":"#94a3b8"} strokeWidth="1"/>
                     {hasTyre && !isSelected && (
                       <text x={pos.x} y={pos.y+3} textAnchor="middle" fill="#fff" fontSize="7" fontFamily="sans-serif" fontWeight="bold">
                         {vehData[pos.id]?.marca?.slice(0,3)?.toUpperCase()}
@@ -1723,7 +1781,7 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
               })}
             </svg>
             {/* Legend */}
-            <div style={{display:"flex",gap:12,fontSize:11,color:"var(--text5)",marginTop:6,flexWrap:"wrap"}}>
+            <div style={{display:"flex",gap:18,fontSize:13,color:"#64748b",marginTop:14,flexWrap:"wrap"}}>
               {[["#22c55e","<18m"],["#f59e0b","18-24m"],["#ef4444",">24m"],["#3b82f6","Selec."],["var(--bg3)","Sin datos"]].map(([color,label])=>(
                 <span key={label} style={{display:"flex",alignItems:"center",gap:4}}>
                   <span style={{width:10,height:10,borderRadius:"50%",background:color,display:"inline-block"}}/>
@@ -1734,8 +1792,8 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
           </div>
 
           {/* Form cambio */}
-          <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:16}}>
-            <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:12}}>
+          <div style={{background:"rgba(255,255,255,.95)",border:"1px solid #dbe5ec",borderRadius:12,padding:22,boxShadow:"0 14px 32px rgba(15,23,42,.05)"}}>
+            <div style={{fontWeight:900,fontSize:18,color:"#0f172a",marginBottom:18}}>
               Registrar cambio {sel.size>0?`(${sel.size} rueda${sel.size>1?"s":""})`:""}
             </div>
 
@@ -2500,13 +2558,15 @@ export default function Taller() {
   }).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)), [taller.reparaciones, filtroVh, q]);
 
   const stockBajo  = useMemo(() => taller.stock.filter(s=>(s.stock_actual||0)<=(s.stock_minimo||0)), [taller.stock]);
+  const stockTotalUnidades = useMemo(() => (taller.stock || []).reduce((s,p)=>s+Number(p.stock_actual || 0),0), [taller.stock]);
   const stockFiltrado = useMemo(() => {
     const term = stockQ.trim().toLowerCase();
     if (!term) return taller.stock || [];
     return (taller.stock || []).filter(p => `${p.nombre || ""} ${p.referencia || ""} ${p.codigo_barras || ""} ${p.categoria || ""} ${p.proveedor || ""}`.toLowerCase().includes(term));
   }, [taller.stock, stockQ]);
-  const costoMes   = useMemo(() => taller.reparaciones.filter(r=>r.fecha?.slice(0,7)===new Date().toISOString().slice(0,7)).reduce((s,r)=>s+(r.coste_total||0),0), [taller.reparaciones]);
-  const costoTotal = useMemo(() => taller.reparaciones.reduce((s,r)=>s+(r.coste_total||0),0), [taller.reparaciones]);
+  const gastoTaller = useMemo(() => resumenGastoTaller(taller.reparaciones || []), [taller.reparaciones]);
+  const costoMes   = gastoTaller.mes;
+  const costoTotal = gastoTaller.total;
 
   useEffect(() => {
     if (!focusTaller?.pieza_id || tab !== "stock" || !taller.stock.length) return;
@@ -2562,13 +2622,13 @@ export default function Taller() {
       <div style={S.sub}>Intervenciones, reparaciones y stock de piezas y repuestos</div>
 
       {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:18}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:18,marginBottom:28}}>
         {[
-          {l:"Total intervenciones",  v:taller.reparaciones.length, c:"var(--accent-xl)"},
-          {l:"Coste este mes",        v:`${fmt2(costoMes)} EUR`,       c:"var(--green)"},
+          {l:"Total intervenciones",  v:taller.reparaciones.length, c:"#0f2a6b", icon:"tool", bg:"#dcfce7"},
+          {l:"Coste este mes",        v:`${fmt2(costoMes)} EUR`,       c:"#0f766e", icon:"money", bg:"#d1fae5", title:`Mano de obra: ${fmt2(gastoTaller.manoObra)} EUR - Piezas: ${fmt2(gastoTaller.piezas)} EUR`},
           ...(vehiculosEnTaller.length>0?[{l:`Lucro cesante (${vehiculosEnTaller.length} veh.)`,v:`${fmt2(lucroTotal)} EUR`,c:"#ef4444",title:"Ingresos perdidos por vehículos en taller"}]:[]),
-          {l:"Piezas en stock",       v:taller.stock.length,          c:"#a78bfa"},
-          {l:"Stock bajo minimo",     v:stockBajo.length,             c:stockBajo.length>0?"#f97316":"var(--green)"},
+          {l:"Piezas en stock",       v:stockTotalUnidades,          c:"#7c3aed", icon:"cube", bg:"#ede9fe"},
+          {l:"Stock bajo minimo",     v:stockBajo.length,             c:stockBajo.length>0?"#2563eb":"#0f766e", icon:"layers", bg:"#dbeafe"},
           ...(()=>{
             const cnt = {};
             taller.reparaciones.forEach(r=>{ if(r.vehiculo_matricula) cnt[r.vehiculo_matricula]=(cnt[r.vehiculo_matricula]||0)+1; });
@@ -2576,9 +2636,14 @@ export default function Taller() {
             return top ? [{l:"Más intervenciones", v:`${top[0]} (${top[1]}x)`, c:"#f59e0b"}] : [];
           })(),
         ].map((k,i)=>(
-          <div key={i} style={{background:"var(--bg2)",border:"1px solid #141a28",borderRadius:10,padding:"12px 14px"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:800,color:k.c}}>{k.v}</div>
-            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginTop:3}}>{k.l}</div>
+          <div key={i} title={k.title || ""} style={{background:"rgba(255,255,255,.95)",border:"1px solid #dbe5ec",borderRadius:12,padding:"26px 28px",display:"flex",alignItems:"center",gap:20,minHeight:102,boxShadow:"0 16px 34px rgba(15,23,42,.06)"}}>
+            <div style={{width:54,height:54,borderRadius:"50%",display:"grid",placeItems:"center",background:k.bg || `${k.c}14`,color:k.c,flexShrink:0}}>
+              <TallerIcon name={k.icon || "tool"} color={k.c} size={27} />
+            </div>
+            <div>
+              <div style={{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:900,color:k.c,lineHeight:1}}>{k.v}</div>
+              <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"#64748b",marginTop:10}}>{k.l}</div>
+            </div>
           </div>
         ))}
       </div>
@@ -2590,9 +2655,9 @@ export default function Taller() {
       )}
 
       {/* Tabs */}
-      <div style={{display:"flex",gap:0,borderBottom:"1px solid #141a28",marginBottom:16}}>
+      <div style={{display:"flex",gap:20,borderBottom:"1px solid #dbe5ec",marginBottom:16,overflowX:"auto"}}>
         {[["reparaciones","Intervenciones"],[`stock`,`Stock${stockBajo.length>0?` (${stockBajo.length} bajo minimo)`:""}`],["trazabilidad","Trazabilidad piezas"],["neumaticos","Neumaticos"],["proveedores","Talleres / Proveedores"],["avisos_mant","Avisos mantenimiento"],["solicitudes","Solicitudes choferes"],["tareas","Tareas mecanicos"]].map(([id,l])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{...S.tab,borderBottomColor:tab===id?"var(--accent-l)":"transparent",color:tab===id?"var(--accent-xl)":"var(--text4)"}}>{l}</button>
+          <button key={id} onClick={()=>setTab(id)} style={{...S.tab,borderBottomColor:tab===id?"#0f766e":"transparent",color:tab===id?"#0f766e":"#64748b",padding:"12px 0",fontSize:14,fontWeight:900,whiteSpace:"nowrap"}}>{l}</button>
         ))}
       </div>
 

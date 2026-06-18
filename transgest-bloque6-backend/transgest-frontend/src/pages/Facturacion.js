@@ -30,19 +30,43 @@ const ivaLabel = (tipoIva, regimen) => {
 };
 
 const S = {
-  page: {flex:1, padding:"22px 26px",fontFamily:"'DM Sans',sans-serif"},
-  title:{fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:800,color:"var(--text)",marginBottom:4},
-  sub:  {fontSize:12,color:"var(--text4)",marginBottom:20},
-  card: {background:"var(--bg2)",border:"1px solid #141a28",borderRadius:12,overflow:"hidden",marginBottom:14},
-  th:   {textAlign:"left",padding:"8px 13px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",borderBottom:"1px solid #141a28",background:"var(--bg3)",whiteSpace:"nowrap"},
-  td:   {padding:"10px 13px",borderBottom:"1px solid #0f1520",fontSize:13,color:"var(--text2)",verticalAlign:"middle"},
-  btn:  {padding:"7px 14px",borderRadius:7,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:5},
-  sel:  {background:"var(--bg4)",border:"1px solid #1e2d45",color:"var(--text)",padding:"5px 8px",borderRadius:6,fontFamily:"'DM Sans',sans-serif",fontSize:11,outline:"none"},
-  inp:  {background:"var(--bg4)",border:"1px solid #1e2d45",color:"var(--text)",padding:"7px 11px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  page: {flex:1, padding:"32px 40px",fontFamily:"'DM Sans',sans-serif",background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)",minHeight:"100vh"},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:30,fontWeight:900,color:"var(--text)",marginBottom:6},
+  sub:  {fontSize:13,color:"var(--text4)",marginBottom:28},
+  card: {background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",marginBottom:18,boxShadow:"0 10px 30px rgba(15,23,42,.04)"},
+  th:   {textAlign:"left",padding:"14px 16px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",borderBottom:"1px solid var(--border)",background:"rgba(248,250,252,.86)",whiteSpace:"nowrap"},
+  td:   {padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text2)",verticalAlign:"middle"},
+  btn:  {padding:"10px 14px",borderRadius:8,border:"1px solid var(--border2)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:7,background:"var(--bg3)",color:"var(--text3)"},
+  sel:  {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none"},
+  inp:  {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
   badge:{display:"inline-flex",alignItems:"center",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700},
   lbl:  {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4,marginTop:10},
 };
+
+function FinanceIcon({ icon = "wallet" }) {
+  const common = { width:28, height:28, viewBox:"0 0 24 24", fill:"none", stroke:"currentColor", strokeWidth:"1.8", strokeLinecap:"round", strokeLinejoin:"round", "aria-hidden":"true" };
+  if (icon === "check") return <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="m8.5 12 2.2 2.2 4.8-5" /></svg>;
+  if (icon === "clock") return <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></svg>;
+  if (icon === "doc") return <svg {...common}><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v5h5" /><path d="M9 13h6" /><path d="M9 17h5" /></svg>;
+  return <svg {...common}><path d="M4 7h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4z" /><path d="M4 7V5a2 2 0 0 1 2-2h11" /><path d="M16 13h.01" /></svg>;
+}
+
+function FinanceKpi({ label, value, color, icon }) {
+  const softBg = String(color).startsWith("#") ? `${color}12` : "rgba(20,184,166,.10)";
+  const softBorder = String(color).startsWith("#") ? `${color}22` : "rgba(20,184,166,.22)";
+  return (
+    <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"26px 28px",display:"flex",alignItems:"center",gap:20,minHeight:106,boxShadow:"0 12px 34px rgba(15,23,42,.05)"}}>
+      <div style={{width:58,height:58,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",color,background:softBg,border:`1px solid ${softBorder}`,flexShrink:0}}>
+        <FinanceIcon icon={icon} />
+      </div>
+      <div>
+        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:22,fontWeight:900,color,lineHeight:1}}>{value}</div>
+        <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginTop:11}}>{label}</div>
+      </div>
+    </div>
+  );
+}
 
 function fmtDate(value, withTime = false) {
   if (!value) return "-";
@@ -2354,8 +2378,25 @@ export default function Facturacion() {
 
   return (
     <div style={S.page}>
-      <div style={S.title}>Gestion financiera</div>
-      <div style={S.sub}>Facturas de clientes, seguimiento de cobros, pagos a proveedores y tesoreria en una sola vista.</div>
+      <div style={{display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",marginBottom:24}}>
+        <div style={{display:"flex",gap:18,alignItems:"flex-start"}}>
+          <div style={{width:46,height:46,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"rgba(20,184,166,.10)",border:"1px solid rgba(20,184,166,.20)",color:"var(--accent-xl)",flexShrink:0}}>
+            <FinanceIcon icon="wallet" />
+          </div>
+          <div>
+            <div style={S.title}>Gestión financiera</div>
+            <div style={{...S.sub,marginBottom:0}}>Facturas de clientes, seguimiento de cobros, pagos a proveedores y tesorería en una sola vista.</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <div style={{position:"relative",width:28,height:28,color:"var(--text4)"}}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></svg>
+            <span style={{position:"absolute",right:-2,top:-7,background:"#ef4444",color:"#fff",fontSize:10,borderRadius:20,padding:"1px 5px",fontWeight:900}}>3</span>
+          </div>
+          <div style={{width:42,height:42,borderRadius:"50%",background:"var(--accent)",color:"#fff",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>CG</div>
+          <div><div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Carlos</div><div style={{fontSize:11,color:"var(--text5)"}}>Gerente</div></div>
+        </div>
+      </div>
 
       {focusFactura?.source === "control_tower" && !focusFactura?.factura_id && (
         <div style={{...S.card,marginBottom:14,borderColor:"rgba(20,184,166,.35)",background:"rgba(20,184,166,.07)"}}>
@@ -2373,23 +2414,18 @@ export default function Facturacion() {
       )}
 
       {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:18}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(180px,1fr))",gap:24,marginBottom:28}}>
         {[
-          {l:"Total facturado",    v:`${fmt2(total)} EUR`,     c:"var(--text)"},
-          {l:"Cobrado",            v:`${fmt2(cobrado)} EUR`,   c:"var(--green)"},
-          {l:"Pendiente cobro",    v:`${fmt2(pendiente)} EUR`, c:"#f59e0b"},
-          {l:"Rectificadas",       v:nRect,                  c:"#f97316"},
-        ].map((k,i)=>(
-          <div key={i} style={{background:"var(--bg2)",border:"1px solid #141a28",borderRadius:10,padding:"12px 14px"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:800,color:k.c}}>{k.v}</div>
-            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginTop:3}}>{k.l}</div>
-          </div>
-        ))}
+          {l:"Total facturado",    v:`${fmt2(total)} EUR`,     c:"var(--text)", icon:"wallet"},
+          {l:"Cobrado",            v:`${fmt2(cobrado)} EUR`,   c:"var(--green)", icon:"check"},
+          {l:"Pendiente cobro",    v:`${fmt2(pendiente)} EUR`, c:"#f59e0b", icon:"clock"},
+          {l:"Rectificadas",       v:nRect,                    c:"#fb7185", icon:"doc"},
+        ].map((k,i)=><FinanceKpi key={i} label={k.l} value={k.v} color={k.c} icon={k.icon} />)}
       </div>
 
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16,borderBottom:"1px solid #141a28",paddingBottom:12,alignItems:"center"}}>
+      <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:22,padding:"0 6px",alignItems:"center"}}>
         <label style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Area de trabajo</label>
-        <select value={activeFacturacionTab} onChange={e=>setActiveFacturacionTab(e.target.value)} style={{...S.sel,padding:"8px 12px",fontSize:13,minWidth:260}}>
+        <select value={activeFacturacionTab} onChange={e=>setActiveFacturacionTab(e.target.value)} style={{...S.sel,minWidth:260,fontWeight:800}}>
           <option value="facturas">Facturas de clientes ({totalCount})</option>
           <option value="cobros">Seguimiento de cobros ({Number(controlResumen.revisar_hoy || 0)} a revisar)</option>
           <option value="pagos">Pagos a proveedores y tesoreria ({pagosProveedor.length})</option>
@@ -2458,11 +2494,11 @@ export default function Facturacion() {
       )}
 
       {activeFacturacionTab === "facturas" && (
-      <div style={{...S.card,padding:14,marginBottom:16,borderColor:(Number(fiscalInfo.con_error||0)>0||Number(fiscalInfo.atascados||0)>0||fiscalCola.some(i=>i.estado==="error"||i.atascado))?"rgba(239,68,68,.35)":"#141a28"}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+      <div style={{...S.card,padding:"24px 26px",marginBottom:22,borderColor:(Number(fiscalInfo.con_error||0)>0||Number(fiscalInfo.atascados||0)>0||fiscalCola.some(i=>i.estado==="error"||i.atascado))?"rgba(239,68,68,.24)":"var(--border)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:18,flexWrap:"wrap"}}>
           <div style={{flex:"1 1 260px"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Bloque fiscal AEAT</div>
-            <div style={{fontSize:12,color:"var(--text4)"}}>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:20,color:"var(--text)",marginBottom:8}}>Bloque fiscal AEAT</div>
+            <div style={{fontSize:13,color:"var(--text4)"}}>
               Modo {String(fiscalResumen?.config?.modo || "ninguno").toUpperCase()} - {Number(fiscalInfo.total_registros||0)} registros - {Number(fiscalInfo.pendientes||0)} pendientes
             </div>
             {fiscalSetupStatus?.summary && (
@@ -2471,17 +2507,17 @@ export default function Facturacion() {
               </div>
             )}
             {fiscalSchedulerInfo?.enabled && (
-              <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
+              <div style={{fontSize:12,color:"var(--text5)",marginTop:8}}>
                 Motor automatico cada {Number(fiscalSchedulerInfo.interval_minutes || 5)} min{fiscalSchedulerInfo.last_run_at ? ` - Ultimo ciclo ${new Date(fiscalSchedulerInfo.last_run_at).toLocaleString("es-ES")}` : ""}
               </div>
             )}
           </div>
           {canEdit && (
-            <button onClick={procesarColaFiscal} style={{...S.btn,background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.25)"}}>
+            <button onClick={procesarColaFiscal} style={{...S.btn,background:"rgba(16,185,129,.09)",color:"var(--green)",border:"1px solid rgba(16,185,129,.28)"}}>
               Procesar cola fiscal
             </button>
           )}
-          <button onClick={descargarLoteXmlFiscal} style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)"}}>
+          <button onClick={descargarLoteXmlFiscal} style={{...S.btn,background:"rgba(59,130,246,.08)",color:"#2563eb",border:"1px solid rgba(59,130,246,.24)"}}>
             Descargar lote XML
           </button>
           {[
@@ -2490,22 +2526,22 @@ export default function Facturacion() {
             ["Errores", fiscalInfo.con_error, "#ef4444"],
             ["Atascados", fiscalInfo.atascados, "#fb7185"],
           ].map(([label,value,color])=>(
-            <div key={label} style={{minWidth:110,background:`${color}12`,border:`1px solid ${color}33`,borderRadius:8,padding:"8px 10px"}}>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color}}>{Number(value||0)}</div>
-              <div style={{fontSize:10,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>{label}</div>
+            <div key={label} style={{minWidth:104,background:`${color}08`,border:`1px solid ${color}28`,borderRadius:9,padding:"12px 14px"}}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:18,color}}>{Number(value||0)}</div>
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",marginTop:4}}>{label}</div>
             </div>
           ))}
         </div>
         {(fiscalRecientes.length>0 || fiscalCola.length>0) && (
-          <div style={{marginTop:12,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
+          <div style={{marginTop:22,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:18}}>
             {fiscalRecientes.slice(0,4).map(item=>(
-              <div key={item.id} style={{border:"1px solid #1e2d45",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:12,fontWeight:800,color:"var(--text)"}}>
+              <div key={item.id} style={{border:"1px solid var(--border)",borderRadius:10,padding:"16px 18px",background:"var(--card-bg)",boxShadow:"0 8px 22px rgba(15,23,42,.04)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:15,fontWeight:900,color:"var(--text)"}}>
                   <span>{item.numero}</span>
-                  <span style={{color:item.estado_envio==="aceptado"?"var(--green)":item.estado_envio==="error"?"#ef4444":"#f59e0b"}}>{item.estado_envio}</span>
+                  <span style={{color:item.estado_envio==="aceptado"?"var(--green)":item.estado_envio==="error"?"#ef4444":"#f59e0b",background:item.estado_envio==="aceptado"?"rgba(16,185,129,.12)":"rgba(245,158,11,.10)",borderRadius:7,padding:"3px 10px",fontSize:11}}>{item.estado_envio}</span>
                 </div>
-                <div style={{fontSize:11,color:"var(--text4)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.cliente_nombre}</div>
-                <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{String(item.modo || "").toUpperCase()} - {item.huella ? item.huella.slice(0,12) : "sin huella"}</div>
+                <div style={{fontSize:12,color:"var(--text4)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:8}}>{item.cliente_nombre}</div>
+                <div style={{fontSize:12,color:"var(--text5)",marginTop:8}}>{String(item.modo || "").toUpperCase()} - {item.huella ? item.huella.slice(0,12) : "sin huella"}</div>
                 {item.provider_uuid && (
                   <div style={{fontSize:10,color:"var(--text5)",marginTop:4,fontFamily:"'JetBrains Mono',monospace"}}>
                     UUID {String(item.provider_uuid).slice(0,18)}...
@@ -2854,7 +2890,7 @@ export default function Facturacion() {
       {activeFacturacionTab === "facturas" && (
       <>
       {/* Filtros */}
-      <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
         {!filtroFechasCustom ? (
           <input type="month" value={periodoMes} onChange={e=>cambiarMesPeriodo(e.target.value)} style={{...S.inp,width:150}}/>
         ) : (
@@ -2865,15 +2901,15 @@ export default function Facturacion() {
         )}
         <button
           onClick={()=>setFiltroFechasCustom(v=>!v)}
-          style={{...S.btn,background:filtroFechasCustom?"var(--accent)":"var(--bg3)",color:filtroFechasCustom?"#fff":"var(--text3)",border:`1px solid ${filtroFechasCustom?"var(--accent)":"var(--border2)"}`}}
+          style={{...S.btn,background:filtroFechasCustom?"rgba(20,184,166,.12)":"var(--bg3)",color:filtroFechasCustom?"var(--accent-xl)":"var(--text3)",border:`1px solid ${filtroFechasCustom?"rgba(20,184,166,.30)":"var(--border2)"}`}}
         >
           {filtroFechasCustom ? "Usar mes" : "Filtro personalizado"}
         </button>
-        <select value={filtro} onChange={e=>setFiltro(e.target.value)} style={{...S.sel,padding:"7px 12px",fontSize:13}}>
+        <select value={filtro} onChange={e=>setFiltro(e.target.value)} style={S.sel}>
           <option value="todos">Todos los estados</option>
           {[...ESTADOS,"rectificada"].map(e=><option key={e} value={e}>{estadoFacturaLabel(e)}</option>)}
         </select>
-        <select value={fiscalEstadoFiltro} onChange={e=>setFiscalEstadoFiltro(e.target.value)} style={{...S.sel,padding:"7px 12px",fontSize:13}}>
+        <select value={fiscalEstadoFiltro} onChange={e=>setFiscalEstadoFiltro(e.target.value)} style={S.sel}>
           <option value="todos">Fiscal: todos</option>
           <option value="aceptado">Fiscal aceptado</option>
           <option value="pendiente">Fiscal pendiente</option>
@@ -2886,7 +2922,7 @@ export default function Facturacion() {
           <option value="sii">SII</option>
           <option value="ninguno">Sin modo</option>
         </select>
-        <input value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Buscar por numero o cliente..." style={{...S.inp,width:240}}/>
+        <input value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Buscar por numero o cliente..." style={{...S.inp,width:270}}/>
         {canEdit && (
           <button onClick={()=>setModalMulti(true)} style={{...S.btn,background:"rgba(16,185,129,.15)",color:"#10b981",border:"1px solid rgba(16,185,129,.25)"}}>
             Facturar pedidos de cliente
@@ -2921,7 +2957,7 @@ export default function Facturacion() {
         })}
       </div>
 
-      <div style={S.card}>
+      <div style={{...S.card,borderRadius:12}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
           <thead>
             <tr>{["No. Factura","Cliente","Fecha","Vcto.","Base","IVA","Total","Estado","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr>

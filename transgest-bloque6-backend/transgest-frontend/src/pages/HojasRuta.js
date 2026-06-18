@@ -22,14 +22,40 @@ function primerDiaMes(d){ const x=new Date(d); x.setDate(1); return x.toISOStrin
 function ultimoDiaMes(d){ const x=new Date(d); x.setMonth(x.getMonth()+1,0); return x.toISOString().slice(0,10); }
 function precioCombDia(fecha,cfg){ if(!cfg||!cfg.tipo||cfg.tipo==="fijo") return Number((cfg&&cfg.precio_fijo)||0); const p=(cfg.periodos||[]).find(x=>fecha>=x.desde&&fecha<=x.hasta); return p?Number(p.precio||0):Number(cfg.precio_base||cfg.precio_fijo||0); }
 const S={
-  page:{flex:1,padding:"22px 26px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh"},
-  card:{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"16px 18px",marginBottom:14},
-  th:{textAlign:"left",padding:"8px 10px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"},
-  td:{padding:"8px 10px",borderBottom:"1px solid var(--border2)",fontSize:12,color:"var(--text2)",verticalAlign:"middle"},
-  btn:{padding:"7px 14px",borderRadius:7,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:5},
-  inp:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
+  page:{flex:1,padding:"30px 36px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)"},
+  card:{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"18px 22px",marginBottom:16,boxShadow:"0 10px 30px rgba(15,23,42,.04)"},
+  th:{textAlign:"left",padding:"13px 16px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap",background:"rgba(248,250,252,.86)"},
+  td:{padding:"11px 16px",borderBottom:"1px solid var(--border)",fontSize:12,color:"var(--text2)",verticalAlign:"middle"},
+  btn:{padding:"10px 14px",borderRadius:8,border:"1px solid var(--border2)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:7,background:"var(--bg3)",color:"var(--text3)"},
+  inp:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"11px 13px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
   lbl:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10},
 };
+
+function RouteSheetIcon({ icon = "truck" }) {
+  const common = { width:22, height:22, viewBox:"0 0 24 24", fill:"none", stroke:"currentColor", strokeWidth:"1.9", strokeLinecap:"round", strokeLinejoin:"round", "aria-hidden":"true" };
+  if (icon === "clip") return <svg {...common}><path d="M9 5h6" /><path d="M9 3h6v4H9z" /><path d="M7 5H5v16h14V5h-2" /><path d="m9 14 2 2 4-5" /></svg>;
+  if (icon === "doc") return <svg {...common}><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v5h5" /></svg>;
+  if (icon === "fuel") return <svg {...common}><path d="M6 3h9v18H6z" /><path d="M9 7h3" /><path d="M15 8h2l2 2v8a2 2 0 0 1-2 2h-2" /></svg>;
+  if (icon === "money") return <svg {...common}><path d="M4 7h16v10H4z" /><circle cx="12" cy="12" r="3" /></svg>;
+  if (icon === "trend") return <svg {...common}><path d="m4 16 5-5 4 4 7-8" /><path d="M14 7h6v6" /></svg>;
+  return <svg {...common}><path d="M3 7h10v9H3z" /><path d="M13 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="2" /><circle cx="17" cy="18" r="2" /></svg>;
+}
+
+function RouteKpi({ label, value, unit, color, icon }) {
+  const cleanLabel = String(label || "").replace(/â‚¬/g, "EUR").replace(/€/g, "EUR");
+  const cleanUnit = String(unit || "").replace(/â‚¬/g, "EUR").replace(/€/g, "EUR");
+  return (
+    <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,padding:"18px 18px",minHeight:76,display:"flex",alignItems:"center",gap:14,boxShadow:"0 8px 24px rgba(15,23,42,.04)"}}>
+      <div style={{color,display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+        <RouteSheetIcon icon={icon} />
+      </div>
+      <div style={{minWidth:0}}>
+        <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:18,color,lineHeight:1}}>{value} <span style={{fontSize:11}}>{cleanUnit}</span></div>
+        <div style={{fontSize:10,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em",marginTop:8,fontWeight:900}}>{cleanLabel}</div>
+      </div>
+    </div>
+  );
+}
 
 function ModalGasoil({vehiculo,onClose}){
   const [cfg,setCfg]=useState({tipo:"fijo",precio_fijo:1.65,periodos:[]});
@@ -484,9 +510,9 @@ export default function HojasRuta(){
 
   return(
     <div style={S.page}>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:900,color:"var(--text)"}}>Hojas de Ruta</div>
-        <select value={vehiculoSel} onChange={e=>setVehiculoSel(e.target.value)} style={{...S.inp,width:"auto",minWidth:180,fontWeight:700}}>
+      <div style={{display:"flex",alignItems:"center",gap:18,marginBottom:24,flexWrap:"wrap"}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:34,fontWeight:900,color:"var(--text)",marginRight:8}}>Hojas de Ruta</div>
+        <select value={vehiculoSel} onChange={e=>setVehiculoSel(e.target.value)} style={{...S.inp,width:"auto",minWidth:290,fontWeight:800}}>
           {(()=>{
             const remIds = new Set(vehiculos.map(v=>v.remolque_id).filter(Boolean));
             return vehiculos
@@ -502,61 +528,61 @@ export default function HojasRuta(){
               });
           })()}
         </select>
-        <input type="date" style={{...S.inp,width:140}} value={fechaDesde} onChange={e=>setFechaDesde(e.target.value)}/>
+        <input type="date" style={{...S.inp,width:170}} value={fechaDesde} onChange={e=>setFechaDesde(e.target.value)}/>
         <span style={{color:"var(--text5)",fontSize:12}}>a</span>
-        <input type="date" style={{...S.inp,width:140}} value={fechaHasta} onChange={e=>setFechaHasta(e.target.value)}/>
-        <button onClick={imprimir} style={{...S.btn,background:"var(--accent)",color:"#fff",marginLeft:"auto"}}>Imprimir / PDF</button>
+        <input type="date" style={{...S.inp,width:170}} value={fechaHasta} onChange={e=>setFechaHasta(e.target.value)}/>
+        <button onClick={imprimir} style={{...S.btn,background:"var(--accent)",color:"#fff",border:"1px solid var(--accent)",marginLeft:"auto",padding:"12px 22px",fontSize:14}}>Imprimir / PDF</button>
       </div>
 
       {loading&&<div style={{color:"var(--text5)",padding:40,textAlign:"center"}}>Cargando datos...</div>}
 
       {!loading&&vehiculo&&(
         <>
-          <div style={{...S.card,display:"flex",gap:20,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
-            <div>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:18,color:"var(--text)"}}>{vehiculo.matricula}</div>
-                <div style={{fontSize:12,color:"var(--text4)"}}>{vehiculo.marca} {vehiculo.modelo} {vehiculo.clase?" - "+vehiculo.clase:""}</div>
+          <div style={{...S.card,display:"flex",gap:28,flexWrap:"wrap",alignItems:"center",marginBottom:10,minHeight:70}}>
+            <div style={{paddingRight:28,borderRight:"1px solid var(--border)"}}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:22,color:"var(--text)"}}>{vehiculo.matricula}</div>
+              <div style={{fontSize:13,color:"var(--text4)",marginTop:4}}>{vehiculo.clase || vehiculo.marca || "Tractora"}</div>
             </div>
             {chofer&&(
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <div>
-                  <div style={{fontSize:13,fontWeight:700,color:"var(--accent-xl)"}}>{chofer.nombre} {chofer.apellidos||""}</div>
-                  <div style={{fontSize:11,color:"var(--text5)"}}>{choferExt.salario_base?"Salario: "+fmt2(choferExt.salario_base)+" EUR":"Sin salario base"}{choferExt.incentivo_pct?" - Incentivo: "+choferExt.incentivo_pct+"%":""}</div>
+                  <div style={{fontSize:15,fontWeight:900,color:"var(--accent-xl)"}}>{chofer.nombre} {chofer.apellidos||""}</div>
+                  <div style={{fontSize:13,color:"var(--text5)",marginTop:3}}>{choferExt.salario_base?"Salario: "+fmt2(choferExt.salario_base)+" EUR":"Sin salario base"}{choferExt.incentivo_pct?" - Incentivo: "+choferExt.incentivo_pct+"%":""}</div>
                 </div>
-                <button onClick={()=>setModalChofer(true)} style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text3)",fontSize:11}}>Config.</button>
+                <button onClick={()=>setModalChofer(true)} style={{...S.btn,background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.20)",color:"var(--accent-xl)",fontSize:12}}>Config.</button>
               </div>
             )}
           </div>
 
-          <div style={{display:"flex",gap:2,borderBottom:"1px solid var(--border)",marginBottom:16}}>
+          <div style={{display:"flex",gap:20,borderBottom:"1px solid var(--border)",marginBottom:22,paddingLeft:2}}>
             {TABS.map(([id,l])=>(
-              <button key={id} onClick={()=>setTab(id)} style={{...S.btn,borderRadius:"6px 6px 0 0",border:"none",borderBottom:"2px solid "+(tab===id?"var(--accent)":"transparent"),color:tab===id?"var(--accent)":"var(--text4)",background:"transparent",padding:"8px 16px",fontSize:12}}>{l}</button>
+              <button key={id} onClick={()=>setTab(id)} style={{...S.btn,borderRadius:0,border:"none",borderBottom:"3px solid "+(tab===id?"var(--accent)":"transparent"),color:tab===id?"var(--accent-xl)":"var(--text4)",background:"transparent",padding:"12px 0",fontSize:14,fontWeight:900}}>{l}</button>
             ))}
           </div>
 
           {tab==="hoja"&&hoja&&(
             <>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(165px,1fr))",gap:14,marginBottom:18}}>
                 {[["Viajes",hoja.viajes,"","var(--accent)"],["Km cargado",fmtN(hoja.kmCargado),"km","#10b981"],["Km vacío",fmtN(hoja.kmVacio),"km","#f59e0b"],["Km pagados",fmtN(hoja.kmRetribuidos),"km","#0ea5e9"],["Gasoil",fmtN(litrosSel),"L","#f97316"],["Dietas",nochesCount,"reg.","#a78bfa"],["Disponibilidad",fmt2(hoja.disponibilidad),"€","#6366f1"],["Ingresos",fmt2(hoja.ingresos),"€","#10b981"],["Costes totales",fmt2(hoja.totalCostes),"€","#ef4444"],["Margen bruto",fmt2(hoja.margen),"€",hoja.margen>=0?"#10b981":"#ef4444"],["€/km (ing.)",fmt2(hoja.eurosKmIngresos),"€/km","#8b5cf6"],["€/km (margen)",fmt2(hoja.eurosKmMargen),"€/km",hoja.eurosKmMargen>=0?"#10b981":"#ef4444"],["€/km (coste)",fmt2(hoja.eurosKmCostes),"€/km","#f97316"]].map(([l,v,u,c])=>(
-                  <div key={l} style={{...S.card,padding:"12px 14px",textAlign:"center"}}>
-                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:17,color:c}}>{v} <span style={{fontSize:11}}>{u}</span></div>
-                    <div style={{fontSize:10,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em",marginTop:2}}>{l}</div>
-                  </div>
+                  <RouteKpi key={l} label={l} value={v} unit={u} color={c} icon={l==="Gasoil"?"fuel":l==="Ingresos"||l==="Disponibilidad"?"money":String(l).includes("Margen")||String(l).includes("km")?"trend":l==="Viajes"?"truck":"doc"} />
                 ))}
               </div>
-              <div style={S.card}>
-                <div style={{fontWeight:700,fontSize:12,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Desglose de costes</div>
+              <div style={{...S.card,padding:"20px 24px"}}>
+                <div style={{fontWeight:900,fontSize:13,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".04em",marginBottom:14}}>Desglose de costes</div>
                 <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>
                   {[["Gasoil",repostajesPeriodo.some(r=>Number(r.importe||0)>0||Number(r.precio_litro||0)>0)?fmtN(litrosSel)+"L con precio real":fmtN(litrosSel)+"L x "+fmt2(hoja.precioLitro)+" EUR/L",fmt2(hoja.costeGasoil)],["Taller / Mantenimiento","",fmt2(hoja.costeTaller)],["Dietas / manutencion",nochesCount+" registro(s)",fmt2(hoja.costeNoches)],["Km retribuidos",fmtN(hoja.kmRetribuidos)+" km x "+fmt2(choferExt.precio_km||0)+" EUR/km",fmt2(hoja.pagoKm)],["Disponibilidad pactada",hoja.diasActivos+" dia(s) + mensual",fmt2(hoja.disponibilidad)],["Salario base chofer","",fmt2(hoja.salarioBase)],["SS empresa","",fmt2(hoja.ssEmpresa)],...(hoja.incentivo>0?[["Incentivo",hoja.incentivoPct+"% x "+fmt2(hoja.ingresos)+" EUR",fmt2(hoja.incentivo)]]:[] )].map(([l,d,v])=>(
                     <tr key={l}><td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{l}</td><td style={{...S.td,color:"var(--text5)",fontSize:11}}>{d}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{v} EUR</td></tr>
                   ))}
-                  <tr style={{background:"rgba(239,68,68,.05)"}}><td style={{...S.td,fontWeight:800,color:"var(--text)"}} colSpan={2}>TOTAL COSTES</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:15,color:"var(--red)"}}>{fmt2(hoja.totalCostes)} EUR</td></tr>
-                  <tr style={{background:hoja.margen>=0?"rgba(16,185,129,.06)":"rgba(239,68,68,.06)"}}><td style={{...S.td,fontWeight:800,color:"var(--text)"}} colSpan={2}>MARGEN BRUTO</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:hoja.margen>=0?"var(--green)":"var(--red)"}}>{fmt2(hoja.margen)} EUR</td></tr>
+                  <tr style={{background:"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"#ef4444"}} colSpan={2}>TOTAL COSTES</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:15,color:"#ef4444"}}>{fmt2(hoja.totalCostes)} EUR</td></tr>
+                  <tr style={{background:hoja.margen>=0?"linear-gradient(90deg, rgba(20,184,166,.12), rgba(20,184,166,.05))":"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"var(--accent-xl)"}} colSpan={2}>MARGEN BRUTO</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:16,color:hoja.margen>=0?"var(--accent-xl)":"#ef4444"}}>{fmt2(hoja.margen)} EUR</td></tr>
                 </tbody></table>
               </div>
-              <div style={S.card}>
-                <div style={{fontWeight:700,fontSize:12,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Viajes del periodo ({hoja.viajes})</div>
-                {hoja.pedVeh.length===0?(<div style={{padding:20,textAlign:"center",color:"var(--text5)"}}>Sin viajes en este periodo</div>):(
+              <div style={{...S.card,padding:"20px 24px"}}>
+                <div style={{fontWeight:900,fontSize:13,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".04em",marginBottom:14}}>Viajes del periodo ({hoja.viajes})</div>
+                {hoja.pedVeh.length===0?(<div style={{padding:"32px 20px",textAlign:"center",color:"var(--text5)",display:"flex",alignItems:"center",justifyContent:"center",gap:20}}>
+                  <div style={{width:58,height:58,borderRadius:"50%",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center"}}><RouteSheetIcon icon="doc" /></div>
+                  <div style={{textAlign:"left"}}><div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>Sin viajes en este periodo</div><div style={{fontSize:11,marginTop:4}}>Aun no se han registrado viajes en el rango de fechas seleccionado.</div></div>
+                </div>):(
                   <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>N</th><th style={S.th}>Fecha</th><th style={S.th}>Origen / Destino</th><th style={S.th}>Cliente</th><th style={S.th}>Km</th><th style={S.th}>Km vacio</th><th style={S.th}>Importe</th></tr></thead><tbody>
                     {hoja.pedVeh.map(p=>(<tr key={p.id}><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--accent)"}}>{p.numero}</td><td style={S.td}>{p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):""}</td><td style={S.td}>{p.origen||""}{p.destino?" a "+p.destino:""}</td><td style={{...S.td,color:"var(--text4)"}}>{p.cliente_nombre||"—"}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace"}}>{fmtN(p.km_ruta||p.km||0)}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#f59e0b"}}>{fmtN(p.km_vacio||0)}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)"}}>{fmt2(p.importe||0)} EUR</td></tr>))}
                   </tbody></table>

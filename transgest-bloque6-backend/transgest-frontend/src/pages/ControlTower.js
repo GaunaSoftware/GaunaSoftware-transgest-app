@@ -168,6 +168,110 @@ function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
   );
 }
 
+const MAP_SIZE = { width: 640, height: 220 };
+const SPAIN_CENTER = { lat: 40.25, lng: -3.7 };
+const CITY_COORDS = {
+  madrid: { lat: 40.4168, lng: -3.7038 },
+  barcelona: { lat: 41.3874, lng: 2.1686 },
+  zaragoza: { lat: 41.6488, lng: -0.8891 },
+  valencia: { lat: 39.4699, lng: -0.3763 },
+  sevilla: { lat: 37.3891, lng: -5.9845 },
+  cordoba: { lat: 37.8882, lng: -4.7794 },
+  bilbao: { lat: 43.263, lng: -2.935 },
+  burgos: { lat: 42.3439, lng: -3.6969 },
+  albacete: { lat: 38.9943, lng: -1.8585 },
+  tarragona: { lat: 41.1189, lng: 1.2445 },
+  lleida: { lat: 41.6176, lng: 0.62 },
+  alicante: { lat: 38.3452, lng: -0.481 },
+  torrent: { lat: 39.4371, lng: -0.4655 },
+  abanilla: { lat: 38.2056, lng: -1.0414 },
+  ribarroja: { lat: 39.545, lng: -0.5708 },
+  riba_roja: { lat: 39.545, lng: -0.5708 },
+  lorqui: { lat: 38.0819, lng: -1.251 },
+  arganda_del_rey: { lat: 40.3069, lng: -3.4477 },
+  alcala_de_henares: { lat: 40.4819, lng: -3.3635 },
+  lucena: { lat: 37.4088, lng: -4.4852 },
+  gandia: { lat: 38.968, lng: -0.1845 },
+  santago: { lat: 40.9701, lng: -3.6434 },
+};
+
+function normalizePlaceKey(value = "") {
+  return String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function coordsForPlace(value = "") {
+  const key = normalizePlaceKey(value);
+  if (!key) return null;
+  if (CITY_COORDS[key]) return CITY_COORDS[key];
+  const match = Object.keys(CITY_COORDS).find(k => key.includes(k) || k.includes(key));
+  return match ? CITY_COORDS[match] : null;
+}
+
+function latLngToPixels(point, zoom) {
+  const scale = 256 * (2 ** zoom);
+  const sinLat = Math.sin(point.lat * Math.PI / 180);
+  return {
+    x: ((point.lng + 180) / 360) * scale,
+    y: (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale,
+  };
+}
+
+function clampMap(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getMapGeometry({ route, hasGps, gpsLat, gpsLng, zoom }) {
+  const gps = hasGps ? { lat: Number(gpsLat), lng: Number(gpsLng) } : null;
+  const origin = coordsForPlace(route.origen);
+  const destination = coordsForPlace(route.destino);
+  const center = gps || (origin && destination
+    ? { lat: (origin.lat + destination.lat) / 2, lng: (origin.lng + destination.lng) / 2 }
+    : origin || destination || SPAIN_CENTER);
+  const centerPx = latLngToPixels(center, zoom);
+  const topLeft = { x: centerPx.x - MAP_SIZE.width / 2, y: centerPx.y - MAP_SIZE.height / 2 };
+  const project = point => {
+    if (!point) return null;
+    const px = latLngToPixels(point, zoom);
+    return {
+      x: clampMap(px.x - topLeft.x, 36, MAP_SIZE.width - 36),
+      y: clampMap(px.y - topLeft.y, 32, MAP_SIZE.height - 34),
+    };
+  };
+  const tileStartX = Math.floor(topLeft.x / 256);
+  const tileStartY = Math.floor(topLeft.y / 256);
+  const tileEndX = Math.floor((topLeft.x + MAP_SIZE.width) / 256);
+  const tileEndY = Math.floor((topLeft.y + MAP_SIZE.height) / 256);
+  const maxTiles = 2 ** zoom;
+  const tiles = [];
+  for (let x = tileStartX; x <= tileEndX; x += 1) {
+    for (let y = tileStartY; y <= tileEndY; y += 1) {
+      if (y < 0 || y >= maxTiles) continue;
+      const wrappedX = ((x % maxTiles) + maxTiles) % maxTiles;
+      tiles.push({
+        key: `${zoom}-${x}-${y}`,
+        src: `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
+        left: Math.round(x * 256 - topLeft.x),
+        top: Math.round(y * 256 - topLeft.y),
+      });
+    }
+  }
+  return {
+    center,
+    origin,
+    destination,
+    gps,
+    tiles,
+    start: project(origin) || { x: 112, y: 148 },
+    end: project(destination) || { x: 520, y: 106 },
+    gpsPoint: project(gps),
+  };
+}
+
 function parseRouteFromItem(item = {}) {
   const text = [item.ruta, item.route, item.description, item.title].filter(Boolean).join(" ");
   const match = String(text).match(/([A-ZÁÉÍÓÚÜÑ0-9 .,'/-]{2,})\s*(?:>|->|→|a)\s*([A-ZÁÉÍÓÚÜÑ0-9 .,'/-]{2,})/i);
@@ -177,11 +281,12 @@ function parseRouteFromItem(item = {}) {
 }
 
 function RouteMapPanel({ item }) {
-  const route = parseRouteFromItem(item || {});
+  const route = useMemo(() => parseRouteFromItem(item || {}), [item]);
   const hasGps = Number.isFinite(Number(item?.gps_lat)) && Number.isFinite(Number(item?.gps_lng));
   const title = item?.title || item?.numero || item?.pedido_numero || "Viaje en seguimiento";
   const [providerInfo, setProviderInfo] = useState(null);
   const [routeMode, setRouteMode] = useState("camion");
+  const [mapZoom, setMapZoom] = useState(6);
   useEffect(() => {
     let alive = true;
     getRouteProviders()
@@ -190,12 +295,22 @@ function RouteMapPanel({ item }) {
     return () => { alive = false; };
   }, []);
   const hereConfigured = Boolean(providerInfo?.providers?.here?.configured || providerInfo?.here?.configured);
+  const map = useMemo(() => getMapGeometry({
+    route,
+    hasGps,
+    gpsLat: item?.gps_lat,
+    gpsLng: item?.gps_lng,
+    zoom: mapZoom,
+  }), [route, hasGps, item?.gps_lat, item?.gps_lng, mapZoom]);
   const routeModes = [
     { key:"camion", label:"Camion", detail:"Perfil pesado" },
     { key:"rapida", label:"Rapida", detail:"Menor tiempo" },
     { key:"economica", label:"Economica", detail:"Menor coste" },
   ];
   const routeLabel = routeModes.find(m => m.key === routeMode)?.detail || "Ruta prevista";
+  const cx = Math.max(70, Math.min(570, (map.start.x + map.end.x) / 2));
+  const cy = Math.max(42, Math.min(178, Math.min(map.start.y, map.end.y) - 44));
+  const routePath = `M${map.start.x} ${map.start.y} C${cx} ${cy}, ${cx} ${cy}, ${map.end.x} ${map.end.y}`;
   return (
     <div style={S.card}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
@@ -207,7 +322,13 @@ function RouteMapPanel({ item }) {
           {hasGps ? "GPS activo" : "Ruta prevista"}
         </span>
       </div>
-      <div style={{position:"relative",height:210,borderRadius:10,overflow:"hidden",border:"1px solid var(--border)",background:"linear-gradient(135deg, rgba(230,244,241,.95), rgba(248,250,252,.95))"}}>
+      <div style={{position:"relative",height:220,borderRadius:10,overflow:"hidden",border:"1px solid var(--border)",background:"linear-gradient(135deg, rgba(230,244,241,.95), rgba(248,250,252,.95))"}}>
+        <div style={{position:"absolute",inset:0,overflow:"hidden",opacity:.82}}>
+          {map.tiles.map(tile => (
+            <img key={tile.key} src={tile.src} alt="" style={{position:"absolute",left:tile.left,top:tile.top,width:256,height:256,userSelect:"none",pointerEvents:"none",filter:"saturate(.65) contrast(.92) brightness(1.08)"}} />
+          ))}
+        </div>
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(90deg, rgba(240,253,250,.46), rgba(255,255,255,.20))"}} />
         <svg viewBox="0 0 640 220" style={{position:"absolute",inset:0,width:"100%",height:"100%"}}>
           <defs>
             <linearGradient id="ct-sea" x1="0" x2="1" y1="0" y2="1">
@@ -218,25 +339,32 @@ function RouteMapPanel({ item }) {
               <feDropShadow dx="0" dy="6" stdDeviation="6" floodColor="#0f172a" floodOpacity=".10" />
             </filter>
           </defs>
-          <rect width="640" height="220" fill="url(#ct-sea)" />
-          <path d="M92 146 C120 102 145 72 196 60 C248 48 271 29 324 45 C373 60 416 64 463 58 C515 52 561 78 582 116 C553 123 536 143 501 143 C464 144 448 167 409 171 C370 175 340 153 303 166 C262 181 234 164 203 169 C164 176 126 166 92 146Z" fill="#f8fafc" stroke="rgba(100,116,139,.28)" strokeWidth="1.5" filter="url(#ct-map-shadow)" />
-          <path d="M126 145 C173 97 249 117 304 95 S432 73 529 108" fill="none" stroke="rgba(20,184,166,.72)" strokeWidth="5" strokeLinecap="round" strokeDasharray={hasGps ? "0" : "10 10"} />
-          <circle cx="126" cy="145" r="12" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
-          <circle cx="529" cy="108" r="12" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
+          <rect width="640" height="220" fill="transparent" />
+          <path d={routePath} fill="none" stroke="rgba(15,118,110,.30)" strokeWidth="9" strokeLinecap="round" filter="url(#ct-map-shadow)" />
+          <path d={routePath} fill="none" stroke="rgba(20,184,166,.86)" strokeWidth="4" strokeLinecap="round" strokeDasharray={hasGps ? "0" : "9 9"} />
+          <circle cx={map.start.x} cy={map.start.y} r="12" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
+          <circle cx={map.end.x} cy={map.end.y} r="12" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
           <text x="92" y="190" fill="rgba(15,23,42,.18)" fontSize="18" fontWeight="800">Portugal</text>
           <text x="472" y="182" fill="rgba(15,23,42,.18)" fontSize="18" fontWeight="800">Mediterraneo</text>
           <text x="300" y="42" fill="rgba(15,23,42,.20)" fontSize="18" fontWeight="900">España</text>
           {hasGps ? (
-            <g transform="translate(296 83)">
+            <g transform={`translate(${(map.gpsPoint?.x || cx) - 12} ${(map.gpsPoint?.y || cy) - 12})`}>
               <circle cx="12" cy="12" r="18" fill="rgba(16,185,129,.18)" stroke="rgba(16,185,129,.42)" />
               <rect x="3" y="7" width="18" height="10" rx="3" fill="var(--green)" />
               <circle cx="7" cy="19" r="3" fill="#fff" />
               <circle cx="19" cy="19" r="3" fill="#fff" />
             </g>
           ) : (
-            <circle cx="304" cy="95" r="9" fill="var(--accent)" stroke="#fff" strokeWidth="3" />
+            <circle cx={cx} cy={cy + 32} r="9" fill="var(--accent)" stroke="#fff" strokeWidth="3" />
           )}
         </svg>
+        <div style={{position:"absolute",right:12,bottom:14,display:"grid",overflow:"hidden",border:"1px solid rgba(148,163,184,.32)",borderRadius:8,background:"rgba(255,255,255,.88)",boxShadow:"0 8px 20px rgba(15,23,42,.08)"}}>
+          <button onClick={() => setMapZoom(z => Math.min(8, z + 1))} style={{width:34,height:32,border:"none",borderBottom:"1px solid rgba(148,163,184,.22)",background:"transparent",fontSize:18,fontWeight:900,cursor:"pointer",color:"#334155"}}>+</button>
+          <button onClick={() => setMapZoom(z => Math.max(5, z - 1))} style={{width:34,height:32,border:"none",background:"transparent",fontSize:20,fontWeight:900,cursor:"pointer",color:"#334155"}}>-</button>
+        </div>
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{position:"absolute",right:56,bottom:14,fontSize:9,color:"rgba(15,23,42,.55)",background:"rgba(255,255,255,.78)",border:"1px solid rgba(148,163,184,.24)",borderRadius:6,padding:"3px 6px",textDecoration:"none"}}>
+          © OpenStreetMap
+        </a>
         <div style={{position:"absolute",left:14,bottom:14,width:220,background:"rgba(255,255,255,.88)",color:"#0f172a",border:"1px solid rgba(148,163,184,.28)",borderRadius:10,padding:"10px 12px",boxShadow:"0 10px 30px rgba(15,23,42,.10)"}}>
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"#0f766e",marginBottom:5}}>{hasGps ? "Ubicacion actual" : "Ruta"}</div>
           <div style={{fontSize:12,fontWeight:900,lineHeight:1.35}}>{route.origen || "Origen"} -> {route.destino || "Destino"}</div>

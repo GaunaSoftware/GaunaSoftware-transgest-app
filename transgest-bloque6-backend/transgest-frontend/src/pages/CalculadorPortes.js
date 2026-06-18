@@ -95,41 +95,58 @@ export default function CalculadorPortes() {
   const margenReal = precioSug > 0 ? (margen / precioSug) * 100 : 0;
 
   const inp = {
-    background: "var(--bg4)",
-    border: "1px solid var(--border2)",
-    color: "var(--text)",
-    padding: "9px 12px",
+    background: "#fff",
+    border: "1px solid #cfdbe5",
+    color: "#0f172a",
+    padding: "12px 14px",
     borderRadius: 8,
     fontFamily: "'DM Sans',sans-serif",
-    fontSize: 13,
+    fontSize: 15,
     outline: "none",
     width: "100%",
     boxSizing: "border-box",
+    boxShadow: "0 8px 18px rgba(15, 23, 42, .035)",
   };
   const lbl = {
     display: "block",
-    fontSize: 10,
-    fontWeight: 700,
+    fontSize: 11,
+    fontWeight: 900,
     textTransform: "uppercase",
     letterSpacing: ".07em",
-    color: "var(--text5)",
-    marginBottom: 4,
-    marginTop: 12,
+    color: "#64748b",
+    marginBottom: 7,
+    marginTop: 14,
   };
   const fmt = n => toNumber(n).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <div style={{ flex: 1, padding: "22px 26px", fontFamily: "'DM Sans',sans-serif", maxWidth: 900 }}>
-      <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 20, fontWeight: 800, color: "var(--text)", marginBottom: 6 }}>
-        Calculador de portes
+    <div style={{ flex: 1, padding: "36px 44px", fontFamily: "'DM Sans',sans-serif", minHeight: "100vh", background: "linear-gradient(180deg,#f8fbfd 0%,#ffffff 45%,#f7fafc 100%)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 8, maxWidth: 1500, marginLeft: "auto", marginRight: "auto" }}>
+        <button type="button" onClick={() => window.history.back()} style={{
+          width: 42,
+          height: 42,
+          borderRadius: 8,
+          border: "1px solid #b9d7d6",
+          background: "#eefbf9",
+          color: "#006f68",
+          fontSize: 24,
+          fontWeight: 800,
+          lineHeight: 1,
+          cursor: "pointer",
+        }}>
+          ‹
+        </button>
+        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 34, fontWeight: 900, color: "#0f172a" }}>
+          Calculador de portes
+        </div>
       </div>
-      <div style={{ fontSize: 12, color: "var(--text4)", marginBottom: 24 }}>
+      <div style={{ fontSize: 16, color: "#64748b", marginBottom: 28, maxWidth: 1500, marginLeft: "auto", marginRight: "auto", paddingLeft: 60 }}>
         Calcula el coste real del transporte, el consumo estimado y el precio a cobrar con margen real sobre venta.
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-        <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 12, textTransform: "uppercase", letterSpacing: ".06em" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(430px, .95fr) minmax(430px, 1fr)", gap: 24, maxWidth: 1500, margin: "0 auto", alignItems: "start" }}>
+        <div style={{ background: "rgba(255,255,255,.96)", border: "1px solid #dbe5ec", borderRadius: 12, padding: 26, boxShadow: "0 16px 36px rgba(15, 23, 42, .07)" }}>
+          <div style={{ fontSize: 14, fontWeight: 900, color: "#006f68", marginBottom: 18, textTransform: "uppercase", letterSpacing: ".06em" }}>
             Datos del viaje
           </div>
 
@@ -146,9 +163,10 @@ export default function CalculadorPortes() {
             </div>
             <button onClick={calcularDistancia} disabled={calcKm || !origen || !destino}
               style={{
-                padding: "9px 14px", borderRadius: 8, border: "1px solid var(--accent)",
-                background: "transparent", color: "var(--accent)", fontSize: 12,
+                padding: "12px 34px", borderRadius: 8, border: "1px solid #007f78",
+                background: "#fff", color: "#006f68", fontSize: 15,
                 fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+                boxShadow: "0 8px 18px rgba(15, 23, 42, .035)",
               }}>
               {calcKm ? "Calculando..." : "Calcular"}
             </button>
@@ -166,17 +184,17 @@ export default function CalculadorPortes() {
             <button onClick={() => setConPeajes(v => !v)}
               style={{
                 display: "flex", alignItems: "center", gap: 8,
-                padding: "8px 14px", borderRadius: 8, cursor: "pointer",
+                padding: "10px 16px", borderRadius: 8, cursor: "pointer",
                 fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600,
-                border: conPeajes ? "1px solid rgba(20,184,166,.4)" : "1px solid var(--border2)",
-                background: conPeajes ? "rgba(20,184,166,.11)" : "var(--bg3)",
-                color: conPeajes ? "var(--accent-xl)" : "var(--text4)",
+                border: conPeajes ? "1px solid rgba(20,184,166,.38)" : "1px solid #dbe5ec",
+                background: conPeajes ? "rgba(20,184,166,.12)" : "#fff",
+                color: conPeajes ? "#006f68" : "#64748b",
                 transition: "all .15s",
               }}>
               {conPeajes ? "Con peajes" : "Sin peajes"}
               <span style={{
                 display: "inline-block", width: 32, height: 18, borderRadius: 9,
-                background: conPeajes ? "var(--accent)" : "var(--border3)",
+                background: conPeajes ? "#008b82" : "#cbd5e1",
                 position: "relative", transition: "background .2s",
               }}>
                 <span style={{
@@ -218,22 +236,23 @@ export default function CalculadorPortes() {
             {[15, 20, 25, 30, 35].map(m => (
               <button key={m} onClick={() => setMargenPct(m)}
                 style={{
-                  padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border2)",
-                  background: margenObjetivo === m ? "var(--accent)" : "transparent",
-                  color: margenObjetivo === m ? "#fff" : "var(--text4)",
-                  fontSize: 11, cursor: "pointer", fontWeight: 600,
+                  padding: "9px 16px", borderRadius: 7, border: "1px solid #dbe5ec",
+                  background: margenObjetivo === m ? "linear-gradient(180deg,#008b82,#006f68)" : "#fff",
+                  color: margenObjetivo === m ? "#fff" : "#334155",
+                  fontSize: 13, cursor: "pointer", fontWeight: 800,
+                  boxShadow: margenObjetivo === m ? "0 10px 18px rgba(0,111,104,.18)" : "none",
                 }}>
                 {m}%
               </button>
             ))}
           </div>
 
-          <div style={{ marginTop: 16, padding: "12px", borderRadius: 8, border: "1px solid var(--border2)", background: "var(--bg3)" }}>
+          <div style={{ marginTop: 16, padding: "14px", borderRadius: 8, border: "1px solid #b9d7d6", background: "linear-gradient(180deg,rgba(20,184,166,.08),rgba(255,255,255,.95))" }}>
             <label style={{ ...lbl, marginTop: 0 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                 <input type="checkbox" checked={usarMultiplicadorCorto} onChange={e => setUsarMultiplicadorCorto(e.target.checked)}
                   style={{ width: 16, height: 16, cursor: "pointer" }} />
-                <span style={{ fontWeight: 600, color: "var(--text3)", textTransform: "none", letterSpacing: "normal", fontSize: 13 }}>
+                <span style={{ fontWeight: 700, color: "#006f68", textTransform: "none", letterSpacing: "normal", fontSize: 14 }}>
                   Activar multiplicador de viaje corto
                 </span>
               </span>
@@ -255,8 +274,8 @@ export default function CalculadorPortes() {
         </div>
 
         <div>
-          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 20, marginBottom: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 14, textTransform: "uppercase", letterSpacing: ".06em" }}>
+          <div style={{ background: "rgba(255,255,255,.96)", border: "1px solid #dbe5ec", borderRadius: 12, padding: 26, marginBottom: 24, boxShadow: "0 16px 36px rgba(15, 23, 42, .07)" }}>
+            <div style={{ fontSize: 14, fontWeight: 900, color: "#006f68", marginBottom: 20, textTransform: "uppercase", letterSpacing: ".06em" }}>
               Desglose de costes
             </div>
             {[
@@ -270,18 +289,18 @@ export default function CalculadorPortes() {
               ["Recargo corto recorrido", aplicaMultiplicadorCorto ? fmt(recargoCorto) + " €" : "No aplica", aplicaMultiplicadorCorto ? "#10b981" : "var(--text5)"],            ].map(([label, val, color], i) => (
               <div key={i} style={{
                 display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0",
-                borderBottom: "1px solid var(--border)", fontSize: 13,
+                borderBottom: "1px solid #e2e8f0", fontSize: 15,
               }}>
-                <span style={{ color: "var(--text4)" }}>{label}</span>
+                <span style={{ color: "#475569" }}>{label}</span>
                 <span style={{
                   fontFamily: "'JetBrains Mono',monospace", fontWeight: 600,
-                  color: color || "var(--text2)", textAlign: "right",
+                  color: color || "#334155", textAlign: "right",
                 }}>{val}</span>
               </div>
             ))}
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0 0", fontSize: 14, fontWeight: 700 }}>
-              <span style={{ color: "var(--text3)" }}>Coste total</span>
-              <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#ef4444" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "28px 0 0", fontSize: 18, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".04em" }}>
+              <span style={{ color: "#006f68" }}>Coste total</span>
+              <span style={{ fontFamily: "'JetBrains Mono',monospace", color: "#006f68", fontSize: 28 }}>
                 {kmNum > 0 ? fmt(costeBase) + " €" : "—"}
               </span>
             </div>
@@ -289,8 +308,8 @@ export default function CalculadorPortes() {
 
           {puedeCalcular && (
             <div style={{
-              background: "rgba(16,185,129,.06)", border: "1px solid rgba(16,185,129,.25)",
-              borderRadius: 12, padding: 20,
+              background: "linear-gradient(180deg,rgba(20,184,166,.09),rgba(255,255,255,.98))", border: "1px solid #b9d7d6",
+              borderRadius: 12, padding: 26, boxShadow: "0 16px 36px rgba(15, 23, 42, .06)",
             }}>
               <div style={{
                 fontSize: 12, fontWeight: 700, color: "#10b981", marginBottom: 14,
@@ -308,7 +327,7 @@ export default function CalculadorPortes() {
                 Coste {fmt(costeBase)} € + margen {fmt(margen)} €
                 <span style={{
                   marginLeft: 8, padding: "2px 7px", borderRadius: 5,
-                  background: "rgba(16,185,129,.15)", color: "#10b981", fontWeight: 700, fontSize: 11,
+                background: "rgba(16,185,129,.15)", color: "#008b82", fontWeight: 700, fontSize: 11,
                 }}>
                   {margenReal.toFixed(1)}% sobre venta
                 </span>
@@ -340,14 +359,14 @@ export default function CalculadorPortes() {
                   ["€/100 km", kmNum > 0 ? fmt(precioSug / (kmNum / 100)) : "—"],
                   ["Margen", margenReal.toFixed(1) + "%"],
                 ].map(([k, v], i) => (
-                  <div key={i} style={{ background: "var(--bg3)", borderRadius: 7, padding: "8px 10px", textAlign: "center" }}>
+                  <div key={i} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "8px 10px", textAlign: "center" }}>
                     <div style={{
                       fontSize: 9, color: "var(--text5)", textTransform: "uppercase",
                       letterSpacing: ".06em", marginBottom: 4,
                     }}>{k}</div>
                     <div style={{
                       fontFamily: "'JetBrains Mono',monospace", fontWeight: 700,
-                      fontSize: 13, color: "var(--text)",
+                      fontSize: 13, color: "#0f172a",
                     }}>{v}</div>
                   </div>
                 ))}
@@ -367,11 +386,12 @@ export default function CalculadorPortes() {
 
           {!puedeCalcular && (
             <div style={{
-              background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12,
-              padding: 40, textAlign: "center", color: "var(--text5)",
+              background: "linear-gradient(180deg,rgba(20,184,166,.08),rgba(255,255,255,.98))", border: "1px solid #c8e4e1", borderRadius: 12,
+              padding: 66, textAlign: "center", color: "#64748b", minHeight: 190, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
             }}>
-              <div style={{ fontSize: 13 }}>Introduce los kilómetros para calcular el precio a cobrar.</div>
-              <div style={{ fontSize: 11, marginTop: 4 }}>El margen se aplica como margen real sobre venta.</div>
+              <div style={{ width: 72, height: 72, borderRadius: "50%", background: "rgba(20,184,166,.12)", border: "1px solid rgba(20,184,166,.2)", color: "#006f68", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, marginBottom: 28 }}>▦</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "#0f172a" }}>Introduce los kilómetros para calcular el precio a cobrar.</div>
+              <div style={{ fontSize: 15, marginTop: 12 }}>El margen se aplica como margen real sobre venta.</div>
             </div>
           )}
         </div>

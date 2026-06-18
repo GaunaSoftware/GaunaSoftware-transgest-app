@@ -924,47 +924,53 @@ export default function Palets(){
   const TIPO_ICON={entrega:"ENT",devolucion:"DEV",entrada_stock:"ALT",salida_stock:"SAL"};
 
   const S={
-    card:{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"16px 18px",marginBottom:14},
-    btn:{padding:"7px 14px",borderRadius:7,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:5},
-    th:{textAlign:"left",padding:"8px 10px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",borderBottom:"1px solid var(--border)",background:"var(--bg3)"},
-    td:{padding:"8px 10px",borderBottom:"1px solid var(--border2)",fontSize:12,color:"var(--text2)"},
-    inp:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
-    lbl:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10},
+    card:{background:"rgba(255,255,255,.96)",border:"1px solid #dbe5ec",borderRadius:12,padding:"18px 20px",marginBottom:16,boxShadow:"0 12px 30px rgba(15,23,42,.055)"},
+    btn:{padding:"10px 15px",borderRadius:8,border:"1px solid #dbe5ec",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:7,background:"#fff",color:"#0f172a"},
+    th:{textAlign:"left",padding:"12px 12px",fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",borderBottom:"1px solid #dbe5ec",background:"#f8fbfd"},
+    td:{padding:"13px 12px",borderBottom:"1px solid #e2e8f0",fontSize:13,color:"#334155"},
+    inp:{background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box"},
+    lbl:{display:"block",fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",marginBottom:5,marginTop:10},
   };
 
   return(
-    <div style={{flex:1, padding:"22px 26px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh"}}>
+    <div style={{flex:1, padding:"30px 36px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 44%,#f7fafc 100%)"}}>
       {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:900,color:"var(--text)"}}>Gestion de Almacen</div>
-        <button onClick={()=>{setMovimientoEditando(null);setModal(true);}} style={{...S.btn,background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:700,marginLeft:"auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:26,flexWrap:"wrap"}}>
+        <div style={{width:44,height:44,borderRadius:10,border:"1px solid #dbe5ec",background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>⌂</div>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:34,fontWeight:900,color:"#0f172a"}}>Gestion de almacen</div>
+        <button onClick={()=>{setMovimientoEditando(null);setModal(true);}} style={{...S.btn,background:"linear-gradient(180deg,#008b82,#006f68)",color:"#fff",fontSize:15,fontWeight:800,marginLeft:"auto",border:"1px solid #007f78",padding:"13px 22px",boxShadow:"0 12px 22px rgba(0,111,104,.18)"}}>
           + Registrar movimiento
         </button>
       </div>
 
       {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:14,marginBottom:24}}>
         {[
-          ["Stock empresa",stockEmpresa,"palets",stockEmpresa>0?"#10b981":"#f59e0b"],
-          ["Pendientes devolucion",totalPendiente,"palets",totalPendiente>0?"#f97316":"#10b981"],
-          ["Salidas preparadas",totalSalidasPreparadas,"palets",totalSalidasPreparadas>0?"#f59e0b":"#10b981"],
-          ["Alertas antiguedad",alertasAntiguedad.length,"lotes",alertasCriticas.length>0?"#ef4444":alertasAntiguedad.length>0?"#f59e0b":"#10b981"],
-          ["Devueltos registrados",totalDevuelto,"palets","#10b981"],
-          ["Clientes con palets",clientesConPalets.filter(c=>c.stock>0).length,"clientes","#3b82f6"],
-          ["Total movimientos",movimientos.length,"registros","var(--text4)"],
-        ].map(([l,v,u,c])=>(
-          <div key={l} style={{...S.card,padding:"12px 14px",textAlign:"center",marginBottom:0}}>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:20,color:c}}>{fmtN(v)}</div>
-            <div style={{fontSize:11,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".05em",marginTop:2}}>{l}</div>
-            <div style={{fontSize:10,color:"var(--text5)"}}>{u}</div>
+          ["Stock empresa",stockEmpresa,"palets",stockEmpresa>0?"#10b981":"#f59e0b","□"],
+          ["Pendientes devolucion",totalPendiente,"palets",totalPendiente>0?"#f97316":"#10b981","↶"],
+          ["Salidas preparadas",totalSalidasPreparadas,"palets",totalSalidasPreparadas>0?"#f59e0b":"#10b981","↑"],
+          ["Alertas antiguedad",alertasAntiguedad.length,"lotes",alertasCriticas.length>0?"#ef4444":alertasAntiguedad.length>0?"#f59e0b":"#10b981","!"],
+          ["Devueltos registrados",totalDevuelto,"palets","#10b981","▣"],
+          ["Clientes con palets",clientesConPalets.filter(c=>c.stock>0).length,"clientes","#3b82f6","☷"],
+          ["Total movimientos",movimientos.length,"registros","#64748b","⌁"],
+        ].map(([l,v,u,c,icon])=>(
+          <div key={l} style={{...S.card,padding:"18px 16px",marginBottom:0,display:"flex",alignItems:"center",gap:13,minHeight:92}}>
+            <div style={{width:50,height:50,borderRadius:"50%",background:`${c}18`,color:c,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:900,flex:"0 0 auto"}}>
+              {icon}
+            </div>
+            <div style={{minWidth:0}}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:24,color:c,lineHeight:1}}>{fmtN(v)}</div>
+              <div style={{fontSize:11,color:"#334155",textTransform:"uppercase",letterSpacing:".05em",fontWeight:900,marginTop:6}}>{l}</div>
+              <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{u}</div>
+            </div>
           </div>
         ))}
       </div>
 
       {/* Tabs */}
-      <div style={{display:"flex",gap:2,borderBottom:"1px solid var(--border)",marginBottom:16}}>
+      <div style={{display:"flex",gap:22,borderBottom:"1px solid #dbe5ec",marginBottom:18}}>
         {[["stock","Palets / cliente"],["dev_cliente","Dev. Cliente"],["almacen_propio","Mercancia propia"],["almacen_cliente","Almacen cliente"],["historial","Historial"]].map(([id,l])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{...S.btn,border:"none",borderRadius:"6px 6px 0 0",borderBottom:`2px solid ${tab===id?"var(--accent)":"transparent"}`,color:tab===id?"var(--accent)":"var(--text4)",background:"transparent",padding:"8px 16px",fontSize:12}}>
+          <button key={id} onClick={()=>setTab(id)} style={{...S.btn,border:"none",borderRadius:0,borderBottom:`2px solid ${tab===id?"#008b82":"transparent"}`,color:tab===id?"#006f68":"#64748b",background:"transparent",padding:"0 0 13px",fontSize:14,fontWeight:800,boxShadow:"none"}}>
             {l}
           </button>
         ))}
@@ -973,53 +979,62 @@ export default function Palets(){
       {/* Stock empresa */}
       {tab==="stock"&&(
         <div style={S.card}>
-          <div style={{fontWeight:800,fontSize:14,color:"var(--text)",marginBottom:16}}>Estado actual del almacen de palets</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-            <div style={{background:"var(--bg3)",borderRadius:10,padding:"16px",textAlign:"center"}}>
+          <div style={{fontWeight:900,fontSize:18,color:"#0f172a",marginBottom:16}}>Estado actual del almacen de palets</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:18}}>
+            <div style={{background:"linear-gradient(90deg,rgba(16,185,129,.11),rgba(255,255,255,.9))",borderRadius:10,padding:"22px",textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:24}}>
+              <div style={{width:58,height:58,borderRadius:"50%",background:"rgba(16,185,129,.13)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,color:"#009b7d"}}>□</div>
+              <div>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:36,color:stockEmpresa>0?"#10b981":"#f59e0b"}}>{fmtN(stockEmpresa)}</div>
-              <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>Palets disponibles en empresa</div>
+              <div style={{fontSize:14,color:"#64748b",marginTop:4}}>Palets disponibles en empresa</div>
+              </div>
             </div>
-            <div style={{background:"var(--bg3)",borderRadius:10,padding:"16px",textAlign:"center"}}>
+            <div style={{background:"linear-gradient(90deg,rgba(249,115,22,.12),rgba(255,255,255,.9))",borderRadius:10,padding:"22px",textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:24}}>
+              <div style={{width:58,height:58,borderRadius:"50%",background:"rgba(249,115,22,.13)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,color:"#f97316"}}>↶</div>
+              <div>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:36,color:"#f97316"}}>{fmtN(totalPendiente)}</div>
-              <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>Palets pendientes de devolucion de clientes</div>
+              <div style={{fontSize:14,color:"#64748b",marginTop:4}}>Palets pendientes de devolucion de clientes</div>
+              </div>
             </div>
           </div>
-          <div style={{padding:"10px 14px",background:"rgba(59,130,246,.06)",border:"1px solid rgba(59,130,246,.15)",borderRadius:8,fontSize:12,color:"var(--text3)"}}>
+          <div style={{padding:"13px 16px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,fontSize:13,color:"#475569"}}>
             El stock de empresa aumenta cuando entran palets de un cliente/obra y baja cuando se devuelven al propietario. Cada devolucion queda desglosada por obra o referencia.
           </div>
-          <div style={{marginTop:12,padding:"12px 14px",borderRadius:10,background:alertasAntiguedad.length?"rgba(245,158,11,.08)":"rgba(16,185,129,.07)",border:`1px solid ${alertasAntiguedad.length?"rgba(245,158,11,.24)":"rgba(16,185,129,.20)"}`}}>
+          <div style={{marginTop:14,padding:"16px 18px",borderRadius:10,background:alertasAntiguedad.length?"rgba(249,115,22,.07)":"rgba(16,185,129,.07)",border:`1px solid ${alertasAntiguedad.length?"#fed7aa":"rgba(16,185,129,.20)"}`}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:alertasAntiguedad.length?10:0}}>
               <div>
-                <div style={{fontWeight:900,fontSize:13,color:"var(--text)"}}>Alertas de antiguedad y almacenaje</div>
-                <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
+                <div style={{fontWeight:900,fontSize:16,color:"#0f172a"}}>Alertas de antiguedad y almacenaje</div>
+                <div style={{fontSize:13,color:"#64748b",marginTop:3}}>
                   Detecta palets de cliente/obra pendientes de devolver con 14 dias o mas. A partir de 30 dias se marcan como criticos.
                 </div>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <span style={{...S.btn,background:alertasCriticas.length?"rgba(239,68,68,.12)":"var(--bg3)",color:alertasCriticas.length?"#ef4444":"var(--text4)",border:"1px solid var(--border2)",cursor:"default"}}>
+                <span style={{...S.btn,background:alertasCriticas.length?"rgba(239,68,68,.12)":"#fff",color:alertasCriticas.length?"#ef4444":"#64748b",border:"1px solid #fecaca",cursor:"default"}}>
                   {alertasCriticas.length} criticas
                 </span>
-                <span style={{...S.btn,background:alertasAntiguedad.length?"rgba(245,158,11,.12)":"var(--bg3)",color:alertasAntiguedad.length?"#f59e0b":"var(--text4)",border:"1px solid var(--border2)",cursor:"default"}}>
+                <span style={{...S.btn,background:alertasAntiguedad.length?"rgba(249,115,22,.12)":"#fff",color:alertasAntiguedad.length?"#f97316":"#64748b",border:"1px solid #fed7aa",cursor:"default"}}>
                   {fmtN(totalPaletsEnAlerta)} palets
                 </span>
-                <span style={{...S.btn,background:"var(--bg3)",color:"var(--text4)",border:"1px solid var(--border2)",cursor:"default"}}>
+                <span style={{...S.btn,background:"#fff",color:"#64748b",border:"1px solid #dbe5ec",cursor:"default"}}>
                   {costeAlmacenajeEstimado>0 ? `${fmt2(costeAlmacenajeEstimado)} EUR estimados` : "Sin coste configurado"}
                 </span>
               </div>
             </div>
             {alertasAntiguedad.length ? (
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:8}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
                 {alertasAntiguedad.slice(0,6).map((a,idx)=>(
-                  <div key={`${a.cliente_id}-${a.fecha}-${idx}`} style={{border:"1px solid var(--border)",borderRadius:8,padding:"9px 10px",background:"var(--bg3)"}}>
+                  <div key={`${a.cliente_id}-${a.fecha}-${idx}`} style={{border:"1px solid #fed7aa",borderRadius:8,padding:"14px 16px",background:"#fff",display:"grid",gridTemplateColumns:"48px 1fr auto",alignItems:"center",gap:16}}>
+                    <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(249,115,22,.12)",display:"flex",alignItems:"center",justifyContent:"center",color:"#ef4444",fontWeight:900,fontSize:22}}>!</div>
+                    <div>
                     <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
-                      <span style={{fontWeight:900,fontSize:12,color:"var(--text)"}}>{a.cliente_nombre}</span>
-                      <span style={{fontSize:10,fontWeight:900,color:a.nivel==="critica"?"#ef4444":"#f59e0b",textTransform:"uppercase"}}>{a.dias} dias</span>
+                      <span style={{fontWeight:900,fontSize:13,color:"#0f172a"}}>{a.cliente_nombre}</span>
                     </div>
-                    <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{a.obra_nombre}</div>
-                    <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:7,fontSize:11,color:"var(--text5)"}}>
+                    <div style={{fontSize:12,color:"#64748b",marginTop:3}}>{a.obra_nombre}</div>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:7,fontSize:12,color:"#64748b"}}>
                       <span>{fmtN(a.palets)} palets desde {a.fecha || "-"}</span>
                       {a.coste_estimado>0 && <strong style={{color:"#f59e0b"}}>{fmt2(a.coste_estimado)} EUR</strong>}
                     </div>
+                    </div>
+                    <span style={{fontSize:13,fontWeight:900,color:a.nivel==="critica"?"#ef4444":"#f59e0b",textTransform:"uppercase"}}>{a.dias} dias</span>
                   </div>
                 ))}
               </div>

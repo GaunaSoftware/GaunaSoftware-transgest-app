@@ -350,6 +350,21 @@ export const getPedidoDocumentoControlExport = (id) => apiFetch(`/pedidos/${id}/
 export const getPedidoDocumentoControlFirmaPaquete = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/firma-paquete`);
 export const getPedidoRegulatoryCoreExport = (id, params = {}) =>
   apiFetch(`/pedidos/${id}/regulatory-core/export?${new URLSearchParams(params)}`, { silentSuccess:true });
+export async function descargarPedidoRegulatoryDossierPdf(id) {
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/v1/pedidos/${encodeURIComponent(id)}/regulatory-core/dossier.pdf`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!res.ok) {
+    const data = await parseApiResponse(res).catch(() => ({}));
+    throw new Error(data.error || data.message || data.raw_text || "No se pudo descargar el dossier regulatorio.");
+  }
+  const disposition = res.headers.get("content-disposition") || "";
+  const filename = filenameFromDisposition(disposition) || `transgest-dossier-regulatorio-${id}.pdf`;
+  return { blob: await res.blob(), filename };
+}
 export const getPedidoRegulatoryPayload = (id, type) =>
   apiFetch(`/pedidos/${id}/regulatory-core/payload/${encodeURIComponent(type)}`, { silentSuccess:true });
 export const crearPedidoRegulatoryTransmissionDraft = (id, data = {}) =>
@@ -566,7 +581,6 @@ export const getEmisionesOperativas = (period="90d") => apiFetch(`/informes/emis
 export const getDatosMaestrosReadiness = () => apiFetch("/informes/datos-maestros-readiness", { silentSuccess:true, silentError:true });
 export const getCumplimientoEuropeo = (days=45) => apiFetch(`/informes/cumplimiento-europeo?days=${encodeURIComponent(days)}`, { silentSuccess:true, silentError:true });
 export const getControlTower = (period="7d") => apiFetch(`/informes/control-tower?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
-export const getCopilotoOperativo = (period="7d") => apiFetch(`/informes/copiloto-operativo?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
 export const getExcepcionesOperativas = () => apiFetch("/informes/excepciones", { silentSuccess:true, silentError:true });
 export const actualizarExcepcionOperativa = (key, data) => apiFetch(`/informes/excepciones/${encodeURIComponent(key)}`, { method:"PATCH", body:data });
 export const getNotificaciones = (limit=50) => apiFetch(`/notificaciones?limit=${encodeURIComponent(limit)}`, { silentSuccess:true, silentError:true });

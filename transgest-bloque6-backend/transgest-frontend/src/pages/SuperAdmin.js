@@ -93,6 +93,23 @@ const monthlyPlanValue = (plan, ciclo="mensual") => {
   return ciclo === "anual" ? (base * 12 * 0.85) / 12 : base;
 };
 
+function buildEmpresaImplantacion(e = {}) {
+  const checks = [
+    { key:"datos", label:"Datos fiscales", ok: Boolean(e.nombre && e.cif) },
+    { key:"gerente", label:"Gerente activo", ok: Number(e.n_usuarios || e.usuarios_activos || 0) > 0 },
+    { key:"flota", label:"Flota cargada", ok: Number(e.n_vehiculos || e.vehiculos_activos || 0) > 0 },
+    { key:"clientes", label:"Clientes", ok: Number(e.clientes_activos || e.n_clientes || 0) > 0 },
+    { key:"actividad", label:"Pedido de prueba", ok: Number(e.n_pedidos || e.pedidos_30d || 0) > 0 },
+    { key:"pago", label:"Forma de pago", ok: Boolean(e.metodo_pago && e.metodo_pago !== "pendiente") },
+    { key:"vencimiento", label:"Contrato/vencimiento", ok: Boolean(e.fecha_vencimiento || e.estado === "activo") },
+  ];
+  const ok = checks.filter(c => c.ok).length;
+  const score = Math.round((ok / checks.length) * 100);
+  const pendientes = checks.filter(c => !c.ok).map(c => c.label);
+  const estado = score >= 85 ? "lista" : score >= 60 ? "en curso" : "bloqueada";
+  return { score, estado, pendientes };
+}
+
 // Section
 function LoginSA({ onLogin }){
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
@@ -2940,16 +2957,18 @@ export default function SuperAdmin(){
               <div style={{padding:30,textAlign:"center",color:"#64748b"}}>Sin resultados.</div>
             ):(
               <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",minWidth:980}}>
+                <table style={{width:"100%",borderCollapse:"collapse",minWidth:1120}}>
                   <thead><tr>
                     <th style={S.th}>Empresa</th><th style={S.th}>Plan</th><th style={S.th}>Estado</th>
-                    <th style={S.th}>Pago</th><th style={S.th}>Uso</th><th style={S.th}>Pedidos</th>
+                    <th style={S.th}>Pago</th><th style={S.th}>Uso</th><th style={S.th}>Implantacion</th><th style={S.th}>Pedidos</th>
                     <th style={S.th}>Registro</th><th style={S.th}>Vencimiento</th><th style={S.th}></th>
                   </tr></thead>
                   <tbody>
                     {empresasFiltradas.map(e=>{
                       const vencida=e.fecha_vencimiento&&new Date(e.fecha_vencimiento)<new Date();
                       const proxima=e.fecha_vencimiento&&!vencida&&(new Date(e.fecha_vencimiento)-new Date())<7*24*3600*1000;
+                      const implantacion = buildEmpresaImplantacion(e);
+                      const implantacionColor = implantacion.estado === "lista" ? "#34d399" : implantacion.estado === "en curso" ? "#fbbf24" : "#f87171";
                       return(
                         <tr key={e.id}>
                           <td style={{...S.td,fontWeight:700,color:"#e2e8f0"}}>
@@ -2966,6 +2985,16 @@ export default function SuperAdmin(){
                           <td style={S.td}>
                             <div style={{fontSize:11,color:"#f97316",fontWeight:700}}>{fmtN(e.n_vehiculos)} vehiculos</div>
                             <div style={{fontSize:11,color:"#3b82f6",fontWeight:700,marginTop:2}}>{fmtN(e.n_usuarios)} usuarios</div>
+                            <div style={{fontSize:10,color:"#14b8a6",fontWeight:700,marginTop:2}}>{fmtN(e.n_clientes)} clientes</div>
+                          </td>
+                          <td style={S.td}>
+                            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:900,color:implantacionColor}}>{implantacion.score}%</div>
+                            <div style={{fontSize:10,color:implantacionColor,fontWeight:800,textTransform:"uppercase",marginTop:1}}>{implantacion.estado}</div>
+                            {!!implantacion.pendientes.length && (
+                              <div title={implantacion.pendientes.join(", ")} style={{fontSize:10,color:"#64748b",marginTop:3,maxWidth:170,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                                Falta: {implantacion.pendientes.slice(0, 2).join(", ")}{implantacion.pendientes.length > 2 ? "..." : ""}
+                              </div>
+                            )}
                           </td>
                           <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",textAlign:"center",color:"#e2e8f0"}}>{fmtN(e.n_pedidos)}</td>
                           <td style={{...S.td,fontSize:11}}>{fmtDate(e.created_at)}</td>

@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import { getEmpresa, saveEmpresa, getEmpresaBackend, saveEmpresaBackend, getEmailConfig, saveEmailConfig, getEmailConfigBackend, saveEmailConfigBackend, getEmailLogBackend, getEmpresaConfig, setConfigTrafico, setConfigPrecios, setConfigAlertas, getLogo, subirLogo, eliminarLogo, getEmpresaFiscalConfig, saveEmpresaFiscalConfig, testEmpresaFiscalConfig, getEmpresaFiscalQueueSummary, getEmpresaIntegracionesStatus, getPuestaMarchaComercial, descargarPuestaMarchaInforme, getJornadaDiariaOperativa, descargarJornadaDiariaInforme, solicitarBackupEmpresa, getControlCobrosConfig, guardarControlCobrosConfig, actualizarCapitalTesoreria, getCalendarioLaboral, getCalendarioLaboralCcaa, getToken, getWhatsappConfig, guardarWhatsappConfig, getWhatsappLog } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
+import { getEmpresaPlanLocal, normalizePlan } from "../utils/planFeatures";
+import { COMPANY_PALETTES, canUseCompanyPalette, normalizePaletteConfig, saveCompanyPalette } from "../utils/companyPalette";
 
 const S = {
-  page:   { padding:"22px 26px", fontFamily:"'DM Sans',sans-serif", maxWidth:860 },
+  page:   { padding:"22px 26px", fontFamily:"'DM Sans',sans-serif", width:"100%", maxWidth:"none", boxSizing:"border-box" },
   title:  { fontFamily:"'Syne',sans-serif", fontSize:20, fontWeight:800, color:"var(--text)", marginBottom:4 },
   sub:    { fontSize:12, color:"var(--text4)", marginBottom:24 },
   section:{ background:"var(--bg2)", border:"1px solid #141a28", borderRadius:12, padding:"20px 22px", marginBottom:16 },
@@ -89,6 +91,8 @@ export default function Empresa() {
   const [logoMime, setLogoMime]     = useState("image/png");
   const [logoUploading, setLogoUploading] = useState(false);
   const esGerente = user?.rol === "gerente";
+  const empresaPlan = normalizePlan(user?.plan || getEmpresaPlanLocal());
+  const puedePersonalizarColores = canUseCompanyPalette(empresaPlan);
 
   const [empresa, setEmpresa]         = useState(() => ({
     razon_social:"", cif:"", domicilio:"", cp:"", municipio:"",
@@ -224,6 +228,7 @@ export default function Empresa() {
       if (perfil && Object.keys(perfil).length) {
         setEmpresa(prev => ({ ...prev, ...perfil }));
         saveEmpresa({ ...getEmpresa(), ...perfil });
+        if (perfil.paleta_colores) saveCompanyPalette(perfil.paleta_colores);
         try { localStorage.removeItem("tms_empresa"); } catch {}
         return;
       }
@@ -268,8 +273,6 @@ export default function Empresa() {
     }).catch(()=>{});
     getEmpresaFiscalQueueSummary().then(setFiscalQueueSummary).catch(()=>{});
     getEmpresaIntegracionesStatus().then(setIntegracionesStatus).catch(()=>{});
-    getPuestaMarchaComercial().then(setPuestaMarcha).catch(()=>{});
-    getJornadaDiariaOperativa().then(setJornadaDiaria).catch(()=>{});
     getEmpresaConfig()
       .then(async d=>{
         const safeCfg = d && typeof d === "object" ? d : {};
@@ -341,15 +344,20 @@ export default function Empresa() {
   const ffs = k => e => setFiscalCfg(p => ({ ...p, sii:{ ...p.sii, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value } }));
 
   async function guardarEmpresa() {
-    saveEmpresa(empresa);
+    const empresaToSave = {
+      ...empresa,
+      paleta_colores: puedePersonalizarColores ? normalizePaletteConfig(empresa.paleta_colores) : normalizePaletteConfig(),
+    };
+    saveEmpresa(empresaToSave);
+    saveCompanyPalette(empresaToSave.paleta_colores);
     try {
-      const res = await saveEmpresaBackend(empresa);
+      const res = await saveEmpresaBackend(empresaToSave);
       if (res?.perfil) {
         setEmpresa(prev => ({ ...prev, ...res.perfil }));
         saveEmpresa({ ...getEmpresa(), ...res.perfil });
+        if (res.perfil.paleta_colores) saveCompanyPalette(res.perfil.paleta_colores);
       }
       getEmpresaIntegracionesStatus().then(setIntegracionesStatus).catch(()=>{});
-      getPuestaMarchaComercial().then(setPuestaMarcha).catch(()=>{});
       setSaved("empresa");
       setTimeout(() => setSaved(""), 3000);
     } catch(e) {
@@ -377,7 +385,6 @@ export default function Empresa() {
       if (res?.config?.ultima_prueba) setFiscalTestResult(res.config.ultima_prueba);
       getEmpresaFiscalQueueSummary().then(setFiscalQueueSummary).catch(()=>{});
       getEmpresaIntegracionesStatus().then(setIntegracionesStatus).catch(()=>{});
-      getPuestaMarchaComercial().then(setPuestaMarcha).catch(()=>{});
       setSaved("fiscal");
       setTimeout(()=>setSaved(""), 3000);
     } catch(e) {
@@ -408,7 +415,6 @@ export default function Empresa() {
     try {
       const res = await saveEmailConfigBackend(emailCfg);
       if (res?.config) setEmailCfg(p => ({ ...p, ...res.config, smtp_pass:"" }));
-      getPuestaMarchaComercial().then(setPuestaMarcha).catch(()=>{});
       setSaved("email");
       setTimeout(() => setSaved(""), 3000);
     } catch(e) {
@@ -658,7 +664,6 @@ export default function Empresa() {
   }
 
   const TABS = [
-    { id:"puesta_marcha", l:"Puesta en marcha" },
     { id:"empresa", l:"Datos fiscales" },
     { id:"tesoreria", l:"Tesoreria" },
     { id:"sostenibilidad", l:"Sostenibilidad / CO2" },
@@ -668,6 +673,31 @@ export default function Empresa() {
     { id:"avisos_cfg", l:"Avisos personalizados" },
     { id:"trafico_cfg", l:"Config. Tráfico" },
   ];
+
+  const activePalette = normalizePaletteConfig(empresa.paleta_colores);
+
+  function setEmpresaPalette(paletteId) {
+    const preset = COMPANY_PALETTES.find(p => p.id === paletteId) || COMPANY_PALETTES[0];
+    const next = normalizePaletteConfig({
+      id: preset.id,
+      custom: {
+        accent: preset.accent,
+        accentLight: preset.accentLight,
+        sidebar: preset.sidebar,
+      },
+    });
+    setEmpresa(p => ({ ...p, paleta_colores: next }));
+    saveCompanyPalette(next);
+  }
+
+  function setEmpresaPaletteColor(key, value) {
+    const next = normalizePaletteConfig({
+      ...activePalette,
+      custom: { ...activePalette, [key]: value },
+    });
+    setEmpresa(p => ({ ...p, paleta_colores: next }));
+    saveCompanyPalette(next);
+  }
 
   return (
     <div style={S.page}>
@@ -751,14 +781,93 @@ export default function Empresa() {
           </div>
         </div>
       </div>
+      <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"16px 18px",marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:14,flexWrap:"wrap",marginBottom:12}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:13,color:"var(--text)",marginBottom:4}}>Personalizacion premium</div>
+            <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45}}>
+              Cada empresa puede elegir una paleta visual propia. El logo del programa no se modifica.
+            </div>
+          </div>
+          <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",border:`1px solid ${puedePersonalizarColores ? "rgba(16,185,129,.30)" : "rgba(245,158,11,.30)"}`,background:puedePersonalizarColores ? "rgba(16,185,129,.10)" : "rgba(245,158,11,.10)",color:puedePersonalizarColores ? "var(--green)" : "#f59e0b",borderRadius:999,padding:"5px 9px"}}>
+            {puedePersonalizarColores ? `${empresaPlan} activo` : "Solo premium"}
+          </span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(260px,1.2fr) minmax(260px,.8fr)",gap:14}}>
+          <div style={{display:"grid",gap:10}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {COMPANY_PALETTES.map(palette => (
+                <button
+                  key={palette.id}
+                  type="button"
+                  disabled={!puedePersonalizarColores}
+                  onClick={() => setEmpresaPalette(palette.id)}
+                  style={{
+                    border:`1px solid ${activePalette.id === palette.id ? "var(--accent-l)" : "var(--border2)"}`,
+                    background:activePalette.id === palette.id ? "var(--accent-dim)" : "var(--bg3)",
+                    color:activePalette.id === palette.id ? "var(--accent-xl)" : "var(--text3)",
+                    borderRadius:9,
+                    padding:"8px 10px",
+                    fontSize:12,
+                    fontWeight:900,
+                    cursor:puedePersonalizarColores ? "pointer" : "not-allowed",
+                    opacity:puedePersonalizarColores ? 1 : .58,
+                    fontFamily:"'DM Sans',sans-serif",
+                    display:"inline-flex",
+                    alignItems:"center",
+                    gap:7,
+                  }}
+                >
+                  <span style={{width:18,height:18,borderRadius:999,background:`linear-gradient(135deg, ${palette.accent}, ${palette.accentLight})`,border:"1px solid rgba(255,255,255,.35)"}} />
+                  {palette.label}
+                </button>
+              ))}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+              {[
+                ["accent", "Color principal"],
+                ["accentLight", "Color activo"],
+                ["sidebar", "Lateral"],
+              ].map(([key, label]) => (
+                <label key={key} style={{display:"grid",gap:5,fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>
+                  {label}
+                  <input
+                    type="color"
+                    disabled={!puedePersonalizarColores}
+                    value={activePalette[key]}
+                    onChange={e => setEmpresaPaletteColor(key, e.target.value)}
+                    style={{width:"100%",height:38,border:"1px solid var(--border2)",borderRadius:8,background:"var(--bg3)",padding:4,cursor:puedePersonalizarColores ? "pointer" : "not-allowed",opacity:puedePersonalizarColores ? 1 : .55}}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+          <div style={{border:"1px solid var(--border)",borderRadius:10,overflow:"hidden",background:"var(--bg3)"}}>
+            <div style={{height:42,background:activePalette.sidebar,display:"flex",alignItems:"center",gap:8,padding:"0 12px",color:"#fff"}}>
+              <span style={{width:24,height:24,borderRadius:7,background:activePalette.accentLight}} />
+              <strong style={{fontSize:12}}>Vista previa</strong>
+            </div>
+            <div style={{padding:12,display:"grid",gap:8}}>
+              <div style={{height:32,borderRadius:8,background:activePalette.accent,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900}}>Boton principal</div>
+              <div style={{height:32,borderRadius:8,border:`1px solid ${activePalette.accentLight}`,background:"var(--bg2)",color:activePalette.accentLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900}}>Estado activo</div>
+            </div>
+          </div>
+        </div>
+        {!puedePersonalizarColores && (
+          <div style={{marginTop:10,fontSize:12,color:"#b45309",background:"rgba(245,158,11,.10)",border:"1px solid rgba(245,158,11,.25)",borderRadius:8,padding:"8px 10px"}}>
+            Disponible para planes Profesional, Enterprise o Premium.
+          </div>
+        )}
+      </div>
+
       {/* Tabs */}
-      <div style={{ display:"flex", gap:0, borderBottom:"1px solid #141a28", marginBottom:20 }}>
+      <div style={{ display:"flex", gap:0, borderBottom:"1px solid #141a28", marginBottom:20, overflowX:"auto", overflowY:"hidden", WebkitOverflowScrolling:"touch" }}>
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding:"7px 16px", border:"none",
             borderBottom:`2px solid ${tab===t.id ? "var(--accent-l)":"transparent"}`,
             background:"none", fontFamily:"'DM Sans',sans-serif", fontSize:12,
-            fontWeight:600, cursor:"pointer", color:tab===t.id ? "var(--accent-xl)" : "var(--text4)",
+            fontWeight:600, cursor:"pointer", color:tab===t.id ? "var(--accent-xl)" : "var(--text4)", whiteSpace:"nowrap", flex:"0 0 auto",
           }}>{t.l}</button>
         ))}
       </div>

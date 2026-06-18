@@ -5,7 +5,7 @@ import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, eliminarP
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidos, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
-         getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
+         getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          getPuntosInteres as getPuntosInteresApi, chatIA, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getRutaOptimizadaPedido, optimizarRuta,
          getPedidoWhatsappPreflight, enviarPedidoWhatsapp } from "../services/api";
@@ -479,15 +479,15 @@ const S = {
   title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:16,color:"var(--text)"},
   bar:{display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"},
   btn:{padding:"8px 16px",borderRadius:7,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:6},
-  card:{background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:12,overflow:"hidden"},
-  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)",whiteSpace:"nowrap"},
-  td:{padding:"10px 14px",borderBottom:"1px solid #181e2e",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
-  input:{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
-  sel:{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  card:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
+  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)",whiteSpace:"nowrap"},
+  td:{padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
+  input:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  sel:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
-  mbox:{background:"var(--bg2)",border:"1px solid #28344f",borderRadius:16,padding:28,width:"min(720px,96vw)",maxHeight:"92vh",overflowY:"auto",position:"relative"},
+  mbox:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:"clamp(14px,3vw,28px)",width:"100%",maxWidth:720,boxSizing:"border-box",maxHeight:"92vh",overflowY:"auto",overflowX:"hidden",position:"relative"},
   label:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:5,marginTop:12},
-  sec:{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".1em",color:"#3b6ef5",marginTop:20,marginBottom:8,paddingBottom:6,borderBottom:"1px solid #1a2d5a"},
+  sec:{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent)",marginTop:20,marginBottom:8,paddingBottom:6,borderBottom:"1px solid var(--border)"},
 };
 
 function Badge({ estado }) {
@@ -1159,6 +1159,61 @@ function applyPuntoCargaToDraft(draft = {}, punto = {}) {
       nombre
     ),
   };
+}
+
+function applyPuntoDescargaToDraft(draft = {}, punto = {}) {
+  const nombre = (punto.nombre || punto.direccion || draft.destino || "").toUpperCase();
+  return {
+    ...draft,
+    destino: nombre,
+    ventana_descarga: draft.ventana_descarga || punto.ventana || "",
+    puntos_descarga: updatePrimaryStop(
+      draft.puntos_descarga,
+      puntoToStop(punto),
+      nombre
+    ),
+  };
+}
+
+function findPuntoInteresForRouteEndpoint(endpoint, clienteId, tipo = "ambos") {
+  const needle = normalizePlaceText(endpoint);
+  if (!needle) return null;
+  const stop = new Set(["de","del","la","el","los","las","s","sl","sa","sau","slu","cementos","capa","grupo"]);
+  const endpointTokens = needle.split(/\W+/).filter(t => t.length >= 3 && !stop.has(t));
+  const candidates = getPuntosInteres().filter(p => {
+    const pointTipo = String(p?.tipo || "ambos").toLowerCase();
+    const typeOk = tipo === "ambos" || pointTipo === "ambos" || pointTipo === tipo;
+    if (!typeOk) return false;
+    return !p?.cliente_id || !clienteId || String(p.cliente_id) === String(clienteId);
+  });
+  const score = (p) => {
+    const haystack = normalizePlaceText([
+      p.nombre,
+      p.direccion,
+      p.ciudad,
+      p.provincia,
+      p.codigo_postal,
+      direccionCompletaPunto(p),
+    ].filter(Boolean).join(" "));
+    if (!haystack) return 0;
+    if (haystack === needle) return 100;
+    if (haystack.includes(needle) || needle.includes(haystack)) return 90;
+    const hits = endpointTokens.filter(t => haystack.includes(t)).length;
+    return hits >= Math.min(2, endpointTokens.length || 2) ? 50 + hits : 0;
+  };
+  return candidates
+    .map(p => ({ p, score: score(p) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.p || null;
+}
+
+function applyRouteEndpointsFromSavedPoints(draft = {}, ruta = {}) {
+  let next = { ...draft };
+  const puntoCarga = findPuntoInteresForRouteEndpoint(ruta.origen || next.origen, next.cliente_id, "carga");
+  const puntoDescarga = findPuntoInteresForRouteEndpoint(ruta.destino || next.destino, next.cliente_id, "descarga");
+  if (puntoCarga) next = applyPuntoCargaToDraft(next, puntoCarga);
+  if (puntoDescarga) next = applyPuntoDescargaToDraft(next, puntoDescarga);
+  return next;
 }
 
 function formatPaymentTerms(empresa = {}) {
@@ -3633,6 +3688,24 @@ ${esCol ? `
     }
   }
 
+  async function descargarDossierRegulatorioPdf() {
+    if (!pedido?.id) return;
+    try {
+      const { blob, filename } = await descargarPedidoRegulatoryDossierPdf(pedido.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || `transgest-dossier-regulatorio-${pedido.numero || pedido.id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      notify("Dossier regulatorio PDF descargado.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo descargar el dossier regulatorio.", "error");
+    }
+  }
+
   async function descargarPayloadRegulatorio(type) {
     if (!pedido?.id || !type) return;
     try {
@@ -3956,9 +4029,15 @@ ${esCol ? `
                     {regulatoryCore?.checklist?.status && (
                       <div style={{fontSize:11,fontWeight:900,color:regulatoryCore.checklist.status === "ready" ? "#10b981" : "#f59e0b"}}>
                         {regulatoryCore.checklist.status === "ready" ? "Listo" : "Requiere revision"}
+                        {regulatoryCore.checklist.readiness_score != null ? ` · ${Number(regulatoryCore.checklist.readiness_score || 0)}%` : ""}
                       </div>
                     )}
                   </div>
+                  {Array.isArray(regulatoryCore?.checklist?.certification_gaps) && regulatoryCore.checklist.certification_gaps.length > 0 && (
+                    <div style={{fontSize:11,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.20)",borderRadius:7,padding:"7px 9px",marginBottom:8}}>
+                      Pendiente para certificacion: {regulatoryCore.checklist.certification_gaps.slice(0, 4).join(" | ")}
+                    </div>
+                  )}
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
                     {regulatoryPayloads.map((p) => (
                       <div key={p.payload_type} style={{padding:"8px 10px",borderRadius:7,background:"var(--bg3)",border:"1px solid var(--border)"}}>
@@ -3971,6 +4050,9 @@ ${esCol ? `
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:9}}>
                     <button onClick={descargarPaqueteRegulatorio} style={{border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.10)",color:"var(--accent)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Paquete regulatorio
+                    </button>
+                    <button onClick={descargarDossierRegulatorioPdf} style={{border:"1px solid rgba(15,118,110,.30)",background:"rgba(15,118,110,.10)",color:"#0f766e",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      Dossier PDF
                     </button>
                     {["efti","ecmr","diwass"].map(type => (
                       <button key={type} onClick={()=>descargarPayloadRegulatorio(type)} style={{border:"1px solid var(--border)",background:"var(--bg3)",color:"var(--text3)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
@@ -5749,6 +5831,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
       if (r.origen)  newForm.origen  = r.origen;
       if (r.destino) newForm.destino = r.destino;
       if (r.km)      newForm.km_ruta = r.km;
+      Object.assign(newForm, applyRouteEndpointsFromSavedPoints(newForm, r));
 
       // Auto-fill peajes cost if ruta has it
       if (r.peajes && Number(r.peajes) > 0) {
@@ -6438,22 +6521,25 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                       <div>
                         <label style={S.label}>Precio acordado EUR/tonelada</label>
                         <input type="text" inputMode="decimal" style={S.input}
-                          value={compactNumberInput(form.precio_colaborador_unitario)}
+                          value={form.precio_colaborador_unitario ?? ""}
                           onChange={e=>setForm(p=>syncPrecioColaboradorCalc({...p,precio_colaborador_unitario:e.target.value}))}
-                          placeholder="Ej: 32"/>
+                          placeholder="Ej: 32,50"/>
                       </div>
                       <div>
                         <label style={S.label}>Minimo facturable acordado (toneladas)</label>
                         <input type="text" inputMode="decimal" style={S.input}
-                          value={compactNumberInput(form.minimo_colaborador_unidades)}
+                          value={form.minimo_colaborador_unidades ?? ""}
                           onChange={e=>setForm(p=>syncPrecioColaboradorCalc({...p,minimo_colaborador_unidades:e.target.value}))}
-                          placeholder="Ej: 25"/>
+                          placeholder="Ej: 25,5"/>
                       </div>
                       <div>
-                        <label style={S.label}>Total calculado colaborador (EUR)</label>
-                        <input type="text" inputMode="decimal" style={{...S.input,background:"var(--bg3)"}} value={compactNumberInput(form.precio_colaborador)||""}
+                        <label style={S.label}>Total colaborador (EUR)</label>
+                        <input type="text" inputMode="decimal" style={{...S.input,background:"var(--bg3)"}} value={form.precio_colaborador ?? ""}
                           onChange={e=>setForm(p=>({...p,precio_colaborador:e.target.value,precio_colaborador_unitario:"",minimo_colaborador_unidades:""}))}
-                          placeholder="Se calcula por toneladas"/>
+                          placeholder="Ej: 650 (precio cerrado)"/>
+                        <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>
+                          Si escribes aqui, se guarda como precio cerrado y se limpian los campos por tonelada.
+                        </div>
                       </div>
                     </>) : (
                       <div><label style={S.label}>Lo que pagamos al colaborador (EUR, sin IVA)</label>
@@ -6579,9 +6665,9 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
             {editando?.id && <PedidoTimeline pedido={editando}/>}
 
             <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
-              <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}} onClick={requestClose}>Salir</button>
+              <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}} onClick={requestClose}>Salir</button>
               {!(editando?._readonly && !desvinculado) && (
-                <button style={{...S.btn,background:"#3b6ef5",color:"#fff",opacity:saving?0.7:1}} onClick={guardar} disabled={saving}>{saving?"Guardando...":editando?"Guardar cambios":"Crear pedido"}</button>
+                <button style={{...S.btn,background:"#3b6ef5",color:"#fff",opacity:saving?0.7:1}} onClick={guardar} disabled={saving}>{saving?"Guardando...":editando?.id?"Guardar cambios":"Crear pedido"}</button>
               )}
             </div>
           </div>
@@ -7012,6 +7098,43 @@ function readPedidosFocus() {
   return readRuntimeFocus("tms_pedidos_focus");
 }
 
+function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes = []) {
+  const defaults = focus?.defaults || {};
+  const vehiculoId = defaults.vehiculo_id || "";
+  const vehiculo = vehiculos.find(v => String(v.id || "") === String(vehiculoId));
+  const chofer = choferes.find(c =>
+    String(c.id || "") === String(defaults.chofer_id || "") ||
+    String(c.id || "") === String(vehiculo?.chofer_id || "") ||
+    String(c.vehiculo_id || "") === String(vehiculo?.id || "") ||
+    String(c.matricula || "").toUpperCase() === String(vehiculo?.matricula || "").toUpperCase()
+  );
+  const fechaCarga = toDateInputValue(defaults.fecha_carga || defaults.fecha_pedido) || new Date().toISOString().slice(0, 10);
+  const fechaDescarga = toDateInputValue(defaults.fecha_descarga || fechaCarga) || fechaCarga;
+  const remolqueId = defaults.remolque_id || vehiculo?.remolque_id || "";
+
+  return {
+    estado: "pendiente",
+    tipo_precio: "viaje",
+    fecha_pedido: toDateInputValue(defaults.fecha_pedido) || fechaCarga,
+    fecha_carga: fechaCarga,
+    fecha_descarga: fechaDescarga,
+    vehiculo_id: vehiculoId,
+    chofer_id: defaults.chofer_id || chofer?.id || "",
+    remolque_id: remolqueId,
+    remolque_id_manual: remolqueId,
+    tipo_iva: 21,
+    iva_regimen: "general",
+    carga_lateral: true,
+    carga_trasera: false,
+    intercambio_palets: false,
+    requiere_cinchas: true,
+    pendiente_completar: true,
+    aviso_completar: "Pedido iniciado desde Gestion de trafico: completar cliente, ruta, precio y documentacion.",
+    _focus_asignacion: true,
+    _nuevo_desde_trafico: true,
+  };
+}
+
 function readGuidedPedidoTutorial() {
   const focus = readRuntimeFocus("tms_guided_tutorial");
   return focus?.type === "pedido_create" ? focus : null;
@@ -7110,6 +7233,7 @@ export default function Pedidos() {
   const aiVisualPlanActivo = planHasFeature(empresaPlan, "ai");
   const aiDisponible = true;
   const [focusPedido] = useState(() => readPedidosFocus());
+  const focusNuevoAplicadoRef = useRef(false);
   const [guidedPedido, setGuidedPedido] = useState(() => {
     const focus = readGuidedPedidoTutorial();
     return focus ? { active:true, modalOpened:false, saved:false, progress:buildGuidedPedidoProgress({}, { modalOpened:false, saved:false }) } : null;
@@ -7155,6 +7279,7 @@ export default function Pedidos() {
   const [aiCreando,     setAiCreando]    = useState(false); // texto libre -> pedido IA
   const [quickCreando,  setQuickCreando] = useState(false);
   const [copyPlan, setCopyPlan] = useState(null);
+  const [copyReviewQueue, setCopyReviewQueue] = useState([]);
   const [copySaving, setCopySaving] = useState(false);
   const [bulkCopying, setBulkCopying] = useState(false);
   const [reprogrammingPedidoId, setReprogrammingPedidoId] = useState("");
@@ -7404,6 +7529,23 @@ export default function Pedidos() {
   }, [cargar]);
 
   useEffect(() => {
+    if (focusNuevoAplicadoRef.current || loading) return;
+    if (focusPedido?.action !== "nuevo") return;
+    const draft = buildPedidoDraftFromTrafficFocus(focusPedido, vehiculos, choferes);
+    focusNuevoAplicadoRef.current = true;
+    setFiltroEst("todos");
+    setFiltroMes("");
+    setFiltroFechasCustom(false);
+    setFiltroDesde("");
+    setFiltroHasta("");
+    setQ("");
+    setEditando(draft);
+    setModal(true);
+    clearRuntimeFocus("tms_pedidos_focus");
+    notify("Pedido nuevo preparado con el conjunto seleccionado en trafico.", "success");
+  }, [focusPedido, loading, vehiculos, choferes]);
+
+  useEffect(() => {
     if (!focusPedido?.pedido_id || loading) return;
     const found = pedidos.find(p => String(p.id) === String(focusPedido.pedido_id));
     if (!found) return;
@@ -7503,7 +7645,8 @@ export default function Pedidos() {
       setCopyPlan({
         source: pedidoBase,
         fecha_carga: String(pedidoBase?.fecha_carga || new Date().toISOString().slice(0, 10)).slice(0, 10),
-        semanas: 1,
+        copias: 1,
+        frecuencia_dias: 7,
         mantener_asignacion: true,
       });
     } catch (e) {
@@ -7517,19 +7660,20 @@ export default function Pedidos() {
       notify("Indica una fecha de carga para la copia.", "warning");
       return;
     }
-    const semanas = Math.max(1, Math.min(12, Number(copyPlan.semanas || 1)));
+    const copias = Math.max(1, Math.min(20, Number(copyPlan.copias || 1)));
+    const frecuenciaDias = Math.max(0, Math.min(365, Number(copyPlan.frecuencia_dias ?? 7)));
     setCopySaving(true);
     try {
       const creados = [];
-      for (let i = 0; i < semanas; i += 1) {
-        const fechaCarga = sumarDiasISO(copyPlan.fecha_carga, i * 7);
+      for (let i = 0; i < copias; i += 1) {
+        const fechaCarga = sumarDiasISO(copyPlan.fecha_carga, i * frecuenciaDias);
         const fechaDescargaBase = copyPlan.source?.fecha_descarga || copyPlan.source?.fecha_carga || copyPlan.fecha_carga;
         const diferenciaDias = Math.round((new Date(`${String(fechaDescargaBase).slice(0, 10)}T00:00:00`) - new Date(`${String(copyPlan.source?.fecha_carga || copyPlan.fecha_carga).slice(0, 10)}T00:00:00`)) / 86400000);
         const payload = buildPedidoCopyPayload(copyPlan.source, {
           fecha_carga: fechaCarga,
           fecha_descarga: fechaDescargaBase ? sumarDiasISO(fechaCarga, Number.isFinite(diferenciaDias) ? diferenciaDias : 0) : null,
           pendiente_completar: true,
-          aviso_completar: semanas > 1
+          aviso_completar: copias > 1
             ? "Viaje copiado en serie: revisar fechas, asignacion y precio antes de cerrar."
             : "Viaje copiado: revisar fechas, asignacion y precio antes de cerrar.",
           mantener_asignacion: !!copyPlan.mantener_asignacion,
@@ -7542,21 +7686,34 @@ export default function Pedidos() {
         if (creado?.id) creados.push(creado);
       }
       notify(
-        semanas > 1
-          ? `Se han copiado ${creados.length} viajes semanales.`
+        copias > 1
+          ? `Se han creado ${creados.length} copias. Se abrira cada una para revisarla.`
           : "Viaje copiado correctamente.",
         "success"
       );
       setCopyPlan(null);
-      cargar();
+      await cargar();
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-copy-batch" } }));
+      }
+      if (creados.length) {
+        const [first, ...rest] = creados;
+        setCopyReviewQueue(rest);
+        await abrirEditar(first, { _copyReview:true });
       }
     } catch (e) {
       notify(e.message || "No se pudieron copiar los viajes.", "error");
     } finally {
       setCopySaving(false);
     }
+  }
+
+  async function abrirSiguienteCopiaPendiente(queueOverride = null) {
+    const queue = Array.isArray(queueOverride) ? queueOverride : copyReviewQueue;
+    const [next, ...rest] = queue;
+    setCopyReviewQueue(rest);
+    if (!next) return;
+    await abrirEditar(next, { _copyReview:true });
   }
 
   async function reprogramarPedidoDias(pedido, offsetDays = 1) {
@@ -8481,7 +8638,7 @@ export default function Pedidos() {
                         )}
                         {false && canEdit && (
                           <button onClick={e=>{e.stopPropagation();abrirCopiarPedido(p);}}
-                            title="Copiar viaje por fecha o semanas"
+                            title="Copiar viaje"
                             style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"3px 8px",fontSize:11}}>
                             Copiar
                           </button>
@@ -8701,7 +8858,7 @@ export default function Pedidos() {
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div>
-                <label style={S.lbl}>Fecha de carga inicial</label>
+                <label style={S.lbl}>Fecha primera copia</label>
                 <input
                   type="date"
                   style={S.inp}
@@ -8710,14 +8867,25 @@ export default function Pedidos() {
                 />
               </div>
               <div>
-                <label style={S.lbl}>Numero de semanas</label>
+                <label style={S.lbl}>Numero de copias</label>
                 <input
                   type="number"
                   min="1"
-                  max="12"
+                  max="20"
                   style={S.inp}
-                  value={copyPlan.semanas || 1}
-                  onChange={e=>setCopyPlan(prev=>({...prev, semanas:e.target.value}))}
+                  value={copyPlan.copias || 1}
+                  onChange={e=>setCopyPlan(prev=>({...prev, copias:e.target.value}))}
+                />
+              </div>
+              <div>
+                <label style={S.lbl}>Separacion entre copias (dias)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="365"
+                  style={S.inp}
+                  value={copyPlan.frecuencia_dias ?? 7}
+                  onChange={e=>setCopyPlan(prev=>({...prev, frecuencia_dias:e.target.value}))}
                 />
               </div>
             </div>
@@ -8727,14 +8895,14 @@ export default function Pedidos() {
                 checked={!!copyPlan.mantener_asignacion}
                 onChange={e=>setCopyPlan(prev=>({...prev, mantener_asignacion:e.target.checked}))}
               />
-              <span style={{fontSize:12,color:"var(--text2)"}}>Mantener asignacion operativa en las copias</span>
+              <span style={{fontSize:12,color:"var(--text2)"}}>Copiar asignacion (vehiculo, chofer, remolque o colaborador)</span>
             </label>
             <div style={{fontSize:11,color:"var(--text5)",marginTop:10}}>
-              Si lo desmarcas, las copias saldran sin vehiculo, chofer, colaborador, remolque ni matriculas manuales.
+              Para copias semanales deja 7 dias. Si lo desmarcas, las copias saldran sin vehiculo, chofer, colaborador, remolque ni matriculas manuales.
             </div>
             <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
               <button
-                style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}}
+                style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}}
                 onClick={()=>setCopyPlan(null)}
                 disabled={copySaving}
               >
@@ -8778,7 +8946,7 @@ export default function Pedidos() {
             />
             <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
               <button
-                style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}}
+                style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}}
                 onClick={()=>cerrarSelectorRetraso(null)}
               >
                 Cancelar
@@ -8798,8 +8966,8 @@ export default function Pedidos() {
         <PedidoModal
           key={editando?.id||"new"}
           editando={editando}
-          onClose={()=>{setModal(false);setEditando(null);}}
-          onSaved={()=>{ if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: editando?.id || null, source: "pedidos-modal-save" } })); if (guidedPedidoActive) setGuidedPedido(prev => ({ ...(prev || { active:true }), saved:true, modalOpened:true, progress:buildGuidedPedidoProgress(prev?.lastForm || {}, { modalOpened:true, saved:true }) })); setModal(false);setEditando(null);cargar();}}
+          onClose={()=>{ const abrirSiguiente = !!editando?._copyReview; setModal(false);setEditando(null); if (abrirSiguiente) abrirSiguienteCopiaPendiente(); }}
+          onSaved={()=>{ const abrirSiguiente = !!editando?._copyReview; if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: editando?.id || null, source: "pedidos-modal-save" } })); if (guidedPedidoActive) setGuidedPedido(prev => ({ ...(prev || { active:true }), saved:true, modalOpened:true, progress:buildGuidedPedidoProgress(prev?.lastForm || {}, { modalOpened:true, saved:true }) })); setModal(false);setEditando(null);cargar(); if (abrirSiguiente) abrirSiguienteCopiaPendiente();}}
           onReload={()=>{cargar();}}
           onFacturaDesvinculada={(pedidoId)=>{
             setPedidos(prev=>prev.map(p=>String(p.id)===String(pedidoId)

@@ -7,14 +7,14 @@ import MojibakeFixer from "./components/MojibakeFixer";
 import Login  from "./pages/Login";
 import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
-import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador } from "./services/api";
+import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, getEmpresaBackend, saveEmpresa } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
 import { getEmpresaPlanLocal, normalizePlan } from "./utils/planFeatures";
+import { saveCompanyPalette } from "./utils/companyPalette";
 
 // Carga perezosa de todos los mÃƒÂ³dulos
 const Dashboard    = lazy(() => import("./pages/Dashboard"));
 const ControlTower = lazy(() => import("./pages/ControlTower"));
-const CopilotoOperativo = lazy(() => import("./pages/CopilotoOperativo"));
 const Clientes     = lazy(() => import("./pages/Clientes"));
 const Pedidos      = lazy(() => import("./pages/Pedidos"));
 const Rutas        = lazy(() => import("./pages/Rutas"));
@@ -163,7 +163,6 @@ const IC = {
   usuarios:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><circle cx="18" cy="8" r="3"/><path d="M21 13c1.6.7 3 2 3 3.5V20"/></svg>,
   agenda:      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/><path d="M8 15h4M8 18h8"/></svg>,
   tower:       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8"/><path d="M12 12l5-5"/><path d="M12 4v2M20 12h-2M12 20v-2M4 12h2"/></svg>,
-  copiloto:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l1.8 5.5L19 9.3l-5.2 1.8L12 17l-1.8-5.9L5 9.3l5.2-1.8L12 2z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z"/></svg>,
   almacen:     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-5 9 5v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/><path d="M9 21v-8h6v8"/></svg>,
   calculadora: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 10h2M12 10h2M16 10h.01M8 14h2M12 14h2M16 14h.01M8 18h2M12 18h4"/></svg>,
   hojaRuta:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-12"/><path d="M6 6h.01M18 18h.01"/><path d="M7 6c5 0 5 12 10 12"/></svg>,
@@ -182,7 +181,7 @@ const IC = {
 // enterprise: incluye todo
 const MODULOS_POR_PLAN = {
     basico: [
-      "dashboard","control_tower","copiloto_operativo","agenda","pedidos","plan_diario","gestion_trafico","calculador_portes","palets","app_chofer",
+      "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","calculador_portes","palets","app_chofer",
       "clientes","colaboradores","vehiculos","choferes","taller","grupajes","solicitudes",
       "hojas_ruta","nominas","control_horario","documentos","avisos","facturacion","contabilidad","empresa",
       "usuarios","actividad","importacion","mi_cuenta",
@@ -190,7 +189,7 @@ const MODULOS_POR_PLAN = {
       "facturacion_grupo"
     ],
     profesional: [
-      "dashboard","control_tower","copiloto_operativo","agenda","pedidos","plan_diario","gestion_trafico","rutas_recomendadas","calculador_portes","palets","app_chofer",
+      "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","rutas_recomendadas","calculador_portes","palets","app_chofer",
       "clientes","tarifas","colaboradores","vehiculos","choferes","taller","grupajes","rutas","solicitudes",
       "explotacion","hojas_ruta","gastos_estructura","nominas","control_horario",
       "documentos","avisos","facturacion","contabilidad","informes","excepciones","objetivos",
@@ -241,7 +240,7 @@ function filtrarModulosPorPermisos(modulos, permisos, rol) {
   };
   const puedeVerCompat = id => {
     if (puedeVer(id)) return true;
-    if (["control_tower", "copiloto_operativo"].includes(id)) {
+    if (id === "control_tower") {
       return reglas.dashboard?.ver !== false && (reglas.dashboard?.ver === true || reglas.gestion_trafico?.ver === true);
     }
     return false;
@@ -267,7 +266,6 @@ const MODULOS_GERENTE = [
   { titulo:"Operaciones", items:[
     { id:"gestion_trafico", icon:IC.rutas, label:"Gestión de tráfico" },
     { id:"control_tower", icon:IC.tower, label:"Control Tower" },
-    { id:"copiloto_operativo", icon:IC.copiloto, label:"Copiloto operativo" },
     { id:"cuadrante_grupo", icon:IC.cuadrante, label:"Cuadrante", children:[
       { id:"plan_diario", label:"Plan diario" },
       { id:"cuadrante_semana", label:"Resumen semanal" },
@@ -354,7 +352,6 @@ const MODULOS_TRAFICO = [
     { id:"plan_diario", icon:IC.cuadrante, label:"Plan diario" },
     { id:"gestion_trafico", icon:IC.rutas, label:"Gestión de tráfico" },
     { id:"control_tower", icon:IC.tower, label:"Control Tower" },
-    { id:"copiloto_operativo", icon:IC.copiloto, label:"Copiloto operativo" },
     { id:"pedidos", icon:IC.pedidos, label:"Pedidos / Tráfico" },
     { id:"solicitudes", icon:IC.docs, label:"Solicitudes clientes" },
     { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
@@ -425,7 +422,6 @@ function VISTA_DEFAULT(rol) {
 const VISTAS = {
   dashboard:    <Dashboard />,
   control_tower:<ControlTower />,
-  copiloto_operativo:<CopilotoOperativo />,
   agenda:       <Agenda />,
   clientes:     <Clientes />,
   pedidos:      <Pedidos />,
@@ -481,7 +477,6 @@ function onboardingStorageKey(user) {
 const GUIDED_MODULE_LABELS = {
   dashboard: "Dashboard",
   control_tower: "Control Tower",
-  copiloto_operativo: "Copiloto operativo",
   agenda: "Agenda",
   pedidos: "Pedidos",
   plan_diario: "Plan diario",
@@ -528,11 +523,6 @@ const GUIDED_MODULE_MISSIONS = {
     ["Estado operativo", "Revisa viajes activos, retrasos y excepciones."],
     ["Separadores", "Comprueba cada bloque para entender que requiere accion."],
     ["Priorizar", "Abre la incidencia o pedido que tenga mayor impacto."],
-  ],
-  copiloto_operativo: [
-    ["Resumen IA", "Lee recomendaciones y riesgos operativos detectados."],
-    ["Acciones", "Identifica que pedidos o vehiculos necesitan atencion."],
-    ["Seguimiento", "Vuelve tras resolver para confirmar que baja el riesgo."],
   ],
   agenda: [
     ["Crear aviso", "Anade un recordatorio manual con fecha y responsable."],
@@ -960,6 +950,13 @@ function AppInner() {
   useEffect(() => {
     if (!user) return;
     setVista(VISTA_DEFAULT(user.rol));
+    getEmpresaBackend()
+      .then(perfil => {
+        if (!perfil || typeof perfil !== "object") return;
+        saveEmpresa(perfil);
+        if (perfil.paleta_colores) saveCompanyPalette(perfil.paleta_colores);
+      })
+      .catch(() => {});
     // Badges: defer 3s so dashboard renders first, then load in background
     function calcTallerBadge() {
       getTallerEstado().then(t => {

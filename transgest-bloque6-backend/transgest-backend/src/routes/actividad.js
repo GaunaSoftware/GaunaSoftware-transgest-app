@@ -35,7 +35,6 @@ function criticidad(row) {
     if (/\/(superadmin|usuarios|empresa|facturas|fiscal|backup|api-keys|gps)/i.test(path)) return "alta";
     return "media";
   }
-  if (String(row.accion || "").toUpperCase().startsWith("LOGIN fallido".toUpperCase())) return "alta";
   return "baja";
 }
 
@@ -59,7 +58,16 @@ router.get("/", async (req, res) => {
 
   const { accion = "", actor = "", desde = "", hasta = "", modulo = "", metodo = "", status = "", criticidad: criticidadFiltro = "" } = req.query;
   const params = [empresaId];
-  const where = ["empresa_id=$1"];
+  const where = [
+    "empresa_id=$1",
+    "accion NOT ILIKE 'LOGIN %'",
+    "accion NOT ILIKE 'GET %'",
+    "accion NOT ILIKE 'HEAD %'",
+    "accion NOT ILIKE 'OPTIONS %'",
+    "accion NOT ILIKE '%/api/v1/auth/login%'",
+    "accion NOT ILIKE '%/api/v1/auth/me%'",
+    "accion NOT ILIKE '%/api/v1/actividad%'",
+  ];
 
   if (accion) {
     params.push(`%${String(accion).trim()}%`);

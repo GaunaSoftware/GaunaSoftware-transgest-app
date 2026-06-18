@@ -85,8 +85,8 @@ const PERMISOS = {
     editar: ["clientes","facturacion","contabilidad","nominas","documentos"],
   },
   trafico: {
-    ver:    ["dashboard","control_tower","copiloto_operativo","agenda","pedidos","plan_diario","gestion_trafico","rutas","rutas_recomendadas","clientes","vehiculos","choferes","colaboradores","documentos","avisos","hojas_ruta","palets","grupajes","solicitudes"],
-    editar: ["agenda","control_tower","copiloto_operativo","pedidos","plan_diario","gestion_trafico","rutas","rutas_recomendadas","clientes","vehiculos","choferes","colaboradores","documentos","avisos","hojas_ruta","palets","grupajes","solicitudes"],
+    ver:    ["dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","rutas","rutas_recomendadas","clientes","vehiculos","choferes","colaboradores","documentos","avisos","hojas_ruta","palets","grupajes","solicitudes"],
+    editar: ["agenda","control_tower","pedidos","plan_diario","gestion_trafico","rutas","rutas_recomendadas","clientes","vehiculos","choferes","colaboradores","documentos","avisos","hojas_ruta","palets","grupajes","solicitudes"],
   },
   administrativo: {
     ver:    ["dashboard","agenda","clientes","vehiculos","choferes","facturacion","contabilidad","nominas","pedidos","documentos","informes","actividad","empresa"],

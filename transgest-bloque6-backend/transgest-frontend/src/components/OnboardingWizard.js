@@ -65,7 +65,6 @@ const ROLE_STEPS = {
 const MODULE_LABEL = {
   dashboard: "Dashboard",
   control_tower: "Control Tower",
-  copiloto_operativo: "Copiloto operativo",
   agenda: "Agenda",
   pedidos: "Pedidos",
   plan_diario: "Plan diario",

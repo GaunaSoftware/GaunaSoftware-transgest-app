@@ -6,13 +6,13 @@ import { confirmDialog, notify } from "../services/notify";
 const S={
   page:{padding:"24px 28px",minWidth:0},
   title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:16,color:"var(--text)"},
-  card:{background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:12,overflow:"hidden"},
-  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)"},
-  td:{padding:"10px 14px",borderBottom:"1px solid #181e2e",fontSize:13,color:"var(--text)"},
+  card:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
+  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)"},
+  td:{padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)"},
   btn:{padding:"8px 16px",borderRadius:7,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"},
-  inp:{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,width:"100%",boxSizing:"border-box"},
+  inp:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,width:"100%",boxSizing:"border-box"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center"},
-  mbox:{background:"var(--bg2)",border:"1px solid #28344f",borderRadius:16,padding:28,width:"min(600px,96vw)",maxHeight:"90vh",overflowY:"auto"},
+  mbox:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:28,width:"min(600px,96vw)",maxHeight:"90vh",overflowY:"auto"},
   label:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4,marginTop:12},
 };
 
@@ -571,7 +571,7 @@ export default function Rutas(){
               </div>
             </div>
             <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
-              <button style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid #28344f"}}
+              <button style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)"}}
                 onClick={()=>setModal(false)}>Cancelar</button>
               <button style={{...S.btn,background:"var(--accent)",color:"#fff",opacity:saving?.7:1}}
                 onClick={guardar} disabled={saving}>
@@ -649,7 +649,7 @@ function PreciosEditor({ruta,data,clientes=[],canEdit,onClose}){
           <thead><tr>
             {["Cliente","Precio (EUR)","Tipo","Minimo","Combustible","IVA","Notas",""].map(h=>(
               <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:700,
-                textTransform:"uppercase",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)"}}>
+                textTransform:"uppercase",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)"}}>
                 {h}
               </th>
             ))}
@@ -664,12 +664,12 @@ function PreciosEditor({ruta,data,clientes=[],canEdit,onClose}){
                   <input type="number" step="0.01" value={p.precio||""}
                     onChange={e=>setPrecios(prev=>prev.map((x,j)=>j===i?{...x,precio:e.target.value}:x))}
                     disabled={!canEdit}
-                    style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",
+                    style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",
                       padding:"5px 8px",borderRadius:6,width:100,fontFamily:"'DM Sans',sans-serif",fontSize:13}}/>
                   <span style={{marginLeft:4,color:"var(--text4)",fontSize:12}}>EUR</span>
                 </td>
                 <td style={{padding:"9px 12px",borderBottom:"1px solid #0f1520"}}>
-                  <select value={p.tarifa_tipo||"viaje"} onChange={e=>setPrecios(prev=>prev.map((x,j)=>j===i?{...x,tarifa_tipo:e.target.value}:x))} disabled={!canEdit} style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"5px 8px",borderRadius:6,width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
+                  <select value={p.tarifa_tipo||"viaje"} onChange={e=>setPrecios(prev=>prev.map((x,j)=>j===i?{...x,tarifa_tipo:e.target.value}:x))} disabled={!canEdit} style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"5px 8px",borderRadius:6,width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
                     {TIPOS_TARIFA.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
                   </select>
                 </td>
@@ -677,13 +677,13 @@ function PreciosEditor({ruta,data,clientes=[],canEdit,onClose}){
                   <input type="number" step="0.01" value={(p.tarifa_tipo||"viaje") === "viaje" ? (p.minimo_facturable||"") : (p.minimo_unidades||"")}
                     onChange={e=>setPrecios(prev=>prev.map((x,j)=>j===i?{...x,[(x.tarifa_tipo||"viaje") === "viaje" ? "minimo_facturable" : "minimo_unidades"]:e.target.value}:x))}
                     disabled={!canEdit}
-                    style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"5px 8px",borderRadius:6,width:110,fontFamily:"'DM Sans',sans-serif",fontSize:12}}/>
+                    style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"5px 8px",borderRadius:6,width:110,fontFamily:"'DM Sans',sans-serif",fontSize:12}}/>
                 </td>
                 <td style={{padding:"9px 12px",borderBottom:"1px solid #0f1520"}}>
                   <input type="number" step="0.01" value={p.recargo_combustible_pct||""}
                     onChange={e=>setPrecios(prev=>prev.map((x,j)=>j===i?{...x,recargo_combustible_pct:e.target.value}:x))}
                     disabled={!canEdit}
-                    style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"5px 8px",borderRadius:6,width:90,fontFamily:"'DM Sans',sans-serif",fontSize:12}}/>
+                    style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"5px 8px",borderRadius:6,width:90,fontFamily:"'DM Sans',sans-serif",fontSize:12}}/>
                 </td>
                 <td style={{padding:"9px 12px",borderBottom:"1px solid #0f1520",fontSize:13,color:"var(--text3)"}}>
                   {p.iva_pct||21}%
@@ -692,7 +692,7 @@ function PreciosEditor({ruta,data,clientes=[],canEdit,onClose}){
                   <input value={p.notas||""}
                     onChange={e=>setPrecios(prev=>prev.map((x,j)=>j===i?{...x,notas:e.target.value}:x))}
                     disabled={!canEdit}
-                    style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",
+                    style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",
                       padding:"5px 8px",borderRadius:6,width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:12}}/>
                 </td>
                 <td style={{padding:"9px 12px",borderBottom:"1px solid #0f1520"}}>
@@ -713,14 +713,14 @@ function PreciosEditor({ruta,data,clientes=[],canEdit,onClose}){
           <select
             value=""
             onChange={e=>addPrecioCliente(e.target.value)}
-            style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 10px",borderRadius:7,minWidth:220,fontFamily:"'DM Sans',sans-serif",fontSize:13}}
+            style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 10px",borderRadius:7,minWidth:220,fontFamily:"'DM Sans',sans-serif",fontSize:13}}
           >
             <option value="">+ Anadir tarifa por cliente</option>
             {clientesDisponibles.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
           <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <button onClick={onClose}
-            style={{padding:"8px 16px",borderRadius:7,border:"1px solid #28344f",
+            style={{padding:"8px 16px",borderRadius:7,border:"1px solid var(--border2)",
               background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>
             Cancelar
           </button>

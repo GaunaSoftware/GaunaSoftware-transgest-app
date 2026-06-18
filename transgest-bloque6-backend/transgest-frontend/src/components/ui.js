@@ -96,7 +96,7 @@ export function ModalShell({ title, children, footer, onClose, width = 560 }) {
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
       onMouseDown={e => e.target === e.currentTarget && onClose?.()}
     >
-      <div style={{ background: "var(--bg2)", border: "1px solid #28344f", borderRadius: 8, padding: 24, width: `min(${width}px,96vw)`, maxHeight: "90vh", overflowY: "auto" }}>
+      <div style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 8, padding: 24, width: `min(${width}px,96vw)`, maxHeight: "90vh", overflowY: "auto", boxShadow: "var(--shadow)" }}>
         {title && <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 17, fontWeight: 800, marginBottom: 14, color: "var(--text)" }}>{title}</div>}
         {children}
         {footer && <div style={{ display: "flex", gap: 10, marginTop: 20, justifyContent: "flex-end" }}>{footer}</div>}

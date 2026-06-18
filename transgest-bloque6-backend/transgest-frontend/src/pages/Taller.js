@@ -1429,22 +1429,22 @@ const TIPOS_NEUMAT = [
   { id:"traccion",      label:"Tracción",           medidas:["295/80 R22.5","315/80 R22.5","315/60 R22.5","385/65 R22.5"] },
 ];
 const POSICIONES_TRACTOR = [
-  {id:"del_iz",  label:"Delantera Izq",  x:120, y:80,  r:18, tipo:"directriz"},
-  {id:"del_der", label:"Delantera Der",  x:120, y:200, r:18, tipo:"directriz"},
-  {id:"tra_iz1", label:"Trasera Izq 1",  x:260, y:60,  r:18, tipo:"traccion"},
-  {id:"tra_iz2", label:"Trasera Izq 2",  x:260, y:100, r:18, tipo:"traccion"},
-  {id:"tra_der1",label:"Trasera Der 1",  x:260, y:180, r:18, tipo:"traccion"},
-  {id:"tra_der2",label:"Trasera Der 2",  x:260, y:220, r:18, tipo:"traccion"},
+  {id:"del_iz",  label:"Delantera Izq",  x:112, y:78,  r:18, tipo:"directriz"},
+  {id:"del_der", label:"Delantera Der",  x:112, y:210, r:18, tipo:"directriz"},
+  {id:"tra_iz1", label:"Trasera Izq 1",  x:252, y:78,  r:18, tipo:"traccion"},
+  {id:"tra_iz2", label:"Trasera Izq 2",  x:252, y:122, r:18, tipo:"traccion"},
+  {id:"tra_der1",label:"Trasera Der 1",  x:252, y:166, r:18, tipo:"traccion"},
+  {id:"tra_der2",label:"Trasera Der 2",  x:252, y:210, r:18, tipo:"traccion"},
 ];
 const POSICIONES_REMOLQUE = [
-  {id:"rem_iz1", label:"Rem Izq 1",  x:400, y:60,  r:18, tipo:"remolque"},
-  {id:"rem_iz2", label:"Rem Izq 2",  x:400, y:100, r:18, tipo:"remolque"},
-  {id:"rem_der1",label:"Rem Der 1",  x:400, y:180, r:18, tipo:"remolque"},
-  {id:"rem_der2",label:"Rem Der 2",  x:400, y:220, r:18, tipo:"remolque"},
-  {id:"rem_iz3", label:"Rem Izq 3",  x:470, y:60,  r:18, tipo:"remolque"},
-  {id:"rem_iz4", label:"Rem Izq 4",  x:470, y:100, r:18, tipo:"remolque"},
-  {id:"rem_der3",label:"Rem Der 3",  x:470, y:180, r:18, tipo:"remolque"},
-  {id:"rem_der4",label:"Rem Der 4",  x:470, y:220, r:18, tipo:"remolque"},
+  {id:"rem_iz1", label:"Rem Izq 1",  x:392, y:78,  r:18, tipo:"remolque"},
+  {id:"rem_iz2", label:"Rem Izq 2",  x:392, y:122, r:18, tipo:"remolque"},
+  {id:"rem_der1",label:"Rem Der 1",  x:392, y:166, r:18, tipo:"remolque"},
+  {id:"rem_der2",label:"Rem Der 2",  x:392, y:210, r:18, tipo:"remolque"},
+  {id:"rem_iz3", label:"Rem Izq 3",  x:462, y:78,  r:18, tipo:"remolque"},
+  {id:"rem_iz4", label:"Rem Izq 4",  x:462, y:122, r:18, tipo:"remolque"},
+  {id:"rem_der3",label:"Rem Der 3",  x:462, y:166, r:18, tipo:"remolque"},
+  {id:"rem_der4",label:"Rem Der 4",  x:462, y:210, r:18, tipo:"remolque"},
 ];
 function groupNeumaticosStock(rows = []) {
   const groups = new Map();

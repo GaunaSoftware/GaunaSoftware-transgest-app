@@ -59,12 +59,21 @@ function criticidadColor(criticidad) {
   return "var(--text5)";
 }
 
-function jsonPlano(value) {
-  try {
-    return JSON.stringify(value || {}, null, 2);
-  } catch {
-    return "{}";
-  }
+function accionVisible(item = {}) {
+  const method = item.method || String(item.accion || "").split(" ")[0] || "ACCION";
+  const path = item.path || String(item.accion || "").replace(method, "").trim();
+  const modulo = item.modulo || etiquetaAccion(item.accion);
+  const verb = method === "POST" ? "Creacion" : method === "PUT" ? "Actualizacion" : method === "PATCH" ? "Cambio" : method === "DELETE" ? "Eliminacion" : "Accion";
+  const id = item.detalle?.params?.id || item.detalle?.body?.id || "";
+  if (path.includes("/pedidos")) return `${verb} en pedidos${id ? ` (${id})` : ""}`;
+  if (path.includes("/facturas")) return `${verb} en facturacion${id ? ` (${id})` : ""}`;
+  if (path.includes("/clientes")) return `${verb} en clientes${id ? ` (${id})` : ""}`;
+  if (path.includes("/vehiculos")) return `${verb} en vehiculos${id ? ` (${id})` : ""}`;
+  if (path.includes("/choferes")) return `${verb} en choferes${id ? ` (${id})` : ""}`;
+  if (path.includes("/colaboradores")) return `${verb} en colaboradores${id ? ` (${id})` : ""}`;
+  if (path.includes("/taller")) return `${verb} en taller${id ? ` (${id})` : ""}`;
+  if (path.includes("/palets")) return `${verb} en almacen${id ? ` (${id})` : ""}`;
+  return `${verb} en ${modulo}`;
 }
 
 function csvCell(value) {
@@ -80,7 +89,6 @@ export default function Actividad() {
   const [items, setItems] = useState([]);
   const [porModulo, setPorModulo] = useState({});
   const [totales, setTotales] = useState({});
-  const [open, setOpen] = useState({});
   const [loading, setLoading] = useState(true);
   const [filtros, setFiltros] = useState({
     accion:"",
@@ -143,7 +151,7 @@ export default function Actividad() {
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16,marginBottom:16}}>
         <div>
           <div style={S.title}>Registro de actividad</div>
-          <div style={S.sub}>Trazabilidad interna visible solo para gerencia: accesos, consultas, cambios y errores registrados.</div>
+          <div style={S.sub}>Trazabilidad interna visible solo para gerencia: cambios, altas, bajas, aprobaciones y errores relevantes. No se muestran inicios de sesion ni consultas tecnicas.</div>
         </div>
         <div style={{display:"flex",gap:8}}>
           <button onClick={exportarCsv} disabled={!items.length} style={{...S.btn,background:"rgba(59,130,246,.12)",borderColor:"rgba(59,130,246,.3)",color:"var(--accent-xl)",opacity:items.length?1:.55}}>
@@ -198,7 +206,7 @@ export default function Actividad() {
           <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Metodo</div>
           <select value={filtros.metodo} onChange={f("metodo")} style={{...S.inp,width:"100%"}}>
             <option value="">Todos</option>
-            {["GET","POST","PUT","PATCH","DELETE"].map(m => <option key={m} value={m}>{m}</option>)}
+            {["POST","PUT","PATCH","DELETE"].map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
         <div>
@@ -242,7 +250,6 @@ export default function Actividad() {
           {items.map(item => {
             const method = item.method || String(item.accion || "").split(" ")[0] || "ACCION";
             const color = metodoColor(method);
-            const path = item.path || String(item.accion || "").replace(method, "").trim();
             const status = item.status || parseStatus(item);
             const cColor = criticidadColor(item.criticidad);
             return (
@@ -256,28 +263,19 @@ export default function Actividad() {
                   </div>
                 </div>
                 <div>
-                  <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:3}}>{path}</div>
+                  <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:3}}>{accionVisible(item)}</div>
                   <div style={{fontSize:12,color:"var(--text4)"}}>
                     {item.actor_email || "usuario"} - {status ? `estado ${status}` : "accion registrada"}
-                    {item.request_id ? ` - ${item.request_id}` : ""}
                   </div>
                   <div style={{display:"inline-flex",marginTop:6,padding:"2px 8px",borderRadius:999,background:`${cColor}18`,border:`1px solid ${cColor}44`,color:cColor,fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".05em"}}>
                     {item.criticidad || "baja"}
                   </div>
-                  {open[item.id] && (
-                    <pre style={{margin:"8px 0 0",padding:10,background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text3)",fontSize:11,whiteSpace:"pre-wrap",maxHeight:220,overflow:"auto"}}>
-                      {jsonPlano(item.detalle)}
-                    </pre>
-                  )}
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--text3)"}}>
                     {item.created_at ? new Date(item.created_at).toLocaleString("es-ES") : ""}
                   </div>
                   <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{item.actor_tipo}</div>
-                  <button onClick={()=>setOpen(prev=>({...prev,[item.id]:!prev[item.id]}))} style={{...S.btn,padding:"4px 8px",fontSize:11,marginTop:6}}>
-                    {open[item.id] ? "Ocultar" : "Detalle"}
-                  </button>
                 </div>
               </div>
             );

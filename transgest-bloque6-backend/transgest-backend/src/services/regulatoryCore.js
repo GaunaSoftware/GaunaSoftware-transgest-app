@@ -15,6 +15,10 @@ function sha256Hex(value) {
   return crypto.createHash("sha256").update(typeof value === "string" ? value : stableJson(value)).digest("hex");
 }
 
+function sha256Buffer(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
 function cleanText(value) {
   return String(value || "").trim();
 }
@@ -315,16 +319,25 @@ function buildRegulatoryChecklist({ documento = {}, structuredExport = {}, repos
   const adrValidation = buildDangerousGoodsValidation(documento);
   const international = bool(documento.preparacion_digital?.cumplimiento_operativo?.internacional?.requiere_revision);
   const decaReady = !!(repository?.pdf_hash_sha256 || structuredExport.identifiers?.codigo_control);
+  const decaPublicUrl = !!(repository?.public_url || repository?.url_publica);
+  const decaQrReady = !!(repository?.qr_data_url || repository?.qr_url || structuredExport.identifiers?.qr_url || structuredExport.identifiers?.codigo_control);
+  const retentionReady = !!(repository?.retencion_minima_hasta || repository?.retention_until);
   const eftiReady = !!payloads.efti?.hash_sha256;
   const ecmrMissing = Array.isArray(ecmr.missing_fields) ? ecmr.missing_fields : [];
+  const decaMissing = [
+    ...(decaReady ? [] : ["pdf_deca"]),
+    ...(decaQrReady ? [] : ["qr_o_codigo_control"]),
+    ...(decaPublicUrl ? [] : ["url_https_descarga"]),
+    ...(retentionReady ? [] : ["retencion_minima_1_ano"]),
+  ];
   const checklist = [
     {
       key: "deca",
       label: "DeCA / DCD",
       applies: true,
-      status: decaReady ? "ready" : "missing",
-      missing: decaReady ? [] : ["pdf_deca"],
-      detail: decaReady ? "PDF DeCA generado o datos de control disponibles." : "Generar DeCA antes de iniciar o remitir el viaje.",
+      status: decaMissing.length ? "requires_review" : "ready",
+      missing: decaMissing,
+      detail: decaMissing.length ? "Completar PDF nativo, QR/URL HTTPS y retencion interna." : "PDF DeCA/DCD generado, localizable y conservado.",
     },
     {
       key: "ecmr",
@@ -360,10 +373,272 @@ function buildRegulatoryChecklist({ documento = {}, structuredExport = {}, repos
     },
   ];
   const blocking = checklist.filter(item => item.applies && ["missing", "requires_review"].includes(item.status));
+  const applicable = checklist.filter(item => item.applies);
+  const readyCount = applicable.filter(item => ["ready", "prepared"].includes(item.status)).length;
+  const readinessScore = applicable.length ? Math.round((readyCount / applicable.length) * 100) : 100;
+  const certificationGaps = [];
+  if (!eftiReady) certificationGaps.push("generar_payload_efti");
+  certificationGaps.push("conectar_plataforma_efti_certificada_o_certificar_proceso_transgest");
+  if (international && ecmrMissing.length) certificationGaps.push("completar_datos_ecmr");
+  if (decaMissing.length) certificationGaps.push("cerrar_requisitos_dcd_deca");
   return {
     status: blocking.length ? "requires_review" : "ready",
+    readiness_score: readinessScore,
     blocking: blocking.map(item => item.key),
+    summary: {
+      applicable: applicable.length,
+      ready: readyCount,
+      review: blocking.length,
+      not_applicable: checklist.filter(item => !item.applies || item.status === "not_applicable").length,
+    },
+    certification_gaps: certificationGaps,
     items: checklist,
+  };
+}
+
+function certificationRequirementMatrix(pkg = {}) {
+  const readiness = pkg.regulatory_readiness || {};
+  const docs = Array.isArray(pkg.documents) ? pkg.documents : [];
+  const payloads = Array.isArray(pkg.payloads) ? pkg.payloads : [];
+  const versions = Array.isArray(pkg.document_versions) ? pkg.document_versions : [];
+  const parties = Array.isArray(pkg.parties) ? pkg.parties : [];
+  const locations = Array.isArray(pkg.locations) ? pkg.locations : [];
+  const audit = Array.isArray(pkg.audit) ? pkg.audit : [];
+  const transmissions = Array.isArray(pkg.transmissions) ? pkg.transmissions : [];
+  const hasDoc = (type) => docs.some(d => d.document_type === type && d.hash_sha256);
+  const hasPayload = (type) => payloads.some(p => p.payload_type === type && p.hash_sha256);
+  const hasParty = (role) => parties.some(p => p.role === role && cleanText(p.name));
+  const hasLocation = (role) => locations.some(l => l.role === role && (cleanText(l.name) || cleanText(l.address)));
+  const checklistItems = Array.isArray(readiness.checklist?.items) ? readiness.checklist.items : [];
+  const blocking = Array.isArray(readiness.blocking) ? readiness.blocking : [];
+  return [
+    {
+      area: "DeCA / DCD",
+      requirement: "PDF nativo archivado con hash SHA-256",
+      status: hasDoc("deca") ? "ok" : "missing",
+      evidence: hasDoc("deca") ? "regulatory_documents.deca" : "Falta generar/archivar DeCA",
+    },
+    {
+      area: "DeCA / DCD",
+      requirement: "QR o URL HTTPS tokenizada disponible durante el servicio",
+      status: docs.some(d => d.url || d.metadata?.public_activo) ? "ok" : "review",
+      evidence: docs.find(d => d.url)?.url ? "URL segura registrada" : "Revisar URL/QR del repositorio",
+    },
+    {
+      area: "Trazabilidad",
+      requirement: "Versiones, hashes y motivo de cambio conservados",
+      status: versions.length ? "ok" : "review",
+      evidence: versions.length ? `${versions.length} version(es) documentales` : "Sin version documental registrada",
+    },
+    {
+      area: "Datos estructurados",
+      requirement: "Partes legales y roles diferenciados",
+      status: hasParty("cargador_contractual") && hasParty("transportista_efectivo") ? "ok" : "missing",
+      evidence: `${parties.length} parte(s) sincronizada(s)`,
+    },
+    {
+      area: "Datos estructurados",
+      requirement: "Origen, destino y puntos operativos normalizados",
+      status: hasLocation("origen") && hasLocation("destino") ? "ok" : "missing",
+      evidence: `${locations.length} ubicacion(es) sincronizada(s)`,
+    },
+    {
+      area: "eCMR",
+      requirement: "Carta de porte electronica preparada si aplica",
+      status: hasPayload("ecmr") ? "ok" : "missing",
+      evidence: hasPayload("ecmr") ? "payload eCMR interno versionado" : "Falta payload eCMR",
+    },
+    {
+      area: "eFTI",
+      requirement: "Dataset interno exportable a plataforma certificada",
+      status: hasPayload("efti") ? "ok" : "missing",
+      evidence: hasPayload("efti") ? "payload eFTI interno con hash" : "Falta payload eFTI",
+    },
+    {
+      area: "DIWASS / residuos",
+      requirement: "Deteccion y payload de residuos/eAnnex VII cuando aplique",
+      status: hasPayload("diwass") ? "ok" : "missing",
+      evidence: pkg.waste?.is_waste ? "residuo detectado/revisado" : "payload DIWASS preparado como no aplicable o pendiente",
+    },
+    {
+      area: "Integraciones",
+      requirement: "Borradores de envio y conectores para proveedor certificado",
+      status: transmissions.length ? "review" : "planned",
+      evidence: transmissions.length ? `${transmissions.length} borrador(es) de transmision` : "Pendiente proveedor certificado/API real",
+    },
+    {
+      area: "Auditoria",
+      requirement: "Historial de sincronizacion, exportacion y acciones",
+      status: audit.length ? "ok" : "review",
+      evidence: audit.length ? `${audit.length} evento(s) regulatorios` : "Sin eventos regulatorios",
+    },
+    {
+      area: "Motor de cumplimiento",
+      requirement: "Checklist por transporte con bloqueos visibles",
+      status: blocking.length ? "review" : (checklistItems.length ? "ok" : "review"),
+      evidence: blocking.length ? `Bloqueos: ${blocking.join(", ")}` : `${checklistItems.length} check(s)`,
+    },
+  ];
+}
+
+function buildRegulatoryCertificationDossier(pkg = {}) {
+  const matrix = certificationRequirementMatrix(pkg);
+  const ok = matrix.filter(i => i.status === "ok").length;
+  const review = matrix.filter(i => i.status === "review").length;
+  const missing = matrix.filter(i => i.status === "missing").length;
+  const planned = matrix.filter(i => i.status === "planned").length;
+  const score = matrix.length ? Math.round((ok / matrix.length) * 100) : 0;
+  const body = {
+    schema: "transgest.regulatory.certification_dossier.v1",
+    generated_at: new Date().toISOString(),
+    purpose: "Expediente de preparacion para inspeccion, auditoria e integraciones eFTI/eCMR/DIWASS. No acredita certificacion externa por si solo.",
+    scope: pkg.scope || {},
+    readiness_score: score,
+    summary: { ok, review, missing, planned, total: matrix.length },
+    matrix,
+    regulatory_readiness: pkg.regulatory_readiness || {},
+    evidence: {
+      package_hash_sha256: pkg.package_hash_sha256 || "",
+      documents: (pkg.documents || []).map(d => ({
+        type: d.document_type,
+        status: d.status,
+        filename: d.filename,
+        hash_sha256: d.hash_sha256,
+        url_present: !!d.url,
+        metadata: d.metadata || {},
+        updated_at: d.updated_at,
+      })),
+      payloads: (pkg.payloads || []).map(p => ({
+        type: p.payload_type,
+        status: p.status,
+        version: p.version,
+        hash_sha256: p.hash_sha256,
+        validation: p.validation || {},
+        updated_at: p.updated_at,
+      })),
+      document_versions: pkg.document_versions || [],
+      transmissions: pkg.transmissions || [],
+      audit: pkg.audit || [],
+    },
+    certification_path: [
+      "Mantener DeCA/DCD nativo con QR/URL HTTPS, hash y repositorio seguro.",
+      "Completar datos maestros obligatorios de partes, ubicaciones, mercancia, vehiculos y conductor.",
+      "Conservar versiones y motivos de modificacion antes/despues de remision o firma.",
+      "Conectar proveedor eCMR/eFTI/DIWASS certificado o abrir proceso formal de certificacion de TransGest.",
+      "Ejecutar pruebas de interoperabilidad, seguridad, tenant isolation, auditoria y retencion documental.",
+    ],
+    governance: {
+      tenant_isolation: "Todos los datos del expediente se filtran por empresa_id.",
+      public_access: "Solo enlaces tokenizados para soporte DCD; la descarga publica puede desactivarse despues del servicio.",
+      retention: "Conservacion interna minima configurada/recomendada de 1 ano para DCD, ampliable por politica de empresa.",
+      security_note: "Los hashes permiten detectar modificaciones, pero la certificacion externa requiere proveedor/plataforma conforme cuando aplique.",
+    },
+  };
+  return {
+    ...body,
+    dossier_hash_sha256: sha256Hex(body),
+  };
+}
+
+async function generateRegulatoryDossierPdf(dossier = {}) {
+  const PDFDocument = require("pdfkit");
+  const generatedAt = new Date(dossier.generated_at || Date.now());
+  const title = `Dossier regulatorio ${dossier.scope?.pedido_numero || dossier.scope?.pedido_id || ""}`.trim();
+  const doc = new PDFDocument({
+    size: "A4",
+    margin: 42,
+    info: {
+      Title: title,
+      Author: "TransGest",
+      Subject: "Dossier de preparacion eFTI, eCMR, DIWASS y DeCA",
+      Keywords: "TransGest,DeCA,DCD,eFTI,eCMR,DIWASS,compliance",
+      Creator: "TransGest",
+      Producer: "TransGest PDF service",
+      CreationDate: generatedAt,
+      ModDate: generatedAt,
+    },
+  });
+  const chunks = [];
+  doc.on("data", chunk => chunks.push(chunk));
+  const done = new Promise((resolve, reject) => {
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+  });
+  const text = (value) => String(value ?? "").trim() || "-";
+  const fit = (value, len = 100) => {
+    const raw = text(value);
+    return raw.length > len ? `${raw.slice(0, len - 3)}...` : raw;
+  };
+  const ensureSpace = (height = 100) => {
+    if (doc.y + height > doc.page.height - 58) doc.addPage();
+  };
+  const section = (label) => {
+    ensureSpace(50);
+    doc.moveDown(0.7);
+    doc.font("Helvetica-Bold").fontSize(12).fillColor("#0f766e").text(label);
+    doc.moveTo(42, doc.y + 4).lineTo(553, doc.y + 4).strokeColor("#cbd5e1").lineWidth(0.7).stroke();
+    doc.moveDown(0.65);
+  };
+  const line = (label, value, opts = {}) => {
+    ensureSpace(opts.height || 34);
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#64748b").text(String(label || "").toUpperCase());
+    doc.font("Helvetica").fontSize(opts.size || 9).fillColor("#111827").text(text(value), { width: opts.width || 500, lineGap: 1.5 });
+    doc.moveDown(0.35);
+  };
+  const statusColor = (status) => status === "ok" ? "#059669" : status === "missing" ? "#dc2626" : status === "planned" ? "#64748b" : "#d97706";
+
+  doc.font("Helvetica-Bold").fontSize(18).fillColor("#0f172a").text("Dossier regulatorio TransGest", 42, 42, { width: 360 });
+  doc.font("Helvetica").fontSize(9).fillColor("#64748b").text("Preparacion DeCA/DCD, eCMR, eFTI, DIWASS, ADR y residuos", { width: 380 });
+  doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f766e").text("Preparacion", 420, 42, { width: 130, align: "right" });
+  doc.font("Helvetica-Bold").fontSize(18).fillColor(Number(dossier.readiness_score || 0) >= 80 ? "#059669" : "#d97706").text(`${Number(dossier.readiness_score || 0)}%`, 420, 58, { width: 130, align: "right" });
+  doc.font("Helvetica").fontSize(8).fillColor("#64748b").text(`Generado: ${generatedAt.toLocaleString("es-ES")}`, 350, 82, { width: 200, align: "right" });
+  doc.moveDown(2.2);
+
+  section("Alcance");
+  line("Pedido", `${text(dossier.scope?.pedido_numero)} | ${text(dossier.scope?.pedido_id)}`);
+  line("Estado operativo", dossier.scope?.status || "-");
+  line("Hash dossier", dossier.dossier_hash_sha256 || "-", { size: 8 });
+  line("Hash paquete regulatorio", dossier.evidence?.package_hash_sha256 || "-", { size: 8 });
+  line("Aviso", dossier.purpose || "-", { size: 8 });
+
+  section("Resumen");
+  const summary = dossier.summary || {};
+  line("Estado matriz", `OK: ${summary.ok || 0} | Revisar: ${summary.review || 0} | Faltan: ${summary.missing || 0} | Planificado: ${summary.planned || 0}`);
+  line("Checklist core", `Estado: ${text(dossier.regulatory_readiness?.checklist_status)} | Bloqueos: ${Array.isArray(dossier.regulatory_readiness?.blocking) && dossier.regulatory_readiness.blocking.length ? dossier.regulatory_readiness.blocking.join(", ") : "sin bloqueos"}`);
+
+  section("Matriz de cumplimiento");
+  (Array.isArray(dossier.matrix) ? dossier.matrix : []).forEach(item => {
+    ensureSpace(58);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(statusColor(item.status)).text(`[${String(item.status || "").toUpperCase()}] ${item.area}`, { width: 500 });
+    doc.font("Helvetica").fontSize(8.6).fillColor("#111827").text(fit(item.requirement, 130), { width: 500 });
+    doc.font("Helvetica").fontSize(8).fillColor("#64748b").text(fit(item.evidence, 150), { width: 500 });
+    doc.moveDown(0.35);
+  });
+
+  section("Evidencias tecnicas");
+  const documents = dossier.evidence?.documents || [];
+  const payloads = dossier.evidence?.payloads || [];
+  line("Documentos", documents.length ? documents.map(d => `${d.type}:${d.status}:${String(d.hash_sha256 || "").slice(0, 10)}`).join(" | ") : "Sin documentos regulatorios");
+  line("Payloads", payloads.length ? payloads.map(p => `${p.type}:v${p.version}:${String(p.hash_sha256 || "").slice(0, 10)}`).join(" | ") : "Sin payloads regulatorios");
+  line("Versiones", `${(dossier.evidence?.document_versions || []).length} version(es) documentales registradas`);
+  line("Transmisiones", `${(dossier.evidence?.transmissions || []).length} borrador(es)/envio(s) registrados`);
+
+  section("Camino de certificacion");
+  (dossier.certification_path || []).forEach((item, idx) => line(`${idx + 1}`, item, { height: 28 }));
+
+  section("Gobernanza");
+  Object.entries(dossier.governance || {}).forEach(([key, value]) => line(key.replace(/_/g, " "), value, { size: 8 }));
+
+  doc.font("Helvetica").fontSize(7).fillColor("#64748b")
+    .text("Este informe es una evidencia de preparacion interna. La certificacion oficial depende de proveedor/plataforma certificada o proceso formal de certificacion cuando sea exigible.", 42, 792, { width: 510, align: "center" });
+  doc.end();
+  const buffer = await done;
+  const ref = String(dossier.scope?.pedido_numero || dossier.scope?.pedido_id || "pedido").replace(/[^a-zA-Z0-9._-]+/g, "-");
+  return {
+    buffer,
+    mime: "application/pdf",
+    filename: `transgest-dossier-regulatorio-${ref}.pdf`,
+    hash_sha256: sha256Buffer(buffer),
   };
 }
 
@@ -823,9 +1098,13 @@ async function buildRegulatoryTransportPackage(pedidoId, empresaId, options = {}
       immutable_evidence: "Hashes SHA-256 y versiones de documento/payload para detectar cambios.",
     },
   };
-  return {
+  const packageWithHash = {
     ...packageBody,
     package_hash_sha256: sha256Hex(packageBody),
+  };
+  return {
+    ...packageWithHash,
+    certification_dossier: buildRegulatoryCertificationDossier(packageWithHash),
   };
 }
 
@@ -916,4 +1195,6 @@ module.exports = {
   buildEftiPayload,
   buildDiwassPayload,
   buildRegulatoryChecklist,
+  buildRegulatoryCertificationDossier,
+  generateRegulatoryDossierPdf,
 };

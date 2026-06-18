@@ -40,7 +40,6 @@ const MODULOS_PERM = [
   ["agenda", "Agenda"],
   ["dashboard", "Dashboard"],
   ["control_tower", "Control Tower"],
-  ["copiloto_operativo", "Copiloto operativo"],
   ["pedidos", "Pedidos"],
   ["plan_diario", "Plan diario"],
   ["solicitudes", "Solicitudes clientes"],
@@ -83,8 +82,8 @@ const ROLE_PRESETS = {
     editar: ["agenda","clientes","facturacion","contabilidad","nominas","control_horario","documentos","avisos","mi_cuenta"],
   },
   trafico: {
-    ver: ["agenda","dashboard","control_tower","copiloto_operativo","pedidos","plan_diario","solicitudes","gestion_trafico","calculador_portes","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","taller","hojas_ruta","control_horario","documentos","avisos","mi_cuenta"],
-    editar: ["agenda","control_tower","copiloto_operativo","pedidos","plan_diario","solicitudes","gestion_trafico","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","hojas_ruta","control_horario","documentos","avisos","mi_cuenta"],
+    ver: ["agenda","dashboard","control_tower","pedidos","plan_diario","solicitudes","gestion_trafico","calculador_portes","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","taller","hojas_ruta","control_horario","documentos","avisos","mi_cuenta"],
+    editar: ["agenda","control_tower","pedidos","plan_diario","solicitudes","gestion_trafico","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","hojas_ruta","control_horario","documentos","avisos","mi_cuenta"],
   },
   administrativo: {
     ver: ["agenda","dashboard","pedidos","plan_diario","solicitudes","clientes","rutas","vehiculos","choferes","palets","facturacion","contabilidad","nominas","control_horario","informes","documentos","avisos","empresa","mi_cuenta"],
@@ -163,14 +162,14 @@ const S = {
   page:{flex:1,padding:"24px 28px"},
   title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:16,color:"var(--text)"},
   btn:{padding:"8px 16px",borderRadius:7,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"},
-  input:{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
-  sel:{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
+  input:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
+  sel:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
-  mbox:{background:"var(--bg2)",border:"1px solid #28344f",borderRadius:8,padding:28,width:"min(520px,96vw)",maxHeight:"90vh",overflowY:"auto"},
+  mbox:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:28,width:"min(520px,96vw)",maxHeight:"90vh",overflowY:"auto"},
   label:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:5,marginTop:12},
-  card:{background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:8,overflow:"hidden"},
-  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)"},
-  td:{padding:"10px 14px",borderBottom:"1px solid #181e2e",fontSize:13,color:"var(--text)"},
+  card:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
+  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)"},
+  td:{padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)"},
 };
 
 export default function Usuarios() {
@@ -357,35 +356,35 @@ export default function Usuarios() {
           onClose={()=>setModal(false)}
           width={560}
           footer={<>
-            <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}} onClick={()=>setModal(false)}>Cancelar</button>
+            <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}} onClick={()=>setModal(false)}>Cancelar</button>
             <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={guardar} disabled={saving}>{saving?"Guardando...":editando?"Guardar":"Crear usuario"}</button>
           </>}
         >
             <FormField label="Nombre" required error={errors.nombre}>
-              <input style={{...S.input,borderColor:errors.nombre?"#ef4444":"#28344f"}} value={form.nombre||""} onChange={f("nombre")}/>
+              <input style={{...S.input,borderColor:errors.nombre?"#ef4444":"var(--border2)"}} value={form.nombre||""} onChange={f("nombre")}/>
             </FormField>
             <FormField label="Usuario" required error={errors.username}>
-              <input style={{...S.input,borderColor:errors.username?"#ef4444":"#28344f"}} value={form.username||""} onChange={f("username")} placeholder="nombre.usuario"/>
+              <input style={{...S.input,borderColor:errors.username?"#ef4444":"var(--border2)"}} value={form.username||""} onChange={f("username")} placeholder="nombre.usuario"/>
             </FormField>
             <FormField label="Email" error={errors.email} hint="Opcional. Se usara para invitaciones y recuperacion si esta informado.">
-              <input style={{...S.input,borderColor:errors.email?"#ef4444":"#28344f"}} type="email" value={form.email||""} onChange={f("email")} placeholder="correo@empresa.com"/>
+              <input style={{...S.input,borderColor:errors.email?"#ef4444":"var(--border2)"}} type="email" value={form.email||""} onChange={f("email")} placeholder="correo@empresa.com"/>
             </FormField>
             {!editando&&<>
               <FormField label="Contraseña temporal" required error={errors.password} hint="Mínimo 8 caracteres.">
-                <input style={{...S.input,borderColor:errors.password?"#ef4444":"#28344f"}} type="password" value={form.password||""} onChange={f("password")}/>
+                <input style={{...S.input,borderColor:errors.password?"#ef4444":"var(--border2)"}} type="password" value={form.password||""} onChange={f("password")}/>
               </FormField>
             </>}
             <FormField label="Perfil">
               <input style={S.input} value={form.perfil||""} onChange={f("perfil")} placeholder="Operaciones, Administracion..."/>
             </FormField>
             <FormField label="Rol" required error={errors.rol}>
-              <select value={form.rol||"trafico"} onChange={cambiarRol} style={{...S.sel,borderColor:errors.rol?"#ef4444":"#28344f"}}>
+              <select value={form.rol||"trafico"} onChange={cambiarRol} style={{...S.sel,borderColor:errors.rol?"#ef4444":"var(--border2)"}}>
                 {ROLES.map(r=><option key={r} value={r}>{LABEL[r]||r}</option>)}
               </select>
             </FormField>
             {form.rol === "chofer" && (
               <FormField label="Ficha de chofer y matricula" required error={errors.chofer_id} hint="La app mostrara los viajes asignados a este chofer o a su vehiculo/matricula habitual.">
-                <select value={form.chofer_id || ""} onChange={f("chofer_id")} style={{...S.sel,borderColor:errors.chofer_id?"#ef4444":"#28344f"}}>
+                <select value={form.chofer_id || ""} onChange={f("chofer_id")} style={{...S.sel,borderColor:errors.chofer_id?"#ef4444":"var(--border2)"}}>
                   <option value="">Selecciona chofer...</option>
                   {choferes.map(c => (
                     <option key={c.id} value={c.id}>
@@ -396,7 +395,7 @@ export default function Usuarios() {
               </FormField>
             )}
             {form.rol === "trafico" && (
-              <div style={{border:"1px solid #28344f",borderRadius:8,padding:12,marginTop:12,background:"rgba(20,184,166,.06)"}}>
+              <div style={{border:"1px solid var(--border2)",borderRadius:8,padding:12,marginTop:12,background:"rgba(20,184,166,.06)"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
                   <div>
                     <div style={{fontSize:12,fontWeight:900,color:"var(--accent-xl)"}}>Alcance operativo de trafico</div>
@@ -424,7 +423,7 @@ export default function Usuarios() {
                         type="button"
                         key={key}
                         onClick={()=>toggleTipoViaje(key)}
-                        style={{padding:"6px 10px",borderRadius:7,border:`1px solid ${active ? "rgba(20,184,166,.35)" : "#28344f"}`,background:active ? "rgba(20,184,166,.14)" : "var(--bg4)",color:active ? "var(--accent-xl)" : "var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}
+                        style={{padding:"6px 10px",borderRadius:7,border:`1px solid ${active ? "rgba(20,184,166,.35)" : "var(--border2)"}`,background:active ? "rgba(20,184,166,.14)" : "var(--bg4)",color:active ? "var(--accent-xl)" : "var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}
                       >
                         {label}
                       </button>
@@ -435,11 +434,11 @@ export default function Usuarios() {
                   <label style={{...S.label,marginTop:0}}>Matriculas</label>
                   <div style={{display:"flex",gap:6}}>
                     <button type="button" onClick={()=>setForm(p=>({...p,trafico_config:{...normalizarTraficoConfigUI(p.trafico_config),vehiculo_ids:vehiculos.map(v=>String(v.id))}}))}
-                      style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid #28344f",padding:"4px 8px",fontSize:10}}>
+                      style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid var(--border2)",padding:"4px 8px",fontSize:10}}>
                       Todas
                     </button>
                     <button type="button" onClick={()=>setForm(p=>({...p,trafico_config:{...normalizarTraficoConfigUI(p.trafico_config),vehiculo_ids:[]}}))}
-                      style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid #28344f",padding:"4px 8px",fontSize:10}}>
+                      style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid var(--border2)",padding:"4px 8px",fontSize:10}}>
                       Sin limite
                     </button>
                   </div>
@@ -449,7 +448,7 @@ export default function Usuarios() {
                     const cfg = normalizarTraficoConfigUI(form.trafico_config);
                     const active = cfg.vehiculo_ids.includes(String(v.id));
                     return (
-                      <label key={v.id} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 8px",borderRadius:7,border:`1px solid ${active ? "rgba(20,184,166,.35)" : "#28344f"}`,background:active ? "rgba(20,184,166,.10)" : "var(--bg4)",fontSize:11,color:"var(--text2)",cursor:"pointer"}}>
+                      <label key={v.id} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 8px",borderRadius:7,border:`1px solid ${active ? "rgba(20,184,166,.35)" : "var(--border2)"}`,background:active ? "rgba(20,184,166,.10)" : "var(--bg4)",fontSize:11,color:"var(--text2)",cursor:"pointer"}}>
                         <input type="checkbox" checked={active} onChange={()=>toggleVehiculoScope(v.id)} />
                         <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800}}>{v.matricula || "Sin matricula"}</span>
                       </label>
@@ -466,13 +465,13 @@ export default function Usuarios() {
               <label style={{...S.label,marginTop:0,marginBottom:0}}>Permisos por modulo</label>
               <button
                 type="button"
-                style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid #28344f",padding:"5px 9px",fontSize:11}}
+                style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid var(--border2)",padding:"5px 9px",fontSize:11}}
                 onClick={()=>setForm(p=>({...p,permisos:presetRol(p.rol||"trafico")}))}
               >
                 Aplicar rol
               </button>
             </div>
-            <div style={{border:"1px solid #28344f",borderRadius:8,overflow:"hidden",marginTop:8}}>
+            <div style={{border:"1px solid var(--border2)",borderRadius:8,overflow:"hidden",marginTop:8}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr 64px 64px",gap:0,background:"var(--bg3)",color:"var(--text4)",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em"}}>
                 <div style={{padding:"8px 10px"}}>Modulo</div>
                 <div style={{padding:"8px 10px",textAlign:"center"}}>Ver</div>

@@ -113,6 +113,43 @@ function AlertBadge({ aviso }) {
   );
 }
 
+function initialsFromName(value) {
+  const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
+  return (parts[0]?.[0] || "").concat(parts[1]?.[0] || "").toUpperCase() || "";
+}
+
+function ChoferAvatar({ row }) {
+  const name = row?.chofer_nombre || "Sin chofer";
+  const src = row?.chofer_foto_url || row?.chofer_avatar_url || row?.chofer_foto || row?.foto_url || "";
+  const initials = initialsFromName(name);
+  const baseStyle = {
+    width:32,
+    height:32,
+    borderRadius:"50%",
+    flexShrink:0,
+    border:"1px solid rgba(20,184,166,.25)",
+    background:"linear-gradient(135deg, rgba(20,184,166,.16), rgba(59,130,246,.10))",
+    color:"var(--accent-xl)",
+    display:"inline-flex",
+    alignItems:"center",
+    justifyContent:"center",
+    fontSize:11,
+    fontWeight:900,
+    overflow:"hidden",
+  };
+  if (src) return <img src={src} alt={name} style={{ ...baseStyle, objectFit:"cover", background:"var(--bg3)" }} />;
+  return (
+    <span style={baseStyle} title={name}>
+      {initials || (
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M20 21a8 8 0 0 0-16 0" />
+          <circle cx="12" cy="8" r="4" />
+        </svg>
+      )}
+    </span>
+  );
+}
+
 async function copyTextToClipboard(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -337,6 +374,46 @@ export default function PlanDiario() {
   }
 
   const resumen = data.resumen || {};
+  const avisosDia = useMemo(() => {
+    const pedidosDia = [
+      ...(data.rows || []).flatMap(row => (row.pedidos || []).map(p => ({ ...p, _row: row }))),
+      ...(data.unassigned || []),
+    ];
+    const rowsAlerts = (data.rows || []).flatMap(row => (row.avisos || []).map((aviso, idx) => ({
+      id: `${row.id}-${aviso.source || "aviso"}-${idx}`,
+      severity: aviso.severity || "info",
+      title: aviso.title || "Aviso operativo",
+      detail: [row.matricula, aviso.detail].filter(Boolean).join(" - "),
+      label: aviso.label || row.chofer_nombre || "",
+    })));
+    const festivoAlerts = pedidosDia
+      .map(p => {
+        const raw = p.aviso_festivo || p.festivo || p.festivo_nombre || p.festivo_ccaa || "";
+        const text = typeof raw === "object"
+          ? [raw.nombre, raw.descripcion, raw.municipio, raw.provincia, raw.ccaa].filter(Boolean).join(" - ")
+          : String(raw || "");
+        if (!text) return null;
+        return {
+          id: `festivo-${p.id || p.numero}`,
+          severity: "warning",
+          title: "Festivo en ruta",
+          detail: `${p.numero || "Pedido"} - ${[p.origen, p.destino].filter(Boolean).join(" -> ") || p.ruta || text}`,
+          label: text,
+        };
+      })
+      .filter(Boolean);
+    const sinAsignarAlerts = (data.unassigned || []).slice(0, 5).map(p => ({
+      id: `unassigned-${p.id}`,
+      severity: "warning",
+      title: p.aviso_completar || "Pedido sin asignacion completa",
+      detail: `${p.numero || "Pedido"} - ${p.ruta || [p.origen, p.destino].filter(Boolean).join(" -> ") || "Sin ruta"}`,
+      label: p.fecha_carga || "",
+    }));
+    return [...rowsAlerts, ...festivoAlerts, ...sinAsignarAlerts].sort((a, b) => {
+      const order = { danger: 0, warning: 1, info: 2, ok: 3 };
+      return (order[a.severity] ?? 9) - (order[b.severity] ?? 9);
+    }).slice(0, 8);
+  }, [data.rows, data.unassigned]);
   const today = ymd(new Date());
   const tomorrow = addDays(today, 1);
 
@@ -404,8 +481,13 @@ export default function PlanDiario() {
                     </td>
                     <td style={{ ...S.td, fontFamily:"'JetBrains Mono',monospace", fontWeight:800, color:row.remolque_matricula ? "#a78bfa" : "var(--text5)" }}>{row.remolque_matricula || "-"}</td>
                     <td style={S.td}>
-                      <div style={{ fontWeight:850, color:"var(--text)" }}>{row.chofer_nombre || "Sin chofer"}</div>
-                      {row.chofer_telefono && <div style={{ fontSize:10, color:"var(--text5)", marginTop:3 }}>{row.chofer_telefono}</div>}
+                      <div style={{ display:"flex", alignItems:"center", gap:9, minWidth:0 }}>
+                        <ChoferAvatar row={row} />
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontWeight:850, color:"var(--text)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{row.chofer_nombre || "Sin chofer"}</div>
+                          {row.chofer_telefono && <div style={{ fontSize:10, color:"var(--text5)", marginTop:3 }}>{row.chofer_telefono}</div>}
+                        </div>
+                      </div>
                     </td>
                     <td
                       style={{
@@ -483,6 +565,22 @@ export default function PlanDiario() {
                 </div>
               </div>
             ))}
+          </div>
+          <div style={{ padding:"10px 12px", borderTop:"1px solid var(--border)", borderBottom:"1px solid var(--border)", background:"var(--bg3)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}>
+              <div style={{ fontSize:12, fontWeight:900, color:"var(--text)" }}>Avisos del dia</div>
+              <span style={{ fontSize:10, color:"var(--text5)", fontWeight:900 }}>{avisosDia.length}</span>
+            </div>
+            <div style={{ fontSize:10, color:"var(--text5)", marginTop:2 }}>Trafico, mantenimiento, agenda, documentacion y festivos aceptados</div>
+          </div>
+          <div style={{ padding:10, display:"grid", gap:8 }}>
+            {loading ? (
+              <div style={{ color:"var(--text4)", fontSize:12 }}>Cargando avisos...</div>
+            ) : avisosDia.length ? (
+              avisosDia.map(a => <AlertBadge key={a.id} aviso={a} />)
+            ) : (
+              <div style={{ color:"var(--text4)", fontSize:12, padding:12 }}>Sin avisos relevantes para este dia.</div>
+            )}
           </div>
         </aside>
       </div>

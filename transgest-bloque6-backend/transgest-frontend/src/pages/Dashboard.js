@@ -1,15 +1,16 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { getFacturas, getPedidos, getVehiculos, getChoferes, getExcepcionesOperativas, getActividad, getEmpresaConfig, getTallerEstado, getPaletMovimientos } from "../services/api";
+import { getFacturas, getPedidos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos } from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import { setRuntimeFocus } from "../services/runtimeFocus";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const fmt2   = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtN   = n => Number(n||0).toLocaleString("es-ES");
 const S = {
-  page:  { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },
-  title: { fontFamily:"'Syne',sans-serif", fontSize:20, fontWeight:800, color:"var(--text)" },
-  card:  { background:"var(--card-bg)", border:"1px solid var(--border)", borderRadius:12, padding:"16px 18px" },
-  kpi:   { background:"var(--card-bg)", border:"1px solid var(--border)", borderRadius:12, padding:"16px 18px", flex:1 },
+  page:  { flex:1, padding:"28px 32px 34px", fontFamily:"'DM Sans',sans-serif", background:"linear-gradient(180deg,rgba(236,253,245,.18),rgba(255,255,255,0) 300px)" },
+  title: { fontFamily:"'Syne',sans-serif", fontSize:25, fontWeight:900, color:"var(--text)", letterSpacing:0 },
+  card:  { background:"var(--card-bg)", border:"1px solid rgba(15,118,110,.12)", borderRadius:14, padding:"20px 22px", boxShadow:"0 16px 42px rgba(15,23,42,.10)" },
+  kpi:   { background:"var(--card-bg)", border:"1px solid rgba(15,118,110,.12)", borderRadius:14, padding:"21px 24px", boxShadow:"0 16px 42px rgba(15,23,42,.10)", minHeight:106 },
   sec:   { fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:".08em", color:"var(--text5)", marginBottom:8, display:"flex", alignItems:"center", gap:6 },
   badge: { display:"inline-flex", alignItems:"center", padding:"2px 10px", borderRadius:20, fontSize:11, fontWeight:700 },
 };
@@ -103,39 +104,151 @@ function buildPaletsDashboardAlerts(movimientos = []) {
   return alertas.sort((a,b) => b.dias - a.dias).slice(0, 5);
 }
 
-function AlertRow({ icon, texto, color, bg }) {
+function abrirAlerta(alerta = {}) {
+  if (alerta.focusKey && alerta.focus) setRuntimeFocus(alerta.focusKey, alerta.focus);
+  navegar(alerta.view || "control_tower");
+}
+
+function AlertRow({ icon, texto, color, bg, view, focusKey, focus, actionLabel = "Abrir" }) {
   return (
-    <div style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", borderRadius:8,
-                  background: bg||"rgba(239,68,68,.08)", border:`1px solid ${color}30`, marginBottom:6 }}>
+    <button onClick={()=>abrirAlerta({ view, focusKey, focus })}
+      style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"8px 12px", borderRadius:8,
+                  background: bg||"rgba(239,68,68,.08)", border:`1px solid ${color}30`, marginBottom:6, cursor:"pointer", textAlign:"left", fontFamily:"'DM Sans',sans-serif" }}>
       <span style={{ fontSize:14 }}>{icon||""}</span>
-      <span style={{ fontSize:12, color, fontWeight:500 }}>{texto}</span>
+      <span style={{ fontSize:12, color, fontWeight:700, flex:1 }}>{texto}</span>
+      <span style={{ fontSize:10, color, fontWeight:900, textTransform:"uppercase", letterSpacing:".05em" }}>{actionLabel}</span>
+    </button>
+  );
+}
+
+const PERIOD_LABELS = { "7d":"7 días", "mes":"Este mes", "3m":"3 meses", "6m":"6 meses", "1y":"Este año", "all":"Todo" };
+
+function DashboardIcon({ name, size = 24 }) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.9,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": true,
+  };
+  if (name === "truck") return (
+    <svg {...common}>
+      <path d="M3 7h11v9H3z" />
+      <path d="M14 10h4l3 3v3h-7z" />
+      <path d="M6.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+      <path d="M17.5 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+    </svg>
+  );
+  if (name === "vehicle") return (
+    <svg {...common}>
+      <path d="M5 11h14l-1.4-4.2A2 2 0 0 0 15.7 5H8.3a2 2 0 0 0-1.9 1.8L5 11z" />
+      <path d="M5 11v5h14v-5" />
+      <path d="M7.5 18a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
+      <path d="M16.5 18a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
+    </svg>
+  );
+  if (name === "driver") return (
+    <svg {...common}>
+      <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+      <path d="M15 14l2 3" />
+      <path d="M9 14l-2 3" />
+    </svg>
+  );
+  if (name === "euro") return (
+    <svg {...common}>
+      <path d="M17 5.5A7 7 0 1 0 17 18.5" />
+      <path d="M5 10h10" />
+      <path d="M5 14h9" />
+    </svg>
+  );
+  if (name === "clipboard") return (
+    <svg {...common}>
+      <path d="M9 4h6l1 2h3v15H5V6h3z" />
+      <path d="M9 4v3h6V4" />
+      <path d="M9 12h6" />
+      <path d="M9 16h4" />
+    </svg>
+  );
+  if (name === "bars") return (
+    <svg {...common}>
+      <path d="M5 20V10" />
+      <path d="M12 20V4" />
+      <path d="M19 20v-7" />
+      <path d="M3 20h18" />
+    </svg>
+  );
+  if (name === "pie") return (
+    <svg {...common}>
+      <path d="M12 3v9h9" />
+      <path d="M20.5 15a9 9 0 1 1-11-11" />
+    </svg>
+  );
+  if (name === "money") return (
+    <svg {...common}>
+      <path d="M3 7h18v10H3z" />
+      <path d="M7 12h.01" />
+      <path d="M17 12h.01" />
+      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+    </svg>
+  );
+  if (name === "pulse") return (
+    <svg {...common}>
+      <path d="M3 12h4l2-5 4 10 2-5h6" />
+    </svg>
+  );
+  if (name === "tower") return (
+    <svg {...common}>
+      <path d="M8 21l4-18 4 18" />
+      <path d="M7 10h10" />
+      <path d="M6 15h12" />
+      <path d="M9 6h6" />
+    </svg>
+  );
+  return (
+    <svg {...common}>
+      <path d="M4 4h16v16H4z" />
+      <path d="M8 8h8" />
+      <path d="M8 12h8" />
+      <path d="M8 16h5" />
+    </svg>
+  );
+}
+
+function ExecutiveKpi({ icon, iconBg, iconColor, value, label, sub, valueColor }) {
+  return (
+    <div style={{...S.kpi,display:"flex",alignItems:"center",gap:18}}>
+      <div style={{width:58,height:58,borderRadius:"50%",background:iconBg,color:iconColor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:900,boxShadow:"inset 0 0 0 1px rgba(255,255,255,.44)",flexShrink:0}}>
+        {icon}
+      </div>
+      <div style={{minWidth:0}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:26,fontWeight:900,color:valueColor || "var(--text)",lineHeight:1.05}}>{value}</div>
+        <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginTop:5}}>{label}</div>
+        <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{sub}</div>
+      </div>
     </div>
   );
 }
 
-function actividadModulo(accion) {
-  const raw = String(accion || "");
-  if (raw.includes("/pedidos")) return "Pedidos";
-  if (raw.includes("/facturas")) return "Facturacion";
-  if (raw.includes("/clientes")) return "Clientes";
-  if (raw.includes("/vehiculos")) return "Vehiculos";
-  if (raw.includes("/choferes")) return "Choferes";
-  if (raw.includes("/colaboradores")) return "Colaboradores";
-  if (raw.includes("/taller")) return "Taller";
-  if (raw.includes("/palets")) return "Almacen";
-  return "Sistema";
+function PanelTitle({ icon, title, action }) {
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,minWidth:0}}>
+        {icon && (
+          <span style={{width:30,height:30,borderRadius:9,border:"1px solid rgba(15,118,110,.18)",background:"rgba(20,184,166,.07)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,flexShrink:0}}>
+            {icon}
+          </span>
+        )}
+        <span style={{...S.sec,marginBottom:0}}>{title}</span>
+      </div>
+      {action}
+    </div>
+  );
 }
-
-function actividadColor(accion, status) {
-  if (Number(status || 0) >= 400) return "#ef4444";
-  const method = String(accion || "").split(" ")[0];
-  if (method === "POST") return "var(--green)";
-  if (method === "PUT" || method === "PATCH") return "#f59e0b";
-  if (method === "DELETE") return "#ef4444";
-  return "var(--accent-l)";
-}
-
-const PERIOD_LABELS = { "7d":"7 días", "mes":"Este mes", "3m":"3 meses", "6m":"6 meses", "1y":"Este año", "all":"Todo" };
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -145,7 +258,6 @@ export default function Dashboard() {
   const [vehiculos,  setVehiculos]  = useState([]);
   const [choferes,  setChoferes]  = useState([]);
   const [misTareas, setMisTareas] = useState([]);
-  const [actividadReciente, setActividadReciente] = useState([]);
   const [empresaCfg, setEmpresaCfg] = useState({ cfg_alertas: [] });
   const [tallerEstado, setTallerEstado] = useState({ stock: [], reparaciones: [] });
   const [paletMovimientos, setPaletMovimientos] = useState([]);
@@ -156,13 +268,12 @@ export default function Dashboard() {
       setLoading(true);
       try {
       const _tout = (p, ms=8000) => Promise.race([p, new Promise(r=>setTimeout(()=>r([]),ms))]);
-        const [p, f, v, c, ex, act, cfg, taller, palets] = await Promise.all([
+        const [p, f, v, c, ex, cfg, taller, palets] = await Promise.all([
           _tout(getPedidos().catch(()=>[])),
           getFacturas().catch(()=>[]),
           getVehiculos().catch(()=>[]),
           getChoferes().catch(()=>[]),
           getExcepcionesOperativas().catch(()=>null),
-          user?.rol === "gerente" ? getActividad({ limit: 6 }).catch(()=>null) : Promise.resolve(null),
           getEmpresaConfig().catch(()=>null),
           getTallerEstado().catch(()=>null),
           getPaletMovimientos().catch(()=>[]),
@@ -172,12 +283,10 @@ export default function Dashboard() {
         setVehiculos(Array.isArray(v)?v:[]);
         setChoferes(Array.isArray(c)?c:[]);
         const exItems = Array.isArray(ex?.data) ? ex.data : [];
-        const actItems = Array.isArray(act?.data) ? act.data.slice(0, 6) : [];
         setMisTareas(exItems
           .filter(x => x.workflow?.activa && String(x.workflow?.asignado_a || "") === String(user?.id || ""))
           .slice(0, 5)
         );
-        setActividadReciente(actItems);
         setEmpresaCfg(cfg && typeof cfg === "object" ? cfg : { cfg_alertas: [] });
         setTallerEstado(taller && typeof taller === "object" ? taller : { stock: [], reparaciones: [] });
         setPaletMovimientos(Array.isArray(palets) ? palets : Array.isArray(palets?.data) ? palets.data : []);
@@ -289,6 +398,10 @@ export default function Dashboard() {
           texto: `${tipo} ${merged.matricula}: ${s.label}`,
           color: s.color, bg: s.dias<=0?"rgba(239,68,68,.08)":"rgba(245,158,11,.08)",
           icon: s.dias<=0?"":"",
+          view: "vehiculos",
+          focusKey: "tms_vehiculos_focus",
+          focus: { vehiculo_id: merged.id, source: "dashboard_alertas", section: "documentacion", tipo },
+          actionLabel: "Revisar",
         });
       });
     });
@@ -298,6 +411,10 @@ export default function Dashboard() {
         if (s) alertas.push({
           texto: `${tipo} ${c.nombre}: ${s.label}`,
           color:s.color, bg:s.dias<=0?"rgba(239,68,68,.08)":"rgba(245,158,11,.08)", icon:s.dias<=0?"":"",
+          view: "choferes",
+          focusKey: "tms_choferes_focus",
+          focus: { chofer_id: c.id, source: "dashboard_alertas", section: "documentacion", tipo },
+          actionLabel: "Revisar",
         });
       });
     });
@@ -318,6 +435,10 @@ export default function Dashboard() {
             color: Math.max(pctDias,pctKm)>=1 ? "var(--red)" : "#f59e0b",
             bg:    Math.max(pctDias,pctKm)>=1 ? "rgba(239,68,68,.08)" : "rgba(245,158,11,.08)",
             icon:"",
+            view: "taller",
+            focusKey: "tms_taller_focus",
+            focus: { vehiculo_id: v.id, source: "dashboard_alertas", tipo: cfg.tipo_mantenimiento },
+            actionLabel: "Abrir taller",
           });
         }
       });
@@ -332,11 +453,19 @@ export default function Dashboard() {
         alertas.push({
           texto: `Factura ${f.numero} (${f.cliente_nombre||"-"}) VENCIDA hace ${Math.abs(dias)} día${Math.abs(dias)!==1?"s":""}`,
           color: "var(--red)", bg: "rgba(239,68,68,.08)", icon:"",
+          view: "facturacion",
+          focusKey: "tms_facturacion_focus",
+          focus: { factura_id: f.id, source: "dashboard_alertas", title: "Factura vencida" },
+          actionLabel: "Gestionar",
         });
       } else if (dias <= 7) {
         alertas.push({
           texto: `Factura ${f.numero} (${f.cliente_nombre||"-"}) vence en ${dias} día${dias!==1?"s":""}`,
           color: "#f59e0b", bg: "rgba(245,158,11,.06)", icon:"",
+          view: "facturacion",
+          focusKey: "tms_facturacion_focus",
+          focus: { factura_id: f.id, source: "dashboard_alertas", title: "Factura proxima a vencer" },
+          actionLabel: "Ver",
         });
       }
     });
@@ -347,6 +476,9 @@ export default function Dashboard() {
         color: a.critico ? "var(--red)" : "#f59e0b",
         bg: a.critico ? "rgba(239,68,68,.08)" : "rgba(245,158,11,.08)",
         icon: "",
+        view: "palets",
+        focus: { source: "dashboard_alertas", cliente: a.cliente },
+        actionLabel: "Regularizar",
       });
     });
     // ── Camiones en taller con pérdidas ──
@@ -357,6 +489,10 @@ export default function Dashboard() {
         alertas.push({
           texto: `${v.matricula} lleva ${dias} día${dias!==1?"s":""} en taller`,
           color: "#f97316", bg: "rgba(249,115,22,.08)", icon:"",
+          view: "taller",
+          focusKey: "tms_taller_focus",
+          focus: { vehiculo_id: v.id, source: "dashboard_alertas", section: "taller" },
+          actionLabel: "Abrir taller",
         });
       }
     });
@@ -364,7 +500,7 @@ export default function Dashboard() {
     const avisosEmpresa = Array.isArray(empresaCfg?.cfg_alertas) ? empresaCfg.cfg_alertas : [];
     // (custom alerts are shown as reminders in the alert area when active)
     avisosEmpresa.filter(a => a?.activo !== false).filter(a => ["Otro", "Otro aviso personalizado"].includes(String(a?.tipo || "")) || String(a?.descripcion || "").trim()).forEach(a => {
-      alertas.push({ texto: a.descripcion||a.tipo, color:"#818cf8", bg:"rgba(99,102,241,.07)", icon:"" });
+      alertas.push({ texto: a.descripcion||a.tipo, color:"#818cf8", bg:"rgba(99,102,241,.07)", icon:"", view:"avisos", actionLabel:"Abrir" });
     });
   
     // ── Últimas actividades ──
@@ -384,7 +520,7 @@ export default function Dashboard() {
   }, [pedidos, facturas, vehiculos, choferes, filterByPeriod, empresaCfg, tallerEstado, paletMovimientos]);
 
   const puedeVerControlTower = false;
-  const copiloto = null;
+  const controlAnalysis = null;
   const towerResumen = {};
   const towerKpis = {};
   const towerVistas = {};
@@ -399,28 +535,36 @@ export default function Dashboard() {
   const controlTowerRef = { current: null };
   const setTowerExpanded = () => {};
   const setTowerTab = () => {};
-  const abrirCopilotoAction = () => {};
+  const abrirControlAnalysisAction = () => {};
   const renderTowerItem = () => null;
 
   return (
     <div style={S.page}>
       {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20, flexWrap:"wrap", gap:10 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:26, flexWrap:"wrap", gap:16 }}>
         <div>
           <div style={S.title}>Dashboard Ejecutivo</div>
-          <div style={{ fontSize:12, color:"var(--text4)", marginTop:2, textTransform:"capitalize" }}>{today}</div>
+          <div style={{ fontSize:12, color:"var(--text4)", marginTop:4, textTransform:"capitalize" }}>{today}</div>
+          <div style={{ fontSize:11, color:"var(--text5)", marginTop:3 }}>
+            Vista de negocio y salud general. La operativa diaria se atiende en Control Tower.
+          </div>
         </div>
         {/* Period selector */}
-        <div style={{ display:"flex", gap:5, background:"var(--bg3)", padding:4, borderRadius:9, border:"1px solid var(--border)" }}>
-          {Object.entries(PERIOD_LABELS).map(([k,l])=>(
-            <button key={k} onClick={()=>setPeriod(k)}
-              style={{ padding:"5px 12px", borderRadius:6, border:"none", fontFamily:"'DM Sans',sans-serif",
-                       fontSize:12, fontWeight:600, cursor:"pointer",
-                       background: period===k ? "var(--accent)" : "transparent",
-                       color:      period===k ? "#fff" : "var(--text4)" }}>
-              {l}
-            </button>
-          ))}
+        <div style={{display:"flex",gap:14,alignItems:"center",flexWrap:"wrap"}}>
+          <button onClick={()=>navegar("control_tower")} style={{border:"1px solid rgba(15,118,110,.18)",background:"var(--card-bg)",color:"var(--accent-xl)",borderRadius:10,padding:"10px 16px",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",boxShadow:"0 10px 25px rgba(15,23,42,.07)",display:"inline-flex",alignItems:"center",gap:8}}>
+            <DashboardIcon name="tower" size={15} /> Abrir Control Tower
+          </button>
+          <div style={{ display:"flex", gap:4, background:"var(--card-bg)", padding:5, borderRadius:11, border:"1px solid rgba(15,118,110,.12)", boxShadow:"0 10px 25px rgba(15,23,42,.07)" }}>
+            {Object.entries(PERIOD_LABELS).map(([k,l])=>(
+              <button key={k} onClick={()=>setPeriod(k)}
+                style={{ padding:"8px 17px", borderRadius:8, border:"none", fontFamily:"'DM Sans',sans-serif",
+                         fontSize:12, fontWeight:600, cursor:"pointer",
+                         background: period===k ? "var(--accent)" : "transparent",
+                         color:      period===k ? "#fff" : "var(--text4)" }}>
+                {l}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -429,7 +573,7 @@ export default function Dashboard() {
       ) : (
         <>
           {/* ── KPI Row ── */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:16 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))", gap:22, marginBottom:22 }}>
             {[
               { label:"TOTAL VIAJES",      val:pedFilt.length,         sub:`${pedFilt.filter(p=>p.estado==="en_curso").length} en curso`,   color:"var(--accent-xl)" },
               { label:"VEHÍCULOS DISP.",
@@ -438,31 +582,46 @@ export default function Dashboard() {
               { label:"CHÓFERES DISP.",    val:`${cDisp}/${choferes.length}`,  sub:`${choferes.filter(c=>c.estado==="vacaciones").length} de vacaciones`, color:"var(--text)" },
               { label:"FACTURACIÓN TOTAL", val:`${fmt2(totalFacturado)} EUR`,     sub:`${fmtN(nFacturas)} facturas emitidas`,                  color:"#f59e0b" },
             ].map((k,i)=>(
-              <div key={i} style={S.kpi}>
-                <div style={{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:800, color:k.color, marginBottom:4 }}>{k.val}</div>
-                <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:".08em", color:"var(--text5)" }}>{k.label}</div>
-                <div style={{ fontSize:11, color:"var(--text4)", marginTop:4 }}>{k.sub}</div>
-              </div>
+              <ExecutiveKpi
+                key={i}
+                icon={[
+                  <DashboardIcon name="truck" size={25} />,
+                  <DashboardIcon name="vehicle" size={25} />,
+                  <DashboardIcon name="driver" size={25} />,
+                  <DashboardIcon name="euro" size={25} />,
+                ][i]}
+                iconBg={[
+                  "linear-gradient(135deg,#0f766e,#14b8a6)",
+                  "rgba(20,184,166,.22)",
+                  "rgba(245,158,11,.24)",
+                  "rgba(249,115,22,.28)",
+                ][i]}
+                iconColor={["#fff","var(--accent-xl)","#b45309","#c2410c"][i]}
+                value={k.val}
+                label={k.label}
+                sub={k.sub}
+                valueColor={i === 3 ? "#b45309" : k.color}
+              />
             ))}
           </div>
 
           {/* ── Row 2: estado viajes + alertas ── */}
-          {puedeVerControlTower && copiloto?.resumen && (
-          <div style={{...S.card,marginBottom:12,borderColor:copiloto.resumen.salud==="critica"?"rgba(239,68,68,.38)":copiloto.resumen.salud==="alerta"?"rgba(249,115,22,.34)":"var(--border)"}}>
+          {puedeVerControlTower && controlAnalysis?.resumen && (
+          <div style={{...S.card,marginBottom:12,borderColor:controlAnalysis.resumen.salud==="critica"?"rgba(239,68,68,.38)":controlAnalysis.resumen.salud==="alerta"?"rgba(249,115,22,.34)":"var(--border)"}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
               <div style={{flex:"1 1 360px"}}>
-                <div style={{...S.sec,marginBottom:4}}>Copiloto operativo</div>
-                <div style={{fontSize:15,fontWeight:900,color:"var(--text)",lineHeight:1.3}}>{copiloto.resumen.headline || "Operacion revisada con datos reales."}</div>
+                <div style={{...S.sec,marginBottom:4}}>Analisis operativo</div>
+                <div style={{fontSize:15,fontWeight:900,color:"var(--text)",lineHeight:1.3}}>{controlAnalysis.resumen.headline || "Operacion revisada con datos reales."}</div>
                 <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>
-                  {Number(copiloto.resumen.activos || 0)} activos - {Number(copiloto.resumen.cargas_hoy || 0)} cargas hoy - {Number(copiloto.resumen.descargas_hoy || 0)} descargas hoy
-                  {copiloto.resumen.margen_pct != null ? ` - margen ${fmt2(copiloto.resumen.margen_pct)}%` : ""}
+                  {Number(controlAnalysis.resumen.activos || 0)} activos - {Number(controlAnalysis.resumen.cargas_hoy || 0)} cargas hoy - {Number(controlAnalysis.resumen.descargas_hoy || 0)} descargas hoy
+                  {controlAnalysis.resumen.margen_pct != null ? ` - margen ${fmt2(controlAnalysis.resumen.margen_pct)}%` : ""}
                 </div>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                 {[
-                  ["Prioridades", copiloto.resumen.total_prioridades, "var(--accent-xl)"],
-                  ["Criticas", copiloto.resumen.criticas, "#ef4444"],
-                  ["Altas", copiloto.resumen.altas, "#f97316"],
+                  ["Prioridades", controlAnalysis.resumen.total_prioridades, "var(--accent-xl)"],
+                  ["Criticas", controlAnalysis.resumen.criticas, "#ef4444"],
+                  ["Altas", controlAnalysis.resumen.altas, "#f97316"],
                 ].map(([label,value,color])=>(
                   <div key={label} style={{minWidth:90,border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
                     <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:900,color}}>{Number(value || 0)}</div>
@@ -471,9 +630,9 @@ export default function Dashboard() {
                 ))}
               </div>
             </div>
-            {Array.isArray(copiloto.prioridades) && copiloto.prioridades.length > 0 ? (
+            {Array.isArray(controlAnalysis.prioridades) && controlAnalysis.prioridades.length > 0 ? (
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:8}}>
-                {copiloto.prioridades.slice(0,4).map(p=>{
+                {controlAnalysis.prioridades.slice(0,4).map(p=>{
                   const sev = SEV[p.severity] || SEV.info;
                   return (
                     <div key={p.key} style={{border:`1px solid ${sev.color}40`,background:`${sev.color}0f`,borderRadius:8,padding:"9px 10px"}}>
@@ -495,7 +654,7 @@ export default function Dashboard() {
                       {Array.isArray(p.quick_actions) && p.quick_actions.length > 0 && (
                         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:8}}>
                           {p.quick_actions.slice(0,3).map(action=>(
-                            <button key={action.key || action.label} onClick={()=>abrirCopilotoAction(p, action)}
+                            <button key={action.key || action.label} onClick={()=>abrirControlAnalysisAction(p, action)}
                               style={{fontSize:10,fontWeight:800,border:`1px solid ${action.primary ? "rgba(20,184,166,.35)" : "var(--border)"}`,background:action.primary ? "rgba(20,184,166,.10)" : "var(--bg3)",color:action.primary ? "var(--accent-xl)" : "var(--text4)",borderRadius:20,padding:"2px 7px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                               {action.label}
                             </button>
@@ -507,7 +666,7 @@ export default function Dashboard() {
                 })}
               </div>
             ) : (
-              <div style={{fontSize:12,color:"var(--green)",fontWeight:800}}>Sin prioridades criticas detectadas por el copiloto.</div>
+              <div style={{fontSize:12,color:"var(--green)",fontWeight:800}}>Sin prioridades criticas detectadas.</div>
             )}
           </div>
           )}
@@ -588,14 +747,19 @@ export default function Dashboard() {
           </div>
           )}
 
-          <div style={{...S.card,marginBottom:12,borderColor:misTareas.length>0?"rgba(249,115,22,.35)":"var(--border)"}}>
-            <div style={{...S.sec,justifyContent:"space-between"}}>
-              <span>Mis tareas de hoy</span>
-              <button onClick={()=>navegar("excepciones")}
-                style={{border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text2)",borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                Abrir bandeja
-              </button>
-            </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(420px,100%),1fr))", gap:22, marginBottom:22, alignItems:"stretch" }}>
+            <div style={{display:"grid",gap:22}}>
+          <div style={{...S.card,minHeight:98,borderColor:misTareas.length>0?"rgba(249,115,22,.28)":"rgba(15,118,110,.12)"}}>
+            <PanelTitle
+              icon={<DashboardIcon name="clipboard" size={17} />}
+              title="Mis tareas de hoy"
+              action={(
+                <button onClick={()=>navegar("excepciones")}
+                  style={{border:"1px solid rgba(15,118,110,.16)",background:"rgba(15,118,110,.07)",color:"var(--accent-xl)",borderRadius:9,padding:"8px 14px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  Abrir bandeja
+                </button>
+              )}
+            />
             {misTareas.length===0 ? (
               <div style={{fontSize:12,color:"var(--green)",fontWeight:700}}>No tienes excepciones activas asignadas.</div>
             ) : (
@@ -620,10 +784,10 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+          {/* Bloques ejecutivos */}
             {/* Estado de viajes */}
             <div style={S.card}>
-              <div style={S.sec}>Estado de viajes</div>
+              <PanelTitle icon={<DashboardIcon name="bars" size={17} />} title="Estado de viajes" />
               {estadosPed.length === 0
                 ? <div style={{ color:"var(--text5)", fontSize:12, padding:"16px 0", textAlign:"center" }}>Sin viajes en el período seleccionado</div>
                 : estadosPed.map((e,i) => {
@@ -640,67 +804,43 @@ export default function Dashboard() {
                 })
               }
             </div>
+            </div>
 
             {/* Alertas activas */}
-            <div style={S.card}>
-              <div style={{ ...S.sec, justifyContent:"space-between" }}>
-                <span> Alertas activas</span>
-                {alertas.length > 0 && (
-                  <span style={{ background:"var(--red)", color:"#fff", borderRadius:"50%", width:20, height:20,
-                                  display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:800 }}>
+            <div style={{...S.card,minHeight:290}}>
+              <PanelTitle
+                icon="!"
+                title="Alertas activas"
+                action={alertas.length > 0 && (
+                  <span style={{ background:"var(--red)", color:"#fff", borderRadius:"50%", width:22, height:22,
+                                  display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:900 }}>
                     {alertas.length}
                   </span>
                 )}
-              </div>
-              <div style={{ maxHeight:200, overflowY:"auto" }}>
+              />
+              <div style={{ maxHeight:300, overflowY:"auto", paddingRight:2 }}>
                 {alertas.length === 0
                   ? <div style={{ color:"var(--green)", fontSize:12, display:"flex", gap:6, alignItems:"center" }}>Sin alertas activas</div>
-                  : alertas.map((a,i) => <AlertRow key={i} {...a}/>)
+                  : alertas.slice(0, 7).map((a,i) => <AlertRow key={i} {...a}/>)
                 }
+                {alertas.length > 7 && (
+                  <button onClick={()=>navegar("avisos")} style={{width:"100%",marginTop:4,border:"1px solid rgba(15,118,110,.18)",background:"rgba(15,118,110,.07)",color:"var(--accent-xl)",borderRadius:8,padding:"8px 10px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    Ver todas las alertas
+                  </button>
+                )}
               </div>
             </div>
           </div>
 
-          {user?.rol === "gerente" && (
-            <div style={{ ...S.card, marginBottom:12 }}>
-              <div style={S.sec}>Actividad reciente del sistema</div>
-              {actividadReciente.length === 0
-                ? <div style={{ color:"var(--text5)", fontSize:12 }}>Sin actividad reciente</div>
-                : actividadReciente.map((a,i) => {
-                    const status = Number(a?.detalle?.status || 0);
-                    const color = actividadColor(a?.accion, status);
-                    const method = String(a?.accion || "").split(" ")[0] || "ACCION";
-                    const path = String(a?.accion || "").replace(method, "").trim();
-                    return (
-                      <div key={a.id || i} style={{ display:"flex", alignItems:"center", gap:10, padding:"7px 0", borderBottom:"1px solid var(--border)" }}>
-                        <div style={{ width:8, height:8, borderRadius:"50%", background:color, flexShrink:0 }}/>
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <div style={{ fontSize:12, fontWeight:700, color:"var(--text)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                            {actividadModulo(a?.accion)} - {path || method}
-                          </div>
-                          <div style={{ fontSize:10, color:"var(--text4)" }}>
-                            {a?.actor_email || "usuario"} - {a?.created_at ? new Date(a.created_at).toLocaleString("es-ES") : ""}
-                          </div>
-                        </div>
-                        <span style={{ ...S.badge, background:`${color}1a`, color, flexShrink:0 }}>
-                          {status || method}
-                        </span>
-                      </div>
-                    );
-                  })
-              }
-            </div>
-          )}
-
           {/* ── Row 3: Evolución mensual + Top clientes ── */}
-          <div style={{ display:"grid", gridTemplateColumns:"3fr 2fr", gap:12, marginBottom:12 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(420px,100%),1fr))", gap:22, marginBottom:22 }}>
             {/* Evolución mensual */}
             <div style={S.card}>
-              <div style={S.sec}>EVOLUCIÓN MENSUAL</div>
+              <PanelTitle icon={<DashboardIcon name="bars" size={17} />} title="EVOLUCIÓN MENSUAL" />
               {facMensual.length === 0
                 ? <div style={{ color:"var(--text5)", fontSize:12, padding:"24px 0", textAlign:"center" }}>Sin datos para este período</div>
                 : (
-                  <ResponsiveContainer width="100%" height={160}>
+                  <ResponsiveContainer width="100%" height={150}>
                     <BarChart data={facMensual} margin={{top:0,right:0,bottom:0,left:0}}>
                       <XAxis dataKey="name" tick={{fontSize:10,fill:"var(--text4)"}} axisLine={false} tickLine={false}/>
                       <YAxis tick={{fontSize:10,fill:"var(--text4)"}} axisLine={false} tickLine={false} width={50}
@@ -716,7 +856,7 @@ export default function Dashboard() {
 
             {/* Por cliente */}
             <div style={S.card}>
-              <div style={S.sec}>POR CLIENTE</div>
+              <PanelTitle icon={<DashboardIcon name="pie" size={17} />} title="POR CLIENTE" />
               {topClientes.length === 0
                 ? <div style={{ color:"var(--text5)", fontSize:12, padding:"24px 0", textAlign:"center" }}>Sin datos</div>
                 : topClientes.map((c,i)=>(
@@ -733,10 +873,10 @@ export default function Dashboard() {
           </div>
 
           {/* ── Row 4: KPIs financieros + últimas actividades ── */}
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(420px,100%),1fr))", gap:22 }}>
             {/* Resumen financiero */}
             <div style={S.card}>
-              <div style={S.sec}>RESUMEN FINANCIERO</div>
+              <PanelTitle icon={<DashboardIcon name="money" size={17} />} title="RESUMEN FINANCIERO" />
               {[
                 { l:"Facturado",         v:`${fmt2(totalFacturado)} EUR`,  c:"var(--text)" },
                 { l:"Cobrado",           v:`${fmt2(cobrado)} EUR`,         c:"var(--green)" },
@@ -756,7 +896,7 @@ export default function Dashboard() {
 
             {/* Últimas actividades */}
             <div style={S.card}>
-              <div style={S.sec}>ÚLTIMAS ACTIVIDADES</div>
+              <PanelTitle icon={<DashboardIcon name="pulse" size={17} />} title="ÚLTIMAS ACTIVIDADES" />
               {ultPedidos.length === 0
                 ? <div style={{ color:"var(--text5)", fontSize:12 }}>Sin actividad reciente</div>
                 : ultPedidos.map((p,i)=>(
@@ -783,3 +923,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

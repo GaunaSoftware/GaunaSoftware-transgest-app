@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getControlTower } from "../services/api";
+import { getControlTower, getRouteProviders } from "../services/api";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 
 const S = {
@@ -10,11 +10,11 @@ const S = {
 };
 
 const SEV = {
-  critica: { label:"Critica", color:"#ef4444" },
-  alta: { label:"Alta", color:"#f97316" },
-  media: { label:"Media", color:"#f59e0b" },
-  baja: { label:"Baja", color:"#3b82f6" },
-  info: { label:"Info", color:"var(--accent-l)" },
+  critica: { label:"Critica", color:"#ef4444", bg:"rgba(239,68,68,.08)", border:"rgba(239,68,68,.35)" },
+  alta: { label:"Alta", color:"#f97316", bg:"rgba(249,115,22,.08)", border:"rgba(249,115,22,.35)" },
+  media: { label:"Media", color:"#f59e0b", bg:"rgba(245,158,11,.08)", border:"rgba(245,158,11,.35)" },
+  baja: { label:"Baja", color:"#3b82f6", bg:"rgba(59,130,246,.08)", border:"rgba(59,130,246,.32)" },
+  info: { label:"Info", color:"var(--accent-xl)", bg:"rgba(20,184,166,.09)", border:"rgba(20,184,166,.28)" },
 };
 
 const PERIODS = { "7d":"7 días", mes:"Este mes", "30d":"30 días" };
@@ -93,7 +93,7 @@ function abrirAccion(item, action) {
 function TowerItem({ item }) {
   const sev = SEV[item?.severity] || SEV.info;
   return (
-    <div style={{border:`1px solid ${sev.color}40`,background:`${sev.color}0f`,borderRadius:8,padding:"12px 13px",display:"flex",flexDirection:"column",gap:7,minHeight:148}}>
+    <div style={{border:`1px solid ${sev.border}`,background:sev.bg,borderRadius:8,padding:"12px 13px",display:"flex",flexDirection:"column",gap:7,minHeight:148}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
         <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:sev.color}}>{sev.label}</span>
         <span style={{fontSize:10,color:"var(--text5)",fontWeight:800}}>{item.area}</span>
@@ -127,7 +127,7 @@ function MetricBox({ label, value, detail, color = "var(--accent-xl)" }) {
   );
 }
 
-function FlowPanel({ flujo = [] }) {
+function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
   const rows = Array.isArray(flujo) ? flujo : [];
   const max = Math.max(1, ...rows.map(r => Number(r.total || 0)));
   return (
@@ -137,7 +137,22 @@ function FlowPanel({ flujo = [] }) {
         {rows.map(row => {
           const total = Number(row.total || 0);
           return (
-            <div key={row.key} style={{border:"1px solid var(--border)",borderRadius:8,padding:"9px 10px",background:"var(--bg3)"}}>
+            <button
+              key={row.key}
+              type="button"
+              onClick={() => total > 0 && onStatusClick?.(row)}
+              disabled={total <= 0}
+              style={{
+                border:`1px solid ${selectedKey === row.key ? "rgba(20,184,166,.48)" : "var(--border)"}`,
+                borderRadius:8,
+                padding:"9px 10px",
+                background:selectedKey === row.key ? "rgba(20,184,166,.10)" : "var(--bg3)",
+                cursor:total > 0 ? "pointer" : "default",
+                textAlign:"left",
+                fontFamily:"'DM Sans',sans-serif",
+                opacity:total > 0 ? 1 : .72,
+              }}
+            >
               <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
                 <span style={{fontSize:11,fontWeight:900,color:"var(--text)",whiteSpace:"nowrap"}}>{row.label}</span>
                 <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:900,color:"var(--accent-xl)"}}>{total}</span>
@@ -145,10 +160,116 @@ function FlowPanel({ flujo = [] }) {
               <div style={{height:5,background:"var(--bg4)",borderRadius:99,overflow:"hidden",marginTop:8}}>
                 <div style={{height:"100%",width:`${Math.max(4, total / max * 100)}%`,background:"var(--accent)",borderRadius:99}} />
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function parseRouteFromItem(item = {}) {
+  const text = [item.ruta, item.route, item.description, item.title].filter(Boolean).join(" ");
+  const match = String(text).match(/([A-ZÁÉÍÓÚÜÑ0-9 .,'/-]{2,})\s*(?:>|->|→|a)\s*([A-ZÁÉÍÓÚÜÑ0-9 .,'/-]{2,})/i);
+  const origen = item.origen || match?.[1]?.trim() || "";
+  const destino = item.destino || match?.[2]?.replace(/\s+-\s+.*/, "").trim() || "";
+  return { origen, destino };
+}
+
+function RouteMapPanel({ item }) {
+  const route = parseRouteFromItem(item || {});
+  const hasGps = Number.isFinite(Number(item?.gps_lat)) && Number.isFinite(Number(item?.gps_lng));
+  const title = item?.title || item?.numero || item?.pedido_numero || "Viaje en seguimiento";
+  const [providerInfo, setProviderInfo] = useState(null);
+  const [routeMode, setRouteMode] = useState("camion");
+  useEffect(() => {
+    let alive = true;
+    getRouteProviders()
+      .then(info => { if (alive) setProviderInfo(info); })
+      .catch(() => { if (alive) setProviderInfo(null); });
+    return () => { alive = false; };
+  }, []);
+  const hereConfigured = Boolean(providerInfo?.providers?.here?.configured || providerInfo?.here?.configured);
+  const routeModes = [
+    { key:"camion", label:"Camion", detail:"Perfil pesado" },
+    { key:"rapida", label:"Rapida", detail:"Menor tiempo" },
+    { key:"economica", label:"Economica", detail:"Menor coste" },
+  ];
+  const routeLabel = routeModes.find(m => m.key === routeMode)?.detail || "Ruta prevista";
+  return (
+    <div style={S.card}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
+        <div>
+          <div style={S.sec}>Visibilidad extremo a extremo</div>
+          <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{title}</div>
+        </div>
+        <span style={{fontSize:10,fontWeight:900,color:hasGps ? "var(--green)" : "var(--accent-xl)",border:`1px solid ${hasGps ? "rgba(16,185,129,.30)" : "rgba(20,184,166,.30)"}`,background:hasGps ? "rgba(16,185,129,.10)" : "rgba(20,184,166,.10)",borderRadius:20,padding:"3px 8px"}}>
+          {hasGps ? "GPS activo" : "Ruta prevista"}
+        </span>
+      </div>
+      <div style={{position:"relative",height:210,borderRadius:10,overflow:"hidden",border:"1px solid var(--border)",background:"linear-gradient(135deg, rgba(230,244,241,.95), rgba(248,250,252,.95))"}}>
+        <svg viewBox="0 0 640 220" style={{position:"absolute",inset:0,width:"100%",height:"100%"}}>
+          <defs>
+            <linearGradient id="ct-sea" x1="0" x2="1" y1="0" y2="1">
+              <stop offset="0%" stopColor="#e6f4f1" />
+              <stop offset="100%" stopColor="#f8fafc" />
+            </linearGradient>
+            <filter id="ct-map-shadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="6" stdDeviation="6" floodColor="#0f172a" floodOpacity=".10" />
+            </filter>
+          </defs>
+          <rect width="640" height="220" fill="url(#ct-sea)" />
+          <path d="M92 146 C120 102 145 72 196 60 C248 48 271 29 324 45 C373 60 416 64 463 58 C515 52 561 78 582 116 C553 123 536 143 501 143 C464 144 448 167 409 171 C370 175 340 153 303 166 C262 181 234 164 203 169 C164 176 126 166 92 146Z" fill="#f8fafc" stroke="rgba(100,116,139,.28)" strokeWidth="1.5" filter="url(#ct-map-shadow)" />
+          <path d="M126 145 C173 97 249 117 304 95 S432 73 529 108" fill="none" stroke="rgba(20,184,166,.72)" strokeWidth="5" strokeLinecap="round" strokeDasharray={hasGps ? "0" : "10 10"} />
+          <circle cx="126" cy="145" r="12" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
+          <circle cx="529" cy="108" r="12" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
+          <text x="92" y="190" fill="rgba(15,23,42,.18)" fontSize="18" fontWeight="800">Portugal</text>
+          <text x="472" y="182" fill="rgba(15,23,42,.18)" fontSize="18" fontWeight="800">Mediterraneo</text>
+          <text x="300" y="42" fill="rgba(15,23,42,.20)" fontSize="18" fontWeight="900">España</text>
+          {hasGps ? (
+            <g transform="translate(296 83)">
+              <circle cx="12" cy="12" r="18" fill="rgba(16,185,129,.18)" stroke="rgba(16,185,129,.42)" />
+              <rect x="3" y="7" width="18" height="10" rx="3" fill="var(--green)" />
+              <circle cx="7" cy="19" r="3" fill="#fff" />
+              <circle cx="19" cy="19" r="3" fill="#fff" />
+            </g>
+          ) : (
+            <circle cx="304" cy="95" r="9" fill="var(--accent)" stroke="#fff" strokeWidth="3" />
+          )}
+        </svg>
+        <div style={{position:"absolute",left:14,bottom:14,width:220,background:"rgba(255,255,255,.88)",color:"#0f172a",border:"1px solid rgba(148,163,184,.28)",borderRadius:10,padding:"10px 12px",boxShadow:"0 10px 30px rgba(15,23,42,.10)"}}>
+          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"#0f766e",marginBottom:5}}>{hasGps ? "Ubicacion actual" : "Ruta"}</div>
+          <div style={{fontSize:12,fontWeight:900,lineHeight:1.35}}>{route.origen || "Origen"} -> {route.destino || "Destino"}</div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:5}}>{hasGps ? "Mostrando posicion GPS recibida." : `Sin GPS reciente: ${routeLabel.toLowerCase()}.`}</div>
+          <button onClick={()=>abrirItem(item)} style={{marginTop:9,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#0f766e",borderRadius:7,padding:"6px 9px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            Ver detalle del viaje
+          </button>
+        </div>
+      </div>
+      {hereConfigured && (
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10,alignItems:"center"}}>
+          <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>Rutas HERE</span>
+          {routeModes.map(mode => (
+            <button
+              key={mode.key}
+              onClick={() => setRouteMode(mode.key)}
+              style={{
+                border:`1px solid ${routeMode === mode.key ? "rgba(20,184,166,.45)" : "var(--border2)"}`,
+                background:routeMode === mode.key ? "rgba(20,184,166,.12)" : "var(--bg3)",
+                color:routeMode === mode.key ? "var(--accent-xl)" : "var(--text4)",
+                borderRadius:20,
+                padding:"5px 10px",
+                fontSize:11,
+                fontWeight:900,
+                cursor:"pointer",
+                fontFamily:"'DM Sans',sans-serif",
+              }}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -166,7 +287,7 @@ function DecisionsPanel({ decisiones = [] }) {
             const sev = SEV[d.severity] || SEV.info;
             return (
               <button key={d.id || idx} onClick={()=>navegar(d.view || "gestion_trafico")}
-                style={{textAlign:"left",border:`1px solid ${sev.color}35`,background:`${sev.color}0f`,borderRadius:8,padding:"9px 11px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                style={{textAlign:"left",border:`1px solid ${sev.border}`,background:sev.bg,borderRadius:8,padding:"9px 11px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
                   <span style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{d.title}</span>
                   <span style={{fontSize:10,fontWeight:900,color:sev.color,textTransform:"uppercase"}}>{sev.label}</span>
@@ -208,6 +329,8 @@ export default function ControlTower() {
   const [tab, setTab] = useState("todas");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [statusPicker, setStatusPicker] = useState(null);
+  const [selectedTrip, setSelectedTrip] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -228,10 +351,40 @@ export default function ControlTower() {
   const kpis = data?.kpis || {};
   const vistas = data?.vistas || {};
   const flujo = Array.isArray(data?.flujo_operativo) ? data.flujo_operativo : [];
+  const viajesPorEstado = useMemo(
+    () => data?.viajes_por_estado && typeof data.viajes_por_estado === "object" ? data.viajes_por_estado : {},
+    [data]
+  );
   const recursos = data?.recursos || {};
   const visibilidad = data?.visibilidad || {};
   const decisiones = Array.isArray(data?.decisiones) ? data.decisiones : [];
   const eventos = Array.isArray(data?.eventos_recientes) ? data.eventos_recientes : [];
+  const mapItem = useMemo(() => {
+    if (selectedTrip) return selectedTrip;
+    const enRuta = Array.isArray(viajesPorEstado.en_curso) ? viajesPorEstado.en_curso[0] : null;
+    if (enRuta) return enRuta;
+    return items.find(item => ["en_ruta", "gps_sin_senal", "retraso", "incidencia_pedido"].includes(String(item?.type || ""))) ||
+      items.find(item => parseRouteFromItem(item).origen && parseRouteFromItem(item).destino) ||
+      null;
+  }, [items, selectedTrip, viajesPorEstado]);
+
+  function abrirEstadoFlujo(row) {
+    const key = row?.key || "";
+    const trips = Array.isArray(viajesPorEstado[key]) ? viajesPorEstado[key] : [];
+    if (!trips.length) return;
+    setStatusPicker({ ...row, trips });
+  }
+
+  function seleccionarViajeFlujo(trip) {
+    setSelectedTrip({
+      ...trip,
+      title: `Viaje ${trip.numero || ""}`,
+      entity_id: trip.id,
+      view: "pedidos",
+      description: `${trip.cliente_nombre || "Cliente"} - ${trip.origen || "-"} > ${trip.destino || "-"}`,
+    });
+    setStatusPicker(null);
+  }
   const grupos = useMemo(() => ({
     todas: items,
     hoy: items.filter(item => Array.isArray(item?.buckets) && item.buckets.includes("hoy")),
@@ -285,10 +438,54 @@ export default function ControlTower() {
         </div>
       </div>
 
+      {statusPicker && (
+        <div
+          style={{position:"fixed",inset:0,zIndex:420,background:"rgba(15,23,42,.58)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+          onClick={e => e.target === e.currentTarget && setStatusPicker(null)}
+        >
+          <div style={{width:"min(680px,96vw)",maxHeight:"82vh",overflowY:"auto",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,padding:18,boxShadow:"0 24px 70px rgba(15,23,42,.24)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
+              <div>
+                <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:900,color:"var(--text)"}}>{statusPicker.label}</div>
+                <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Selecciona un viaje para cargar su ruta en el mapa.</div>
+              </div>
+              <button onClick={() => setStatusPicker(null)} style={{border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",borderRadius:8,width:34,height:34,fontSize:18,fontWeight:900,cursor:"pointer"}}>x</button>
+            </div>
+            <div style={{display:"grid",gap:8}}>
+              {statusPicker.trips.map(trip => (
+                <button
+                  key={trip.id}
+                  type="button"
+                  onClick={() => seleccionarViajeFlujo(trip)}
+                  style={{
+                    textAlign:"left",
+                    border:"1px solid var(--border)",
+                    background:"var(--bg3)",
+                    borderRadius:10,
+                    padding:"10px 12px",
+                    cursor:"pointer",
+                    fontFamily:"'DM Sans',sans-serif",
+                  }}
+                >
+                  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
+                    <span style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>{trip.numero || "Pedido"} - {trip.cliente_nombre || "Cliente"}</span>
+                    <span style={{fontSize:11,fontWeight:900,color:"var(--accent-xl)",whiteSpace:"nowrap"}}>{trip.vehiculo_matricula || trip.colaborador_nombre || "Sin matricula"}</span>
+                  </div>
+                  <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>
+                    {trip.origen || "-"} - {trip.destino || "-"}{trip.fecha_carga ? ` - ${String(trip.fecha_carga).slice(0,10)}` : ""}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {!loading && data && (
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12,marginBottom:12}}>
           <div style={{display:"grid",gap:12}}>
-            <FlowPanel flujo={flujo} />
+            <FlowPanel flujo={flujo} selectedKey={statusPicker?.key || selectedTrip?.estado || ""} onStatusClick={abrirEstadoFlujo} />
+            {mapItem && <RouteMapPanel item={mapItem} />}
             <div style={{...S.card}}>
               <div style={S.sec}>Flota, recursos y señales</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>

@@ -97,6 +97,63 @@ const CSS = `
     .tg-user-meta { display:none; }
     .tg-user-chip { padding:3px !important; }
     .tg-current-label { max-width:48vw; }
+    .tg-main, .tg-main.sidebar-collapsed, .tg-content {
+      width:100% !important;
+      max-width:100vw !important;
+      min-width:0 !important;
+      overflow-x:hidden !important;
+    }
+    .tg-content {
+      box-sizing:border-box;
+      padding-bottom:84px;
+    }
+    .tg-content * {
+      box-sizing:border-box;
+      min-width:0;
+    }
+    .tg-content > * {
+      width:100% !important;
+      max-width:100vw !important;
+    }
+    .tg-content [style*="display: grid"],
+    .tg-content [style*="display:grid"] {
+      grid-template-columns:1fr !important;
+    }
+    .tg-content [style*="display: flex"],
+    .tg-content [style*="display:flex"] {
+      max-width:100%;
+    }
+    .tg-content [style*="width: min("],
+    .tg-content [style*="width:min("] {
+      width:100% !important;
+      max-width:calc(100vw - 24px) !important;
+    }
+    .tg-content [style*="min-width"],
+    .tg-content [style*="minWidth"] {
+      min-width:0 !important;
+    }
+    .tg-content input,
+    .tg-content select,
+    .tg-content textarea {
+      width:100% !important;
+      max-width:100% !important;
+      min-width:0 !important;
+    }
+    .tg-content button {
+      max-width:100%;
+      white-space:normal;
+    }
+    .tg-content table {
+      display:block;
+      width:100% !important;
+      max-width:100% !important;
+      overflow-x:auto;
+      white-space:nowrap;
+    }
+    .tg-content th,
+    .tg-content td {
+      white-space:nowrap;
+    }
   }
 `;
 

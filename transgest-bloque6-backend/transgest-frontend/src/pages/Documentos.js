@@ -93,13 +93,13 @@ const S = {
   title: {fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:16,color:"var(--text)"},
   bar:   {display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"},
   btn:   {padding:"8px 14px",borderRadius:7,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:6},
-  card:  {background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:12,overflow:"hidden"},
-  th:    {textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)",whiteSpace:"nowrap"},
-  td:    {padding:"10px 14px",borderBottom:"1px solid #181e2e",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
-  inp:   {background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
-  sel:   {background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  card:  {background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
+  th:    {textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)",whiteSpace:"nowrap"},
+  td:    {padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
+  inp:   {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  sel:   {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
   modal: {position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
-  mbox:  {background:"var(--bg2)",border:"1px solid #28344f",borderRadius:16,padding:28,width:"min(600px,96vw)",maxHeight:"90vh",overflowY:"auto"},
+  mbox:  {background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:28,width:"min(600px,96vw)",maxHeight:"90vh",overflowY:"auto"},
   lbl:   {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:5,marginTop:12},
   tab:   {padding:"7px 16px",border:"none",borderBottom:"2px solid transparent",background:"none",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"},
 };
@@ -423,7 +423,7 @@ Responde SOLO con el JSON, sin texto adicional.`;
       )}
 
       {/* Tabs */}
-      <div style={{display:"flex",gap:0,borderBottom:"1px solid #181e2e",marginBottom:18}}>
+      <div style={{display:"flex",gap:0,borderBottom:"1px solid var(--border)",marginBottom:18}}>
         {TABS.map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)}
             style={{...S.tab,borderBottomColor:tab===t.id?"#3b6ef5":"transparent",
@@ -620,7 +620,7 @@ Responde SOLO con el JSON, sin texto adicional.`;
                   </div>
                 )}
                 {(formDoc.file_nombre || formDoc.file_url) && (
-                  <div style={{marginTop:8,padding:"8px 10px",border:"1px solid #28344f",borderRadius:7,background:"var(--bg3)",fontSize:11,color:"var(--text4)"}}>
+                  <div style={{marginTop:8,padding:"8px 10px",border:"1px solid var(--border2)",borderRadius:7,background:"var(--bg3)",fontSize:11,color:"var(--text4)"}}>
                     <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",color:"var(--text2)",fontWeight:700}}>
                       <input
                         type="checkbox"
@@ -666,7 +666,7 @@ Responde SOLO con el JSON, sin texto adicional.`;
             )}
 
             <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
-              <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}} onClick={()=>setModalDoc(false)}>Cancelar</button>
+              <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}} onClick={()=>setModalDoc(false)}>Cancelar</button>
               <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={guardarDoc} disabled={saving}>
                 {saving?"Guardando...":"Añadir documento"}
               </button>

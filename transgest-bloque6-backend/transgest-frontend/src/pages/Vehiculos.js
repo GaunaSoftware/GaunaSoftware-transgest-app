@@ -67,6 +67,18 @@ const GPS_PROVIDER_LABELS = {
   app_chofer: "App chofer",
 };
 
+function esVehiculoConGpsHabitual(v, todos = []) {
+  const clase = String(v?.clase || v?.tipo || "").toLowerCase();
+  const mat = String(v?.matricula || "").toUpperCase();
+  const remolquesAsignados = new Set((todos || []).map(x => x?.remolque_id).filter(Boolean).map(String));
+  return !clase.includes("remolque") &&
+    !clase.includes("semirremolque") &&
+    !clase.includes("dolly") &&
+    !mat.startsWith("R-") &&
+    !mat.endsWith("-R") &&
+    !remolquesAsignados.has(String(v?.id || ""));
+}
+
 function fmt2(n) { return Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
 function readGpsFocus() {
@@ -92,10 +104,11 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
   const [savingId, setSavingId] = useState("");
   const [savingBulk, setSavingBulk] = useState(false);
   const gpsProviders = (providers || []).filter(p => p.id !== "manual");
+  const vehiculosGps = useMemo(() => (vehiculos || []).filter(v => esVehiculoConGpsHabitual(v, vehiculos)), [vehiculos]);
   const activeProvider = syncProvider || status?.active_provider || gpsProviders.find(p => p.active)?.id || gpsProviders.find(p => p.configured)?.id || "";
-  const mapped = vehiculos.filter(v => v.gps_provider && v.gps_provider !== "manual" && v.gps_external_id).length;
-  const pendientes = vehiculos.filter(v => v.activo !== false && (!v.gps_provider || v.gps_provider === "manual" || !v.gps_external_id)).length;
-  const dirtyLinks = vehiculos
+  const mapped = vehiculosGps.filter(v => v.gps_provider && v.gps_provider !== "manual" && v.gps_external_id).length;
+  const pendientes = vehiculosGps.filter(v => v.activo !== false && (!v.gps_provider || v.gps_provider === "manual" || !v.gps_external_id)).length;
+  const dirtyLinks = vehiculosGps
     .map(v => ({ v, draft: drafts[v.id] || {} }))
     .filter(({ v, draft }) => {
       const currentProvider = v.gps_provider && v.gps_provider !== "manual" ? v.gps_provider : "";
@@ -108,14 +121,14 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
   useEffect(() => {
       const defaultProvider = activeProvider || "gps_generic";
     const next = {};
-    vehiculos.forEach(v => {
+    vehiculosGps.forEach(v => {
       next[v.id] = {
         provider: v.gps_provider && v.gps_provider !== "manual" ? v.gps_provider : defaultProvider,
-        external_id: v.gps_external_id || v.matricula || "",
+        external_id: v.gps_external_id || "",
       };
     });
     setDrafts(next);
-  }, [vehiculos, activeProvider]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [vehiculosGps, activeProvider]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const focus = readGpsFocus();
@@ -136,11 +149,16 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
       notify("Configura primero un proveedor GPS activo en SuperAdmin.", "error");
       return;
     }
+    const externalId = String(draft.external_id || "").trim();
+    if (!externalId) {
+      notify("Introduce el IMEI/ID GPS antes de intentar localizar senal.", "warning");
+      return;
+    }
     setSavingId(v.id);
     try {
       await vincularGpsVehiculo(v.id, {
         provider,
-        external_id: String(draft.external_id || "").trim(),
+        external_id: externalId,
       });
       notify(`GPS enlazado para ${v.matricula}.`, "success");
       onReload();
@@ -170,7 +188,12 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
     }
     setSavingBulk(true);
     try {
-      const payload = dirtyLinks.map(({ v, draft }) => ({
+      const linksWithId = dirtyLinks.filter(({ draft }) => String(draft.external_id || "").trim());
+      if (!linksWithId.length) {
+        notify("Introduce al menos un IMEI/ID GPS antes de guardar.", "warning");
+        return;
+      }
+      const payload = linksWithId.map(({ v, draft }) => ({
         vehiculo_id: v.id,
         provider: activeProvider,
         external_id: String(draft.external_id || "").trim(),
@@ -189,7 +212,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
     const provider = activeProvider || "gps_generic";
     setDrafts(prev => {
       const next = { ...prev };
-      vehiculos.forEach(v => {
+      vehiculosGps.forEach(v => {
         next[v.id] = { ...(next[v.id] || {}), provider, external_id: v.matricula || "" };
       });
       return next;
@@ -198,7 +221,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
   }
 
   function aplicarImportacion() {
-    const byMat = new Map(vehiculos.map(v => [String(v.matricula || "").trim().toUpperCase(), v]));
+    const byMat = new Map(vehiculosGps.map(v => [String(v.matricula || "").trim().toUpperCase(), v]));
     const provider = activeProvider || "gps_generic";
     let applied = 0;
     let ignored = 0;
@@ -231,7 +254,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
         <div>
           <div style={{fontSize:14,fontWeight:900,color:"var(--text)",fontFamily:"'Syne',sans-serif"}}>GPS y matriculas</div>
             <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
-              Asocia cada vehiculo con el ID que usa el proveedor GPS activo. Normalmente sera la matricula, pero algunos proveedores usan un codigo interno.
+              Asocia cada tractora/camion con el IMEI o ID que usa el proveedor GPS activo. Si no hay IMEI/ID, no se intenta obtener senal GPS.
             </div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -240,7 +263,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
             </div>
             {canEdit && (
               <button onClick={onSync} disabled={syncing || !activeProvider} style={{...S.btn,background:"var(--bg2)",color:"var(--text)",border:"1px solid var(--border2)"}}>
-                {syncing ? "Sincronizando..." : "Sincronizar GPS"}
+              {syncing ? "Localizando..." : "Localizar senal GPS"}
               </button>
             )}
           {canEdit && (
@@ -364,7 +387,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
 
       {open && (
         <div style={{marginTop:14,borderTop:"1px solid var(--border)",paddingTop:12,display:"flex",flexDirection:"column",gap:8}}>
-          {vehiculos.map(v => {
+          {vehiculosGps.map(v => {
             const draft = drafts[v.id] || {};
             const linked = v.gps_provider && v.gps_provider !== "manual" && v.gps_external_id;
             const dirty = dirtyLinks.some(x => x.v.id === v.id);
@@ -382,7 +405,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
                   <div style={{...S.sel,display:"flex",alignItems:"center",background:"var(--bg2)",cursor:"default"}}>
                     {GPS_PROVIDER_LABELS[draft.provider || activeProvider] || draft.provider || activeProvider || "Sin proveedor activo"}
                   </div>
-                <input disabled={!canEdit} value={draft.external_id || ""} onChange={e=>setDrafts(p=>({...p,[v.id]:{...(p[v.id]||{}),external_id:e.target.value}}))} style={S.inp} placeholder="ID externo o matricula"/>
+                <input disabled={!canEdit} value={draft.external_id || ""} onChange={e=>setDrafts(p=>({...p,[v.id]:{...(p[v.id]||{}),external_id:e.target.value}}))} style={S.inp} placeholder="IMEI / ID GPS del dispositivo"/>
                 {canEdit && (
                   <button onClick={()=>guardar(v)} disabled={savingId===v.id} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.28)",justifyContent:"center"}}>
                     {savingId===v.id ? "Guardando..." : "Guardar"}
@@ -987,8 +1010,8 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                     </div>
                   </div>
                 <div>
-                  <label style={S.lbl}>ID externo GPS</label>
-                  <input style={S.inp} value={form.gps_external_id||""} onChange={f("gps_external_id")} placeholder="Matricula/ID del proveedor"/>
+                  <label style={S.lbl}>IMEI / ID GPS del dispositivo</label>
+                  <input style={S.inp} value={form.gps_external_id||""} onChange={f("gps_external_id")} placeholder="IMEI o ID exacto del proveedor GPS"/>
                 </div>
                 <div>
                   <label style={S.lbl}>Fecha matriculacion</label>
@@ -1002,9 +1025,14 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                     onClick={async e => {
                         e.stopPropagation();
                         try {
+                          const externalId = String(form.gps_external_id || "").trim();
+                          if (!externalId) {
+                            notify("Introduce el IMEI/ID GPS antes de intentar localizar senal.", "warning");
+                            return;
+                          }
                           const updated = await vincularGpsVehiculo(editando.id, {
                             provider: gpsProviderActivo || form.gps_provider || "manual",
-                            external_id: form.gps_external_id || "",
+                            external_id: externalId,
                           });
                         setForm(p => ({...p, ...updated}));
                         onVehiculoActualizado?.(updated);
@@ -1014,7 +1042,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                         notify(err.message || "No se pudo guardar el enlace GPS", "error");
                       }
                     }}>
-                    Guardar enlace GPS
+                    Guardar IMEI / enlace GPS
                   </button>
                 )}
                 {editando?.id && form.ubicacion_actual?.trim() && (

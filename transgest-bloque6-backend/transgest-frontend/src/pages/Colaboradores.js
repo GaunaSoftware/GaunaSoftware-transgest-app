@@ -20,9 +20,9 @@ const S={
   lbl:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4,marginTop:12},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16},
   mbox:{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:24,width:"min(600px,96vw)",maxHeight:"92vh",overflowY:"auto"},
-  card:{background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:12,overflow:"hidden"},
-  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)"},
-  td:{padding:"10px 14px",borderBottom:"1px solid #181e2e",fontSize:13,color:"var(--text)"},
+  card:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
+  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)"},
+  td:{padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)"},
 };
 
 const estVenc = (fecha) => {
@@ -526,7 +526,7 @@ function TabDocumentosColab({ colaborador, canEdit }) {
               <label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",
                 letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Tipo</label>
               <select value={form.tipo} onChange={e=>setForm(p=>({...p,tipo:e.target.value}))}
-                style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",
+                style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",
                   padding:"7px 10px",borderRadius:7,width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>
                 {TIPOS_DOC_COLAB.map(t=><option key={t.id} value={t.id}>{t.icon} {t.l}</option>)}
               </select>
@@ -536,7 +536,7 @@ function TabDocumentosColab({ colaborador, canEdit }) {
                 letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Nombre / referencia *</label>
               <input value={form.nombre} onChange={e=>setForm(p=>({...p,nombre:e.target.value}))}
                 placeholder="Ej: Póliza nº 12345678"
-                style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",
+                style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",
                   padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",
                   fontFamily:"'DM Sans',sans-serif",fontSize:13}}/>
             </div>
@@ -544,7 +544,7 @@ function TabDocumentosColab({ colaborador, canEdit }) {
               <label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",
                 letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Fecha de caducidad</label>
               <input type="date" value={form.caducidad} onChange={e=>setForm(p=>({...p,caducidad:e.target.value}))}
-                style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",
+                style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",
                   padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",
                   fontFamily:"'DM Sans',sans-serif",fontSize:13}}/>
             </div>
@@ -553,14 +553,14 @@ function TabDocumentosColab({ colaborador, canEdit }) {
                 letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Notas</label>
               <input value={form.notas} onChange={e=>setForm(p=>({...p,notas:e.target.value}))}
                 placeholder="Observaciones opcionales"
-                style={{background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",
+                style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",
                   padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",
                   fontFamily:"'DM Sans',sans-serif",fontSize:13}}/>
             </div>
           </div>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <button onClick={()=>setShowForm(false)}
-              style={{padding:"7px 14px",borderRadius:7,border:"1px solid #28344f",
+              style={{padding:"7px 14px",borderRadius:7,border:"1px solid var(--border2)",
                 background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>
               Cancelar
             </button>

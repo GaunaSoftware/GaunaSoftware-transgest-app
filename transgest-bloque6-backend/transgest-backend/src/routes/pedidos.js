@@ -15,6 +15,7 @@ const {
   buildRegulatoryTransportPackage,
   getRegulatoryPayloadForExport,
   createRegulatoryTransmissionDraft,
+  generateRegulatoryDossierPdf,
 } = require("../services/regulatoryCore");
 const { getEmpresaCalendarForDate, inferCcaaFromText } = require("../services/calendarioLaboral");
 const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
@@ -4363,6 +4364,28 @@ router.get("/:id/regulatory-core/export", GERENTE_O_TRAFICO, async (req, res) =>
     res.json(pkg);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message || "No se pudo exportar el paquete regulatorio" });
+  }
+});
+
+router.get("/:id/regulatory-core/dossier.pdf", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const synced = await syncRegulatoryCoreForPedido(req, req.params.id, empresaId, "regulatory_dossier_pdf_export");
+    if (!synced?.ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    const pkg = await buildRegulatoryTransportPackage(req.params.id, empresaId, { includePayloadBodies: false });
+    if (!pkg?.certification_dossier) return res.status(404).json({ error: "Dossier regulatorio no encontrado" });
+    const pdf = await generateRegulatoryDossierPdf(pkg.certification_dossier);
+    await logPedidoEvento(req.params.id, empresaId, "regulatory_core.dossier_pdf_exported", {
+      dossier_hash_sha256: pkg.certification_dossier.dossier_hash_sha256,
+      pdf_hash_sha256: pdf.hash_sha256,
+      readiness_score: pkg.certification_dossier.readiness_score,
+      checklist_status: pkg.regulatory_readiness?.checklist_status || "",
+    }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+    res.setHeader("Content-Type", pdf.mime);
+    res.setHeader("Content-Disposition", `attachment; filename="${pdf.filename.replace(/[^a-zA-Z0-9._-]+/g, "-")}"`);
+    res.send(pdf.buffer);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "No se pudo generar el dossier regulatorio" });
   }
 });
 

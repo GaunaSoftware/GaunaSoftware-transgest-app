@@ -32,6 +32,22 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function useIsMobile(maxWidth = 760) {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia(`(max-width: ${maxWidth}px)`).matches;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const media = window.matchMedia(`(max-width: ${maxWidth}px)`);
+    const onChange = () => setIsMobile(media.matches);
+    onChange();
+    media.addEventListener?.("change", onChange);
+    return () => media.removeEventListener?.("change", onChange);
+  }, [maxWidth]);
+  return isMobile;
+}
+
 function monthStartIso() {
   const d = new Date();
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
@@ -57,6 +73,7 @@ function pedirUbicacion() {
 
 export default function ControlHorario() {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const canManage = ["gerente", "contable", "administrativo"].includes(user?.rol);
   const [miJornada, setMiJornada] = useState(null);
   const [resumen, setResumen] = useState(null);
@@ -204,11 +221,11 @@ export default function ControlHorario() {
   }
 
   return (
-    <div style={S.page}>
+    <div style={{...S.page,padding:isMobile ? "14px 12px 96px" : S.page.padding,overflowX:"hidden"}}>
       <div style={S.title}>Control horario oficina</div>
       <div style={S.sub}>Registro diario de jornada para personal interno, pausas, teletrabajo y revisión por gerencia/administración.</div>
 
-      <div style={{display:"grid",gridTemplateColumns:"minmax(280px,1.1fr) minmax(280px,1fr)",gap:14,alignItems:"stretch"}}>
+      <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "minmax(280px,1.1fr) minmax(280px,1fr)",gap:14,alignItems:"stretch"}}>
         <div style={S.card}>
           <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
             <div>
@@ -220,7 +237,7 @@ export default function ControlHorario() {
               <div style={{fontSize:10,color:"var(--text5)",fontFamily:"'DM Sans',sans-serif"}}>trabajado</div>
             </div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "repeat(3,1fr)",gap:8,marginBottom:12}}>
             <Mini label="Entrada" value={fmtDt(miJornada?.entrada_at)} />
             <Mini label="Salida" value={fmtDt(miJornada?.salida_at)} />
             <Mini label="Pausas" value={minToClock(miJornada?.pausa_total_live_min)} />
@@ -268,13 +285,13 @@ export default function ControlHorario() {
             </div>
             {canManage && <button onClick={exportCsv} style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)"}}>Exportar CSV</button>}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(4,1fr)",gap:8,marginBottom:12}}>
             <Mini label="Jornadas" value={resumenBase.jornadas || 0} />
             <Mini label="Abiertas" value={resumenBase.abiertas || 0} tone={Number(resumenBase.abiertas) ? "#f59e0b" : "var(--green)"} />
             <Mini label="Pausas" value={minToClock(resumenBase.pausa_min)} />
             <Mini label="Personas abiertas" value={abiertos.length} />
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "1fr 1fr",gap:8}}>
             <div><label style={S.lbl}>Desde</label><input type="date" style={{...S.inp,width:"100%"}} value={desde} onChange={e=>setDesde(e.target.value)} /></div>
             <div><label style={S.lbl}>Hasta</label><input type="date" style={{...S.inp,width:"100%"}} value={hasta} onChange={e=>setHasta(e.target.value)} /></div>
           </div>
@@ -291,10 +308,10 @@ export default function ControlHorario() {
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"minmax(280px,1fr) minmax(280px,1fr)",gap:14,alignItems:"start"}}>
+      <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "minmax(280px,1fr) minmax(280px,1fr)",gap:14,alignItems:"start"}}>
         <div style={S.card}>
           <div style={{fontSize:14,fontWeight:900,color:"var(--text)",marginBottom:8}}>Teletrabajo</div>
-          <div style={{display:"grid",gridTemplateColumns:"150px 1fr",gap:8,marginBottom:8}}>
+          <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "150px 1fr",gap:8,marginBottom:8}}>
             <div><label style={S.lbl}>Día</label><input type="date" style={{...S.inp,width:"100%"}} value={teleForm.fecha} onChange={e=>setTeleForm(p=>({...p,fecha:e.target.value}))} /></div>
             <div><label style={S.lbl}>Motivo</label><input style={{...S.inp,width:"100%"}} value={teleForm.motivo} onChange={e=>setTeleForm(p=>({...p,motivo:e.target.value}))} placeholder="Motivo o contexto..." /></div>
           </div>
@@ -324,7 +341,7 @@ export default function ControlHorario() {
           <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:10}}>
             La jornada fija sirve como referencia. Si se olvida apertura o cierre, se avisará, pero no contará como hora extra salvo ajuste/aprobación.
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,alignItems:"end"}}>
+          <div style={{display:"grid",gridTemplateColumns:isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(4,1fr)",gap:8,alignItems:"end"}}>
             <Field label="Entrada" type="time" value={jornadaCfg.hora_entrada} onChange={v=>setJornadaCfg(p=>({...p,hora_entrada:v}))} />
             <Field label="Salida" type="time" value={jornadaCfg.hora_salida} onChange={v=>setJornadaCfg(p=>({...p,hora_salida:v}))} />
             <Field label="Pausa min" type="number" value={jornadaCfg.pausa_min} onChange={v=>setJornadaCfg(p=>({...p,pausa_min:v}))} />
@@ -371,10 +388,10 @@ export default function ControlHorario() {
 
       {edit && (
         <div style={{position:"fixed",inset:0,zIndex:300,background:"rgba(0,0,0,.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
-          <div style={{...S.card,width:"min(560px,96vw)",margin:0}}>
+          <div style={{...S.card,width:"100%",maxWidth:560,boxSizing:"border-box",margin:0}}>
             <div style={{fontSize:18,fontWeight:900,color:"var(--text)",marginBottom:4}}>Ajustar fichaje</div>
             <div style={{fontSize:12,color:"var(--text4)",marginBottom:12}}>{edit.usuario_nombre} · {edit.fecha ? new Date(edit.fecha).toLocaleDateString("es-ES") : ""}</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "1fr 1fr",gap:10}}>
               <Field label="Entrada" type="datetime-local" value={toLocalInput(edit.entrada_at)} onChange={v=>setEdit(p=>({...p,entrada_at:v ? new Date(v).toISOString() : null}))} />
               <Field label="Salida" type="datetime-local" value={toLocalInput(edit.salida_at)} onChange={v=>setEdit(p=>({...p,salida_at:v ? new Date(v).toISOString() : null}))} />
               <Field label="Pausa total min" type="number" value={edit.pausa_total_min || 0} onChange={v=>setEdit(p=>({...p,pausa_total_min:v}))} />

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, getPedidos, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida } from "../services/api";
+import { getVehiculos, getPedidos, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
-import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
+import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 
 // â”€â”€ Calculadora de tiempo de conducciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function calcTiempoTransito(km, cfg){
@@ -792,6 +792,25 @@ function getWeekDays(anchor) {
 }
 
 const DIA_NAMES = ["LUN","MAR","MIE","JUE","VIE","SAB","DOM"];
+const TRAFICO_TRIP_ORDER_KEY = "tms_gestion_trafico_trip_order_v1";
+
+function loadTraficoTripOrder() {
+  try {
+    const raw = localStorage.getItem(TRAFICO_TRIP_ORDER_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveTraficoTripOrder(value) {
+  try { localStorage.setItem(TRAFICO_TRIP_ORDER_KEY, JSON.stringify(value || {})); } catch {}
+}
+
+function trafficOrderKey(vehiculoId, fecha) {
+  return `${vehiculoId || ""}:${fecha || ""}`;
+}
 
 // â”€â”€ Tarjeta de viaje - idÃ©ntica a la imagen de referencia â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function TripCard({
@@ -808,6 +827,10 @@ function TripCard({
   disableReschedule = false,
   highlighted = false,
   highlightLabel = "",
+  draggable = false,
+  onDragStart = null,
+  onDragOverTrip = null,
+  onDropTrip = null,
 }) {
   const e = EC[pedido.estado] || EC.pendiente;
   const hasKmVacio = Number(pedido.km_vacio) > 0;
@@ -819,6 +842,10 @@ function TripCard({
   return (
     <div
       onClick={() => onClick(pedido)}
+      draggable={draggable}
+      onDragStart={(e2) => onDragStart?.(e2, pedido)}
+      onDragOver={(e2) => onDragOverTrip?.(e2, pedido)}
+      onDrop={(e2) => onDropTrip?.(e2, pedido)}
       title={`${pedido.numero} - ${pedido.origen||""} -> ${pedido.destino||""}`}
       style={{
         background: e.bg,
@@ -2251,7 +2278,11 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   const [incidenciasViaje, setIncidenciasViaje] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [editViaje, setEditViaje] = useState(null);
+  const [addTripCell, setAddTripCell] = useState(null);
+  const [addTripExistingId, setAddTripExistingId] = useState("");
+  const [addTripSaving, setAddTripSaving] = useState(false);
   const [dragOver,  setDragOver]  = useState(null); // {vehiculo_id, fecha}
+  const [manualTripOrder, setManualTripOrder] = useState(() => loadTraficoTripOrder());
   const [quickUpdatingId, setQuickUpdatingId] = useState("");
   const [quickAssigningId, setQuickAssigningId] = useState("");
   const [copyingPedidoId, setCopyingPedidoId] = useState("");
@@ -2406,11 +2437,20 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   function getTrips(vehiculo_id, dia) {
     const dStr = dia.toISOString().slice(0,10);
     // Use pre-computed map for O(1) vehicle lookup instead of full array scan
-    return sortTripsByOperationalPriority((pedidosPorVehiculo[vehiculo_id] || []).filter(p => {
+    const baseTrips = sortTripsByOperationalPriority((pedidosPorVehiculo[vehiculo_id] || []).filter(p => {
       if (!pasaFiltrosOperativos(p)) return false;
       const fecha = p.fecha_carga?.slice(0,10) || p.fecha_pedido?.slice(0,10) || "";
       return fecha === dStr;
     }));
+    const order = manualTripOrder[trafficOrderKey(vehiculo_id, dStr)];
+    if (!Array.isArray(order) || !order.length) return baseTrips;
+    const position = new Map(order.map((id, idx) => [String(id), idx]));
+    return [...baseTrips].sort((a, b) => {
+      const ai = position.has(String(a.id)) ? position.get(String(a.id)) : 9999;
+      const bi = position.has(String(b.id)) ? position.get(String(b.id)) : 9999;
+      if (ai !== bi) return ai - bi;
+      return baseTrips.indexOf(a) - baseTrips.indexOf(b);
+    });
   }
 
   const semanaInicio = dias[0].toISOString().slice(0,10);
@@ -3537,6 +3577,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
           disableReschedule={reschedulingPedidoId === String(p.id)}
           highlighted={String(focusContext?.pedido_id || "") === String(p.id)}
           highlightLabel={focusContext?.source === "pedidos" ? "Desde pedidos" : "En foco"}
+          draggable={puedeEditar("pedidos") && !pedidoTieneFacturaFinal(p)}
+          onDragStart={startTripDrag}
         />
       ));
     }
@@ -3581,6 +3623,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                     disableReschedule={reschedulingPedidoId === String(p.id)}
                     highlighted={String(focusContext?.pedido_id || "") === String(p.id)}
                     highlightLabel={focusContext?.source === "pedidos" ? "Desde pedidos" : "En foco"}
+                    draggable={puedeEditar("pedidos") && !pedidoTieneFacturaFinal(p)}
+                    onDragStart={startTripDrag}
                   />
                 ))}
               </div>
@@ -3591,12 +3635,57 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   }
 
   // â”€â”€ Drag & drop â”€â”€
+  function startTripDrag(e, pedido) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("pedido_id", String(pedido?.id || ""));
+    e.dataTransfer.setData("from_vehiculo_id", String(pedido?.vehiculo_id || ""));
+    e.dataTransfer.setData("from_fecha", fechaPedido(pedido));
+  }
+
+  function setCellTripOrder(vehiculo_id, fecha, orderedIds) {
+    const key = trafficOrderKey(vehiculo_id, fecha);
+    setManualTripOrder(prev => {
+      const next = { ...(prev || {}), [key]: orderedIds.map(String) };
+      saveTraficoTripOrder(next);
+      return next;
+    });
+  }
+
+  async function persistCellTripOrder(vehiculo_id, fecha, orderedIds) {
+    try {
+      await guardarPlanDiarioOrden({
+        fecha,
+        vehiculo_id,
+        pedido_orden: orderedIds.map((id, idx) => ({ pedido_id: id, orden: idx + 1 })),
+      });
+    } catch {}
+  }
+
+  async function reorderTripInCell(e, vehiculo_id, dia, targetPedido) {
+    const pedido_id = e.dataTransfer.getData("pedido_id");
+    const fecha = dia.toISOString().slice(0,10);
+    if (!pedido_id || !targetPedido?.id || String(pedido_id) === String(targetPedido.id)) return;
+    const fromVehiculo = e.dataTransfer.getData("from_vehiculo_id");
+    const fromFecha = e.dataTransfer.getData("from_fecha");
+    if (String(fromVehiculo || "") !== String(vehiculo_id || "") || String(fromFecha || "") !== String(fecha || "")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(null);
+    const current = getTrips(vehiculo_id, dia).map(p => String(p.id));
+    const withoutDragged = current.filter(id => id !== String(pedido_id));
+    const targetIndex = withoutDragged.indexOf(String(targetPedido.id));
+    const nextOrder = [...withoutDragged];
+    nextOrder.splice(targetIndex >= 0 ? targetIndex : nextOrder.length, 0, String(pedido_id));
+    setCellTripOrder(vehiculo_id, fecha, nextOrder);
+    await persistCellTripOrder(vehiculo_id, fecha, nextOrder);
+  }
+
   async function handleDrop(e, vehiculo_id, dia) {
     e.preventDefault();
     setDragOver(null);
     if (!puedeEditar("pedidos")) return;
     const pedido_id = e.dataTransfer.getData("pedido_id");
-    const p = pedidos.find(x => x.id === pedido_id);
+    const p = pedidos.find(x => String(x.id) === String(pedido_id));
     if (!p || pedidoTieneFacturaFinal(p)) return;
     const vehiculo = vehiculos.find(v => String(v.id) === String(vehiculo_id));
     const linkedChoferRaw = findLinkedChoferForVehiculo(vehiculo, choferes);
@@ -3671,6 +3760,10 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         chofer_id: nextForm.chofer_id,
         fecha_carga: nextForm.fecha_carga,
       });
+      const currentIds = getTrips(vehiculo_id, dia).map(x => String(x.id)).filter(id => id !== String(p.id));
+      const nextIds = [...currentIds, String(p.id)];
+      setCellTripOrder(vehiculo_id, nextForm.fecha_carga, nextIds);
+      persistCellTripOrder(vehiculo_id, nextForm.fecha_carga, nextIds);
       broadcastPedidosChanged({ pedido_id: p.id, source: "gestion-trafico-dnd" });
       notify(
         `${p.numero || "Pedido"} asignado a ${vehiculo?.matricula || "vehiculo"}${linkedChofer && !p.chofer_id ? ` con ${linkedChofer.nombre || ""} ${linkedChofer.apellidos || ""}`.trim().replace(/\s+/g, " ") : ""}.`,
@@ -3678,6 +3771,103 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       );
       cargar();
     } catch(err) { notify(err.message, "error"); }
+  }
+
+  const viajesParaAnadir = useMemo(() => {
+    if (!addTripCell) return [];
+    const fecha = addTripCell.fecha;
+    return sortTripsByOperationalPriority(pedidos.filter(p => {
+      if (!p?.id || pedidoTieneFacturaFinal(p)) return false;
+      if (["cancelado", "facturado"].includes(String(p.estado || "").toLowerCase())) return false;
+      if (p.colaborador_id || p.colaborador_nombre) return false;
+      const sameCell = String(p.vehiculo_id || "") === String(addTripCell.vehiculo_id || "") && fechaPedido(p) === fecha;
+      if (sameCell) return false;
+      const f = fechaPedido(p);
+      return !p.vehiculo_id || !f || f === fecha || (f >= semanaInicio && f <= semanaFin);
+    })).slice(0, 80);
+  }, [addTripCell, pedidos, semanaInicio, semanaFin]);
+
+  const viajesYaCargadosEnCelda = useMemo(() => {
+    if (!addTripCell) return [];
+    return sortTripsByOperationalPriority(pedidos.filter(p =>
+      String(p.vehiculo_id || "") === String(addTripCell.vehiculo_id || "") &&
+      fechaPedido(p) === addTripCell.fecha &&
+      !["cancelado", "facturado"].includes(String(p.estado || "").toLowerCase())
+    ));
+  }, [addTripCell, pedidos]);
+
+  function abrirAnadirViaje(vehiculo, dia) {
+    if (!vehiculo?.id) return;
+    const fecha = dia.toISOString().slice(0, 10);
+    setAddTripCell({ vehiculo_id: vehiculo.id, fecha, matricula: vehiculo.matricula || "" });
+    setAddTripExistingId("");
+  }
+
+  async function asignarViajeExistenteACelda() {
+    if (!addTripCell || !addTripExistingId) {
+      notify("Selecciona un viaje existente.", "warning");
+      return;
+    }
+    const pedido = pedidos.find(p => String(p.id) === String(addTripExistingId));
+    const vehiculo = vehiculos.find(v => String(v.id) === String(addTripCell.vehiculo_id));
+    if (!pedido || !vehiculo) return;
+    const linkedChoferRaw = findLinkedChoferForVehiculo(vehiculo, choferes);
+    const linkedChofer = isChoferAsignable(linkedChoferRaw) ? linkedChoferRaw : null;
+    const payload = {
+      ...pedido,
+      vehiculo_id: vehiculo.id,
+      fecha_carga: addTripCell.fecha,
+      chofer_id: pedido.chofer_id || linkedChofer?.id || "",
+    };
+    setAddTripSaving(true);
+    try {
+      try {
+        await editarPedido(pedido.id, payload);
+      } catch (err) {
+        if (!isFestivoConfirmError(err) || !(await confirmFestivoDestino(err))) throw err;
+        await editarPedido(pedido.id, { ...payload, festivo_confirmado: true });
+      }
+      syncPedidoLocal(pedido.id, {
+        vehiculo_id: payload.vehiculo_id,
+        chofer_id: payload.chofer_id,
+        fecha_carga: payload.fecha_carga,
+      });
+      const day = new Date(`${addTripCell.fecha}T00:00:00`);
+      const currentIds = getTrips(vehiculo.id, day).map(x => String(x.id)).filter(id => id !== String(pedido.id));
+      const nextIds = [...currentIds, String(pedido.id)];
+      setCellTripOrder(vehiculo.id, addTripCell.fecha, nextIds);
+      persistCellTripOrder(vehiculo.id, addTripCell.fecha, nextIds);
+      broadcastPedidosChanged({ pedido_id: pedido.id, source: "gestion-trafico-add-existing" });
+      notify(`${pedido.numero || "Viaje"} anadido a ${vehiculo.matricula || "la celda"}.`, "success");
+      setAddTripCell(null);
+      setAddTripExistingId("");
+      cargar();
+    } catch (err) {
+      notify(err.message || "No se pudo anadir el viaje.", "error");
+    } finally {
+      setAddTripSaving(false);
+    }
+  }
+
+  function irACrearViajeDesdeCelda() {
+    if (!addTripCell) return;
+    const vehiculo = vehiculos.find(v => String(v.id) === String(addTripCell.vehiculo_id));
+    const linkedChoferRaw = findLinkedChoferForVehiculo(vehiculo, choferes);
+    const linkedChofer = isChoferAsignable(linkedChoferRaw) ? linkedChoferRaw : null;
+    setRuntimeFocus("tms_pedidos_focus", {
+      source: "gestion_trafico",
+      action: "nuevo",
+      defaults: {
+        vehiculo_id: addTripCell.vehiculo_id,
+        chofer_id: linkedChofer?.id || vehiculo?.chofer_id || "",
+        remolque_id: vehiculo?.remolque_id || "",
+        fecha_carga: addTripCell.fecha,
+        fecha_pedido: addTripCell.fecha,
+      },
+    });
+    window.dispatchEvent(new CustomEvent("tms:navegar", { detail:"pedidos" }));
+    notify("Abro Pedidos para crear el viaje con la fecha y vehiculo de la celda como referencia.", "success");
+    setAddTripCell(null);
   }
 
   const LEGEND = [
@@ -4627,9 +4817,34 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                               disableReschedule={reschedulingPedidoId === String(p.id)}
                               highlighted={String(focusContext?.pedido_id || "") === String(p.id)}
                               highlightLabel={focusContext?.source === "pedidos" ? "Desde pedidos" : "En foco"}
+                              draggable={puedeEditar("pedidos") && !pedidoTieneFacturaFinal(p)}
+                              onDragStart={startTripDrag}
+                              onDragOverTrip={(e2) => { e2.preventDefault(); e2.dataTransfer.dropEffect = "move"; }}
+                              onDropTrip={(e2, targetPedido) => reorderTripInCell(e2, v.id, d, targetPedido)}
                             />
                           ));
                         })()}
+                        {puedeEditar("pedidos") && (
+                          <button
+                            type="button"
+                            onClick={() => abrirAnadirViaje(v, d)}
+                            style={{
+                              width:"100%",
+                              marginTop:trips.length ? 4 : 14,
+                              padding:trips.length ? "4px 6px" : "9px 6px",
+                              borderRadius:7,
+                              border:"1px dashed var(--border2)",
+                              background:trips.length ? "rgba(20,184,166,.06)" : "transparent",
+                              color:trips.length ? "var(--accent-xl)" : "var(--text5)",
+                              fontSize:trips.length ? 10 : 11,
+                              fontWeight:800,
+                              cursor:"pointer",
+                              fontFamily:"'DM Sans',sans-serif",
+                            }}
+                          >
+                            + Anadir viaje
+                          </button>
+                        )}
                         {trips.length === 0 && isDrop && (
                           <div style={{
                             border:"2px dashed var(--accent-l)", borderRadius:5,
@@ -4688,6 +4903,113 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       </div>
 
       {/* â”€â”€ Modal ediciÃ³n â”€â”€ */}
+      {addTripCell && (
+        <div
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.78)", zIndex:280, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
+          onClick={e => e.target === e.currentTarget && !addTripSaving && setAddTripCell(null)}
+        >
+          <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:12, padding:18, width:"min(520px,96vw)", boxShadow:"0 24px 60px rgba(0,0,0,.35)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"flex-start", marginBottom:12 }}>
+              <div>
+                <div style={{ fontFamily:"'Syne',sans-serif", fontSize:17, fontWeight:900, color:"var(--text)" }}>Anadir viaje</div>
+                <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>
+                  {addTripCell.matricula || "Vehiculo"} - {new Date(`${addTripCell.fecha}T12:00:00`).toLocaleDateString("es-ES", { weekday:"long", day:"2-digit", month:"2-digit" })}
+                </div>
+              </div>
+              <button onClick={() => setAddTripCell(null)} disabled={addTripSaving} style={{ border:"none", background:"transparent", color:"var(--text4)", fontSize:22, cursor:addTripSaving ? "not-allowed" : "pointer" }}>x</button>
+            </div>
+
+            {viajesYaCargadosEnCelda.length > 0 && (
+              <div style={{ border:"1px solid rgba(20,184,166,.24)", background:"rgba(20,184,166,.07)", borderRadius:10, padding:10, marginBottom:12 }}>
+                <div style={{ fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:".07em", color:"var(--accent-xl)", marginBottom:7 }}>
+                  Viajes ya cargados en esta matricula
+                </div>
+                <div style={{ display:"grid", gap:7, maxHeight:150, overflowY:"auto", paddingRight:3 }}>
+                  {viajesYaCargadosEnCelda.map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setEditViaje(p);
+                        setFocusContext({ pedido_id:p.id, fecha_carga:fechaPedido(p), source:"add_trip_cell" });
+                        setAddTripCell(null);
+                      }}
+                      style={{
+                        textAlign:"left",
+                        border:"1px solid var(--border2)",
+                        background:"var(--bg3)",
+                        borderRadius:8,
+                        padding:"8px 10px",
+                        cursor:"pointer",
+                        fontFamily:"'DM Sans',sans-serif",
+                      }}
+                    >
+                      <div style={{ fontSize:12, fontWeight:900, color:"var(--text)" }}>{p.numero || "Pedido"} - {getPedidoClienteLabel(p)}</div>
+                      <div style={{ fontSize:11, color:"var(--text4)", marginTop:2 }}>
+                        {p.origen || "-"} - {p.destino || "-"}{p.estado ? ` - ${EC[p.estado]?.label || p.estado}` : ""}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {viajesParaAnadir.length ? (
+              <div style={{ display:"grid", gap:10 }}>
+                <div>
+                  <label style={{ display:"block", fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:".07em", color:"var(--text5)", marginBottom:5 }}>Viaje existente</label>
+                  <select value={addTripExistingId} onChange={e => setAddTripExistingId(e.target.value)} style={{ width:"100%", background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)", padding:"9px 10px", borderRadius:8, fontFamily:"'DM Sans',sans-serif", fontSize:13 }}>
+                    <option value="">Seleccionar viaje...</option>
+                    {viajesParaAnadir.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.numero || "Pedido"} - {getPedidoClienteLabel(p)} - {p.origen || "-"} a {p.destino || "-"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ maxHeight:210, overflowY:"auto", display:"grid", gap:7, paddingRight:3 }}>
+                  {viajesParaAnadir.slice(0, 8).map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setAddTripExistingId(p.id)}
+                      style={{
+                        textAlign:"left",
+                        border:`1px solid ${String(addTripExistingId) === String(p.id) ? "rgba(20,184,166,.45)" : "var(--border2)"}`,
+                        background:String(addTripExistingId) === String(p.id) ? "rgba(20,184,166,.10)" : "var(--bg3)",
+                        borderRadius:8,
+                        padding:"8px 10px",
+                        cursor:"pointer",
+                        fontFamily:"'DM Sans',sans-serif",
+                      }}
+                    >
+                      <div style={{ fontSize:12, fontWeight:900, color:"var(--text)" }}>{p.numero || "Pedido"} - {getPedidoClienteLabel(p)}</div>
+                      <div style={{ fontSize:11, color:"var(--text4)", marginTop:2 }}>{p.origen || "-"} - {p.destino || "-"}{fechaPedido(p) ? ` - ${fechaPedido(p)}` : ""}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{ border:"1px dashed var(--border2)", borderRadius:10, padding:18, textAlign:"center", color:"var(--text4)", fontSize:12 }}>
+                No hay viajes existentes que encajen con esta celda.
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:16, flexWrap:"wrap" }}>
+              <button type="button" onClick={irACrearViajeDesdeCelda} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid rgba(59,130,246,.30)", background:"rgba(59,130,246,.12)", color:"#60a5fa", fontWeight:900, fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
+                Crear viaje nuevo
+              </button>
+              <button type="button" onClick={() => setAddTripCell(null)} disabled={addTripSaving} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid var(--border2)", background:"var(--bg4)", color:"var(--text3)", fontWeight:800, fontSize:12, cursor:addTripSaving ? "not-allowed" : "pointer", fontFamily:"'DM Sans',sans-serif" }}>
+                Cancelar
+              </button>
+              <button type="button" onClick={asignarViajeExistenteACelda} disabled={addTripSaving || !addTripExistingId} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid rgba(20,184,166,.35)", background:addTripExistingId ? "var(--accent)" : "var(--bg4)", color:addTripExistingId ? "#fff" : "var(--text5)", fontWeight:900, fontSize:12, cursor:addTripSaving || !addTripExistingId ? "not-allowed" : "pointer", fontFamily:"'DM Sans',sans-serif", opacity:addTripSaving ? .7 : 1 }}>
+                {addTripSaving ? "Anadiendo..." : "Anadir existente"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editViaje && (
         <ModalViaje
           pedido={editViaje}

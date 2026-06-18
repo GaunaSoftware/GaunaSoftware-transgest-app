@@ -158,15 +158,15 @@ const S = {
   title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:16,color:"var(--text)"},
   bar:  {display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"},
   btn:  {padding:"8px 16px",borderRadius:7,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:6},
-  card: {background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:12,overflow:"hidden"},
-  th:   {textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)",whiteSpace:"nowrap"},
-  td:   {padding:"10px 14px",borderBottom:"1px solid #181e2e",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
-  inp:  {background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
-  sel:  {background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  card: {background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
+  th:   {textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)",whiteSpace:"nowrap"},
+  td:   {padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
+  inp:  {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  sel:  {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"stretch",justifyContent:"center",padding:12,overflow:"hidden"},
-  mbox: {background:"var(--bg2)",border:"1px solid #28344f",borderRadius:12,padding:24,width:"min(1320px,calc(100vw - 24px))",height:"calc(100vh - 24px)",maxHeight:"calc(100vh - 24px)",overflowY:"auto",overflowX:"hidden"},
+  mbox: {background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:24,width:"min(1320px,calc(100vw - 24px))",height:"calc(100vh - 24px)",maxHeight:"calc(100vh - 24px)",overflowY:"auto",overflowX:"hidden"},
   lbl:  {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:5,marginTop:12},
-  sec:  {fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".1em",color:"#3b6ef5",marginTop:20,marginBottom:8,paddingBottom:6,borderBottom:"1px solid #1a2d5a"},
+  sec:  {fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent)",marginTop:20,marginBottom:8,paddingBottom:6,borderBottom:"1px solid var(--border)"},
   tab:  {padding:"7px 16px",border:"none",borderBottom:"2px solid transparent",background:"none",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"},
 };
 
@@ -625,7 +625,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
         </div>
 
         {/* Tabs */}
-        <div style={{display:"flex",gap:0,borderBottom:"1px solid #181e2e",marginBottom:18,marginTop:12}}>
+        <div style={{display:"flex",gap:0,borderBottom:"1px solid var(--border)",marginBottom:18,marginTop:12}}>
           {(esNuevo ? TABS.slice(0,2) : TABS).map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)}
               style={{...S.tab, borderBottomColor:tab===t.id?"#3b6ef5":"transparent",
@@ -961,7 +961,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
                     <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Notas</label><input style={S.inp} value={formRuta.notas||""} onChange={fr("notas")}/></div>
                   </div>
                   <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
-                    <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}} onClick={()=>setModalRuta(false)}>Cancelar</button>
+                    <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}} onClick={()=>setModalRuta(false)}>Cancelar</button>
                     <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={guardarRuta} disabled={saving}>{saving?"Guardando...":editRuta?"Guardar":"Crear ruta"}</button>
                   </div>
                 </div>
@@ -977,7 +977,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
             <div style={{display:"flex",gap:10,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
               <input type="month" value={mesFiltro} onChange={e=>setMesFiltro(e.target.value)}
                 style={{...S.inp,width:170}} title="Filtrar por mes de carga"/>
-              {mesFiltro && <button style={{...S.btn,background:"transparent",color:"var(--text4)",border:"1px solid #28344f",padding:"6px 10px",fontSize:12}} onClick={()=>setMesFiltro("")}>x Quitar filtro</button>}
+              {mesFiltro && <button style={{...S.btn,background:"transparent",color:"var(--text4)",border:"1px solid var(--border2)",padding:"6px 10px",fontSize:12}} onClick={()=>setMesFiltro("")}>x Quitar filtro</button>}
               <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"6px 12px",fontSize:12}} onClick={seleccionarMes}>Seleccionar mes actual</button>
               {selPedidos.size > 0 && (
                 <button
@@ -1320,8 +1320,8 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
 
         {/* Footer botones */}
         {(tab==="datos"||tab==="facturacion") && canEdit && (
-          <div style={{display:"flex",gap:10,marginTop:24,justifyContent:"flex-end",borderTop:"1px solid #181e2e",paddingTop:18}}>
-            <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid #28344f"}} onClick={onClose}>Cancelar</button>
+          <div style={{display:"flex",gap:10,marginTop:24,justifyContent:"flex-end",borderTop:"1px solid var(--border)",paddingTop:18}}>
+            <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}} onClick={onClose}>Cancelar</button>
             <button style={{...S.btn,background:"#3b6ef5",color:"#fff",opacity:saving?0.7:1}} onClick={guardarCliente} disabled={saving}>
               {saving?"Guardando...":esNuevo?"Crear cliente":"Guardar cambios"}
             </button>

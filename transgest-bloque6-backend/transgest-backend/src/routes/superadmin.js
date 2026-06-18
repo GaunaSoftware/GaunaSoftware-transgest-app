@@ -903,6 +903,7 @@ router.get("/empresas", superAuth, async (req, res) => {
     SELECT e.*,
       (SELECT COUNT(*) FROM usuarios u WHERE u.empresa_id=e.id) AS n_usuarios,
       (SELECT COUNT(*) FROM vehiculos v WHERE v.empresa_id=e.id) AS n_vehiculos,
+      (SELECT COUNT(*) FROM clientes c WHERE c.empresa_id=e.id) AS n_clientes,
       (SELECT COUNT(*) FROM pedidos p WHERE p.empresa_id=e.id) AS n_pedidos,
       (SELECT COUNT(*) FROM facturas f WHERE f.empresa_id=e.id) AS n_facturas
     FROM empresas e

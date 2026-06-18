@@ -985,7 +985,23 @@ function normalizeEmpresaProfile(raw = {}) {
     ...(raw && typeof raw === "object" ? raw : {}),
     plazo_pago_colaboradores: Number(raw?.plazo_pago_colaboradores || EMPRESA_PROFILE_DEFAULTS.plazo_pago_colaboradores),
     plazo_pago_clientes: Number(raw?.plazo_pago_clientes || EMPRESA_PROFILE_DEFAULTS.plazo_pago_clientes),
+    paleta_colores: normalizeEmpresaPalette(raw?.paleta_colores),
   };
+}
+
+function normalizeEmpresaPalette(raw = {}) {
+  const allowed = new Set(["transgest", "mar", "bosque", "ambar", "grafito"]);
+  const cfg = raw && typeof raw === "object" ? raw : {};
+  const custom = cfg.custom && typeof cfg.custom === "object" ? cfg.custom : {};
+  const cleanHex = value => /^#[0-9a-f]{6}$/i.test(String(value || "").trim()) ? String(value).trim() : undefined;
+  const result = { id: allowed.has(String(cfg.id || "")) ? String(cfg.id) : "transgest" };
+  const cleanCustom = {
+    accent: cleanHex(cfg.accent || custom.accent),
+    accentLight: cleanHex(cfg.accentLight || custom.accentLight),
+    sidebar: cleanHex(cfg.sidebar || custom.sidebar),
+  };
+  result.custom = Object.fromEntries(Object.entries(cleanCustom).filter(([, value]) => value));
+  return result;
 }
 
 function publicAppUrl(req) {
@@ -1733,6 +1749,11 @@ router.get("/perfil", async (req,res) => {
 router.put("/perfil", SOLO_GERENTE, async (req,res) => {
   try {
     const perfil = normalizeEmpresaProfile(req.body || {});
+    const planRes = await db.query("SELECT plan FROM empresas WHERE id=$1", [EID(req)]).catch(() => ({ rows: [] }));
+    const plan = String(planRes.rows[0]?.plan || "").toLowerCase();
+    if (!["profesional", "enterprise", "premium"].includes(plan)) {
+      perfil.paleta_colores = normalizeEmpresaPalette({ id:"transgest" });
+    }
     const { rows } = await db.query(
       `UPDATE empresas
           SET cfg_precios = jsonb_set(COALESCE(cfg_precios,'{}'::jsonb), '{empresa_perfil}', $1::jsonb, true)

@@ -349,10 +349,13 @@ async function getRutasClienteRows(clienteId, empresaId) {
 
 function buildClienteRiesgoAvisos(row = {}) {
   const limite = Number(row.limite_riesgo || 0) || 0;
-  const pendiente = Number(row.total_pendiente || 0) || 0;
+  const pendienteFacturas = Number((row.total_facturas_pendiente ?? row.total_pendiente) || 0) || 0;
+  const pendientePedidos = Number(row.total_pedidos_confirmados || 0) || 0;
+  const pendiente = pendienteFacturas + pendientePedidos;
   const vencido = Number(row.total_vencido || 0) || 0;
   const facturasPendientes = Number(row.facturas_pendientes || 0) || 0;
   const facturasVencidas = Number(row.facturas_vencidas || 0) || 0;
+  const pedidosConfirmados = Number(row.pedidos_confirmados_pendientes || 0) || 0;
   const riesgoPct = limite > 0 ? Math.round((pendiente / limite) * 1000) / 10 : null;
   const avisos = [];
   if (vencido > 0 || facturasVencidas > 0) {
@@ -365,7 +368,7 @@ function buildClienteRiesgoAvisos(row = {}) {
     avisos.push({
       tipo: "deuda_pendiente",
       nivel: "medio",
-      mensaje: `${facturasPendientes} factura(s) pendiente(s) por ${pendiente.toFixed(2)} EUR.`,
+      mensaje: `${facturasPendientes} factura(s) y ${pedidosConfirmados} viaje(s) confirmado(s) pendientes por ${pendiente.toFixed(2)} EUR.`,
     });
   }
   if (limite > 0 && riesgoPct !== null) {
@@ -436,7 +439,7 @@ router.get("/:id/riesgo-operativo", cacheMiddleware(30), async (req, res) => {
              c.nombre AS cliente_nombre,
              COALESCE(c.limite_riesgo, 0) AS limite_riesgo,
              COUNT(f.id) FILTER (WHERE f.estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar'))::int AS facturas_pendientes,
-             COALESCE(SUM(f.total) FILTER (WHERE f.estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar')), 0)::numeric AS total_pendiente,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar')), 0)::numeric AS total_facturas_pendiente,
              COUNT(f.id) FILTER (
                WHERE f.estado::text IN ('vencida','reclamada','sin_cobrar')
                   OR (fv.vencimiento_date IS NOT NULL AND fv.vencimiento_date < CURRENT_DATE AND f.estado::text IN ('emitida','enviada'))
@@ -449,7 +452,9 @@ router.get("/:id/riesgo-operativo", cacheMiddleware(30), async (req, res) => {
                WHERE f.estado::text IN ('vencida','reclamada','sin_cobrar')
                   OR (fv.vencimiento_date IS NOT NULL AND fv.vencimiento_date < CURRENT_DATE AND f.estado::text IN ('emitida','enviada'))
              ) AS primer_vencimiento,
-             MAX(f.fecha) FILTER (WHERE f.estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar')) AS ultima_factura
+             MAX(f.fecha) FILTER (WHERE f.estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar')) AS ultima_factura,
+             COALESCE(pr.pedidos_confirmados_pendientes, 0)::int AS pedidos_confirmados_pendientes,
+             COALESCE(pr.total_pedidos_confirmados, 0)::numeric AS total_pedidos_confirmados
         FROM clientes c
         LEFT JOIN facturas f ON f.cliente_id = c.id AND f.empresa_id = c.empresa_id
         LEFT JOIN LATERAL (
@@ -459,8 +464,28 @@ router.get("/:id/riesgo-operativo", cacheMiddleware(30), async (req, res) => {
             ELSE NULL
           END AS vencimiento_date
         ) fv ON true
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS pedidos_confirmados_pendientes,
+                 COALESCE(SUM(
+                   COALESCE(
+                     p.importe,
+                     p.precio_cliente_col,
+                     CASE
+                       WHEN p.tipo_precio::text = 'viaje' THEN p.precio_unitario
+                       WHEN p.tipo_precio::text = 'kg' THEN (COALESCE(p.cantidad, 0) / 100.0) * COALESCE(p.precio_unitario, 0)
+                       ELSE GREATEST(COALESCE(p.cantidad, 0), COALESCE(p.minimo_unidades, 0)) * COALESCE(p.precio_unitario, 0)
+                     END,
+                     0
+                   )
+                 ), 0)::numeric AS total_pedidos_confirmados
+            FROM pedidos p
+           WHERE p.empresa_id = c.empresa_id
+             AND p.cliente_id = c.id
+             AND p.estado::text IN ('confirmado','en_curso','descarga','entregado')
+             AND p.factura_id IS NULL
+        ) pr ON true
        WHERE c.id = $1 AND c.empresa_id = $2
-       GROUP BY c.id, c.nombre, c.limite_riesgo
+       GROUP BY c.id, c.nombre, c.limite_riesgo, pr.pedidos_confirmados_pendientes, pr.total_pedidos_confirmados
        LIMIT 1
     `, [req.params.id, empresaId]);
     const row = rows[0];
@@ -470,7 +495,10 @@ router.get("/:id/riesgo-operativo", cacheMiddleware(30), async (req, res) => {
       ...row,
       limite_riesgo: Number(row.limite_riesgo || 0),
       facturas_pendientes: Number(row.facturas_pendientes || 0),
-      total_pendiente: Number(row.total_pendiente || 0),
+      total_facturas_pendiente: Number(row.total_facturas_pendiente || 0),
+      pedidos_confirmados_pendientes: Number(row.pedidos_confirmados_pendientes || 0),
+      total_pedidos_confirmados: Number(row.total_pedidos_confirmados || 0),
+      total_pendiente: Number(row.total_facturas_pendiente || 0) + Number(row.total_pedidos_confirmados || 0),
       facturas_vencidas: Number(row.facturas_vencidas || 0),
       total_vencido: Number(row.total_vencido || 0),
       riesgo_pct: riesgo.riesgoPct,

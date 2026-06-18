@@ -187,6 +187,42 @@ function ensureRetornoSolicitudesSchema() {
   return retornoSolicitudesSchemaReady;
 }
 
+let choferVacacionesSchemaReady = null;
+function ensureChoferVacacionesSchemaForInformes() {
+  if (!choferVacacionesSchemaReady) {
+    choferVacacionesSchemaReady = db.query(`
+      CREATE TABLE IF NOT EXISTS chofer_vacaciones_solicitudes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        chofer_id UUID NOT NULL REFERENCES choferes(id) ON DELETE CASCADE,
+        usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+        estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+        fecha_inicio DATE NOT NULL,
+        fecha_fin DATE NOT NULL,
+        dias NUMERIC(8,2) NOT NULL DEFAULT 0,
+        motivo TEXT,
+        firma_solicitud JSONB NOT NULL DEFAULT '{}'::jsonb,
+        firma_aceptacion JSONB NOT NULL DEFAULT '{}'::jsonb,
+        aprobado_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+        aprobado_at TIMESTAMPTZ,
+        rechazado_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+        rechazado_at TIMESTAMPTZ,
+        observaciones TEXT,
+        aviso_id VARCHAR(80),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `).then(() => Promise.all([
+      db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_empresa_estado ON chofer_vacaciones_solicitudes(empresa_id, estado, fecha_inicio)"),
+      db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_chofer ON chofer_vacaciones_solicitudes(empresa_id, chofer_id, fecha_inicio DESC)"),
+    ])).catch(err => {
+      choferVacacionesSchemaReady = null;
+      throw err;
+    });
+  }
+  return choferVacacionesSchemaReady;
+}
+
 function pct(part, total) {
   const p = Number(part || 0);
   const t = Number(total || 0);
@@ -2977,6 +3013,7 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
     const { desde, hasta } = rangoPeriodo(period);
     const safeRows = (promise) => promise.then(r => r.rows || []).catch(() => []);
     await ensureRegulatoryCoreSchema().catch(() => {});
+    await ensureChoferVacacionesSchemaForInformes().catch(() => {});
 
     const [kpiRows, proximos, incidencias, retrasos, sinAsignar, margen, docs, facturacionInconsistente, cobros, gps, regulatoryDocs] = await Promise.all([
       safeRows(db.query(`
@@ -3142,6 +3179,18 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
           FROM vehiculos
          WHERE empresa_id=$1
            AND activo IS DISTINCT FROM false
+           AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%remolque%'
+           AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%semirremolque%'
+           AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%dolly%'
+           AND UPPER(COALESCE(matricula,'')) NOT LIKE 'R-%'
+           AND UPPER(COALESCE(matricula,'')) NOT LIKE '%-R'
+           AND NOT EXISTS (
+             SELECT 1
+               FROM vehiculos vt
+              WHERE vt.empresa_id=vehiculos.empresa_id
+                AND vt.remolque_id=vehiculos.id
+                AND vt.activo IS DISTINCT FROM false
+           )
            AND gps_provider IS NOT NULL
            AND gps_provider <> 'manual'
            AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL
@@ -3193,7 +3242,22 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       `, [empresaId])),
     ]);
 
-    const [flujo, recursos, eventosRecientes, esperas, vacacionesPendientes, gpsResumen] = await Promise.all([
+    const tractoraFilter = `
+      AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%remolque%'
+      AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%semirremolque%'
+      AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%dolly%'
+      AND UPPER(COALESCE(matricula,'')) NOT LIKE 'R-%'
+      AND UPPER(COALESCE(matricula,'')) NOT LIKE '%-R'
+      AND NOT EXISTS (
+        SELECT 1
+          FROM vehiculos vt
+         WHERE vt.empresa_id=vehiculos.empresa_id
+           AND vt.remolque_id=vehiculos.id
+           AND vt.activo IS DISTINCT FROM false
+      )
+    `;
+
+    const [flujo, viajesFlujo, recursos, eventosRecientes, esperas, vacacionesPendientes, gpsResumen] = await Promise.all([
       safeRows(db.query(`
         SELECT
           COALESCE(NULLIF(p.estado::text,''),'pendiente') AS estado,
@@ -3205,6 +3269,27 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
           AND COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date)
               BETWEEN CURRENT_DATE - INTERVAL '2 days' AND CURRENT_DATE + INTERVAL '10 days'
         GROUP BY COALESCE(NULLIF(p.estado::text,''),'pendiente')
+      `, [empresaId])),
+      safeRows(db.query(`
+        SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga,
+               p.estado::text AS estado,
+               c.nombre AS cliente_nombre,
+               v.matricula AS vehiculo_matricula,
+               v.gps_lat, v.gps_lng, v.ubicacion_actual, v.ubicacion_ts,
+               ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos,
+               col.nombre AS colaborador_nombre
+        FROM pedidos p
+        LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
+        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+        LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+        LEFT JOIN colaboradores col ON col.id=p.colaborador_id AND col.empresa_id=p.empresa_id
+        WHERE p.empresa_id=$1
+          AND p.factura_id IS NULL
+          AND p.estado::text NOT IN ('cancelado','facturado')
+          AND COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date)
+              BETWEEN CURRENT_DATE - INTERVAL '2 days' AND CURRENT_DATE + INTERVAL '10 days'
+        ORDER BY COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
+        LIMIT 160
       `, [empresaId])),
       safeRows(db.query(`
         SELECT
@@ -3266,10 +3351,10 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       `, [empresaId])),
       safeRows(db.query(`
         SELECT
-          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false)::int AS vehiculos_activos,
-          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL)::int AS gps_enlazados,
-          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND ubicacion_ts >= NOW() - INTERVAL '6 hours')::int AS gps_ok,
-          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND (ubicacion_ts IS NULL OR ubicacion_ts < NOW() - INTERVAL '6 hours'))::int AS gps_sin_senal
+          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false ${tractoraFilter})::int AS vehiculos_activos,
+          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false ${tractoraFilter} AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL)::int AS gps_enlazados,
+          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false ${tractoraFilter} AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND ubicacion_ts >= NOW() - INTERVAL '6 hours')::int AS gps_ok,
+          COUNT(*) FILTER (WHERE activo IS DISTINCT FROM false ${tractoraFilter} AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND (ubicacion_ts IS NULL OR ubicacion_ts < NOW() - INTERVAL '6 hours'))::int AS gps_sin_senal
         FROM vehiculos
         WHERE empresa_id=$1
       `, [empresaId])),
@@ -3447,6 +3532,28 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       ["entregado", "Entregados"],
       ["incidencia", "Incidencias"],
     ].map(([key, label]) => ({ key, label, total: Number(flujoMap.get(key) || 0) }));
+    const viajesPorEstado = (viajesFlujo || []).reduce((acc, p) => {
+      const key = String(p.estado || "pendiente").toLowerCase() || "pendiente";
+      if (!acc[key]) acc[key] = [];
+      acc[key].push({
+        id: p.id,
+        numero: p.numero,
+        origen: p.origen,
+        destino: p.destino,
+        fecha_carga: p.fecha_carga,
+        fecha_descarga: p.fecha_descarga,
+        estado: key,
+        cliente_nombre: p.cliente_nombre,
+        vehiculo_matricula: p.vehiculo_matricula,
+        gps_lat: p.gps_lat,
+        gps_lng: p.gps_lng,
+        ubicacion_actual: p.ubicacion_actual,
+        ubicacion_ts: p.ubicacion_ts,
+        chofer_nombre: [p.chofer_nombre, p.chofer_apellidos].filter(Boolean).join(" ").trim(),
+        colaborador_nombre: p.colaborador_nombre,
+      });
+      return acc;
+    }, {});
     const recursosRow = recursos[0] || {};
     const gpsRow = gpsResumen[0] || {};
     const recursosResumen = {
@@ -3498,6 +3605,7 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       resumen,
       vistas,
       flujo_operativo: flujoOperativo,
+      viajes_por_estado: viajesPorEstado,
       recursos: recursosResumen,
       visibilidad: visibilidadResumen,
       decisiones,

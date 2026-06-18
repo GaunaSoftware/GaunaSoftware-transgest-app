@@ -653,6 +653,20 @@ r1.get("/gps/status", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
     const { providers, activeProvider } = await getGpsProviderStatuses(empresaId);
+    const tractoraFilter = `
+      AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%remolque%'
+      AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%semirremolque%'
+      AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%dolly%'
+      AND UPPER(COALESCE(matricula,'')) NOT LIKE 'R-%'
+      AND UPPER(COALESCE(matricula,'')) NOT LIKE '%-R'
+      AND NOT EXISTS (
+        SELECT 1
+          FROM vehiculos vt
+         WHERE vt.empresa_id=vehiculos.empresa_id
+           AND vt.remolque_id=vehiculos.id
+           AND vt.activo IS DISTINCT FROM false
+      )
+    `;
     const [counts, duplicates, lastPosition, staleVehicles, webhookRows] = await Promise.all([
       db.query(
         `SELECT
@@ -665,7 +679,8 @@ r1.get("/gps/status", async (req, res) => {
            COUNT(*) FILTER (WHERE activo=true AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND ubicacion_ts >= NOW()-INTERVAL '6 hours')::int AS senal_reciente,
            COUNT(*) FILTER (WHERE activo=true AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND (ubicacion_ts IS NULL OR ubicacion_ts < NOW()-INTERVAL '6 hours'))::int AS sin_senal_reciente
          FROM vehiculos
-         WHERE empresa_id=$1`,
+         WHERE empresa_id=$1
+         ${tractoraFilter}`,
         [empresaId]
       ),
       db.query(
@@ -673,6 +688,7 @@ r1.get("/gps/status", async (req, res) => {
                 ARRAY_AGG(matricula ORDER BY matricula) AS matriculas
          FROM vehiculos
          WHERE empresa_id=$1
+           ${tractoraFilter}
            AND gps_provider IS NOT NULL
            AND gps_provider <> 'manual'
            AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL
@@ -694,6 +710,7 @@ r1.get("/gps/status", async (req, res) => {
         `SELECT id, matricula, gps_provider, gps_external_id, ubicacion_actual, ubicacion_ts
          FROM vehiculos
          WHERE empresa_id=$1
+           ${tractoraFilter}
            AND activo=true
            AND gps_provider IS NOT NULL
            AND gps_provider <> 'manual'

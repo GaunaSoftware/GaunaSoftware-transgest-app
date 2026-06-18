@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getTodosLosDocs, getVehiculos, getNotificaciones, marcarNotificacionLeida, marcarTodasNotificacionesLeidas, getTallerEstado, getEmpresaConfig, setConfigAlertas } from "../services/api";
 import { confirmDialog } from "../services/notify";
 import { setRuntimeFocus } from "../services/runtimeFocus";
@@ -28,9 +28,9 @@ const LEYENDA = [
 const S = {
   page: {flex:1, padding:"24px 28px"},
   title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:4,color:"var(--text)"},
-  card: {background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:12,overflow:"hidden"},
-  th:   {textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid #181e2e",background:"var(--bg3)",whiteSpace:"nowrap"},
-  td:   {padding:"10px 14px",borderBottom:"1px solid #181e2e",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
+  card: {background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
+  th:   {textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)",whiteSpace:"nowrap"},
+  td:   {padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
   btn:  {padding:"6px 14px",borderRadius:7,border:"1px solid",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"},
 };
 
@@ -43,6 +43,75 @@ function Pastilla({ s }) {
       {s.label}
     </span>
   );
+}
+
+function cleanKey(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function dateMs(value) {
+  if (!value) return 0;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function entidadLabel(doc = {}) {
+  return doc.vehiculo_matricula || doc.chofer_nombre || doc.entidad_nombre || "-";
+}
+
+function entidadTipo(doc = {}) {
+  return doc.entidad_tipo || (doc.vehiculo_matricula ? "vehiculo" : doc.chofer_nombre ? "chofer" : "otros");
+}
+
+function entidadId(doc = {}) {
+  return doc.entidad_id || doc.vehiculo_id || doc.chofer_id || entidadLabel(doc);
+}
+
+function docGroupKey(doc = {}) {
+  return [
+    entidadTipo(doc),
+    cleanKey(entidadId(doc)),
+    cleanKey(doc.tipo_doc || doc.tipo || "otros"),
+  ].join(":");
+}
+
+function docFreshnessScore(doc = {}) {
+  return Math.max(dateMs(doc.fecha_vencimiento), dateMs(doc.fecha_emision), dateMs(doc.created_at));
+}
+
+function dedupeDocumentos(rows = []) {
+  const groups = new Map();
+  rows.forEach(doc => {
+    const key = docGroupKey(doc);
+    const list = groups.get(key) || [];
+    list.push(doc);
+    groups.set(key, list);
+  });
+  const vigentes = [];
+  const duplicados = [];
+  groups.forEach(list => {
+    const sorted = [...list].sort((a, b) => docFreshnessScore(b) - docFreshnessScore(a));
+    const current = { ...sorted[0], historial_count: sorted.length, historial_oculto: Math.max(0, sorted.length - 1) };
+    vigentes.push(current);
+    if (sorted.length > 1) duplicados.push({ key: docGroupKey(current), actual: current, historico: sorted.slice(1), total: sorted.length });
+  });
+  return { vigentes, duplicados };
+}
+
+function dedupeNotificaciones(rows = []) {
+  const seen = new Set();
+  return rows.filter(n => {
+    const key = n?.data?.dedupe_key
+      || `${n?.tipo || ""}:${n?.data?.pedido_id || ""}:${n?.data?.colaborador_id || ""}:${n?.data?.exception_key || ""}:${n?.titulo || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export default function Avisos() {
@@ -81,7 +150,7 @@ export default function Avisos() {
   function cargarNotificaciones() {
     return getNotificaciones(80)
       .then(d => {
-        const pendientes = Array.isArray(d?.data) ? d.data.filter(n => !n?.leida) : [];
+        const pendientes = dedupeNotificaciones(Array.isArray(d?.data) ? d.data.filter(n => !n?.leida) : []);
         setNotificaciones(pendientes);
         setNoLeidas(Number(d?.no_leidas || 0));
       })
@@ -135,6 +204,32 @@ export default function Avisos() {
     }
   }
 
+  function abrirDocumento(d) {
+    const tipo = entidadTipo(d);
+    const id = entidadId(d);
+    if (tipo === "vehiculo" && id) {
+      setRuntimeFocus("tms_vehiculos_focus", {
+        source: "avisos_documentos",
+        vehiculo_id: id,
+        title: d.tipo_doc,
+        description: `Documento ${d.tipo_doc || ""} ${d.s?.texto || ""}`.trim(),
+      });
+      window.dispatchEvent(new CustomEvent("tms:navegar", { detail:"vehiculos" }));
+      return;
+    }
+    if (tipo === "chofer" && id) {
+      setRuntimeFocus("tms_choferes_focus", {
+        source: "avisos_documentos",
+        chofer_id: id,
+        title: d.tipo_doc,
+        description: `Documento ${d.tipo_doc || ""} ${d.s?.texto || ""}`.trim(),
+      });
+      window.dispatchEvent(new CustomEvent("tms:navegar", { detail:"choferes" }));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("tms:navegar", { detail:"documentos" }));
+  }
+
   async function guardarAvisosCfg(next) {
     const lista = Array.isArray(next) ? next : [];
     await setConfigAlertas(lista);
@@ -142,9 +237,10 @@ export default function Avisos() {
   }
 
   // ── Maintenance alerts calc ──
-  const reps   = Array.isArray(tallerEstado?.reparaciones) ? tallerEstado.reparaciones : [];
-  const avisosMant = [];
-  vehiculos.forEach(v => {
+  const avisosMant = useMemo(() => {
+    const reps = Array.isArray(tallerEstado?.reparaciones) ? tallerEstado.reparaciones : [];
+    const map = new Map();
+    vehiculos.forEach(v => {
     const vMerged = { ...v };
     avisosCfg.forEach(cfg => {
       if (!cfg.activo) return;
@@ -158,7 +254,9 @@ export default function Avisos() {
       const pct = Math.max(pctDias, pctKm);
       if (pct >= 0.75) {
         const nivel = pct >= 1 ? 0 : pct >= 0.9 ? 1 : 2;
-        avisosMant.push({
+        const item = {
+          key: `${v.id}:${cleanKey(cfg.tipo_mantenimiento)}`,
+          vehiculo_id: v.id,
           vehiculo_matricula: v.matricula,
           tipo: cfg.tipo_mantenimiento,
           diasDesde, kmDesde,
@@ -166,23 +264,30 @@ export default function Avisos() {
           pct, nivel,
           ultimaFecha: ult.fecha,
           descripcion: cfg.descripcion,
-        });
+        };
+        const prev = map.get(item.key);
+        if (!prev || item.pct > prev.pct) map.set(item.key, item);
       }
     });
-  });
+    });
+    return [...map.values()].sort((a,b) => a.nivel - b.nivel || b.pct - a.pct);
+  }, [avisosCfg, tallerEstado, vehiculos]);
 
-  const todosConSemaforo = docs.map(d => ({ ...d, s: semaforo(d.fecha_vencimiento) }));
+  const { vigentes: docsVigentes, duplicados: docsDuplicados } = useMemo(() => dedupeDocumentos(docs), [docs]);
+  const todosConSemaforo = docsVigentes.map(d => ({ ...d, s: semaforo(d.fecha_vencimiento) }));
 
   const filtrados = todosConSemaforo
     .filter(d => {
       if (filtro==="criticos") return d.s.nivel <= 2;
+      if (filtro==="incompletos") return !d.fecha_vencimiento;
+      if (filtro==="duplicados") return Number(d.historial_oculto || 0) > 0;
       if (filtro==="vehiculos") return !!d.vehiculo_matricula;
       if (filtro==="choferes") return !!d.chofer_nombre;
       return true;
     })
     .filter(d => {
       if (!q) return true;
-      const txt = `${d.tipo_doc} ${d.vehiculo_matricula||""} ${d.chofer_nombre||""}`.toLowerCase();
+      const txt = `${d.tipo_doc} ${d.vehiculo_matricula||""} ${d.chofer_nombre||""} ${d.entidad_nombre||""} ${d.organismo||""}`.toLowerCase();
       return txt.includes(q.toLowerCase());
     })
     .sort((a,b) => (a.s.dias??99999) - (b.s.dias??99999));
@@ -191,7 +296,9 @@ export default function Avisos() {
   const caducados = todosConSemaforo.filter(d=>d.s.nivel===0).length;
   const criticos  = todosConSemaforo.filter(d=>d.s.nivel<=2).length;
   const atencion  = todosConSemaforo.filter(d=>d.s.nivel===3||d.s.nivel===4).length;
-  const enPlazo   = todosConSemaforo.filter(d=>d.s.nivel>=5).length;
+  const sinFecha  = todosConSemaforo.filter(d=>!d.fecha_vencimiento).length;
+  const enPlazo   = todosConSemaforo.filter(d=>d.fecha_vencimiento && d.s.nivel>=5).length;
+  const filtrosDocumentos = [["todos","Todos"],["criticos","Criticos y caducados"],["incompletos","Incompletos"],["duplicados","Con historial"],["vehiculos","Vehiculos"],["choferes","Choferes"]];
 
   return (
     <div style={S.page}>
@@ -269,15 +376,16 @@ export default function Avisos() {
 
       {tab==="documentos" && <>
       {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:12}}>
         {[
           {l:"Caducados",    v:caducados, c:"#f05252", bg:"rgba(240,82,82,.12)"},
           {l:"Críticos",     v:criticos,  c:"#fb8c3a", bg:"rgba(251,140,58,.10)"},
           {l:"Requieren atención",v:atencion,c:"#fbbf24",bg:"rgba(251,191,36,.10)"},
+          {l:"Incompletos",  v:sinFecha,  c:"#94a3b8", bg:"rgba(148,163,184,.10)"},
           {l:"En plazo",     v:enPlazo,   c:"var(--green)", bg:"rgba(34,211,160,.10)"},
         ].map((k,i)=>(
           <div key={i} style={{background:k.bg,border:`1px solid ${k.c}30`,borderRadius:12,padding:"14px 16px",cursor:"pointer"}}
-            onClick={()=>setFiltro(i===0||i===1?"criticos":"todos")}>
+            onClick={()=>setFiltro(i===0||i===1?"criticos":i===3?"incompletos":"todos")}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:26,fontWeight:800,color:k.c,lineHeight:1}}>{k.v}</div>
             <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:k.c,opacity:.7,marginTop:4}}>{k.l}</div>
           </div>
@@ -285,7 +393,18 @@ export default function Avisos() {
       </div>
 
       {/* Leyenda semáforo */}
-      <div style={{display:"flex",gap:16,marginBottom:16,flexWrap:"wrap",background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:10,padding:"12px 16px",alignItems:"center"}}>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:16}}>
+        <span style={{fontSize:11,color:"var(--text4)"}}>
+          Mostrando documento vigente por entidad y tipo. Historicos ocultos: {docs.length - docsVigentes.length}.
+        </span>
+        {docsDuplicados.length > 0 && (
+          <button onClick={()=>setFiltro("duplicados")} style={{...S.btn,borderColor:"rgba(245,158,11,.35)",background:"rgba(245,158,11,.10)",color:"#f59e0b"}}>
+            Revisar {docsDuplicados.length} grupo{docsDuplicados.length!==1?"s":""} con historial
+          </button>
+        )}
+      </div>
+
+      <div style={{display:"flex",gap:16,marginBottom:16,flexWrap:"wrap",background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,padding:"12px 16px",alignItems:"center"}}>
         <span style={{fontSize:10,fontWeight:700,textTransform:"uppercase",color:"var(--text4)",letterSpacing:".08em",marginRight:4}}>Semáforo:</span>
         {LEYENDA.map((s,i)=>(
           <div key={i} style={{display:"flex",alignItems:"center",gap:5}}>
@@ -307,8 +426,18 @@ export default function Avisos() {
             {l}
           </button>
         ))}
+        <span style={{width:1,height:24,background:"var(--border)",margin:"0 2px"}} />
+        {filtrosDocumentos.filter(([v])=>["incompletos","duplicados"].includes(v)).map(([v,l])=>(
+          <button key={`pro-${v}`} onClick={()=>setFiltro(v)}
+            style={{...S.btn,
+                    borderColor:filtro===v?"var(--accent)":"var(--border2)",
+                    background:filtro===v?"var(--accent)":"var(--bg3)",
+                    color:filtro===v?"#fff":"var(--text3)"}}>
+            {l}
+          </button>
+        ))}
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar..."
-          style={{marginLeft:"auto",background:"var(--bg4)",border:"1px solid #28344f",color:"var(--text)",
+          style={{marginLeft:"auto",background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",
                   padding:"6px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:200}}/>
       </div>
 
@@ -316,7 +445,7 @@ export default function Avisos() {
       {loading ? (
         <div style={{textAlign:"center",color:"var(--text4)",padding:60}}>Cargando avisos...</div>
       ) : filtrados.length===0 ? (
-        <div style={{textAlign:"center",padding:60,background:"var(--bg2)",border:"1px solid #181e2e",borderRadius:12}}>
+        <div style={{textAlign:"center",padding:60,background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8}}>
           <div style={{color:"var(--green)",fontWeight:700,fontSize:15}}>Sin avisos para este filtro</div>
           <div style={{color:"var(--text4)",fontSize:12,marginTop:6}}>Toda la documentación está en plazo</div>
         </div>
@@ -328,13 +457,20 @@ export default function Avisos() {
             </tr></thead>
             <tbody>
               {filtrados.map((d,i)=>(
-                <tr key={i} style={{background:d.s.nivel<=1?d.s.bg:undefined}}>
+                <tr key={`${docGroupKey(d)}:${d.id || i}`} style={{background:d.s.nivel<=1?d.s.bg:undefined}}>
                   <td style={{...S.td,fontWeight:600,fontSize:12}}>
                     {d.vehiculo_matricula
                       ? <span>{d.vehiculo_matricula}</span>
                       : <span>{d.chofer_nombre}</span>}
                   </td>
-                  <td style={{...S.td,fontSize:12}}>{d.tipo_doc}</td>
+                  <td style={{...S.td,fontSize:12}}>
+                    {d.tipo_doc}
+                    {Number(d.historial_oculto || 0) > 0 && (
+                      <div style={{fontSize:10,color:"#f59e0b",fontWeight:800,marginTop:3}}>
+                        {d.historial_oculto} historico{Number(d.historial_oculto) !== 1 ? "s" : ""} oculto{Number(d.historial_oculto) !== 1 ? "s" : ""}
+                      </div>
+                    )}
+                  </td>
                   <td style={S.td}>
                     <span style={{fontSize:11,color:d.s.color,fontWeight:700}}>{d.s.texto}</span>
                   </td>
@@ -344,17 +480,22 @@ export default function Avisos() {
                   </td>
                   <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>{d.organismo||"—"}</td>
                   <td style={S.td}>
-                    {d.s.nivel<=2&&(
-                      <span style={{fontSize:11,color:"#fb8c3a",fontStyle:"italic"}}>
-                        Renovar en Documentos
-                      </span>
-                    )}
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      <button onClick={()=>abrirDocumento(d)} style={{...S.btn,borderColor:"rgba(59,130,246,.35)",background:"rgba(59,130,246,.10)",color:"var(--accent-xl)",padding:"4px 9px"}}>
+                        Abrir ficha
+                      </button>
+                      {d.s.nivel<=2&&(
+                        <button onClick={()=>window.dispatchEvent(new CustomEvent("tms:navegar", { detail:"documentos" }))} style={{...S.btn,borderColor:"rgba(251,140,58,.35)",background:"rgba(251,140,58,.10)",color:"#fb8c3a",padding:"4px 9px"}}>
+                          Renovar
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div style={{padding:"10px 16px",borderTop:"1px solid #181e2e",fontSize:11,color:"var(--text4)"}}>
+          <div style={{padding:"10px 16px",borderTop:"1px solid var(--border)",fontSize:11,color:"var(--text4)"}}>
             {filtrados.length} documento{filtrados.length!==1?"s":""}
           </div>
         </div>

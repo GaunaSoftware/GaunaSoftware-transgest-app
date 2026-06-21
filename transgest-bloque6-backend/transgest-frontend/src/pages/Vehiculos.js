@@ -112,7 +112,7 @@ function UiIcon({ name = "truck", color = "currentColor", size = 22 }) {
 
 const CLASES_VEHICULO = [
   "Tractora", "Camion rigido", "Furgon", "Furgoneta",
-  "Remolque - Tautliner (lona)", "Remolque - Banera (volcador)", "Remolque - Cisterna",
+  "Remolque - Tautliner (lona)", "Remolque - Bañera (volcador)", "Remolque - Cisterna",
   "Remolque - Lateral bajo (lowboy)", "Remolque - Frigorifico", "Remolque - Portacoches",
   "Semirremolque", "Dolly / Balleston", "Otro",
 ];

@@ -267,6 +267,16 @@ function normalizePedidoDate(value) {
   return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
 }
 
+function assertPedidoDateOrder(fechaCarga, fechaDescarga) {
+  const carga = normalizePedidoDate(fechaCarga);
+  const descarga = normalizePedidoDate(fechaDescarga);
+  if (carga && descarga && descarga < carga) {
+    const err = new Error("La fecha de descarga no puede ser anterior a la fecha de carga.");
+    err.status = 400;
+    throw err;
+  }
+}
+
 function normalizePedidoTime(value) {
   if (!value) return null;
   const raw = String(value).trim();
@@ -5671,6 +5681,11 @@ router.post("/", GERENTE_O_TRAFICO,
     const fechaEntregaNorm = normalizePedidoDate(fecha_entrega);
     const fechaDescargaNorm = normalizePedidoDate(req.body.fecha_descarga);
     const horaDescargaNorm = normalizePedidoTime(req.body.hora_descarga);
+    try {
+      assertPedidoDateOrder(fechaCargaNorm, fechaDescargaNorm || fechaEntregaNorm);
+    } catch (dateErr) {
+      return res.status(dateErr.status || 400).json({ error: dateErr.message });
+    }
     const importeInicial = parseLocaleNumber(importe)
       ?? calcPedidoImporteCanonical(normalizePedidoTarifaFields({
         ...req.body,
@@ -6137,6 +6152,14 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     ...pedidoActualRows[0],
     ...body,
   });
+  try {
+    assertPedidoDateOrder(
+      body.fecha_carga !== undefined ? body.fecha_carga : pedidoActualRows[0].fecha_carga,
+      body.fecha_descarga !== undefined ? body.fecha_descarga : (body.fecha_entrega !== undefined ? body.fecha_entrega : (pedidoActualRows[0].fecha_descarga || pedidoActualRows[0].fecha_entrega))
+    );
+  } catch (dateErr) {
+    return res.status(dateErr.status || 400).json({ error: dateErr.message });
+  }
 
   // Build dynamic UPDATE - only update fields that are present in the request
   const fieldMap = {

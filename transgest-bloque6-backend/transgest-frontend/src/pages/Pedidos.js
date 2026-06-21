@@ -280,8 +280,10 @@ function buildPedidoDuplicado(pedido = {}) {
     numero: "",
     estado: "pendiente",
     fecha_pedido: hoy,
+    fecha_descarga: "",
+    fecha_entrega: "",
     pendiente_completar: true,
-    aviso_completar: "Pedido duplicado: revisa fechas, asignacion, precio y documentacion antes de guardar.",
+    aviso_completar: "Pedido duplicado: completa fecha de descarga, revisa asignacion, precio y documentacion antes de guardar.",
     _duplicado: true,
     _readonly: false,
   });
@@ -317,8 +319,14 @@ function normalizarFechasCopia(fechaBase, copias, actuales = []) {
   const base = String(fechaBase || new Date().toISOString().slice(0, 10)).slice(0, 10);
   return Array.from({ length: total }, (_, idx) => {
     const current = String(actuales[idx] || "").slice(0, 10);
-    return current || sumarDiasISO(base, idx * 7);
+    return current || (idx === 0 ? base : "");
   });
+}
+
+function descargaAntesQueCarga(fechaCarga, fechaDescarga) {
+  const carga = String(fechaCarga || "").slice(0, 10);
+  const descarga = String(fechaDescarga || "").slice(0, 10);
+  return Boolean(carga && descarga && descarga < carga);
 }
 
 function fileToPedidoDocBase64(file) {
@@ -442,11 +450,14 @@ function buildPedidoCopyPayload(basePedido = {}, overrides = {}) {
     factura_numero, facturado, cliente_email, cliente_telefono,
     chofer2_nombre, remolque_id, mantener_asignacion, ...formClean
   } = merged;
+  const descargaPendiente = !merged.fecha_descarga && !merged.fecha_entrega;
+  const puntosDescargaCopy = normalizeStopsForCopy(merged.puntos_descarga, merged.destino, "descarga")
+    .map(stop => descargaPendiente ? { ...stop, fecha:"" } : stop);
   const payload = sanitizePedidoPayload({
     ...formClean,
     importe: calcImporte(merged),
     puntos_carga: normalizeStopsForCopy(merged.puntos_carga, merged.origen, "carga"),
-    puntos_descarga: normalizeStopsForCopy(merged.puntos_descarga, merged.destino, "descarga"),
+    puntos_descarga: puntosDescargaCopy,
     extracostes_importe: toFiniteNumber(merged.extracostes ?? merged.extracostes_importe, 0),
     importe_revision_combustible: calcRevisionCombustible(merged),
     importe_minimo: merged.tipo_precio === "viaje" ? toNullableNumber(merged.importe_minimo) : null,
@@ -2385,6 +2396,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     if (!form.origen.trim()) { notify("Indica el origen.", "warning"); return; }
     if (!form.destino.trim()) { notify("Indica el destino.", "warning"); return; }
     if (!form.fecha_carga) { notify("Indica la fecha de carga para que aparezca en el cuadrante.", "warning"); return; }
+    if (descargaAntesQueCarga(form.fecha_carga, form.fecha_descarga)) {
+      notify("La fecha de descarga no puede ser anterior a la fecha de carga.", "warning");
+      return;
+    }
     setSaving(true);
     try {
       const cliente = await resolverCliente();
@@ -2476,7 +2491,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         remolque_matricula_colaborador: remolqueColaborador || null,
         fecha_pedido: hoy,
         fecha_carga: form.fecha_carga,
-        fecha_descarga: form.fecha_descarga || form.fecha_carga,
+        fecha_descarga: form.fecha_descarga || null,
         hora_carga: form.hora_carga || null,
         hora_descarga: form.hora_descarga || null,
         referencia_cliente: form.referencia_cliente || null,
@@ -5881,6 +5896,10 @@ async function guardarLegacy() {
 async function guardar() {
   if (!form.cliente_id) { notify("Selecciona un cliente", "warning"); return; }
   if (!form.fecha_carga) { notify("La fecha de carga es obligatoria.", "warning"); return; }
+  if (descargaAntesQueCarga(form.fecha_carga, form.fecha_descarga || form.fecha_entrega)) {
+    notify("La fecha de descarga no puede ser anterior a la fecha de carga.", "warning");
+    return;
+  }
   if (!editando?.id && bloqueoClienteModal) {
     notify(bloqueoClienteModal.message, "error");
     return;
@@ -8282,15 +8301,14 @@ export default function Pedidos() {
       const creados = [];
       for (let i = 0; i < copias; i += 1) {
         const fechaCarga = fechasCopia[i];
-        const fechaDescargaBase = copyPlan.source?.fecha_descarga || copyPlan.source?.fecha_carga || copyPlan.fecha_carga;
-        const diferenciaDias = Math.round((new Date(`${String(fechaDescargaBase).slice(0, 10)}T00:00:00`) - new Date(`${String(copyPlan.source?.fecha_carga || copyPlan.fecha_carga).slice(0, 10)}T00:00:00`)) / 86400000);
         const payload = buildPedidoCopyPayload(copyPlan.source, {
           fecha_carga: fechaCarga,
-          fecha_descarga: fechaDescargaBase ? sumarDiasISO(fechaCarga, Number.isFinite(diferenciaDias) ? diferenciaDias : 0) : null,
+          fecha_descarga: null,
+          fecha_entrega: null,
           pendiente_completar: true,
           aviso_completar: copias > 1
-            ? "Viaje copiado en serie: revisar fechas, asignacion y precio antes de cerrar."
-            : "Viaje copiado: revisar fechas, asignacion y precio antes de cerrar.",
+            ? "Viaje copiado en serie: completar fecha de descarga, revisar asignacion y precio antes de cerrar."
+            : "Viaje copiado: completar fecha de descarga, revisar asignacion y precio antes de cerrar.",
           mantener_asignacion: !!copyPlan.mantener_asignacion,
           vehiculo_id: copyPlan.mantener_asignacion ? copyPlan.source?.vehiculo_id || null : null,
           chofer_id: copyPlan.mantener_asignacion ? copyPlan.source?.chofer_id || null : null,

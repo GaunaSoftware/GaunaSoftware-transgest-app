@@ -105,7 +105,7 @@ const TIPO_TARIFA_RUTA = [
 const TIPO_VEHICULO_RUTA = [
   {v:"cualquiera",l:"Cualquier vehiculo"},
   {v:"tautliner",l:"Tautliner / lona"},
-  {v:"banera",l:"Banera"},
+  {v:"banera",l:"Bañera"},
   {v:"frigorifico",l:"Frigorifico"},
   {v:"cisterna",l:"Cisterna"},
   {v:"caja",l:"Caja cerrada"},

@@ -19,7 +19,7 @@ const S={
 const TIPOS_VEHICULO=[
   {v:"cualquiera",l:"Cualquier vehículo"},
   {v:"tautliner",l:"Tautliner / Lona"},
-  {v:"banera",l:"Banera"},
+  {v:"banera",l:"Bañera"},
   {v:"frigorifico",l:"Frigorífico"},
   {v:"cisterna",l:"Cisterna"},
   {v:"portacoches",l:"Portacoches"},

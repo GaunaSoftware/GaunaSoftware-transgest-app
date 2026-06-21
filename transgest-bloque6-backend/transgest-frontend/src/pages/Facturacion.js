@@ -1,6 +1,6 @@
 import { getLogoDataUrl } from "../services/logoHelper";
 import { useState, useEffect, useCallback , useMemo } from "react";
-import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig } from "../services/api";
+import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
@@ -1242,6 +1242,7 @@ function ModalFacturarMultiple({ onClose }) {
   const [confirmCantidades, setConfirmCantidades] = useState(false);
   const [confirmReferencias, setConfirmReferencias] = useState(false);
   const [confirmAlbaranes, setConfirmAlbaranes] = useState(false);
+  const [refEdit, setRefEdit] = useState(null);
 
   const hoy = new Date();
   const [fechaDesde, setFechaDesde] = useState(new Date(hoy.getFullYear(),hoy.getMonth(),1).toISOString().slice(0,10));
@@ -1354,6 +1355,20 @@ function ModalFacturarMultiple({ onClose }) {
   function updateLineaFactura(idx, key, value) {
     setLineasEdit(prev => prev.map((linea, i) => i === idx ? { ...linea, [key]: key === "concepto" ? value : value } : linea));
     setConfirmCantidades(false);
+  }
+
+  async function guardarReferenciaPedido() {
+    if (!refEdit?.pedido?.id) return;
+    try {
+      const referencia = String(refEdit.referencia || "").trim();
+      const actualizado = await editarPedido(refEdit.pedido.id, { referencia_cliente: referencia || null });
+      setPedidos(prev => prev.map(p => p.id === refEdit.pedido.id ? { ...p, ...actualizado, referencia_cliente: referencia } : p));
+      setConfirmReferencias(false);
+      setRefEdit(null);
+      notify("Referencia del pedido actualizada.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo actualizar la referencia del pedido.", "error");
+    }
   }
 
   const lineasValidas = lineasEdit
@@ -1571,9 +1586,19 @@ function ModalFacturarMultiple({ onClose }) {
                         <td style={{...td,fontSize:11}}>{p.origen||""}{p.destino?" -> "+p.destino:""}</td>
                         <td style={{...td,fontSize:11}}>
                           {tieneReferenciaCliente(p) ? (
-                            <span style={{display:"inline-flex",padding:"2px 7px",borderRadius:5,background:"rgba(16,185,129,.10)",color:"var(--green)",fontWeight:800}}>OK</span>
+                            <button
+                              type="button"
+                              onClick={e=>{e.stopPropagation();setRefEdit({ pedido:p, referencia:p.referencia_cliente || p.ref_cliente || p.referencia_factura || "" });}}
+                              title="Editar referencia del cliente"
+                              style={{display:"inline-flex",padding:"2px 7px",borderRadius:5,background:"rgba(16,185,129,.10)",color:"var(--green)",fontWeight:800,border:"1px solid rgba(16,185,129,.20)",cursor:"pointer"}}
+                            >OK</button>
                           ) : (
-                            <span style={{display:"inline-flex",padding:"2px 7px",borderRadius:5,background:"rgba(245,158,11,.12)",color:"#f59e0b",fontWeight:800}}>Falta</span>
+                            <button
+                              type="button"
+                              onClick={e=>{e.stopPropagation();setRefEdit({ pedido:p, referencia:"" });}}
+                              title="Añadir referencia del cliente"
+                              style={{display:"inline-flex",padding:"2px 7px",borderRadius:5,background:"rgba(245,158,11,.12)",color:"#f59e0b",fontWeight:800,border:"1px solid rgba(245,158,11,.25)",cursor:"pointer"}}
+                            >Falta</button>
                           )}
                         </td>
                         <td style={{...td,fontSize:11}}>
@@ -1692,6 +1717,30 @@ function ModalFacturarMultiple({ onClose }) {
                 <input type="checkbox" checked={confirmAlbaranes} onChange={e=>setConfirmAlbaranes(e.target.checked)} />
                 <span>Albaranes/soportes revisados o marcados como pendientes asumidos antes de emitir.</span>
               </label>
+            </div>
+          </div>
+        )}
+
+        {refEdit && (
+          <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(15,23,42,.42)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setRefEdit(null)}>
+            <div style={{width:"min(420px,96vw)",background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,boxShadow:"0 24px 64px rgba(15,23,42,.28)",padding:18}}>
+              <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:800,color:"var(--text)",marginBottom:6}}>Referencia cliente</div>
+              <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.4,marginBottom:12}}>
+                Pedido {refEdit.pedido?.numero || "-"} · {refEdit.pedido?.origen || "-"} -&gt; {refEdit.pedido?.destino || "-"}
+              </div>
+              <label style={{display:"block",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:5}}>Referencia</label>
+              <input
+                autoFocus
+                value={refEdit.referencia || ""}
+                onChange={e=>setRefEdit(prev=>({...prev,referencia:e.target.value}))}
+                onKeyDown={e=>{ if (e.key === "Enter") guardarReferenciaPedido(); if (e.key === "Escape") setRefEdit(null); }}
+                style={{...inp,width:"100%"}}
+                placeholder="Referencia / pedido del cliente"
+              />
+              <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:16}}>
+                <button type="button" onClick={()=>setRefEdit(null)} style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)"}}>Cancelar</button>
+                <button type="button" onClick={guardarReferenciaPedido} style={{...S.btn,background:"var(--accent)",color:"#fff",border:"1px solid var(--accent)"}}>Guardar referencia</button>
+              </div>
             </div>
           </div>
         )}
@@ -2394,14 +2443,6 @@ export default function Facturacion() {
             <div style={S.title}>Gestión financiera</div>
             <div style={{...S.sub,marginBottom:0}}>Facturas de clientes, seguimiento de cobros, pagos a proveedores y tesorería en una sola vista.</div>
           </div>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:14}}>
-          <div style={{position:"relative",width:28,height:28,color:"var(--text4)"}}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></svg>
-            <span style={{position:"absolute",right:-2,top:-7,background:"#ef4444",color:"#fff",fontSize:10,borderRadius:20,padding:"1px 5px",fontWeight:900}}>3</span>
-          </div>
-          <div style={{width:42,height:42,borderRadius:"50%",background:"var(--accent)",color:"#fff",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>CG</div>
-          <div><div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Carlos</div><div style={{fontSize:11,color:"var(--text5)"}}>Gerente</div></div>
         </div>
       </div>
 

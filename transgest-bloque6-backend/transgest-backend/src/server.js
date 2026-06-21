@@ -325,6 +325,7 @@ async function applyMigrations() {
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_envios INTEGER NOT NULL DEFAULT 0").catch(() => {});
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_ultimo_envio_at TIMESTAMPTZ").catch(() => {});
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS aviso_cobro_dias INTEGER NOT NULL DEFAULT 7").catch(() => {});
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)").catch(() => {});
     await db.query("CREATE INDEX IF NOT EXISTS idx_facturas_revision_cobro ON facturas(empresa_id, revision_cobro_at) WHERE estado <> 'cobrada'").catch(() => {});
     await db.query(`
       CREATE TABLE IF NOT EXISTS factura_registros_fiscales (

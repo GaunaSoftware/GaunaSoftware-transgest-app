@@ -191,7 +191,7 @@ router.get("/", GERENTE_O_CONTABLE, async (req, res) => {
       GROUP BY factura_id
     ) fp_count ON fp_count.factura_id = f.id
     WHERE ${where.join(" AND ")}
-    ORDER BY f.fecha DESC, f.numero DESC
+    ORDER BY f.fecha ASC, f.numero ASC
     LIMIT $${i++} OFFSET $${i++}
   `;
   params.push(limit, offset);
@@ -596,8 +596,11 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   const empresaId = req.empresaId || req.user.empresa_id;
   const { rows } = await db.query(`
     SELECT f.*,
-           c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion,
-           c.direccion AS cliente_dir, c.tipo_iva, c.iva_regimen AS cliente_iva_regimen, c.tipo_irpf, c.forma_pago, c.vencimiento
+           c.nombre AS cliente_nombre, c.cif AS cliente_cif,
+           c.direccion AS cliente_dir, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, c.pais AS cliente_pais,
+           c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion,
+           c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
+           c.tipo_iva, c.iva_regimen AS cliente_iva_regimen, c.tipo_irpf, c.forma_pago, c.vencimiento
     FROM facturas f JOIN clientes c ON c.id = f.cliente_id
     WHERE f.id = $1 AND f.empresa_id = $2
   `, [req.params.id, empresaId]);
@@ -826,7 +829,8 @@ router.post("/", GERENTE_O_CONTABLE,
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { cliente_id, serie, fecha, fecha_vencimiento, estado, forma_pago, vencimiento,
-            lineas, extracostes = [], pedidos_ids = [], observaciones, notas_internas } = req.body;
+            lineas, extracostes = [], pedidos_ids = [], observaciones, notas_internas,
+            referencia_cliente } = req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
     const pedidosIdsUnicos = [...new Set((pedidos_ids || []).filter(Boolean))];
     const borradoresPrevios = new Set();
@@ -914,13 +918,14 @@ router.post("/", GERENTE_O_CONTABLE,
         INSERT INTO facturas
           (numero, serie, cliente_id, fecha, fecha_vencimiento, estado, forma_pago, vencimiento,
            base_imponible, tipo_iva, cuota_iva, tipo_irpf, cuota_irpf, total,
-           iva_regimen, observaciones, notas_internas, created_by, empresa_id, revision_cobro_at, aviso_cobro_dias)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+          iva_regimen, observaciones, notas_internas, created_by, empresa_id, revision_cobro_at, aviso_cobro_dias,
+          referencia_cliente)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
         RETURNING *`,
         [numero, serie, cliente_id, fecha || new Date(), fecha_vencimiento, estado || "borrador",
          forma_pago, vencimiento, base, tipoIva, cuotaIva, tipoIrpf, cuotaIrpf, total,
          ivaRegimen, observaciones, notas_internas, req.user.id, empresaId, revisionCobroAt,
-         cobrosConfig.dias_entre_reclamaciones]
+         cobrosConfig.dias_entre_reclamaciones, String(referencia_cliente || "").trim() || null]
       );
 
       // Insertar líneas

@@ -113,11 +113,11 @@ function formatDireccion(obj, prefijo="") {
   const cp       = obj[p+"cod_postal"]  || obj.cp || "";
   const mun      = obj[p+"municipio"]   || obj.ciudad || "";
   const prov     = obj[p+"provincia"]   || "";
-  const pais     = obj[p+"pais_iso"]    || obj.pais || "ES";
+  const pais     = obj[p+"pais_iso"]    || obj[p+"pais"] || obj.pais || "";
 
   const linea1 = [calle, num, piso].filter(Boolean).join(" ");
   const linea2 = [cp, mun, prov !== mun ? prov : ""].filter(Boolean).join(" ");
-  const linea3 = pais !== "ES" ? pais : "";
+  const linea3 = pais === "ES" ? "España" : pais;
   return [linea1, linea2, linea3].filter(Boolean).join(", ");
 }
 
@@ -580,15 +580,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
     providerUuid: fiscalProviderUuid,
     lastSend: ultimoEnvioFiscal,
   });
-  const cobroTimeline = !esRect ? [
-    factura.fecha && { label: "Factura emitida", value: fmtDate(factura.fecha), tone: "var(--text2)" },
-    factura.fecha_vencimiento && { label: "Vencimiento", value: fmtDate(factura.fecha_vencimiento), tone: "#f59e0b" },
-    factura.revision_cobro_at && { label: "Revision programada", value: fmtDate(factura.revision_cobro_at), tone: "var(--accent)" },
-    factura.reclamacion_ultimo_envio_at && { label: "Ultima reclamacion", value: fmtDate(factura.reclamacion_ultimo_envio_at, true), tone: "#f97316" },
-    factura.reclamacion_hasta && { label: "Seguimiento hasta", value: fmtDate(factura.reclamacion_hasta), tone: "#ef4444" },
-    factura.estado === "cobrada" && { label: "Factura cobrada", value: "Marcada como cobrada", tone: "var(--green)" },
-    factura.estado === "sin_cobrar" && { label: "Escalada", value: "Marcada como sin cobrar", tone: "#ef4444" },
-  ].filter(Boolean) : [];
+  const clienteEmailVisible = factura.cliente_email_facturacion || factura.cliente_email || "";
 
   async function enviarEmail() {
     const mail = factura.cliente_email_facturacion || factura.cliente_email || "";
@@ -737,6 +729,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                 {esRect?"FACTURA RECTIFICATIVA":"FACTURA"}
               </div>
               <div style={{fontSize:14,color:"var(--text2)",fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{factura.numero}</div>
+              {factura.referencia_cliente&&<div style={{fontSize:11,color:"var(--text3)",marginTop:4}}>Referencia: {factura.referencia_cliente}</div>}
               <div style={{fontSize:11,color:"var(--text4)",marginTop:4}}>Fecha: {factura.fecha?new Date(factura.fecha).toLocaleDateString("es-ES"):"-"}</div>
               {factura.fecha_vencimiento&&<div style={{fontSize:11,color:"var(--text4)"}}>Vcto: {new Date(factura.fecha_vencimiento).toLocaleDateString("es-ES")}</div>}
               {esRect&&factura.factura_original_numero&&<div style={{fontSize:11,color:"#f97316",marginTop:4,fontWeight:700}}>Rectifica: {factura.factura_original_numero}</div>}
@@ -769,6 +762,9 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                   Dir. fiscal: {factura.cliente_dir_fiscal}
                 </div>
               )}
+              {factura.cliente_contacto&&<div>Contacto: {factura.cliente_contacto}</div>}
+              {factura.cliente_telefono&&<div>Tel.: {factura.cliente_telefono}</div>}
+              {clienteEmailVisible&&<div>Email: {clienteEmailVisible}</div>}
             </div>
           </div>
 
@@ -777,59 +773,6 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
             <div style={{background:"rgba(249,115,22,.08)",border:"1px solid rgba(249,115,22,.2)",borderRadius:8,padding:"9px 14px",marginBottom:16,fontSize:12,color:"#b07030"}}>
               <strong>Motivo:</strong> {factura.motivo_rectificacion}
             </div>
-          )}
-
-          {!esRect && (
-            <details style={{background:"var(--bg3)",border:"1px solid #141a28",borderRadius:8,padding:"10px 14px",marginBottom:16}}>
-              <summary style={{cursor:"pointer",fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)"}}>
-                Seguimiento de cobro
-              </summary>
-              <div style={{marginTop:10}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginBottom:8}}>Seguimiento de cobro</div>
-              <div style={{fontSize:11,color:"var(--text5)",marginBottom:8}}>
-                Los envios de reclamacion, ultimo email y seguimiento hasta se calculan desde la politica de cobros configurada en Mi Empresa &gt; Configuracion facturas.
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:"8px 18px",fontSize:12}}>
-                <div>
-                  <div style={{color:"var(--text5)",fontSize:10,textTransform:"uppercase",fontWeight:700,letterSpacing:".06em"}}>Estado</div>
-                  <div style={{color:EC[factura.estado]||"var(--text2)",fontWeight:700}}>{estadoFacturaLabel(factura.estado)}</div>
-                </div>
-                <div>
-                  <div style={{color:"var(--text5)",fontSize:10,textTransform:"uppercase",fontWeight:700,letterSpacing:".06em"}}>Vencimiento</div>
-                  <div style={{color:"var(--text2)"}}>{fmtDate(factura.fecha_vencimiento)}</div>
-                </div>
-                <div>
-                  <div style={{color:"var(--text5)",fontSize:10,textTransform:"uppercase",fontWeight:700,letterSpacing:".06em"}}>Revision cobro</div>
-                  <div style={{color:"var(--text2)"}}>{fmtDate(factura.revision_cobro_at)}</div>
-                </div>
-                <div>
-                  <div style={{color:"var(--text5)",fontSize:10,textTransform:"uppercase",fontWeight:700,letterSpacing:".06em"}}>Envios reclamacion</div>
-                  <div style={{color:"var(--text2)"}}>{Number(factura.reclamacion_envios || 0)}</div>
-                </div>
-                <div>
-                  <div style={{color:"var(--text5)",fontSize:10,textTransform:"uppercase",fontWeight:700,letterSpacing:".06em"}}>Ultimo email</div>
-                  <div style={{color:"var(--text2)"}}>{fmtDate(factura.reclamacion_ultimo_envio_at, true)}</div>
-                </div>
-                <div>
-                  <div style={{color:"var(--text5)",fontSize:10,textTransform:"uppercase",fontWeight:700,letterSpacing:".06em"}}>Seguimiento hasta</div>
-                  <div style={{color:"var(--text2)"}}>{fmtDate(factura.reclamacion_hasta)}</div>
-                </div>
-              </div>
-              {cobroTimeline.length > 0 && (
-                <div style={{marginTop:12,paddingTop:10,borderTop:"1px solid #141a28"}}>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginBottom:8}}>Historial resumido</div>
-                  <div style={{display:"grid",gap:6}}>
-                    {cobroTimeline.map((item, idx)=>(
-                      <div key={`${item.label}-${idx}`} style={{display:"flex",justifyContent:"space-between",gap:12,fontSize:11}}>
-                        <span style={{color:item.tone,fontWeight:700}}>{item.label}</span>
-                        <span style={{color:"var(--text3)",textAlign:"right"}}>{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              </div>
-            </details>
           )}
 
           {/* Lineas */}
@@ -1234,6 +1177,7 @@ function ModalFacturarMultiple({ onClose }) {
   const [selIds,     setSelIds]     = useState(new Set());
   const [modo,       setModo]       = useState("linea"); // linea|detalle|kg
   const [concepto,   setConcepto]   = useState("");
+  const [referenciaFactura, setReferenciaFactura] = useState("");
   const [loading,    setLoading]    = useState(false);
   const [loadingResumen, setLoadingResumen] = useState(false);
   const [saving,     setSaving]     = useState(false);
@@ -1259,10 +1203,16 @@ function ModalFacturarMultiple({ onClose }) {
     return (!fechaDesde || f >= fechaDesde) && (!fechaHasta || f <= fechaHasta);
   }, [fechaDesde, fechaHasta]);
 
+  const ordenarPorFechaCarga = useCallback((items = []) => [...items].sort((a, b) => {
+    const fechaA = String(a.fecha_carga || a.fecha_pedido || "9999-12-31").slice(0, 10);
+    const fechaB = String(b.fecha_carga || b.fecha_pedido || "9999-12-31").slice(0, 10);
+    return fechaA.localeCompare(fechaB) || String(a.numero || "").localeCompare(String(b.numero || ""));
+  }), []);
+
   useEffect(()=>{
     setLoadingResumen(true);
     getPedidos({desde:fechaDesde, hasta:fechaHasta, facturado:"false", limit:1000}).then(d=>{
-      const arr = (Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : []).filter(pedidoFacturableEnPeriodo);
+      const arr = ordenarPorFechaCarga((Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : []).filter(pedidoFacturableEnPeriodo));
       const by = new Map();
       arr.forEach(p => {
         const key = p.cliente_id || "sin-cliente";
@@ -1280,7 +1230,7 @@ function ModalFacturarMultiple({ onClose }) {
       });
       setResumenClientes([...by.values()].sort((a,b) => b.total - a.total || a.cliente_nombre.localeCompare(b.cliente_nombre)));
     }).catch(()=>setResumenClientes([])).finally(()=>setLoadingResumen(false));
-  },[fechaDesde, fechaHasta, pedidoFacturableEnPeriodo]);
+  },[fechaDesde, fechaHasta, pedidoFacturableEnPeriodo, ordenarPorFechaCarga]);
 
   useEffect(()=>{
     if (!clienteSel) { setPedidos([]); return; }
@@ -1288,11 +1238,11 @@ function ModalFacturarMultiple({ onClose }) {
     getPedidos({cliente_id:clienteSel, desde:fechaDesde, hasta:fechaHasta, facturado:"false", limit:1000}).then(d=>{
       const arr = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
       // Facturable: entregado y sin factura definitiva. Los borradores automaticos se pueden reagrupar.
-      const filt = arr.filter(pedidoFacturableEnPeriodo);
+      const filt = ordenarPorFechaCarga(arr.filter(pedidoFacturableEnPeriodo));
       setPedidos(filt);
       setSelIds(new Set(filt.map(p=>p.id)));
     }).catch(()=>{}).finally(()=>setLoading(false));
-  },[clienteSel, fechaDesde, fechaHasta, pedidoFacturableEnPeriodo]);
+  },[clienteSel, fechaDesde, fechaHasta, pedidoFacturableEnPeriodo, ordenarPorFechaCarga]);
 
   useEffect(()=>{
     const fmtD = d => d ? new Date(d).toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"}).toUpperCase() : "";
@@ -1405,6 +1355,7 @@ function ModalFacturarMultiple({ onClose }) {
         estado:      "borrador",
         pedidos_ids: selArr.map(p=>p.id),
         lineas,
+        referencia_cliente: referenciaFactura.trim() || null,
         observaciones: `Periodo ${fechaDesde} - ${fechaHasta}. ${selArr.length} viajes.`,
       });
       broadcastFacturasChanged(normalizarDetalleCambioFactura(created, {
@@ -1651,6 +1602,17 @@ function ModalFacturarMultiple({ onClose }) {
 
         {paso===3 && (
           <div style={{background:"rgba(16,185,129,.06)",border:"1px solid rgba(16,185,129,.2)",borderRadius:9,padding:"12px 16px",marginBottom:14}}>
+            <div style={{marginBottom:12}}>
+              <label style={lbl}>Referencia de la factura</label>
+              <input
+                value={referenciaFactura}
+                onChange={e=>setReferenciaFactura(e.target.value)}
+                style={inp}
+                maxLength={255}
+                placeholder="Referencia libre del cliente, contrato, obra o expediente"
+              />
+              <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>Es independiente del numero legal correlativo de factura.</div>
+            </div>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
               <div>
                 <div style={{fontWeight:800,fontSize:12,color:"#10b981",textTransform:"uppercase",letterSpacing:".06em"}}>Revision de lineas de factura</div>
@@ -3164,16 +3126,25 @@ export default function Facturacion() {
 
       {vistaFact && (() => {
         const cli = clientes.find(c=>c.id===vistaFact.cliente_id);
+        const direccionApi = formatDireccion({
+          direccion: vistaFact.cliente_dir,
+          cp: vistaFact.cliente_cp,
+          ciudad: vistaFact.cliente_ciudad,
+          pais: vistaFact.cliente_pais,
+        });
         const facturaEnriquecida = {
           ...vistaFact,
           cliente_cif:      vistaFact.cliente_cif     || cli?.cif        || "",
-          cliente_direccion: vistaFact.cliente_direccion || formatDireccion(cli||{}) || "",
+          cliente_direccion: vistaFact.cliente_direccion || direccionApi || formatDireccion(cli||{}) || "",
           cliente_dir_fiscal: cli?.dir_fiscal_distinta
             ? formatDireccion(cli||{}, "fiscal_")
             : null,
           cliente_dir_envio:vistaFact.cliente_dir_envio|| cli?.dir_envio_facturas || "",
           cliente_dir_fiscal_distinta: cli?.dir_fiscal_distinta || false,
-          cliente_email:    vistaFact.cliente_email    || cli?.email_facturas || cli?.email || "",
+          cliente_email:    vistaFact.cliente_email    || cli?.email || "",
+          cliente_email_facturacion: vistaFact.cliente_email_facturacion || cli?.email_facturacion || cli?.email_facturas || "",
+          cliente_telefono: vistaFact.cliente_telefono || cli?.telefono || "",
+          cliente_contacto: vistaFact.cliente_contacto || cli?.contacto || "",
         };
         return <VistaFactura factura={facturaEnriquecida} onClose={()=>setVistaFact(null)} onSyncFiscal={sincronizarFacturaVerifactiAhora} onExportFiscal={descargarJustificanteFiscal} onCambiarEstado={canEdit ? cambiarEstado : null} rectificadasIds={rectificadasIds} onRectificar={f=>{setVistaFact(null);setModalRect(f);}}/>;
       })()}

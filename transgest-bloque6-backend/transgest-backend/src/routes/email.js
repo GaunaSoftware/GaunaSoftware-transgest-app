@@ -16,11 +16,24 @@ function safePdfText(value) {
     .slice(0, 120);
 }
 
+function formatClienteDireccion(factura = {}) {
+  const lineaLocalidad = [factura.cliente_cp, factura.cliente_ciudad].filter(Boolean).join(" ");
+  return [factura.cliente_direccion, lineaLocalidad, factura.cliente_pais].filter(Boolean).join(", ");
+}
+
 function buildSimpleFacturaPdfBuffer(factura = {}, lineas = [], empresa = {}) {
+  const clienteDireccion = formatClienteDireccion(factura);
+  const clienteEmail = factura.cliente_email_facturacion || factura.cliente_email || "";
   const lines = [
     `${empresa.razon_social || empresa.nombre || "TransGest"}`,
     `FACTURA ${factura.numero || ""}`,
+    factura.referencia_cliente ? `Referencia: ${factura.referencia_cliente}` : "",
     `Cliente: ${factura.cliente_nombre || ""}`,
+    factura.cliente_cif ? `CIF/NIF: ${factura.cliente_cif}` : "",
+    clienteDireccion ? `Direccion: ${clienteDireccion}` : "",
+    factura.cliente_contacto ? `Contacto: ${factura.cliente_contacto}` : "",
+    factura.cliente_telefono ? `Telefono: ${factura.cliente_telefono}` : "",
+    clienteEmail ? `Email: ${clienteEmail}` : "",
     `Fecha: ${factura.fecha ? new Date(factura.fecha).toLocaleDateString("es-ES") : ""}`,
     `Vencimiento: ${factura.fecha_vencimiento ? new Date(factura.fecha_vencimiento).toLocaleDateString("es-ES") : ""}`,
     "",
@@ -72,7 +85,9 @@ async function getEmpresaPerfilEmail(empresaId) {
 async function cargarFacturaEmailContext(facturaId, empresaId) {
   const { rows } = await db.query(
     `SELECT f.*, c.nombre AS cliente_nombre, c.cif AS cliente_cif,
+            c.direccion AS cliente_direccion, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, c.pais AS cliente_pais,
             c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion,
+            c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
             c.forma_pago AS cliente_forma_pago, c.vencimiento AS cliente_vencimiento
        FROM facturas f
        JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id

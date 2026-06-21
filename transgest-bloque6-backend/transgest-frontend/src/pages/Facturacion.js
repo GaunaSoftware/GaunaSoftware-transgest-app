@@ -138,6 +138,12 @@ function getFiscalProviderUuid(envios = []) {
     || "";
 }
 
+function localDateValue(value = new Date()) {
+  const dateValue = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dateValue.getTime())) return "";
+  return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, "0")}-${String(dateValue.getDate()).padStart(2, "0")}`;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -1089,7 +1095,7 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
       const data = {
         cliente_id:             facturaOriginal.cliente_id,
         serie:                  serieRect,
-        fecha:                  new Date().toISOString().slice(0,10),
+        fecha:                  localDateValue(),
         estado:                 "emitida",
         factura_original_id:    facturaOriginal.id,
         factura_original_numero:facturaOriginal.numero,
@@ -1189,8 +1195,9 @@ function ModalFacturarMultiple({ onClose }) {
   const [refEdit, setRefEdit] = useState(null);
 
   const hoy = new Date();
-  const [fechaDesde, setFechaDesde] = useState(new Date(hoy.getFullYear(),hoy.getMonth(),1).toISOString().slice(0,10));
-  const [fechaHasta, setFechaHasta] = useState(new Date(hoy.getFullYear(),hoy.getMonth()+1,0).toISOString().slice(0,10));
+  const periodoInicial = monthBounds(hoy);
+  const [fechaDesde, setFechaDesde] = useState(periodoInicial.desde);
+  const [fechaHasta, setFechaHasta] = useState(periodoInicial.hasta);
   useEffect(()=>{
     getClientes().then(d=>setClientes(Array.isArray(d?.data)?d.data:Array.isArray(d)?d:[])).catch(()=>{});
   },[]);
@@ -1351,7 +1358,7 @@ function ModalFacturarMultiple({ onClose }) {
       const created = await crearFactura({
         cliente_id:  clienteSel,
         serie:       empresa.serie_facturas||"A",
-        fecha:       new Date().toISOString().slice(0,10),
+        fecha:       localDateValue(),
         estado:      "borrador",
         pedidos_ids: selArr.map(p=>p.id),
         lineas,
@@ -1736,9 +1743,10 @@ function readFacturacionFocus() {
 }
 
 function monthBounds(value = new Date()) {
-  const d = value instanceof Date ? value : new Date(`${value}-01T00:00:00`);
-  const year = d.getFullYear();
-  const month = d.getMonth();
+  const monthMatch = typeof value === "string" ? value.match(/^(\d{4})-(\d{2})$/) : null;
+  const d = value instanceof Date ? value : new Date();
+  const year = monthMatch ? Number(monthMatch[1]) : d.getFullYear();
+  const month = monthMatch ? Number(monthMatch[2]) - 1 : d.getMonth();
   return {
     monthValue: `${year}-${String(month + 1).padStart(2, "0")}`,
     desde: `${year}-${String(month + 1).padStart(2, "0")}-01`,
@@ -2232,10 +2240,15 @@ export default function Facturacion() {
   }
 
   function cambiarMesPeriodo(value) {
-    setPeriodoMes(value);
-    const bounds = monthBounds(value);
+    const bounds = monthBounds(value || new Date());
+    setPeriodoMes(bounds.monthValue);
     setFechaDesde(bounds.desde);
     setFechaHasta(bounds.hasta);
+  }
+
+  function alternarFiltroFechas() {
+    if (filtroFechasCustom) cambiarMesPeriodo(periodoMes);
+    setFiltroFechasCustom(value => !value);
   }
 
   const filtradas = useMemo(() => facturas.filter(f=>{
@@ -2931,7 +2944,7 @@ export default function Facturacion() {
           </>
         )}
         <button
-          onClick={()=>setFiltroFechasCustom(v=>!v)}
+          onClick={alternarFiltroFechas}
           style={{...S.btn,background:filtroFechasCustom?"rgba(20,184,166,.12)":"var(--bg3)",color:filtroFechasCustom?"var(--accent-xl)":"var(--text3)",border:`1px solid ${filtroFechasCustom?"rgba(20,184,166,.30)":"var(--border2)"}`}}
         >
           {filtroFechasCustom ? "Usar mes" : "Filtro personalizado"}

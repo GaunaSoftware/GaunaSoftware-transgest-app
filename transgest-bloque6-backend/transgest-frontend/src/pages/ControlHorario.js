@@ -28,8 +28,42 @@ function fmtDt(v) {
   return Number.isNaN(d.getTime()) ? "-" : d.toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
 }
 
+function formatLocalIso(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return formatLocalIso(new Date());
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return formatLocalIso(new Date());
+}
+
+function minutesBetweenLocal(start, endMs = Date.now()) {
+  if (!start) return 0;
+  const a = new Date(start).getTime();
+  const b = typeof endMs === "number" ? endMs : new Date(endMs).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return 0;
+  return Math.floor((b - a) / 60000);
+}
+
+function withLiveJornada(row, nowMs = Date.now()) {
+  if (!row) return null;
+  const salidaMs = row.salida_at ? new Date(row.salida_at).getTime() : nowMs;
+  const pausaActivaMin = row.pausa_inicio_at && !row.salida_at ? minutesBetweenLocal(row.pausa_inicio_at, nowMs) : 0;
+  const pausaTotal = Math.max(0, Number(row.pausa_total_min || 0) + pausaActivaMin);
+  const bruto = row.entrada_at ? minutesBetweenLocal(row.entrada_at, salidaMs) : 0;
+  return {
+    ...row,
+    pausa_activa_min: pausaActivaMin,
+    pausa_total_live_min: pausaTotal,
+    bruto_min: bruto,
+    trabajado_min: Math.max(0, bruto - pausaTotal),
+    abierto: !row.salida_at && row.estado !== "cerrado",
+    en_pausa: Boolean(row.pausa_inicio_at && !row.salida_at),
+  };
 }
 
 function useIsMobile(maxWidth = 760) {
@@ -50,7 +84,7 @@ function useIsMobile(maxWidth = 760) {
 
 function monthStartIso() {
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return formatLocalIso(new Date(d.getFullYear(), d.getMonth(), 1));
 }
 
 function pedirUbicacion() {
@@ -86,6 +120,8 @@ export default function ControlHorario() {
   const [loading, setLoading] = useState(true);
   const [edit, setEdit] = useState(null);
   const [gpsStatus, setGpsStatus] = useState("");
+  const [fichando, setFichando] = useState(false);
+  const [nowTick, setNowTick] = useState(Date.now());
   const [controlCfg, setControlCfg] = useState(null);
   const [teletrabajo, setTeletrabajo] = useState([]);
   const [teleForm, setTeleForm] = useState({ fecha: todayIso(), motivo: "" });
@@ -111,25 +147,39 @@ export default function ControlHorario() {
   }, [desde, hasta]);
 
   useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
 
+  const miJornadaLive = useMemo(() => withLiveJornada(miJornada, nowTick), [miJornada, nowTick]);
   const resumenBase = resumen?.resumen || {};
   const abiertos = Array.isArray(resumen?.abiertas) ? resumen.abiertas : [];
-  const estadoTexto = miJornada?.en_pausa ? "En pausa" : miJornada?.abierto ? "Jornada abierta" : miJornada ? "Jornada cerrada" : "Sin fichar";
+  const estadoTexto = miJornadaLive?.en_pausa ? "En descanso" : miJornadaLive?.abierto ? "Jornada abierta" : miJornadaLive ? "Jornada cerrada" : "Sin fichar";
+  const descansoExcedido = Boolean(miJornadaLive?.en_pausa && Number(miJornadaLive.pausa_total_live_min || 0) > Number(jornadaCfg.pausa_min || 0));
   const acciones = useMemo(() => {
-    if (!miJornada) return [["entrada", "Fichar entrada", "var(--accent)"]];
-    if (miJornada.salida_at) return [["entrada", "Jornada cerrada", "#64748b"]];
-    if (miJornada.en_pausa) return [["reanudar", "Reanudar", "var(--accent)"], ["salida", "Fichar salida", "#ef4444"]];
-    return [["pausa", "Iniciar pausa", "#f59e0b"], ["salida", "Fichar salida", "#ef4444"]];
-  }, [miJornada]);
+    if (!miJornadaLive) return [["entrada", "Fichar entrada", "var(--accent)"]];
+    if (miJornadaLive.salida_at) return [["entrada", "Jornada cerrada", "#64748b"]];
+    if (miJornadaLive.en_pausa) return [["reanudar", "Terminar descanso", "var(--accent)"], ["salida", "Fichar salida", "#ef4444"]];
+    return [["pausa", "Marcar descanso", "#f59e0b"], ["salida", "Fichar salida", "#ef4444"]];
+  }, [miJornadaLive]);
 
   async function fichar(accion) {
-    if (accion === "entrada" && miJornada?.salida_at) return;
+    if (fichando || (accion === "entrada" && miJornadaLive?.salida_at)) return;
+    setFichando(true);
     try {
       let ubicacion_gps = null;
       if (["entrada", "salida"].includes(accion)) {
         setGpsStatus("Solicitando ubicación...");
-        ubicacion_gps = await pedirUbicacion();
-        setGpsStatus(`Ubicación capturada (${Math.round(Number(ubicacion_gps.accuracy || 0))} m).`);
+        ubicacion_gps = await pedirUbicacion().catch(gpsErr => {
+          setGpsStatus(`${gpsErr.message || "No se pudo obtener la ubicacion."} Se registrara sin GPS.`);
+          return { accuracy: 0, missing: true };
+        });
+        if (ubicacion_gps?.missing) {
+          ubicacion_gps = null;
+        } else {
+          setGpsStatus(`Ubicación capturada (${Math.round(Number(ubicacion_gps.accuracy || 0))} m).`);
+        }
       }
       await ficharControlHorario({ accion, modalidad, ubicacion, notas, ubicacion_gps });
       notify("Fichaje registrado.", "success");
@@ -138,6 +188,8 @@ export default function ControlHorario() {
     } catch (e) {
       setGpsStatus(e.message || "No se pudo obtener la ubicación.");
       notify(e.message || "No se pudo registrar el fichaje.", "error");
+    } finally {
+      setFichando(false);
     }
   }
 
@@ -224,6 +276,12 @@ export default function ControlHorario() {
     <div style={{...S.page,padding:isMobile ? "14px 12px 96px" : S.page.padding,overflowX:"hidden"}}>
       <div style={S.title}>Control horario oficina</div>
       <div style={S.sub}>Registro diario de jornada para personal interno, pausas, teletrabajo y revisión por gerencia/administración.</div>
+      <div style={{...S.card,display:"grid",gap:6,borderColor:"var(--accent-border)",background:"linear-gradient(135deg,var(--accent-soft),var(--bg2))"}}>
+        <div style={{fontSize:12,fontWeight:900,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".06em"}}>Registro legal y privacidad</div>
+        <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.55}}>
+          El fichaje registra entrada, salida y pausas con eventos trazables. La ubicación se solicita solo en el momento exacto de entrada/salida, sin seguimiento continuo. Los ajustes requieren motivo y quedan separados del registro original para auditoría.
+        </div>
+      </div>
 
       <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "minmax(280px,1.1fr) minmax(280px,1fr)",gap:14,alignItems:"stretch"}}>
         <div style={S.card}>
@@ -233,15 +291,27 @@ export default function ControlHorario() {
               <div style={{fontSize:18,fontWeight:900,color:"var(--text)",marginTop:2}}>{estadoTexto}</div>
             </div>
             <div style={{textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:"var(--accent-xl)"}}>
-              {minToClock(miJornada?.trabajado_min)}
+              {minToClock(miJornadaLive?.trabajado_min)}
               <div style={{fontSize:10,color:"var(--text5)",fontFamily:"'DM Sans',sans-serif"}}>trabajado</div>
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "repeat(3,1fr)",gap:8,marginBottom:12}}>
-            <Mini label="Entrada" value={fmtDt(miJornada?.entrada_at)} />
-            <Mini label="Salida" value={fmtDt(miJornada?.salida_at)} />
-            <Mini label="Pausas" value={minToClock(miJornada?.pausa_total_live_min)} />
+            <Mini label="Entrada" value={fmtDt(miJornadaLive?.entrada_at)} />
+            <Mini label="Salida" value={fmtDt(miJornadaLive?.salida_at)} />
+            <Mini label="Descanso" value={minToClock(miJornadaLive?.pausa_total_live_min)} tone={descansoExcedido ? "#ef4444" : "var(--text)"} />
           </div>
+          {miJornadaLive?.abierto && (
+            <div style={{border:`1px solid ${descansoExcedido ? "rgba(239,68,68,.28)" : "rgba(20,184,166,.22)"}`,background:descansoExcedido ? "rgba(239,68,68,.08)" : "var(--accent-dim)",borderRadius:10,padding:"10px 12px",marginBottom:10,display:"grid",gridTemplateColumns:isMobile ? "1fr" : "1fr 1fr 1fr",gap:8}}>
+              <Mini label="Tiempo fichado" value={minToClock(miJornadaLive.bruto_min)} tone="var(--accent-xl)" />
+              <Mini label={miJornadaLive.en_pausa ? "Descanso actual" : "Trabajando ahora"} value={miJornadaLive.en_pausa ? minToClock(miJornadaLive.pausa_activa_min) : minToClock(miJornadaLive.trabajado_min)} tone={descansoExcedido ? "#ef4444" : "var(--green)"} />
+              <Mini label="Descanso permitido" value={minToClock(jornadaCfg.pausa_min)} tone="var(--text3)" />
+              {descansoExcedido && (
+                <div style={{gridColumn:"1/-1",fontSize:12,color:"#ef4444",fontWeight:900}}>
+                  Descanso excedido. Al terminar el descanso o cerrar la jornada se avisara a gerencia.
+                </div>
+              )}
+            </div>
+          )}
           <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 10px",marginBottom:10,display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
             <div>
               <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Ubicación de fichaje</div>
@@ -251,9 +321,9 @@ export default function ControlHorario() {
                   : "Base GPS de empresa sin configurar"}
               </div>
               {gpsStatus && <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{gpsStatus}</div>}
-              {miJornada?.ubicacion_estado && (
-                <div style={{fontSize:11,color:miJornada.ubicacion_estado==="fuera_radio" ? "#ef4444" : "var(--green)",fontWeight:800,marginTop:3}}>
-                  Ultimo control: {miJornada.ubicacion_estado}{miJornada.ubicacion_distancia_m != null ? ` · ${miJornada.ubicacion_distancia_m} m` : ""}
+              {miJornadaLive?.ubicacion_estado && (
+                <div style={{fontSize:11,color:miJornadaLive.ubicacion_estado==="fuera_radio" ? "#ef4444" : "var(--green)",fontWeight:800,marginTop:3}}>
+                  Ultimo control: {miJornadaLive.ubicacion_estado}{miJornadaLive.ubicacion_distancia_m != null ? ` · ${miJornadaLive.ubicacion_distancia_m} m` : ""}
                 </div>
               )}
             </div>
@@ -270,7 +340,7 @@ export default function ControlHorario() {
           <textarea style={{...S.inp,width:"100%",minHeight:68,boxSizing:"border-box"}} value={notas} onChange={e=>setNotas(e.target.value)} placeholder="Notas de jornada, incidencia o disponibilidad..." />
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
             {acciones.map(([accion,label,color]) => (
-              <button key={accion} onClick={()=>fichar(accion)} disabled={accion==="entrada" && miJornada?.salida_at} style={{...S.btn,background:color,color:"#fff",opacity:(accion==="entrada" && miJornada?.salida_at) ? .55 : 1}}>
+              <button key={accion} onClick={()=>fichar(accion)} disabled={fichando || (accion==="entrada" && miJornadaLive?.salida_at)} style={{...S.btn,background:color,color:"#fff",opacity:(fichando || (accion==="entrada" && miJornadaLive?.salida_at)) ? .55 : 1}}>
                 {label}
               </button>
             ))}

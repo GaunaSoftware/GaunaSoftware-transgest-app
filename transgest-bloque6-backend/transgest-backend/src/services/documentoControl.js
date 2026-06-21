@@ -42,6 +42,8 @@ function firstStopInfo(stops = [], fallbackName = "") {
     hora: stop.hora_carga || stop.hora_descarga || stop.hora || "",
     ventana: stop.ventana || "",
     google_maps_url: stop.google_maps_url || stop.maps_url || "",
+    provincia: stop.provincia || stop.region || "",
+    pais: stop.pais || stop.country || "",
   };
 }
 
@@ -54,6 +56,8 @@ function normalizeStopList(stops = [], fallback = {}) {
     hora: stop.hora_carga || stop.hora_descarga || stop.hora || fallback.hora || "",
     ventana: stop.ventana || fallback.ventana || "",
     google_maps_url: stop.google_maps_url || stop.maps_url || "",
+    provincia: stop.provincia || stop.region || fallback.provincia || "",
+    pais: stop.pais || stop.country || fallback.pais || "",
   })).filter(stop => stop.direccion || stop.nombre);
 }
 
@@ -156,6 +160,11 @@ function detectTransportComplianceSignals(pedido = {}) {
   const text = normalizeSearchText([
     pedido?.origen,
     pedido?.destino,
+    pedido?.origen_pais,
+    pedido?.destino_pais,
+    pedido?.origen_provincia,
+    pedido?.destino_provincia,
+    pedido?.cmr_tipo,
     pedido?.mercancia,
     pedido?.descripcion_carga,
     pedido?.notas,
@@ -250,6 +259,18 @@ function detectTransportComplianceSignals(pedido = {}) {
     },
     avisos,
   };
+}
+
+function isSpainLike(value = "") {
+  const norm = normalizeSearchText(value);
+  return !norm || ["espana", "spain", "es"].includes(norm);
+}
+
+function documentIsInternational(documento = {}) {
+  const explicit = normalizeSearchText(documento.cmr_tipo || documento.tipo_cmr || "");
+  if (explicit === "internacional") return true;
+  if (explicit === "nacional") return false;
+  return !isSpainLike(documento.origen?.pais || "España") || !isSpainLike(documento.destino?.pais || "España");
 }
 
 function buildCodigoControl({ empresaId, pedidoId }) {
@@ -371,9 +392,12 @@ function docFieldOk(value) {
 }
 
 function buildEcmrConsignmentNote(documento = {}) {
+  const internacional = documentIsInternational(documento);
   const requiredFields = [
     { key: "sender", label: "Remitente/cargador", ok: docFieldOk(documento.cargador_contractual?.nombre) },
+    { key: "sender_id", label: "NIF/VAT del remitente", ok: docFieldOk(documento.cargador_contractual?.nif) },
     { key: "carrier", label: "Transportista", ok: docFieldOk(documento.transportista_efectivo?.nombre) },
+    { key: "carrier_id", label: "NIF/VAT del transportista", ok: docFieldOk(documento.transportista_efectivo?.nif) },
     { key: "consignee", label: "Destinatario", ok: docFieldOk(documento.destino?.destinatario || documento.destino?.nombre) },
     { key: "taking_over_place", label: "Lugar de carga", ok: docFieldOk(documento.origen?.direccion) },
     { key: "delivery_place", label: "Lugar de entrega", ok: docFieldOk(documento.destino?.direccion) },
@@ -382,12 +406,37 @@ function buildEcmrConsignmentNote(documento = {}) {
     { key: "weight", label: "Peso/cantidad", ok: !!documento.mercancia?.peso_kg },
     { key: "vehicle", label: "Matricula tractora", ok: docFieldOk(documento.vehiculo?.tractora) },
   ];
+  if (internacional) {
+    requiredFields.push(
+      { key: "origin_country", label: "Pais de carga", ok: docFieldOk(documento.origen?.pais) },
+      { key: "destination_country", label: "Pais de entrega", ok: docFieldOk(documento.destino?.pais) },
+      { key: "cmr_statement", label: "Clausula de sometimiento CMR", ok: true },
+      { key: "electronic_integrity", label: "Integridad electronica y trazabilidad", ok: docFieldOk(documento.verificacion?.codigo_verificacion) },
+    );
+  }
   const faltantes = requiredFields.filter(f => !f.ok).map(f => f.label);
   return {
-    profile: "eCMR-preparado",
+    profile: internacional ? "eCMR-internacional-preparado" : "eCMR-nacional-preparado",
+    tipo: internacional ? "internacional" : "nacional",
     certified_provider_connected: false,
     status: faltantes.length ? "incompleto" : "preparado_para_firma_y_proveedor",
-    nota: "Carta de porte electronica preparatoria. La validez avanzada requiere acuerdo de partes, firma/evidencia y proveedor o plataforma aplicable cuando proceda.",
+    nota: internacional
+      ? "CMR electronico internacional preparatorio. Requiere acuerdo de partes, autenticidad, integridad, firmas/evidencias y, para interoperabilidad oficial, proveedor o plataforma aplicable."
+      : "Carta de porte electronica preparatoria. La validez avanzada requiere acuerdo de partes, firma/evidencia y proveedor o plataforma aplicable cuando proceda.",
+    legal_basis: internacional ? {
+      convention: "CMR 1956",
+      electronic_protocol: "Protocolo adicional e-CMR 2008",
+      minimum_controls: [
+        "Identificacion de remitente, transportista y destinatario",
+        "Lugar y fecha de toma de cargo y entrega",
+        "Naturaleza de la mercancia, bultos/peso y referencias",
+        "Autenticidad de partes e integridad del documento electronico",
+        "Historial de modificaciones y disponibilidad durante el transporte",
+      ],
+    } : {
+      convention: "Carta de porte / documento de control nacional",
+      electronic_protocol: "Preparacion digital interna",
+    },
     required_fields: requiredFields,
     missing_fields: faltantes,
     consignment: {
@@ -399,11 +448,15 @@ function buildEcmrConsignmentNote(documento = {}) {
       },
       taking_over: {
         place: documento.origen?.direccion || "",
+        country: documento.origen?.pais || "",
+        region: documento.origen?.provincia || "",
         date: documento.horarios?.fecha_carga || documento.fecha_transporte || "",
         time_window: documento.horarios?.hora_carga || documento.horarios?.ventana_carga || "",
       },
       delivery: {
         place: documento.destino?.direccion || "",
+        country: documento.destino?.pais || "",
+        region: documento.destino?.provincia || "",
         date: documento.horarios?.fecha_descarga || "",
         time_window: documento.horarios?.hora_descarga || documento.horarios?.ventana_descarga || "",
       },
@@ -413,6 +466,12 @@ function buildEcmrConsignmentNote(documento = {}) {
         codigo_control: documento.codigo_control || "",
         referencia_pedido: documento.referencia_pedido || "",
         verification_code: documento.verificacion?.codigo_verificacion || "",
+      },
+      electronic_evidence: {
+        integrity_algorithm: documento.verificacion?.algoritmo || "HMAC-SHA256",
+        secure_url: documento.verificacion?.url_segura || "",
+        noindex: documento.verificacion?.noindex !== false,
+        modification_history_required: true,
       },
     },
   };
@@ -797,10 +856,16 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   const codigoControl = buildCodigoControl({ empresaId, pedidoId: pedido?.id });
   const publicUrl = buildPublicUrl({ empresaId, pedidoId: pedido?.id, config, appBaseUrl });
   const verificationCode = buildPublicVerificationCode({ empresaId, pedidoId: pedido?.id });
+  const origenPais = pedido?.origen_pais || carga.pais || "España";
+  const destinoPais = pedido?.destino_pais || descarga.pais || "España";
+  const cmrTipo = String(pedido?.cmr_tipo || "").toLowerCase() === "internacional" || !isSpainLike(origenPais) || !isSpainLike(destinoPais)
+    ? "internacional"
+    : "nacional";
 
   const documento = {
     codigo_control: codigoControl,
     sistema: config.sistema,
+    cmr_tipo: cmrTipo,
     soporte_url: publicUrl,
     qr_url: config.sistema === "qr_url" ? publicUrl : "",
     referencia_pedido: pedido?.numero || pedido?.referencia_cliente || "",
@@ -818,23 +883,31 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     origen: {
       nombre: carga.nombre || pedido?.origen || "",
       direccion: carga.direccion || pedido?.origen || "",
+      provincia: pedido?.origen_provincia || "",
+      pais: origenPais,
       google_maps_url: carga.google_maps_url || "",
     },
     destino: {
       nombre: descarga.nombre || pedido?.destino || "",
       direccion: descarga.direccion || pedido?.destino || "",
       destinatario: descarga.cliente_nombre || pedido?.destino || "",
+      provincia: pedido?.destino_provincia || "",
+      pais: destinoPais,
       google_maps_url: descarga.google_maps_url || "",
     },
     cargas: normalizeStopList(cargas, {
       fecha: pedido?.fecha_carga || "",
       hora: pedido?.hora_carga || "",
       ventana: pedido?.ventana_carga || "",
+      provincia: pedido?.origen_provincia || "",
+      pais: origenPais,
     }),
     descargas: normalizeStopList(descargas, {
       fecha: pedido?.fecha_descarga || pedido?.fecha_entrega || "",
       hora: pedido?.hora_descarga || "",
       ventana: pedido?.ventana_descarga || "",
+      provincia: pedido?.destino_provincia || "",
+      pais: destinoPais,
     }),
     mercancia: {
       descripcion: pedido?.mercancia || pedido?.descripcion_carga || "",
@@ -880,6 +953,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       efti_ecmr: {
         fecha_aplicacion_ue: "2027-07-09",
         pendiente_plataforma_certificada: true,
+        cmr_tipo: cmrTipo,
+        internacional: cmrTipo === "internacional",
       },
       diwass_annex_vii: {
         aplica_si_residuos_transfronterizos: true,
@@ -934,6 +1009,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     { key: "vehiculo", ok: hasText(documento.vehiculo.tractora), label: "Matricula del vehiculo tractor", category: "vehiculo" },
     { key: "remolque", ok: hasText(documento.vehiculo.remolque), label: "Matricula de remolque si aplica", category: "vehiculo", required: false },
     { key: "forma_pago", ok: hasText(documento.condiciones.forma_pago), label: "Condiciones de pago del servicio", category: "condiciones" },
+    { key: "ecmr_internacional", ok: documento.cmr_tipo !== "internacional" || buildEcmrConsignmentNote(documento).missing_fields.length === 0, label: "eCMR internacional con datos CMR minimos", category: "interoperabilidad" },
     { key: "firma_avanzada", ok: false, label: "Proveedor de firma avanzada eIDAS integrado", category: "firma", required: false },
     { key: "efti_platform", ok: false, label: "Preparado para plataforma eFTI/e-CMR certificada", category: "interoperabilidad", required: false },
     { key: "diwass_annex_vii", ok: !wasteSignals.detected || wasteSignals.cross_border_hint, label: "Revision DIWASS/eAnnex VII si hay residuos transfronterizos", category: "interoperabilidad", required: false },

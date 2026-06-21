@@ -195,6 +195,79 @@ const CITY_COORDS = {
   santago: { lat: 40.9701, lng: -3.6434 },
 };
 
+const REGION_COORDS = {
+  // Provincias espanolas y puntos frecuentes. Coordenadas aproximadas para encuadre operativo.
+  a_coruna: { lat: 43.3623, lng: -8.4115 },
+  alava: { lat: 42.8467, lng: -2.6727 },
+  albacete: { lat: 38.9943, lng: -1.8585 },
+  alicante: { lat: 38.3452, lng: -0.481 },
+  almeria: { lat: 36.834, lng: -2.4637 },
+  asturias: { lat: 43.3614, lng: -5.8593 },
+  avila: { lat: 40.6567, lng: -4.6812 },
+  badajoz: { lat: 38.8794, lng: -6.9707 },
+  barcelona: { lat: 41.3874, lng: 2.1686 },
+  burgos: { lat: 42.3439, lng: -3.6969 },
+  caceres: { lat: 39.4753, lng: -6.3724 },
+  cadiz: { lat: 36.5271, lng: -6.2886 },
+  cantabria: { lat: 43.1828, lng: -3.9878 },
+  castellon: { lat: 39.9864, lng: -0.0513 },
+  castellon_de_la_plana: { lat: 39.9864, lng: -0.0513 },
+  ciudad_real: { lat: 38.9848, lng: -3.9274 },
+  cordoba: { lat: 37.8882, lng: -4.7794 },
+  cuenca: { lat: 40.0704, lng: -2.1374 },
+  girona: { lat: 41.9794, lng: 2.8214 },
+  granada: { lat: 37.1773, lng: -3.5986 },
+  guadalajara: { lat: 40.6325, lng: -3.1602 },
+  gipuzkoa: { lat: 43.0756, lng: -2.2237 },
+  huelva: { lat: 37.2614, lng: -6.9447 },
+  huesca: { lat: 42.1401, lng: -0.4089 },
+  illes_balears: { lat: 39.5716, lng: 2.6517 },
+  jaen: { lat: 37.7796, lng: -3.7849 },
+  la_rioja: { lat: 42.2871, lng: -2.5396 },
+  las_palmas: { lat: 28.1235, lng: -15.4363 },
+  leon: { lat: 42.5987, lng: -5.5671 },
+  lleida: { lat: 41.6176, lng: 0.62 },
+  lugo: { lat: 43.0097, lng: -7.5568 },
+  madrid: { lat: 40.4168, lng: -3.7038 },
+  malaga: { lat: 36.7213, lng: -4.4214 },
+  murcia: { lat: 37.9922, lng: -1.1307 },
+  navarra: { lat: 42.6954, lng: -1.6761 },
+  ourense: { lat: 42.3358, lng: -7.8639 },
+  palencia: { lat: 42.0097, lng: -4.5288 },
+  pontevedra: { lat: 42.431, lng: -8.6444 },
+  salamanca: { lat: 40.9701, lng: -5.6635 },
+  santa_cruz_de_tenerife: { lat: 28.4636, lng: -16.2518 },
+  segovia: { lat: 40.9429, lng: -4.1088 },
+  sevilla: { lat: 37.3891, lng: -5.9845 },
+  soria: { lat: 41.7636, lng: -2.4649 },
+  tarragona: { lat: 41.1189, lng: 1.2445 },
+  teruel: { lat: 40.3457, lng: -1.1065 },
+  toledo: { lat: 39.8628, lng: -4.0273 },
+  valencia: { lat: 39.4699, lng: -0.3763 },
+  valladolid: { lat: 41.6523, lng: -4.7245 },
+  bizkaia: { lat: 43.263, lng: -2.935 },
+  zamora: { lat: 41.5035, lng: -5.7446 },
+  zaragoza: { lat: 41.6488, lng: -0.8891 },
+  espana: { lat: 40.25, lng: -3.7 },
+  spain: { lat: 40.25, lng: -3.7 },
+  portugal: { lat: 39.7, lng: -8.0 },
+  francia: { lat: 46.6, lng: 2.2 },
+  france: { lat: 46.6, lng: 2.2 },
+  italia: { lat: 42.8, lng: 12.5 },
+  italy: { lat: 42.8, lng: 12.5 },
+  alemania: { lat: 51.2, lng: 10.4 },
+  germany: { lat: 51.2, lng: 10.4 },
+  belgica: { lat: 50.6, lng: 4.6 },
+  paises_bajos: { lat: 52.2, lng: 5.3 },
+  luxemburgo: { lat: 49.8, lng: 6.1 },
+  suiza: { lat: 46.8, lng: 8.2 },
+  austria: { lat: 47.6, lng: 14.2 },
+  reino_unido: { lat: 54.5, lng: -2.5 },
+  irlanda: { lat: 53.3, lng: -8.2 },
+  marruecos: { lat: 31.8, lng: -7.1 },
+  andorra: { lat: 42.5, lng: 1.55 },
+};
+
 function normalizePlaceKey(value = "") {
   return String(value)
     .normalize("NFD")
@@ -204,12 +277,61 @@ function normalizePlaceKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function coordsForPlace(value = "") {
-  const key = normalizePlaceKey(value);
-  if (!key) return null;
-  if (CITY_COORDS[key]) return CITY_COORDS[key];
-  const match = Object.keys(CITY_COORDS).find(k => key.includes(k) || k.includes(key));
-  return match ? CITY_COORDS[match] : null;
+function parseStops(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function coordsFromGoogleMaps(value = "") {
+  const raw = String(value || "");
+  const at = raw.match(/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/);
+  if (at) return { lat: Number(at[1]), lng: Number(at[2]) };
+  const bang = raw.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+  if (bang) return { lat: Number(bang[1]), lng: Number(bang[2]) };
+  const q = raw.match(/[?&](?:q|query|ll)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/);
+  if (q) return { lat: Number(q[1]), lng: Number(q[2]) };
+  return null;
+}
+
+function validCoord(point) {
+  const lat = Number(point?.lat ?? point?.latitud);
+  const lng = Number(point?.lng ?? point?.longitud);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+function coordsForPlace(...values) {
+  for (const value of values) {
+    if (!value) continue;
+    if (typeof value === "object") {
+      const direct = validCoord(value);
+      if (direct) return direct;
+      const maps = coordsFromGoogleMaps(value.google_maps_url || value.googleMapsUrl || value.maps_url || "");
+      if (maps) return maps;
+      const nested = coordsForPlace(value.nombre, value.name, value.direccion, value.address, value.provincia, value.pais);
+      if (nested) return nested;
+      continue;
+    }
+    const key = normalizePlaceKey(value);
+    if (!key) continue;
+    if (CITY_COORDS[key]) return CITY_COORDS[key];
+    if (REGION_COORDS[key]) return REGION_COORDS[key];
+    const cityMatch = Object.keys(CITY_COORDS).find(k => key.includes(k) || k.includes(key));
+    if (cityMatch) return CITY_COORDS[cityMatch];
+    const regionMatch = Object.keys(REGION_COORDS).find(k => key.includes(k) || k.includes(key));
+    if (regionMatch) return REGION_COORDS[regionMatch];
+  }
+  return null;
 }
 
 function latLngToPixels(point, zoom) {
@@ -225,10 +347,42 @@ function clampMap(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function getMapGeometry({ route, hasGps, gpsLat, gpsLng, zoom }) {
-  const gps = hasGps ? { lat: Number(gpsLat), lng: Number(gpsLng) } : null;
-  const origin = coordsForPlace(route.origen);
-  const destination = coordsForPlace(route.destino);
+function firstStopCoords(rawStops = []) {
+  const stops = parseStops(rawStops);
+  for (const stop of stops) {
+    const point = coordsForPlace(stop);
+    if (point) return point;
+  }
+  return null;
+}
+
+function fitZoomForPoints(points = []) {
+  const valid = points.filter(Boolean);
+  if (valid.length < 2) return 6;
+  for (let zoom = 8; zoom >= 3; zoom -= 1) {
+    const px = valid.map(point => latLngToPixels(point, zoom));
+    const xs = px.map(p => p.x);
+    const ys = px.map(p => p.y);
+    const spanX = Math.max(...xs) - Math.min(...xs);
+    const spanY = Math.max(...ys) - Math.min(...ys);
+    if (spanX <= MAP_SIZE.width - 120 && spanY <= MAP_SIZE.height - 80) return zoom;
+  }
+  return 3;
+}
+
+function getRouteGeoPoints(route = {}, item = {}) {
+  const gps = Number.isFinite(Number(item?.gps_lat)) && Number.isFinite(Number(item?.gps_lng))
+    ? { lat: Number(item.gps_lat), lng: Number(item.gps_lng) }
+    : null;
+  const origin = firstStopCoords(item?.puntos_carga) ||
+    coordsForPlace(route.origen, item?.origen_provincia, item?.origen_pais);
+  const destination = firstStopCoords(item?.puntos_descarga) ||
+    coordsForPlace(route.destino, item?.destino_provincia, item?.destino_pais);
+  return { origin, destination, gps };
+}
+
+function getMapGeometry({ route, item, zoom }) {
+  const { origin, destination, gps } = getRouteGeoPoints(route, item);
   const center = gps || (origin && destination
     ? { lat: (origin.lat + destination.lat) / 2, lng: (origin.lng + destination.lng) / 2 }
     : origin || destination || SPAIN_CENTER);
@@ -286,7 +440,7 @@ function RouteMapPanel({ item }) {
   const title = item?.title || item?.numero || item?.pedido_numero || "Viaje en seguimiento";
   const [providerInfo, setProviderInfo] = useState(null);
   const [routeMode, setRouteMode] = useState("camion");
-  const [mapZoom, setMapZoom] = useState(6);
+  const [mapZoomDelta, setMapZoomDelta] = useState(0);
   useEffect(() => {
     let alive = true;
     getRouteProviders()
@@ -294,14 +448,21 @@ function RouteMapPanel({ item }) {
       .catch(() => { if (alive) setProviderInfo(null); });
     return () => { alive = false; };
   }, []);
+  useEffect(() => {
+    setMapZoomDelta(0);
+  }, [item?.id, item?.numero, route.origen, route.destino]);
   const hereConfigured = Boolean(providerInfo?.providers?.here?.configured || providerInfo?.here?.configured);
+  const routePoints = useMemo(() => getRouteGeoPoints(route, item || {}), [route, item]);
+  const baseZoom = useMemo(
+    () => fitZoomForPoints([routePoints.origin, routePoints.destination, routePoints.gps]),
+    [routePoints]
+  );
+  const mapZoom = Math.max(3, Math.min(9, baseZoom + mapZoomDelta));
   const map = useMemo(() => getMapGeometry({
     route,
-    hasGps,
-    gpsLat: item?.gps_lat,
-    gpsLng: item?.gps_lng,
+    item: item || {},
     zoom: mapZoom,
-  }), [route, hasGps, item?.gps_lat, item?.gps_lng, mapZoom]);
+  }), [route, item, mapZoom]);
   const routeModes = [
     { key:"camion", label:"Camion", detail:"Perfil pesado" },
     { key:"rapida", label:"Rapida", detail:"Menor tiempo" },
@@ -359,8 +520,8 @@ function RouteMapPanel({ item }) {
           )}
         </svg>
         <div style={{position:"absolute",right:12,bottom:14,display:"grid",overflow:"hidden",border:"1px solid rgba(148,163,184,.32)",borderRadius:8,background:"rgba(255,255,255,.88)",boxShadow:"0 8px 20px rgba(15,23,42,.08)"}}>
-          <button onClick={() => setMapZoom(z => Math.min(8, z + 1))} style={{width:34,height:32,border:"none",borderBottom:"1px solid rgba(148,163,184,.22)",background:"transparent",fontSize:18,fontWeight:900,cursor:"pointer",color:"#334155"}}>+</button>
-          <button onClick={() => setMapZoom(z => Math.max(5, z - 1))} style={{width:34,height:32,border:"none",background:"transparent",fontSize:20,fontWeight:900,cursor:"pointer",color:"#334155"}}>-</button>
+          <button onClick={() => setMapZoomDelta(z => Math.min(3, z + 1))} style={{width:34,height:32,border:"none",borderBottom:"1px solid rgba(148,163,184,.22)",background:"transparent",fontSize:18,fontWeight:900,cursor:"pointer",color:"#334155"}}>+</button>
+          <button onClick={() => setMapZoomDelta(z => Math.max(-2, z - 1))} style={{width:34,height:32,border:"none",background:"transparent",fontSize:20,fontWeight:900,cursor:"pointer",color:"#334155"}}>-</button>
         </div>
         <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{position:"absolute",right:56,bottom:14,fontSize:9,color:"rgba(15,23,42,.55)",background:"rgba(255,255,255,.78)",border:"1px solid rgba(148,163,184,.24)",borderRadius:6,padding:"3px 6px",textDecoration:"none"}}>
           © OpenStreetMap
@@ -430,6 +591,34 @@ function DecisionsPanel({ decisiones = [] }) {
   );
 }
 
+function actorEventoLabel(ev = {}) {
+  if (ev.actor_nombre) return ev.actor_nombre;
+  if (ev.actor_email) return ev.actor_email;
+  if (String(ev.actor_tipo || "").toLowerCase() === "sistema") return "Sistema";
+  if (String(ev.actor_tipo || "").toLowerCase() === "cliente") return "Cliente";
+  return "Usuario";
+}
+
+function accionEventoAmigable(ev = {}) {
+  const tipo = String(ev.tipo || "").toLowerCase();
+  const detalle = ev.detalle && typeof ev.detalle === "object" ? ev.detalle : {};
+  const estado = detalle.estado_nuevo || detalle.estado || detalle.to || detalle.next_estado;
+  const map = {
+    "pedido.creado": "creo el pedido",
+    "pedido.editado": "edito el pedido",
+    "pedido.actualizado": "actualizo el pedido",
+    "pedido.editado_estado": estado ? `cambio el estado a ${estado}` : "cambio el estado",
+    "pedido.estado": estado ? `cambio el estado a ${estado}` : "cambio el estado",
+    "estado.actualizado": estado ? `cambio el estado a ${estado}` : "cambio el estado",
+    "documento.generado": "genero documentacion",
+    "documento.firmado": "firmo documentacion",
+    "ruta.enviada": "envio la ruta al conductor",
+    "chofer.actualizo_pasos": "actualizo el seguimiento del viaje",
+  };
+  if (map[tipo]) return map[tipo];
+  return tipo.replace(/^pedido[._-]?/i, "").replace(/[._-]+/g, " ").trim() || "registro actividad";
+}
+
 function EventsPanel({ eventos = [] }) {
   const rows = Array.isArray(eventos) ? eventos.slice(0, 8) : [];
   return (
@@ -443,7 +632,7 @@ function EventsPanel({ eventos = [] }) {
             {ev.created_at ? new Date(ev.created_at).toLocaleTimeString("es-ES", { hour:"2-digit", minute:"2-digit" }) : "--:--"}
           </div>
           <div>
-            <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{ev.pedido_numero || "Pedido"} · {ev.tipo}</div>
+            <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{ev.pedido_numero || "Pedido"} - {actorEventoLabel(ev)} {accionEventoAmigable(ev)}</div>
             <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{ev.ruta}</div>
           </div>
         </div>

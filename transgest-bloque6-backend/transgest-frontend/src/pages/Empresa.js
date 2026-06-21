@@ -4,17 +4,18 @@ import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
 import { getEmpresaPlanLocal, normalizePlan } from "../utils/planFeatures";
 import { COMPANY_PALETTES, canUseCompanyPalette, normalizePaletteConfig, saveCompanyPalette } from "../utils/companyPalette";
+import { EUROPE_COUNTRIES, canonicalCountry, getEnabledEuropeCountries } from "../utils/europeGeo";
 
 const S = {
   page:   { padding:"22px 26px", fontFamily:"'DM Sans',sans-serif", width:"100%", maxWidth:"none", boxSizing:"border-box" },
   title:  { fontFamily:"'Syne',sans-serif", fontSize:20, fontWeight:800, color:"var(--text)", marginBottom:4 },
   sub:    { fontSize:12, color:"var(--text4)", marginBottom:24 },
-  section:{ background:"var(--bg2)", border:"1px solid #141a28", borderRadius:12, padding:"20px 22px", marginBottom:16 },
+  section:{ background:"var(--card-bg)", border:"1px solid var(--border)", borderRadius:12, padding:"20px 22px", marginBottom:16, boxShadow:"var(--shadow-card)" },
   secTitle:{ fontFamily:"'Syne',sans-serif", fontSize:13, fontWeight:700, color:"var(--text)", marginBottom:16, display:"flex", alignItems:"center", gap:8 },
   grid2:  { display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 14px" },
   grid3:  { display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"6px 14px" },
   lbl:    { display:"block", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:".07em", color:"var(--text5)", marginBottom:4, marginTop:10 },
-  inp:    { background:"var(--bg4)", border:"1px solid #1e2d45", color:"var(--text)", padding:"8px 12px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" },
+  inp:    { background:"var(--input-bg)", border:"1px solid var(--border2)", color:"var(--text)", padding:"8px 12px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" },
   btn:    { padding:"8px 18px", borderRadius:7, border:"none", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:6 },
   info:   { background:"rgba(59,130,246,.07)", border:"1px solid rgba(59,130,246,.15)", borderRadius:8, padding:"10px 14px", fontSize:12, color:"#5a7ab8", marginBottom:14 },
   saved:  { background:"rgba(16,185,129,.1)", border:"1px solid rgba(16,185,129,.25)", borderRadius:7, padding:"6px 14px", fontSize:12, color:"var(--green)", display:"inline-flex", alignItems:"center", gap:6 },
@@ -329,7 +330,14 @@ export default function Empresa() {
   }, [tab, cargarCalendarioLaboral]);
 
   async function guardarTrafico() {
-    try { await setConfigTrafico(cfgTrafico); setSaved("trafico"); setTimeout(()=>setSaved(""),3000); }
+    try {
+      const next = {...cfgTrafico,paises_trabajo:getEnabledEuropeCountries({cfg_trafico:cfgTrafico})};
+      await setConfigTrafico(next);
+      setCfgTrafico(next);
+      if (typeof window !== "undefined") window.__TMS_EMPRESA_CONFIG = {...(window.__TMS_EMPRESA_CONFIG || {}), cfg_trafico:next};
+      setSaved("trafico");
+      setTimeout(()=>setSaved(""),3000);
+    }
     catch(e) { notify("Error al guardar: "+e.message, "error"); }
   }
 
@@ -680,11 +688,9 @@ export default function Empresa() {
     const preset = COMPANY_PALETTES.find(p => p.id === paletteId) || COMPANY_PALETTES[0];
     const next = normalizePaletteConfig({
       id: preset.id,
-      custom: {
-        accent: preset.accent,
-        accentLight: preset.accentLight,
-        sidebar: preset.sidebar,
-      },
+      accent: preset.accent,
+      accentLight: preset.accentLight,
+      sidebar: preset.sidebar,
     });
     setEmpresa(p => ({ ...p, paleta_colores: next }));
     saveCompanyPalette(next);
@@ -693,7 +699,9 @@ export default function Empresa() {
   function setEmpresaPaletteColor(key, value) {
     const next = normalizePaletteConfig({
       ...activePalette,
-      custom: { ...activePalette, [key]: value },
+      id: "custom",
+      [key]: value,
+      custom: { ...activePalette.custom, [key]: value },
     });
     setEmpresa(p => ({ ...p, paleta_colores: next }));
     saveCompanyPalette(next);
@@ -796,7 +804,7 @@ export default function Empresa() {
         <div style={{display:"grid",gridTemplateColumns:"minmax(260px,1.2fr) minmax(260px,.8fr)",gap:14}}>
           <div style={{display:"grid",gap:10}}>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {COMPANY_PALETTES.map(palette => (
+              {COMPANY_PALETTES.filter(palette => palette.id !== "custom").map(palette => (
                 <button
                   key={palette.id}
                   type="button"
@@ -822,6 +830,29 @@ export default function Empresa() {
                   {palette.label}
                 </button>
               ))}
+              <button
+                type="button"
+                disabled={!puedePersonalizarColores}
+                onClick={() => setEmpresaPaletteColor("accent", activePalette.accent)}
+                style={{
+                  border:`1px solid ${activePalette.id === "custom" ? "var(--accent-l)" : "var(--border2)"}`,
+                  background:activePalette.id === "custom" ? "var(--accent-dim)" : "var(--bg3)",
+                  color:activePalette.id === "custom" ? "var(--accent-xl)" : "var(--text3)",
+                  borderRadius:9,
+                  padding:"8px 10px",
+                  fontSize:12,
+                  fontWeight:900,
+                  cursor:puedePersonalizarColores ? "pointer" : "not-allowed",
+                  opacity:puedePersonalizarColores ? 1 : .58,
+                  fontFamily:"'DM Sans',sans-serif",
+                  display:"inline-flex",
+                  alignItems:"center",
+                  gap:7,
+                }}
+              >
+                <span style={{width:18,height:18,borderRadius:999,background:`linear-gradient(135deg, ${activePalette.accent}, ${activePalette.accentLight})`,border:"1px solid rgba(255,255,255,.35)"}} />
+                Personalizada
+              </button>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
               {[
@@ -837,6 +868,15 @@ export default function Empresa() {
                     value={activePalette[key]}
                     onChange={e => setEmpresaPaletteColor(key, e.target.value)}
                     style={{width:"100%",height:38,border:"1px solid var(--border2)",borderRadius:8,background:"var(--bg3)",padding:4,cursor:puedePersonalizarColores ? "pointer" : "not-allowed",opacity:puedePersonalizarColores ? 1 : .55}}
+                  />
+                  <input
+                    type="text"
+                    disabled={!puedePersonalizarColores}
+                    value={activePalette[key]}
+                    onChange={e => setEmpresaPaletteColor(key, e.target.value)}
+                    placeholder="#0f766e"
+                    maxLength={7}
+                    style={{...S.inp,height:34,fontSize:12,textTransform:"uppercase",opacity:puedePersonalizarColores ? 1 : .55}}
                   />
                 </label>
               ))}
@@ -2515,6 +2555,9 @@ export default function Empresa() {
               <input type="number" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
                 value={cfgTrafico.velocidad_media||80} onChange={e=>setCfgTrafico(p=>({...p,velocidad_media:Number(e.target.value)}))}/>
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 80 km/h</div>
+              <div style={{marginTop:8,padding:"9px 11px",background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.15)",borderRadius:8,fontSize:11,color:"var(--text3)",lineHeight:1.45}}>
+                Ejemplo: Madrid->Barcelona (620 km) = 620÷80 = 7,75h + 1 pausa de 45min = <strong>8h 30min</strong> de tránsito
+              </div>
             </div>
             <div><label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10}}>Tiempo descarga (minutos)</label>
               <input type="number" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
@@ -2532,9 +2575,53 @@ export default function Empresa() {
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 45 min</div>
             </div>
           </div>
-          <div style={{marginTop:16,padding:"10px 14px",background:"rgba(59,130,246,.07)",borderRadius:8,fontSize:12,color:"var(--text3)"}}>
-            Ejemplo: Madrid->Barcelona (620 km) = 620÷80 = 7,75h + 1 pausa de 45min = <strong>8h 30min</strong> de tránsito
+          <div style={{marginTop:18,padding:"14px 16px",borderRadius:10,border:"1px solid var(--border2)",background:"var(--bg4)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Paises operativos</div>
+                <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>Solo los paises activados apareceran en los puntos de carga y descarga de Pedidos.</div>
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:["EspaÃ±a"]}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Solo Espana</button>
+                <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:EUROPE_COUNTRIES}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Activar Europa</button>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:7,maxHeight:260,overflowY:"auto",paddingRight:4}}>
+              {EUROPE_COUNTRIES.map(country => {
+                const selected = getEnabledEuropeCountries({cfg_trafico:cfgTrafico}).includes(country);
+                return (
+                  <label key={country} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",borderRadius:8,border:`1px solid ${selected ? "rgba(20,184,166,.36)" : "var(--border2)"}`,background:selected ? "rgba(20,184,166,.08)" : "var(--bg3)",fontSize:12,color:"var(--text)",cursor:"pointer"}}>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={e=>setCfgTrafico(prev=>{
+                        const current = getEnabledEuropeCountries({cfg_trafico:prev});
+                        const canonical = canonicalCountry(country);
+                        const next = e.target.checked
+                          ? Array.from(new Set([...current, canonical]))
+                          : current.filter(x => x !== canonical);
+                        return {...prev,paises_trabajo:next.length ? next : ["EspaÃ±a"]};
+                      })}
+                      style={{accentColor:"var(--accent)"}}
+                    />
+                    <span>{country}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
+          <label style={{display:"flex",alignItems:"flex-start",gap:10,marginTop:16,padding:"12px 14px",borderRadius:9,border:"1px solid rgba(239,68,68,.24)",background:(cfgTrafico.requerir_motivo_cancelacion !== false && cfgTrafico.requiere_motivo_cancelacion !== false)?"rgba(239,68,68,.07)":"var(--bg4)",cursor:"pointer"}}>
+            <input
+              type="checkbox"
+              checked={cfgTrafico.requerir_motivo_cancelacion !== false && cfgTrafico.requiere_motivo_cancelacion !== false}
+              onChange={e=>setCfgTrafico(p=>({...p,requerir_motivo_cancelacion:e.target.checked}))}
+              style={{marginTop:2,accentColor:"#ef4444"}}
+            />
+            <span>
+              <span style={{display:"block",fontSize:13,fontWeight:900,color:"var(--text)"}}>Exigir motivo al cancelar viajes</span>
+              <span style={{display:"block",fontSize:11,color:"var(--text4)",marginTop:2}}>Si esta activo, el menu contextual de pedidos pedira un motivo y lo guardara en el viaje y en el historial.</span>
+            </span>
+          </label>
           <button onClick={guardarTrafico} style={{marginTop:14,padding:"7px 18px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>
             Guardar configuración
           </button>

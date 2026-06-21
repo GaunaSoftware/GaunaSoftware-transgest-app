@@ -295,9 +295,167 @@ function buildAdvisorPackageManifest({ selectedCompany, permissions = [], filter
   };
 }
 
+const crcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xEDB88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+
+function crc32(buffer) {
+  let crc = 0xFFFFFFFF;
+  for (const byte of buffer) {
+    crc = crcTable[(crc ^ byte) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function dosDateTime(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear());
+  const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+  const day = (year - 1980) << 9 | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { time, date: day };
+}
+
+function safeZipName(name) {
+  return String(name || "file.txt")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\.\./g, "")
+    .replace(/[^A-Za-z0-9._/ -]/g, "_")
+    .slice(0, 180) || "file.txt";
+}
+
+function buildZip(files = [], now = new Date()) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  const stamp = dosDateTime(now);
+
+  files.forEach(file => {
+    const name = Buffer.from(safeZipName(file.name), "utf8");
+    const content = Buffer.isBuffer(file.content) ? file.content : Buffer.from(String(file.content || ""), "utf8");
+    const crc = crc32(content);
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(stamp.time, 10);
+    localHeader.writeUInt16LE(stamp.date, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(content.length, 18);
+    localHeader.writeUInt32LE(content.length, 22);
+    localHeader.writeUInt16LE(name.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    localParts.push(localHeader, name, content);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(stamp.time, 12);
+    centralHeader.writeUInt16LE(stamp.date, 14);
+    centralHeader.writeUInt32LE(crc, 16);
+    centralHeader.writeUInt32LE(content.length, 20);
+    centralHeader.writeUInt32LE(content.length, 24);
+    centralHeader.writeUInt16LE(name.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    centralParts.push(centralHeader, name);
+
+    offset += localHeader.length + name.length + content.length;
+  });
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralDirectory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localParts, centralDirectory, end]);
+}
+
+function csvCell(value) {
+  const clean = String(value ?? "").replace(/\r?\n/g, " ").trim();
+  return `"${clean.replace(/"/g, '""')}"`;
+}
+
+function advisorPackageIndexCsv(exports = []) {
+  const headers = ["id", "nombre", "disponible", "permiso", "ruta", "bloqueos"];
+  const rows = exports.map(item => ({
+    id: item.id,
+    nombre: item.label,
+    disponible: item.available ? "si" : "no",
+    permiso: item.permission,
+    ruta: item.path || "",
+    bloqueos: (item.blocked_reasons || []).join(" | "),
+  }));
+  return [
+    headers.map(csvCell).join(";"),
+    ...rows.map(row => headers.map(header => csvCell(row[header])).join(";")),
+  ].join("\n");
+}
+
+function buildAdvisorPackageZip(manifest) {
+  const files = [
+    {
+      name: "manifest.json",
+      content: JSON.stringify(manifest, null, 2),
+    },
+    {
+      name: "README.txt",
+      content: [
+        "TransGest Contabilidad - Paquete asesoria",
+        "",
+        "Este ZIP es un paquete tecnico de control para preparar exportaciones autorizadas.",
+        "No declara cumplimiento legal, certificacion ni homologacion con ningun proveedor.",
+        "Los CSV reales se descargan desde las rutas indicadas y conservan permisos y auditoria.",
+        "",
+        `Generado: ${manifest.generated_at}`,
+        `Empresa: ${manifest.selected_company?.name || manifest.selected_company?.company_id || "-"}`,
+      ].join("\n"),
+    },
+    {
+      name: "exports/index.csv",
+      content: advisorPackageIndexCsv(manifest.exports || []),
+    },
+  ];
+
+  (manifest.exports || []).forEach(item => {
+    const folder = item.available ? "exports" : "blocked";
+    files.push({
+      name: `${folder}/${item.id}.txt`,
+      content: [
+        item.label,
+        item.description || "",
+        "",
+        item.available ? `CSV: ${item.path}` : `Bloqueado: ${(item.blocked_reasons || []).join(" | ")}`,
+        `Permiso: ${item.permission}`,
+      ].join("\n"),
+    });
+  });
+
+  return buildZip(files);
+}
+
 module.exports = {
   INTEGRATION_CATALOG_VERSION,
   buildAdvisorPackageManifest,
+  buildAdvisorPackageZip,
   externalAccountingIntegrations,
   integrationSummary,
   listExternalAccountingIntegrations,

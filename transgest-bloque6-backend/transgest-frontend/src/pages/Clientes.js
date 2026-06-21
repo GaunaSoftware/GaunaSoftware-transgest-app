@@ -739,6 +739,20 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
             <div>
               <label style={S.lbl}>Límite de riesgo (EUR) - 0 = sin límite</label>
               <input type="number" step="100" style={S.inp} value={form.limite_riesgo||""} onChange={f("limite_riesgo")} placeholder="Ej: 5000 - bloquea nuevos viajes si deuda supera este importe"/>
+              <label style={{display:"flex",gap:10,alignItems:"center",padding:"10px 12px",margin:"10px 0",borderRadius:8,border:"1px solid rgba(239,68,68,.24)",background:form.bloqueado?"rgba(239,68,68,.08)":"rgba(248,250,252,.78)",cursor:"pointer"}}>
+                <input
+                  type="checkbox"
+                  checked={!!form.bloqueado}
+                  onChange={e=>setForm(p=>({...p,bloqueado:e.target.checked}))}
+                  style={{width:16,height:16,accentColor:"#ef4444"}}
+                />
+                <span>
+                  <span style={{display:"block",fontSize:13,fontWeight:900,color:form.bloqueado?"#b91c1c":"var(--text)"}}>Bloquear cliente</span>
+                  <span style={{display:"block",fontSize:11,color:"var(--text4)",marginTop:2}}>Impide crear nuevos viajes hasta desactivar el bloqueo.</span>
+                </span>
+              </label>
+              <label style={S.lbl}>Motivo del bloqueo</label>
+              <input style={S.inp} value={form.bloqueo_motivo||""} onChange={f("bloqueo_motivo")} placeholder="Ej: impago, documentacion pendiente, decision comercial..."/>
               <label style={S.lbl}>Minimo facturable por toneladas (T)</label>
               <input type="number" step="0.01" style={S.inp} value={form.minimo_facturable_toneladas||""} onChange={f("minimo_facturable_toneladas")} placeholder="Ej: 25"/>
               <label style={S.lbl}>Modo de facturación</label>
@@ -1370,6 +1384,15 @@ export default function Clientes() {
     catch(e) { notify(e.message, "error"); }
   }
 
+  const resumenClientes = {
+    total: clientes.length,
+    bloqueados: clientes.filter(c=>c.bloqueado).length,
+    revisar: clientes.filter(c=>c.pendiente_revision).length,
+    conRiesgo: clientes.filter(c=>Number(c.limite_riesgo || 0) > 0).length,
+    conEmailFacturacion: clientes.filter(c=>c.email_facturacion || c.email).length,
+    rutas: rutasG.length,
+  };
+
   return (
     <div style={S.page}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:18}}>
@@ -1392,6 +1415,23 @@ export default function Clientes() {
         <span style={{fontSize:13,color:"#64748b",marginLeft:"auto",fontWeight:700}}>
           {clientes.length} cliente{clientes.length!==1?"s":""}
         </span>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:14}}>
+        {[
+          ["Clientes activos", resumenClientes.total, "var(--text)", "Listado visible"],
+          ["Bloqueados", resumenClientes.bloqueados, resumenClientes.bloqueados ? "#ef4444" : "var(--green)", "No admiten viajes"],
+          ["A revisar", resumenClientes.revisar, resumenClientes.revisar ? "#f59e0b" : "var(--green)", "Pendiente validacion"],
+          ["Con riesgo", resumenClientes.conRiesgo, "var(--accent-xl)", "Limite configurado"],
+          ["Email fact.", resumenClientes.conEmailFacturacion, "var(--green)", "Preparados para envio"],
+          ["Rutas/tarifas", resumenClientes.rutas, "var(--accent-xl)", "Tarifas activas"],
+        ].map(([label,value,color,detail])=>(
+          <div key={label} style={{...S.card,padding:"12px 14px",marginBottom:0}}>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:900,color}}>{value}</div>
+            <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",marginTop:4}}>{label}</div>
+            <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{detail}</div>
+          </div>
+        ))}
       </div>
 
       <div style={S.card}>
@@ -1422,6 +1462,13 @@ export default function Clientes() {
                         background:"rgba(251,191,36,.15)",color:"#f59e0b",
                         border:"1px solid rgba(251,191,36,.3)",whiteSpace:"nowrap",flexShrink:0}}>
                         REVISAR
+                      </span>
+                    )}
+                    {c.bloqueado && (
+                      <span title={c.bloqueo_motivo || "Cliente bloqueado"} style={{fontSize:9,fontWeight:900,padding:"2px 7px",borderRadius:10,
+                        background:"rgba(239,68,68,.12)",color:"#ef4444",
+                        border:"1px solid rgba(239,68,68,.26)",whiteSpace:"nowrap",flexShrink:0}}>
+                        BLOQUEADO
                       </span>
                     )}
                   </div>

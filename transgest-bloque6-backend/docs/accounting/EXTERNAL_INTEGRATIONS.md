@@ -43,18 +43,19 @@ No existe una fuente publica unica y auditada que ordene con precision los 10 pr
 1. Catalogo visible en Superadmin. Implementado como `/api/v1/superadmin/integraciones/contabilidad`.
 2. Catalogo operativo visible en TransGest Contabilidad. Implementado como `/api/v1/external-integrations`.
 3. Manifiesto de paquete asesoria. Implementado como `/api/v1/external-integrations/advisor-package`.
-4. Persistencia y seguimiento por empresa del conector preferido, estado contractual, responsable, modo autorizado e historial auditado desde Superadmin. Implementado como `/api/v1/superadmin/integraciones/contabilidad/empresas/:empresaId`.
-5. Mapeos por empresa para plan contable, terceros, impuestos, diario, bancos y documentos. Implementado como metadatos versionables en la ficha de Superadmin.
-6. Exportaciones normalizadas: terceros, vencimientos, bancos, diario, sumas y saldos, balance y PyG.
-7. Paquete asesoria en ZIP con CSV/XLSX/PDF y manifiesto JSON.
-8. Staging de importacion: detectar duplicados, validar empresa, ejercicio, periodo y moneda.
-9. Conector Holded u Odoo como primer piloto API, siempre con outbox y aprobacion manual.
-10. Conectores de ficheros para Sage 50/ContaPlus, Sage 200, a3 y CONTASOL.
-11. Monitor de sincronizacion: estado, ultimo lote, errores, reintentos e idempotency keys.
+4. ZIP tecnico de control para asesoria con manifiesto, indice de exportaciones y rutas CSV autorizadas. Implementado como `/api/v1/external-integrations/advisor-package.zip`.
+5. Persistencia y seguimiento por empresa del conector preferido, estado contractual, responsable, modo autorizado e historial auditado desde Superadmin. Implementado como `/api/v1/superadmin/integraciones/contabilidad/empresas/:empresaId`.
+6. Mapeos por empresa para plan contable, terceros, impuestos, diario, bancos y documentos. Implementado como metadatos versionables en la ficha de Superadmin.
+7. Exportaciones normalizadas: terceros, vencimientos, bancos, diario, sumas y saldos, balance y PyG.
+8. Paquete asesoria ZIP con CSV/XLSX/PDF fisicos, no solo rutas e indice.
+9. Staging de importacion: detectar duplicados, validar empresa, ejercicio, periodo y moneda.
+10. Conector Holded u Odoo como primer piloto API, siempre con outbox y aprobacion manual.
+11. Conectores de ficheros para Sage 50/ContaPlus, Sage 200, a3 y CONTASOL.
+12. Monitor de sincronizacion: estado, ultimo lote, errores, reintentos e idempotency keys.
 
 ## Paquete asesoria actual
 
-El manifiesto actual no comprime ficheros en ZIP todavia. Devuelve los CSV disponibles para el usuario autenticado y marca como bloqueados los que requieren permisos o ejercicio seleccionado.
+El manifiesto actual devuelve los CSV disponibles para el usuario autenticado y marca como bloqueados los que requieren permisos o ejercicio seleccionado. El ZIP actual es un paquete tecnico de control: incluye `manifest.json`, `exports/index.csv` y ficheros de texto con las rutas CSV autorizadas. Todavia no empaqueta fisicamente cada CSV dentro del ZIP.
 
 Incluye:
 

@@ -106,8 +106,11 @@ function canManage(req) {
 
 function dateOnly(value = new Date()) {
   const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
-  return d.toISOString().slice(0, 10);
+  if (Number.isNaN(d.getTime())) return dateOnly(new Date());
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function minutesBetween(a, b) {
@@ -221,6 +224,41 @@ async function notificarGerentes(req, { tipo, titulo, mensaje, data = {} }) {
   }).catch(() => null)));
 }
 
+async function getJornadaConfigForUsuario(req, usuarioId, client = db) {
+  const { rows } = await client.query(
+    `SELECT pausa_min
+       FROM oficina_jornada_config
+      WHERE empresa_id=$1 AND usuario_id=$2
+      LIMIT 1`,
+    [empresaId(req), usuarioId]
+  ).catch(() => ({ rows: [] }));
+  return { pausa_min: Math.max(0, Number(rows[0]?.pausa_min || 60) || 60) };
+}
+
+async function notificarGerenciaDescansoExcedido(req, jornada, accion) {
+  if (!jornada?.id) return;
+  const cfg = await getJornadaConfigForUsuario(req, jornada.usuario_id || req.user.id);
+  const totalPausa = Number(jornada.pausa_total_live_min ?? jornada.pausa_total_min ?? 0) || 0;
+  const limite = Number(cfg.pausa_min || 0) || 0;
+  if (!limite || totalPausa <= limite) return;
+  const exceso = Math.max(0, totalPausa - limite);
+  await notificarGerentes(req, {
+    tipo: "control_horario_descanso_excedido",
+    titulo: "Descanso excedido",
+    mensaje: `${jornada.usuario_nombre || req.user?.nombre || req.user?.email || "Empleado"} ha superado el descanso previsto en ${exceso} min.`,
+    data: {
+      fichaje_id: jornada.id,
+      usuario_id: jornada.usuario_id || req.user.id,
+      usuario_nombre: jornada.usuario_nombre || req.user?.nombre || "",
+      accion,
+      pausa_total_min: totalPausa,
+      pausa_limite_min: limite,
+      exceso_min: exceso,
+      dedupe_key: `control_horario_descanso:${jornada.id}`,
+    },
+  });
+}
+
 function computeRow(row = {}) {
   const now = new Date();
   const pausaLive = row.pausa_inicio_at && !row.salida_at ? minutesBetween(row.pausa_inicio_at, now) : 0;
@@ -247,12 +285,13 @@ async function logEvento(client, req, fichajeId, usuarioId, tipo, detalle = {}) 
 }
 
 async function getToday(req, client = db) {
+  const today = dateOnly();
   const { rows } = await client.query(
     `SELECT f.*, u.nombre AS usuario_nombre, u.email AS usuario_email, u.rol AS usuario_rol
        FROM oficina_fichajes f
        JOIN usuarios u ON u.id=f.usuario_id
-      WHERE f.empresa_id=$1 AND f.usuario_id=$2 AND f.fecha=CURRENT_DATE`,
-    [empresaId(req), req.user.id]
+      WHERE f.empresa_id=$1 AND f.usuario_id=$2 AND f.fecha=$3::date`,
+    [empresaId(req), req.user.id, today]
   );
   return rows[0] ? computeRow(rows[0]) : null;
 }
@@ -407,9 +446,6 @@ router.post("/fichar", async (req, res) => {
   const ubicacion = String(req.body?.ubicacion || "").trim().slice(0, 240);
   const notas = String(req.body?.notas || "").trim().slice(0, 500);
   const gps = normalizeGps(req.body?.ubicacion_gps || req.body?.gps || req.body || {});
-  if (["entrada", "salida"].includes(accion) && !gps) {
-    return res.status(400).json({ error: "Activa la ubicacion del navegador para fichar entrada o salida." });
-  }
 
   const out = await db.transaction(async (client) => {
     const cfg = await getControlConfig(empresaId(req), client);
@@ -422,9 +458,17 @@ router.post("/fichar", async (req, res) => {
     }
 
     if (accion === "entrada") {
+      if (jornada?.salida_at || jornada?.estado === "cerrado") {
+        const err = new Error("La jornada de hoy ya esta cerrada. Solicita un ajuste si necesitas corregirla.");
+        err.status = 409;
+        throw err;
+      }
+      if (jornada?.entrada_at && !jornada?.salida_at) {
+        return jornada;
+      }
       const { rows } = await client.query(
         `INSERT INTO oficina_fichajes (empresa_id,usuario_id,fecha,entrada_at,estado,modalidad,ubicacion,notas,entrada_lat,entrada_lng,entrada_accuracy_m,ubicacion_estado,ubicacion_distancia_m)
-         VALUES ($1,$2,CURRENT_DATE,NOW(),'abierto',$3,$4,$5,$6,$7,$8,$9,$10)
+         VALUES ($1,$2,$11::date,NOW(),'abierto',$3,$4,$5,$6,$7,$8,$9,$10)
          ON CONFLICT (empresa_id, usuario_id, fecha) DO UPDATE
            SET entrada_at=COALESCE(oficina_fichajes.entrada_at, NOW()),
                estado=CASE WHEN oficina_fichajes.salida_at IS NULL THEN 'abierto' ELSE oficina_fichajes.estado END,
@@ -438,7 +482,7 @@ router.post("/fichar", async (req, res) => {
                ubicacion_distancia_m=EXCLUDED.ubicacion_distancia_m,
                updated_at=NOW()
          RETURNING *`,
-        [empresaId(req), req.user.id, modalidad, ubicacion, notas, gps?.lat || null, gps?.lng || null, gps?.accuracy_m || null, evalGps.estado, evalGps.distancia_m]
+        [empresaId(req), req.user.id, modalidad, ubicacion, notas, gps?.lat || null, gps?.lng || null, gps?.accuracy_m || null, evalGps.estado, evalGps.distancia_m, dateOnly()]
       );
       await logEvento(client, req, rows[0].id, req.user.id, "entrada", { modalidad, ubicacion, gps, ubicacion_estado: evalGps.estado, distancia_m: evalGps.distancia_m });
       return computeRow(rows[0]);
@@ -504,6 +548,9 @@ router.post("/fichar", async (req, res) => {
       evalGps: { fuera_radio: true, distancia_m: Number(out.ubicacion_distancia_m || 0) || null },
       cfg,
     });
+  }
+  if (["reanudar", "salida"].includes(accion)) {
+    await notificarGerenciaDescansoExcedido(req, out, accion);
   }
   res.json(out);
 });

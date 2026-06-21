@@ -10,6 +10,7 @@ import {
   createMaturity,
   createParty,
   downloadAdvisorPackageFile,
+  downloadAdvisorPackageZip,
   downloadBalanceSheetCsv,
   downloadBankTransactionsCsv,
   downloadJournalEntriesCsv,
@@ -1476,6 +1477,20 @@ export default function App() {
       const result = await downloadAdvisorPackageFile(item.path);
       saveBlob(result.blob, result.filename || `${item.id}.csv`);
       setAdvisorPackageStatus({ tone: "ok", text: `${item.label} descargado para el paquete de asesoria.` });
+    } catch (err) {
+      setAdvisorPackageStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setAdvisorPackageDownloading(null);
+    }
+  }
+
+  async function handleDownloadAdvisorPackageZip() {
+    setAdvisorPackageDownloading("zip");
+    setAdvisorPackageStatus(null);
+    try {
+      const result = await downloadAdvisorPackageZip(advisorPackageFilters);
+      saveBlob(result.blob, result.filename || "paquete-asesoria.zip");
+      setAdvisorPackageStatus({ tone: "ok", text: "ZIP de control para asesoria generado y auditado." });
     } catch (err) {
       setAdvisorPackageStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
     } finally {
@@ -3662,7 +3677,17 @@ export default function App() {
                   <h2>Paquete asesoria</h2>
                   <p>Genera un manifiesto de CSV descargables para asesoria o importacion en programas externos. Mantiene permisos, auditoria y filtros por ejercicio.</p>
                 </div>
-                {advisorPackageLoading && <StatusBadge tone="neutral" text="Preparando" />}
+                <div className="panel-actions">
+                  {advisorPackageLoading && <StatusBadge tone="neutral" text="Preparando" />}
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!advisorPackage || advisorPackageDownloading === "zip"}
+                    onClick={handleDownloadAdvisorPackageZip}
+                  >
+                    {advisorPackageDownloading === "zip" ? "Preparando ZIP" : "Descargar ZIP"}
+                  </button>
+                </div>
               </div>
               <form className="advisor-package-filters" onSubmit={handleAdvisorPackageFilter}>
                 <label>

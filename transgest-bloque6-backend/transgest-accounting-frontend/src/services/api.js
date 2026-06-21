@@ -101,6 +101,16 @@ export const getAdvisorPackage = (filters = {}) => {
 };
 
 export const downloadAdvisorPackageFile = path => downloadFile(path);
+export const downloadAdvisorPackageZip = (filters = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value).trim());
+    }
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return downloadFile(`/external-integrations/advisor-package.zip${suffix}`);
+};
 
 export async function selectCompany(companyId) {
   const data = await apiFetch("/companies/select", {

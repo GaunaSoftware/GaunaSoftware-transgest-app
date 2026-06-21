@@ -318,13 +318,14 @@ export default function Dashboard() {
   }, [period]);
 
   const {
-    pedFilt, totalFacturado, cobrado, pendiente,
+    pedKpi, totalFacturado, cobrado, pendiente,
     nFacturas, costeTotal, margenTotal, margenPct,
     vDisp, vTaller, cDisp,
     estadosPed, facMensual, topClientes, alertas,
     today, ultPedidos, estadoColor,
   } = useMemo(() => {
     const pedFilt = filterByPeriod(pedidos, "fecha_pedido");
+    const pedKpi = pedFilt.filter(p => ["confirmado","en_curso","descarga","entregado","facturado"].includes(String(p.estado || "").toLowerCase()));
     const facFilt = filterByPeriod(facturas, "fecha");
   
     // ── KPIs ──
@@ -335,7 +336,7 @@ export default function Dashboard() {
     const pendiente      = facEmitidas.filter(f=>["emitida","enviada"].includes(f.estado)).reduce((s,f)=>s+Number(f.total||0),0);
     const nFacturas      = facEmitidas.length;
     // Margen: from pedidos that have cost data
-    const costeTotal = pedidos.reduce((s,p)=>
+    const costeTotal = pedKpi.reduce((s,p)=>
       s+Number(p.coste_gasoil||0)+Number(p.coste_peajes||0)+Number(p.coste_dietas||0)+Number(p.coste_otros||0),0);
     const margenTotal = totalFacturado - costeTotal;
     const margenPct   = totalFacturado>0 ? (margenTotal/totalFacturado*100).toFixed(1) : null;
@@ -353,7 +354,7 @@ export default function Dashboard() {
     const cDisp          = choferes.filter(c=>c.activo!==false&&c.estado!=="baja").length;
   
     // ── Estado de pedidos ──
-    const estadoCounts = pedFilt.reduce((acc, p) => {
+    const estadoCounts = pedFilt.filter(p => String(p.estado || "").toLowerCase() !== "cancelado").reduce((acc, p) => {
       const key = String(p.estado || "sin_estado").toLowerCase();
       acc[key] = (acc[key] || 0) + 1;
       return acc;
@@ -511,7 +512,7 @@ export default function Dashboard() {
   
 
     return {
-      pedFilt, facFilt, facEmitidas, totalFacturado, cobrado, pendiente,
+      pedKpi, facFilt, facEmitidas, totalFacturado, cobrado, pendiente,
       nFacturas, costeTotal, margenTotal, margenPct,
       vDisp, vRuta, vTaller, cDisp,
       estadosPed, facMensual, topClientes, alertas,
@@ -575,7 +576,7 @@ export default function Dashboard() {
           {/* ── KPI Row ── */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))", gap:22, marginBottom:22 }}>
             {[
-              { label:"TOTAL VIAJES",      val:pedFilt.length,         sub:`${pedFilt.filter(p=>p.estado==="en_curso").length} en curso`,   color:"var(--accent-xl)" },
+              { label:"TOTAL VIAJES",      val:pedKpi.length,         sub:`${pedKpi.filter(p=>p.estado==="en_curso").length} en curso`,   color:"var(--accent-xl)" },
               { label:"VEHÍCULOS DISP.",
                 val:`${vDisp}/${vehiculos.filter(v=>{const cl=(v.clase||v.tipo||"").toLowerCase();const mat=(v.matricula||"").toUpperCase();const rids=new Set(vehiculos.map(x=>x.remolque_id).filter(Boolean));return !cl.includes("remolque")&&!cl.includes("semirremolque")&&!cl.includes("dolly")&&!rids.has(v.id)&&!mat.startsWith("R-")&&!mat.endsWith("-R");}).length}`,
                 sub:`${vTaller} en mantenimiento`,                            color:"var(--green)" },

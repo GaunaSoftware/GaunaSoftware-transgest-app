@@ -282,6 +282,8 @@ export default function Informes() {
   const pedFilt  = filterItems(pedidos,  "fecha_pedido", period);
   const facFilt  = filterItems(facturas, "fecha",        period);
   const repFilt  = filterItems(taller.reparaciones, "fecha", period);
+  const pedKpi = pedFilt.filter(p => ["confirmado","en_curso","descarga","entregado","facturado"].includes(String(p.estado || "").toLowerCase()));
+  const pedCancelados = pedFilt.filter(p => String(p.estado || "").toLowerCase() === "cancelado");
 
   // KPIs base
   const kpisPeriodo = kpisBackend?.period === period ? kpisBackend : null;
@@ -320,7 +322,7 @@ export default function Informes() {
   // Rutas más rentables
   const topRutas = (() => {
     const map = {};
-    pedFilt.forEach(p => {
+    pedKpi.forEach(p => {
       if (!p.origen || !p.destino) return;
       const k = `${p.origen} - ${p.destino}`;
       if (!map[k]) map[k]={viajes:0,importe:0};
@@ -341,7 +343,7 @@ export default function Informes() {
            !_remIds.has(v.id) && !mat.startsWith("R-") && !mat.endsWith("-R");
   };
   const flotaStats = vehiculos.filter(esTractora).map(v => {
-    const pedVeh  = pedFilt.filter(p=>p.vehiculo_id===v.id||p.matricula===v.matricula);
+    const pedVeh  = pedKpi.filter(p=>p.vehiculo_id===v.id||p.matricula===v.matricula);
     const facVeh  = facFilt.filter(f=>f.vehiculo_id===v.id||pedVeh.find(p=>p.id===f.pedido_id));
     const repVeh  = repFilt.filter(r=>r.vehiculo_id===v.id);
     const ingresos= facVeh.reduce((s,f)=>s+Number(f.total||0),0);
@@ -355,7 +357,7 @@ export default function Informes() {
 
   // Chóferes stats: incluye pedidos como chofer1 Y chofer2
   const choferesStats = choferes.map(c => {
-    const pedCh = pedFilt.filter(p=>p.chofer_id===c.id || p.chofer2_id===c.id);
+    const pedCh = pedKpi.filter(p=>p.chofer_id===c.id || p.chofer2_id===c.id);
     // Para pedidos compartidos, prorratear el ingreso según reparto
     const ingresos = pedCh.reduce((s,p)=>{
       const pct = p.chofer2_id && p.chofer_id !== c.id
@@ -427,6 +429,23 @@ export default function Informes() {
     return Object.entries(meses).sort(([a],[b])=>a.localeCompare(b)).slice(-12)
       .map(([k,v])=>({ name:new Date(k+"-01").toLocaleDateString("es-ES",{month:"short",year:"2-digit"}), coste:v }));
   })();
+
+  const visionGerencia = {
+    viajesOperativos: pedKpi.length,
+    viajesCancelados: pedCancelados.length,
+    cancelacionPct: pedFilt.length ? (pedCancelados.length / pedFilt.length) * 100 : 0,
+    ticketMedio: pedKpi.length ? totalFact / pedKpi.length : 0,
+    cobroPct: totalFact > 0 ? (cobrado / totalFact) * 100 : 0,
+    pendientePct: totalFact > 0 ? (pendiente / totalFact) * 100 : 0,
+    facturacionPorCamion: flotaStats.length ? totalFact / Math.max(1, flotaStats.length) : 0,
+    costeTallerPorCamion: flotaStats.length ? costeTaller / Math.max(1, flotaStats.length) : 0,
+  };
+  const panelesGerencia = [
+    { l:"Viajes KPI", v:fmtN(visionGerencia.viajesOperativos), c:"var(--accent-xl)", d:`${fmtN(visionGerencia.viajesCancelados)} cancelados excluidos` },
+    { l:"Ticket medio", v:`${fmt2(visionGerencia.ticketMedio)} EUR`, c:"var(--text)", d:"Facturacion / viajes KPI" },
+    { l:"Cobro efectivo", v:`${fmt2(visionGerencia.cobroPct)}%`, c:visionGerencia.cobroPct >= 80 ? "var(--green)" : "#f59e0b", d:`Pendiente ${fmt2(visionGerencia.pendientePct)}%` },
+    { l:"Fact. por camion", v:`${fmt2(visionGerencia.facturacionPorCamion)} EUR`, c:"var(--green)", d:`Taller/camion ${fmt2(visionGerencia.costeTallerPorCamion)} EUR` },
+  ];
 
   // Objetivos keys
   const OBJ_KEYS = [
@@ -652,6 +671,27 @@ export default function Informes() {
                     <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", color:"var(--text5)", marginTop:4 }}>{k.l}</div>
                   </div>
                 ))}
+              </div>
+
+              <div style={{...S.card,borderColor:"rgba(20,184,166,.25)",background:"linear-gradient(135deg, rgba(20,184,166,.08), var(--card-bg))"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
+                  <div>
+                    <div style={S.sec}>VISION GERENCIA</div>
+                    <div style={{fontSize:12,color:"var(--text4)"}}>Lectura transversal de operaciones, cobro, cancelaciones, flota y margen para el periodo seleccionado.</div>
+                  </div>
+                  <div style={{fontSize:11,fontWeight:900,color:visionGerencia.cancelacionPct > 8 ? "#ef4444" : "var(--green)"}}>
+                    Cancelacion {fmt2(visionGerencia.cancelacionPct)}%
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
+                  {panelesGerencia.map((k,i)=>(
+                    <div key={i} style={{border:"1px solid var(--border)",background:"var(--bg3)",borderRadius:9,padding:"10px 12px"}}>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:17,fontWeight:900,color:k.c}}>{k.v}</div>
+                      <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",marginTop:4}}>{k.l}</div>
+                      <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{k.d}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {objActual > 0 && (
@@ -898,8 +938,8 @@ export default function Informes() {
                     </div>
 
                     <div style={S.card}>
-                      <div style={S.sec}>PREPARACION DCD / eCMR / eFTI</div>
-                      <div style={{ fontSize:12, color:"var(--text3)", lineHeight:1.5 }}>{data.objetivo || "Diagnostico de datos maestros para documentacion digital."}</div>
+                      <div style={S.sec}>CALIDAD DE DATOS OPERATIVOS</div>
+                      <div style={{ fontSize:12, color:"var(--text3)", lineHeight:1.5 }}>{data.objetivo || "Control de clientes, colaboradores, choferes y vehiculos para evitar bloqueos al crear viajes, facturar o asignar recursos."}</div>
                       <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginTop:10 }}>
                         {(data.acciones_recomendadas || []).map((a,i)=>(
                           <span key={i} style={{ fontSize:11, color:"var(--text3)", background:"var(--bg4)", border:"1px solid var(--border)", borderRadius:999, padding:"4px 9px" }}>{a}</span>
@@ -1022,12 +1062,12 @@ export default function Informes() {
                     </div>
 
                     <div style={S.card}>
-                      <div style={S.sec}>MARCO PREVENTIVO EUROPEO</div>
+                      <div style={S.sec}>CONTROL OPERATIVO Y DOCUMENTAL</div>
                       <div style={{ fontSize:12, color:"var(--text3)", lineHeight:1.5 }}>
-                        Documento de control obligatorio desde {data.marco_normativo?.documento_control_obligatorio_desde || "2026-10-05"}; DIWASS/eAnnex VII desde {data.marco_normativo?.diwass_eannex_vii_entrada_vigor || "2026-05-21"}; eFTI desde {data.marco_normativo?.efti_plena_aplicacion_desde || "2027-07-09"}. La detección es preventiva y debe confirmarse por el usuario antes de operar.
+                        Prioriza viajes con documentacion pendiente, senales ADR/ZBE, rutas internacionales, tacografo, bloqueos de checklist o datos incompletos antes de confirmar, cargar o facturar.
                       </div>
                       <div style={{ fontSize:12, color:"var(--text3)", lineHeight:1.5, marginTop:8 }}>
-                        El núcleo interno comprueba PDF DeCA archivado, QR/URL, payload eFTI, eCMR, DIWASS, ADR y el historial de versiones del viaje cuando ya se haya generado documentación.
+                        Usa esta vista como lista de trabajo: cada senal debe tener responsable, accion y cierre antes de que el viaje avance.
                       </div>
                       <div style={{ fontSize:11, color:"var(--text5)", marginTop:8, fontFamily:"'JetBrains Mono',monospace" }}>
                         Periodo {data.periodo?.desde || "-"} a {data.periodo?.hasta || "-"} - actualizado {data.generated_at ? new Date(data.generated_at).toLocaleString("es-ES") : "-"}
@@ -1172,6 +1212,22 @@ export default function Informes() {
                           <div style={{ fontSize:10, color:"var(--text5)", marginTop:4, fontWeight:700, textTransform:"uppercase" }}>{k.l}</div>
                         </div>
                       ))}
+                    </div>
+
+                    <div style={S.card}>
+                      <div style={S.sec}>LECTURA DE SCORING</div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
+                        {[
+                          ["Riesgo cliente", "Bloqueo comercial, limite de riesgo, deuda vencida y volumen pendiente antes de admitir nuevos viajes."],
+                          ["Riesgo carrier", "Verificacion documental, incidencias, aceptacion condicionada y bloqueos antes de asignar cargas."],
+                          ["Decision gerencia", "Casos que requieren autorizar, condicionar o parar la operativa para proteger margen y cobro."],
+                        ].map(([title, text])=>(
+                          <div key={title} style={{border:"1px solid var(--border)",background:"var(--bg3)",borderRadius:9,padding:"10px 12px"}}>
+                            <div style={{fontSize:12,fontWeight:900,color:"var(--text)",marginBottom:5}}>{title}</div>
+                            <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45}}>{text}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
                     <div style={{...S.card,marginBottom:14,borderColor:decisiones.length?"rgba(249,115,22,.30)":"var(--border)"}}>

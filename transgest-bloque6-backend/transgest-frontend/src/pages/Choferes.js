@@ -570,7 +570,8 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
   const [form,   setForm]   = useState(editando ? { ...editando } : {
     activo:true, nombre:"", apellidos:"", dni:"", telefono:"", email:"",
     direccion:"", poblacion:"", cp:"", provincia:"", pais:"España",
-    fecha_alta: new Date().toISOString().slice(0,10), fecha_baja:"",
+    fecha_alta: new Date().toISOString().slice(0,10), fecha_baja:"", motivo_baja:"",
+    carta_renuncia_nombre:"", carta_renuncia_mime:"", carta_renuncia_base64:"",
     vehiculo_id:"", remolque_id:"", tipo_contrato:"", salario:"",
     sexo:"", puesto_valor:"",
     // Carnets
@@ -583,9 +584,38 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
   const [saving, setSaving] = useState(false);
 
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value }));
+  const onActivoChange = e => {
+    const checked = e.target.checked;
+    setForm(p => ({
+      ...p,
+      activo: checked,
+      estado: checked ? (p.estado === "baja" ? "disponible" : p.estado) : "baja",
+      fecha_baja: checked ? p.fecha_baja : (p.fecha_baja || new Date().toISOString().slice(0,10)),
+    }));
+  };
+  const onCartaRenuncia = e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = String(reader.result || "");
+      setForm(p => ({
+        ...p,
+        carta_renuncia_nombre: file.name,
+        carta_renuncia_mime: file.type || "application/octet-stream",
+        carta_renuncia_base64: raw.includes(",") ? raw.split(",").pop() : raw,
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
 
   async function guardar() {
     if (!form.nombre) { notify("El nombre es obligatorio", "warning"); return; }
+    if (form.activo === false) {
+      if (!form.fecha_baja) { notify("Indica la fecha de baja del chofer.", "warning"); return; }
+      if (!String(form.motivo_baja || "").trim()) { notify("Indica el motivo de la baja.", "warning"); return; }
+      if (!form.carta_renuncia_base64) { notify("Sube la carta de renuncia o documento de baja.", "warning"); return; }
+    }
     setSaving(true);
     try {
       if (editando?.id) await editarChofer(editando.id, form);
@@ -750,7 +780,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
                 <div>
                   <label style={S.lbl}>Estado</label>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:10 }}>
-                    <input type="checkbox" id="activo_check" checked={form.activo!==false} onChange={f("activo")} style={{ width:16, height:16, accentColor:"var(--green)" }}/>
+                    <input type="checkbox" id="activo_check" checked={form.activo!==false} onChange={onActivoChange} style={{ width:16, height:16, accentColor:"var(--green)" }}/>
                     <label htmlFor="activo_check" style={{ fontSize:13, color:"var(--text2)", cursor:"pointer" }}>Activo (en plantilla)</label>
                   </div>
                 </div>
@@ -765,6 +795,21 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
                   <label style={S.lbl}>Puesto / trabajo de igual valor</label>
                   <input style={S.inp} value={form.puesto_valor||""} onChange={f("puesto_valor")} placeholder="Conductor ruta nacional, tráfico local..."/>
                 </div>
+                {form.activo === false && (
+                  <>
+                    <div style={{ gridColumn:"1/-1" }}>
+                      <label style={S.lbl}>Motivo de baja *</label>
+                      <textarea style={{ ...S.inp, height:64, resize:"vertical" }} value={form.motivo_baja||""} onChange={f("motivo_baja")} placeholder="Renuncia voluntaria, fin de contrato, baja empresa..."/>
+                    </div>
+                    <div style={{ gridColumn:"1/-1" }}>
+                      <label style={S.lbl}>Carta de renuncia / documento de baja *</label>
+                      <input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" style={S.inp} onChange={onCartaRenuncia}/>
+                      <div style={{fontSize:11,color:form.carta_renuncia_base64 ? "var(--green)" : "var(--text5)",marginTop:5}}>
+                        {form.carta_renuncia_nombre || "Documento pendiente"}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div style={S.sec}>Notas</div>
@@ -883,7 +928,7 @@ export default function Choferes() {
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, v, taller] = await Promise.all([getChoferes().catch(()=>[]), getVehiculos().catch(()=>[]), getTallerEstado().catch(()=>null)]);
+      const [c, v, taller] = await Promise.all([getChoferes("todos").catch(()=>[]), getVehiculos().catch(()=>[]), getTallerEstado().catch(()=>null)]);
       setChoferes(Array.isArray(c) ? c : []);
       setVehiculos(Array.isArray(v) ? v : []);
       if (taller && typeof taller === "object") {

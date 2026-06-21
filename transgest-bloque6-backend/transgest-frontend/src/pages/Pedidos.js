@@ -14,6 +14,7 @@ import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
+import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
 
 let puntosInteresCache = [];
 const AI_INBOX_MAX_FILE_BYTES = 6 * 1024 * 1024;
@@ -26,6 +27,62 @@ function formatDateInputLocal(value = new Date()) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function withPedidoGeoDefaults(draft = {}) {
+  const origenPaisFallback = canonicalCountry(draft.origen_pais || draft.pais_origen || "España") || "España";
+  const destinoPaisFallback = canonicalCountry(draft.destino_pais || draft.pais_destino || "España") || "España";
+  const puntosCarga = hydrateStopsGeo(parseStops(draft.puntos_carga), origenPaisFallback, draft.origen_provincia || draft.provincia_origen || "");
+  const puntosDescarga = hydrateStopsGeo(parseStops(draft.puntos_descarga), destinoPaisFallback, draft.destino_provincia || draft.provincia_destino || "");
+  const origenPrimary = puntosCarga[0] || {};
+  const destinoPrimary = puntosDescarga[0] || {};
+  const origenPais = stopCountry(origenPrimary, origenPaisFallback);
+  const destinoPais = stopCountry(destinoPrimary, destinoPaisFallback);
+  return {
+    ...draft,
+    puntos_carga: puntosCarga.length ? puntosCarga : draft.puntos_carga,
+    puntos_descarga: puntosDescarga.length ? puntosDescarga : draft.puntos_descarga,
+    origen_pais: origenPais,
+    destino_pais: destinoPais,
+    origen_provincia: stopRegion(origenPrimary, draft.origen_provincia || draft.provincia_origen || ""),
+    destino_provincia: stopRegion(destinoPrimary, draft.destino_provincia || draft.provincia_destino || ""),
+    cmr_tipo: cmrTypeForPedidoStops({ ...draft, puntos_carga: puntosCarga, puntos_descarga: puntosDescarga, origen_pais: origenPais, destino_pais: destinoPais }),
+  };
+}
+
+function stopCountry(stop = {}, fallback = "España") {
+  return canonicalCountry(stop.pais || stop.country || stop.pais_origen || fallback || "España") || "España";
+}
+
+function stopCountryInputValue(stop = {}, fallback = "España") {
+  if (Object.prototype.hasOwnProperty.call(stop, "pais")) return stop.pais ?? "";
+  if (Object.prototype.hasOwnProperty.call(stop, "country")) return stop.country ?? "";
+  if (Object.prototype.hasOwnProperty.call(stop, "pais_origen")) return stop.pais_origen ?? "";
+  return fallback || "";
+}
+
+function stopRegion(stop = {}, fallback = "") {
+  return stop.provincia || stop.region || stop.state || stop.provincia_origen || fallback || "";
+}
+
+function hydrateStopsGeo(stops = [], fallbackCountry = "España", fallbackRegion = "") {
+  return (Array.isArray(stops) ? stops : []).map((stop, idx) => ({
+    ...stop,
+    pais: stopCountry(stop, idx === 0 ? fallbackCountry : "España"),
+    provincia: stopRegion(stop, idx === 0 ? fallbackRegion : ""),
+  }));
+}
+
+function cmrTypeForPedidoStops(form = {}) {
+  const cargas = hydrateStopsGeo(parseStops(form.puntos_carga), form.origen_pais || "España", form.origen_provincia || "");
+  const descargas = hydrateStopsGeo(parseStops(form.puntos_descarga), form.destino_pais || "España", form.destino_provincia || "");
+  const countries = [
+    ...cargas.map(stop => stopCountry(stop)),
+    ...descargas.map(stop => stopCountry(stop)),
+    form.origen_pais || "España",
+    form.destino_pais || "España",
+  ];
+  return countries.some(country => cmrTypeForCountries(country, "España") === "internacional") ? "internacional" : "nacional";
 }
 
 function currentWeekRangeLocal(now = new Date()) {
@@ -218,7 +275,7 @@ function buildPedidoDuplicado(pedido = {}) {
     "workflow_colaborador_en_camino_at","workflow_colaborador_descargado_at",
     "firma_entrega","firma_colaborador","albaranes","docs","eventos"
   ].forEach(k => { delete clone[k]; });
-  return {
+  return withPedidoGeoDefaults({
     ...clone,
     numero: "",
     estado: "pendiente",
@@ -227,7 +284,7 @@ function buildPedidoDuplicado(pedido = {}) {
     aviso_completar: "Pedido duplicado: revisa fechas, asignacion, precio y documentacion antes de guardar.",
     _duplicado: true,
     _readonly: false,
-  };
+  });
 }
 
 const PEDIDOS_COLLAPSED_GROUPS_KEY = "tms_pedidos_collapsed_groups_v1";
@@ -424,6 +481,7 @@ function buildPedidoReschedulePayload(basePedido = {}, offsetDays = 1, overrides
 
 function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   const merged = normalizePedidoTarifaDraft({ ...basePedido, ...overrides });
+  const geoMerged = withPedidoGeoDefaults(merged);
   const {
     remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
     colaborador_nombre, chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
@@ -438,10 +496,15 @@ function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   } = merged;
   const payload = sanitizePedidoPayload({
     ...formClean,
+    origen_pais: geoMerged.origen_pais,
+    origen_provincia: geoMerged.origen_provincia || null,
+    destino_pais: geoMerged.destino_pais,
+    destino_provincia: geoMerged.destino_provincia || null,
+    cmr_tipo: cmrTypeForPedidoStops(geoMerged),
     importe: calcImporte(merged),
     precio_colaborador: merged.colaborador_id ? (importeColaboradorCalculado(merged) || merged.precio_colaborador || null) : merged.precio_colaborador,
-    puntos_carga: parseStops(merged.puntos_carga),
-    puntos_descarga: parseStops(merged.puntos_descarga),
+    puntos_carga: parseStops(geoMerged.puntos_carga),
+    puntos_descarga: parseStops(geoMerged.puntos_descarga),
     extracostes_importe: toFiniteNumber(merged.extracostes ?? merged.extracostes_importe, 0),
     importe_revision_combustible: calcRevisionCombustible(merged),
     importe_minimo: merged.tipo_precio === "viaje" ? toNullableNumber(merged.importe_minimo) : null,
@@ -511,15 +574,15 @@ const TIPOS_PRECIO = [
   { v:"palet",    l:"Por palet (EUR/palet)" },
 ];
 const S = {
-  page:{flex:1,padding:"24px 28px"},
-  title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:16,color:"var(--text)"},
-  bar:{display:"flex",gap:10,marginBottom:16,alignItems:"center",flexWrap:"wrap"},
-  btn:{padding:"8px 16px",borderRadius:7,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:6},
-  card:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
-  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)",whiteSpace:"nowrap"},
-  td:{padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
-  input:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
-  sel:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  page:{flex:1,padding:"34px 36px",minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 45%,#f7fafc 100%)"},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:36,fontWeight:900,marginBottom:16,color:"#0f172a"},
+  bar:{display:"flex",gap:12,marginBottom:18,alignItems:"center",flexWrap:"wrap"},
+  btn:{padding:"10px 16px",borderRadius:8,border:"1px solid #dbe5ec",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:6,background:"#fff",color:"#0f172a"},
+  card:{background:"rgba(255,255,255,.96)",border:"1px solid #dbe5ec",borderRadius:12,overflow:"hidden",boxShadow:"0 12px 30px rgba(15,23,42,.055)"},
+  th:{textAlign:"left",padding:"13px 16px",fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"#64748b",borderBottom:"1px solid #dbe5ec",background:"#f8fbfd",whiteSpace:"nowrap"},
+  td:{padding:"13px 16px",borderBottom:"1px solid #e2e8f0",fontSize:14,color:"#0f172a",verticalAlign:"middle"},
+  input:{background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box"},
+  sel:{background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
   mbox:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:"clamp(14px,3vw,28px)",width:"100%",maxWidth:720,boxSizing:"border-box",maxHeight:"92vh",overflowY:"auto",overflowX:"hidden",position:"relative"},
   label:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:5,marginTop:12},
@@ -663,6 +726,34 @@ function markRiskConfirmed(ref, clienteId, riesgoPedido = {}) {
   const key = String(clienteId);
   const prev = Number(ref.current.get(key) || -1);
   ref.current.set(key, Math.max(prev, riskPctValue(riesgoPedido)));
+}
+
+function truthyFlag(value) {
+  return value === true || value === 1 || String(value || "").toLowerCase() === "true";
+}
+
+function userCanOverrideClienteRisk(user) {
+  return String(user?.rol || "").toLowerCase() === "gerente";
+}
+
+function clienteCreationBlock(cliente = null, riesgoPedido = null, user = null) {
+  if (cliente && truthyFlag(cliente.bloqueado)) {
+    const motivo = String(cliente.bloqueo_motivo || "").trim() || "Sin motivo indicado";
+    return {
+      type: "manual",
+      title: "Cliente bloqueado",
+      message: `No se puede crear el viaje para este cliente. Motivo: ${motivo}`,
+    };
+  }
+  const pct = Number(riesgoPedido?.riesgo_pct_proyectado);
+  if (Number.isFinite(pct) && pct >= 100 && !userCanOverrideClienteRisk(user)) {
+    return {
+      type: "riesgo",
+      title: "Cliente en limite de riesgo",
+      message: "No se pueden grabar mas viajes para este cliente porque supera el limite de riesgo. Solo gerencia puede autorizarlo.",
+    };
+  }
+  return null;
 }
 
 function unidadesFacturablesPedido(form, minOverride = form?.minimo_unidades) {
@@ -1166,6 +1257,8 @@ function puntoToStop(punto) {
     cif: punto?.cif || "",
     telefono: punto?.telefono || punto?.contacto_telefono || "",
     email: punto?.email || "",
+    provincia: punto?.provincia || "",
+    pais: punto?.pais || "",
     google_maps_url: cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || ""),
     lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? null,
     lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? null,
@@ -1188,6 +1281,9 @@ function applyPuntoCargaToDraft(draft = {}, punto = {}) {
   return {
     ...draft,
     origen: nombre,
+    origen_pais: canonicalCountry(punto.pais || draft.origen_pais || "España") || "España",
+    origen_provincia: punto.provincia || draft.origen_provincia || "",
+    cmr_tipo: cmrTypeForCountries(punto.pais || draft.origen_pais || "España", draft.destino_pais || "España"),
     ventana_carga: draft.ventana_carga || punto.ventana || "",
     puntos_carga: updatePrimaryStop(
       draft.puntos_carga,
@@ -1202,6 +1298,9 @@ function applyPuntoDescargaToDraft(draft = {}, punto = {}) {
   return {
     ...draft,
     destino: nombre,
+    destino_pais: canonicalCountry(punto.pais || draft.destino_pais || "España") || "España",
+    destino_provincia: punto.provincia || draft.destino_provincia || "",
+    cmr_tipo: cmrTypeForCountries(draft.origen_pais || "España", punto.pais || draft.destino_pais || "España"),
     ventana_descarga: draft.ventana_descarga || punto.ventana || "",
     puntos_descarga: updatePrimaryStop(
       draft.puntos_descarga,
@@ -1387,6 +1486,29 @@ function stopDisplayParts(stop = {}, fallback = "") {
   }
   nombre = distinctPlaceName(nombre, direccion);
   return { nombre, direccion };
+}
+
+function stopPostalLine(stop = {}, fallbackProvincia = "", fallbackPais = "España") {
+  const punto = findPuntoInteresForStop(stop, stopAddress(stop));
+  const source = { ...(punto || {}), ...(stop || {}) };
+  const cp = String(source.codigo_postal || source.cp || source.postal_code || "").trim();
+  const poblacion = String(source.ciudad || source.poblacion || source.localidad || source.municipio || "").trim();
+  const provincia = String(source.provincia || source.region || source.state || fallbackProvincia || "").trim();
+  const pais = stopCountry(source, fallbackPais || "España");
+  return [cp, poblacion, provincia, pais].filter(Boolean).join(", ");
+}
+
+function empresaPostalAddress(empresa = {}) {
+  const cpPoblacion = [
+    empresa.cp || empresa.codigo_postal || empresa.postal_code,
+    empresa.municipio || empresa.ciudad || empresa.poblacion,
+  ].map(x => String(x || "").trim()).filter(Boolean).join(" ");
+  return [
+    empresa.domicilio || empresa.direccion || empresa.emp_dir,
+    cpPoblacion,
+    empresa.provincia,
+    empresa.pais,
+  ].map(x => String(x || "").trim()).filter(Boolean).join(", ");
 }
 
 function hasRoutePlaceData(place) {
@@ -1992,8 +2114,9 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
 
 // ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Componente edicion concepto de factura ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
 function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colaboradores = [], onClose, onCreado }) {
+  const { user } = useAuth();
   const hoy = new Date().toISOString().slice(0, 10);
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(withPedidoGeoDefaults({
     cliente_nombre: "",
     cliente_id: "",
     ruta_id: "",
@@ -2020,7 +2143,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     km_ruta: "",
     cargas_extra: "",
     descargas_extra: "",
-  });
+  }));
   const [saving, setSaving] = useState(false);
   const [rutasCliente, setRutasCliente] = useState([]);
   const [rutasLoading, setRutasLoading] = useState(false);
@@ -2046,6 +2169,8 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     puntos_descarga: [],
   });
   const clienteRiesgoRapidoPedido = buildClienteRiesgoPedidoAvisos(clienteRiesgoRapido, importeRapidoPreview);
+  const bloqueoClienteRapido = clienteCreationBlock(clienteSeleccionadoRapido, clienteRiesgoRapidoPedido, user);
+  const bloqueoRapidoNoticeRef = useRef("");
   const vehiculosConjunto = vehiculos.filter(v => {
     const clase = (v.clase || v.tipo || "").toLowerCase();
     const mat = (v.matricula || "").toUpperCase();
@@ -2062,6 +2187,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     return remolque ? `${v.matricula} + ${remolque}` : v.matricula;
   };
   const buildCargasRapidas = () => {
+    const pais = canonicalCountry(form.origen_pais || "España") || "España";
     const principal = {
       direccion: form.origen.trim().toUpperCase(),
       cliente_nombre: "",
@@ -2070,6 +2196,8 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       ventana: "",
       bultos: "",
       peso_kg: "",
+      pais,
+      provincia: form.origen_provincia || "",
       notas: "Pedido rapido",
     };
     const extras = String(form.cargas_extra || "")
@@ -2086,12 +2214,15 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           ventana: "",
           bultos: "",
           peso_kg: "",
+          pais,
+          provincia: "",
           notas: "Carga adicional desde pedido rapido",
         };
       });
     return [principal, ...extras];
   };
   const buildDescargasRapidas = () => {
+    const pais = canonicalCountry(form.destino_pais || "España") || "España";
     const principal = {
       direccion: form.destino.trim().toUpperCase(),
       cliente_nombre: "",
@@ -2101,6 +2232,8 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       bultos: "",
       peso_kg: "",
       precio: "",
+      pais,
+      provincia: form.destino_provincia || "",
       tipo_descarga: form.tipo_descarga || "indiferente",
       notas: form.tipo_descarga ? `Pedido rapido. Descarga ${form.tipo_descarga}` : "Pedido rapido",
     };
@@ -2119,6 +2252,8 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           bultos: "",
           peso_kg: "",
           precio: "",
+          pais,
+          provincia: "",
           tipo_descarga: form.tipo_descarga || "indiferente",
           notas: "Descarga adicional desde pedido rapido",
         };
@@ -2165,6 +2300,14 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       .finally(() => { if (alive) setPuntosCargaLoading(false); });
     return () => { alive = false; };
   }, [clienteSeleccionadoRapido?.id]);
+
+  useEffect(() => {
+    if (!bloqueoClienteRapido || !form.cliente_id) return;
+    const key = `${form.cliente_id}:${bloqueoClienteRapido.type}:${bloqueoClienteRapido.message}`;
+    if (bloqueoRapidoNoticeRef.current === key) return;
+    bloqueoRapidoNoticeRef.current = key;
+    notify(bloqueoClienteRapido.message, "error");
+  }, [bloqueoClienteRapido, form.cliente_id]);
 
   async function resolverCliente() {
     const exact = clientes.find(c => (c.nombre || "").trim().toLowerCase() === cleanCliente.toLowerCase());
@@ -2237,6 +2380,11 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     try {
       const cliente = await resolverCliente();
       if (!cliente?.id) throw new Error("No se pudo resolver el cliente.");
+      const bloqueo = clienteCreationBlock(cliente, clienteRiesgoRapidoPedido, user);
+      if (bloqueo) {
+        notify(bloqueo.message, "error");
+        return;
+      }
       const rutasDisponiblesRaw = rutasCliente.length ? rutasCliente : await getRutasCliente(cliente.id).catch(() => []);
       const rutasDisponibles = Array.isArray(rutasDisponiblesRaw)
         ? rutasDisponiblesRaw
@@ -2302,6 +2450,15 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         ruta_id: ruta?.id || ruta?.ruta_id || null,
         origen: form.origen.trim().toUpperCase(),
         destino: form.destino.trim().toUpperCase(),
+        origen_pais: canonicalCountry(form.origen_pais || "España") || "España",
+        origen_provincia: form.origen_provincia || null,
+        destino_pais: canonicalCountry(form.destino_pais || "España") || "España",
+        destino_provincia: form.destino_provincia || null,
+        cmr_tipo: cmrTypeForPedidoStops({
+          ...form,
+          puntos_carga: buildCargasRapidas(),
+          puntos_descarga: buildDescargasRapidas(),
+        }),
         vehiculo_id: colaboradorId ? null : (form.vehiculo_id || null),
         chofer_id: !colaboradorId && form.vehiculo_id ? (form.chofer_id || null) : null,
         remolque_id_manual: colaboradorId ? null : (form.remolque_id_manual || null),
@@ -2375,6 +2532,11 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           </div>
           {clienteSeleccionadoRapido?.id && (
             <div style={{gridColumn:"1/-1",display:"grid",gap:8}}>
+              {bloqueoClienteRapido && (
+                <div style={{padding:"10px 12px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,fontSize:12,color:"#b91c1c",fontWeight:800}}>
+                  {bloqueoClienteRapido.title}: {bloqueoClienteRapido.message}
+                </div>
+              )}
               {clienteRiesgoLoadingRapido ? (
                 <div style={{padding:"8px 12px",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7,fontSize:12,color:"var(--text4)"}}>
                   Revisando cobros pendientes y riesgo del cliente...
@@ -2624,18 +2786,28 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   const set = k => e => setForm(p => ({...p, [k]: e.target.value}));
   const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
   const lbl = {display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4,marginTop:10};
+  const modalPais = canonicalCountry(form.pais || "España") || "España";
+  const modalCountries = Array.from(new Set([...getEnabledEuropeCountries(), modalPais]));
+  const modalRegions = getRegionsForCountry(modalPais);
+  const modalCountryListId = `poi-countries-${form.id || "nuevo"}`;
+  const modalRegionListId = `poi-regions-${form.id || "nuevo"}`;
 
   async function guardar() {
     if (!form.nombre.trim()) { notify("Indica el nombre de la empresa o punto.", "warning"); return; }
     if (!form.direccion.trim()) { notify("Indica la direccion del punto.", "warning"); return; }
-    let saved = form;
+    const payload = {
+      ...form,
+      pais: canonicalCountry(form.pais || "España") || "España",
+      provincia: String(form.provincia || "").trim(),
+    };
+    let saved = payload;
     try {
-      saved = form.id ? await editarPuntoInteres(form.id, form) : await crearPuntoInteres(form);
+      saved = payload.id ? await editarPuntoInteres(payload.id, payload) : await crearPuntoInteres(payload);
     } catch (e) {
       notify("Punto guardado localmente, pero no se ha sincronizado con la base de datos: " + e.message, "warning");
     }
-    const next = savePuntoInteres(saved || form);
-    onSave?.(next, saved || form);
+    const next = savePuntoInteres(saved || payload);
+    onSave?.(next, saved || payload);
     onClose();
   }
 
@@ -2644,6 +2816,12 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:20,width:"min(620px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)",marginBottom:4}}>{form.id ? "Editar punto de interes" : "Guardar punto de interes"}</div>
         <div style={{fontSize:12,color:"var(--text4)",marginBottom:12}}>Crea una ficha reutilizable para empresas donde cargas o descargas con frecuencia.</div>
+        <datalist id={modalCountryListId}>
+          {modalCountries.map(country => <option key={country} value={country} />)}
+        </datalist>
+        <datalist id={modalRegionListId}>
+          {modalRegions.map(region => <option key={region} value={region} />)}
+        </datalist>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre empresa / punto *</label><input style={inp} value={form.nombre} onChange={set("nombre")} autoFocus placeholder="Ej: Logistica Madrid Norte"/></div>
           <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={set("cif")} /></div>
@@ -2652,8 +2830,28 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Enlace Google Maps</label><input style={inp} value={form.google_maps_url} onChange={set("google_maps_url")} placeholder="https://maps.google.com/..." /></div>
           <div><label style={lbl}>Codigo postal</label><input style={inp} value={form.codigo_postal} onChange={set("codigo_postal")} /></div>
           <div><label style={lbl}>Ciudad</label><input style={inp} value={form.ciudad} onChange={set("ciudad")} /></div>
-          <div><label style={lbl}>Provincia</label><input style={inp} value={form.provincia} onChange={set("provincia")} /></div>
-          <div><label style={lbl}>Pais</label><input style={inp} value={form.pais} onChange={set("pais")} /></div>
+          <div>
+            <label style={lbl}>Pais *</label>
+            <input
+              list={modalCountryListId}
+              style={inp}
+              value={modalPais}
+              onChange={e=>setForm(p=>({...p,pais:e.target.value,provincia:""}))}
+              onKeyDown={e=>completeOnTab(e, modalCountries, modalPais, value=>setForm(p=>({...p,pais:value,provincia:""})))}
+              placeholder="España"
+            />
+          </div>
+          <div>
+            <label style={lbl}>Provincia / region</label>
+            <input
+              list={modalRegionListId}
+              style={inp}
+              value={form.provincia || ""}
+              onChange={set("provincia")}
+              onKeyDown={e=>completeOnTab(e, modalRegions, form.provincia || "", value=>setForm(p=>({...p,provincia:value})))}
+              placeholder={modalRegions.length ? "Selecciona de la lista" : "Region / provincia"}
+            />
+          </div>
           <div><label style={lbl}>Telefono empresa</label><input style={inp} value={form.telefono} onChange={set("telefono")} /></div>
           <div><label style={lbl}>Email</label><input type="email" style={inp} value={form.email} onChange={set("email")} /></div>
           <div><label style={lbl}>Contacto</label><input style={inp} value={form.contacto_nombre} onChange={set("contacto_nombre")} /></div>
@@ -2930,7 +3128,8 @@ function PagoColaboradorPanel({ pedido, onUpdated }) {
 function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const [adding, setAdding] = useState(false);
   const [puntosInteres, setPuntosInteres] = useState(getPuntosInteres);
-  const [newStop, setNewStop] = useState({ direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", notas:"", google_maps_url:"" });
+  const [newStop, setNewStop] = useState({ direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", notas:"", google_maps_url:"", pais:"España", provincia:"" });
+  const [puntoQuery, setPuntoQuery] = useState("");
   const [poiDraft, setPoiDraft] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);
   const key = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
@@ -2944,14 +3143,18 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
         direccion: stopAddress(primaryStop) || mainLugar || "",
         fecha: primaryStop.fecha || mainFecha || "",
         hora: primaryStop.hora || mainHora || "",
+        pais: stopCountryInputValue(primaryStop, tipo === "carga" ? form.origen_pais : form.destino_pais),
+        provincia: stopRegion(primaryStop, tipo === "carga" ? form.origen_provincia : form.destino_provincia),
         tipo,
         es_principal: true,
         es_adicional: false,
       }
-    : (mainLugar ? { direccion: mainLugar, fecha: mainFecha || "", hora: mainHora || "", tipo, es_principal: true, es_adicional: false } : null);
+    : (mainLugar ? { direccion: mainLugar, fecha: mainFecha || "", hora: mainHora || "", pais: tipo === "carga" ? (form.origen_pais || "España") : (form.destino_pais || "España"), provincia: tipo === "carga" ? (form.origen_provincia || "") : (form.destino_provincia || ""), tipo, es_principal: true, es_adicional: false } : null);
   const stopsOrdenados = effectivePrimary ? [effectivePrimary, ...paradas] : paradas;
-  const puntosFiltrados = puntosInteres.filter(p => !p.tipo || p.tipo === tipo);
+  const puntosFiltrados = puntosInteres.filter(p => !p.tipo || p.tipo === "ambos" || p.tipo === tipo);
   const puntosListId = `puntos-${tipo}-${pedidoId || "nuevo"}`;
+  const countryListId = `paises-${tipo}-${pedidoId || "nuevo"}`;
+  const paisesActivos = getEnabledEuropeCountries();
   const normalizarBusqueda = (v) => String(v || "").trim().toLowerCase();
   const buscarPuntoExacto = (texto) => {
     const q = normalizarBusqueda(texto);
@@ -2962,13 +3165,69 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       normalizarBusqueda(`${p.nombre || ""} - ${p.direccion || ""}`) === q
     ) || null;
   };
+  const textoBusquedaPuntos = normalizarBusqueda(puntoQuery);
+  const puntosBusqueda = textoBusquedaPuntos
+    ? puntosFiltrados
+        .filter(p => [
+          p.nombre,
+          p.direccion,
+          p.ciudad,
+          p.provincia,
+          p.pais,
+          `${p.nombre || ""} - ${p.direccion || ""}`,
+        ].some(v => normalizarBusqueda(v).includes(textoBusquedaPuntos)))
+        .slice(0, 8)
+    : [];
+  const noExistePuntoBusqueda = textoBusquedaPuntos.length >= 3 && puntosBusqueda.length === 0;
   const aplicarPuntoGuardado = (punto) => {
     if (!punto) return;
+    setPuntoQuery(punto.nombre || punto.direccion || "");
     setNewStop(prev => ({
       ...prev,
       ...puntoToStop(punto),
+      pais: stopCountry(punto, prev.pais || "España"),
+      provincia: stopRegion(punto, prev.provincia || ""),
       cliente_nombre: punto.cliente_nombre || punto.nombre || prev.cliente_nombre || "",
     }));
+  };
+  const resetNewStop = () => {
+    resetNewStop();
+    setPuntoQuery("");
+  };
+  const puntoToSelectableStop = (punto) => {
+    const puntoStop = puntoToStop(punto);
+    return {
+      ...newStop,
+      ...puntoStop,
+      punto_interes_id: punto?.id || puntoStop.punto_interes_id,
+      direccion: puntoStop.direccion || newStop.direccion || puntoQuery.trim(),
+      cliente_nombre: punto?.cliente_nombre || punto?.nombre || puntoStop.cliente_nombre || newStop.cliente_nombre || "",
+      fecha: newStop.fecha || puntoStop.fecha || mainFecha || "",
+      hora: newStop.hora || puntoStop.hora || mainHora || "",
+      pais: stopCountry(puntoStop, newStop.pais || "EspaÃ±a"),
+      provincia: stopRegion(puntoStop, newStop.provincia || ""),
+      tipo,
+    };
+  };
+  const usarPuntoBuscado = (punto, modo = "adicional") => {
+    if (!punto) return;
+    const stop = puntoToSelectableStop(punto);
+    if (modo === "principal" || !stopsOrdenados.length) {
+      setStopsOrdenados([{...stop, es_principal:true, es_adicional:false}, ...stopsOrdenados.slice(1)]);
+    } else {
+      setStopsOrdenados([...stopsOrdenados, {...stop, es_principal:false, es_adicional:true}]);
+    }
+    resetNewStop();
+    setAdding(false);
+  };
+  const abrirCrearPunto = () => {
+    const texto = (puntoQuery || newStop.cliente_nombre || newStop.direccion || "").trim();
+    setPoiDraft({
+      ...newStop,
+      nombre: newStop.cliente_nombre || texto,
+      direccion: newStop.direccion || texto,
+      tipo,
+    });
   };
 
   useEffect(() => {
@@ -3008,6 +3267,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
         .filter(stop => stopAddress(stop) || stop?.cliente_nombre || stop?.google_maps_url)
         .map((stop, idx) => ({
           ...stop,
+          pais: stopCountryInputValue(stop, idx === 0 ? (tipo === "carga" ? p.origen_pais : p.destino_pais) : "España"),
+          provincia: stopRegion(stop),
           tipo,
           es_principal: idx === 0,
           es_adicional: idx !== 0,
@@ -3018,11 +3279,16 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
         updated.origen = stopAddress(first) || "";
         updated.fecha_carga = first.fecha || "";
         updated.hora_carga = first.hora || "";
+        updated.origen_pais = stopCountryInputValue(first, p.origen_pais || "España");
+        updated.origen_provincia = stopRegion(first, p.origen_provincia || "");
       } else {
         updated.destino = stopAddress(first) || "";
         updated.fecha_descarga = first.fecha || "";
         updated.hora_descarga = first.hora || "";
+        updated.destino_pais = stopCountryInputValue(first, p.destino_pais || "España");
+        updated.destino_provincia = stopRegion(first, p.destino_provincia || "");
       }
+      updated.cmr_tipo = cmrTypeForPedidoStops(updated);
       const totalCarga = tipo === "carga" ? sumStopWeights(stopsToStore) : sumStopWeights(updated.puntos_carga);
       const totalDescarga = tipo === "descarga" ? sumStopWeights(stopsToStore) : sumStopWeights(updated.puntos_descarga);
       const totalPeso = totalCarga || totalDescarga;
@@ -3036,8 +3302,12 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   function addParada() {
     if (!newStop.direccion.trim()) { notify("La direccion es obligatoria", "warning"); return; }
     setStopsOrdenados([...stopsOrdenados, {...newStop, direccion:newStop.direccion.trim(), es_adicional:true, es_principal:false}]);
-    setNewStop({ direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", notas:"", google_maps_url:"" });
+    setNewStop({ direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", notas:"", google_maps_url:"", pais:"España", provincia:"" });
     setAdding(false);
+  }
+  function updateStop(idx, patch) {
+    const next = stopsOrdenados.map((stop, i) => i === idx ? { ...stop, ...patch } : stop);
+    setStopsOrdenados(next);
   }
   function removeStop(idx) {
     if (stopsOrdenados.length <= 1) return;
@@ -3061,9 +3331,15 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
 
   const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:6,fontSize:12,outline:"none"};
   const label = tipo === "carga" ? "carga" : "descarga";
+  const newStopPais = stopCountryInputValue(newStop, "España");
+  const newStopRegions = getRegionsForCountry(newStopPais);
+  const newStopRegionListId = `regiones-${tipo}-${pedidoId || "nuevo"}-new`;
 
   return (
     <div>
+      <datalist id={countryListId}>
+        {paisesActivos.map(country => <option key={country} value={country} />)}
+      </datalist>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
         <span style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase"}}>{tipo === "carga" ? "Carga principal" : "Descarga principal"}</span>
         <span style={{fontSize:11,color:"var(--text5)"}}>-&gt; {mainLugar||"Sin direccion"} - {mainFecha||"Sin fecha"}{mainHora?` - ${mainHora}`:""}</span>
@@ -3074,6 +3350,9 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           {stopsOrdenados.map((d, i) => {
             const isPrimary = i === 0;
             const isDragging = dragIdx === i;
+            const stopPais = stopCountryInputValue(d, "España");
+            const stopRegions = getRegionsForCountry(stopPais);
+            const stopRegionListId = `regiones-${tipo}-${pedidoId || "nuevo"}-${i}`;
             return (
             <div
               key={`${key}-${i}-${stopAddress(d) || d.cliente_nombre || "stop"}`}
@@ -3110,6 +3389,29 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                   {d.bultos && <span style={{marginRight:8}}>{d.bultos} bultos</span>}
                   {Number(d.precio||0) > 0 && <span style={{color:"var(--green)",fontWeight:700}}>+{Number(d.precio).toFixed(2)} EUR</span>}
                 </div>
+                <datalist id={stopRegionListId}>
+                  {stopRegions.map(region => <option key={region} value={region} />)}
+                </datalist>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6,maxWidth:520}}>
+                  <input
+                    list={countryListId}
+                    style={inp}
+                    disabled={disabled}
+                    value={stopPais}
+                    onChange={e=>updateStop(i, { pais:e.target.value, provincia:"" })}
+                    onKeyDown={e=>completeOnTab(e, Array.from(new Set([...paisesActivos, stopPais])), stopPais, value=>updateStop(i, { pais:value, provincia:"" }))}
+                    placeholder="País"
+                  />
+                  <input
+                    list={stopRegionListId}
+                    style={inp}
+                    disabled={disabled}
+                    value={stopRegion(d)}
+                    onChange={e=>updateStop(i, { provincia:e.target.value })}
+                    onKeyDown={e=>completeOnTab(e, stopRegions, stopRegion(d), value=>updateStop(i, { provincia:value }))}
+                    placeholder="Provincia / región"
+                  />
+                </div>
               </div>
               {!disabled && (
                 <div style={{display:"flex",gap:2,alignItems:"center"}}>
@@ -3126,6 +3428,48 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
 
       {!disabled && (adding ? (
         <div style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:12,marginTop:6}}>
+          <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,padding:10,marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:900,color:"var(--text)",textTransform:"uppercase",letterSpacing:".04em"}}>Buscar punto de {label}</div>
+                <div style={{fontSize:11,color:"var(--text5)"}}>Selecciona un punto guardado o crealo si no existe.</div>
+              </div>
+              <button
+                type="button"
+                onClick={abrirCrearPunto}
+                disabled={!String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()}
+                style={{padding:"6px 12px",borderRadius:7,border:"1px solid var(--border2)",background:"rgba(20,184,166,.08)",color:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"var(--accent)":"var(--text5)",fontSize:12,fontWeight:800,cursor:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"pointer":"not-allowed"}}
+              >
+                Crear punto
+              </button>
+            </div>
+            <input
+              style={{...inp,width:"100%",boxSizing:"border-box"}}
+              placeholder={`Buscar por nombre, direccion o poblacion de ${label}...`}
+              value={puntoQuery}
+              onChange={e=>setPuntoQuery(e.target.value)}
+            />
+            {puntosBusqueda.length > 0 && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8,marginTop:8}}>
+                {puntosBusqueda.map(p=>(
+                  <div key={p.id || `${p.nombre}-${p.direccion}`} style={{border:"1px solid var(--border2)",borderRadius:8,padding:9,background:"var(--bg3)"}}>
+                    <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{p.nombre || "Punto sin nombre"}</div>
+                    <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>{p.direccion || "-"}{p.ciudad ? ` · ${p.ciudad}` : ""}</div>
+                    <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+                      <button type="button" onClick={()=>usarPuntoBuscado(p, "principal")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--accent)",background:"rgba(20,184,166,.08)",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Usar principal</button>
+                      <button type="button" onClick={()=>usarPuntoBuscado(p, "adicional")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Anadir parada</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {noExistePuntoBusqueda && (
+              <div style={{marginTop:8,padding:9,borderRadius:8,border:"1px solid rgba(245,158,11,.35)",background:"rgba(245,158,11,.08)",display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                <span style={{fontSize:12,color:"var(--text4)"}}>No hay ningun punto guardado con esa busqueda.</span>
+                <button type="button" onClick={abrirCrearPunto} style={{padding:"5px 12px",borderRadius:6,border:"1px solid rgba(245,158,11,.45)",background:"rgba(245,158,11,.12)",color:"var(--orange)",fontSize:12,fontWeight:800,cursor:"pointer"}}>Crear "{puntoQuery.trim()}"</button>
+              </div>
+            )}
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:6,marginBottom:6}}>
             {puntosFiltrados.length > 0 && (
               <select
@@ -3159,6 +3503,25 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               onBlur={e=>aplicarPuntoGuardado(buscarPuntoExacto(e.target.value))}
             />
             <input style={{...inp,gridColumn:"1/-1"}} placeholder="Enlace Google Maps (opcional)" value={newStop.google_maps_url||""} onChange={e=>setNewStop(p=>({...p,google_maps_url:e.target.value}))}/>
+            <datalist id={newStopRegionListId}>
+              {newStopRegions.map(region => <option key={region} value={region} />)}
+            </datalist>
+            <input
+              list={countryListId}
+              style={inp}
+              placeholder="País"
+              value={newStopPais}
+              onChange={e=>setNewStop(p=>({...p,pais:e.target.value,provincia:""}))}
+              onKeyDown={e=>completeOnTab(e, Array.from(new Set([...paisesActivos, newStopPais])), newStopPais, value=>setNewStop(p=>({...p,pais:value,provincia:""})))}
+            />
+            <input
+              list={newStopRegionListId}
+              style={inp}
+              placeholder="Provincia / región"
+              value={newStop.provincia || ""}
+              onChange={e=>setNewStop(p=>({...p,provincia:e.target.value}))}
+              onKeyDown={e=>completeOnTab(e, newStopRegions, newStop.provincia || "", value=>setNewStop(p=>({...p,provincia:value})))}
+            />
             <input
               list={puntosListId}
               style={inp}
@@ -3184,9 +3547,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           </div>
           <div style={{display:"flex",gap:6}}>
             <button type="button" onClick={addParada} style={{padding:"5px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Anadir {label}</button>
-            <button type="button" onClick={()=>{
-              setPoiDraft({...newStop, nombre:newStop.cliente_nombre || newStop.direccion, tipo});
-            }} disabled={!newStop.direccion.trim()} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:newStop.direccion.trim()?"var(--accent)":"var(--text5)",fontSize:12,cursor:newStop.direccion.trim()?"pointer":"not-allowed"}}>
+            <button type="button" onClick={abrirCrearPunto} disabled={!String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"var(--accent)":"var(--text5)",fontSize:12,cursor:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"pointer":"not-allowed"}}>
               {buscarPuntoExacto(newStop.cliente_nombre || newStop.direccion) ? "Actualizar punto" : "Crear punto"}
             </button>
             <button type="button" onClick={()=>setAdding(false)} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
@@ -3194,7 +3555,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
         </div>
       ) : (
         <button type="button" onClick={()=>setAdding(true)} style={{padding:"5px 14px",borderRadius:6,border:"1px dashed var(--border2)",background:"transparent",color:"var(--text5)",fontSize:12,cursor:"pointer",marginTop:4}}>
-          + Anadir {label} adicional
+          Buscar / crear punto de {label}
         </button>
       ))}
       {poiDraft && (
@@ -3204,6 +3565,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           onSave={(next, saved)=>{
             setPuntosInteres(next);
             setNewStop(p=>({...p,...puntoToStop(saved)}));
+            setPuntoQuery(saved?.nombre || saved?.direccion || "");
           }}
         />
       )}
@@ -3297,7 +3659,10 @@ function OrdenCargaModal({ pedido, onClose }) {
     const fmtNum = v => Number(v || 0).toLocaleString("es-ES", { maximumFractionDigits: 3 });
     const empCol  = esCol ? "#6d28d9" : "#1d4ed8";
     const empBg   = esCol ? "#ede9fe" : "#dbeafe";
-    const empresaDireccion = [empresa.domicilio, empresa.cp, empresa.municipio, empresa.provincia, empresa.pais].filter(Boolean).join(", ");
+    const empresaDireccion = empresaPostalAddress(empresa);
+    const cargaPostalOrden = stopPostalLine(cargaPrincipal, pedido.origen_provincia || "", pedido.origen_pais || "España");
+    const descargaPostalOrden = stopPostalLine(descargaPrincipal, pedido.destino_provincia || "", pedido.destino_pais || "España");
+    const albaranesDireccionPostal = empresaDireccion || "Direccion postal pendiente de configurar en Mi Empresa";
     const logoHtml = getLogoDataUrl() ? `<img src="${getLogoDataUrl()}" style="max-height:52px;max-width:160px;object-fit:contain;margin-bottom:6px;display:block" alt="">` : "";
     const emailAlbaranesColaborador = joinEmailList(
       [pedido.cliente_emails_albaranes, pedido.emails_albaranes, pedido.cliente_email_facturacion, pedido.cliente_email],
@@ -3307,6 +3672,7 @@ function OrdenCargaModal({ pedido, onClose }) {
 <div class="sec">
   <div class="sec-t">Envio de albaranes</div>
   <div class="f"><div class="fl">Destinatarios de albaranes firmados</div><div class="fv">${htmlEscape(emailAlbaranesColaborador)}</div></div>
+  <div class="f" style="margin-top:8px"><div class="fl">Envio postal obligatorio de albaranes</div><div class="fv">Los albaranes originales deben remitirse a: ${htmlEscape(albaranesDireccionPostal)}</div></div>
 </div>`;
     const fallbackRoutePlaces = getRoutePlaces({ ...pedido, origen: origenOrden, destino: destinoOrden })
       .filter((place, idx, arr) => arr.findIndex(x => routePlaceKey(x) === routePlaceKey(place)) === idx);
@@ -3355,7 +3721,7 @@ function OrdenCargaModal({ pedido, onClose }) {
     <div class="price-cell"><div class="fl">Referencia de pedido</div><div class="fv">${htmlEscape(referenciaPedido || "-")}</div></div>
   </div>
   <div class="notice" style="margin-top:10px"><strong>Forma de pago:</strong> ${htmlEscape(condicionesPagoColaborador)}</div>
-  <div class="notice"><strong>PENDIENTE DE PAGO</strong> - Adjuntar factura del colaborador. Enviar albaranes firmados a: ${emailAlbaranesColaborador}</div>
+  <div class="notice"><strong>PENDIENTE DE PAGO</strong> - Adjuntar factura del colaborador. Enviar copia digital a: ${emailAlbaranesColaborador}. Los albaranes originales deben remitirse por correo postal a: ${htmlEscape(albaranesDireccionPostal)}</div>
 </div>` : "";
     const dcdReady = !!docControl?.status?.ready;
     const dcdSupportUrl = docControl?.documento?.soporte_url || "";
@@ -3498,8 +3864,8 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
   <div class="sec">
     <div class="sec-t">Ruta y fechas</div>
     <div class="g2" style="margin-bottom:8px">
-      <div class="f hl"><div class="fl">Origen -> Punto de carga</div><div class="fv big">${htmlEscape(origenNombreOrden || origenOrden || "-")}</div>${origenNombreOrden && origenOrden ? `<div class="map-address">${htmlEscape(origenOrden)}</div>` : ""}${pedido.ventana_carga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_carga}</div>`:""}${cargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(cargaPrincipal.google_maps_url)}">${htmlEscape(cargaPrincipal.google_maps_url)}</a></div>`:""}</div>
-      <div class="f hl"><div class="fl">Destino -> Punto de entrega</div><div class="fv big">${htmlEscape(destinoNombreOrden || destinoOrden || "-")}</div>${destinoNombreOrden && destinoOrden ? `<div class="map-address">${htmlEscape(destinoOrden)}</div>` : ""}${pedido.ventana_descarga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_descarga}</div>`:""}${descargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(descargaPrincipal.google_maps_url)}">${htmlEscape(descargaPrincipal.google_maps_url)}</a></div>`:""}</div>
+      <div class="f hl"><div class="fl">Origen -> Punto de carga</div><div class="fv big">${htmlEscape(origenNombreOrden || origenOrden || "-")}</div>${origenNombreOrden && origenOrden ? `<div class="map-address">${htmlEscape(origenOrden)}</div>` : ""}${cargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(cargaPostalOrden)}</div>` : ""}${pedido.ventana_carga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_carga}</div>`:""}${cargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(cargaPrincipal.google_maps_url)}">${htmlEscape(cargaPrincipal.google_maps_url)}</a></div>`:""}</div>
+      <div class="f hl"><div class="fl">Destino -> Punto de entrega</div><div class="fv big">${htmlEscape(destinoNombreOrden || destinoOrden || "-")}</div>${destinoNombreOrden && destinoOrden ? `<div class="map-address">${htmlEscape(destinoOrden)}</div>` : ""}${descargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(descargaPostalOrden)}</div>` : ""}${pedido.ventana_descarga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_descarga}</div>`:""}${descargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(descargaPrincipal.google_maps_url)}">${htmlEscape(descargaPrincipal.google_maps_url)}</a></div>`:""}</div>
     </div>
     <div class="g3">
       <div class="f"><div class="fl">Fecha carga</div><div class="fv">${fmtDate(pedido.fecha_carga)}</div></div>
@@ -3565,6 +3931,7 @@ ${bloqueEconomicoColaborador}
     <li><strong>Puntualidad:</strong> La puntualidad en carga y descarga es esencial. Los retrasos no justificados pueden generar penalizaciones.</li>
     <li><strong>Contacto con clientes:</strong> Queda expresamente prohibido el contacto directo con los clientes de la empresa contratante.</li>
     <li><strong>Documentacion:</strong> No se pagara la factura hasta recibir todos los documentos de transporte originales firmados por el destinatario (CMR o carta de porte y albaran) en maximo 48h.</li>
+    <li><strong>Albaranes originales:</strong> Deben enviarse por correo postal a ${htmlEscape(albaranesDireccionPostal)}.</li>
     <li><strong>Mercancia:</strong> El colaborador es responsable de la mercancia desde la carga hasta la entrega.</li>
     <li><strong>Facturacion:</strong> Las facturas deben emitirse a: <strong>${empresa.razon_social||empresa.nombre||"-"} | CIF: ${empresa.cif||"-"}</strong>.</li>
   </ol>
@@ -4860,6 +5227,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   pedidos, clientes: clientesProp, vehiculos, choferes, rutas: rutas_prop, colaboradores, canEdit,
   guidedActive = false, onGuidedProgress,
 }) {
+  const { user } = useAuth();
   const asignacionRef = React.useRef(null);
   const [clientes, setClientes] = useState(clientesProp || []);
   const [rutas,    setRutas]    = useState(rutas_prop || []);
@@ -4927,8 +5295,8 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [desvinculado, setDesvinculado] = useState(false);
   const [form,       setForm]       = useState(
     editando
-      ? normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""})
-      : { estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" }
+      ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""}))
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
   );
   const [saving,     setSaving]     = useState(false);
   const [nombreBusqueda, setNombreBusqueda]= useState("");
@@ -4952,11 +5320,12 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const initialFormRef = React.useRef(JSON.stringify(form));
   const rutasCreadasRef = React.useRef(new Set());
   const riesgoConfirmadoRef = React.useRef(new Map());
+  const bloqueoClienteNoticeRef = React.useRef("");
 
   useEffect(() => {
     const nextForm = editando
-      ? normalizePedidoTarifaDraft({ ...editando, remolque_id_manual: editando.remolque_id || "" })
-      : { estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, intercambio_palets:false, requiere_cinchas:true };
+      ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({ ...editando, remolque_id_manual: editando.remolque_id || "" }))
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, intercambio_palets:false, requiere_cinchas:true });
     setForm(nextForm);
     setColaboradorBusqueda("");
     setPendingDocs(Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
@@ -5078,6 +5447,9 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const rutasCompatibles = rutas.filter(rutaCompatibleConConjunto);
   const rutaSeleccionada = rutas.find(r => r.id === form.ruta_id);
   const clienteRiesgoPedido = buildClienteRiesgoPedidoAvisos(clienteRiesgo, calcImporte(form));
+  const clienteSeleccionadoModal = clientes.find(c => String(c.id || "") === String(form.cliente_id || "")) || null;
+  const bloqueoClienteModal = clienteCreationBlock(clienteSeleccionadoModal, clienteRiesgoPedido, user);
+  const cmrInternacionalModal = cmrTypeForPedidoStops(form) === "internacional";
   const rutaIncompatible = rutaSeleccionada && !rutaCompatibleConConjunto(rutaSeleccionada);
   const remolquesCompatiblesRuta = rutaSeleccionada
     ? vehiculosLocal.filter(v => {
@@ -5090,6 +5462,14 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
         return requerido === "cualquiera" || tipoVehiculoDeTexto([v.clase,v.tipo,v.marca,v.modelo,v.notas_operacion].filter(Boolean).join(" ")) === requerido;
       })
     : [];
+
+  useEffect(() => {
+    if (editando?.id || !bloqueoClienteModal || !form.cliente_id) return;
+    const key = `${form.cliente_id}:${bloqueoClienteModal.type}:${bloqueoClienteModal.message}`;
+    if (bloqueoClienteNoticeRef.current === key) return;
+    bloqueoClienteNoticeRef.current = key;
+    notify(bloqueoClienteModal.message, "error");
+  }, [bloqueoClienteModal, editando?.id, form.cliente_id]);
 
 // ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Calcular km por carretera via OpenRouteService (gratuito) ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
 async function calcularKmRuta(origen, destino, puntos = null) {
@@ -5126,6 +5506,7 @@ function GestionPuntosInteresModal({ onClose, onApply }) {
   const [puntos, setPuntos] = useState(getPuntosInteres);
   const [editing, setEditing] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [pointSearch, setPointSearch] = useState("");
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -5154,6 +5535,21 @@ function GestionPuntosInteresModal({ onClose, onApply }) {
     setPuntos(next);
     onApply?.(next);
   }
+  const qPoint = normalizePlaceText(pointSearch);
+  const puntosFiltrados = qPoint
+    ? puntos.filter(point => [
+        point.nombre,
+        point.direccion,
+        point.ciudad,
+        point.provincia,
+        point.pais,
+        point.cif,
+      ].some(value => normalizePlaceText(value).includes(qPoint)))
+    : puntos;
+  const crearDesdeBusqueda = () => {
+    const text = pointSearch.trim();
+    setEditing({ nombre:text, direccion:text, tipo:"ambos", pais:"EspaÃ±a" });
+  };
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",zIndex:540,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -5169,19 +5565,38 @@ function GestionPuntosInteresModal({ onClose, onApply }) {
           </div>
         </div>
         <div style={{padding:20,overflowY:"auto"}}>
+          <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:14,flexWrap:"wrap"}}>
+            <input
+              value={pointSearch}
+              onChange={e=>setPointSearch(e.target.value)}
+              placeholder="Buscar punto por nombre, direccion, poblacion, provincia..."
+              style={{...S.input,flex:"1 1 320px"}}
+            />
+            <button
+              type="button"
+              onClick={crearDesdeBusqueda}
+              disabled={!pointSearch.trim()}
+              style={{...S.btn,background:pointSearch.trim()?"rgba(20,184,166,.12)":"var(--bg4)",color:pointSearch.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",cursor:pointSearch.trim()?"pointer":"not-allowed"}}
+            >
+              Crear desde busqueda
+            </button>
+          </div>
           {loading ? (
             <div style={{fontSize:12,color:"var(--text5)"}}>Cargando puntos guardados...</div>
-          ) : !puntos.length ? (
-            <div style={{fontSize:12,color:"var(--text5)"}}>Todavia no hay puntos guardados.</div>
+          ) : !puntosFiltrados.length ? (
+            <div style={{fontSize:12,color:"var(--text5)"}}>
+              {pointSearch.trim() ? "No hay puntos con esa busqueda. Puedes crearlo con el boton superior." : "Todavia no hay puntos guardados."}
+            </div>
           ) : (
             <div style={{display:"grid",gap:10}}>
-              {puntos.map(point => (
+              {puntosFiltrados.map(point => (
                 <div key={point.id} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px",display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"start"}}>
                   <div>
                     <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{point.nombre}</div>
                     <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion}</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
                       {point.tipo && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(59,130,246,.12)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.22)"}}>{point.tipo}</span>}
+                      {(point.pais || point.provincia) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.22)"}}>{[point.provincia, point.pais].filter(Boolean).join(", ")}</span>}
                       {point.ventana && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)"}}>{point.ventana}</span>}
                       {point.google_maps_url && <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--accent)"}}>Google Maps</a>}
                     </div>
@@ -5305,10 +5720,25 @@ async function maybeCrearRutaClienteDesdePedido() {
   return nueva.ruta_id;
 }
 
+function pedidoTieneContenidoReal(draft = {}) {
+  const camposTexto = [
+    "cliente_id", "cliente_nombre", "origen", "destino", "vehiculo_id", "chofer_id", "chofer2_id",
+    "remolque_id_manual", "matricula_colaborador", "colaborador_id", "ruta_id", "referencia_cliente",
+    "notas", "observaciones", "km_ruta", "km_vacio", "precio_unitario", "importe_minimo",
+    "precio_colaborador", "precio_colaborador_unitario", "extracostes", "bultos", "peso_kg",
+  ];
+  if (camposTexto.some(key => String(draft[key] ?? "").trim())) return true;
+  const hasStops = value => parseStops(value).some(stop => stopAddress(stop) || stop?.cliente_nombre || stop?.google_maps_url);
+  if (hasStops(draft.puntos_carga) || hasStops(draft.puntos_descarga)) return true;
+  if (Array.isArray(pendingDocs) && pendingDocs.length) return true;
+  return false;
+}
+
 async function requestClose() {
   if (saving) return;
   if (editando?._readonly && !desvinculado) { onClose(); return; }
   const changed = JSON.stringify(form) !== initialFormRef.current;
+  if (!editando && !pedidoTieneContenidoReal(form)) { onClose(); return; }
   if (editando && !changed) { onClose(); return; }
   const guardarAntes = await confirmDialog({
     title: "Cambios sin guardar",
@@ -5442,6 +5872,10 @@ async function guardarLegacy() {
 async function guardar() {
   if (!form.cliente_id) { notify("Selecciona un cliente", "warning"); return; }
   if (!form.fecha_carga) { notify("La fecha de carga es obligatoria.", "warning"); return; }
+  if (!editando?.id && bloqueoClienteModal) {
+    notify(bloqueoClienteModal.message, "error");
+    return;
+  }
   if (rutaIncompatible) {
     notify("La ruta seleccionada no es compatible con el remolque actual. Cambia el remolque antes de guardar.", "warning");
     return;
@@ -5791,6 +6225,11 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                   );
                 })()}
               </div>
+              {!editando?.id && bloqueoClienteModal && (
+                <div style={{gridColumn:"1/-1",padding:"10px 12px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,fontSize:12,color:"#b91c1c",fontWeight:800}}>
+                  {bloqueoClienteModal.title}: {bloqueoClienteModal.message}
+                </div>
+              )}
               {form.cliente_id && clienteRiesgoLoading && (
                 <div style={{gridColumn:"1/-1",padding:"8px 12px",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7,fontSize:12,color:"var(--text4)"}}>
                   Revisando cobros pendientes y limite de riesgo del cliente...
@@ -5827,6 +6266,11 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
               {form.cliente_id && rutas.length > 0 && (
                 <div style={{gridColumn:"1/-1",padding:"8px 12px",background:"rgba(16,185,129,.07)",border:"1px solid rgba(16,185,129,.2)",borderRadius:7,fontSize:12,color:"var(--text3)"}}>
                   Hay {rutas.length} tarifa(s) guardada(s) para este cliente. Usa "Cargar tarifa / ruta guardada" para rellenar origen, destino, km, precio, minimos y recargos.
+                </div>
+              )}
+              {cmrInternacionalModal && (
+                <div style={{gridColumn:"1/-1",padding:"9px 12px",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.22)",borderRadius:8,fontSize:12,color:"var(--text3)",lineHeight:1.35}}>
+                  <strong style={{color:"#2563eb"}}>eCMR internacional:</strong> origen o destino fuera de España. El documento se preparara como CMR internacional con trazabilidad, firmas/evidencias, historial y exportacion eFTI/eCMR cuando generes la carta de porte/documento digital.
                 </div>
               )}
               {/* Regla tarifaria por ruta */}
@@ -5959,16 +6403,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                   <PuntoInteresPicker
                     placeholder="Usar punto como destino"
                     onPick={p=>setForm(x=>{
-                      return {
-                        ...x,
-                        destino:(p.nombre || p.direccion || "").toUpperCase(),
-                        ventana_descarga:x.ventana_descarga || p.ventana || "",
-                        puntos_descarga: updatePrimaryStop(
-                          x.puntos_descarga,
-                          puntoToStop(p),
-                          (p.nombre || p.direccion || "").toUpperCase()
-                        ),
-                      };
+                      return applyPuntoDescargaToDraft(x, p);
                     })}
                     style={{...S.sel,flex:1}}
                   />
@@ -6776,6 +7211,15 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
 function CartaPorteModal({ data, onClose }) {
   const docNumero = data.carta_porte_numero || data.numero || "";
   const pedidoNumero = data.pedido_numero || data.numero || "";
+  const cargaPrincipalGeo = parseStops(data.puntos_carga)[0] || {};
+  const descargaPrincipalGeo = parseStops(data.puntos_descarga)[0] || {};
+  const cmrTipo = data.cmr_tipo || cmrTypeForPedidoStops(data);
+  const isCmrInternacional = cmrTipo === "internacional";
+  const documentoTitulo = isCmrInternacional ? "CMR Internacional" : "Carta de Porte";
+  const origenGeo = [stopRegion(cargaPrincipalGeo, data.origen_provincia || ""), stopCountry(cargaPrincipalGeo, data.origen_pais || "España")].filter(Boolean).join(", ");
+  const destinoGeo = [stopRegion(descargaPrincipalGeo, data.destino_provincia || ""), stopCountry(descargaPrincipalGeo, data.destino_pais || "España")].filter(Boolean).join(", ");
+  const origenPostalGeo = stopPostalLine(cargaPrincipalGeo, data.origen_provincia || "", data.origen_pais || "España");
+  const destinoPostalGeo = stopPostalLine(descargaPrincipalGeo, data.destino_provincia || "", data.destino_pais || "España");
   const [firmaMode, setFirmaMode] = React.useState(null); // null | 'remitente' | 'destinatario' | 'chofer'
   const [firmas, setFirmas] = React.useState({
     remitente:    data.firma_destinatario || null,
@@ -6844,7 +7288,7 @@ function CartaPorteModal({ data, onClose }) {
   function generarHTML() {
     const d = data;
     return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>Carta de Porte - ${docNumero}</title>
+<title>${documentoTitulo} - ${docNumero}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px}
@@ -6871,6 +7315,8 @@ function CartaPorteModal({ data, onClose }) {
   .status{display:inline-block;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700}
   .badge-ok{background:#d1fae5;color:#065f46}
   .badge-warn{background:#fef3c7;color:#92400e}
+  .cmr-note{border-color:#0f766e;background:#f0fdfa;margin-bottom:12px}
+  .cmr-note h2{color:#0f766e;border-bottom-color:#0f766e}
   @media print{@page{margin:1cm}body{padding:0}}
 </style></head><body>
 <div class="header">
@@ -6880,7 +7326,7 @@ function CartaPorteModal({ data, onClose }) {
     <div style="color:#555">${d.empresa_email||""}</div>
   </div>
   <div class="doc-info">
-    <div class="doc-label">Carta de Porte</div>
+    <div class="doc-label">${documentoTitulo}</div>
     <div class="doc-num">${docNumero||"-"}</div>
     <div style="font-size:10px;color:#555;margin-top:4px">Pedido: ${pedidoNumero||"-"}</div>
     <div style="font-size:10px;color:#555;margin-top:4px">Fecha: ${new Date().toLocaleDateString("es-ES")}</div>
@@ -6889,6 +7335,18 @@ function CartaPorteModal({ data, onClose }) {
     </div>
   </div>
 </div>
+
+${isCmrInternacional ? `<div class="box cmr-note">
+  <h2>CMR internacional</h2>
+  <div class="grid3" style="margin-bottom:0">
+    <div><div class="lbl">CP / poblacion / provincia carga</div><div class="val">${origenPostalGeo || origenGeo || "-"}</div></div>
+    <div><div class="lbl">CP / poblacion / provincia entrega</div><div class="val">${destinoPostalGeo || destinoGeo || "-"}</div></div>
+    <div><div class="lbl">Regimen</div><div class="val">Transporte internacional por carretera sujeto al Convenio CMR cuando proceda</div></div>
+  </div>
+  <div style="margin-top:8px;font-size:10px;color:#134e4a">
+    Verifica remitente, transportista, destinatario, lugar y fecha de toma de mercancia, lugar de entrega, descripcion, bultos, marcas/numeros, peso/cantidad, gastos, instrucciones y documentos entregados.
+  </div>
+</div>` : ""}
 
 <div class="grid2">
   <div class="box">
@@ -6913,6 +7371,10 @@ function CartaPorteModal({ data, onClose }) {
   <div class="box">
     <h2>Origen (Carga)</h2>
     <div class="val-big">${d.origen||"-"}</div>
+    <div class="lbl" style="margin-top:6px">Pais / provincia</div>
+    <div class="val">${origenGeo || "-"}</div>
+    <div class="lbl" style="margin-top:6px">Codigo postal / poblacion / provincia</div>
+    <div class="val">${origenPostalGeo || "-"}</div>
     <div class="lbl" style="margin-top:8px">Fecha de carga</div>
     <div class="val">${new Date(d.fecha_carga||Date.now()).toLocaleDateString("es-ES")}${d.hora_carga?" - "+d.hora_carga:""}</div>
     ${d.ventana_carga?`<div class="lbl" style="margin-top:4px">Ventana horaria</div><div class="val">${d.ventana_carga}</div>`:""}
@@ -6921,6 +7383,10 @@ function CartaPorteModal({ data, onClose }) {
   <div class="box">
     <h2>Destino (Descarga)</h2>
     <div class="val-big">${d.destino||"-"}</div>
+    <div class="lbl" style="margin-top:6px">Pais / provincia</div>
+    <div class="val">${destinoGeo || "-"}</div>
+    <div class="lbl" style="margin-top:6px">Codigo postal / poblacion / provincia</div>
+    <div class="val">${destinoPostalGeo || "-"}</div>
     <div class="lbl" style="margin-top:8px">Fecha de entrega</div>
     <div class="val">${d.fecha_entrega?new Date(d.fecha_entrega).toLocaleDateString("es-ES"):"-"}${d.hora_descarga?" - "+d.hora_descarga:""}</div>
     ${d.ventana_descarga?`<div class="lbl" style="margin-top:4px">Ventana horaria</div><div class="val">${d.ventana_descarga}</div>`:""}
@@ -6942,6 +7408,23 @@ function CartaPorteModal({ data, onClose }) {
     <td>${d.importe?Number(d.importe).toLocaleString("es-ES",{minimumFractionDigits:2})+" EUR":"-"}</td>
   </tr></tbody>
 </table>
+
+${isCmrInternacional ? `<div class="grid2">
+  <div class="box">
+    <h2>Documentos / Aduanas</h2>
+    <div class="lbl">Documentos entregados al transportista</div>
+    <div class="val">${d.documentos_aduaneros || d.condiciones_adicionales || "-"}</div>
+    <div class="lbl" style="margin-top:6px">Instrucciones del remitente</div>
+    <div class="val">${d.instrucciones_aduaneras || d.notas || "-"}</div>
+  </div>
+  <div class="box">
+    <h2>Reservas y gastos</h2>
+    <div class="lbl">Reservas del transportista</div>
+    <div class="val">${d.reservas_transportista || "-"}</div>
+    <div class="lbl" style="margin-top:6px">Gastos / porte</div>
+    <div class="val">${d.importe?Number(d.importe).toLocaleString("es-ES",{minimumFractionDigits:2})+" EUR":"-"}</div>
+  </div>
+</div>` : ""}
 
 <div class="grid3">
   <div class="box">
@@ -7015,7 +7498,7 @@ ${d.notas?`<div class="box" style="margin-bottom:12px"><h2>Observaciones</h2><di
       <div style={O.modal}>
         <div style={O.header}>
           <div>
-            <div style={{fontWeight:800,fontSize:16,color:"var(--text)"}}>Carta de Porte - {docNumero}</div>
+            <div style={{fontWeight:800,fontSize:16,color:"var(--text)"}}>{documentoTitulo} - {docNumero}</div>
             <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>
               Pedido {pedidoNumero} · {d.origen} -> {d.destino} · {fmtD(d.fecha_carga)}
             </div>
@@ -7024,6 +7507,14 @@ ${d.notas?`<div class="box" style="margin-bottom:12px"><h2>Observaciones</h2><di
         </div>
 
         <div style={O.body}>
+          {isCmrInternacional && (
+            <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.24)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:800,color:"#0f766e"}}>CMR internacional</div>
+              <div style={{fontSize:11,color:"var(--text3)",marginTop:4}}>
+                Se genera como transporte internacional porque el pais de carga o descarga no es España. Revisa documentos aduaneros e instrucciones antes de imprimir o firmar.
+              </div>
+            </div>
+          )}
           {/* Preview compacto */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
             {[
@@ -7031,6 +7522,10 @@ ${d.notas?`<div class="box" style="margin-bottom:12px"><h2>Observaciones</h2><di
               {l:"Cliente / Remitente", v:d.cliente_nombre||"-"},
               {l:"Origen", v:d.origen||"-"},
               {l:"Destino", v:d.destino||"-"},
+              {l:"Pais / provincia carga", v:origenGeo || "-"},
+              {l:"Pais / provincia descarga", v:destinoGeo || "-"},
+              {l:"CP / poblacion carga", v:origenPostalGeo || "-"},
+              {l:"CP / poblacion descarga", v:destinoPostalGeo || "-"},
               {l:"Fecha carga", v:fmtD(d.fecha_carga)},
               {l:"Fecha entrega", v:fmtD(d.fecha_entrega)},
               {l:"Vehiculo", v:[d.veh_matricula,d.veh_marca,d.veh_modelo].filter(Boolean).join(" ")||"-"},
@@ -7148,7 +7643,7 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
   const fechaDescarga = toDateInputValue(defaults.fecha_descarga || fechaCarga) || fechaCarga;
   const remolqueId = defaults.remolque_id || vehiculo?.remolque_id || "";
 
-  return {
+  return withPedidoGeoDefaults({
     estado: "pendiente",
     tipo_precio: "viaje",
     fecha_pedido: toDateInputValue(defaults.fecha_pedido) || fechaCarga,
@@ -7168,7 +7663,7 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
     aviso_completar: "Pedido iniciado desde Gestion de trafico: completar cliente, ruta, precio y documentacion.",
     _focus_asignacion: true,
     _nuevo_desde_trafico: true,
-  };
+  });
 }
 
 function readGuidedPedidoTutorial() {
@@ -7497,10 +7992,11 @@ export default function Pedidos() {
         // Don't send multi-estado to backend - filter client-side below
       }
       else if (filtroEst !== "todos") { params.estado = filtroEst; }
-      if (filtroDesde) params.desde = filtroDesde;
-      if (filtroHasta) params.hasta = filtroHasta;
       if (debouncedQ) params.q = debouncedQ;
       if (filtroCliente) params.cliente_id = filtroCliente;
+      const busquedaHistorica = Boolean(debouncedQ || filtroCliente);
+      if (!busquedaHistorica && filtroDesde) params.desde = filtroDesde;
+      if (!busquedaHistorica && filtroHasta) params.hasta = filtroHasta;
       params.page  = page;
       params.limit = PAGE_SIZE;
         const [p, c, v, ch, r, col, cfgEmpresa] = await Promise.all([
@@ -7592,8 +8088,43 @@ export default function Pedidos() {
     return () => window.clearTimeout(t);
   }, [focusPedido, loading, pedidos]);
 
-  async function cambiarEstado(id, estado) {
+  function empresaRequiereMotivoCancelacion() {
+    const cfg = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && typeof window.__TMS_EMPRESA_CONFIG === "object")
+      ? window.__TMS_EMPRESA_CONFIG
+      : {};
+    const trafico = cfg?.cfg_trafico || {};
+    return trafico.requerir_motivo_cancelacion !== false && trafico.requiere_motivo_cancelacion !== false;
+  }
+
+  async function solicitarCancelacionPedido(p) {
+    if (!p?.id) return;
+    let motivo = "";
+    if (empresaRequiereMotivoCancelacion()) {
+      const input = window.prompt(`Motivo de cancelacion para ${p.numero || "este pedido"}:`, p.motivo_cancelacion || "");
+      if (input === null) return;
+      motivo = String(input || "").trim();
+      if (!motivo) {
+        notify("Indica un motivo para cancelar el pedido.", "warning");
+        return;
+      }
+    } else {
+      const ok = await confirmDialog({
+        title: "Cancelar pedido",
+        message: `Cancelar el pedido ${p.numero || ""}?`,
+        confirmText: "Cancelar pedido",
+        tone: "warning",
+      });
+      if (!ok) return;
+    }
+    await cambiarEstado(p.id, "cancelado", { motivo_cancelacion: motivo, __fromCancelFlow: true });
+  }
+
+  async function cambiarEstado(id, estado, extra = {}) {
     const p = pedidos.find(x => x.id === id);
+    if (estado === "cancelado" && !extra.__fromCancelFlow) {
+      await solicitarCancelacionPedido(p);
+      return;
+    }
     if (pedidoTieneFacturaFinal(p)) {
       notify("No se puede cambiar el estado de un pedido facturado.", "warning");
       return;
@@ -7604,9 +8135,11 @@ export default function Pedidos() {
       return;
     }
     // Optimistic update - UI responds instantly
-    setPedidos(prev => prev.map(x => x.id===id ? {...x, estado} : x));
+    setPedidos(prev => prev.map(x => x.id===id ? {...x, estado, ...(estado === "cancelado" ? { motivo_cancelacion: extra.motivo_cancelacion || x.motivo_cancelacion || "" } : {})} : x));
     try {
-      await cambiarEstadoPedido(id, estado);
+      const payloadExtra = { ...extra };
+      delete payloadExtra.__fromCancelFlow;
+      await cambiarEstadoPedido(id, estado, payloadExtra);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: id, estado, source: "pedidos-estado" } }));
       // No need to full reload - optimistic update is correct
     } catch(e) {
@@ -8199,11 +8732,14 @@ export default function Pedidos() {
         ];
       })
     : pedidosAgrupados.flatMap(month => {
+        const showMonthGroup = pedidosAgrupados.length > 1;
         const monthCollapsed = !!collapsedClientes[month.key];
-        const entries = [{ _group: true, type: "month", key: month.key, label: month.label, count: month.count, collapsed: monthCollapsed }];
+        const entries = showMonthGroup
+          ? [{ _group: true, type: "month", key: month.key, label: month.label, count: month.count, collapsed: monthCollapsed }]
+          : [];
         if (monthCollapsed) return entries;
         month.weeks.forEach(week => {
-          const weekCollapsed = !!collapsedClientes[week.key];
+          const weekCollapsed = collapsedClientes[week.key] === undefined ? true : !!collapsedClientes[week.key];
           entries.push({ _group: true, type: "week", key: week.key, label: week.label, count: week.count, collapsed: weekCollapsed });
           if (weekCollapsed) return;
           week.days.forEach(day => {
@@ -8240,8 +8776,8 @@ export default function Pedidos() {
 
   return (
     <div style={S.page}>
-      <div style={S.title}>Pedidos / Trafico</div>
-      <div style={{display:"flex",gap:6,margin:"-6px 0 14px",flexWrap:"wrap"}}>
+      <div style={S.title}>Pedidos / Tráfico</div>
+      <div style={{display:"flex",gap:8,margin:"-4px 0 24px",flexWrap:"wrap"}}>
         {[
           ["lista", "Listado"],
           ["ia", "Bandeja IA"],
@@ -8249,34 +8785,34 @@ export default function Pedidos() {
           <button
             key={key}
             onClick={()=>setVistaPedidos(key)}
-            style={{...S.btn,padding:"7px 13px",background:vistaPedidos===key?"rgba(59,130,246,.14)":"var(--bg3)",color:vistaPedidos===key?"#60a5fa":"var(--text3)",border:vistaPedidos===key?"1px solid rgba(59,130,246,.30)":"1px solid var(--border2)"}}
+            style={{...S.btn,padding:"10px 16px",background:vistaPedidos===key?"#fff":"#fff",color:vistaPedidos===key?"#006f68":"#64748b",border:vistaPedidos===key?"1px solid #008b82":"1px solid #dbe5ec",boxShadow:vistaPedidos===key?"0 8px 18px rgba(0,111,104,.10)":"none"}}
           >
             {label}
           </button>
         ))}
       </div>
-      {totalAlertasCriticas > 0 ? (
-        <div style={{margin:"0 0 12px",padding:"10px 16px",background:"rgba(239,68,68,.05)",border:"1px solid rgba(239,68,68,.18)",borderRadius:9,display:"flex",flexDirection:"column",gap:8}}>
+      {totalAlertasCriticasPendientes > 0 ? (
+        <div style={{margin:"0 0 26px",padding:"18px 22px",background:"rgba(239,68,68,.05)",border:"1px solid rgba(239,68,68,.22)",borderRadius:12,display:"flex",flexDirection:"column",gap:10,boxShadow:"0 10px 24px rgba(239,68,68,.06)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
             <div style={{display:"flex",flexDirection:"column",gap:2}}>
-              <div style={{fontSize:12,fontWeight:800,color:"#ef4444"}}>
+              <div style={{fontSize:16,fontWeight:900,color:"#ef4444"}}>
                 Atencion: {totalAlertasCriticasPendientes} aviso{totalAlertasCriticasPendientes !== 1 ? "s" : ""} pendiente{totalAlertasCriticasPendientes !== 1 ? "s" : ""}
               </div>
-              <div style={{fontSize:11,color:"var(--text4)"}}>
+              <div style={{fontSize:14,color:"#64748b",marginTop:3}}>
                 {totalAlertasCriticas} pedido{totalAlertasCriticas !== 1 ? "s" : ""} critico{totalAlertasCriticas !== 1 ? "s" : ""} en total
               </div>
             </div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               <button
                 onClick={() => setCriticalPanelOpen(v => !v)}
-                style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)"}}
+                style={{...S.btn,padding:"10px 16px",fontSize:14,background:"#fff",color:"#475569",border:"1px solid #dbe5ec"}}
               >
                 {criticalPanelOpen ? "Ocultar avisos" : "Mostrar avisos"}
               </button>
               <button
                 onClick={() => marcarPedidosAvisosVisiblesLeidos(alertasCriticasPendientes)}
                 disabled={!totalAlertasCriticasPendientes}
-                style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.24)",opacity:totalAlertasCriticasPendientes?1:0.5,cursor:totalAlertasCriticasPendientes?"pointer":"not-allowed"}}
+                style={{...S.btn,padding:"10px 16px",fontSize:14,background:"rgba(16,185,129,.10)",color:"#008b82",border:"1px solid rgba(16,185,129,.24)",opacity:totalAlertasCriticasPendientes?1:0.5,cursor:totalAlertasCriticasPendientes?"pointer":"not-allowed"}}
               >
                 Marcar visibles leidos
               </button>
@@ -8285,14 +8821,14 @@ export default function Pedidos() {
                   <button
                     onClick={copiarCriticosSemanaSiguiente}
                     disabled={bulkCopying}
-                    style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(59,130,246,.10)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.24)",opacity:bulkCopying?0.6:1,cursor:bulkCopying?"not-allowed":"pointer"}}
+                    style={{...S.btn,padding:"10px 16px",fontSize:14,background:"rgba(79,70,229,.09)",color:"#4f46e5",border:"1px solid rgba(79,70,229,.20)",opacity:bulkCopying?0.6:1,cursor:bulkCopying?"not-allowed":"pointer"}}
                   >
                     {bulkCopying ? "Copiando..." : "Copiar criticos"}
                   </button>
                   <button
                     onClick={solicitarRetrasoCriticos}
                     disabled={bulkRescheduling}
-                    style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(245,158,11,.10)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.24)",opacity:bulkRescheduling?0.6:1,cursor:bulkRescheduling?"not-allowed":"pointer"}}
+                    style={{...S.btn,padding:"10px 16px",fontSize:14,background:"rgba(245,158,11,.10)",color:"#f97316",border:"1px solid rgba(245,158,11,.24)",opacity:bulkRescheduling?0.6:1,cursor:bulkRescheduling?"not-allowed":"pointer"}}
                   >
                     {bulkRescheduling ? "Reprogramando..." : "Retrasar"}
                   </button>
@@ -8368,12 +8904,12 @@ export default function Pedidos() {
       ) : null}
 
       <div style={S.bar}>
-        {canEdit && <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={abrirNuevo}>+ Nuevo pedido</button>}
-        {canEdit && <button style={{...S.btn,background:"rgba(16,185,129,.14)",color:"#10b981",border:"1px solid rgba(16,185,129,.28)"}} onClick={()=>setQuickCreando(true)}>+ Pedido rapido</button>}
-        {canEdit && aiDisponible && <button style={{...S.btn,background:"rgba(139,92,246,.15)",color:"#a78bfa",border:"1px solid rgba(139,92,246,.25)"}} onClick={()=>setVistaPedidos("ia")}>IA: email / PDF</button>}
+        {canEdit && <button style={{...S.btn,background:"linear-gradient(180deg,#008b82,#006f68)",color:"#fff",border:"1px solid #007f78",boxShadow:"0 12px 22px rgba(0,111,104,.18)"}} onClick={abrirNuevo}>+ Nuevo pedido</button>}
+        {canEdit && <button style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#008b82",border:"1px solid rgba(16,185,129,.24)"}} onClick={()=>setQuickCreando(true)}>+ Pedido rapido</button>}
+        {canEdit && aiDisponible && <button style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#6d5dfc",border:"1px solid rgba(139,92,246,.22)"}} onClick={()=>setVistaPedidos("ia")}>IA: email / PDF</button>}
         <button onClick={aplicarSemanaActual}
           title={filtroSemanaActualActivo ? "Volver al mes en curso" : "Mostrar solo la semana actual"}
-          style={{...S.btn,background:filtroSemanaActualActivo?"#059669":"rgba(148,163,184,.10)",color:filtroSemanaActualActivo?"#fff":"var(--text3)",border:filtroSemanaActualActivo?"1px solid #059669":"1px solid var(--border2)",padding:"6px 12px"}}>
+          style={{...S.btn,background:filtroSemanaActualActivo?"#008b82":"#fff",color:filtroSemanaActualActivo?"#fff":"#475569",border:filtroSemanaActualActivo?"1px solid #008b82":"1px solid #dbe5ec"}}>
           {filtroSemanaActualActivo ? "Mes en curso" : "Semana actual"}
         </button>
         <input type="date" value={filtroDesde} onChange={e=>{setFiltroFechasCustom(true);setFiltroDesde(e.target.value);}}
@@ -8391,17 +8927,17 @@ export default function Pedidos() {
         </select>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar..." style={{...S.input,width:160}}/>
         <button onClick={()=>setShowAdvancedFilters(v=>!v)}
-          style={{...S.btn,background:showAdvancedFilters?"#2563eb":"rgba(148,163,184,.10)",color:showAdvancedFilters?"#fff":"var(--text3)",border:showAdvancedFilters?"1px solid #2563eb":"1px solid var(--border2)",padding:"6px 12px"}}>
+          style={{...S.btn,background:showAdvancedFilters?"#2563eb":"#fff",color:showAdvancedFilters?"#fff":"#475569",border:showAdvancedFilters?"1px solid #2563eb":"1px solid #dbe5ec"}}>
           Filtros avanzados
         </button>
         <button onClick={()=>setGroupByCliente(v=>!v)}
           disabled={filtroSemanaActualActivo}
           title={filtroSemanaActualActivo ? "La semana actual se muestra agrupada por dias." : "Agrupar por cliente"}
-          style={{...S.btn,background:groupByCliente&&!filtroSemanaActualActivo?"#059669":"rgba(148,163,184,.10)",color:groupByCliente&&!filtroSemanaActualActivo?"#fff":"var(--text3)",border:groupByCliente&&!filtroSemanaActualActivo?"1px solid #059669":"1px solid var(--border2)",padding:"6px 12px",opacity:filtroSemanaActualActivo?0.55:1,cursor:filtroSemanaActualActivo?"not-allowed":"pointer"}}>
+          style={{...S.btn,background:groupByCliente&&!filtroSemanaActualActivo?"#008b82":"#fff",color:groupByCliente&&!filtroSemanaActualActivo?"#fff":"#475569",border:groupByCliente&&!filtroSemanaActualActivo?"1px solid #008b82":"1px solid #dbe5ec",opacity:filtroSemanaActualActivo?0.55:1,cursor:filtroSemanaActualActivo?"not-allowed":"pointer"}}>
           {filtroSemanaActualActivo ? "Agrupado por dia" : groupByCliente ? "Agrupado por cliente" : "Agrupar por cliente"}
         </button>
         <button onClick={()=>setSoloCriticos(v=>!v)}
-          style={{...S.btn,background:soloCriticos?"#dc2626":"rgba(148,163,184,.10)",color:soloCriticos?"#fff":"var(--text3)",border:soloCriticos?"1px solid #dc2626":"1px solid var(--border2)",padding:"6px 12px"}}>
+          style={{...S.btn,background:soloCriticos?"#dc2626":"#fff",color:soloCriticos?"#fff":"#475569",border:soloCriticos?"1px solid #dc2626":"1px solid #dbe5ec"}}>
           {soloCriticos ? "Solo criticos" : "Ver criticos"}
         </button>
         {(filtroEst!=="activos"||filtroDesde!==_rangoMesActual.desde||filtroHasta!==_rangoMesActual.hasta||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
@@ -8539,17 +9075,17 @@ export default function Pedidos() {
               if (entry?._group) {
                 const isMonth = entry.type === "month";
                 const isWeek = entry.type === "week";
-                const isDay = entry.type === "day";
                 return (
-                  <tr key={`group-${entry.key}`} style={{background:isMonth ? "rgba(15,118,110,.12)" : isWeek ? "rgba(20,184,166,.08)" : isDay ? "var(--bg3)" : "var(--bg3)"}}>
-                    <td colSpan={11} style={{...S.td,padding:isMonth ? "10px 14px" : isWeek ? "9px 14px 9px 24px" : "8px 14px 8px 38px",borderTop:(isMonth || isWeek) ? "1px solid rgba(20,184,166,.18)" : S.td.borderTop}}>
+                  <tr key={`group-${entry.key}`} style={{background:isMonth ? "var(--bg4)" : isWeek ? "var(--bg3)" : "var(--bg2)"}}>
+                    <td colSpan={11} style={{...S.td,padding:isMonth ? "16px 18px" : isWeek ? "19px 22px" : "12px 18px 12px 56px",borderTop:(isMonth || isWeek) ? "1px solid var(--border)" : S.td.borderTop}}>
                       <button
                         onClick={() => setCollapsedClientes(prev => ({ ...prev, [entry.key]: !prev[entry.key] }))}
-                        style={{display:"flex",alignItems:"center",gap:10,width:"100%",background:"transparent",border:"none",color:"var(--text)",cursor:"pointer",padding:0,fontFamily:"'DM Sans',sans-serif"}}
+                        style={{display:"flex",alignItems:"center",gap:16,width:"100%",background:"transparent",border:"none",color:"var(--text)",cursor:"pointer",padding:0,fontFamily:"'DM Sans',sans-serif"}}
                       >
-                        <span style={{fontSize:14,color:(isMonth || isWeek) ? "var(--green)" : "var(--accent-xl)",fontWeight:900,width:14}}>{entry.collapsed ? "+" : "-"}</span>
-                        <span style={{fontWeight:isMonth ? 950 : isWeek ? 900 : 850,fontSize:isMonth ? 13 : isWeek ? 12 : 12,textTransform:(isMonth || isWeek) ? "uppercase" : "none",letterSpacing:(isMonth || isWeek) ? ".04em" : 0}}>{entry.label}</span>
-                        <span style={{fontSize:11,color:"var(--text4)"}}>{entry.count} pedido{entry.count !== 1 ? "s" : ""}</span>
+                        <span style={{fontSize:16,color:"#008b82",fontWeight:900,width:16}}>{entry.collapsed ? "+" : "−"}</span>
+                        {isWeek && <span style={{width:48,height:48,borderRadius:10,background:"rgba(16,185,129,.10)",border:"1px solid rgba(16,185,129,.18)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#008b82",fontSize:24}}>▣</span>}
+                        <span style={{fontWeight:isMonth ? 950 : isWeek ? 900 : 850,fontSize:isMonth ? 14 : isWeek ? 17 : 13,textTransform:(isMonth || isWeek) ? "uppercase" : "none",letterSpacing:(isMonth || isWeek) ? ".04em" : 0}}>{entry.label}</span>
+                        <span style={{fontSize:13,color:"#64748b",paddingLeft:10,borderLeft:"1px solid #dbe5ec"}}>{entry.count} pedido{entry.count !== 1 ? "s" : ""}</span>
                       </button>
                     </td>
                   </tr>
@@ -8806,6 +9342,12 @@ export default function Pedidos() {
                               }}>
                               Carta de porte / CMR
                             </button>
+                            {canEdit && p.estado !== "cancelado" && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
+                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");solicitarCancelacionPedido(p);}}
+                                style={{...S.btn,textAlign:"left",background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.28)",padding:"6px 10px",fontSize:11}}>
+                                Cancelar pedido
+                              </button>
+                            )}
                             {canEdit && p.estado === "cancelado" && (
                               <button onClick={async e=>{
                                 e.stopPropagation();

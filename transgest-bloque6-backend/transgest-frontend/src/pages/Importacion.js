@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { crearCliente, crearVehiculo, crearChofer, crearPedido, crearColaborador, getClientes, crearRutaCliente, getDatosMaestrosReadiness } from "../services/api";
+import { crearCliente, editarCliente, crearVehiculo, crearChofer, crearPedido, crearColaborador, crearFactura, getClientes, crearRutaCliente, getDatosMaestrosReadiness } from "../services/api";
 import { notify } from "../services/notify";
 
 let clientesImportCachePromise = null;
@@ -21,6 +21,41 @@ function clearClientesImportCache() {
 }
 
 // ── Plantillas de columnas por tipo ───────────────────────────────────────
+function parseImportNumber(value, fallback = 0) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return fallback;
+  let normalized = raw.replace(/\s/g, "");
+  if (normalized.includes(",") && normalized.includes(".")) {
+    normalized = normalized.lastIndexOf(",") > normalized.lastIndexOf(".")
+      ? normalized.replace(/\./g, "").replace(",", ".")
+      : normalized.replace(/,/g, "");
+  } else if (normalized.includes(",")) {
+    normalized = normalized.replace(",", ".");
+  }
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function parseImportBool(value) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  return ["1", "si", "sí", "true", "x", "bloqueado", "bloqueada"].includes(raw);
+}
+
+async function findClienteForImport(data, label = "registro") {
+  const clientes = await getClientesImportCache();
+  const nombre = String(data.cliente_nombre || data.nombre || "").trim().toLowerCase();
+  const cif = String(data.cliente_cif || data.cif || "").trim().toLowerCase();
+  const cliente = clientes.find((c) => {
+    const sameCif = cif && String(c.cif || "").trim().toLowerCase() === cif;
+    const sameName = nombre && String(c.nombre || "").trim().toLowerCase() === nombre;
+    return sameCif || sameName;
+  });
+  if (!cliente?.id) {
+    throw new Error(`Cliente no encontrado para ${label}: ${data.cliente_nombre || data.cliente_cif || data.nombre || "sin identificar"}`);
+  }
+  return cliente;
+}
+
 const TEMPLATES = {
   clientes: {
     nombre: "Clientes",
@@ -35,9 +70,43 @@ const TEMPLATES = {
       { k:"forma_pago",    l:"Forma de pago",         req:false, example:"transferencia" },
       { k:"dias_pago",     l:"Días de pago",          req:false, example:"30" },
       { k:"tipo_iva",      l:"Tipo IVA (%)",          req:false, example:"21" },
+      { k:"limite_riesgo", l:"Limite de riesgo EUR",  req:false, example:"5000" },
+      { k:"bloqueado",     l:"Bloqueado (si/no)",     req:false, example:"no" },
+      { k:"bloqueo_motivo",l:"Motivo bloqueo",        req:false, example:"Impagos pendientes" },
       { k:"notas",         l:"Notas",                 req:false, example:"Cliente VIP" },
     ],
-    apiFn: crearCliente,
+    apiFn: (data) => crearCliente({
+      ...data,
+      limite_riesgo: parseImportNumber(data.limite_riesgo, 0),
+      bloqueado: parseImportBool(data.bloqueado),
+    }),
+  },
+  clientes_situacion: {
+    nombre: "Situacion de clientes",
+    icon: "",
+    columns: [
+      { k:"cliente_nombre", l:"Nombre cliente",       req:false, example:"Transportes Garcia S.L." },
+      { k:"cliente_cif",    l:"CIF cliente",          req:false, example:"B12345678" },
+      { k:"limite_riesgo",  l:"Limite riesgo EUR",    req:false, example:"5000" },
+      { k:"bloqueado",      l:"Bloqueado (si/no)",    req:false, example:"no" },
+      { k:"bloqueo_motivo", l:"Motivo bloqueo",       req:false, example:"Impago o riesgo excedido" },
+      { k:"saldo_pendiente",l:"Saldo pendiente EUR",  req:false, example:"1250.50" },
+      { k:"notas",          l:"Notas internas",       req:false, example:"Saldo inicial importado desde ERP anterior" },
+    ],
+    apiFn: async (data) => {
+      const cliente = await findClienteForImport(data, "situacion de cliente");
+      const notas = [
+        data.notas,
+        data.saldo_pendiente ? `Saldo pendiente inicial/importado: ${data.saldo_pendiente} EUR` : "",
+      ].filter(Boolean).join(" | ");
+      return editarCliente(cliente.id, {
+        ...cliente,
+        limite_riesgo: parseImportNumber(data.limite_riesgo, cliente.limite_riesgo || 0),
+        bloqueado: parseImportBool(data.bloqueado),
+        bloqueo_motivo: data.bloqueo_motivo || cliente.bloqueo_motivo || "",
+        notas: notas || cliente.notas || "",
+      });
+    },
   },
   colaboradores: {
     nombre: "Colaboradores",
@@ -116,6 +185,75 @@ const TEMPLATES = {
     ],
     apiFn: crearPedido,
   },
+  viajes_pendientes: {
+    nombre: "Viajes pendientes",
+    icon: "",
+    columns: [
+      { k:"origen",        l:"Origen (ciudad carga)", req:true,  example:"Madrid" },
+      { k:"destino",       l:"Destino (ciudad entrega)",req:true, example:"Barcelona" },
+      { k:"fecha_carga",   l:"Fecha carga (YYYY-MM-DD)",req:true, example:"2026-07-01" },
+      { k:"fecha_descarga",l:"Fecha descarga",        req:false, example:"2026-07-02" },
+      { k:"cliente_nombre",l:"Nombre cliente",        req:false, example:"Transportes Garcia" },
+      { k:"cliente_cif",   l:"CIF cliente",           req:false, example:"B12345678" },
+      { k:"importe",       l:"Importe (EUR)",         req:false, example:"850.00" },
+      { k:"vehiculo_matricula",l:"Matricula vehiculo",req:false, example:"1234-ABC" },
+      { k:"chofer_nombre", l:"Nombre chofer",         req:false, example:"Juan Garcia" },
+      { k:"peso_kg",       l:"Peso (kg)",             req:false, example:"24000" },
+      { k:"bultos",        l:"Bultos / Pallets",      req:false, example:"20" },
+      { k:"estado",        l:"Estado",                req:false, example:"pendiente" },
+      { k:"notas",         l:"Notas",                 req:false, example:"Pendiente de asignar" },
+    ],
+    apiFn: (data) => crearPedido({
+      ...data,
+      estado: data.estado || "pendiente",
+      importe: parseImportNumber(data.importe, 0),
+      peso_kg: parseImportNumber(data.peso_kg, 0),
+      bultos: parseImportNumber(data.bultos, 0),
+    }),
+  },
+  facturas_pendientes: {
+    nombre: "Facturas pendientes",
+    icon: "",
+    columns: [
+      { k:"cliente_nombre",    l:"Nombre cliente",              req:false, example:"Transportes Garcia S.L." },
+      { k:"cliente_cif",       l:"CIF cliente",                 req:false, example:"B12345678" },
+      { k:"numero_origen",     l:"Numero factura origen",       req:false, example:"ERP-2026-0012" },
+      { k:"fecha",             l:"Fecha factura",               req:false, example:"2026-06-01" },
+      { k:"fecha_vencimiento", l:"Fecha vencimiento",           req:false, example:"2026-07-01" },
+      { k:"base",              l:"Base imponible EUR",          req:false, example:"1000" },
+      { k:"tipo_iva",          l:"IVA %",                       req:false, example:"21" },
+      { k:"total",             l:"Total pendiente EUR",         req:true,  example:"1210" },
+      { k:"estado",            l:"Estado",                      req:false, example:"emitida" },
+      { k:"forma_pago",        l:"Forma de pago",               req:false, example:"transferencia" },
+      { k:"notas",             l:"Notas",                       req:false, example:"Pendiente de cobro en ERP anterior" },
+    ],
+    apiFn: async (data) => {
+      const cliente = await findClienteForImport(data, "factura pendiente");
+      const total = parseImportNumber(data.total, 0);
+      const tipoIva = parseImportNumber(data.tipo_iva, cliente.tipo_iva ?? 21);
+      const base = data.base ? parseImportNumber(data.base, 0) : (tipoIva ? total / (1 + tipoIva / 100) : total);
+      const estados = ["borrador", "emitida", "enviada", "vencida", "reclamada", "sin_cobrar"];
+      const estado = estados.includes(String(data.estado || "").toLowerCase()) ? String(data.estado).toLowerCase() : "emitida";
+      return crearFactura({
+        cliente_id: cliente.id,
+        serie: "A",
+        fecha: data.fecha || undefined,
+        fecha_vencimiento: data.fecha_vencimiento || undefined,
+        estado,
+        forma_pago: data.forma_pago || cliente.forma_pago || "transferencia",
+        observaciones: [
+          data.numero_origen ? `Factura origen importada: ${data.numero_origen}` : "",
+          data.notas || "",
+        ].filter(Boolean).join(" | "),
+        notas_internas: "Importada como factura pendiente inicial. Revisar conciliacion/cobro en gestion financiera.",
+        lineas: [{
+          concepto: data.numero_origen ? `Saldo pendiente factura ${data.numero_origen}` : "Saldo pendiente importado",
+          cantidad: 1,
+          precio_unit: Math.round(base * 100) / 100,
+        }],
+      });
+    },
+  },
   tarifas: {
     nombre: "Tarifas de clientes",
     icon: "",
@@ -130,17 +268,7 @@ const TEMPLATES = {
       { k:"vigencia_hasta",l:"Vigencia hasta",        req:false, example:"2025-12-31" },
     ],
     apiFn: async (data) => {
-      const clientes = await getClientesImportCache();
-      const nombre = String(data.cliente_nombre || "").trim().toLowerCase();
-      const cif = String(data.cliente_cif || "").trim().toLowerCase();
-      const cliente = clientes.find((c) => {
-        const sameCif = cif && String(c.cif || "").trim().toLowerCase() === cif;
-        const sameName = nombre && String(c.nombre || "").trim().toLowerCase() === nombre;
-        return sameCif || sameName;
-      });
-      if (!cliente?.id) {
-        throw new Error(`Cliente no encontrado para la tarifa: ${data.cliente_nombre || data.cliente_cif || "sin identificar"}`);
-      }
+      const cliente = await findClienteForImport(data, "tarifa");
       return crearRutaCliente(cliente.id, {
         origen: data.origen || "",
         destino: data.destino || "",
@@ -157,9 +285,12 @@ const TEMPLATES = {
 
 const READINESS_SECTIONS = [
   { key:"clientes", label:"Clientes", view:"clientes" },
+  { key:"clientes_situacion", label:"Situacion clientes", view:"clientes" },
   { key:"colaboradores", label:"Colaboradores", view:"colaboradores" },
   { key:"choferes", label:"Choferes", view:"choferes" },
   { key:"vehiculos", label:"Vehiculos", view:"vehiculos" },
+  { key:"viajes_pendientes", label:"Viajes pendientes", view:"pedidos" },
+  { key:"facturas_pendientes", label:"Facturas pendientes", view:"facturacion" },
 ];
 
 // ── Parse CSV / TSV ────────────────────────────────────────────────────────
@@ -220,6 +351,12 @@ function downloadTemplate(tipo){
     tpl.columns.map(c=>c.l),
     tpl.columns.map(c=>c.example||""),
   ]);
+}
+
+function downloadCoreTemplates(){
+  ["clientes","clientes_situacion","vehiculos","choferes","colaboradores","viajes_pendientes","facturas_pendientes","tarifas"].forEach((tipo, index) => {
+    setTimeout(() => downloadTemplate(tipo), index * 180);
+  });
 }
 
 function scoreColor(estadoOrScore) {
@@ -312,7 +449,7 @@ export default function Importacion(){
       notify(`Hay ${invalidas.length} filas con errores. Corrige el archivo antes de importar.`, "warning");
       return;
     }
-    if (tipoSel === "tarifas") clearClientesImportCache();
+    if (["tarifas","clientes_situacion","facturas_pendientes"].includes(tipoSel)) clearClientesImportCache();
     setStep("importing");
     const errs=[];
     let done=0;
@@ -328,7 +465,7 @@ export default function Importacion(){
         setProgreso({done,total:preview.parsed.length,errores:errs.length});
       }
     }
-    if (tipoSel === "clientes" && done > 0) clearClientesImportCache();
+    if (["clientes","clientes_situacion"].includes(tipoSel) && done > 0) clearClientesImportCache();
     setErrores(errs);
     setStep("done");
     if (done > 0 && ["clientes","colaboradores","choferes","vehiculos"].includes(tipoSel)) {
@@ -473,6 +610,10 @@ export default function Importacion(){
       {/* Selector de tipo */}
       <div style={{...S.card}}>
         <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text4)",marginBottom:12}}>¿Qué quieres importar?</div>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+          <div style={{fontSize:12,color:"var(--text5)"}}>Orden sugerido: clientes, situacion, vehiculos/choferes, colaboradores, tarifas, viajes pendientes y facturas pendientes.</div>
+          <button onClick={downloadCoreTemplates} style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)"}}>Descargar pack de plantillas</button>
+        </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {Object.entries(TEMPLATES).map(([k,t])=>(
             <button key={k} onClick={()=>{setTipoSel(k);setStep("upload");setPreview(null);setErrores([]);}}

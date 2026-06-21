@@ -2375,6 +2375,13 @@ export default function Facturacion() {
     { key: "error", label: "Errores", value: Number(fiscalInfo.con_error || 0), color: "#ef4444" },
     { key: "sin_registro", label: "Sin registro", value: facturas.filter(f=>!f.fiscal_modo).length, color: "#94a3b8" },
   ];
+  const resumenGestionFinanciera = [
+    { label:"Cobros a revisar", value:Number(controlResumen.revisar_hoy || 0), detail:`${Number(controlResumen.vencidas || 0)} vencidas`, color:Number(controlResumen.vencidas || 0) ? "#ef4444" : "var(--green)" },
+    { label:"Riesgo documental", value:Number(bloqueoDocResumen.total || bloqueoDocResumen.bloqueos || bloqueoDocItems.length || 0), detail:`${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion || 0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente || 0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental || 0))} EUR`, color:Number(bloqueoDocItems.length || 0) ? "#f59e0b" : "var(--green)" },
+    { label:"Fiscal pendiente", value:Number(fiscalInfo.pendientes || 0)+Number(fiscalInfo.con_error || 0)+Number(fiscalInfo.atascados || 0), detail:`${Number(fiscalInfo.aceptados || 0)} aceptadas`, color:Number(fiscalInfo.con_error || 0) ? "#ef4444" : "#f59e0b" },
+    { label:"Tesoreria 30 dias", value:`${fmt2(previsionTesoreria.saldoPrevisto30)} EUR`, detail:`Neto ${fmt2(previsionTesoreria.neto30)} EUR`, color:previsionTesoreria.saldoPrevisto30 < 0 ? "#ef4444" : "var(--green)" },
+    { label:"Pagos proveedor", value:pagosProveedor.length, detail:`${fmt2(previsionTesoreria.totalPagos30)} EUR proximos`, color:"#f59e0b" },
+  ];
 
   return (
     <div style={S.page}>
@@ -2421,6 +2428,27 @@ export default function Facturacion() {
           {l:"Pendiente cobro",    v:`${fmt2(pendiente)} EUR`, c:"#f59e0b", icon:"clock"},
           {l:"Rectificadas",       v:nRect,                    c:"#fb7185", icon:"doc"},
         ].map((k,i)=><FinanceKpi key={i} label={k.l} value={k.v} color={k.c} icon={k.icon} />)}
+      </div>
+
+      <div style={{...S.card,marginBottom:22,borderColor:"rgba(20,184,166,.24)",background:"linear-gradient(135deg, rgba(20,184,166,.07), var(--card-bg))"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"var(--text)"}}>Resumen general financiero</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Cobros, pagos, fiscalidad, soporte documental y caja prevista en una sola lectura.</div>
+          </div>
+          <span style={{fontSize:11,color:pendiente>0?"#f59e0b":"var(--green)",fontWeight:900}}>
+            Pendiente {fmt2(pendiente)} EUR
+          </span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
+          {resumenGestionFinanciera.map(item=>(
+            <div key={item.label} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 12px"}}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:17,fontWeight:900,color:item.color}}>{item.value}</div>
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",marginTop:4}}>{item.label}</div>
+              <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{item.detail}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:22,padding:"0 6px",alignItems:"center"}}>

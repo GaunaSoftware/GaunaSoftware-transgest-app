@@ -417,6 +417,15 @@ async function applyMigrations() {
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS iban VARCHAR(50)").catch(() => {});
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_carga VARCHAR(120)").catch(() => {});
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_descarga VARCHAR(120)").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS limite_riesgo NUMERIC DEFAULT 0").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS modo_facturacion VARCHAR(60) DEFAULT 'por_viaje'").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueado BOOLEAN DEFAULT false").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT").catch(() => {});
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_provincia VARCHAR(120)").catch(() => {});
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_provincia VARCHAR(120)").catch(() => {});
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cmr_tipo VARCHAR(30) DEFAULT 'nacional'").catch(() => {});
     await db.query("ALTER TABLE clientes ALTER COLUMN horario_carga TYPE VARCHAR(255)").catch(() => {});
     await db.query("ALTER TABLE clientes ALTER COLUMN horario_descarga TYPE VARCHAR(255)").catch(() => {});
     await db.query(`
@@ -702,6 +711,66 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS iva_regimen VARCHAR(30) NOT NULL DEFAULT 'general'").catch(()=>{});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS puntos_carga JSONB DEFAULT '[]'::jsonb").catch(()=>{});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS puntos_descarga JSONB DEFAULT '[]'::jsonb").catch(()=>{});
+    await db.query(`
+      UPDATE pedidos
+         SET puntos_carga = CASE
+               WHEN jsonb_typeof(COALESCE(puntos_carga, '[]'::jsonb)) = 'array'
+                AND jsonb_array_length(COALESCE(puntos_carga, '[]'::jsonb)) > 0
+                AND (COALESCE(puntos_carga->0->>'pais','') = '' OR COALESCE(puntos_carga->0->>'provincia','') = '')
+                 THEN jsonb_set(
+                   jsonb_set(COALESCE(puntos_carga, '[]'::jsonb), '{0,pais}', to_jsonb(COALESCE(NULLIF(origen_pais,''), 'España')), true),
+                   '{0,provincia}', to_jsonb(COALESCE(origen_provincia, '')), true
+                 )
+               WHEN COALESCE(origen,'') <> ''
+                 THEN jsonb_build_array(jsonb_build_object(
+                   'direccion', origen,
+                   'fecha', COALESCE(fecha_carga::text, ''),
+                   'hora', COALESCE(hora_carga::text, ''),
+                   'tipo', 'carga',
+                   'es_principal', true,
+                   'pais', COALESCE(NULLIF(origen_pais,''), 'España'),
+                   'provincia', COALESCE(origen_provincia, '')
+                 ))
+               ELSE COALESCE(puntos_carga, '[]'::jsonb)
+             END,
+             puntos_descarga = CASE
+               WHEN jsonb_typeof(COALESCE(puntos_descarga, '[]'::jsonb)) = 'array'
+                AND jsonb_array_length(COALESCE(puntos_descarga, '[]'::jsonb)) > 0
+                AND (COALESCE(puntos_descarga->0->>'pais','') = '' OR COALESCE(puntos_descarga->0->>'provincia','') = '')
+                 THEN jsonb_set(
+                   jsonb_set(COALESCE(puntos_descarga, '[]'::jsonb), '{0,pais}', to_jsonb(COALESCE(NULLIF(destino_pais,''), 'España')), true),
+                   '{0,provincia}', to_jsonb(COALESCE(destino_provincia, '')), true
+                 )
+               WHEN COALESCE(destino,'') <> ''
+                 THEN jsonb_build_array(jsonb_build_object(
+                   'direccion', destino,
+                   'fecha', COALESCE(fecha_descarga::text, fecha_entrega::text, ''),
+                   'hora', COALESCE(hora_descarga::text, ''),
+                   'tipo', 'descarga',
+                   'es_principal', true,
+                   'pais', COALESCE(NULLIF(destino_pais,''), 'España'),
+                   'provincia', COALESCE(destino_provincia, '')
+                 ))
+               ELSE COALESCE(puntos_descarga, '[]'::jsonb)
+             END
+       WHERE (jsonb_typeof(COALESCE(puntos_carga, '[]'::jsonb)) = 'array'
+              AND (jsonb_array_length(COALESCE(puntos_carga, '[]'::jsonb)) = 0 OR COALESCE(puntos_carga->0->>'pais','') = '' OR COALESCE(puntos_carga->0->>'provincia','') = ''))
+          OR (jsonb_typeof(COALESCE(puntos_descarga, '[]'::jsonb)) = 'array'
+              AND (jsonb_array_length(COALESCE(puntos_descarga, '[]'::jsonb)) = 0 OR COALESCE(puntos_descarga->0->>'pais','') = '' OR COALESCE(puntos_descarga->0->>'provincia','') = ''))
+    `).catch(()=>{});
+    await db.query(`
+      UPDATE pedidos p
+         SET origen_pais = COALESCE(NULLIF(p.puntos_carga->0->>'pais',''), p.origen_pais, 'España'),
+             origen_provincia = COALESCE(NULLIF(p.puntos_carga->0->>'provincia',''), p.origen_provincia),
+             destino_pais = COALESCE(NULLIF(p.puntos_descarga->0->>'pais',''), p.destino_pais, 'España'),
+             destino_provincia = COALESCE(NULLIF(p.puntos_descarga->0->>'provincia',''), p.destino_provincia),
+             cmr_tipo = CASE WHEN EXISTS (
+               SELECT 1
+                 FROM jsonb_array_elements(COALESCE(p.puntos_carga, '[]'::jsonb) || COALESCE(p.puntos_descarga, '[]'::jsonb)) AS s(stop)
+                WHERE lower(COALESCE(s.stop->>'pais','España')) NOT IN ('', 'es', 'espana', 'españa', 'spain')
+             ) THEN 'internacional' ELSE 'nacional' END
+       WHERE TRUE
+    `).catch(()=>{});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pendiente_completar BOOLEAN DEFAULT false").catch(()=>{});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS aviso_completar TEXT").catch(()=>{});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS portal_solicitud_id UUID").catch(()=>{});

@@ -71,6 +71,44 @@ const CSS = `
   @media (max-width: 1180px) {
     .tg-topbar { padding:0 12px; gap:8px; }
     .tg-topbar-tabs { flex:1 1 auto !important; max-width:42vw; }
+    .tg-content {
+      overflow-x:hidden;
+    }
+    .tg-content > div {
+      padding-left:18px !important;
+      padding-right:18px !important;
+      max-width:100% !important;
+      min-width:0 !important;
+    }
+    .tg-content * {
+      box-sizing:border-box;
+      min-width:0;
+    }
+    .tg-content [style*="display: grid"],
+    .tg-content [style*="display:grid"] {
+      grid-template-columns:repeat(auto-fit, minmax(min(230px, 100%), 1fr)) !important;
+    }
+    .tg-content [style*="display: flex"],
+    .tg-content [style*="display:flex"] {
+      flex-wrap:wrap;
+    }
+    .tg-content [style*="margin-left: auto"],
+    .tg-content [style*="marginLeft:auto"] {
+      margin-left:0 !important;
+    }
+    .tg-content input,
+    .tg-content select,
+    .tg-content textarea {
+      min-width:0 !important;
+      max-width:100% !important;
+    }
+    .tg-content table {
+      display:block;
+      width:100% !important;
+      max-width:100% !important;
+      overflow-x:auto;
+      white-space:nowrap;
+    }
   }
   @media (max-width: 1024px) {
     .tg-mobile-menu-btn { display:flex; }

@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   buildAdvisorPackageManifest,
+  buildAdvisorPackageZip,
   INTEGRATION_CATALOG_VERSION,
   integrationSummary,
   listExternalAccountingIntegrations,
@@ -69,4 +70,19 @@ test("manifiesto asesoria genera rutas CSV cuando hay ejercicio y permisos", () 
   assert.equal(manifest.blocked_count, 0);
   assert.match(manifest.exports.find(item => item.id === "journal_entries").path, /\/journal-entries\?format=csv/);
   assert.match(manifest.exports.find(item => item.id === "balance_sheet").path, /fiscal_year_id=fy-2026/);
+});
+
+test("paquete asesoria ZIP incluye manifiesto e indice de exportaciones", () => {
+  const manifest = buildAdvisorPackageManifest({
+    selectedCompany: { company_id: "company-1", name: "Demo" },
+    permissions: ["parties.read", "maturities.read", "banks.read", "journal.read", "ledger.read"],
+    filters: { fiscal_year_id: "fy-2026", include_empty: "true" },
+  });
+  const zip = buildAdvisorPackageZip(manifest);
+  assert.ok(Buffer.isBuffer(zip));
+  assert.equal(zip.readUInt32LE(0), 0x04034b50);
+  assert.ok(zip.includes(Buffer.from("manifest.json")));
+  assert.ok(zip.includes(Buffer.from("exports/index.csv")));
+  assert.ok(zip.includes(Buffer.from("/reports/trial-balance?")));
+  assert.equal(zip.readUInt32LE(zip.length - 22), 0x06054b50);
 });

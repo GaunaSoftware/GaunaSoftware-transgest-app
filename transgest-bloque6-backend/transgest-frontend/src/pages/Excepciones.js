@@ -213,6 +213,29 @@ export default function Excepciones() {
     return true;
   }), [items, area, severity, estado, user?.id]);
 
+  const gestion = useMemo(() => {
+    const abiertas = items.filter(i => i.workflow?.activa);
+    const countBy = (rows, pick) => rows.reduce((acc, item) => {
+      const key = pick(item) || "Sin clasificar";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const byArea = Object.entries(countBy(abiertas, i=>i.area)).sort(([,a],[,b])=>b-a).slice(0,5);
+    const bySeverity = Object.entries(countBy(abiertas, i=>i.severity)).sort(([,a],[,b])=>b-a);
+    const vencidas = abiertas.filter(i=>i.sla?.vencida);
+    const sinResponsable = abiertas.filter(i=>!i.workflow?.asignado_a);
+    const criticas = abiertas.filter(i=>i.severity === "critica");
+    return {
+      abiertas,
+      byArea,
+      bySeverity,
+      vencidas,
+      sinResponsable,
+      criticas,
+      slaPct: abiertas.length ? Math.round(((abiertas.length - vencidas.length) / abiertas.length) * 100) : 100,
+    };
+  }, [items]);
+
   const actualizar = async (item, nextEstado) => {
     try {
       let payload = { estado: nextEstado };
@@ -298,6 +321,59 @@ export default function Excepciones() {
             <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginTop:3}}>{label}</div>
           </div>
         ))}
+      </div>
+
+      <div style={{...S.card,marginBottom:14,borderColor:"rgba(20,184,166,.24)",background:"linear-gradient(135deg, rgba(20,184,166,.07), var(--card-bg))"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Gestion operativa de excepciones</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Prioriza por impacto, SLA vencido, responsable asignado y area que acumula mas carga.</div>
+          </div>
+          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:900,color:gestion.slaPct >= 85 ? "var(--green)" : "#ef4444"}}>
+            {gestion.slaPct}% SLA
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(220px,1fr) minmax(220px,1fr) minmax(220px,1fr)",gap:12}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"var(--text5)",marginBottom:7}}>Foco inmediato</div>
+            {[
+              ["Criticas abiertas", gestion.criticas.length, "#ef4444"],
+              ["Fuera SLA", gestion.vencidas.length, gestion.vencidas.length ? "#ef4444" : "var(--green)"],
+              ["Sin responsable", gestion.sinResponsable.length, gestion.sinResponsable.length ? "#f59e0b" : "var(--green)"],
+            ].map(([label,value,color])=>(
+              <div key={label} style={{display:"flex",justifyContent:"space-between",gap:10,borderBottom:"1px solid var(--border)",padding:"6px 0",fontSize:12}}>
+                <span style={{color:"var(--text4)"}}>{label}</span>
+                <strong style={{color,fontFamily:"'JetBrains Mono',monospace"}}>{fmtN(value)}</strong>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"var(--text5)",marginBottom:7}}>Areas con mas carga</div>
+            {gestion.byArea.length ? gestion.byArea.map(([label,value])=>(
+              <div key={label} style={{display:"grid",gridTemplateColumns:"1fr 44px",gap:8,alignItems:"center",marginBottom:7}}>
+                <span style={{fontSize:12,color:"var(--text3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</span>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:"var(--accent-xl)",textAlign:"right"}}>{fmtN(value)}</span>
+              </div>
+            )) : <div style={{fontSize:12,color:"var(--green)",fontWeight:800}}>Sin carga abierta.</div>}
+          </div>
+          <div>
+            <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"var(--text5)",marginBottom:7}}>Prioridad</div>
+            {gestion.bySeverity.map(([label,value])=>{
+              const sev = SEVERITY[label] || SEVERITY.info;
+              const pct = gestion.abiertas.length ? Math.min(100, Math.round((value / gestion.abiertas.length) * 100)) : 0;
+              return (
+                <div key={label} style={{marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text4)",marginBottom:3}}>
+                    <span>{sev.label}</span><span>{fmtN(value)}</span>
+                  </div>
+                  <div style={{height:6,borderRadius:999,background:"var(--bg4)",overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${pct}%`,background:sev.color,borderRadius:999}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:14}}>

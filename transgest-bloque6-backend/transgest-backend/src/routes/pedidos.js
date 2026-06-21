@@ -315,6 +315,14 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_trasera BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS intercambio_palets BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS requiere_cinchas BOOLEAN DEFAULT true").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_provincia VARCHAR(120)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_provincia VARCHAR(120)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cmr_tipo VARCHAR(30) DEFAULT 'nacional'").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motivo_cancelacion TEXT").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_by TEXT").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_viaje VARCHAR(20) DEFAULT 'normal'").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS viaje_enlazado_id UUID REFERENCES pedidos(id) ON DELETE SET NULL").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS grupo_ida_vuelta UUID").catch(() => {});
@@ -696,6 +704,84 @@ function responderFestivoPendiente(res, aviso) {
     requiere_confirmacion: true,
     aviso_festivo: aviso,
   });
+}
+
+function usuarioEsGerencia(req) {
+  return String(req.user?.rol || "").toLowerCase() === "gerente";
+}
+
+async function getCfgTraficoEmpresa(empresaId) {
+  if (!empresaId) return {};
+  const { rows } = await db.query("SELECT cfg_trafico FROM empresas WHERE id=$1 LIMIT 1", [empresaId]);
+  const cfg = rows[0]?.cfg_trafico;
+  return cfg && typeof cfg === "object" ? cfg : {};
+}
+
+async function assertClienteAdmiteNuevoPedido(client, req, clienteId, importeNuevo = 0) {
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  if (!empresaId || !clienteId) return;
+  const { rows } = await client.query(`
+    SELECT c.id, c.nombre,
+           COALESCE(c.bloqueado,false) AS bloqueado,
+           COALESCE(NULLIF(TRIM(c.bloqueo_motivo), ''), 'Sin motivo indicado') AS bloqueo_motivo,
+           COALESCE(c.limite_riesgo, 0) AS limite_riesgo,
+           COALESCE(f.total_facturas_pendiente, 0)::numeric AS total_facturas_pendiente,
+           COALESCE(p.total_pedidos_confirmados, 0)::numeric AS total_pedidos_confirmados
+      FROM clientes c
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(total), 0)::numeric AS total_facturas_pendiente
+          FROM facturas f
+         WHERE f.empresa_id = c.empresa_id
+           AND f.cliente_id = c.id
+           AND f.estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar')
+      ) f ON true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(
+          COALESCE(
+            p.importe,
+            p.precio_cliente_col,
+            CASE
+              WHEN p.tipo_precio::text = 'viaje' THEN p.precio_unitario
+              WHEN p.tipo_precio::text = 'kg' THEN (COALESCE(p.cantidad, 0) / 100.0) * COALESCE(p.precio_unitario, 0)
+              ELSE GREATEST(COALESCE(p.cantidad, 0), COALESCE(p.minimo_unidades, 0)) * COALESCE(p.precio_unitario, 0)
+            END,
+            0
+          )
+        ), 0)::numeric AS total_pedidos_confirmados
+          FROM pedidos p
+         WHERE p.empresa_id = c.empresa_id
+           AND p.cliente_id = c.id
+           AND p.estado::text IN ('confirmado','en_curso','descarga','entregado')
+           AND p.factura_id IS NULL
+      ) p ON true
+     WHERE c.id=$1 AND c.empresa_id=$2
+     LIMIT 1`,
+    [clienteId, empresaId]
+  );
+  const cliente = rows[0];
+  if (!cliente) {
+    const err = new Error("Cliente no encontrado");
+    err.status = 404;
+    throw err;
+  }
+  if (cliente.bloqueado) {
+    const err = new Error(`Cliente bloqueado: ${cliente.bloqueo_motivo}`);
+    err.status = 409;
+    err.code = "CLIENTE_BLOQUEADO";
+    err.cliente = cliente;
+    throw err;
+  }
+  const limite = Number(cliente.limite_riesgo || 0) || 0;
+  const pendiente = Number(cliente.total_facturas_pendiente || 0) + Number(cliente.total_pedidos_confirmados || 0);
+  const proyectado = pendiente + Math.max(0, Number(importeNuevo || 0) || 0);
+  if (limite > 0 && proyectado >= limite && !usuarioEsGerencia(req)) {
+    const pct = Math.round((proyectado / limite) * 1000) / 10;
+    const err = new Error(`Cliente en limite de riesgo: ${proyectado.toFixed(2)} EUR sobre ${limite.toFixed(2)} EUR (${pct.toFixed(1)}%). Solo gerencia puede autorizar nuevos viajes.`);
+    err.status = 409;
+    err.code = "CLIENTE_RIESGO_BLOQUEADO";
+    err.cliente = { ...cliente, total_pendiente: pendiente, total_proyectado: proyectado, riesgo_pct_proyectado: pct };
+    throw err;
+  }
 }
 
 async function updateVehiculoKmFromOdometer(empresaId, vehiculoId, km) {
@@ -2609,6 +2695,22 @@ function parseLocaleNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizePaisPedido(value, fallback = "España") {
+  const raw = String(value || fallback || "").trim();
+  if (!raw) return fallback;
+  const ascii = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (["espana", "spain", "es"].includes(ascii)) return "España";
+  return raw;
+}
+
+function cmrTipoPedido(origenPais = "España", destinoPais = "España", explicit = null) {
+  const requested = String(explicit || "").trim().toLowerCase();
+  if (requested === "internacional" || requested === "nacional") return requested;
+  const origen = normalizePaisPedido(origenPais);
+  const destino = normalizePaisPedido(destinoPais);
+  return origen === "España" && destino === "España" ? "nacional" : "internacional";
+}
+
 function normalizePedidoValue(field, value) {
   if (value === "") return null;
   if (UUID_PEDIDO_FIELDS.has(field)) return normalizePedidoUuid(value);
@@ -3239,7 +3341,7 @@ function isValidMapsUrl(value) {
   return /^(https?:\/\/|geo:)/i.test(raw);
 }
 
-function normalizePedidoStopsForStorage(value, fallbackAddress = "") {
+function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCountry = "España", fallbackRegion = "") {
   const parsed = normalizePedidoJsonList(value);
   const seen = new Set();
   return parsed.map((stop, idx) => {
@@ -3253,6 +3355,8 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "") {
     return {
       ...source,
       direccion,
+      pais: normalizePaisPedido(source.pais || source.country || (idx === 0 ? fallbackCountry : "España")),
+      provincia: String(source.provincia || source.region || source.state || (idx === 0 ? fallbackRegion : "") || "").trim(),
       google_maps_url: cleanMaps,
       notas: notas || "",
       lat: source.lat ?? source.latitud ?? source.metadata?.lat ?? null,
@@ -3270,6 +3374,26 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "") {
     seen.add(key);
     return true;
   });
+}
+
+function derivePedidoGeoFromStops(cargas = [], descargas = [], fallback = {}) {
+  const cargaPrincipal = normalizePedidoJsonList(cargas)[0] || {};
+  const descargaPrincipal = normalizePedidoJsonList(descargas)[0] || {};
+  const origenPais = normalizePaisPedido(cargaPrincipal.pais || fallback.origen_pais || fallback.pais_origen || "España");
+  const destinoPais = normalizePaisPedido(descargaPrincipal.pais || fallback.destino_pais || fallback.pais_destino || "España");
+  const allCountries = [
+    ...normalizePedidoJsonList(cargas).map(stop => normalizePaisPedido(stop.pais || "España")),
+    ...normalizePedidoJsonList(descargas).map(stop => normalizePaisPedido(stop.pais || "España")),
+    origenPais,
+    destinoPais,
+  ];
+  return {
+    origen_pais: origenPais,
+    origen_provincia: String(cargaPrincipal.provincia || fallback.origen_provincia || fallback.provincia_origen || "").trim() || null,
+    destino_pais: destinoPais,
+    destino_provincia: String(descargaPrincipal.provincia || fallback.destino_provincia || fallback.provincia_destino || "").trim() || null,
+    cmr_tipo: allCountries.some(country => cmrTipoPedido(country, "España") === "internacional") ? "internacional" : "nacional",
+  };
 }
 
 async function inferKmRutaPedido(queryClient, empresaId, payload = {}) {
@@ -3590,13 +3714,20 @@ async function validatePedidoAssignment(client, body = {}, empresaId) {
       err.status = 400;
       throw err;
     }
+    const selectFields = table === "choferes" ? "id,nombre,apellidos,activo,estado" : "id";
     const { rows } = await client.query(
-      `SELECT id FROM ${table} WHERE id=$1 AND empresa_id=$2 LIMIT 1`,
+      `SELECT ${selectFields} FROM ${table} WHERE id=$1 AND empresa_id=$2 LIMIT 1`,
       [id, empresaId]
     );
     if (!rows[0]) {
       const err = new Error(`El ${label} indicado no existe o no pertenece a esta empresa. Refresca la pantalla y vuelve a seleccionarlo.`);
       err.status = 400;
+      throw err;
+    }
+    if (table === "choferes" && (rows[0].activo === false || ["baja", "ausencia"].includes(String(rows[0].estado || "").toLowerCase()))) {
+      const nombreChofer = `${rows[0].nombre || ""} ${rows[0].apellidos || ""}`.trim() || "El chofer";
+      const err = new Error(`${nombreChofer} esta de baja o ausente y no puede asignarse a viajes.`);
+      err.status = 409;
       throw err;
     }
     body[field] = id;
@@ -5558,8 +5689,14 @@ router.post("/", GERENTE_O_TRAFICO,
       if (festivoErr.status === 409) return responderFestivoPendiente(res, festivoErr.aviso);
       throw festivoErr;
     }
+    try {
+      await validatePedidoAssignment(db, req.body, empresaId);
+    } catch (validationErr) {
+      return res.status(validationErr.status || 400).json({ error: validationErr.message });
+    }
 
     await db.transaction(async (client) => {
+      await assertClienteAdmiteNuevoPedido(client, req, cliente_id, importeInicial);
       // Resolver el remolque efectivo para este pedido
       const remolqueSolicitado = remolque_id_manual || remolque_id || null;
       let remolque_id_efectivo = remolqueSolicitado;
@@ -5649,11 +5786,29 @@ router.post("/", GERENTE_O_TRAFICO,
       const ivaPedido = (req.body.tipo_iva !== undefined || req.body.iva_regimen !== undefined)
         ? normalizeIvaRegimen(req.body.tipo_iva, req.body.iva_regimen)
         : null;
+      const origenPaisFallback = normalizePaisPedido(req.body.origen_pais || req.body.pais_origen || "España");
+      const destinoPaisFallback = normalizePaisPedido(req.body.destino_pais || req.body.pais_destino || "España");
+      const puntosCargaNorm = req.body.puntos_carga !== undefined
+        ? normalizePedidoStopsForStorage(req.body.puntos_carga, origen, origenPaisFallback, req.body.origen_provincia || req.body.provincia_origen || "")
+        : null;
+      const puntosDescargaNorm = req.body.puntos_descarga !== undefined
+        ? normalizePedidoStopsForStorage(req.body.puntos_descarga, destino, destinoPaisFallback, req.body.destino_provincia || req.body.provincia_destino || "")
+        : null;
+      const geoPedido = derivePedidoGeoFromStops(puntosCargaNorm || [], puntosDescargaNorm || [], {
+        ...req.body,
+        origen_pais: origenPaisFallback,
+        destino_pais: destinoPaisFallback,
+      });
       const extraFieldMap = {
         fecha_descarga: fechaDescargaNorm ?? null,
         hora_descarga: horaDescargaNorm ?? null,
         ventana_carga: req.body.ventana_carga ?? null,
         ventana_descarga: req.body.ventana_descarga ?? null,
+        origen_pais: geoPedido.origen_pais,
+        origen_provincia: geoPedido.origen_provincia,
+        destino_pais: geoPedido.destino_pais,
+        destino_provincia: geoPedido.destino_provincia,
+        cmr_tipo: req.body.cmr_tipo ? cmrTipoPedido(geoPedido.origen_pais, geoPedido.destino_pais, req.body.cmr_tipo) : geoPedido.cmr_tipo,
         peso_kg: req.body.peso_kg ?? peso_kg ?? null,
         km_ruta: req.body.km_ruta ?? null,
         km_vacio: req.body.km_vacio ?? null,
@@ -5696,8 +5851,8 @@ router.post("/", GERENTE_O_TRAFICO,
         minimo_unidades: req.body.minimo_unidades !== undefined ? (parseLocaleNumber(req.body.minimo_unidades) || 0) : undefined,
         importe_paralizacion: req.body.importe_paralizacion !== undefined ? (parseLocaleNumber(req.body.importe_paralizacion) || 0) : undefined,
         paralizacion_horas: req.body.paralizacion_horas !== undefined ? (parseLocaleNumber(req.body.paralizacion_horas) || 0) : undefined,
-        puntos_carga: req.body.puntos_carga !== undefined ? JSON.stringify(normalizePedidoStopsForStorage(req.body.puntos_carga, origen)) : undefined,
-        puntos_descarga: req.body.puntos_descarga !== undefined ? JSON.stringify(normalizePedidoStopsForStorage(req.body.puntos_descarga, destino)) : undefined,
+        puntos_carga: puntosCargaNorm !== null ? JSON.stringify(puntosCargaNorm) : undefined,
+        puntos_descarga: puntosDescargaNorm !== null ? JSON.stringify(puntosDescargaNorm) : undefined,
       };
       const requestedRutaId = normalizePedidoUuid(req.body.ruta_id);
       let rutaIncompatibleDesvinculada = false;
@@ -5722,6 +5877,8 @@ router.post("/", GERENTE_O_TRAFICO,
       const extraFields = Object.entries(normalizedExtraFieldMap).filter(([k]) => (
         (k in req.body) ||
         ((k === "tipo_iva" || k === "iva_regimen") && ivaPedido) ||
+        ["origen_pais","destino_pais","cmr_tipo"].includes(k) ||
+        (["origen_provincia","destino_provincia"].includes(k) && (req.body.puntos_carga !== undefined || req.body.puntos_descarga !== undefined)) ||
         (k === "coste_gasoil" && normalizedExtraFieldMap.colaborador_id) ||
         (k === "importe" && hasPedidoTarifaCalcInput(req.body)) ||
         (k === "precio_cliente_col" && precioClienteColSincronizado) ||
@@ -5804,6 +5961,16 @@ router.post("/", GERENTE_O_TRAFICO,
       if (e.code === "23503") {
         return res.status(400).json({ error: "Alguna asignacion del pedido no existe o no pertenece a esta empresa. Refresca la pantalla y vuelve a seleccionar vehiculo, chofer, remolque o colaborador." });
       }
+      if (e.status === 404) {
+        return res.status(404).json({ error: e.message || "No encontrado" });
+      }
+      if (e.status === 409 && (e.code === "CLIENTE_BLOQUEADO" || e.code === "CLIENTE_RIESGO_BLOQUEADO")) {
+        return res.status(409).json({
+          error: e.message,
+          code: e.code,
+          cliente: e.cliente || null,
+        });
+      }
       res.status(500).json({ error: e.message || "No se pudo crear el pedido" });
     }
   }
@@ -5827,7 +5994,18 @@ router.patch("/:id/estado",
       return res.status(403).json({ error: "El chofer no puede aplicar este estado" });
     }
 
+    await ensureColaboradorWorkflowSchema();
     const incidencia = typeof req.body.incidencia === "string" ? req.body.incidencia.trim() : "";
+    const motivoCancelacion = typeof req.body.motivo_cancelacion === "string"
+      ? req.body.motivo_cancelacion.trim()
+      : typeof req.body.motivo === "string" ? req.body.motivo.trim() : "";
+    if (estado === "cancelado") {
+      const cfgTrafico = await getCfgTraficoEmpresa(empresaId);
+      const requiereMotivo = cfgTrafico.requerir_motivo_cancelacion !== false && cfgTrafico.requiere_motivo_cancelacion !== false;
+      if (requiereMotivo && !motivoCancelacion) {
+        return res.status(400).json({ error: "Indica el motivo de cancelacion para cancelar este pedido.", code: "MOTIVO_CANCELACION_REQUERIDO" });
+      }
+    }
     if (estado === "incidencia" && incidencia) {
       await db.query(
         `UPDATE pedidos
@@ -5836,8 +6014,25 @@ router.patch("/:id/estado",
          WHERE id=$3 AND empresa_id=$4`,
         [estado, `INCIDENCIA: ${incidencia}`, req.params.id, empresaId]
       );
+    } else if (estado === "cancelado") {
+      await db.query(
+        `UPDATE pedidos
+         SET estado=$1,
+             motivo_cancelacion=$2,
+             cancelado_at=NOW(),
+             cancelado_by=$3,
+             notas=CASE
+               WHEN NULLIF($2,'') IS NULL THEN notas
+               ELSE TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $4))
+             END
+         WHERE id=$5 AND empresa_id=$6`,
+        [estado, motivoCancelacion || null, req.user?.id || null, `CANCELACION: ${motivoCancelacion}`, req.params.id, empresaId]
+      );
     } else {
-      await db.query("UPDATE pedidos SET estado=$1 WHERE id=$2 AND empresa_id=$3", [estado, req.params.id, empresaId]);
+      await db.query(
+        "UPDATE pedidos SET estado=$1, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL WHERE id=$2 AND empresa_id=$3",
+        [estado, req.params.id, empresaId]
+      );
     }
 
     if (estado === "descarga" && rows[0].vehiculo_id && rows[0].destino) {
@@ -5851,6 +6046,7 @@ router.patch("/:id/estado",
     await logPedidoEvento(req.params.id, empresaId, "estado.actualizado", {
       estado,
       incidencia: incidencia || null,
+      motivo_cancelacion: motivoCancelacion || null,
     }, req.user?.rol || "usuario", req.user?.id || null);
 
     if (estado === "entregado") {
@@ -5917,6 +6113,30 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
   const ivaPedido = (body.tipo_iva !== undefined || body.iva_regimen !== undefined)
     ? normalizeIvaRegimen(body.tipo_iva, body.iva_regimen)
     : null;
+  const puntosCargaNormUpdate = body.puntos_carga !== undefined
+    ? normalizePedidoStopsForStorage(
+        body.puntos_carga,
+        body.origen ?? pedidoActualRows[0].origen,
+        body.origen_pais ?? body.pais_origen ?? pedidoActualRows[0].origen_pais ?? "España",
+        body.origen_provincia ?? body.provincia_origen ?? pedidoActualRows[0].origen_provincia ?? ""
+      )
+    : normalizePedidoJsonList(pedidoActualRows[0].puntos_carga);
+  const puntosDescargaNormUpdate = body.puntos_descarga !== undefined
+    ? normalizePedidoStopsForStorage(
+        body.puntos_descarga,
+        body.destino ?? pedidoActualRows[0].destino,
+        body.destino_pais ?? body.pais_destino ?? pedidoActualRows[0].destino_pais ?? "España",
+        body.destino_provincia ?? body.provincia_destino ?? pedidoActualRows[0].destino_provincia ?? ""
+      )
+    : normalizePedidoJsonList(pedidoActualRows[0].puntos_descarga);
+  const geoTouched = body.puntos_carga !== undefined || body.puntos_descarga !== undefined ||
+    body.origen_pais !== undefined || body.pais_origen !== undefined || body.origen_provincia !== undefined || body.provincia_origen !== undefined ||
+    body.destino_pais !== undefined || body.pais_destino !== undefined || body.destino_provincia !== undefined || body.provincia_destino !== undefined ||
+    body.cmr_tipo !== undefined;
+  const geoPedidoUpdate = derivePedidoGeoFromStops(puntosCargaNormUpdate, puntosDescargaNormUpdate, {
+    ...pedidoActualRows[0],
+    ...body,
+  });
 
   // Build dynamic UPDATE - only update fields that are present in the request
   const fieldMap = {
@@ -5936,6 +6156,11 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     hora_descarga: body.hora_descarga !== undefined ? normalizePedidoTime(body.hora_descarga) : undefined,
     ventana_carga: body.ventana_carga ?? null,
     ventana_descarga: body.ventana_descarga ?? null,
+    origen_pais: geoTouched ? geoPedidoUpdate.origen_pais : undefined,
+    origen_provincia: geoTouched ? geoPedidoUpdate.origen_provincia : undefined,
+    destino_pais: geoTouched ? geoPedidoUpdate.destino_pais : undefined,
+    destino_provincia: geoTouched ? geoPedidoUpdate.destino_provincia : undefined,
+    cmr_tipo: geoTouched ? (body.cmr_tipo ? cmrTipoPedido(geoPedidoUpdate.origen_pais, geoPedidoUpdate.destino_pais, body.cmr_tipo) : geoPedidoUpdate.cmr_tipo) : undefined,
     mercancia: body.mercancia ?? null,
     peso_kg: body.peso_kg ?? null,
     bultos: body.bultos ?? null,
@@ -5990,8 +6215,8 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     minimo_unidades:        body.minimo_unidades        !== undefined ? (parseLocaleNumber(body.minimo_unidades) || 0) : undefined,
     importe_paralizacion:   body.importe_paralizacion   !== undefined ? (parseLocaleNumber(body.importe_paralizacion) || 0) : undefined,
     paralizacion_horas:     body.paralizacion_horas     !== undefined ? (parseLocaleNumber(body.paralizacion_horas) || 0) : undefined,
-    puntos_carga:           body.puntos_carga           !== undefined ? JSON.stringify(normalizePedidoStopsForStorage(body.puntos_carga, body.origen ?? pedidoActualRows[0].origen)) : undefined,
-    puntos_descarga:        body.puntos_descarga        !== undefined ? JSON.stringify(normalizePedidoStopsForStorage(body.puntos_descarga, body.destino ?? pedidoActualRows[0].destino)) : undefined,
+    puntos_carga:           body.puntos_carga           !== undefined ? JSON.stringify(puntosCargaNormUpdate) : undefined,
+    puntos_descarga:        body.puntos_descarga        !== undefined ? JSON.stringify(puntosDescargaNormUpdate) : undefined,
   };
   const inferPayload = { ...pedidoActualRows[0] };
   for (const [key, value] of Object.entries(fieldMap)) {
@@ -6039,6 +6264,12 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     .filter(([k]) => (
       (k in body) ||
       ((k === "tipo_iva" || k === "iva_regimen") && ivaPedido) ||
+      (["origen_pais","origen_provincia","destino_pais","destino_provincia","cmr_tipo"].includes(k) && geoTouched) ||
+      (k === "origen_pais" && ("pais_origen" in body)) ||
+      (k === "origen_provincia" && ("provincia_origen" in body)) ||
+      (k === "destino_pais" && ("pais_destino" in body)) ||
+      (k === "destino_provincia" && ("provincia_destino" in body)) ||
+      (k === "cmr_tipo" && ("origen_pais" in body || "destino_pais" in body || "pais_origen" in body || "pais_destino" in body)) ||
       (k === "coste_gasoil" && normalizedFieldMap.colaborador_id) ||
       (k === "importe" && hasPedidoTarifaCalcInput(body)) ||
       (k === "precio_cliente_col" && precioClienteColSincronizado) ||
@@ -6288,26 +6519,35 @@ router.get("/:id/carta-porte", async (req, res) => {
     if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
 
     const { rows: empresaRows } = await db.query(
-      "SELECT nombre, cif FROM empresas WHERE id = $1 LIMIT 1",
+      "SELECT nombre, cif, cfg_precios FROM empresas WHERE id = $1 LIMIT 1",
       [empresaId]
     ).catch(() => ({ rows: [] }));
     const empresa = empresaRows[0] || {};
+    const perfilEmpresa = empresa.cfg_precios?.empresa_perfil && typeof empresa.cfg_precios.empresa_perfil === "object"
+      ? empresa.cfg_precios.empresa_perfil
+      : (empresa.cfg_precios && typeof empresa.cfg_precios === "object" ? empresa.cfg_precios : {});
+    const empresaDireccion = [
+      perfilEmpresa.domicilio || perfilEmpresa.direccion,
+      [perfilEmpresa.cp || perfilEmpresa.codigo_postal, perfilEmpresa.municipio || perfilEmpresa.ciudad || perfilEmpresa.poblacion].filter(Boolean).join(" "),
+      perfilEmpresa.provincia,
+      perfilEmpresa.pais,
+    ].filter(Boolean).join(", ");
 
     res.json({
       ...rows[0],
       pedido_numero: rows[0].numero || "",
       carta_porte_numero: cartaPorte?.numero || rows[0].carta_porte_numero || rows[0].numero || "",
       carta_porte_generada_at: cartaPorte?.generated_at || rows[0].carta_porte_generada_at || null,
-      empresa_nombre: empresa.nombre || "",
-      empresa_cif: empresa.cif || "",
-      empresa_direccion: "",
-      empresa_telefono: "",
-      empresa_email: "",
-      emp_nombre: empresa.nombre || "",
-      emp_cif: empresa.cif || "",
-      emp_dir: "",
-      emp_tel: "",
-      emp_email: "",
+      empresa_nombre: perfilEmpresa.razon_social || empresa.nombre || "",
+      empresa_cif: perfilEmpresa.cif || empresa.cif || "",
+      empresa_direccion: empresaDireccion,
+      empresa_telefono: perfilEmpresa.telefono || "",
+      empresa_email: perfilEmpresa.email || "",
+      emp_nombre: perfilEmpresa.razon_social || empresa.nombre || "",
+      emp_cif: perfilEmpresa.cif || empresa.cif || "",
+      emp_dir: empresaDireccion,
+      emp_tel: perfilEmpresa.telefono || "",
+      emp_email: perfilEmpresa.email || "",
       emp_logo: "",
     });
   } catch(e) { res.status(500).json({ error: e.message }); }

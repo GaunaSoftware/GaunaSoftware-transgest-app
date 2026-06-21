@@ -4,16 +4,16 @@ import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
 const S={
-  page:{padding:"24px 28px",minWidth:0},
-  title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:16,color:"var(--text)"},
-  card:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
-  th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)"},
-  td:{padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)"},
-  btn:{padding:"8px 16px",borderRadius:7,border:"none",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"},
-  inp:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,width:"100%",boxSizing:"border-box"},
+  page:{padding:"32px 42px",minWidth:0,minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 45%,#f7fafc 100%)"},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:34,fontWeight:900,marginBottom:10,color:"#0f172a"},
+  card:{background:"rgba(255,255,255,.96)",border:"1px solid #dbe5ec",borderRadius:12,overflow:"hidden",boxShadow:"0 12px 30px rgba(15,23,42,.055)"},
+  th:{textAlign:"left",padding:"12px 16px",fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",borderBottom:"1px solid #dbe5ec",background:"#f8fbfd"},
+  td:{padding:"14px 16px",borderBottom:"1px solid #e2e8f0",fontSize:14,color:"#0f172a",verticalAlign:"middle"},
+  btn:{padding:"10px 16px",borderRadius:8,border:"1px solid #dbe5ec",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",background:"#fff",color:"#0f172a"},
+  inp:{background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:14,width:"100%",boxSizing:"border-box",outline:"none",boxShadow:"0 8px 18px rgba(15,23,42,.035)"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center"},
-  mbox:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:28,width:"min(600px,96vw)",maxHeight:"90vh",overflowY:"auto"},
-  label:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4,marginTop:12},
+  mbox:{background:"#fff",border:"1px solid #dbe5ec",borderRadius:12,padding:28,width:"min(600px,96vw)",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 24px 60px rgba(15,23,42,.20)"},
+  label:{display:"block",fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",marginBottom:6,marginTop:12},
 };
 
 const TIPOS_VEHICULO=[
@@ -305,46 +305,48 @@ export default function Rutas(){
 
   return(
     <div style={S.page}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18,flexWrap:"wrap",gap:10}}>
+      <div style={{marginBottom:20}}>
         <div>
           <div style={S.title}>Rutas y tarifas</div>
-          <div style={{fontSize:12,color:"var(--text4)",maxWidth:720,lineHeight:1.45}}>
+          <div style={{fontSize:15,color:"#475569",maxWidth:820,lineHeight:1.45}}>
             Configura rutas por cliente, minimos facturables, recargo de combustible y compatibilidad por tipo de remolque. En Pedidos solo aparecen las rutas del cliente seleccionado.
           </div>
         </div>
-        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(220px, 1.6fr) minmax(160px, .85fr) minmax(160px, .85fr) minmax(150px, .75fr) auto minmax(250px, 1.2fr) auto",gap:14,alignItems:"center",marginTop:26}}>
           <select value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)}
-            style={{...S.inp,width:"auto",minWidth:160,padding:"7px 10px"}}>
+            style={{...S.inp}}>
             <option value="todos">Todos los clientes</option>
             {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
           <input value={filtroTexto} onChange={e=>setFiltroTexto(e.target.value)} placeholder="Buscar ruta..."
-            style={{...S.inp,width:150,padding:"7px 10px"}}/>
+            style={{...S.inp}}/>
           <select value={filtroTipo} onChange={e=>setFiltroTipo(e.target.value)}
-            style={{...S.inp,width:"auto",minWidth:135,padding:"7px 10px"}}>
+            style={{...S.inp}}>
             <option value="todos">Todos los tipos</option>
             {TIPOS_VEHICULO.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
           </select>
           <select value={filtroTarifa} onChange={e=>setFiltroTarifa(e.target.value)}
-            style={{...S.inp,width:"auto",minWidth:125,padding:"7px 10px"}}>
+            style={{...S.inp}}>
             <option value="todos">Todas tarifas</option>
             {TIPOS_TARIFA.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
           </select>
           <button onClick={()=>setSoloMargenNegativo(v=>!v)}
-            style={{...S.btn,background:soloMargenNegativo?"rgba(239,68,68,.12)":"var(--bg3)",color:soloMargenNegativo?"#ef4444":"var(--text3)",border:"1px solid var(--border2)",padding:"7px 10px"}}>
+            style={{...S.btn,background:soloMargenNegativo?"rgba(239,68,68,.10)":"#effaf8",color:soloMargenNegativo?"#ef4444":"#006f68",border:soloMargenNegativo?"1px solid rgba(239,68,68,.24)":"1px solid #c8e4e1",whiteSpace:"nowrap"}}>
             Margen negativo
           </button>
           <input type="file" accept=".xlsx,.csv,.txt,.pdf" onChange={e=>setImportFile(e.target.files?.[0] || null)}
-            style={{...S.inp,width:230,padding:"7px 10px"}}/>
-          <button style={{...S.btn,background:"var(--bg3)",color:"var(--text3)",border:"1px solid var(--border2)",opacity:importando?.7:1}}
+            style={{...S.inp}}/>
+          <button style={{...S.btn,background:"#fff",color:"#006f68",border:"1px solid #c8e4e1",opacity:importando?.7:1,whiteSpace:"nowrap"}}
             onClick={importarArchivo} disabled={importando}>
             {importando ? "Importando..." : "Importar rutas"}
           </button>
-          <span style={{fontSize:11,color:"var(--text4)",maxWidth:340}}>
+        </div>
+        <div style={{display:"flex",gap:14,alignItems:"flex-start",flexWrap:"wrap",marginTop:12}}>
+          <span style={{fontSize:13,color:"#475569",maxWidth:560,lineHeight:1.45}}>
             Excel/CSV: cabeceras Origen, Destino, Tipo, Precio, Km, Minimo o formato origen;destino;precio;km;tipo_vehiculo;tarifa_tipo;minimo;recargo. Admite 22,00 EUR y columnas de cliente/CIF.
           </span>
           {canEdit&&(
-            <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={()=>abrirModal()}>
+            <button style={{...S.btn,background:"linear-gradient(180deg,#008b82,#006f68)",color:"#fff",border:"1px solid #007f78",padding:"13px 22px",boxShadow:"0 12px 22px rgba(0,111,104,.18)"}} onClick={()=>abrirModal()}>
               + Nueva ruta
             </button>
           )}
@@ -371,33 +373,30 @@ export default function Rutas(){
               if(b==="cualquiera") return 1;
               return a.localeCompare(b);
             });
-            const esGeneral=false;
-
             return(
-              <div key={cid} style={{marginBottom:16}}>
+              <div key={cid} style={{...S.card,marginBottom:16}}>
                 {/* Client header */}
                 <div
                   onClick={()=>toggleCliente(cid)}
                   style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",
-                    padding:"10px 16px",borderRadius:isExpanded?"10px 10px 0 0":"10px",
-                    background:esGeneral?"var(--bg3)":"rgba(59,130,246,.08)",
-                    border:esGeneral?"1px solid var(--border2)":"1px solid rgba(59,130,246,.2)",
-                    borderBottom:isExpanded?"none":"undefined",
+                    padding:"14px 18px",
+                    background:"linear-gradient(180deg,#f8fbfd,#fff)",
+                    borderBottom:isExpanded?"1px solid #dbe5ec":"none",
                   }}>
                   <span style={{fontWeight:800,fontSize:14,
-                    color:esGeneral?"var(--text3)":"var(--accent-xl)"}}>
+                    color:"#006f68",textTransform:"uppercase",letterSpacing:".03em"}}>
                     {grupo.nombre}
                   </span>
-                  <span style={{fontSize:11,color:"var(--text4)",marginLeft:4}}>
+                  <span style={{fontSize:12,color:"#64748b",marginLeft:4,padding:"3px 10px",borderRadius:999,background:"#fff",border:"1px solid #dbe5ec"}}>
                     {grupo.rutas.length} ruta{grupo.rutas.length!==1?"s":""}
                   </span>
-                  <span style={{marginLeft:"auto",fontSize:11,color:"var(--text5)"}}>
+                  <span style={{marginLeft:"auto",fontSize:18,color:"#0f172a",lineHeight:1}}>
                     {isExpanded?"▲":"▼"}
                   </span>
                 </div>
 
                 {isExpanded&&(
-                  <div style={{border:"1px solid var(--border2)",borderTop:"none",borderRadius:"0 0 10px 10px",overflow:"hidden"}}>
+                  <div style={{overflow:"hidden"}}>
                     {tiposOrdenados.map((tv,tvIdx)=>{
                       const tvKey=cid+"_"+tv;
                       const tvExpanded=expandedVehiculos[tvKey]!==false;
@@ -410,15 +409,15 @@ export default function Rutas(){
                           {tieneMultiplesVehiculos&&(
                             <div onClick={()=>toggleVehiculo(tvKey)}
                               style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",
-                                padding:"7px 16px",background:"var(--bg3)",
-                                borderTop:tvIdx>0?"1px solid var(--border2)":"none"}}>
-                              <span style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:".06em"}}>
+                                padding:"9px 16px",background:"#f8fbfd",
+                                borderTop:tvIdx>0?"1px solid #e2e8f0":"none"}}>
+                              <span style={{fontSize:11,fontWeight:900,color:"#334155",textTransform:"uppercase",letterSpacing:".06em"}}>
                                 Tipo {tvLabel}
                               </span>
-                              <span style={{fontSize:10,color:"var(--text5)"}}>
+                              <span style={{fontSize:11,color:"#64748b"}}>
                                 ({porVehiculo[tv].length} ruta{porVehiculo[tv].length!==1?"s":""})
                               </span>
-                              <span style={{marginLeft:"auto",fontSize:10,color:"var(--text5)"}}>
+                              <span style={{marginLeft:"auto",fontSize:12,color:"#64748b"}}>
                                 {tvExpanded?"^":"v"}
                               </span>
                             </div>
@@ -457,16 +456,16 @@ export default function Rutas(){
                                         const m = calcularMargenRuta(r);
                                         return (
                                           <div style={{display:"grid",gap:2}}>
-                                            <span style={{fontSize:11,color:"var(--text4)"}}>Ing. {fmt2(m.ingresoKm)}</span>
-                                            <span style={{fontSize:11,color:"var(--text5)"}}>Coste {fmt2(m.costeKm)}</span>
-                                            <span style={{fontWeight:900,color:m.margenKm>=0?"var(--green)":"#ef4444"}}>Margen {fmt2(m.margenKm)}</span>
+                                            <span style={{fontSize:11,color:"#64748b"}}>Ing. {fmt2(m.ingresoKm)}</span>
+                                            <span style={{fontSize:11,color:"#64748b"}}>Coste {fmt2(m.costeKm)}</span>
+                                            <span style={{fontWeight:900,color:m.margenKm>=0?"#008b82":"#ef4444"}}>Margen {fmt2(m.margenKm)}</span>
                                           </div>
                                         );
                                       })() : "-"}
                                     </td>
                                     <td style={S.td}>
                                       <span style={{padding:"2px 8px",borderRadius:20,fontSize:11,
-                                        background:"var(--bg4)",color:"var(--text3)"}}>
+                                        background:"rgba(20,184,166,.08)",color:"#006f68",border:"1px solid #c8e4e1"}}>
                                         {TIPOS_VEHICULO.find(t=>t.v===r.tipo_vehiculo)?.l||r.tipo_vehiculo||"Cualquiera"}
                                       </span>
                                     </td>
@@ -474,12 +473,12 @@ export default function Rutas(){
                                       {canEdit&&(
                                         <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap"}}>
                                           <button style={{...S.btn,background:"var(--bg3)",color:"var(--text3)",
-                                            border:"1px solid var(--border2)",padding:"4px 10px",fontSize:12}}
+                                            border:"1px solid #dbe5ec",padding:"7px 13px",fontSize:13}}
                                             onClick={()=>abrirModal(r)}>
                                             Editar
                                           </button>
                                           <button style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#ef4444",
-                                            border:"1px solid rgba(239,68,68,.25)",padding:"4px 10px",fontSize:12}}
+                                            border:"1px solid rgba(239,68,68,.25)",padding:"7px 13px",fontSize:13}}
                                             onClick={()=>eliminarRuta(r)}>
                                             Desactivar
                                           </button>

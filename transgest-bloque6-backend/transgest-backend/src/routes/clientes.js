@@ -699,7 +699,7 @@ router.post("/", GERENTE_O_CONTABLE,
             forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, notas,
             calle, num_ext, codigo_postal, pendiente_revision,
             horario_carga, horario_descarga, email_facturacion, emails_albaranes, iban,
-            minimo_facturable_toneladas } = req.body;
+            minimo_facturable_toneladas, limite_riesgo, modo_facturacion, bloqueado, bloqueo_motivo } = req.body;
     const empresaId = req.empresaId||req.user.empresa_id;
     const iva = normalizeIva(tipo_iva, iva_regimen);
     let horarioCargaNorm;
@@ -718,15 +718,17 @@ router.post("/", GERENTE_O_CONTABLE,
     const { rows } = await db.query(`
       INSERT INTO clientes (nombre,cif,direccion,cp,ciudad,pais,email,contacto,telefono,
         forma_pago,vencimiento,tipo_iva,iva_regimen,tipo_irpf,precio_tn_km,notas,empresa_id,
-        pendiente_revision,email_facturacion,emails_albaranes,iban,horario_carga,horario_descarga,minimo_facturable_toneladas)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING *`,
+        pendiente_revision,email_facturacion,emails_albaranes,iban,horario_carga,horario_descarga,minimo_facturable_toneladas,
+        limite_riesgo,modo_facturacion,bloqueado,bloqueo_motivo)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) RETURNING *`,
       [nombre,cif||null,calle?(calle+(num_ext?' '+num_ext:'')):direccion||null,
        codigo_postal||cp||null,ciudad||null,pais||"España",
        email||null,contacto||null,telefono||null,
        forma_pago||"Transferencia bancaria",vencimiento||"30 días",
        iva.tipo_iva,iva.iva_regimen,tipo_irpf||0,precio_tn_km||0,notas||null,empresaId,incompleto,
        email_facturacion || null, emails_albaranes || null, iban || null, horarioCargaNorm, horarioDescargaNorm,
-       numericOrNull(minimo_facturable_toneladas)]
+       numericOrNull(minimo_facturable_toneladas), numericOrNull(limite_riesgo) || 0,
+       modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null]
     );
     res.status(201).json(rows[0]);
   }
@@ -737,7 +739,7 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   const { nombre, cif, direccion, cp, ciudad, pais, email, contacto, telefono,
           forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, activo, notas,
           email_facturacion, emails_albaranes, iban, horario_carga, horario_descarga,
-          minimo_facturable_toneladas } = req.body;
+          minimo_facturable_toneladas, limite_riesgo, modo_facturacion, bloqueado, bloqueo_motivo } = req.body;
   const empresaId = req.empresaId || req.user.empresa_id;
   const iva = normalizeIva(tipo_iva, iva_regimen);
   let horarioCargaNorm;
@@ -752,12 +754,15 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   const { rows } = await db.query(`
     UPDATE clientes SET nombre=$1,cif=$2,direccion=$3,cp=$4,ciudad=$5,pais=$6,email=$7,
       contacto=$8,telefono=$9,forma_pago=$10,vencimiento=$11,tipo_iva=$12,iva_regimen=$13,tipo_irpf=$14,
-      precio_tn_km=$15,activo=$16,notas=$17,email_facturacion=$18,emails_albaranes=$19,iban=$20,horario_carga=$21,horario_descarga=$22,minimo_facturable_toneladas=$23
-    WHERE id=$24 AND empresa_id=$25 RETURNING *`,
+      precio_tn_km=$15,activo=$16,notas=$17,email_facturacion=$18,emails_albaranes=$19,iban=$20,horario_carga=$21,horario_descarga=$22,
+      minimo_facturable_toneladas=$23,limite_riesgo=$24,modo_facturacion=$25,bloqueado=$26,bloqueo_motivo=$27
+    WHERE id=$28 AND empresa_id=$29 RETURNING *`,
     [nombre,cif,direccion,cp,ciudad,pais,email,contacto,telefono,forma_pago,vencimiento,
      iva.tipo_iva,iva.iva_regimen,tipo_irpf,precio_tn_km,activo!==undefined?activo:true,notas,
      email_facturacion || null, emails_albaranes || null, iban || null, horarioCargaNorm, horarioDescargaNorm,
-     numericOrNull(minimo_facturable_toneladas), req.params.id,empresaId]
+     numericOrNull(minimo_facturable_toneladas), numericOrNull(limite_riesgo) || 0,
+     modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null,
+     req.params.id,empresaId]
   );
   if (!rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
   res.json(rows[0]);

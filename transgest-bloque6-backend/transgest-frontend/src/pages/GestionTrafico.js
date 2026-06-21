@@ -1036,7 +1036,7 @@ function TripCard({
                 opacity:disableCopy ? .6 : 1,
               }}
             >
-              {disableCopy ? "Copiando..." : "Copiar +1 sem"}
+              {disableCopy ? "Copiando..." : "Copiar"}
             </button>
           )}
           {quickAction && onQuickState && (
@@ -3115,16 +3115,16 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     }
   }
 
-  async function copiarPedidoSemanaSiguiente(pedido, opts = {}) {
+  async function copiarPedido(pedido, opts = {}) {
     if (!pedido?.id || pedidoTieneFacturaFinal(pedido)) return;
     const keepAssignment = opts.keepAssignment !== false;
     setCopyingPedidoId(String(pedido.id));
     try {
       const fresh = await getPedido(pedido.id).catch(() => pedido);
-      const payload = buildPedidoCopyPayload(fresh || pedido, { offsetDays: 7, keepAssignment });
+      const payload = buildPedidoCopyPayload(fresh || pedido, { offsetDays: 0, keepAssignment });
       await crearPedido(payload);
-      broadcastPedidosChanged({ source: "gestion-trafico-copy-next-week", pedido_id: pedido.id });
-      notify(`Copia creada para la semana siguiente de ${pedido.numero || "este viaje"}.`, "success");
+      broadcastPedidosChanged({ source: "gestion-trafico-copy", pedido_id: pedido.id });
+      notify(`Copia creada de ${pedido.numero || "este viaje"}.`, "success");
       cargar();
     } catch (err) {
       notify(err.message || "No se pudo copiar el viaje.", "error");
@@ -3236,19 +3236,19 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     }
     const ok = await confirmDialog({
       title: "Copiar pedidos criticos",
-      message: `Se copiaran ${lista.length} pedido(s) criticos a la semana siguiente manteniendo, si existe, la asignacion actual.\n\nLas copias quedaran como pendientes para revisarlas antes de cerrar.`,
-      confirmText: "Copiar semana siguiente",
+      message: `Se copiaran ${lista.length} pedido(s) criticos manteniendo, si existe, la asignacion actual.\n\nLas copias quedaran como pendientes para revisarlas antes de cerrar.`,
+      confirmText: "Copiar",
     });
     if (!ok) return;
     setBulkCopying(true);
     try {
       for (const pedido of lista) {
         const fresh = await getPedido(pedido.id).catch(() => pedido);
-        const payload = buildPedidoCopyPayload(fresh || pedido, { offsetDays: 7, keepAssignment: true });
+        const payload = buildPedidoCopyPayload(fresh || pedido, { offsetDays: 0, keepAssignment: true });
         await crearPedido(payload);
       }
       broadcastPedidosChanged({ source: "gestion-trafico-copy-critical-batch" });
-      notify(`Se han copiado ${lista.length} pedido(s) criticos a la semana siguiente.`, "success");
+      notify(`Se han copiado ${lista.length} pedido(s) criticos.`, "success");
       cargar();
     } catch (err) {
       notify(err.message || "No se pudieron copiar los pedidos criticos.", "error");
@@ -3267,7 +3267,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     }
     const ok = await confirmDialog({
       title: "Copiar criticos seleccionados",
-      message: `Se copiaran ${lista.length} pedido(s) criticos seleccionados a la semana siguiente manteniendo, si existe, la asignacion actual.`,
+      message: `Se copiaran ${lista.length} pedido(s) criticos seleccionados manteniendo, si existe, la asignacion actual.`,
       confirmText: "Copiar seleccionados",
     });
     if (!ok) return;
@@ -3275,7 +3275,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     try {
       for (const pedido of lista) {
         const fresh = await getPedido(pedido.id).catch(() => pedido);
-        const payload = buildPedidoCopyPayload(fresh || pedido, { offsetDays: 7, keepAssignment: true });
+        const payload = buildPedidoCopyPayload(fresh || pedido, { offsetDays: 0, keepAssignment: true });
         await crearPedido(payload);
       }
       setSelectedCriticalIds([]);
@@ -3571,7 +3571,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
           quickAction={getQuickActionForPedido(p)}
           onQuickState={aplicarEstadoRapido}
           disableQuickState={quickUpdatingId === String(p.id)}
-          onCopyNextWeek={pedidoTieneFacturaFinal(p) ? null : copiarPedidoSemanaSiguiente}
+          onCopyNextWeek={pedidoTieneFacturaFinal(p) ? null : copiarPedido}
           disableCopy={copyingPedidoId === String(p.id)}
           onDelayRequest={pedidoTieneFacturaFinal(p) ? null : solicitarRetrasoPedido}
           disableReschedule={reschedulingPedidoId === String(p.id)}
@@ -3617,7 +3617,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                     quickAction={getQuickActionForPedido(p)}
                     onQuickState={aplicarEstadoRapido}
                     disableQuickState={quickUpdatingId === String(p.id)}
-                    onCopyNextWeek={pedidoTieneFacturaFinal(p) ? null : copiarPedidoSemanaSiguiente}
+                    onCopyNextWeek={pedidoTieneFacturaFinal(p) ? null : copiarPedido}
                     disableCopy={copyingPedidoId === String(p.id)}
                     onDelayRequest={pedidoTieneFacturaFinal(p) ? null : solicitarRetrasoPedido}
                     disableReschedule={reschedulingPedidoId === String(p.id)}
@@ -4189,7 +4189,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
               disabled={bulkCopying}
               style={{fontSize:11,fontWeight:800,color:"#60a5fa",background:"rgba(59,130,246,.12)",border:"1px solid rgba(59,130,246,.24)",borderRadius:999,padding:"4px 12px",cursor:bulkCopying?"not-allowed":"pointer",opacity:bulkCopying?.6:1}}
             >
-              {bulkCopying ? "Copiando criticos..." : "Copiar criticos +1 semana"}
+              {bulkCopying ? "Copiando criticos..." : "Copiar criticos"}
             </button>
             <label style={{display:"inline-flex",alignItems:"center",gap:8,fontSize:11,fontWeight:800,color:"var(--text3)",padding:"4px 10px",borderRadius:999,border:"1px solid var(--border2)",background:"rgba(148,163,184,.08)"}}>
               <input type="checkbox" checked={allVisibleCriticalsSelected} onChange={toggleSelectAllCriticals} />
@@ -4412,11 +4412,11 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                       </button>
                     )}
                     <button
-                      onClick={() => copiarPedidoSemanaSiguiente(p)}
+                      onClick={() => copiarPedido(p)}
                       disabled={copyingPedidoId === String(p.id)}
                       style={{padding:"4px 8px",borderRadius:6,border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.12)",color:"#60a5fa",fontSize:11,fontWeight:800,cursor:copyingPedidoId === String(p.id) ? "not-allowed" : "pointer",opacity:copyingPedidoId === String(p.id) ? .6 : 1}}
                     >
-                      {copyingPedidoId === String(p.id) ? "Copiando..." : "Copiar +1 sem"}
+                      {copyingPedidoId === String(p.id) ? "Copiando..." : "Copiar"}
                     </button>
                     <button
                       onClick={() => solicitarRetrasoPedido(p)}
@@ -4811,7 +4811,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                               quickAction={getQuickActionForPedido(p)}
                               onQuickState={aplicarEstadoRapido}
                               disableQuickState={quickUpdatingId === String(p.id)}
-                              onCopyNextWeek={pedidoTieneFacturaFinal(p) ? null : copiarPedidoSemanaSiguiente}
+                              onCopyNextWeek={pedidoTieneFacturaFinal(p) ? null : copiarPedido}
                               disableCopy={copyingPedidoId === String(p.id)}
                               onDelayRequest={pedidoTieneFacturaFinal(p) ? null : solicitarRetrasoPedido}
                               disableReschedule={reschedulingPedidoId === String(p.id)}

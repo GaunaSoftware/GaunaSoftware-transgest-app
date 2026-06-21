@@ -501,7 +501,7 @@ export const getPosicionesVehiculo = (id) => apiFetch(`/vehiculos/${id}/posicion
 export const sincronizarGpsVehiculos = (provider) => apiFetch("/vehiculos/gps/sync", { method:"POST", body:{ provider } });
 
 // ── Choferes ──────────────────────────────────────────
-export const getChoferes    = ()          => apiFetch("/choferes");
+export const getChoferes    = (activo = "true") => apiFetch(`/choferes?activo=${encodeURIComponent(activo)}`);
 export const crearChofer    = (data)      => apiFetch("/choferes", { method:"POST", body:data });
 export const editarChofer   = (id,data)   => apiFetch(`/choferes/${id}`, { method:"PUT", body:data });
 export const getChoferJornadaApp = () => apiFetch("/choferes/app/jornada");

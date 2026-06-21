@@ -990,18 +990,34 @@ function normalizeEmpresaProfile(raw = {}) {
 }
 
 function normalizeEmpresaPalette(raw = {}) {
-  const allowed = new Set(["transgest", "mar", "bosque", "ambar", "grafito"]);
+  const presets = {
+    transgest: { accent:"#0f766e", accentLight:"#14b8a6", sidebar:"#10231f" },
+    mar: { accent:"#0e7490", accentLight:"#06b6d4", sidebar:"#0f2530" },
+    bosque: { accent:"#15803d", accentLight:"#22c55e", sidebar:"#10251a" },
+    ambar: { accent:"#b45309", accentLight:"#f59e0b", sidebar:"#2b2112" },
+    grafito: { accent:"#475569", accentLight:"#94a3b8", sidebar:"#111827" },
+  };
   const cfg = raw && typeof raw === "object" ? raw : {};
   const custom = cfg.custom && typeof cfg.custom === "object" ? cfg.custom : {};
-  const cleanHex = value => /^#[0-9a-f]{6}$/i.test(String(value || "").trim()) ? String(value).trim() : undefined;
-  const result = { id: allowed.has(String(cfg.id || "")) ? String(cfg.id) : "transgest" };
-  const cleanCustom = {
-    accent: cleanHex(cfg.accent || custom.accent),
-    accentLight: cleanHex(cfg.accentLight || custom.accentLight),
-    sidebar: cleanHex(cfg.sidebar || custom.sidebar),
+  const cleanHex = value => /^#[0-9a-f]{6}$/i.test(String(value || "").trim()) ? String(value).trim() : "";
+  const requestedId = String(cfg.id || "");
+  const preset = presets[requestedId] || presets.transgest;
+  const clean = {
+    accent: cleanHex(cfg.accent) || cleanHex(custom.accent) || preset.accent,
+    accentLight: cleanHex(cfg.accentLight) || cleanHex(custom.accentLight) || preset.accentLight,
+    sidebar: cleanHex(cfg.sidebar) || cleanHex(custom.sidebar) || preset.sidebar,
   };
-  result.custom = Object.fromEntries(Object.entries(cleanCustom).filter(([, value]) => value));
-  return result;
+  const matchingPresetId = Object.entries(presets).find(([, value]) => (
+    value.accent.toLowerCase() === clean.accent.toLowerCase()
+    && value.accentLight.toLowerCase() === clean.accentLight.toLowerCase()
+    && value.sidebar.toLowerCase() === clean.sidebar.toLowerCase()
+  ))?.[0];
+  const id = requestedId === "custom" || !matchingPresetId ? "custom" : matchingPresetId;
+  return {
+    id,
+    ...clean,
+    custom: clean,
+  };
 }
 
 function publicAppUrl(req) {

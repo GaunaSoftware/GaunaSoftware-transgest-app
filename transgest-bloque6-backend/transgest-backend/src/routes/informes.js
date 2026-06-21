@@ -3272,6 +3272,8 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       `, [empresaId])),
       safeRows(db.query(`
         SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga,
+               p.origen_pais, p.origen_provincia, p.destino_pais, p.destino_provincia,
+               p.puntos_carga, p.puntos_descarga, p.cmr_tipo,
                p.estado::text AS estado,
                c.nombre AS cliente_nombre,
                v.matricula AS vehiculo_matricula,
@@ -3304,10 +3306,12 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       `, [empresaId])),
       safeRows(db.query(`
         SELECT e.id, e.pedido_id, e.tipo, e.actor_tipo, e.detalle, e.created_at,
+               u.nombre AS actor_nombre, u.email AS actor_email, u.rol AS actor_rol,
                p.numero AS pedido_numero, p.estado::text AS pedido_estado,
                COALESCE(p.origen,'') AS origen, COALESCE(p.destino,'') AS destino
         FROM pedido_eventos e
         JOIN pedidos p ON p.id=e.pedido_id AND p.empresa_id=e.empresa_id
+        LEFT JOIN usuarios u ON u.id=e.actor_id AND u.empresa_id=e.empresa_id
         WHERE e.empresa_id=$1
           AND p.estado::text NOT IN ('cancelado')
           AND e.created_at >= NOW() - INTERVAL '48 hours'
@@ -3540,6 +3544,13 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
         numero: p.numero,
         origen: p.origen,
         destino: p.destino,
+        origen_pais: p.origen_pais,
+        origen_provincia: p.origen_provincia,
+        destino_pais: p.destino_pais,
+        destino_provincia: p.destino_provincia,
+        puntos_carga: p.puntos_carga,
+        puntos_descarga: p.puntos_descarga,
+        cmr_tipo: p.cmr_tipo,
         fecha_carga: p.fecha_carga,
         fecha_descarga: p.fecha_descarga,
         estado: key,
@@ -3587,6 +3598,9 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       pedido_numero: ev.pedido_numero,
       tipo: ev.tipo,
       actor_tipo: ev.actor_tipo,
+      actor_nombre: ev.actor_nombre || null,
+      actor_email: ev.actor_email || null,
+      actor_rol: ev.actor_rol || null,
       detalle: ev.detalle || {},
       created_at: ev.created_at,
       ruta: `${ev.origen || "-"} > ${ev.destino || "-"}`,

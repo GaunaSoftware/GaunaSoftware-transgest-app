@@ -3,7 +3,7 @@ import { getActividad } from "../services/api";
 import { notify } from "../services/notify";
 
 const S = {
-  page: { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },
+  page: { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif", minWidth:0, overflowX:"hidden" },
   title:{ fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:800, color:"var(--text)", marginBottom:4 },
   sub:  { fontSize:12, color:"var(--text4)", marginBottom:18 },
   card: { background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:10, padding:"13px 15px" },
@@ -148,12 +148,12 @@ export default function Actividad() {
 
   return (
     <div style={S.page}>
-      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16,marginBottom:16}}>
-        <div>
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16,marginBottom:16,flexWrap:"wrap"}}>
+        <div style={{minWidth:0,flex:"1 1 360px"}}>
           <div style={S.title}>Registro de actividad</div>
           <div style={S.sub}>Trazabilidad interna visible solo para gerencia: cambios, altas, bajas, aprobaciones y errores relevantes. No se muestran inicios de sesion ni consultas tecnicas.</div>
         </div>
-        <div style={{display:"flex",gap:8}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button onClick={exportarCsv} disabled={!items.length} style={{...S.btn,background:"rgba(59,130,246,.12)",borderColor:"rgba(59,130,246,.3)",color:"var(--accent-xl)",opacity:items.length?1:.55}}>
             Exportar CSV
           </button>
@@ -163,7 +163,7 @@ export default function Actividad() {
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(130px,1fr))",gap:10,marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:14}}>
         {[
           ["Registros", totales.registros || items.length || 0, "var(--text)"],
           ["Errores", totales.errores || 0, Number(totales.errores || 0) ? "#ef4444" : "var(--green)"],
@@ -187,7 +187,7 @@ export default function Actividad() {
         </div>
       )}
 
-      <div style={{display:"grid",gridTemplateColumns:"1.1fr 1.1fr .9fr .7fr .8fr .8fr .8fr .8fr auto",gap:8,alignItems:"end",marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,alignItems:"end",marginBottom:14}}>
         <div>
           <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Accion</div>
           <input value={filtros.accion} onChange={f("accion")} placeholder="pedidos, facturas..." style={{...S.inp,width:"100%"}} />
@@ -238,7 +238,7 @@ export default function Actividad() {
           <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Hasta</div>
           <input type="date" value={filtros.hasta} onChange={f("hasta")} style={{...S.inp,width:"100%"}} />
         </div>
-        <button onClick={cargar} style={S.btn}>Filtrar</button>
+        <button onClick={cargar} style={{...S.btn,width:"100%",justifyContent:"center"}}>Filtrar</button>
       </div>
 
       {loading ? (
@@ -253,8 +253,8 @@ export default function Actividad() {
             const status = item.status || parseStatus(item);
             const cColor = criticidadColor(item.criticidad);
             return (
-              <div key={item.id} style={{...S.card,display:"grid",gridTemplateColumns:"110px 1fr 220px",gap:12,alignItems:"center",borderColor:status >= 400 ? "rgba(239,68,68,.45)" : "var(--border)"}}>
-                <div>
+              <div key={item.id} style={{...S.card,display:"grid",gridTemplateColumns:"minmax(92px,.35fr) minmax(220px,1fr) minmax(150px,.45fr)",gap:12,alignItems:"center",borderColor:status >= 400 ? "rgba(239,68,68,.45)" : "var(--border)",overflow:"hidden"}}>
+                <div style={{minWidth:0}}>
                   <div style={{display:"inline-flex",padding:"3px 9px",borderRadius:20,background:`${color}18`,color,fontSize:11,fontWeight:900}}>
                     {method}
                   </div>
@@ -262,17 +262,17 @@ export default function Actividad() {
                     {item.modulo || etiquetaAccion(item.accion)}
                   </div>
                 </div>
-                <div>
-                  <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:3}}>{accionVisible(item)}</div>
-                  <div style={{fontSize:12,color:"var(--text4)"}}>
+                <div style={{minWidth:0,overflow:"hidden"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:3,overflowWrap:"anywhere",lineHeight:1.35}}>{accionVisible(item)}</div>
+                  <div style={{fontSize:12,color:"var(--text4)",overflowWrap:"anywhere",lineHeight:1.35}}>
                     {item.actor_email || "usuario"} - {status ? `estado ${status}` : "accion registrada"}
                   </div>
                   <div style={{display:"inline-flex",marginTop:6,padding:"2px 8px",borderRadius:999,background:`${cColor}18`,border:`1px solid ${cColor}44`,color:cColor,fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".05em"}}>
                     {item.criticidad || "baja"}
                   </div>
                 </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--text3)"}}>
+                <div style={{textAlign:"right",minWidth:0}}>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--text3)",overflowWrap:"anywhere"}}>
                     {item.created_at ? new Date(item.created_at).toLocaleString("es-ES") : ""}
                   </div>
                   <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{item.actor_tipo}</div>

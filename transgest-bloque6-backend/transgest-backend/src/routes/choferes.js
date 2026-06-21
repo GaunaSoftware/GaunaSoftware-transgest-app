@@ -12,6 +12,13 @@ async function ensureChoferesTransparencySchema() {
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS puesto_valor VARCHAR(120)").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS estado VARCHAR(40) NOT NULL DEFAULT 'disponible'").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS avisos JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_alta DATE").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_baja DATE").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS motivo_baja TEXT").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_nombre TEXT").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_mime VARCHAR(120)").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_base64 TEXT").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS historial_laboral JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
   schemaReady = true;
 }
 
@@ -780,11 +787,16 @@ router.get("/:id", async (req,res)=>{
 router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
   try {
     await ensureChoferesTransparencySchema();
-    const {nombre,dni,telefono,email,vehiculo_id,categoria_carnet,apellidos,tipo_contrato,salario,notas,sexo,puesto_valor}=req.body;
+    const {nombre,dni,telefono,email,vehiculo_id,categoria_carnet,apellidos,tipo_contrato,salario,notas,sexo,puesto_valor,fecha_alta}=req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
     const {rows}=await db.query(
-      "INSERT INTO choferes (nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,tipo_contrato,salario,notas,empresa_id,sexo,puesto_valor) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *",
-      [nombre,apellidos||null,dni||null,telefono||null,email||null,vehiculo_id||null,categoria_carnet||"C+E",tipo_contrato||null,salario||null,notas||null,empresaId,sexo||null,puesto_valor||null]
+      `INSERT INTO choferes (nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,tipo_contrato,salario,notas,empresa_id,sexo,puesto_valor,fecha_alta,historial_laboral)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::date,CURRENT_DATE),$15::jsonb) RETURNING *`,
+      [
+        nombre,apellidos||null,dni||null,telefono||null,email||null,vehiculo_id||null,categoria_carnet||"C+E",tipo_contrato||null,salario||null,notas||null,empresaId,sexo||null,puesto_valor||null,
+        fecha_alta || null,
+        JSON.stringify([{ tipo:"alta", fecha: fecha_alta || new Date().toISOString().slice(0,10), usuario_id: req.user?.id || null, created_at: new Date().toISOString() }])
+      ]
     );
     res.status(201).json(rows[0]);
   } catch(e) { res.status(500).json({error:e.message}); }
@@ -792,22 +804,60 @@ router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
 router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
   try {
     await ensureChoferesTransparencySchema();
-    const {nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,activo,notas,tipo_contrato,salario,sexo,puesto_valor,estado,avisos}=req.body;
+    const {nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,activo,notas,tipo_contrato,salario,sexo,puesto_valor,estado,avisos,fecha_alta,fecha_baja,motivo_baja,carta_renuncia_nombre,carta_renuncia_mime,carta_renuncia_base64}=req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
+    const current = await db.query("SELECT * FROM choferes WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);
+    if(!current.rows[0]) return res.status(404).json({error:"No encontrado"});
+    const previous = current.rows[0];
+    const nextActivo = activo!==undefined ? activo !== false : previous.activo !== false;
+    const currentHistorial = Array.isArray(previous.historial_laboral) ? previous.historial_laboral : [];
+    let nextHistorial = currentHistorial;
+    let nextEstado = estado || previous.estado || "disponible";
+    let nextVehiculoId = vehiculo_id || null;
+    let nextFechaBaja = fecha_baja || previous.fecha_baja || null;
+    let nextMotivoBaja = motivo_baja || previous.motivo_baja || null;
+    let nextCartaNombre = carta_renuncia_nombre || previous.carta_renuncia_nombre || null;
+    let nextCartaMime = carta_renuncia_mime || previous.carta_renuncia_mime || null;
+    let nextCartaBase64 = carta_renuncia_base64 || previous.carta_renuncia_base64 || null;
+    const nowIso = new Date().toISOString();
+    if (!nextActivo) {
+      if (!nextFechaBaja) return res.status(400).json({error:"Para dar de baja al chofer indica la fecha de baja."});
+      if (!String(nextMotivoBaja || "").trim()) return res.status(400).json({error:"Para dar de baja al chofer indica el motivo."});
+      if (!nextCartaBase64) return res.status(400).json({error:"Para dar de baja al chofer sube la carta de renuncia o baja."});
+      nextEstado = "baja";
+      nextVehiculoId = null;
+      if (previous.activo !== false) {
+        nextHistorial = [...currentHistorial, { tipo:"baja", fecha: nextFechaBaja, motivo: nextMotivoBaja, documento: nextCartaNombre, usuario_id: req.user?.id || null, created_at: nowIso }];
+      }
+    } else if (previous.activo === false) {
+      const altaFecha = fecha_alta || new Date().toISOString().slice(0,10);
+      nextEstado = estado || "disponible";
+      nextFechaBaja = null;
+      nextMotivoBaja = null;
+      nextHistorial = [...currentHistorial, { tipo:"alta", fecha: altaFecha, usuario_id: req.user?.id || null, created_at: nowIso }];
+    }
     const {rows}=await db.query(
       `UPDATE choferes
           SET nombre=$1,apellidos=$2,dni=$3,telefono=$4,email=$5,vehiculo_id=$6,categoria_carnet=$7,
               activo=$8,notas=$9,tipo_contrato=$10,salario=$11,sexo=$12,puesto_valor=$13,
               estado=COALESCE(NULLIF($14,''), estado),
-              avisos=COALESCE($15::jsonb, avisos)
+              avisos=COALESCE($15::jsonb, avisos),
+              fecha_alta=COALESCE($18::date, fecha_alta),
+              fecha_baja=$19::date,
+              motivo_baja=$20,
+              carta_renuncia_nombre=$21,
+              carta_renuncia_mime=$22,
+              carta_renuncia_base64=$23,
+              historial_laboral=$24::jsonb
         WHERE id=$16 AND empresa_id=$17
         RETURNING *`,
       [
-        nombre,apellidos||null,dni||null,telefono||null,email||null,vehiculo_id||null,categoria_carnet||"C+E",
-        activo!==undefined?activo:true,notas||null,tipo_contrato||null,salario||null,sexo||null,puesto_valor||null,
-        estado || null,
+        nombre,apellidos||null,dni||null,telefono||null,email||null,nextVehiculoId,categoria_carnet||"C+E",
+        nextActivo,notas||null,tipo_contrato||null,salario||null,sexo||null,puesto_valor||null,
+        nextEstado || null,
         Array.isArray(avisos) ? JSON.stringify(avisos.slice(0, 120)) : null,
         req.params.id,empresaId,
+        fecha_alta || null,nextFechaBaja,nextMotivoBaja,nextCartaNombre,nextCartaMime,nextCartaBase64,JSON.stringify(nextHistorial.slice(-120)),
       ]
     );
     if(!rows[0]) return res.status(404).json({error:"No encontrado"});

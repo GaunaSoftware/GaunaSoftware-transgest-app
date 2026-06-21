@@ -35,16 +35,16 @@ function inferVehiculoDocTipo(nombre = "") {
 }
 
 const S = {
-  page:  { flex:1, padding:"30px 36px", fontFamily:"'DM Sans',sans-serif", background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)", minHeight:"100vh" },
-  title: { fontFamily:"'Syne',sans-serif", fontSize:30, fontWeight:900, color:"#0f172a", marginBottom:6, letterSpacing:"-.02em" },
+  page:  { flex:1, padding:"30px 36px", fontFamily:"'DM Sans',sans-serif", background:"var(--bg)", minHeight:"100vh" },
+  title: { fontFamily:"'Syne',sans-serif", fontSize:30, fontWeight:900, color:"var(--text)", marginBottom:6, letterSpacing:"-.02em" },
   btn:   { padding:"10px 15px", borderRadius:8, border:"1px solid var(--border2)", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:7, boxShadow:"0 8px 18px rgba(15,23,42,.04)" },
-  inp:   { background:"#fff", border:"1px solid #cfdbe5", color:"#0f172a", padding:"11px 13px", borderRadius:8, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", boxShadow:"0 6px 14px rgba(15,23,42,.03)" },
-  sel:   { background:"#fff", border:"1px solid #cfdbe5", color:"#0f172a", padding:"11px 13px", borderRadius:8, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", boxShadow:"0 6px 14px rgba(15,23,42,.03)" },
+  inp:   { background:"var(--bg3)", border:"1px solid var(--border2)", color:"var(--text)", padding:"11px 13px", borderRadius:8, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", boxShadow:"0 6px 14px rgba(15,23,42,.03)" },
+  sel:   { background:"var(--bg3)", border:"1px solid var(--border2)", color:"var(--text)", padding:"11px 13px", borderRadius:8, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", boxShadow:"0 6px 14px rgba(15,23,42,.03)" },
   lbl:   { display:"block", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:".07em", color:"var(--text4)", marginBottom:4, marginTop:10 },
   modal: { position:"fixed", inset:0, background:"rgba(0,0,0,.8)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center", padding:12 },
   sec:   { fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:12, color:"var(--text3)", marginTop:20, marginBottom:8, paddingBottom:6, borderBottom:"1px solid var(--border)" },
-  grid2: { display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0px 12px" },
-  grid3: { display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"0px 12px" },
+  grid2: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))", gap:"0px 12px" },
+  grid3: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:"0px 12px" },
   badge: { display:"inline-flex", alignItems:"center", padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:800 },
 };
 
@@ -166,26 +166,30 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
   const [savingId, setSavingId] = useState("");
   const [savingBulk, setSavingBulk] = useState(false);
   const gpsProviders = (providers || []).filter(p => p.id !== "manual");
+  const selectableProviders = [
+    { id:"manual", label:"Sin proveedor / manual" },
+    ...gpsProviders.map(p => ({ id:p.id, label:GPS_PROVIDER_LABELS[p.id] || p.label || p.id, configured:p.configured })),
+  ];
   const vehiculosGps = useMemo(() => (vehiculos || []).filter(v => esVehiculoConGpsHabitual(v, vehiculos)), [vehiculos]);
-  const activeProvider = syncProvider || status?.active_provider || gpsProviders.find(p => p.active)?.id || gpsProviders.find(p => p.configured)?.id || "";
+  const activeProvider = syncProvider || status?.active_provider || gpsProviders.find(p => p.active)?.id || "";
   const mapped = vehiculosGps.filter(v => v.gps_provider && v.gps_provider !== "manual" && v.gps_external_id).length;
   const pendientes = vehiculosGps.filter(v => v.activo !== false && (!v.gps_provider || v.gps_provider === "manual" || !v.gps_external_id)).length;
   const dirtyLinks = vehiculosGps
     .map(v => ({ v, draft: drafts[v.id] || {} }))
     .filter(({ v, draft }) => {
-      const currentProvider = v.gps_provider && v.gps_provider !== "manual" ? v.gps_provider : "";
-      const nextProvider = activeProvider || "";
+      const currentProvider = v.gps_provider || "manual";
+      const nextProvider = draft.provider || "manual";
       const currentExternal = String(v.gps_external_id || "").trim();
       const nextExternal = String(draft.external_id || "").trim();
-      return nextProvider && (currentProvider !== nextProvider || currentExternal !== nextExternal);
+      return currentProvider !== nextProvider || currentExternal !== nextExternal;
     });
 
   useEffect(() => {
-      const defaultProvider = activeProvider || "gps_generic";
+      const defaultProvider = activeProvider || "manual";
     const next = {};
     vehiculosGps.forEach(v => {
       next[v.id] = {
-        provider: v.gps_provider && v.gps_provider !== "manual" ? v.gps_provider : defaultProvider,
+        provider: v.gps_provider || defaultProvider,
         external_id: v.gps_external_id || "",
       };
     });
@@ -206,13 +210,9 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
 
   async function guardar(v) {
     const draft = drafts[v.id] || {};
-    const provider = activeProvider || "";
-    if (!provider) {
-      notify("Configura primero un proveedor GPS activo en SuperAdmin.", "error");
-      return;
-    }
+    const provider = draft.provider || "manual";
     const externalId = String(draft.external_id || "").trim();
-    if (!externalId) {
+    if (provider !== "manual" && !externalId) {
       notify("Introduce el IMEI/ID GPS antes de intentar localizar senal.", "warning");
       return;
     }
@@ -220,7 +220,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
     try {
       await vincularGpsVehiculo(v.id, {
         provider,
-        external_id: externalId,
+        external_id: provider === "manual" ? "" : externalId,
       });
       notify(`GPS enlazado para ${v.matricula}.`, "success");
       onReload();
@@ -239,7 +239,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
     const duplicated = new Set();
     const seen = new Map();
     dirtyLinks.forEach(({ draft }) => {
-      const key = `${activeProvider}:${String(draft.external_id || "").trim().toUpperCase()}`;
+      const key = `${draft.provider || "manual"}:${String(draft.external_id || "").trim().toUpperCase()}`;
       if (!String(draft.external_id || "").trim()) return;
       if (seen.has(key)) duplicated.add(draft.external_id);
       seen.set(key, true);
@@ -250,15 +250,15 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
     }
     setSavingBulk(true);
     try {
-      const linksWithId = dirtyLinks.filter(({ draft }) => String(draft.external_id || "").trim());
+      const linksWithId = dirtyLinks.filter(({ draft }) => (draft.provider || "manual") === "manual" || String(draft.external_id || "").trim());
       if (!linksWithId.length) {
         notify("Introduce al menos un IMEI/ID GPS antes de guardar.", "warning");
         return;
       }
       const payload = linksWithId.map(({ v, draft }) => ({
         vehiculo_id: v.id,
-        provider: activeProvider,
-        external_id: String(draft.external_id || "").trim(),
+        provider: draft.provider || "manual",
+        external_id: (draft.provider || "manual") === "manual" ? "" : String(draft.external_id || "").trim(),
       }));
       const res = await vincularGpsVehiculosBulk(payload);
       notify(`${res.updated || payload.length} enlace(s) GPS guardados.`, "success");
@@ -271,7 +271,11 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
   }
 
   function usarMatriculasComoId() {
-    const provider = activeProvider || "gps_generic";
+    if (!activeProvider) {
+      notify("No hay proveedor GPS activo. Configuralo con soporte antes de enlazar matriculas como ID.", "warning");
+      return;
+    }
+    const provider = activeProvider;
     setDrafts(prev => {
       const next = { ...prev };
       vehiculosGps.forEach(v => {
@@ -284,7 +288,11 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
 
   function aplicarImportacion() {
     const byMat = new Map(vehiculosGps.map(v => [String(v.matricula || "").trim().toUpperCase(), v]));
-    const provider = activeProvider || "gps_generic";
+    if (!activeProvider) {
+      notify("No hay proveedor GPS activo. Configuralo con soporte antes de importar enlaces.", "warning");
+      return;
+    }
+    const provider = activeProvider;
     let applied = 0;
     let ignored = 0;
     const next = { ...drafts };
@@ -304,37 +312,37 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
   }
 
   const chip = (label, value, tone, icon) => (
-    <div style={{background:"rgba(255,255,255,.94)",border:"1px solid #dbe5ec",borderRadius:9,padding:"15px 18px",display:"flex",alignItems:"center",gap:14,minHeight:62,boxShadow:"0 12px 26px rgba(15,23,42,.04)"}}>
+    <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:9,padding:"15px 18px",display:"flex",alignItems:"center",gap:14,minHeight:62,boxShadow:"var(--shadow-sm)"}}>
       <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:`${tone || "#0f766e"}14`,color:tone || "#0f766e",flexShrink:0}}>
         <UiIcon name={icon} color={tone || "#0f766e"} size={23} />
       </div>
       <div>
-        <div style={{fontSize:10,color:"#64748b",fontWeight:900,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</div>
-        <div style={{fontSize:21,color:tone||"#0f172a",fontWeight:900,fontFamily:"'JetBrains Mono',monospace",lineHeight:1.1}}>{value}</div>
+        <div style={{fontSize:10,color:"var(--text4)",fontWeight:900,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</div>
+        <div style={{fontSize:21,color:tone||"var(--text)",fontWeight:900,fontFamily:"'JetBrains Mono',monospace",lineHeight:1.1}}>{value}</div>
       </div>
     </div>
   );
 
   return (
-    <div style={{background:"rgba(255,255,255,.96)",border:"1px solid #dbe5ec",borderRadius:12,padding:"24px 26px",marginBottom:18,boxShadow:"0 18px 42px rgba(15,23,42,.06)"}}>
+    <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"24px 26px",marginBottom:18,boxShadow:"var(--shadow-sm)"}}>
       <div style={{display:"flex",gap:18,alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",marginBottom:18}}>
         <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
           <div style={{width:50,height:50,borderRadius:12,display:"grid",placeItems:"center",background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",boxShadow:"0 14px 28px rgba(15,118,110,.22)"}}>
             <UiIcon name="pin" color="#fff" size={26} />
           </div>
           <div>
-            <div style={{fontSize:30,fontWeight:900,color:"#0f172a",fontFamily:"'Syne',sans-serif",letterSpacing:"-.02em"}}>GPS y matrículas</div>
-            <div style={{fontSize:14,color:"#64748b",marginTop:5,maxWidth:880,lineHeight:1.45}}>
+            <div style={{fontSize:30,fontWeight:900,color:"var(--text)",fontFamily:"'Syne',sans-serif",letterSpacing:"-.02em"}}>GPS y matrículas</div>
+            <div style={{fontSize:14,color:"var(--text4)",marginTop:5,maxWidth:880,lineHeight:1.45}}>
               Asocia cada vehículo con el ID que usa el proveedor GPS activo. Normalmente será la matrícula, pero algunos proveedores usan un código interno.
             </div>
           </div>
         </div>
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            <div style={{...S.sel,width:250,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"default",fontWeight:800}}>
+            <div style={{...S.sel,width:250,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"default",fontWeight:800,background:"var(--bg3)",color:"var(--text)"}}>
               <span>{GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin proveedor activo"}</span>
             </div>
             {canEdit && (
-              <button onClick={onSync} disabled={syncing || !activeProvider} style={{...S.btn,background:"#fff",color:"#334155",border:"1px solid #cfdbe5"}}>
+              <button onClick={onSync} disabled={syncing || !activeProvider} style={{...S.btn,background:"var(--bg3)",color:"var(--text)",border:"1px solid var(--border2)"}}>
               {syncing ? "Sincronizando..." : "Sincronizar GPS"}
               </button>
             )}
@@ -344,12 +352,12 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
             </button>
           )}
           {canEdit && (
-            <button onClick={usarMatriculasComoId} style={{...S.btn,background:"#fff",color:"#0f172a",border:"1px solid #cfdbe5"}}>
+            <button onClick={usarMatriculasComoId} style={{...S.btn,background:"var(--bg3)",color:"var(--text)",border:"1px solid var(--border2)"}}>
               Usar matriculas
             </button>
           )}
           {canEdit && (
-            <button onClick={()=>setImportOpen(o=>!o)} style={{...S.btn,background:"#fff",color:"#0f172a",border:"1px solid #cfdbe5"}}>
+            <button onClick={()=>setImportOpen(o=>!o)} style={{...S.btn,background:"var(--bg3)",color:"var(--text)",border:"1px solid var(--border2)"}}>
               Pegar listado
             </button>
           )}
@@ -385,7 +393,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
         {chip("Senal reciente", status?.counts?.senal_reciente ?? 0, (status?.counts?.senal_reciente ?? 0) ? "#0f766e" : "#64748b", "signal")}
         {chip("Sin senal", status?.counts?.sin_senal_reciente ?? 0, (status?.counts?.sin_senal_reciente ?? 0) ? "#ef4444" : "#10b981", "signalOff")}
         {chip("Nunca recibida", status?.counts?.nunca_senal ?? 0, (status?.counts?.nunca_senal ?? 0) ? "#f97316" : "#10b981", "signalOff")}
-        {chip("Proveedor activo", GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin elegir", "#0f766e", "database")}
+        {chip("Proveedor activo", GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin proveedor", "#0f766e", "database")}
       </div>
 
       {(status?.last_position || status?.webhook) && (
@@ -416,23 +424,23 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
       )}
 
       {status?.warnings?.length > 0 && (
-        <div style={{marginTop:16,background:"linear-gradient(90deg,rgba(251,146,60,.10),rgba(255,247,237,.72))",border:"1px solid rgba(251,146,60,.35)",borderRadius:10,padding:"18px 20px",display:"grid",gridTemplateColumns:"minmax(260px,.65fr) minmax(320px,1fr)",gap:22,alignItems:"start"}}>
+        <div style={{marginTop:16,background:"linear-gradient(90deg,rgba(251,146,60,.14),var(--bg3))",border:"1px solid rgba(251,146,60,.35)",borderRadius:10,padding:"18px 20px",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:22,alignItems:"start"}}>
           <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
             <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:"rgba(251,146,60,.12)",color:"#f97316",flexShrink:0}}>
               <UiIcon name="warning" color="#f97316" size={24} />
             </div>
             <div>
               <div style={{fontSize:14,fontWeight:900,color:"#ea580c",marginBottom:8}}>Diagnostico GPS</div>
-              {status.warnings.map((w, i) => <div key={i} style={{fontSize:13,color:"#475569",lineHeight:1.5}}>{w}</div>)}
+              {status.warnings.map((w, i) => <div key={i} style={{fontSize:13,color:"var(--text3)",lineHeight:1.5}}>{w}</div>)}
             </div>
           </div>
           {status?.signal_help && (
             <div style={{borderLeft:"1px solid rgba(251,146,60,.28)",paddingLeft:20}}>
-              <div style={{fontSize:13,color:"#1e293b",fontWeight:900,lineHeight:1.45,marginBottom:7}}>
+              <div style={{fontSize:13,color:"var(--text)",fontWeight:900,lineHeight:1.45,marginBottom:7}}>
                 {status.signal_help.meaning}
               </div>
               {(status.signal_help.likely_causes || []).slice(0, 4).map((cause, i) => (
-                <div key={i} style={{fontSize:13,color:"#475569",lineHeight:1.5}}>
+                <div key={i} style={{fontSize:13,color:"var(--text3)",lineHeight:1.5}}>
                   - {cause}
                 </div>
               ))}
@@ -442,7 +450,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
       )}
 
       {status?.stale_vehicles?.length > 0 && (
-        <div style={{marginTop:12,background:"linear-gradient(90deg,rgba(239,68,68,.08),rgba(254,242,242,.80))",border:"1px solid rgba(239,68,68,.24)",borderRadius:10,padding:"18px 20px",display:"grid",gridTemplateColumns:"auto 1fr auto",gap:16,alignItems:"center"}}>
+        <div style={{marginTop:12,background:"linear-gradient(90deg,rgba(239,68,68,.10),var(--bg3))",border:"1px solid rgba(239,68,68,.24)",borderRadius:10,padding:"18px 20px",display:"grid",gridTemplateColumns:"auto minmax(0,1fr) auto",gap:16,alignItems:"center"}}>
           <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:"rgba(239,68,68,.10)",color:"#ef4444"}}>
             <UiIcon name="signalOff" color="#ef4444" size={24} />
           </div>
@@ -450,14 +458,14 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
             <div style={{fontSize:14,fontWeight:900,color:"#dc2626",marginBottom:8}}>Vehículos sin señal reciente</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:"2px 26px"}}>
               {status.stale_vehicles.slice(0, 6).map(v => (
-                <div key={v.id} style={{fontSize:12,color:"#475569",lineHeight:1.5}}>
+                <div key={v.id} style={{fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
                   - {v.matricula} - {GPS_PROVIDER_LABELS[v.gps_provider] || v.gps_provider} / {v.gps_external_id}
                   {v.ubicacion_ts ? ` - ultima senal ${new Date(v.ubicacion_ts).toLocaleString("es-ES")}` : " - sin senal recibida"}
                 </div>
               ))}
             </div>
           </div>
-          <button type="button" onClick={()=>setOpen(true)} style={{...S.btn,background:"#fff",color:"#334155",border:"1px solid #cfdbe5",boxShadow:"none",whiteSpace:"nowrap"}}>
+          <button type="button" onClick={()=>setOpen(true)} style={{...S.btn,background:"var(--bg2)",color:"var(--text)",border:"1px solid var(--border2)",boxShadow:"none",whiteSpace:"nowrap"}}>
             Ver todos ({status.stale_vehicles.length})
           </button>
         </div>
@@ -491,10 +499,10 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
                   </div>
                   {v.ubicacion_actual && <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Ultima: {v.ubicacion_actual}</div>}
                 </div>
-                  <div style={{...S.sel,display:"flex",alignItems:"center",background:"var(--bg2)",cursor:"default"}}>
-                    {GPS_PROVIDER_LABELS[draft.provider || activeProvider] || draft.provider || activeProvider || "Sin proveedor activo"}
-                  </div>
-                <input disabled={!canEdit} value={draft.external_id || ""} onChange={e=>setDrafts(p=>({...p,[v.id]:{...(p[v.id]||{}),external_id:e.target.value}}))} style={S.inp} placeholder="IMEI / ID GPS del dispositivo"/>
+                  <select disabled={!canEdit} value={draft.provider || "manual"} onChange={e=>setDrafts(p=>({...p,[v.id]:{...(p[v.id]||{}),provider:e.target.value,external_id:e.target.value==="manual"?"":(p[v.id]?.external_id || "")}}))} style={{...S.sel,background:"var(--bg2)",color:"var(--text)"}}>
+                    {selectableProviders.map(p => <option key={p.id} value={p.id}>{p.label}{p.id !== "manual" && !p.configured ? " (sin configurar)" : ""}</option>)}
+                  </select>
+                <input disabled={!canEdit || (draft.provider || "manual") === "manual"} value={draft.external_id || ""} onChange={e=>setDrafts(p=>({...p,[v.id]:{...(p[v.id]||{}),external_id:e.target.value}}))} style={S.inp} placeholder={(draft.provider || "manual") === "manual" ? "Sin proveedor GPS" : "IMEI / ID GPS del dispositivo"}/>
                 {canEdit && (
                   <button onClick={()=>guardar(v)} disabled={savingId===v.id} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.28)",justifyContent:"center"}}>
                     {savingId===v.id ? "Guardando..." : "Guardar"}
@@ -864,7 +872,11 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
   const [docsVehiculo, setDocsVehiculo] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [docUploading, setDocUploading] = useState(false);
-  const gpsProviderActivo = gpsProviders.find(p => p.active)?.id || gpsProviders.find(p => p.configured)?.id || "";
+  const gpsProviderActivo = gpsProviders.find(p => p.active)?.id || "";
+  const gpsProviderOptions = [
+    { id:"manual", label:"Sin proveedor / manual" },
+    ...gpsProviders.filter(p => p.id !== "manual").map(p => ({ id:p.id, label:GPS_PROVIDER_LABELS[p.id] || p.label || p.id, configured:p.configured })),
+  ];
 
   useEffect(() => {
     let alive = true;
@@ -984,7 +996,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
   return (
     <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:14,
-                    width:"min(820px,98vw)", maxHeight:"97vh", display:"flex", flexDirection:"column" }}>
+                    width:"min(920px,calc(100vw - 24px))", maxWidth:"calc(100vw - 24px)", maxHeight:"97vh", display:"flex", flexDirection:"column", overflow:"hidden" }}>
 
         {/* Header */}
         <div style={{ padding:"14px 20px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
@@ -1020,7 +1032,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
         )}
 
         {/* Tabs */}
-        <div style={{ display:"flex", gap:0, borderBottom:"1px solid var(--border)", flexShrink:0 }}>
+        <div style={{ display:"flex", gap:0, borderBottom:"1px solid var(--border)", flexShrink:0, overflowX:"auto" }}>
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               style={{ padding:"8px 14px", border:"none", borderBottom:`2px solid ${tab===t.id?"var(--accent-l)":"transparent"}`,
@@ -1032,7 +1044,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
         </div>
 
         {/* Content */}
-        <div style={{ flex:1, overflowY:"auto", padding:"16px 20px" }}>
+        <div style={{ flex:1, overflowY:"auto", overflowX:"hidden", padding:"16px 20px" }}>
 
           {/*  Identificacion */}
           {tab === "identificacion" && (
@@ -1093,14 +1105,14 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                   <input style={S.inp} value={form.ubicacion_actual||""} onChange={f("ubicacion_actual")} placeholder="GPS pendiente / ultimo destino"/>
                 </div>
                   <div>
-                    <label style={S.lbl}>Proveedor GPS activo</label>
-                    <div style={{...S.sel,display:"flex",alignItems:"center",background:"var(--bg2)",cursor:"default"}}>
-                      {GPS_PROVIDER_LABELS[gpsProviderActivo] || gpsProviderActivo || "Sin proveedor activo en SuperAdmin"}
-                    </div>
+                    <label style={S.lbl}>Proveedor GPS del vehiculo</label>
+                    <select value={form.gps_provider || gpsProviderActivo || "manual"} onChange={e=>setForm(p=>({...p,gps_provider:e.target.value,gps_external_id:e.target.value==="manual"?"":(p.gps_external_id || "")}))} style={S.sel}>
+                      {gpsProviderOptions.map(p => <option key={p.id} value={p.id}>{p.label}{p.id !== "manual" && !p.configured ? " (sin configurar)" : ""}</option>)}
+                    </select>
                   </div>
                 <div>
                   <label style={S.lbl}>IMEI / ID GPS del dispositivo</label>
-                  <input style={S.inp} value={form.gps_external_id||""} onChange={f("gps_external_id")} placeholder="IMEI o ID exacto del proveedor GPS"/>
+                  <input disabled={(form.gps_provider || gpsProviderActivo || "manual") === "manual"} style={S.inp} value={form.gps_external_id||""} onChange={f("gps_external_id")} placeholder={(form.gps_provider || gpsProviderActivo || "manual") === "manual" ? "Sin proveedor GPS" : "IMEI o ID exacto del proveedor GPS"}/>
                 </div>
                 <div>
                   <label style={S.lbl}>Fecha matriculacion</label>
@@ -1115,13 +1127,14 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                         e.stopPropagation();
                         try {
                           const externalId = String(form.gps_external_id || "").trim();
-                          if (!externalId) {
+                          const provider = form.gps_provider || gpsProviderActivo || "manual";
+                          if (provider !== "manual" && !externalId) {
                             notify("Introduce el IMEI/ID GPS antes de intentar localizar senal.", "warning");
                             return;
                           }
                           const updated = await vincularGpsVehiculo(editando.id, {
-                            provider: gpsProviderActivo || form.gps_provider || "manual",
-                            external_id: externalId,
+                            provider,
+                            external_id: provider === "manual" ? "" : externalId,
                           });
                         setForm(p => ({...p, ...updated}));
                         onVehiculoActualizado?.(updated);
@@ -1489,7 +1502,7 @@ export default function Vehiculos() {
   const [gpsSyncing, setGpsSyncing] = useState(false);
   const [gpsProviders, setGpsProviders] = useState([]);
   const [gpsStatus, setGpsStatus] = useState(null);
-  const [gpsSyncProvider, setGpsSyncProvider] = useState("gps_generic");
+  const [gpsSyncProvider, setGpsSyncProvider] = useState("");
   const recargarResumenGps = useCallback(async () => {
     try {
       const [r, status] = await Promise.all([
@@ -1499,7 +1512,7 @@ export default function Vehiculos() {
         const list = Array.isArray(r?.providers) ? r.providers : [];
         setGpsProviders(list);
         setGpsStatus(status);
-        const preferred = status?.active_provider || r?.active_provider || list.find(p => p.id !== "manual" && p.active)?.id || list.find(p => p.id !== "manual" && p.configured)?.id || list.find(p => p.id !== "manual")?.id || "gps_generic";
+        const preferred = status?.active_provider || r?.active_provider || list.find(p => p.id !== "manual" && p.active)?.id || "";
         setGpsSyncProvider(preferred);
       } catch {}
     }, []);

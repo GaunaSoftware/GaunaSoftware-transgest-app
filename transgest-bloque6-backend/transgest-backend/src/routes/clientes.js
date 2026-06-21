@@ -116,7 +116,17 @@ router.use(async (req, res, next) => {
     await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0");
     await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS iva_pct NUMERIC DEFAULT 21");
     await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pendiente_revision BOOLEAN DEFAULT false");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email_facturacion TEXT");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS emails_albaranes TEXT");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS iban VARCHAR(64)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_carga TEXT");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_descarga TEXT");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS minimo_facturable_toneladas NUMERIC");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS limite_riesgo NUMERIC DEFAULT 0");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS modo_facturacion VARCHAR(40) DEFAULT 'por_viaje'");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueado BOOLEAN DEFAULT false");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT");
   } catch (e) {}
   next();
 });

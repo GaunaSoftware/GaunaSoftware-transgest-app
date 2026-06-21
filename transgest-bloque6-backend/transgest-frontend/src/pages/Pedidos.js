@@ -312,6 +312,15 @@ function sumarDiasISO(fecha, dias) {
   return base.toISOString().slice(0, 10);
 }
 
+function normalizarFechasCopia(fechaBase, copias, actuales = []) {
+  const total = Math.max(1, Math.min(20, Number(copias || 1)));
+  const base = String(fechaBase || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  return Array.from({ length: total }, (_, idx) => {
+    const current = String(actuales[idx] || "").slice(0, 10);
+    return current || sumarDiasISO(base, idx * 7);
+  });
+}
+
 function fileToPedidoDocBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -6607,6 +6616,43 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                   {IVA_PEDIDO_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                 </select>
               </div>
+              <div>
+                <label style={{...S.label,color:"#f59e0b"}}>Clausula gasoil (%)</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  style={S.input}
+                  value={form.recargo_combustible_pct || ""}
+                  onChange={e=>setForm(p=>{
+                    const base = parseLocaleNumber(p.precio_base_sin_combustible || p.precio_unitario, 0);
+                    const pct = parseLocaleNumber(e.target.value, 0);
+                    const next = {
+                      ...p,
+                      recargo_combustible_pct:e.target.value,
+                      precio_base_sin_combustible:p.precio_base_sin_combustible || p.precio_unitario || "",
+                      precio_unitario:base > 0 && pct > 0 ? Number((base * (1 + pct / 100)).toFixed(2)) : p.precio_unitario,
+                    };
+                    return {...next, importe_revision_combustible:calcRevisionCombustible(next)};
+                  })}
+                  placeholder="Ej. 5"
+                />
+              </div>
+              <div>
+                <label style={{...S.label,color:"#f59e0b"}}>Base sin gasoil</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  style={S.input}
+                  value={form.precio_base_sin_combustible || ""}
+                  onChange={e=>setForm(p=>{
+                    const base = parseLocaleNumber(e.target.value, 0);
+                    const pct = parseLocaleNumber(p.recargo_combustible_pct, 0);
+                    const next = {...p,precio_base_sin_combustible:e.target.value,precio_unitario:base > 0 && pct > 0 ? Number((base * (1 + pct / 100)).toFixed(2)) : p.precio_unitario};
+                    return {...next, importe_revision_combustible:calcRevisionCombustible(next)};
+                  })}
+                  placeholder="Precio base anterior"
+                />
+              </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:8}}>
               <div>
@@ -8215,7 +8261,7 @@ export default function Pedidos() {
         source: pedidoBase,
         fecha_carga: String(pedidoBase?.fecha_carga || new Date().toISOString().slice(0, 10)).slice(0, 10),
         copias: 1,
-        frecuencia_dias: 7,
+        fechas_copia: normalizarFechasCopia(pedidoBase?.fecha_carga || new Date().toISOString().slice(0, 10), 1),
         mantener_asignacion: true,
       });
     } catch (e) {
@@ -8225,17 +8271,17 @@ export default function Pedidos() {
 
   async function confirmarCopiaPedido() {
     if (!copyPlan?.source) return;
-    if (!copyPlan.fecha_carga) {
-      notify("Indica una fecha de carga para la copia.", "warning");
+    const copias = Math.max(1, Math.min(20, Number(copyPlan.copias || 1)));
+    const fechasCopia = normalizarFechasCopia(copyPlan.fecha_carga, copias, copyPlan.fechas_copia);
+    if (fechasCopia.some(f => !f)) {
+      notify("Indica la fecha de cada copia.", "warning");
       return;
     }
-    const copias = Math.max(1, Math.min(20, Number(copyPlan.copias || 1)));
-    const frecuenciaDias = Math.max(0, Math.min(365, Number(copyPlan.frecuencia_dias ?? 7)));
     setCopySaving(true);
     try {
       const creados = [];
       for (let i = 0; i < copias; i += 1) {
-        const fechaCarga = sumarDiasISO(copyPlan.fecha_carga, i * frecuenciaDias);
+        const fechaCarga = fechasCopia[i];
         const fechaDescargaBase = copyPlan.source?.fecha_descarga || copyPlan.source?.fecha_carga || copyPlan.fecha_carga;
         const diferenciaDias = Math.round((new Date(`${String(fechaDescargaBase).slice(0, 10)}T00:00:00`) - new Date(`${String(copyPlan.source?.fecha_carga || copyPlan.fecha_carga).slice(0, 10)}T00:00:00`)) / 86400000);
         const payload = buildPedidoCopyPayload(copyPlan.source, {
@@ -9289,12 +9335,6 @@ export default function Pedidos() {
                                 Copiar viaje
                               </button>
                             )}
-                            {canEdit && (
-                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");duplicarPedidoExistente(p);}}
-                                style={{...S.btn,textAlign:"left",background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)",padding:"6px 10px",fontSize:11}}>
-                                Duplicar pedido
-                              </button>
-                            )}
                             {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
                               <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirEditar(p, {_focus_asignacion:true});}}
                                 style={{...S.btn,textAlign:"left",background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)",padding:"6px 10px",fontSize:11}}>
@@ -9447,7 +9487,7 @@ export default function Pedidos() {
                   type="date"
                   style={S.inp}
                   value={copyPlan.fecha_carga || ""}
-                  onChange={e=>setCopyPlan(prev=>({...prev, fecha_carga:e.target.value}))}
+                  onChange={e=>setCopyPlan(prev=>({...prev, fecha_carga:e.target.value, fechas_copia:normalizarFechasCopia(e.target.value, prev?.copias || 1, prev?.fechas_copia)}))}
                 />
               </div>
               <div>
@@ -9458,20 +9498,24 @@ export default function Pedidos() {
                   max="20"
                   style={S.inp}
                   value={copyPlan.copias || 1}
-                  onChange={e=>setCopyPlan(prev=>({...prev, copias:e.target.value}))}
+                  onChange={e=>setCopyPlan(prev=>({...prev, copias:e.target.value, fechas_copia:normalizarFechasCopia(prev?.fecha_carga, e.target.value, prev?.fechas_copia)}))}
                 />
               </div>
-              <div>
-                <label style={S.lbl}>Separacion entre copias (dias)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="365"
-                  style={S.inp}
-                  value={copyPlan.frecuencia_dias ?? 7}
-                  onChange={e=>setCopyPlan(prev=>({...prev, frecuencia_dias:e.target.value}))}
-                />
-              </div>
+              {(copyPlan.fechas_copia || normalizarFechasCopia(copyPlan.fecha_carga, copyPlan.copias)).map((fecha, idx) => (
+                <div key={`fecha-copia-${idx}`}>
+                  <label style={S.lbl}>{(Number(copyPlan.copias || 1) > 1) ? `Fecha copia ${idx + 1}` : "Fecha de copia"}</label>
+                  <input
+                    type="date"
+                    style={S.inp}
+                    value={fecha || ""}
+                    onChange={e=>setCopyPlan(prev=>{
+                      const fechas = normalizarFechasCopia(prev?.fecha_carga, prev?.copias || 1, prev?.fechas_copia);
+                      fechas[idx] = e.target.value;
+                      return {...prev, fecha_carga:idx===0 ? e.target.value : prev?.fecha_carga, fechas_copia:fechas};
+                    })}
+                  />
+                </div>
+              ))}
             </div>
             <label style={{display:"flex",alignItems:"center",gap:10,marginTop:16,padding:"10px 12px",border:"1px solid var(--border)",borderRadius:8,background:"var(--bg3)"}}>
               <input
@@ -9482,7 +9526,7 @@ export default function Pedidos() {
               <span style={{fontSize:12,color:"var(--text2)"}}>Copiar asignacion (vehiculo, chofer, remolque o colaborador)</span>
             </label>
             <div style={{fontSize:11,color:"var(--text5)",marginTop:10}}>
-              Para copias semanales deja 7 dias. Si lo desmarcas, las copias saldran sin vehiculo, chofer, colaborador, remolque ni matriculas manuales.
+              Cada copia se crea en la fecha indicada. Si desmarcas la asignacion, saldran sin vehiculo, chofer, colaborador, remolque ni matriculas manuales.
             </div>
             <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
               <button

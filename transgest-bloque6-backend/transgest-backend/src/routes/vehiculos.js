@@ -376,10 +376,11 @@ async function getGpsProviderStatuses(empresaId) {
       .map(async ([id, label]) => {
         if (id === "manual") return { id, label, configured: true, source: "manual", active: !activeProvider };
         const resolved = await resolveApiKey(empresaId, id).catch(() => ({ key: "", source: "none", config: null }));
+        const companyEnabled = !!resolved.key && (resolved.source === "company" || resolved.config?.use_global === true);
         return {
           id,
           label,
-          configured: !!resolved.key,
+          configured: companyEnabled,
           source: resolved.source || "none",
           active: activeProvider ? activeProvider === id : false,
           mode: resolved.config ? (resolved.config.use_global ? "global" : "company") : "default",
@@ -387,19 +388,13 @@ async function getGpsProviderStatuses(empresaId) {
         };
       })
   );
-  const configuredRemote = providers.filter(p => p.id !== "manual" && p.configured && !p.blocked);
-  const resolvedActive = activeProvider || (configuredRemote.length === 1 ? configuredRemote[0].id : "");
+  const resolvedActive = activeProvider || "";
   return { providers: providers.map(p => ({ ...p, active: resolvedActive ? p.id === resolvedActive : p.active })), activeProvider: resolvedActive };
 }
 
 async function assertGpsProviderMatchesCompany(empresaId, provider) {
   if (!GPS_REMOTE_PROVIDERS.includes(provider)) return;
-  const activeProvider = await getActiveGpsProvider(empresaId);
-  if (activeProvider && activeProvider !== provider) {
-    const err = new Error(`El GPS activo de esta empresa es ${GPS_PROVIDERS[activeProvider]}. No se puede usar ${GPS_PROVIDERS[provider]} en este vehiculo.`);
-    err.status = 409;
-    throw err;
-  }
+  void empresaId;
 }
 
 async function assertGpsExternalIdAvailable(empresaId, vehiculoId, provider, externalId) {
@@ -732,7 +727,7 @@ r1.get("/gps/status", async (req, res) => {
     const configured = providers.filter(p => p.id !== "manual" && p.configured && !p.blocked).map(p => p.id);
     const warnings = [];
     if (!activeProvider) warnings.push("No hay proveedor GPS activo para esta empresa.");
-    if (!configured.length) warnings.push("No hay claves GPS configuradas.");
+    if (!configured.length) warnings.push("No hay proveedor GPS configurado. Para activarlo, habla con soporte o configura el proveedor desde SuperAdmin.");
     if (Number(c.pendientes || 0) > 0) warnings.push(`${c.pendientes} vehiculo(s) activos sin enlace GPS.`);
     if (Number(c.nunca_senal || 0) > 0) warnings.push(`${c.nunca_senal} vehiculo(s) enlazados todavia no han enviado ninguna posicion.`);
     if (Number(c.sin_senal_reciente || 0) > 0) warnings.push(`${c.sin_senal_reciente} vehiculo(s) enlazados sin senal GPS reciente.`);
@@ -1196,10 +1191,14 @@ r1.get("/:id/posiciones", async (req, res) => {
 r1.post("/gps/sync", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
-    const { activeProvider } = await getGpsProviderStatuses(empresaId);
+    const { providers, activeProvider } = await getGpsProviderStatuses(empresaId);
     const provider = String(req.body.provider || activeProvider || "").trim().toLowerCase();
     if (!GPS_PROVIDERS[provider] || provider === "manual") {
       return res.status(400).json({ error: "Selecciona un proveedor GPS activo para sincronizar." });
+    }
+    const providerStatus = providers.find(p => p.id === provider);
+    if (!providerStatus?.configured || providerStatus?.blocked) {
+      return res.status(400).json({ error: `No hay proveedor GPS configurado para ${GPS_PROVIDERS[provider] || provider}. Habla con soporte para activarlo.` });
     }
     if (activeProvider && provider !== activeProvider) {
       return res.status(409).json({ error: `El GPS activo de la empresa es ${GPS_PROVIDERS[activeProvider]}. Cambialo en SuperAdmin antes de sincronizar ${GPS_PROVIDERS[provider]}.` });

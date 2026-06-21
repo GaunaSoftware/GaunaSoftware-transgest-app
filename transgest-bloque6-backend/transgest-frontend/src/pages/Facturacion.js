@@ -1311,7 +1311,7 @@ function ModalFacturarMultiple({ onClose }) {
 
   function buildLineas(){
     const cliente = clientes.find(c=>c.id===clienteSel);
-    const modoFact = cliente?.modo_facturacion || modo;
+    const modoFact = modo || cliente?.modo_facturacion || "linea";
     if (modoFact==="agrupada_linea" || modo==="linea") {
       return [{ concepto, cantidad:1, precio_unit: totalSel }];
     }

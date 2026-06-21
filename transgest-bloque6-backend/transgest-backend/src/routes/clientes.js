@@ -127,6 +127,23 @@ router.use(async (req, res, next) => {
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS modo_facturacion VARCHAR(40) DEFAULT 'por_viaje'");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueado BOOLEAN DEFAULT false");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS calle TEXT");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS num_ext VARCHAR(30)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS piso_puerta VARCHAR(60)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cod_postal VARCHAR(20)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS municipio VARCHAR(120)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS provincia VARCHAR(120)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pais_iso VARCHAR(10)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS dir_fiscal_distinta BOOLEAN DEFAULT false");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_calle TEXT");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_num_ext VARCHAR(30)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_piso_puerta VARCHAR(60)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_cod_postal VARCHAR(20)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_municipio VARCHAR(120)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_provincia VARCHAR(120)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_pais_iso VARCHAR(10)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)");
   } catch (e) {}
   next();
 });
@@ -158,6 +175,61 @@ function numericOrNull(value) {
   else if (raw.includes(",")) raw = raw.replace(",", ".");
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
+}
+
+function firstDefined(source, keys, fallback = null) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source || {}, key) && source[key] !== undefined) return source[key];
+  }
+  return fallback;
+}
+
+function normalizeClienteWrite(body = {}) {
+  const splitAddress = ["calle", "num_ext", "piso_puerta"].some(key => Object.prototype.hasOwnProperty.call(body, key));
+  const calle = String(firstDefined(body, ["calle"], splitAddress ? "" : body.direccion || "") || "").trim();
+  const numExt = String(firstDefined(body, ["num_ext"], "") || "").trim();
+  const pisoPuerta = String(firstDefined(body, ["piso_puerta"], "") || "").trim();
+  const direccion = splitAddress
+    ? [calle, numExt, pisoPuerta].filter(Boolean).join(" ")
+    : String(body.direccion || "").trim();
+  const cp = String(firstDefined(body, ["cod_postal", "codigo_postal", "cp"], "") || "").trim();
+  const ciudad = String(firstDefined(body, ["municipio", "ciudad"], "") || "").trim();
+  const pais = String(firstDefined(body, ["pais_iso", "pais"], "") || "").trim();
+  const contacto = String(firstDefined(body, ["contacto_nombre", "contacto"], "") || "").trim();
+  const vencimiento = String(firstDefined(body, ["dias_pago", "vencimiento"], "") || "").trim();
+  return {
+    ...body,
+    direccion,
+    cp,
+    ciudad,
+    pais,
+    contacto,
+    vencimiento,
+    calle,
+    num_ext: numExt,
+    piso_puerta: pisoPuerta,
+    cod_postal: cp,
+    municipio: ciudad,
+    pais_iso: pais,
+  };
+}
+
+async function persistClienteExtendedFields(clienteId, empresaId, data = {}) {
+  const { rows } = await db.query(`
+    UPDATE clientes SET
+      calle=$3,num_ext=$4,piso_puerta=$5,cod_postal=$6,municipio=$7,provincia=$8,pais_iso=$9,
+      dir_fiscal_distinta=$10,fiscal_calle=$11,fiscal_num_ext=$12,fiscal_piso_puerta=$13,
+      fiscal_cod_postal=$14,fiscal_municipio=$15,fiscal_provincia=$16,fiscal_pais_iso=$17,
+      web=$18,contacto_telefono=$19,updated_at=NOW()
+    WHERE id=$1 AND empresa_id=$2 RETURNING *`,
+    [clienteId, empresaId, data.calle || null, data.num_ext || null, data.piso_puerta || null,
+     data.cod_postal || null, data.municipio || null, data.provincia || null, data.pais_iso || null,
+     Boolean(data.dir_fiscal_distinta), data.fiscal_calle || null, data.fiscal_num_ext || null,
+     data.fiscal_piso_puerta || null, data.fiscal_cod_postal || null, data.fiscal_municipio || null,
+     data.fiscal_provincia || null, data.fiscal_pais_iso || null, data.web || null,
+     data.contacto_telefono || null]
+  );
+  return rows[0] || null;
 }
 
 const TARIFA_TIPOS = new Set(["viaje", "kg", "tonelada", "km", "hora", "palet"]);
@@ -705,11 +777,12 @@ router.post("/", GERENTE_O_CONTABLE,
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0]?.msg || "Datos de cliente no válidos.", errors: errors.array() });
 
+    const clienteData = normalizeClienteWrite(req.body);
     const { nombre, cif, direccion, cp, ciudad, pais, email, contacto, telefono,
             forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, notas,
             calle, num_ext, codigo_postal, pendiente_revision,
             horario_carga, horario_descarga, email_facturacion, emails_albaranes, iban,
-            minimo_facturable_toneladas, limite_riesgo, modo_facturacion, bloqueado, bloqueo_motivo } = req.body;
+            minimo_facturable_toneladas, limite_riesgo, modo_facturacion, bloqueado, bloqueo_motivo } = clienteData;
     const empresaId = req.empresaId||req.user.empresa_id;
     const iva = normalizeIva(tipo_iva, iva_regimen);
     let horarioCargaNorm;
@@ -731,7 +804,7 @@ router.post("/", GERENTE_O_CONTABLE,
         pendiente_revision,email_facturacion,emails_albaranes,iban,horario_carga,horario_descarga,minimo_facturable_toneladas,
         limite_riesgo,modo_facturacion,bloqueado,bloqueo_motivo)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) RETURNING *`,
-      [nombre,cif||null,calle?(calle+(num_ext?' '+num_ext:'')):direccion||null,
+      [nombre,cif||null,direccion||null,
        codigo_postal||cp||null,ciudad||null,pais||"España",
        email||null,contacto||null,telefono||null,
        forma_pago||"Transferencia bancaria",vencimiento||"30 días",
@@ -740,16 +813,18 @@ router.post("/", GERENTE_O_CONTABLE,
        numericOrNull(minimo_facturable_toneladas), numericOrNull(limite_riesgo) || 0,
        modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null]
     );
-    res.status(201).json(rows[0]);
+    const saved = await persistClienteExtendedFields(rows[0].id, empresaId, clienteData);
+    res.status(201).json(saved || rows[0]);
   }
 );
 
 // PUT /clientes/:id
 router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
+  const clienteData = normalizeClienteWrite(req.body);
   const { nombre, cif, direccion, cp, ciudad, pais, email, contacto, telefono,
           forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, activo, notas,
           email_facturacion, emails_albaranes, iban, horario_carga, horario_descarga,
-          minimo_facturable_toneladas, limite_riesgo, modo_facturacion, bloqueado, bloqueo_motivo } = req.body;
+          minimo_facturable_toneladas, limite_riesgo, modo_facturacion, bloqueado, bloqueo_motivo } = clienteData;
   const empresaId = req.empresaId || req.user.empresa_id;
   const iva = normalizeIva(tipo_iva, iva_regimen);
   let horarioCargaNorm;
@@ -775,7 +850,8 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
      req.params.id,empresaId]
   );
   if (!rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
-  res.json(rows[0]);
+  const saved = await persistClienteExtendedFields(rows[0].id, empresaId, clienteData);
+  res.json(saved || rows[0]);
 });
 
 // DELETE /clientes/:id — solo desactivar, no borrar

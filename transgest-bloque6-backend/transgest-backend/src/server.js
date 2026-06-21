@@ -422,6 +422,8 @@ async function applyMigrations() {
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS modo_facturacion VARCHAR(60) DEFAULT 'por_viaje'").catch(() => {});
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueado BOOLEAN DEFAULT false").catch(() => {});
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)").catch(() => {});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_provincia VARCHAR(120)").catch(() => {});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});

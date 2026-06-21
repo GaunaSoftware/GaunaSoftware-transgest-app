@@ -226,16 +226,46 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 }
 
+function normalizePaisIso(value) {
+  const raw = String(value || "ES").trim();
+  const upper = raw.toUpperCase();
+  if (PAISES_ISO.some(([code]) => code === upper)) return upper;
+  const plain = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const aliases = { espana:"ES", portugal:"PT", francia:"FR", alemania:"DE", italia:"IT", paises_bajos:"NL", belgica:"BE", polonia:"PL", marruecos:"MA", reino_unido:"UK" };
+  return aliases[plain.replace(/\s+/g, "_")] || "OTHER";
+}
+
+function buildClienteForm(cliente) {
+  const source = cliente || {};
+  const vencimiento = String(source.dias_pago || source.vencimiento || "30");
+  const dias = vencimiento.match(/\d+/)?.[0] || "30";
+  return {
+    tipo_iva:"21",
+    iva_regimen:"general",
+    pais:"ES",
+    forma_pago:"transferencia",
+    ...source,
+    calle: source.calle || source.direccion || "",
+    num_ext: source.num_ext || "",
+    piso_puerta: source.piso_puerta || "",
+    cod_postal: source.cod_postal || source.codigo_postal || source.cp || "",
+    municipio: source.municipio || source.ciudad || "",
+    provincia: source.provincia || "",
+    pais_iso: normalizePaisIso(source.pais_iso || source.pais || "ES"),
+    contacto_nombre: source.contacto_nombre || source.contacto || "",
+    contacto_telefono: source.contacto_telefono || "",
+    dias_pago: dias,
+    emails_albaranes: normalizeEmailListText(source.emails_albaranes || ""),
+  };
+}
+
 function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("clientes");
   const esNuevo = !cliente;
 
   const [tab,       setTab]       = useState("datos");
-  const [form,      setForm]      = useState(() => ({
-    ...(cliente || { tipo_iva:"21", iva_regimen:"general", pais:"ES", forma_pago:"transferencia", dias_pago:"30" }),
-    emails_albaranes: normalizeEmailListText(cliente?.emails_albaranes || ""),
-  }));
+  const [form,      setForm]      = useState(() => buildClienteForm(cliente));
   const [saving,    setSaving]    = useState(false);
 
   // Rutas del cliente
@@ -330,6 +360,12 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
     try {
       const payload = {
         ...form,
+        direccion: [form.calle, form.num_ext, form.piso_puerta].map(v=>String(v || "").trim()).filter(Boolean).join(" "),
+        cp: form.cod_postal || "",
+        ciudad: form.municipio || "",
+        pais: form.pais_iso || "ES",
+        contacto: form.contacto_nombre || "",
+        vencimiento: form.dias_pago || "30",
         emails_albaranes: emailsAlbaranes.join("\n"),
         horario_carga: normalizarHorarioHabitual(form.horario_carga),
         horario_descarga: normalizarHorarioHabitual(form.horario_descarga),

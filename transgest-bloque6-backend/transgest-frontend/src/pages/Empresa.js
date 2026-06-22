@@ -1435,6 +1435,17 @@ export default function Empresa() {
                 <label style={S.lbl}>Web</label>
                 <input style={S.inp} value={empresa.web} onChange={fe("web")} placeholder="www.empresa.com" disabled={!esGerente}/>
               </div>
+              <div style={{ gridColumn:"1/-1" }}>
+                <label style={S.lbl}>Emails para recibir albaranes</label>
+                <textarea
+                  style={{...S.inp,minHeight:72,resize:"vertical"}}
+                  value={empresa.emails_albaranes || ""}
+                  onChange={fe("emails_albaranes")}
+                  placeholder="trafico@empresa.com, administracion@empresa.com"
+                  disabled={!esGerente}
+                />
+                <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>Se pueden indicar varios separados por coma, punto y coma o salto de linea. Apareceran en las ordenes de carga para colaboradores.</div>
+              </div>
             </div>
           </div>
 

@@ -996,9 +996,6 @@ export default function Palets(){
               </div>
             </div>
           </div>
-          <div style={{padding:"13px 16px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,fontSize:13,color:"#475569"}}>
-            El stock de empresa aumenta cuando entran palets de un cliente/obra y baja cuando se devuelven al propietario. Cada devolucion queda desglosada por obra o referencia.
-          </div>
           <div style={{marginTop:14,padding:"16px 18px",borderRadius:10,background:alertasAntiguedad.length?"rgba(249,115,22,.07)":"rgba(16,185,129,.07)",border:`1px solid ${alertasAntiguedad.length?"#fed7aa":"rgba(16,185,129,.20)"}`}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:alertasAntiguedad.length?10:0}}>
               <div>

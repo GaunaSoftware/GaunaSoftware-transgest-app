@@ -4,7 +4,9 @@ import { BRAND_NAME, getBrandDisplayName, getBrandVersionLabel } from "../brandi
 import { getLoginBrand, getPublicAppMeta, healthCheck } from "../services/api";
 import { confirmDialog } from "../services/notify";
 import { getEmpresaPlanLocal } from "../utils/planFeatures";
+import { useTheme } from "../context/ThemeContext";
 import transgestLogoDark from "../assets/brand/transgest_logo_dark.svg";
+import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
 
 const IS_DEMO = process.env.REACT_APP_DEMO_MODE === "true";
 
@@ -41,6 +43,7 @@ const S = {
 
 export default function Login() {
   const { login }   = useAuth();
+  const { isDark } = useTheme() || {};
   const plan = getEmpresaPlanLocal();
   const brandDisplayName = getBrandDisplayName(plan);
   const [appMeta, setAppMeta] = useState(null);
@@ -131,7 +134,7 @@ export default function Login() {
         <div style={S.logo}>
           <div style={S.logoBox} aria-label={`${brandDisplayName} ${versionLabel}`}>
             <img
-              src={loginBrand?.logo_url || transgestLogoDark}
+              src={loginBrand?.logo_url || (isDark ? transgestLogoWhite : transgestLogoDark)}
               alt={loginBrand?.empresa_nombre || brandDisplayName}
               style={loginBrand?.logo_url ? S.companyLogoImage : S.logoImage}
             />

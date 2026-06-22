@@ -516,7 +516,7 @@ export default function PlanDiario() {
                           onDragOverPedido={(e) => e.preventDefault()}
                           onDropPedido={(e, target) => reorderPedidoInRow(e, row, target)}
                         />) : (
-                          <div style={{ padding:"8px 10px", border:"1px dashed var(--border2)", borderRadius:7, color:"var(--text5)", fontSize:12 }}>Sin trabajo planificado</div>
+                          <div style={{ minHeight:34, padding:"8px 10px", border:"1px dashed var(--border2)", borderRadius:7, color:"var(--text5)", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center", textAlign:"center" }}>Sin trabajo planificado</div>
                         )}
                         {savingPlan && <div style={{fontSize:10,color:"var(--text5)"}}>Guardando asignacion...</div>}
                       </div>
@@ -524,7 +524,7 @@ export default function PlanDiario() {
                     <td style={S.td}>
                       <div style={{ display:"grid", gap:6 }}>
                         {row.avisos?.length ? row.avisos.slice(0, 5).map((a, idx) => <AlertBadge key={`${a.source}-${idx}`} aviso={a} />) : (
-                          <div style={{ color:"var(--text5)", fontSize:12 }}>Sin avisos</div>
+                          <div style={{ minHeight:34, color:"var(--text5)", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center", textAlign:"center" }}>Sin avisos</div>
                         )}
                         {row.avisos?.length > 5 && <div style={{ fontSize:10, color:"var(--text5)" }}>+{row.avisos.length - 5} aviso(s) mas</div>}
                       </div>

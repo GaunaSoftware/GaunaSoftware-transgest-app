@@ -81,6 +81,7 @@ const EMPRESA_PROFILE_DEFAULTS = {
   pais: "Espana",
   telefono: "",
   email: "",
+  emails_albaranes: "",
   web: "",
   iban: "",
   bic: "",

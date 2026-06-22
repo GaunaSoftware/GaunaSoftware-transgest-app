@@ -146,6 +146,7 @@ router.use(async (req, res, next) => {
     await db.query("ALTER TABLE clientes ALTER COLUMN fiscal_pais_iso TYPE VARCHAR(120)");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)");
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()");
   } catch (e) {}
   next();
 });
@@ -214,6 +215,10 @@ function normalizeClienteWrite(body = {}) {
     municipio: ciudad,
     pais_iso: pais,
   };
+}
+
+function generatedClienteCif() {
+  return `PTE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
 async function persistClienteExtendedFields(clienteId, empresaId, data = {}) {
@@ -774,7 +779,7 @@ router.delete("/:id/integracion-tokens/:tokenId", GERENTE_O_CONTABLE, async (req
 // POST /clientes
 router.post("/", GERENTE_O_CONTABLE,
   body("nombre").notEmpty().withMessage("El nombre / razón social es obligatorio.").trim(),
-  body("cif").notEmpty().withMessage("El CIF/NIF es obligatorio para crear el cliente.").trim().toUpperCase(),
+  body("cif").optional({ nullable: true, checkFalsy: true }).trim().toUpperCase(),
   async (req, res) => {
     let createdId = null;
     try {
@@ -782,11 +787,12 @@ router.post("/", GERENTE_O_CONTABLE,
     if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0]?.msg || "Datos de cliente no válidos.", errors: errors.array() });
 
     const clienteData = normalizeClienteWrite(req.body);
-    const { nombre, cif, direccion, cp, ciudad, pais, email, contacto, telefono,
+    const { nombre, direccion, cp, ciudad, pais, email, contacto, telefono,
             forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, notas,
             calle, num_ext, codigo_postal, pendiente_revision,
             horario_carga, horario_descarga, email_facturacion, emails_albaranes, iban,
             minimo_facturable_toneladas, limite_riesgo, modo_facturacion, bloqueado, bloqueo_motivo } = clienteData;
+    const cif = String(clienteData.cif || "").trim().toUpperCase() || generatedClienteCif();
     const empresaId = req.empresaId||req.user.empresa_id;
     const iva = normalizeIva(tipo_iva, iva_regimen);
     let horarioCargaNorm;
@@ -799,7 +805,7 @@ router.post("/", GERENTE_O_CONTABLE,
     }
     // Auto-marcar como pendiente si faltan datos clave
     const incompleto = pendiente_revision ||
-      !cif?.trim() || !email?.trim() || !telefono?.trim() ||
+      !String(req.body?.cif || "").trim() || !email?.trim() || !telefono?.trim() ||
       (!cp?.trim() && !codigo_postal?.trim()) || (!ciudad?.trim());
 
     const { rows } = await db.query(`

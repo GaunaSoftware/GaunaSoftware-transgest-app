@@ -6009,6 +6009,9 @@ router.patch("/:id/estado",
     if (req.user?.rol === "chofer" && !["en_curso","descarga","entregado","incidencia"].includes(estado)) {
       return res.status(403).json({ error: "El chofer no puede aplicar este estado" });
     }
+    if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
+      return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
+    }
 
     await ensureColaboradorWorkflowSchema();
     const incidencia = typeof req.body.incidencia === "string" ? req.body.incidencia.trim() : "";
@@ -6104,6 +6107,14 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     [req.params.id, empresaId]
   );
   if (!pedidoActualRows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+  if (
+    Object.prototype.hasOwnProperty.call(body || {}, "estado") &&
+    String(pedidoActualRows[0].estado || "").toLowerCase() === "entregado" &&
+    String(body.estado || "").toLowerCase() !== "entregado" &&
+    req.user?.rol !== "gerente"
+  ) {
+    return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
+  }
   try {
     await validatePedidoAssignment(db, body, empresaId);
   } catch (validationErr) {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { getColaboradores, crearColaborador, editarColaborador,
+         borrarColaborador,
          getColaboradorVehiculos, crearColaboradorVehiculo, editarColaboradorVehiculo, borrarColaboradorVehiculo,
          getColaboradorHistorial, getColaboradorFacturas, crearColaboradorFactura, editarColaboradorFactura,
          getColaboradorPagos, crearColaboradorPago, borrarColaboradorPago,
@@ -1134,7 +1135,7 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
   );
 }
 
-function DetalleColaborador({ colaborador, canEdit, onEditar, onVolver }) {
+function DetalleColaborador({ colaborador, canEdit, onEditar, onBaja, onVolver }) {
   const [tab, setTab] = useState("datos");
 
   return (
@@ -1145,7 +1146,10 @@ function DetalleColaborador({ colaborador, canEdit, onEditar, onVolver }) {
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:18,color:"var(--text)"}}>{colaborador.nombre}</div>
           <div style={{fontSize:12,color:"var(--text4)"}}>{colaborador.tipo==="empresa"?"Empresa colaboradora":"Autónomo"}{colaborador.cif?" - "+colaborador.cif:""}</div>
         </div>
-        {canEdit && <button onClick={onEditar} style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"6px 12px",fontSize:12,border:"1px solid var(--border2)",marginLeft:"auto"}}>Editar datos</button>}
+        {canEdit && <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={onEditar} style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"6px 12px",fontSize:12,border:"1px solid var(--border2)"}}>Editar datos</button>
+          <button onClick={()=>onBaja?.(colaborador)} style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",padding:"6px 12px",fontSize:12,border:"1px solid rgba(239,68,68,.25)"}}>Dar de baja</button>
+        </div>}
       </div>
 
       {/* Tabs */}
@@ -1349,6 +1353,26 @@ export default function Colaboradores() {
     cargar();
   };
 
+  const darBajaColaborador = async (colaborador) => {
+    const ok = await confirmDialog({
+      title: "Dar de baja colaborador",
+      message: `${colaborador.nombre} dejara de aparecer como colaborador activo. El historial de viajes, facturas, pagos y documentos se conserva.`,
+      confirmText: "Dar de baja",
+      cancelText: "Cancelar",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await borrarColaborador(colaborador.id);
+      notify("Colaborador dado de baja.", "success");
+      setDetalle(null);
+      refrescarBadges();
+      cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo dar de baja el colaborador.", "error");
+    }
+  };
+
   const revisarLiquidaciones = async () => {
     if (!canEdit || revisandoLiquidaciones) return;
     setRevisandoLiquidaciones(true);
@@ -1372,6 +1396,7 @@ export default function Colaboradores() {
           colaborador={colaboradorActual}
           canEdit={canEdit}
           onEditar={() => { setEditando(colaboradorActual); setModal(true); }}
+          onBaja={darBajaColaborador}
           onVolver={() => setDetalle(null)}
         />
         {modal && <ModalColaborador editando={editando} onClose={()=>{setModal(false);setEditando(null);}} onSaved={()=>{setModal(false);setEditando(null);refrescarBadges();cargar();}}/>}
@@ -1441,6 +1466,7 @@ export default function Colaboradores() {
                       </button>
                     )}
                     {canEdit && <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"4px 10px",fontSize:11}} onClick={()=>{setEditando(c);setModal(true);}}>Editar</button>}
+                    {canEdit && <button style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",padding:"4px 10px",fontSize:11,border:"1px solid rgba(239,68,68,.22)"}} onClick={()=>darBajaColaborador(c)}>Baja</button>}
                   </div>
                 </td>
               </tr>

@@ -11,6 +11,7 @@ export const EMPRESA_DEFAULTS = {
   pais: "Espana",
   telefono: "",
   email: "",
+  emails_albaranes: "",
   web: "",
   iban: "",
   bic: "",

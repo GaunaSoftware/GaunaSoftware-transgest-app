@@ -3689,8 +3689,8 @@ function OrdenCargaModal({ pedido, onClose }) {
     const albaranesDireccionPostal = empresaDireccion || "Direccion postal pendiente de configurar en Mi Empresa";
     const logoHtml = getLogoDataUrl() ? `<img src="${getLogoDataUrl()}" style="max-height:52px;max-width:160px;object-fit:contain;margin-bottom:6px;display:block" alt="">` : "";
     const emailAlbaranesColaborador = joinEmailList(
-      [pedido.cliente_emails_albaranes, pedido.emails_albaranes, pedido.cliente_email_facturacion, pedido.cliente_email],
-      "TRAFICO@TRANSPORTESASENSI.COM"
+      [empresa.emails_albaranes, empresa.email],
+      "Email de albaranes pendiente de configurar en Mi Empresa"
     );
     const bloqueEmailsAlbaranes = `
 <div class="sec">
@@ -3745,7 +3745,7 @@ function OrdenCargaModal({ pedido, onClose }) {
     <div class="price-cell"><div class="fl">Referencia de pedido</div><div class="fv">${htmlEscape(referenciaPedido || "-")}</div></div>
   </div>
   <div class="notice" style="margin-top:10px"><strong>Forma de pago:</strong> ${htmlEscape(condicionesPagoColaborador)}</div>
-  <div class="notice"><strong>PENDIENTE DE PAGO</strong> - Adjuntar factura del colaborador. Enviar copia digital a: ${emailAlbaranesColaborador}. Los albaranes originales deben remitirse por correo postal a: ${htmlEscape(albaranesDireccionPostal)}</div>
+  <div class="notice"><strong>PENDIENTE DE PAGO</strong> - Adjuntar factura del colaborador. Enviar copia digital a: ${htmlEscape(emailAlbaranesColaborador)}. Los albaranes originales deben remitirse por correo postal a: ${htmlEscape(albaranesDireccionPostal)}</div>
 </div>` : "";
     const dcdReady = !!docControl?.status?.ready;
     const dcdSupportUrl = docControl?.documento?.soporte_url || "";
@@ -4675,7 +4675,6 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
   async function crear() {
     setError("");
     if (!form.nombre.trim()) { setError("El nombre / razon social es obligatorio."); return; }
-    if (!form.cif.trim()) { setError("El CIF/NIF es obligatorio para crear el cliente."); return; }
     setSaving(true);
     try {
       const nuevo = await crearCliente({
@@ -4701,7 +4700,7 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
         <div style={{fontSize:11,fontWeight:700,color:"var(--accent)",marginBottom:6,marginTop:4,textTransform:"uppercase",letterSpacing:".06em"}}>Datos de empresa</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre / Razon social *</label><input style={inp} value={form.nombre} onChange={fk("nombre")} autoFocus/></div>
-          <div><label style={lbl}>CIF / NIF *</label><input style={{...inp,borderColor:!form.cif.trim()?"rgba(239,68,68,.45)":"var(--border2)"}} value={form.cif} onChange={fk("cif")} placeholder="B12345678"/></div>
+          <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={fk("cif")} placeholder="B12345678"/></div>
           <div><label style={lbl}>Telefono</label><input style={inp} value={form.telefono} onChange={fk("telefono")}/></div>
           <div><label style={lbl}>Email facturacion</label><input type="email" style={inp} value={form.email} onChange={fk("email")}/></div>
           <div><label style={lbl}>Forma de pago</label>
@@ -5252,6 +5251,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   guidedActive = false, onGuidedProgress,
 }) {
   const { user } = useAuth();
+  const esGerente = String(user?.rol || "").toLowerCase() === "gerente";
   const asignacionRef = React.useRef(null);
   const [clientes, setClientes] = useState(clientesProp || []);
   const [rutas,    setRutas]    = useState(rutas_prop || []);
@@ -5908,9 +5908,8 @@ async function guardar() {
     notify("La ruta seleccionada no es compatible con el remolque actual. Cambia el remolque antes de guardar.", "warning");
     return;
   }
-  const tieneFacturaFinal = pedidoTieneFacturaFinal(editando);
-  if (editando?.id && tieneFacturaFinal && !desvinculado) {
-    notify("Este pedido esta facturado y no puede modificarse.\nSi necesitas hacer cambios, emite una factura rectificativa desde Facturacion.", "warning");
+  if (editando?.id && String(editando?.estado || "").toLowerCase() === "entregado" && String(form.estado || "").toLowerCase() !== "entregado" && !esGerente) {
+    notify("Solo gerencia puede cambiar el estado de un pedido marcado como entregado.", "warning");
     return;
   }
   if (clienteRiesgoPedido?.requiere_confirmacion && !isRiskConfirmationFresh(riesgoConfirmadoRef, form.cliente_id, clienteRiesgoPedido)) {
@@ -6138,10 +6137,10 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                 )}
               </div>
             )}
-            {editando?._readonly && !desvinculado && (
+            {pedidoTieneFacturaFinal(editando) && !desvinculado && (
               <div style={{background:"rgba(16,185,129,.1)",border:"1px solid rgba(16,185,129,.25)",borderRadius:8,padding:"7px 14px",marginBottom:16,fontSize:12,color:"var(--green)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                 <span><strong>PEDIDO FACTURADO{editando.factura_numero ? ` - ${editando.factura_numero}` : ""}</strong>
-                &nbsp;| Este pedido no se puede modificar. Para corregir importes emite una factura rectificativa.</span>
+                &nbsp;| Modo correccion: puedes editar datos del pedido. Si esta entregado, solo gerencia puede cambiar el estado.</span>
                 <button onClick={async()=>{
                   const ok = await confirmDialog({
                     title: "Desvincular factura",
@@ -6457,9 +6456,17 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
               <div><label style={S.label}>Hora descarga</label><input type="time" style={S.input} value={form.hora_descarga||""} onChange={f("hora_descarga")}/></div>
               <div><label style={S.label}>Ventana descarga</label><input style={S.input} value={form.ventana_descarga||""} onChange={f("ventana_descarga")} placeholder="07:00-17:00"/></div>
               <div><label style={S.label}>Estado</label>
-                <select value={form.estado||"pendiente"} onChange={f("estado")} style={S.sel}>
+                <select
+                  value={form.estado||"pendiente"}
+                  onChange={f("estado")}
+                  disabled={editando?.id && String(editando?.estado || "").toLowerCase() === "entregado" && !esGerente}
+                  style={{...S.sel,opacity:editando?.id && String(editando?.estado || "").toLowerCase() === "entregado" && !esGerente ? 0.65 : 1}}
+                >
                   {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
                 </select>
+                {editando?.id && String(editando?.estado || "").toLowerCase() === "entregado" && !esGerente && (
+                  <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>Estado bloqueado: solo gerencia puede cambiar un pedido entregado.</div>
+                )}
               </div>
               <div style={{gridColumn:"1/3"}}>
                 <label style={S.label}>Google Maps carga</label>
@@ -6657,7 +6664,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                 />
               </div>
               <div>
-                <label style={{...S.label,color:"#f59e0b"}}>Base sin gasoil</label>
+                <label style={{...S.label,color:"#f59e0b"}}>Precio base sin gasoil</label>
                 <input
                   type="text"
                   inputMode="decimal"
@@ -6669,8 +6676,9 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                     const next = {...p,precio_base_sin_combustible:e.target.value,precio_unitario:base > 0 && pct > 0 ? Number((base * (1 + pct / 100)).toFixed(2)) : p.precio_unitario};
                     return {...next, importe_revision_combustible:calcRevisionCombustible(next)};
                   })}
-                  placeholder="Precio base anterior"
+                  placeholder="Importe antes del recargo"
                 />
+                <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>Importe del viaje antes de aplicar la clausula de gasoil.</div>
               </div>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:8}}>
@@ -7823,7 +7831,7 @@ function openPedidoInTrafico(pedido) {
 
 export default function Pedidos() {
   useEmpresaPerfil();
-  const { puedeEditar } = useAuth();
+  const { puedeEditar, user } = useAuth();
   const canEdit = puedeEditar("pedidos");
   const empresaPlan = getEmpresaPlanLocal();
   const aiVisualPlanActivo = planHasFeature(empresaPlan, "ai");
@@ -8194,6 +8202,10 @@ export default function Pedidos() {
       notify("No se puede cambiar el estado de un pedido facturado.", "warning");
       return;
     }
+    if (String(p?.estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && user?.rol !== "gerente") {
+      notify("Solo gerencia puede cambiar el estado de un pedido entregado.", "warning");
+      return;
+    }
     const validationIssues = getPedidoStateValidationIssues(p, estado);
     if (validationIssues.length) {
       notify(`No se puede pasar a "${LABEL_ESTADO[estado] || estado}" hasta completar: ${validationIssues.join(", ")}.`, "warning");
@@ -8236,9 +8248,8 @@ export default function Pedidos() {
         notify("No se pudo refrescar el pedido completo. Se abre la version disponible.", "warning");
       }
     }
-    // Solo readonly si realmente hay factura final vinculada
     const estaFacturado = pedidoTieneFacturaFinal(pedidoCompleto);
-    setEditando(estaFacturado ? { ...pedidoCompleto, ...options, _readonly: true } : { ...pedidoCompleto, ...options });
+    setEditando(estaFacturado ? { ...pedidoCompleto, ...options, _correccion_factura: true, _readonly: false } : { ...pedidoCompleto, ...options });
     setModal(true);
   }
 
@@ -9351,6 +9362,12 @@ export default function Pedidos() {
                               <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirCopiarPedido(p);}}
                                 style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"6px 10px",fontSize:11}}>
                                 Copiar viaje
+                              </button>
+                            )}
+                            {canEdit && pedidoTieneFacturaFinal(p) && (
+                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirEditar(p);}}
+                                style={{...S.btn,textAlign:"left",background:"rgba(245,158,11,.10)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",padding:"6px 10px",fontSize:11}}>
+                                Corregir pedido
                               </button>
                             )}
                             {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (

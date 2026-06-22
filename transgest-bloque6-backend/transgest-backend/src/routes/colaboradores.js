@@ -2486,6 +2486,21 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
 });
 
 // ── Vehículos de colaboradores ────────────────────────────────────────────
+router.delete("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
+  try {
+    await ensureColaboradorOpsSchema();
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const { rows } = await db.query(
+      "UPDATE colaboradores SET activo=false WHERE id=$1 AND empresa_id=$2 RETURNING id,nombre,activo",
+      [req.params.id, empresaId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Colaborador no encontrado" });
+    res.json({ ok:true, colaborador: rows[0] });
+  } catch(e) {
+    res.status(500).json({ error:e.message || "No se pudo dar de baja el colaborador" });
+  }
+});
+
 router.patch("/:id/revision", GERENTE_O_TRAFICO, async (req,res) => {
   try {
     await ensureColaboradorOpsSchema();

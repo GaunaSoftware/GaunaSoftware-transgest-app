@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "lodash": "4.17.21",
+    "lodash": "4.18.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-scripts": "5.0.1",
@@ -37,7 +37,7 @@
   "proxy": "http://localhost:3001",
   "_buildTime": "1775472581",
   "overrides": {
-    "lodash": "4.17.21"
+    "lodash": "4.18.1"
   },
   "devDependencies": {
     "ajv": "^8.12.0"

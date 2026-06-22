@@ -18,7 +18,9 @@
     "check:env": "node scripts/env_check.js",
     "audit:tenant": "node scripts/audit_tenant.js",
     "audit:tenant:strict": "node scripts/audit_tenant.js --strict",
-    "check": "node --check src/server.js && node --check src/middleware/auth.js && node --check src/services/envValidator.js && node --check src/services/backup.js && node --check src/services/apiKeys.js && node --check src/services/whatsapp.js && node --check src/routes/accounting_sso.js && node --check src/routes/pedidos.js && node --check src/routes/vehiculos.js && node --check src/routes/docs.js && node --check src/routes/informes.js && node --check src/routes/superadmin.js && node --check src/routes/palets.js && node --check src/routes/puntos_interes.js && node --check src/routes/taller.js && node --check src/routes/colaboradores.js && node --check src/routes/route_optimizer.js && node --check src/routes/whatsapp.js && node --check scripts/migrate.js && node --check scripts/smoke_check.js && node --check scripts/accounting_connection_check.js && node --check scripts/deploy_smoke_check.js && node --check scripts/daily_ready_check.js && node --check scripts/qa_deploy_check.js && node --check scripts/functional_check.js && node --check scripts/audit_tenant.js && node --check scripts/env_check.js && node --check scripts/ensure_superadmin.js && node scripts/audit_tenant.js --strict"
+    "security:check": "node scripts/security_check.js",
+    "security:roundtrip": "node scripts/security_roundtrip.js",
+    "check": "node --check src/server.js && node --check src/middleware/auth.js && node --check src/services/envValidator.js && node --check src/services/uploadValidation.js && node --check src/services/backup.js && node --check src/services/apiKeys.js && node --check src/services/whatsapp.js && node --check src/routes/accounting_sso.js && node --check src/routes/pedidos.js && node --check src/routes/vehiculos.js && node --check src/routes/docs.js && node --check src/routes/informes.js && node --check src/routes/superadmin.js && node --check src/routes/palets.js && node --check src/routes/puntos_interes.js && node --check src/routes/taller.js && node --check src/routes/colaboradores.js && node --check src/routes/route_optimizer.js && node --check src/routes/whatsapp.js && node --check scripts/migrate.js && node --check scripts/smoke_check.js && node --check scripts/accounting_connection_check.js && node --check scripts/deploy_smoke_check.js && node --check scripts/security_check.js && node --check scripts/daily_ready_check.js && node --check scripts/qa_deploy_check.js && node --check scripts/functional_check.js && node --check scripts/audit_tenant.js && node --check scripts/env_check.js && node --check scripts/ensure_superadmin.js && node scripts/audit_tenant.js --strict"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -32,7 +34,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "node-cron": "^4.2.1",
-    "nodemailer": "^6.9.14",
+    "nodemailer": "^9.0.1",
     "pdfkit": "^0.19.1",
     "pg": "^8.12.0",
     "qrcode": "^1.5.4",

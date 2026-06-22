@@ -13,6 +13,10 @@ async function main() {
   const nombre = String(process.env.SUPERADMIN_NAME || DEFAULT_NAME).trim() || DEFAULT_NAME;
   const rol = String(process.env.SUPERADMIN_ROLE || "superadmin").trim() || "superadmin";
 
+  if (process.env.NODE_ENV === "production" && (!process.env.SUPERADMIN_EMAIL || !process.env.SUPERADMIN_PASSWORD)) {
+    throw new Error("En produccion SUPERADMIN_EMAIL y SUPERADMIN_PASSWORD son obligatorios; no se permiten credenciales por defecto");
+  }
+
   if (!email.includes("@")) {
     throw new Error("SUPERADMIN_EMAIL debe ser un email valido");
   }

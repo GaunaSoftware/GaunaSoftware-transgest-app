@@ -12,6 +12,7 @@ const { getEmpresaEmailConfig } = require("../services/email");
 const { getWhatsappStatus } = require("../services/whatsapp");
 const { CCAA, buildCalendarResponse, fallbackSpanishHolidays, fetchSpainHolidays, normalizeCcaa, normalizeYear } = require("../services/calendarioLaboral");
 const stripe = require("../services/stripe");
+const { IMAGE_MIMES, validateBase64Upload } = require("../services/uploadValidation");
 const router  = express.Router();
 router.use(authenticate);
 
@@ -1828,14 +1829,13 @@ router.post("/logo", async (req,res) => {
   try {
     const { logo_base64, logo_mime } = req.body;
     if (!logo_base64) return res.status(400).json({error:"Falta logo_base64"});
-    // Validate size (max 500KB base64 ≈ 375KB file)
-    if (logo_base64.length > 700000) return res.status(400).json({error:"El logo es demasiado grande (máx 500KB)"});
+    const upload = validateBase64Upload({ data: logo_base64, mime: logo_mime, maxBytes: 500 * 1024, allowedMimes: IMAGE_MIMES });
     await db.query(
       "UPDATE empresas SET logo_base64=$1, cfg_precios=jsonb_set(COALESCE(cfg_precios,'{}'),'{logo_mime}',$2) WHERE id=$3",
-      [logo_base64, JSON.stringify(logo_mime||"image/png"), EID(req)]
+      [upload.base64, JSON.stringify(upload.mime), EID(req)]
     );
-    res.json({ok:true, logo_base64});
-  } catch(e) { res.status(500).json({error:e.message}); }
+    res.json({ok:true, logo_base64: upload.base64});
+  } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });
 
 router.delete("/logo", async (req,res) => {
@@ -1880,13 +1880,13 @@ router.post("/pedido-docs/:pedido_id", async (req,res) => {
   try {
     const {nombre,tipo,file_base64,file_mime,file_size_kb,notas} = req.body;
     if (!nombre || !file_base64) return res.status(400).json({error:"Faltan nombre o archivo"});
-    if (file_base64.length > 5000000) return res.status(400).json({error:"Archivo demasiado grande (máx ~3MB)"});
+    const upload = validateBase64Upload({ data: file_base64, mime: file_mime, filename: nombre });
     const {rows} = await db.query(
       "INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,nombre,tipo,file_mime,file_size_kb,created_at",
-      [req.params.pedido_id,EID(req),nombre,tipo||"otro",file_base64,file_mime||"application/pdf",file_size_kb||null,notas||null]
+      [req.params.pedido_id,EID(req),nombre,tipo||"otro",upload.base64,upload.mime,Math.ceil(upload.sizeBytes/1024),notas||null]
     );
     res.status(201).json(rows[0]);
-  } catch(e) { res.status(500).json({error:e.message}); }
+  } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });
 
 router.delete("/pedido-docs/:doc_id", async (req,res) => {

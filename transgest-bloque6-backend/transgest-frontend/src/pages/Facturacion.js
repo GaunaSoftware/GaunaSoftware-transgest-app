@@ -2945,7 +2945,7 @@ export default function Facturacion() {
         )}
         <button
           onClick={alternarFiltroFechas}
-          style={{...S.btn,background:filtroFechasCustom?"rgba(20,184,166,.12)":"var(--bg3)",color:filtroFechasCustom?"var(--accent-xl)":"var(--text3)",border:`1px solid ${filtroFechasCustom?"rgba(20,184,166,.30)":"var(--border2)"}`}}
+          style={{...S.btn,background:filtroFechasCustom?"var(--accent)":"var(--bg3)",color:filtroFechasCustom?"#fff":"var(--text3)",border:`1px solid ${filtroFechasCustom?"var(--accent)":"var(--border2)"}`}}
         >
           {filtroFechasCustom ? "Usar mes" : "Filtro personalizado"}
         </button>

@@ -84,6 +84,9 @@ services:
       TACOGEST_API_KEY: ${TACOGEST_API_KEY:-}
       MOVILDATA_API_KEY: ${MOVILDATA_API_KEY:-}
       GPS_API_KEY: ${GPS_API_KEY:-}
+      BACKUP_DIR: /app/backups
+    volumes:
+      - backup_data:/app/backups
     networks: [tg_net]
 
   accounting-migrator:
@@ -212,6 +215,7 @@ services:
 
 volumes:
   db_data:
+  backup_data:
 
 networks:
   tg_net:

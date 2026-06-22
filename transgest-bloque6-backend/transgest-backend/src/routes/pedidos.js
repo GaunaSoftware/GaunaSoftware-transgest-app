@@ -19,6 +19,7 @@ const {
 } = require("../services/regulatoryCore");
 const { getEmpresaCalendarForDate, inferCcaaFromText } = require("../services/calendarioLaboral");
 const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
+const { validateBase64Upload } = require("../services/uploadValidation");
 
 const router = express.Router();
 let colaboradorWorkflowSchemaPromise = null;
@@ -5157,7 +5158,7 @@ router.post("/:id/chofer-docs", async (req, res) => {
     const tipoDoc = String(tipo || "").toLowerCase();
     if (!nombre || !file_base64) return res.status(400).json({ error: "Faltan nombre o archivo" });
     if (!tipoDoc.includes("albaran")) return res.status(400).json({ error: "Desde la app del chofer solo se pueden adjuntar albaranes del viaje" });
-    if (String(file_base64).length > 5000000) return res.status(400).json({ error: "Archivo demasiado grande (max ~3MB)" });
+    const upload = validateBase64Upload({ data: file_base64, mime: file_mime, filename: nombre });
 
     const { rows } = await db.query(
       `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
@@ -5168,16 +5169,16 @@ router.post("/:id/chofer-docs", async (req, res) => {
         empresaId,
         String(nombre).slice(0, 255),
         tipoDoc || "albaran",
-        file_base64,
-        file_mime || "application/pdf",
-        Number.isFinite(Number(file_size_kb)) ? Number(file_size_kb) : null,
+        upload.base64,
+        upload.mime,
+        Math.ceil(upload.sizeBytes / 1024),
         notas || "Subido desde app chofer",
       ]
     );
     await logPedidoEvento(req.params.id, empresaId, "chofer_doc.subido", { documento_id: rows[0].id, tipo: tipoDoc }, req.user?.rol === "chofer" ? "chofer" : "usuario", req.user?.id || null);
     res.status(201).json(rows[0]);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 

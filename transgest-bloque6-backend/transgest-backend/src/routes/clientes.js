@@ -134,6 +134,7 @@ router.use(async (req, res, next) => {
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS municipio VARCHAR(120)");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS provincia VARCHAR(120)");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pais_iso VARCHAR(10)");
+    await db.query("ALTER TABLE clientes ALTER COLUMN pais_iso TYPE VARCHAR(120)");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS dir_fiscal_distinta BOOLEAN DEFAULT false");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_calle TEXT");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_num_ext VARCHAR(30)");
@@ -142,6 +143,7 @@ router.use(async (req, res, next) => {
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_municipio VARCHAR(120)");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_provincia VARCHAR(120)");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_pais_iso VARCHAR(10)");
+    await db.query("ALTER TABLE clientes ALTER COLUMN fiscal_pais_iso TYPE VARCHAR(120)");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT");
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)");
   } catch (e) {}
@@ -774,6 +776,8 @@ router.post("/", GERENTE_O_CONTABLE,
   body("nombre").notEmpty().withMessage("El nombre / razón social es obligatorio.").trim(),
   body("cif").notEmpty().withMessage("El CIF/NIF es obligatorio para crear el cliente.").trim().toUpperCase(),
   async (req, res) => {
+    let createdId = null;
+    try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0]?.msg || "Datos de cliente no válidos.", errors: errors.array() });
 
@@ -813,13 +817,19 @@ router.post("/", GERENTE_O_CONTABLE,
        numericOrNull(minimo_facturable_toneladas), numericOrNull(limite_riesgo) || 0,
        modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null]
     );
+    createdId = rows[0]?.id || null;
     const saved = await persistClienteExtendedFields(rows[0].id, empresaId, clienteData);
     res.status(201).json(saved || rows[0]);
+    } catch (e) {
+      if (createdId) await db.query("DELETE FROM clientes WHERE id=$1", [createdId]).catch(() => {});
+      res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo guardar el cliente", request_id: req.id });
+    }
   }
 );
 
 // PUT /clientes/:id
 router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
+  try {
   const clienteData = normalizeClienteWrite(req.body);
   const { nombre, cif, direccion, cp, ciudad, pais, email, contacto, telefono,
           forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, activo, notas,
@@ -852,6 +862,9 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   if (!rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
   const saved = await persistClienteExtendedFields(rows[0].id, empresaId, clienteData);
   res.json(saved || rows[0]);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo actualizar el cliente", request_id: req.id });
+  }
 });
 
 // DELETE /clientes/:id — solo desactivar, no borrar

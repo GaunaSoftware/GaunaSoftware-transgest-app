@@ -2,6 +2,7 @@ const express = require("express");
 const db      = require("../services/db");
 const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
 const { crearNotificacion } = require("../services/notificaciones");
+const { validateBase64Upload } = require("../services/uploadValidation");
 const router  = express.Router();
 router.use(authenticate);
 
@@ -819,6 +820,11 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
     let nextCartaNombre = carta_renuncia_nombre || previous.carta_renuncia_nombre || null;
     let nextCartaMime = carta_renuncia_mime || previous.carta_renuncia_mime || null;
     let nextCartaBase64 = carta_renuncia_base64 || previous.carta_renuncia_base64 || null;
+    if (carta_renuncia_base64) {
+      const upload = validateBase64Upload({ data: carta_renuncia_base64, mime: carta_renuncia_mime, filename: carta_renuncia_nombre });
+      nextCartaMime = upload.mime;
+      nextCartaBase64 = upload.base64;
+    }
     const nowIso = new Date().toISOString();
     if (!nextActivo) {
       if (!nextFechaBaja) return res.status(400).json({error:"Para dar de baja al chofer indica la fecha de baja."});
@@ -862,6 +868,6 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
     );
     if(!rows[0]) return res.status(404).json({error:"No encontrado"});
     res.json(rows[0]);
-  } catch(e) { res.status(500).json({error:e.message}); }
+  } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });
 module.exports = router;

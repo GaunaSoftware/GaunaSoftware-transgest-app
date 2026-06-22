@@ -9,6 +9,9 @@ const stripe   = require("../services/stripe");
 const { authenticate, getSubscriptionState, normalizePermissionsForRole } = require("../middleware/auth");
 
 const router = express.Router();
+const LOGIN_MAX_ATTEMPTS = Math.max(3, Number(process.env.LOGIN_MAX_ATTEMPTS || 5));
+const LOGIN_LOCK_MINUTES = Math.max(5, Number(process.env.LOGIN_LOCK_MINUTES || 15));
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("transgest-invalid-login-probe", 12);
 
 let authSchemaReady = false;
 async function ensureAuthSchema() {
@@ -17,6 +20,8 @@ async function ensureAuthSchema() {
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trafico_config JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS logo_base64 TEXT").catch(() => {});
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ").catch(() => {});
   authSchemaReady = true;
 }
 
@@ -100,6 +105,7 @@ router.post("/login",
       const { rows } = await db.query(
         `SELECT u.id, u.nombre, u.email, u.password_hash, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id,
                 u.username, u.perfil, u.permisos, u.trafico_config,
+                u.login_failed_count, u.login_locked_until,
                 e.plan, e.estado AS empresa_estado, e.fecha_vencimiento,
                 e.bloqueo_manual, e.bloqueo_motivo
          FROM usuarios u
@@ -112,20 +118,46 @@ router.post("/login",
 
       // Mismo mensaje tanto si no existe como si la contraseña es incorrecta
       if (!user || !user.activo) {
+        await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
         if (user) auditLogin({ user, identifier, ok: false, req, motivo: "usuario_inactivo" });
         return res.status(401).json({ error: "Credenciales incorrectas" });
       }
 
+      const lockedUntil = user.login_locked_until ? new Date(user.login_locked_until) : null;
+      if (lockedUntil && lockedUntil > new Date()) {
+        auditLogin({ user, identifier, ok: false, req, motivo: "bloqueo_temporal" });
+        return res.status(429).json({
+          error: "Acceso bloqueado temporalmente por intentos fallidos. Vuelve a intentarlo mas tarde.",
+          locked_until: lockedUntil.toISOString(),
+        });
+      }
+      if (lockedUntil) {
+        user.login_failed_count = 0;
+        await db.query("UPDATE usuarios SET login_failed_count=0, login_locked_until=NULL WHERE id=$1", [user.id]);
+      }
+
       const valid = await bcrypt.compare(password, user.password_hash);
       if (!valid) {
+        const failedCount = Number(user.login_failed_count || 0) + 1;
+        const shouldLock = failedCount >= LOGIN_MAX_ATTEMPTS;
+        await db.query(
+          `UPDATE usuarios
+              SET login_failed_count=$2,
+                  login_locked_until=CASE WHEN $3 THEN NOW() + ($4 * INTERVAL '1 minute') ELSE NULL END
+            WHERE id=$1`,
+          [user.id, failedCount, shouldLock, LOGIN_LOCK_MINUTES]
+        );
         logger.warn(`Login fallido para: ${identifier} desde ${req.ip}`);
-        auditLogin({ user, identifier, ok: false, req, motivo: "credenciales_invalidas" });
+        auditLogin({ user, identifier, ok: false, req, motivo: shouldLock ? "bloqueo_por_intentos" : "credenciales_invalidas" });
+        if (shouldLock) {
+          return res.status(429).json({ error: `Acceso bloqueado durante ${LOGIN_LOCK_MINUTES} minutos por intentos fallidos.` });
+        }
         return res.status(401).json({ error: "Credenciales incorrectas" });
       }
 
       // Actualizar último acceso
       await db.query(
-        "UPDATE usuarios SET ultimo_acceso = NOW() WHERE id = $1",
+        "UPDATE usuarios SET ultimo_acceso=NOW(), login_failed_count=0, login_locked_until=NULL WHERE id=$1",
         [user.id]
       );
 

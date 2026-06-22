@@ -7,6 +7,7 @@ const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
 const { crearNotificacion, ensureNotificacionesSchema } = require("../services/notificaciones");
 const { enviarEmail } = require("../services/email");
 const { buildDocumentoControlPayload } = require("../services/documentoControl");
+const { validateBase64Upload } = require("../services/uploadValidation");
 const router  = express.Router();
 let colaboradorOpsSchemaPromise = null;
 
@@ -154,12 +155,6 @@ function safeFilename(value, fallback = "documento") {
 function isAlbaranDoc(doc = {}) {
   const raw = `${doc.tipo || ""} ${doc.nombre || ""}`.toLowerCase();
   return raw.includes("albaran") || raw.includes("albarán") || raw.includes("pod") || raw.includes("cmr");
-}
-
-function normalizeUploadBase64(value = "") {
-  const raw = String(value || "");
-  const match = /^data:([^;,]+)?;base64,(.+)$/i.exec(raw);
-  return match ? { mime: match[1] || "", base64: match[2] || "" } : { mime: "", base64: raw };
 }
 
 function fechaMediodia(value) {
@@ -1761,10 +1756,9 @@ router.post("/public/portal/:token/documentos", express.json({ limit: "6mb" }), 
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).json({ error: "Enlace no disponible" });
     const { tipo, nombre, caducidad, notas, file_base64, file_mime, file_size_kb } = req.body || {};
-    const upload = normalizeUploadBase64(file_base64);
+    const upload = validateBase64Upload({ data: file_base64, mime: file_mime, filename: nombre });
     if (!nombre || !String(nombre).trim()) return res.status(400).json({ error: "Nombre de documento obligatorio" });
     if (!upload.base64) return res.status(400).json({ error: "Archivo obligatorio" });
-    if (upload.base64.length > 5000000) return res.status(400).json({ error: "Archivo demasiado grande (max ~3MB)" });
     const { rows } = await db.query(
       `INSERT INTO colaborador_documentos
         (empresa_id,colaborador_id,tipo,nombre,caducidad,notas,file_base64,file_mime,file_size_kb)
@@ -1779,7 +1773,7 @@ router.post("/public/portal/:token/documentos", express.json({ limit: "6mb" }), 
         notas || "Subido desde portal proveedor",
         upload.base64,
         file_mime || upload.mime || "application/octet-stream",
-        Number.isFinite(Number(file_size_kb)) ? Number(file_size_kb) : null,
+        Math.ceil(upload.sizeBytes / 1024),
       ]
     );
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [data.token.id]).catch(()=>{});
@@ -2021,10 +2015,9 @@ router.post("/public/portal/:token/pedidos/:pedidoId/albaranes", express.json({ 
     const ctx = await getPortalProveedorPedido(req.params.token, req.params.pedidoId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no disponible para este proveedor" });
     const { nombre, tipo, file_base64, file_mime, file_size_kb, notas, fase } = req.body || {};
-    const upload = normalizeUploadBase64(file_base64);
+    const upload = validateBase64Upload({ data: file_base64, mime: file_mime, filename: nombre });
     const cleanBase64 = upload.base64;
     if (!nombre || !cleanBase64) return res.status(400).json({ error: "Faltan nombre o archivo" });
-    if (cleanBase64.length > 5000000) return res.status(400).json({ error: "Archivo demasiado grande (max ~3MB)" });
     const tipoDoc = String(tipo || "albaran_colaborador").toLowerCase();
     if (!isAlbaranDoc({ tipo: tipoDoc, nombre })) return res.status(400).json({ error: "El portal proveedor solo acepta albaranes, POD o CMR del viaje" });
 
@@ -2039,7 +2032,7 @@ router.post("/public/portal/:token/pedidos/:pedidoId/albaranes", express.json({ 
         tipoDoc || "albaran_colaborador",
         cleanBase64,
         file_mime || upload.mime || "application/pdf",
-        Number.isFinite(Number(file_size_kb)) ? Number(file_size_kb) : null,
+        Math.ceil(upload.sizeBytes / 1024),
         notas || "Subido desde portal proveedor",
       ]
     );
@@ -2113,9 +2106,8 @@ router.post("/public/portal/:token/pedidos/:pedidoId/factura", express.json({ li
     }
 
     const { numero_factura, total, archivo_base64, archivo_mime, notas } = req.body || {};
-    const upload = normalizeUploadBase64(archivo_base64);
+    const upload = validateBase64Upload({ data: archivo_base64, mime: archivo_mime, filename: "factura.pdf" });
     if (!upload.base64) return res.status(400).json({ error: "Archivo de factura obligatorio" });
-    if (upload.base64.length > 5000000) return res.status(400).json({ error: "Archivo demasiado grande (max ~3MB)" });
     const totalFactura = Number(total || ctx.pedido.precio_colaborador || 0);
     const iva = normalizeIva(colaborador.tipo_iva, colaborador.iva_regimen);
     const base = iva.tipo_iva > 0 ? totalFactura / (1 + iva.tipo_iva / 100) : totalFactura;

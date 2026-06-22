@@ -58,6 +58,12 @@ const controlHorarioRoutes = require("./routes/control_horario");
 const app  = express();
 const PORT = process.env.PORT || 3001;
 validateEnv();
+const RELEASE = String(
+  process.env.RENDER_GIT_COMMIT ||
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.APP_RELEASE ||
+  "local"
+).replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 40) || "local";
 const corsOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map(o => o.trim())
@@ -72,6 +78,8 @@ if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
 app.use((req, res, next) => {
   req.id = req.headers["x-request-id"] || crypto.randomUUID();
   res.setHeader("X-Request-Id", req.id);
+  res.setHeader("X-TransGest-Release", RELEASE);
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self), payment=()");
   next();
 });
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
@@ -85,8 +93,8 @@ app.use(cors({
   credentials: true,
 }));
 app.use("/api/v1/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookRoutes);
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || "8mb" }));
+app.use(express.urlencoded({ extended: true, limit: process.env.REQUEST_BODY_LIMIT || "8mb" }));
 if (process.env.NODE_ENV !== "test") {
   app.use(morgan("combined", { stream: { write: msg => logger.info(msg.trim()) } }));
 }
@@ -159,8 +167,9 @@ app.use((req, res, next) => {
 
 // ── Rate limiting ─────────────────────────────────────
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 50,
+  windowMs: 15 * 60 * 1000, max: 20,
   standardHeaders: true, legacyHeaders: false,
+  message: { error: "Demasiados intentos. Espera 15 minutos antes de volver a probar." },
 });
 const publicWorkflowLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 120,
@@ -177,7 +186,7 @@ app.use("/api/v1/whatsapp/webhook", publicWorkflowLimiter);
 app.get("/health", async (req, res) => {
   try {
     await db.query("SELECT 1");
-    res.json({ status: "ok", db: "connected", ts: new Date().toISOString() });
+    res.json({ status: "ok", db: "connected", release: RELEASE, ts: new Date().toISOString() });
   } catch (e) {
     res.status(503).json({ status: "error", db: "disconnected" });
   }
@@ -939,6 +948,7 @@ async function applyMigrations() {
 
 // ── Auto-seed: carga datos demo si la BD está vacía ──
 async function autoSeedIfEmpty() {
+  if (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_SEED !== "true") return;
   try {
     const { rows } = await db.query("SELECT COUNT(*) AS n FROM empresas");
     if (parseInt(rows[0].n) === 0) {
@@ -965,7 +975,7 @@ async function startServer() {
   await applyMigrations();
   app.listen(PORT, () => {
     logger.info("TransGest API lista en puerto " + PORT + " - " + process.env.NODE_ENV);
-    setTimeout(autoSeedIfEmpty, 5000);
+    if (process.env.ALLOW_DEMO_SEED === "true") setTimeout(autoSeedIfEmpty, 5000);
     try { backupService.startScheduler(); } catch (e) { logger.warn("Backup: " + e.message); }
     try { fiscalScheduler.startScheduler(); } catch (e) { logger.warn("Fiscal: " + e.message); }
     try { pedidosRoutes.startAlbaranesReminderScheduler?.(); } catch (e) { logger.warn("Albaranes: " + e.message); }

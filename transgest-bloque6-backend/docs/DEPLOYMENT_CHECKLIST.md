@@ -60,3 +60,25 @@ npm run functional
 - Backups sin probar. En produccion, evitar depender solo del fallback JSON.
 - Stripe sin webhook validado.
 - Logs sin conservar.
+
+## Produccion app.gauna.es
+
+- Frontend: Vercel (`https://app.gauna.es`). Debe desplegar `transgest-frontend/vercel.json` y conservar `REACT_APP_API_URL=https://transgest-backend.onrender.com`.
+- API: Render (`https://transgest-backend.onrender.com`). Configurar `CORS_ORIGINS=https://app.gauna.es,https://gauna.es` y `PUBLIC_APP_URL=https://app.gauna.es`.
+- Usar `DB_PASSWORD` de al menos 20 caracteres, `JWT_SECRET` aleatorio de al menos 32 caracteres y `ALLOW_DEMO_SEED=false`.
+- Si se ejecuta `superadmin:ensure` en produccion, `SUPERADMIN_EMAIL` y `SUPERADMIN_PASSWORD` deben estar definidos expresamente.
+- Montar un disco persistente para `BACKUP_DIR`; ademas, replicar backups fuera de Render (S3/B2 u otro proveedor) y probar una restauracion periodicamente.
+
+Comprobacion publica sin credenciales:
+
+```powershell
+$env:SECURITY_BASE_URL="https://app.gauna.es"
+$env:SECURITY_API_URL="https://transgest-backend.onrender.com"
+$env:SECURITY_ALLOWED_ORIGIN="https://app.gauna.es"
+npm run security:check
+
+$env:DEPLOY_BASE_URL="https://app.gauna.es"
+$env:DEPLOY_API_URL="https://transgest-backend.onrender.com"
+$env:DEPLOY_EXPECTED_RELEASE="<sha-del-commit>"
+npm run deploy:smoke
+```

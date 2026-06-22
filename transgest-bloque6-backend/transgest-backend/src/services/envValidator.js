@@ -12,11 +12,22 @@ function validateEnv() {
   if (hasPlaceholder(process.env.JWT_SECRET) || String(process.env.JWT_SECRET || "").length < 32) {
     critical.push("JWT_SECRET debe ser una clave larga y aleatoria.");
   }
-  if (hasPlaceholder(process.env.DB_PASSWORD)) {
-    warnings.push("DB_PASSWORD no parece configurado con un valor real.");
+  if (hasPlaceholder(process.env.DB_PASSWORD) || String(process.env.DB_PASSWORD || "").length < 20) {
+    const message = "DB_PASSWORD debe ser una clave real de al menos 20 caracteres.";
+    if (isProd) critical.push(message);
+    else warnings.push(message);
   }
   if (isProd && !process.env.CORS_ORIGINS) {
     critical.push("CORS_ORIGINS debe estar configurado en produccion.");
+  }
+  const corsOrigins = String(process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map(value => value.trim())
+    .filter(Boolean);
+  const secureOrigin = value => /^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(value)
+    || /^http:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/i.test(value);
+  if (isProd && corsOrigins.some(value => value === "*" || !secureOrigin(value))) {
+    critical.push("CORS_ORIGINS solo puede contener origenes HTTPS concretos en produccion.");
   }
   if (isProd && !process.env.PUBLIC_APP_URL && !process.env.APP_PUBLIC_URL && !process.env.APP_URL) {
     critical.push("PUBLIC_APP_URL o APP_URL debe estar configurado en produccion.");

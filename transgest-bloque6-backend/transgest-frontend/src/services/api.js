@@ -703,6 +703,8 @@ export const saveJornadaConfig = (data) => apiFetch("/control-horario/jornada-co
 export const editarControlHorario = (id, data) => apiFetch(`/control-horario/${id}`, { method:"PUT", body:data });
 export const controlHorarioCsvUrl = (params={}) => `${BASE}/api/v1/control-horario/export.csv?${new URLSearchParams(params)}`;
 export const extraerDocumentoIA = (data) => apiFetch("/ia/documento/extraer", { method:"POST", body:data, silentSuccess:true });
+export const analizarPedidoFacturacionIA = (id, data = {}) =>
+  apiFetch(`/ia/pedido/${id}/facturacion-soportes`, { method:"POST", body:data, silentSuccess:true });
 export const getEmpresaIntegracionesStatus = () => apiFetch("/empresa/integraciones/status");
 
 // ── Config email (local) ──────────────────────────────

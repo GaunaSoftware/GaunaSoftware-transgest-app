@@ -60,6 +60,68 @@ function heuristicDocumentParse(text = "") {
   };
 }
 
+function parseNumberLike(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(String(value).replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function extractEmbeddedPdfText(base64 = "", maxChars = 12000) {
+  try {
+    const raw = Buffer.from(String(base64 || "").replace(/^data:[^;]+;base64,/, ""), "base64").toString("latin1");
+    const chunks = [];
+    raw.replace(/\(([^()]{2,220})\)/g, (_, text) => {
+      const clean = String(text || "").replace(/\\([()\\])/g, "$1").replace(/[^\x20-\x7E\xA0-\xFF]/g, " ").trim();
+      if (/[A-Za-z0-9]/.test(clean)) chunks.push(clean);
+      return "";
+    });
+    return chunks.join("\n").slice(0, maxChars);
+  } catch {
+    return "";
+  }
+}
+
+function isBillingSupportDoc(doc = {}) {
+  const raw = `${doc.tipo || ""} ${doc.nombre || ""} ${doc.notas || ""}`.toLowerCase();
+  return /albar|cmr|pod|ticket|bascul|b[áa]scul|pesaje|peso|descarga|carga|entrega/.test(raw);
+}
+
+function heuristicBillingSupportAnalysis(pedido = {}, docs = []) {
+  const docText = docs.map(d => [d.nombre, d.tipo, d.notas, d.extracted_text].filter(Boolean).join("\n")).join("\n\n");
+  const parsed = heuristicDocumentParse(docText);
+  const pesoDoc = parseNumberLike(parsed.peso_kg || parsed.peso || parsed.toneladas);
+  const pesoPedido = parseNumberLike(pedido.peso_kg);
+  const diffs = [];
+  if (pesoDoc && pesoPedido && Math.abs(pesoDoc - pesoPedido) > Math.max(50, pesoPedido * 0.01)) {
+    diffs.push({ campo:"peso_kg", pedido:pesoPedido, documento:pesoDoc, diferencia: pesoDoc - pesoPedido });
+  }
+  if (!docs.length) diffs.push({ campo:"documentos", aviso:"No hay soportes de facturacion adjuntos al pedido" });
+  return {
+    modo: "heuristico",
+    confianza: docs.length ? 0.35 : 0.1,
+    resumen: docs.length
+      ? "Revision basica de soportes. Si el documento es un PDF escaneado, subelo como imagen o con OCR para lectura IA visual."
+      : "Sin documentos de soporte para revisar.",
+    ticket_bascula: {
+      detectado: /ticket|bascul|b[áa]scul|pesaje/.test(docText.toLowerCase()),
+      peso_neto_kg: pesoDoc,
+      bruto_kg: null,
+      tara_kg: null,
+      numero: parsed.albaran_numero || parsed.referencia_cliente || null,
+    },
+    pedido: {
+      id: pedido.id,
+      numero: pedido.numero,
+      peso_kg: pesoPedido,
+      importe: parseNumberLike(pedido.importe),
+      mercancia: pedido.mercancia || null,
+    },
+    diferencias: diffs,
+    faltantes: docs.length ? [] : ["documentos_soporte"],
+    recomendaciones: diffs.length ? ["Revisar pedido antes de emitir la factura."] : ["Soportes sin diferencias evidentes con lectura disponible."],
+  };
+}
+
 async function comprobarCupoIA(req) {
   const empresaId = req.user?.empresa_id;
   if (!empresaId) return;
@@ -324,6 +386,174 @@ ${cleanText || "(Documento aportado como imagen adjunta. Lee la imagen y extrae 
     res.json({ ok:true, modo:"ia", resultado: parsed });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/pedido/:id/facturacion-soportes", async (req, res) => {
+  const empresaId = req.user?.empresa_id || req.empresaId;
+  try {
+    const { rows: pedidoRows } = await db.query(
+      `SELECT id, numero, cliente_id, origen, destino, fecha_carga, fecha_descarga,
+              mercancia, peso_kg, bultos, importe, referencia_cliente
+         FROM pedidos
+        WHERE id=$1 AND empresa_id=$2`,
+      [req.params.id, empresaId]
+    );
+    const pedido = pedidoRows[0];
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+
+    const { rows: docRows } = await db.query(
+      `SELECT id, nombre, tipo, file_base64, file_mime, file_size_kb, notas, metadata, created_at
+         FROM pedido_docs
+        WHERE pedido_id=$1 AND empresa_id=$2
+        ORDER BY created_at DESC`,
+      [req.params.id, empresaId]
+    );
+    const docs = docRows.filter(isBillingSupportDoc).slice(0, 8);
+    const preparedDocs = docs.map(doc => {
+      const mime = String(doc.file_mime || "").toLowerCase();
+      const extractedText = mime.includes("pdf") ? extractEmbeddedPdfText(doc.file_base64) : "";
+      return {
+        id: doc.id,
+        nombre: doc.nombre,
+        tipo: doc.tipo,
+        file_mime: doc.file_mime,
+        notas: doc.notas || "",
+        metadata: doc.metadata || {},
+        extracted_text: extractedText,
+      };
+    });
+
+    if (!preparedDocs.length) {
+      const resultado = heuristicBillingSupportAnalysis(pedido, []);
+      return res.json({ ok:true, modo:"heuristico", pedido, documentos:[], resultado, avisos:["No hay albaranes, CMR, tickets de bascula o soportes detectados."] });
+    }
+
+    let iaConfig;
+    try {
+      await comprobarCupoIA(req);
+      iaConfig = await getIaRuntimeConfig(empresaId);
+      if (iaConfig.apiKey) await assertApiUsageAllowed(empresaId, iaConfig.provider);
+    } catch (err) {
+      if (err.status === 403 || err.status === 429) {
+        const resultado = heuristicBillingSupportAnalysis(pedido, preparedDocs);
+        return res.json({ ok:true, modo:"heuristico", pedido, documentos:preparedDocs.map(({ metadata, ...d }) => d), resultado, avisos:[err.message] });
+      }
+      throw err;
+    }
+
+    if (!iaConfig.apiKey) {
+      const resultado = heuristicBillingSupportAnalysis(pedido, preparedDocs);
+      return res.json({ ok:true, modo:"heuristico", pedido, documentos:preparedDocs.map(({ metadata, ...d }) => d), resultado, avisos:["IA no configurada. Se ha usado revision heuristica."] });
+    }
+
+    const imageAttachments = docs
+      .filter(doc => String(doc.file_mime || "").toLowerCase().startsWith("image/"))
+      .slice(0, 5)
+      .map(doc => ({
+        base64: doc.file_base64,
+        mediaType: doc.file_mime,
+        name: doc.nombre,
+      }));
+    const docsForPrompt = preparedDocs.map(doc => ({
+      id: doc.id,
+      nombre: doc.nombre,
+      tipo: doc.tipo,
+      mime: doc.file_mime,
+      notas: doc.notas,
+      metadata: doc.metadata,
+      texto_extraido: doc.extracted_text || null,
+      aviso: !doc.extracted_text && String(doc.file_mime || "").toLowerCase().includes("pdf")
+        ? "PDF sin texto extraible en backend; si es escaneado, valorar imagen/OCR."
+        : null,
+    }));
+    const system = "Eres un auditor de facturacion para transporte. Devuelve solo JSON valido. No inventes datos: si no se ve, usa null y baja la confianza.";
+    const prompt = `Analiza soportes de facturacion de un pedido antes de emitir factura. Especialmente tickets de bascula, albaranes, CMR y POD.
+
+Pedido:
+${JSON.stringify(pedido, null, 2)}
+
+Documentos:
+${JSON.stringify(docsForPrompt, null, 2)}
+
+Devuelve este JSON:
+{
+  "confianza":0.0,
+  "resumen":"",
+  "ticket_bascula":{"detectado":false,"numero":null,"fecha":null,"peso_bruto_kg":null,"tara_kg":null,"peso_neto_kg":null},
+  "albaranes":[{"numero":null,"fecha":null,"mercancia":null,"peso_kg":null}],
+  "pedido":{"peso_kg":null,"importe":null,"mercancia":null,"referencia_cliente":null},
+  "diferencias":[{"campo":"","pedido":null,"documento":null,"diferencia":null,"gravedad":"baja|media|alta","detalle":""}],
+  "faltantes":[],
+  "recomendaciones":[]
+}`;
+
+    let remoteData;
+    if (iaConfig.provider === "openai" || iaConfig.provider === "ai_generic") {
+      const baseUrl = iaConfig.provider === "openai" ? "https://api.openai.com/v1" : (iaConfig.baseUrl || "https://api.openai.com/v1");
+      const proxyRes = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json", Authorization:`Bearer ${iaConfig.apiKey}` },
+        body: JSON.stringify({
+          model: iaConfig.model || "gpt-4o-mini",
+          response_format: { type:"json_object" },
+          messages: normalizeOpenAiMessages([{ role:"user", content:buildOpenAiDocumentContent(prompt, imageAttachments) }], system),
+          max_tokens: 2200,
+        }),
+      });
+      remoteData = await proxyRes.json().catch(() => ({}));
+      if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
+    } else {
+      const proxyRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type":"application/json",
+          "x-api-key": iaConfig.apiKey,
+          "anthropic-version":"2023-06-01",
+        },
+        body: JSON.stringify({
+          model: iaConfig.model || "claude-sonnet-4-20250514",
+          max_tokens: 2200,
+          system,
+          messages: [{ role:"user", content:buildAnthropicDocumentContent(prompt, imageAttachments) }],
+        }),
+      });
+      remoteData = await proxyRes.json().catch(() => ({}));
+      if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
+    }
+
+    await recordApiUsage(empresaId, iaConfig.provider, 1).catch(() => {});
+    const parsed = tryJson(extractModelText(iaConfig.provider, remoteData));
+    const resultado = parsed || heuristicBillingSupportAnalysis(pedido, preparedDocs);
+    const analyzedAt = new Date().toISOString();
+    const metadataPayload = {
+      facturacion_ai: {
+        analyzed_at: analyzedAt,
+        modo: parsed ? "ia" : "heuristico",
+        resumen: resultado.resumen || "",
+        confianza: resultado.confianza ?? null,
+        diferencias: Array.isArray(resultado.diferencias) ? resultado.diferencias : [],
+        ticket_bascula: resultado.ticket_bascula || null,
+      },
+    };
+    for (const doc of docs) {
+      await db.query(
+        `UPDATE pedido_docs
+            SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
+          WHERE id=$2 AND empresa_id=$3`,
+        [JSON.stringify(metadataPayload), doc.id, empresaId]
+      ).catch(() => {});
+    }
+    res.json({
+      ok:true,
+      modo: parsed ? "ia" : "heuristico",
+      pedido,
+      documentos: preparedDocs.map(({ metadata, ...d }) => d),
+      resultado,
+      avisos: parsed ? [] : ["La IA no devolvio JSON valido. Se ha usado revision heuristica."],
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 

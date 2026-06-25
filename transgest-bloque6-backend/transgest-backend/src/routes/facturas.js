@@ -618,9 +618,18 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
                 JOIN facturas f ON f.id=fe.factura_id
                WHERE fe.factura_id=$1 AND f.empresa_id=$2
                ORDER BY fe.id`, [req.params.id, empresaId]),
-    db.query(`SELECT p.id, p.numero, p.origen, p.destino, p.fecha_pedido
+    db.query(`SELECT p.id, p.numero, p.origen, p.destino, p.fecha_pedido, p.fecha_carga, p.fecha_descarga,
+                     p.mercancia, p.peso_kg, p.bultos, p.importe, p.referencia_cliente, p.estado,
+                     p.km_ruta, p.km_vacio,
+                     COUNT(pd.id)::int AS documentos_count,
+                     COALESCE(jsonb_agg(pd.metadata->'facturacion_ai') FILTER (WHERE pd.metadata ? 'facturacion_ai'), '[]'::jsonb) AS facturacion_ai_metadata
               FROM factura_pedidos fp JOIN pedidos p ON p.id=fp.pedido_id
-              WHERE fp.factura_id=$1 AND p.empresa_id=$2`, [req.params.id, empresaId]),
+              LEFT JOIN pedido_docs pd ON pd.pedido_id=p.id AND pd.empresa_id=p.empresa_id
+              WHERE fp.factura_id=$1 AND p.empresa_id=$2
+              GROUP BY p.id, p.numero, p.origen, p.destino, p.fecha_pedido, p.fecha_carga, p.fecha_descarga,
+                       p.mercancia, p.peso_kg, p.bultos, p.importe, p.referencia_cliente, p.estado,
+                       p.km_ruta, p.km_vacio
+              ORDER BY p.fecha_carga NULLS LAST, p.numero`, [req.params.id, empresaId]),
     db.query(`SELECT id, pedido_doc_id, pedido_id, nombre, tipo, file_mime, created_at
               FROM factura_docs
               WHERE factura_id=$1 AND empresa_id=$2

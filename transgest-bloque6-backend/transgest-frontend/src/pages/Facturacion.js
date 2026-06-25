@@ -1,6 +1,6 @@
 import { getLogoDataUrl } from "../services/logoHelper";
 import { useState, useEffect, useCallback , useMemo } from "react";
-import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido } from "../services/api";
+import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
@@ -142,6 +142,22 @@ function localDateValue(value = new Date()) {
   const dateValue = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(dateValue.getTime())) return "";
   return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, "0")}-${String(dateValue.getDate()).padStart(2, "0")}`;
+}
+
+function latestFacturacionAi(pedido = {}) {
+  const raw = pedido.facturacion_ai_metadata;
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return list
+    .filter(Boolean)
+    .sort((a, b) => String(b.analyzed_at || "").localeCompare(String(a.analyzed_at || "")))[0] || null;
+}
+
+function facturacionAiTone(ai) {
+  const diffs = Array.isArray(ai?.diferencias) ? ai.diferencias : [];
+  if (!ai) return { label:"Sin IA", color:"#94a3b8", bg:"rgba(148,163,184,.10)" };
+  if (diffs.some(d => String(d.gravedad || "").toLowerCase() === "alta")) return { label:"Revisar", color:"#ef4444", bg:"rgba(239,68,68,.10)" };
+  if (diffs.length) return { label:"Avisos IA", color:"#f59e0b", bg:"rgba(245,158,11,.12)" };
+  return { label:"IA OK", color:"var(--green)", bg:"rgba(16,185,129,.10)" };
 }
 
 function escapeHtml(value) {
@@ -552,7 +568,7 @@ function getFacturaFiscalRowMeta(factura) {
   };
 }
 
-function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, rectificadasIds=new Set()}) {
+function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set()}) {
   const empresa = useEmpresaPerfil();
   // Safety: ensure factura has required fields
   if (!factura || !factura.id) {
@@ -568,6 +584,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
   }
   const esRect  = factura.estado==="rectificada" || factura.serie?.startsWith("R") || (factura.factura_original_numero);
   const lineas  = Array.isArray(factura.lineas) ? factura.lineas : [];
+  const pedidosFactura = Array.isArray(factura.pedidos) ? factura.pedidos : [];
   const documentos = Array.isArray(factura.documentos) ? factura.documentos : [];
   const fiscal = factura.fiscal || null;
   const fiscalEventos = Array.isArray(factura.fiscal_eventos) ? factura.fiscal_eventos : [];
@@ -802,6 +819,63 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
               {lineas.length===0&&<tr><td colSpan={4} style={{padding:12,textAlign:"center",color:"var(--text5)",fontSize:12}}>Sin lineas registradas</td></tr>}
             </tbody>
           </table>
+
+          {pedidosFactura.length>0&&(
+            <div style={{background:"var(--bg3)",border:"1px solid #141a28",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:8}}>
+                <div>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Pedidos vinculados y verificacion</div>
+                  <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>Corrige peso, mercancia, referencia o importe antes de emitir/enviar la factura.</div>
+                </div>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text5)"}}>{pedidosFactura.length} pedido(s)</span>
+              </div>
+              <div style={{display:"grid",gap:7}}>
+                {pedidosFactura.map(p => {
+                  const ai = latestFacturacionAi(p);
+                  const tone = facturacionAiTone(ai);
+                  const diffs = Array.isArray(ai?.diferencias) ? ai.diferencias : [];
+                  return (
+                    <div key={p.id} style={{display:"grid",gridTemplateColumns:"minmax(170px,1.2fr) minmax(180px,1.4fr) 96px 90px auto",gap:8,alignItems:"center",padding:"8px 9px",border:"1px solid #0f1520",borderRadius:8,background:"rgba(15,21,32,.45)"}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:900,color:"var(--text)",fontFamily:"'JetBrains Mono',monospace"}}>{p.numero || "-"}</div>
+                        <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>{p.fecha_carga ? new Date(p.fecha_carga).toLocaleDateString("es-ES") : "-"}</div>
+                      </div>
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:11,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.origen || "-"} -&gt; {p.destino || "-"}</div>
+                        <div style={{fontSize:10,color:"var(--text5)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.mercancia || "Mercancia sin indicar"}</div>
+                      </div>
+                      <div style={{fontSize:11,color:"var(--text3)",textAlign:"right",fontFamily:"'JetBrains Mono',monospace"}}>
+                        {Number(p.peso_kg || 0).toLocaleString("es-ES")} kg
+                      </div>
+                      <div style={{fontSize:11,color:"var(--green)",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:800}}>
+                        {fmt2(p.importe || 0)} EUR
+                      </div>
+                      <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                        <span title={ai?.resumen || "Sin analisis IA"} style={{display:"inline-flex",alignItems:"center",padding:"3px 7px",borderRadius:999,background:tone.bg,color:tone.color,fontSize:10,fontWeight:900,border:`1px solid ${tone.color}33`}}>
+                          {tone.label}{diffs.length ? ` (${diffs.length})` : ""}
+                        </span>
+                        {onAnalizarPedido && (
+                          <button type="button" onClick={()=>onAnalizarPedido(p)} disabled={analizandoPedidoId===p.id} style={{...S.btn,padding:"4px 7px",fontSize:10,background:"rgba(139,92,246,.12)",color:"#8b5cf6",border:"1px solid rgba(139,92,246,.24)"}}>
+                            {analizandoPedidoId===p.id ? "Analizando..." : "Analizar IA"}
+                          </button>
+                        )}
+                        {onCorregirPedido && (
+                          <button type="button" onClick={()=>onCorregirPedido(p)} style={{...S.btn,padding:"4px 7px",fontSize:10,background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)"}}>
+                            Corregir pedido
+                          </button>
+                        )}
+                      </div>
+                      {ai?.resumen && (
+                        <div style={{gridColumn:"1 / -1",fontSize:10,color:"var(--text5)",lineHeight:1.35}}>
+                          IA: {ai.resumen}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {documentos.length>0&&(
             <div style={{background:"var(--bg3)",border:"1px solid #141a28",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
@@ -1077,6 +1151,104 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
   );
 }
 
+function ModalCorregirPedidoFactura({ pedido, onClose, onSaved }) {
+  const [form, setForm] = useState(() => ({
+    referencia_cliente: pedido?.referencia_cliente || "",
+    origen: pedido?.origen || "",
+    destino: pedido?.destino || "",
+    fecha_carga: String(pedido?.fecha_carga || "").slice(0, 10),
+    fecha_descarga: String(pedido?.fecha_descarga || "").slice(0, 10),
+    mercancia: pedido?.mercancia || "",
+    peso_kg: pedido?.peso_kg ?? "",
+    bultos: pedido?.bultos ?? "",
+    importe: pedido?.importe ?? "",
+    km_ruta: pedido?.km_ruta ?? "",
+    km_vacio: pedido?.km_vacio ?? "",
+  }));
+  const [saving, setSaving] = useState(false);
+  const f = key => e => setForm(prev => ({ ...prev, [key]: e.target.value }));
+  const peso = Number(String(form.peso_kg || 0).replace(",", "."));
+  const importe = Number(String(form.importe || 0).replace(",", "."));
+  const avisos = [
+    !String(form.referencia_cliente || "").trim() ? "Falta referencia del cliente." : null,
+    !String(form.mercancia || "").trim() ? "Falta mercancia." : null,
+    !Number.isFinite(peso) || peso <= 0 ? "Peso no valido o cero." : null,
+    !Number.isFinite(importe) || importe <= 0 ? "Importe no valido o cero." : null,
+  ].filter(Boolean);
+
+  async function guardar() {
+    setSaving(true);
+    try {
+      const payload = {
+        referencia_cliente: form.referencia_cliente.trim() || null,
+        origen: form.origen.trim() || null,
+        destino: form.destino.trim() || null,
+        fecha_carga: form.fecha_carga || null,
+        fecha_descarga: form.fecha_descarga || null,
+        mercancia: form.mercancia.trim() || null,
+        peso_kg: form.peso_kg === "" ? null : peso,
+        bultos: form.bultos === "" ? null : Number(String(form.bultos).replace(",", ".")),
+        importe: form.importe === "" ? 0 : importe,
+        km_ruta: form.km_ruta === "" ? null : Number(String(form.km_ruta).replace(",", ".")),
+        km_vacio: form.km_vacio === "" ? null : Number(String(form.km_vacio).replace(",", ".")),
+      };
+      const actualizado = await editarPedido(pedido.id, payload);
+      notify("Pedido corregido. Revisa lineas/importes de la factura si ya estaban emitidos.", "success");
+      onSaved(actualizado);
+    } catch (e) {
+      notify(e.message || "No se pudo corregir el pedido.", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const input = {...S.inp,padding:"8px 10px",fontSize:12};
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:360,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{width:"min(760px,96vw)",maxHeight:"92vh",overflowY:"auto",background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:900,color:"var(--text)"}}>Corregir pedido para factura</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Pedido {pedido?.numero || "-"} · Estado {pedido?.estado || "-"}. No se cambia el estado desde aqui.</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",cursor:"pointer"}}>Cerrar</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
+          <label><span style={S.lbl}>Referencia cliente</span><input value={form.referencia_cliente} onChange={f("referencia_cliente")} style={input}/></label>
+          <label><span style={S.lbl}>Mercancia</span><input value={form.mercancia} onChange={f("mercancia")} style={input}/></label>
+          <label><span style={S.lbl}>Origen</span><input value={form.origen} onChange={f("origen")} style={input}/></label>
+          <label><span style={S.lbl}>Destino</span><input value={form.destino} onChange={f("destino")} style={input}/></label>
+          <label><span style={S.lbl}>Fecha carga</span><input type="date" value={form.fecha_carga} onChange={f("fecha_carga")} style={input}/></label>
+          <label><span style={S.lbl}>Fecha descarga</span><input type="date" value={form.fecha_descarga} onChange={f("fecha_descarga")} style={input}/></label>
+          <label><span style={S.lbl}>Peso kg</span><input value={form.peso_kg} onChange={f("peso_kg")} style={input}/></label>
+          <label><span style={S.lbl}>Bultos</span><input value={form.bultos} onChange={f("bultos")} style={input}/></label>
+          <label><span style={S.lbl}>Importe</span><input value={form.importe} onChange={f("importe")} style={input}/></label>
+          <label><span style={S.lbl}>Km ruta</span><input value={form.km_ruta} onChange={f("km_ruta")} style={input}/></label>
+          <label><span style={S.lbl}>Km vacio</span><input value={form.km_vacio} onChange={f("km_vacio")} style={input}/></label>
+        </div>
+        <div style={{marginTop:14,border:"1px solid var(--border)",borderRadius:9,padding:12,background:"var(--bg3)"}}>
+          <div style={{fontSize:12,fontWeight:900,color:avisos.length ? "#f59e0b" : "var(--green)"}}>
+            {avisos.length ? "Verificacion con avisos" : "Verificacion basica correcta"}
+          </div>
+          {avisos.length ? (
+            <ul style={{margin:"6px 0 0 16px",padding:0,fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
+              {avisos.map(a => <li key={a}>{a}</li>)}
+            </ul>
+          ) : (
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:5}}>Referencia, mercancia, peso e importe tienen valor revisable.</div>
+          )}
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:16}}>
+          <button onClick={onClose} style={{...S.btn,background:"transparent",color:"var(--text3)"}}>Cancelar</button>
+          <button onClick={guardar} disabled={saving} style={{...S.btn,background:"var(--accent)",color:"#fff",border:"1px solid var(--accent)",opacity:saving?0.7:1}}>
+            {saving ? "Guardando..." : "Guardar correccion"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
   const empresa   = useEmpresaPerfil();
   const serieRect = empresa.serie_rectificativas || "R";
@@ -1193,6 +1365,8 @@ function ModalFacturarMultiple({ onClose }) {
   const [confirmReferencias, setConfirmReferencias] = useState(false);
   const [confirmAlbaranes, setConfirmAlbaranes] = useState(false);
   const [refEdit, setRefEdit] = useState(null);
+  const [analisisIA, setAnalisisIA] = useState({});
+  const [analizandoIA, setAnalizandoIA] = useState(false);
 
   const hoy = new Date();
   const periodoInicial = monthBounds(hoy);
@@ -1339,11 +1513,16 @@ function ModalFacturarMultiple({ onClose }) {
   const pedidosSinReferencia = selArr.filter(p => !tieneReferenciaCliente(p));
   const pedidosSinSoporte = selArr.filter(p => !tieneSoportePedido(p));
   const pedidosImporteCero = selArr.filter(p => Number(p.importe || 0) <= 0);
+  const pedidosConAvisoIA = selArr.filter(p => {
+    const diffs = analisisIA[p.id]?.resultado?.diferencias;
+    return Array.isArray(diffs) && diffs.length > 0;
+  });
   const diferenciaLineas = Math.abs(totalLineasEdit - totalSel);
   const revisionFacturacion = [
     pedidosSinReferencia.length ? `${pedidosSinReferencia.length} pedido(s) sin referencia de cliente` : null,
     pedidosSinSoporte.length ? `${pedidosSinSoporte.length} pedido(s) sin albaran/documento adjunto detectado` : null,
     pedidosImporteCero.length ? `${pedidosImporteCero.length} pedido(s) con importe cero o negativo` : null,
+    pedidosConAvisoIA.length ? `${pedidosConAvisoIA.length} pedido(s) con diferencias detectadas por IA documental` : null,
     diferenciaLineas > 0.01 ? `El total editado difiere ${fmt2(diferenciaLineas)} EUR del total de pedidos` : null,
   ].filter(Boolean);
   const listoParaBorrador = clienteSel && selArr.length > 0 && lineasValidas.length > 0 && confirmCantidades && confirmReferencias && confirmAlbaranes;
@@ -1375,6 +1554,28 @@ function ModalFacturarMultiple({ onClose }) {
       onClose();
     } catch(e){ notify("Error: "+e.message, "error"); }
     finally { setSaving(false); }
+  }
+
+  async function analizarSeleccionIA() {
+    if (!selArr.length) { notify("Selecciona pedidos para analizar.", "warning"); return; }
+    setAnalizandoIA(true);
+    try {
+      const entries = [];
+      for (const pedido of selArr) {
+        try {
+          const result = await analizarPedidoFacturacionIA(pedido.id);
+          entries.push([pedido.id, result]);
+        } catch (e) {
+          entries.push([pedido.id, { ok:false, error:e.message || "Error IA" }]);
+        }
+      }
+      setAnalisisIA(prev => ({ ...prev, ...Object.fromEntries(entries) }));
+      const avisos = entries.reduce((s, [, r]) => s + (Array.isArray(r?.resultado?.diferencias) ? r.resultado.diferencias.length : 0), 0);
+      notify(avisos ? `IA documental: ${avisos} aviso(s) para revisar.` : "IA documental sin diferencias evidentes.", avisos ? "warning" : "success");
+      setPaso(4);
+    } finally {
+      setAnalizandoIA(false);
+    }
   }
 
   const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
@@ -1646,8 +1847,15 @@ function ModalFacturarMultiple({ onClose }) {
 
         {paso===4 && (
           <div style={{border:"1px solid var(--border)",borderRadius:9,padding:14,background:"var(--bg3)",marginBottom:14}}>
-            <div style={{fontWeight:800,fontSize:13,color:"var(--text)",marginBottom:4}}>Control previo antes de facturar</div>
-            <div style={{fontSize:11,color:"var(--text5)",marginBottom:12}}>Este paso evita devoluciones por referencias, albaranes o importes incorrectos.</div>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:12}}>
+              <div>
+                <div style={{fontWeight:800,fontSize:13,color:"var(--text)",marginBottom:4}}>Control previo antes de facturar</div>
+                <div style={{fontSize:11,color:"var(--text5)"}}>Este paso evita devoluciones por referencias, albaranes, tickets de bascula o importes incorrectos.</div>
+              </div>
+              <button type="button" onClick={analizarSeleccionIA} disabled={analizandoIA || !selArr.length} style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#8b5cf6",border:"1px solid rgba(139,92,246,.24)",padding:"6px 9px"}}>
+                {analizandoIA ? "Analizando IA..." : "Analizar soportes IA"}
+              </button>
+            </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
               {[
                 ["Pedidos", selArr.length, "var(--accent)", "rgba(59,130,246,.10)"],
@@ -1671,6 +1879,24 @@ function ModalFacturarMultiple({ onClose }) {
             ) : (
               <div style={{border:"1px solid rgba(16,185,129,.22)",background:"rgba(16,185,129,.08)",borderRadius:8,padding:"9px 10px",marginBottom:12,color:"var(--green)",fontSize:12,fontWeight:800}}>
                 Revision automatica sin incidencias detectadas.
+              </div>
+            )}
+            {Object.keys(analisisIA).length > 0 && (
+              <div style={{border:"1px solid rgba(139,92,246,.22)",background:"rgba(139,92,246,.07)",borderRadius:8,padding:"9px 10px",marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:900,color:"#8b5cf6",textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>Resultado IA documental</div>
+                <div style={{display:"grid",gap:6}}>
+                  {selArr.filter(p => analisisIA[p.id]).map(p => {
+                    const r = analisisIA[p.id];
+                    const diffs = Array.isArray(r?.resultado?.diferencias) ? r.resultado.diferencias : [];
+                    return (
+                      <div key={p.id} style={{fontSize:11,color:"var(--text3)",display:"grid",gridTemplateColumns:"110px 1fr auto",gap:8,alignItems:"center"}}>
+                        <strong style={{fontFamily:"'JetBrains Mono',monospace",color:"var(--text)"}}>{p.numero}</strong>
+                        <span>{r?.resultado?.resumen || r?.error || "Analisis realizado."}</span>
+                        <span style={{color:diffs.length ? "#f59e0b" : "var(--green)",fontWeight:900}}>{diffs.length ? `${diffs.length} aviso(s)` : "OK"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
             <div style={{display:"grid",gap:8}}>
@@ -1779,6 +2005,8 @@ export default function Facturacion() {
   const [vistaFact,    setVistaFact]    = useState(null);
   const [modalRect,    setModalRect]    = useState(null);
   const [modalMulti,   setModalMulti]   = useState(false); // facturar multiples pedidos de un cliente
+  const [pedidoCorreccion, setPedidoCorreccion] = useState(null);
+  const [analizandoPedidoId, setAnalizandoPedidoId] = useState(null);
   const [clientes,     setClientes]     = useState([]); // needed for factura enrichment
   const [controlCobros,setControlCobros]= useState(null);
   const [bloqueosDocCobro,setBloqueosDocCobro] = useState(null);
@@ -1884,6 +2112,27 @@ export default function Facturacion() {
 
   async function handleRowClick(f) {
     await abrirFacturaPorId(f.id, f);
+  }
+
+  async function refrescarFacturaAbierta() {
+    if (!vistaFact?.id) return;
+    const refreshed = await getFactura(vistaFact.id);
+    setVistaFact(refreshed);
+  }
+
+  async function analizarSoportesPedidoFactura(pedido) {
+    if (!pedido?.id) return;
+    setAnalizandoPedidoId(pedido.id);
+    try {
+      const result = await analizarPedidoFacturacionIA(pedido.id, { factura_id: vistaFact?.id || null });
+      const diffs = Array.isArray(result?.resultado?.diferencias) ? result.resultado.diferencias.length : 0;
+      notify(diffs ? `IA: ${diffs} punto(s) a revisar en ${pedido.numero || "pedido"}.` : `IA: soportes revisados para ${pedido.numero || "pedido"}.`, diffs ? "warning" : "success");
+      await refrescarFacturaAbierta();
+    } catch (e) {
+      notify(e.message || "No se pudo analizar el soporte con IA.", "error");
+    } finally {
+      setAnalizandoPedidoId(null);
+    }
   }
 
   async function cambiarEstado(id, estado) {
@@ -3159,7 +3408,18 @@ export default function Facturacion() {
           cliente_telefono: vistaFact.cliente_telefono || cli?.telefono || "",
           cliente_contacto: vistaFact.cliente_contacto || cli?.contacto || "",
         };
-        return <VistaFactura factura={facturaEnriquecida} onClose={()=>setVistaFact(null)} onSyncFiscal={sincronizarFacturaVerifactiAhora} onExportFiscal={descargarJustificanteFiscal} onCambiarEstado={canEdit ? cambiarEstado : null} rectificadasIds={rectificadasIds} onRectificar={f=>{setVistaFact(null);setModalRect(f);}}/>;
+        return <VistaFactura
+          factura={facturaEnriquecida}
+          onClose={()=>setVistaFact(null)}
+          onSyncFiscal={sincronizarFacturaVerifactiAhora}
+          onExportFiscal={descargarJustificanteFiscal}
+          onCambiarEstado={canEdit ? cambiarEstado : null}
+          onCorregirPedido={canEdit ? setPedidoCorreccion : null}
+          onAnalizarPedido={canEdit ? analizarSoportesPedidoFactura : null}
+          analizandoPedidoId={analizandoPedidoId}
+          rectificadasIds={rectificadasIds}
+          onRectificar={f=>{setVistaFact(null);setModalRect(f);}}
+        />;
       })()}
       {/* Paginacion */}
       {activeFacturacionTab === "facturas" && totalPages>1&&(
@@ -3261,6 +3521,18 @@ export default function Facturacion() {
       )}
 
       {modalMulti && <ModalFacturarMultiple onClose={()=>{setModalMulti(false);cargar();}}/>}
+      {pedidoCorreccion && (
+        <ModalCorregirPedidoFactura
+          pedido={pedidoCorreccion}
+          onClose={()=>setPedidoCorreccion(null)}
+          onSaved={async()=>{
+            setPedidoCorreccion(null);
+            await refrescarFacturaAbierta();
+            await cargar();
+            window.dispatchEvent(new CustomEvent("tms:pedidos-changed"));
+          }}
+        />
+      )}
       {modalRect && <ModalRectificativa facturaOriginal={modalRect} onClose={()=>setModalRect(null)} onSaved={()=>{setModalRect(null);cargar();}}/>}
     </div>
   );

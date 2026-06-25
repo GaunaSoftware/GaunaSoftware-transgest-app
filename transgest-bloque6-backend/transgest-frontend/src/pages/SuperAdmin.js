@@ -59,9 +59,12 @@ async function saFetch(path, opts={}){
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401) {
     saTokenRem();
     throw new Error("Sesion de superadmin caducada. Vuelve a iniciar sesion.");
+  }
+  if (res.status === 403) {
+    throw new Error(data.error || "No tienes permisos para realizar esta accion de superadmin.");
   }
   if(!res.ok) throw new Error(data.error||"Error");
   return data;
@@ -682,8 +685,9 @@ function IntegracionesAdmin({ saFetchFn }) {
     });
   }, [cfgEmpresa?.empresa_id, cfgEmpresa?.provider, cfgEmpresa?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (gpsForm.api_key) return;
     if (gpsActivoEmpresa && gpsActivoEmpresa !== gpsProvider) setGpsProvider(gpsActivoEmpresa);
-  }, [gpsActivoEmpresa, gpsProvider]);
+  }, [gpsActivoEmpresa, gpsProvider, gpsForm.api_key]);
   useEffect(() => {
     setShowGpsProviderPicker(false);
   }, [empresaId]);
@@ -903,6 +907,10 @@ function IntegracionesAdmin({ saFetchFn }) {
 
   async function guardarGpsEmpresa() {
     if (!empresaId || !gpsProvider) return;
+    if (gpsForm.use_global === false && !String(gpsForm.api_key || "").trim() && !cfgGps?.key_mask) {
+      notify("Pega una clave GPS propia o cambia el modo a usar global.", "warning");
+      return;
+    }
     try {
       await saFetchFn(`/integraciones/empresas/${empresaId}/${gpsProvider}`, { method:"PUT", body:{ ...gpsForm, activo:true } });
       notify("GPS de empresa guardado. El resto de proveedores GPS quedan inactivos para esta empresa.", "success");

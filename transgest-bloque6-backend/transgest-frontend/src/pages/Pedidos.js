@@ -7,7 +7,7 @@ import { getPedidos, getClientes, getVehiculos, getChoferes, getRutas, getColabo
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
-         getPuntosInteres as getPuntosInteresApi, chatIA, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getRutaOptimizadaPedido, optimizarRuta,
+         getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta,
          getPedidoWhatsappPreflight, enviarPedidoWhatsapp } from "../services/api";
 import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { useAuth } from "../context/AuthContext";
@@ -4763,67 +4763,26 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
 function ModalAutoAsignacion({ pedido, vehiculos, choferes, onAsignar, onClose }) {
   const [loading,   setLoading]   = useState(true);
   const [sugerencia, setSugerencia] = useState(null);
+  const [candidatos, setCandidatos] = useState([]);
+  const [policy, setPolicy] = useState("");
   const [error,     setError]     = useState("");
   const [aplicando, setAplicando] = useState(false);
 
   const analizar = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      // Filtrar solo tractoras/camiones disponibles
-      const disponibles = vehiculos.filter(v =>
-        v.activo && v.estado === "disponible" &&
-        !v.clase?.toLowerCase().includes("remolque") &&
-        !v.clase?.toLowerCase().includes("semirremolque")
-      );
-
-      const nl = "\n";
-      const listaVeh = disponibles.map(v =>
-        "- " + v.matricula + " | " + (v.clase||v.tipo) + " | Carga max: " + (v.carga_max_kg ? v.carga_max_kg+"kg" : "-") + " | Remolque: " + (v.remolque_matricula || "ninguno")
-      ).join(nl);
-      const listaChof = choferes.filter(c=>c.activo).map(c =>
-        "- " + c.nombre + " " + (c.apellidos||"") + " | Vehiculo habitual: " + (vehiculos.find(v=>v.id===c.vehiculo_id)?.matricula || "ninguno")
-      ).join(nl);
-      const ctx = "Eres un sistema de gestion de transporte. Analiza este pedido y sugiere el mejor vehiculo y chofer disponible." + nl +
-        nl + "PEDIDO:" +
-        nl + "- Numero: " + pedido.numero +
-        nl + "- Origen: " + (pedido.origen || "-") +
-        nl + "- Destino: " + (pedido.destino || "-") +
-        nl + "- Fecha carga: " + (pedido.fecha_carga || "-") +
-        nl + "- Hora carga: " + (pedido.hora_carga || "-") +
-        nl + "- Fecha descarga: " + (pedido.fecha_descarga || "-") +
-        nl + "- Mercancia: " + (pedido.mercancia || "-") +
-        nl + "- Peso: " + (pedido.peso_kg ? pedido.peso_kg + " kg" : "-") +
-        nl + "- Bultos: " + (pedido.bultos || "-") +
-        nl + "- Notas: " + (pedido.notas || "-") +
-        nl + nl + "VEHICULOS DISPONIBLES:" + nl + listaVeh +
-        nl + nl + "CHOFERES DISPONIBLES:" + nl + listaChof +
-        nl + nl + 'Responde SOLO con JSON con estos campos: vehiculo_id, vehiculo_matricula, chofer_id, chofer_nombre, remolque_id (null si no), remolque_matricula (null si no), confianza (alta/media/baja), razon (1-2 frases en espanol), advertencias (array).';
-
-      const data = await chatIA({
-        max_tokens: 500,
-        messages: [{ role: "user", content: ctx }]
-      });
-      const text = data.content?.[0]?.text || "";
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error("No se pudo obtener una sugerencia");
-      const sug = JSON.parse(match[0]);
-      // Verify IDs exist
-      if (sug.vehiculo_id && !vehiculos.find(v=>v.id===sug.vehiculo_id)) {
-        // Try to find by matricula
-        const vByMat = vehiculos.find(v=>v.matricula===sug.vehiculo_matricula);
-        if (vByMat) sug.vehiculo_id = vByMat.id;
-      }
-      if (sug.chofer_id && !choferes.find(c=>c.id===sug.chofer_id)) {
-        const cByName = choferes.find(c=>sug.chofer_nombre?.includes(c.nombre));
-        if (cByName) sug.chofer_id = cByName.id;
-      }
-      setSugerencia(sug);
+      const data = await getPlanificacionCargaIA(pedido.id);
+      const list = Array.isArray(data.candidatos) ? data.candidatos : [];
+      if (!list.length) throw new Error("No hay vehiculos candidatos para planificar esta carga.");
+      setCandidatos(list);
+      setPolicy(data.data_policy || "");
+      setSugerencia(data.sugerencia || list[0]);
     } catch(e) {
       setError("No se pudo obtener sugerencia: " + e.message);
     } finally {
       setLoading(false);
     }
-  }, [choferes, pedido, vehiculos]);
+  }, [pedido?.id]);
 
   useEffect(() => { analizar(); }, [analizar]);
 
@@ -4860,9 +4819,12 @@ function ModalAutoAsignacion({ pedido, vehiculos, choferes, onAsignar, onClose }
             {/* Confianza */}
             <div style={{display:"flex",alignItems:"center",gap:8,margin:"16px 0 12px"}}>
               <span style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)"}}>Confianza:</span>
-              <span style={{padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:`${CONFIANZA_COLOR[sugerencia.confianza]}18`,color:CONFIANZA_COLOR[sugerencia.confianza],border:`1px solid ${CONFIANZA_COLOR[sugerencia.confianza]}40`}}>
+              <span style={{padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:`${CONFIANZA_COLOR[sugerencia.confianza] || "#94a3b8"}18`,color:CONFIANZA_COLOR[sugerencia.confianza] || "#94a3b8",border:`1px solid ${CONFIANZA_COLOR[sugerencia.confianza] || "#94a3b8"}40`}}>
                 {sugerencia.confianza?.toUpperCase()}
               </span>
+              {Number.isFinite(Number(sugerencia.score)) && (
+                <span style={{fontSize:11,color:"var(--text4)",fontWeight:800}}>Score {sugerencia.score}/100</span>
+              )}
             </div>
 
             {/* Sugerencia */}
@@ -4889,7 +4851,40 @@ function ModalAutoAsignacion({ pedido, vehiculos, choferes, onAsignar, onClose }
             {/* Razon */}
             <div style={{background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.15)",borderRadius:9,padding:"10px 14px",fontSize:13,color:"var(--text2)",lineHeight:1.6,marginBottom:12}}>
               Motivo: {sugerencia.razon}
+              <div style={{fontSize:11,color:"var(--text4)",marginTop:6}}>
+                Fuente posicion: {sugerencia.ubicacion?.source || "sin posicion"}
+                {sugerencia.ubicacion?.priority === "gps_api" ? " (GPS conectado)" : sugerencia.ubicacion?.priority === "app_chofer" ? " (app chofer)" : ""}
+                {sugerencia.distancia_origen_km != null ? ` - ${sugerencia.distancia_origen_km} km al origen` : ""}
+              </div>
+              {policy && <div style={{fontSize:10,color:"var(--text5)",marginTop:5}}>{policy}</div>}
             </div>
+
+            {candidatos.length > 1 && (
+              <div style={{display:"grid",gap:6,marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>Ranking de candidatos</div>
+                {candidatos.slice(0, 5).map(c => {
+                  const active = String(c.vehiculo_id) === String(sugerencia.vehiculo_id);
+                  return (
+                    <button
+                      type="button"
+                      key={`${c.vehiculo_id}-${c.chofer_id || "sin-chofer"}`}
+                      onClick={()=>setSugerencia(c)}
+                      style={{display:"grid",gridTemplateColumns:"58px 1fr auto",gap:8,alignItems:"center",textAlign:"left",border:`1px solid ${active ? "rgba(139,92,246,.45)" : "var(--border2)"}`,background:active ? "rgba(139,92,246,.10)" : "var(--bg3)",borderRadius:8,padding:"8px 10px",cursor:"pointer",color:"var(--text)"}}
+                    >
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:900,color:active?"#a78bfa":"var(--text3)"}}>{c.score}/100</span>
+                      <span>
+                        <span style={{display:"block",fontSize:12,fontWeight:900}}>{c.vehiculo_matricula || "-"} · {c.chofer_nombre || "Sin chofer"}</span>
+                        <span style={{display:"block",fontSize:10,color:"var(--text5)",marginTop:2}}>
+                          {c.ubicacion?.priority === "gps_api" ? "GPS API" : c.ubicacion?.priority === "app_chofer" ? "App chofer" : c.ubicacion?.source || "Sin posicion"}
+                          {c.distancia_origen_km != null ? ` · ${c.distancia_origen_km} km` : ""}
+                        </span>
+                      </span>
+                      <span style={{fontSize:10,fontWeight:900,color:CONFIANZA_COLOR[c.confianza] || "var(--text4)",textTransform:"uppercase"}}>{c.confianza || ""}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Advertencias */}
             {sugerencia.advertencias?.length > 0 && (
@@ -4915,7 +4910,7 @@ function ModalAutoAsignacion({ pedido, vehiculos, choferes, onAsignar, onClose }
                   await onAsignar({
                     vehiculo_id: sugerencia.vehiculo_id,
                     chofer_id: sugerencia.chofer_id,
-                    remolque_id_manual: sugerencia.remolque_id||null,
+                    remolque_id_manual: sugerencia.remolque_id_manual || sugerencia.remolque_id || null,
                   });
                   onClose();
                 }}

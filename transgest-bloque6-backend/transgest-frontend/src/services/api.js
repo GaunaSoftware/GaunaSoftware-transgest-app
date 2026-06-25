@@ -386,6 +386,8 @@ export const getAiInboxRuns = (limit = 30) =>
   apiFetch(`/pedidos/ai-inbox/runs?limit=${encodeURIComponent(limit)}`, { silentSuccess:true });
 export const getAiInboxStatus = () =>
   apiFetch("/pedidos/ai-inbox/status", { silentSuccess:true });
+export const getPlanificacionCargaIA = (id) =>
+  apiFetch(`/pedidos/${id}/planificacion-ia`, { silentSuccess:true });
 export const crearPedido    = (data)      => apiFetch("/pedidos", { method:"POST", body:data });
 export const editarPedido   = (id,data)   => apiFetch(`/pedidos/${id}`, { method:"PUT", body:data });
 export const cambiarEstadoPedido = (id, estado, extra = {}) =>

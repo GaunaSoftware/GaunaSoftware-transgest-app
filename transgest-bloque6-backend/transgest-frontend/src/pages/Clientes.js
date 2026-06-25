@@ -4,7 +4,7 @@ import {
   getRutasCliente, getRutasClienteSalud, crearRutaCliente, editarRutaCliente, borrarRutaCliente,
   getPedidosCliente, crearFacturaMultiple, getRutas, marcarClienteRevisado,
   crearPortalUsuarioCliente, getClienteIntegracionTokens, crearClienteIntegracionToken, revocarClienteIntegracionToken,
-  getFacturas, getPortalSolicitudesAdmin,
+  getFacturas, getPortalSolicitudesAdmin, getPuntosInteres,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -233,6 +233,84 @@ function normalizePaisIso(value) {
   const plain = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const aliases = { espana:"ES", portugal:"PT", francia:"FR", alemania:"DE", italia:"IT", paises_bajos:"NL", belgica:"BE", polonia:"PL", marruecos:"MA", reino_unido:"UK" };
   return aliases[plain.replace(/\s+/g, "_")] || "OTHER";
+}
+
+function puntoToClienteAddressPatch(punto = {}, prefijo = "") {
+  return {
+    [prefijo + "calle"]: punto.direccion || "",
+    [prefijo + "num_ext"]: "",
+    [prefijo + "piso_puerta"]: "",
+    [prefijo + "cod_postal"]: punto.codigo_postal || "",
+    [prefijo + "municipio"]: punto.ciudad || "",
+    [prefijo + "provincia"]: punto.provincia || "",
+    [prefijo + "pais_iso"]: normalizePaisIso(punto.pais || "ES"),
+  };
+}
+
+function PuntoClienteSelector({ cliente, onApply }) {
+  const [query, setQuery] = useState("");
+  const [puntos, setPuntos] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setPuntos([]);
+      return;
+    }
+    let alive = true;
+    const t = setTimeout(() => {
+      setLoading(true);
+      getPuntosInteres({ q })
+        .then(data => { if (alive) setPuntos(Array.isArray(data) ? data : []); })
+        .catch(() => { if (alive) setPuntos([]); })
+        .finally(() => { if (alive) setLoading(false); });
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [query]);
+
+  const vinculados = puntos.filter(p => cliente?.id && String(p.cliente_id || "") === String(cliente.id));
+  const ordenados = [...vinculados, ...puntos.filter(p => !vinculados.some(v => String(v.id) === String(p.id)))].slice(0, 12);
+
+  return (
+    <div style={{gridColumn:"1/-1",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+        <div style={{flex:"1 1 280px"}}>
+          <label style={{...S.lbl,marginTop:0}}>Buscar punto guardado</label>
+          <input
+            style={S.inp}
+            value={query}
+            onChange={e=>setQuery(e.target.value)}
+            placeholder="Nombre, direccion o poblacion del punto"
+          />
+        </div>
+        <div style={{fontSize:11,color:"var(--text5)",paddingBottom:8}}>
+          {loading ? "Buscando..." : query.trim().length >= 2 ? `${ordenados.length} resultado(s)` : "Escribe al menos 2 caracteres"}
+        </div>
+      </div>
+      {ordenados.length > 0 && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:8,marginTop:10}}>
+          {ordenados.map(p => (
+            <div key={p.id || `${p.nombre}-${p.direccion}`} style={{border:"1px solid var(--border2)",borderRadius:8,padding:10,background:"var(--bg2)"}}>
+              <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{p.nombre || "Punto sin nombre"}</div>
+              <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{p.direccion || "-"}{p.ciudad ? ` - ${p.ciudad}` : ""}</div>
+              {cliente?.id && String(p.cliente_id || "") === String(cliente.id) && (
+                <div style={{fontSize:10,color:"var(--green)",fontWeight:900,marginTop:4}}>Vinculado a este cliente</div>
+              )}
+              <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+                <button type="button" onClick={()=>onApply(p, "")} style={{...S.btn,background:"rgba(59,110,245,.10)",color:"var(--accent)",border:"1px solid rgba(59,110,245,.22)",padding:"6px 10px",fontSize:11,boxShadow:"none"}}>
+                  Usar social
+                </button>
+                <button type="button" onClick={()=>onApply(p, "fiscal_")} style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)",padding:"6px 10px",fontSize:11,boxShadow:"none"}}>
+                  Usar fiscal
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function buildClienteForm(cliente) {
@@ -720,6 +798,14 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
             </div>
             {/* Dirección social */}
             <div style={{gridColumn:"1/-1"}}>
+              <PuntoClienteSelector
+                cliente={cliente}
+                onApply={(punto, prefijo) => setForm(prev => ({
+                  ...prev,
+                  ...puntoToClienteAddressPatch(punto, prefijo),
+                  ...(prefijo === "fiscal_" ? { dir_fiscal_distinta: true } : {}),
+                }))}
+              />
               <DireccionFields
                 titulo="Dirección social / operativa"
                 values={form}

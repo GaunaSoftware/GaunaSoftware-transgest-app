@@ -717,6 +717,186 @@ function responderFestivoPendiente(res, aviso) {
   });
 }
 
+function normalizePlanningText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function firstPedidoStopWithCoords(pedido = {}) {
+  const stops = normalizePedidoJsonList(pedido.puntos_carga);
+  for (const stop of stops) {
+    const lat = Number(stop.lat ?? stop.latitude);
+    const lng = Number(stop.lng ?? stop.lon ?? stop.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, text: stopDireccion(stop) };
+  }
+  return null;
+}
+
+function distanceKm(a, b) {
+  if (!a || !b) return null;
+  const lat1 = Number(a.lat);
+  const lon1 = Number(a.lng);
+  const lat2 = Number(b.lat);
+  const lon2 = Number(b.lng);
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return null;
+  const r = 6371;
+  const toRad = deg => deg * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const s1 = Math.sin(dLat / 2);
+  const s2 = Math.sin(dLon / 2);
+  const h = s1 * s1 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * s2 * s2;
+  return r * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function ageHours(value) {
+  if (!value) return null;
+  const t = new Date(value).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, (Date.now() - t) / 36e5);
+}
+
+function pickVehiclePlanningLocation(v = {}) {
+  const gpsLat = Number(v.gps_log_lat);
+  const gpsLng = Number(v.gps_log_lng);
+  if (Number.isFinite(gpsLat) && Number.isFinite(gpsLng)) {
+    return {
+      lat: gpsLat,
+      lng: gpsLng,
+      text: v.gps_log_ubicacion || v.ubicacion_actual || "",
+      source: v.gps_log_provider || v.gps_provider || "gps",
+      priority: "gps_api",
+      recorded_at: v.gps_log_recorded_at || v.ubicacion_ts || null,
+    };
+  }
+  const appLat = Number(v.app_log_lat);
+  const appLng = Number(v.app_log_lng);
+  if (Number.isFinite(appLat) && Number.isFinite(appLng)) {
+    return {
+      lat: appLat,
+      lng: appLng,
+      text: v.app_log_ubicacion || v.ubicacion_actual || "",
+      source: "app_chofer",
+      priority: "app_chofer",
+      recorded_at: v.app_log_recorded_at || v.ubicacion_ts || null,
+    };
+  }
+  const lat = Number(v.gps_lat);
+  const lng = Number(v.gps_lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    const fuente = String(v.ubicacion_fuente || v.gps_provider || "manual");
+    const apiLike = fuente && !["app_chofer", "manual", "ultima_descarga"].includes(fuente);
+    return {
+      lat,
+      lng,
+      text: v.ubicacion_actual || "",
+      source: fuente,
+      priority: apiLike ? "gps_api" : (fuente === "app_chofer" ? "app_chofer" : "manual"),
+      recorded_at: v.ubicacion_ts || null,
+    };
+  }
+  return {
+    lat: null,
+    lng: null,
+    text: v.ubicacion_actual || "",
+    source: v.ubicacion_fuente || (v.jornada_estado === "abierta" ? "app_chofer_jornada" : "sin_posicion"),
+    priority: v.jornada_estado === "abierta" ? "app_chofer" : "sin_posicion",
+    recorded_at: v.ubicacion_ts || v.jornada_updated_at || null,
+  };
+}
+
+function scorePlanningCandidate({ pedido, vehicle, originCoord, originText, conflicts }) {
+  let score = 45;
+  const reasons = [];
+  const warnings = [];
+  const location = pickVehiclePlanningLocation(vehicle);
+  const locAge = ageHours(location.recorded_at);
+  const distancia_origen_km = distanceKm(location, originCoord);
+  const peso = Number(pedido.peso_kg || 0);
+  const cargaMax = Number(vehicle.carga_max_kg || 0);
+  const estado = String(vehicle.estado || "").toLowerCase();
+  const fuente = String(location.priority || "");
+
+  if (estado === "disponible") { score += 18; reasons.push("Vehiculo disponible."); }
+  else if (["en_ruta", "ruta", "en ruta"].includes(estado)) { score -= 14; warnings.push("Vehiculo marcado en ruta."); }
+  else if (estado) { score -= 8; warnings.push(`Estado del vehiculo: ${vehicle.estado}.`); }
+
+  if (peso > 0 && cargaMax > 0) {
+    if (cargaMax >= peso) { score += 12; reasons.push("Capacidad suficiente para el peso indicado."); }
+    else { score -= 30; warnings.push(`Carga maxima insuficiente (${cargaMax} kg para ${peso} kg).`); }
+  } else if (peso > 0) {
+    warnings.push("Vehiculo sin carga maxima informada.");
+  }
+
+  if (fuente === "gps_api") {
+    score += 16;
+    reasons.push(`Posicion tomada de GPS conectado (${location.source}).`);
+  } else if (fuente === "app_chofer") {
+    score += 10;
+    reasons.push("Sin GPS API prioritario: se usa ultima posicion de la app del chofer.");
+  } else if (fuente === "manual") {
+    score += 3;
+    warnings.push("Solo hay ubicacion manual o ultima descarga.");
+  } else {
+    score -= 8;
+    warnings.push("Sin posicion reciente para calcular proximidad.");
+  }
+
+  if (locAge !== null) {
+    if (locAge <= 2) score += 10;
+    else if (locAge <= 12) score += 4;
+    else {
+      score -= 6;
+      warnings.push(`Posicion antigua (${Math.round(locAge)} h).`);
+    }
+  }
+
+  if (distancia_origen_km !== null) {
+    if (distancia_origen_km <= 30) { score += 18; reasons.push("Muy cerca del punto de carga."); }
+    else if (distancia_origen_km <= 120) { score += 10; reasons.push("Proximo al punto de carga."); }
+    else if (distancia_origen_km <= 300) score += 2;
+    else { score -= 8; warnings.push(`Lejos del origen (${Math.round(distancia_origen_km)} km).`); }
+  } else {
+    const locText = normalizePlanningText(location.text);
+    const origin = normalizePlanningText(originText);
+    if (locText && origin && (origin.includes(locText) || locText.includes(origin))) {
+      score += 8;
+      reasons.push("La ubicacion textual coincide con el origen.");
+    } else {
+      warnings.push("No hay coordenadas suficientes para calcular distancia al origen.");
+    }
+  }
+
+  const vehicleConflicts = Number(conflicts?.vehiculo || 0);
+  const driverConflicts = Number(conflicts?.chofer || 0);
+  if (vehicleConflicts > 0) {
+    score -= 22;
+    warnings.push(`${vehicleConflicts} pedido(s) cercanos usan este vehiculo.`);
+  }
+  if (driverConflicts > 0) {
+    score -= 18;
+    warnings.push(`${driverConflicts} pedido(s) cercanos usan este chofer.`);
+  }
+
+  if (vehicle.jornada_estado === "abierta") {
+    const actividad = String(vehicle.actividad_actual || "").replace(/_/g, " ");
+    reasons.push(`Jornada de chofer abierta${actividad ? ` (${actividad})` : ""}.`);
+    if (["descanso", "pausa"].includes(String(vehicle.actividad_actual || ""))) score -= 4;
+  }
+
+  return {
+    score: Math.max(0, Math.min(100, Math.round(score))),
+    reasons,
+    warnings,
+    distancia_origen_km: distancia_origen_km === null ? null : Number(distancia_origen_km.toFixed(1)),
+    location,
+  };
+}
+
 function usuarioEsGerencia(req) {
   return String(req.user?.rol || "").toLowerCase() === "gerente";
 }
@@ -4681,6 +4861,182 @@ router.post("/:id/documento-control-digital/evento", async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const { rows: pedidoRows } = await db.query(
+      `SELECT p.*
+         FROM pedidos p
+        WHERE p.id=$1 AND p.empresa_id=$2
+        LIMIT 1`,
+      [req.params.id, empresaId]
+    );
+    const pedido = pedidoRows[0];
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
+      return res.status(403).json({ error: "No puedes planificar este pedido" });
+    }
+
+    const originCoord = firstPedidoStopWithCoords(pedido);
+    const originText = originCoord?.text || pedido.origen || "";
+    const fechaCarga = dateOnly(pedido.fecha_carga || pedido.fecha_pedido);
+    const fechaDesde = fechaCarga ? new Date(`${fechaCarga}T00:00:00.000Z`) : null;
+    const fechaHasta = fechaDesde ? new Date(fechaDesde.getTime() + 36 * 60 * 60 * 1000) : null;
+
+    const [vehiculosRes, conflictsRes] = await Promise.all([
+      db.query(
+        `SELECT v.id, v.matricula, v.clase, v.tipo, v.estado, v.carga_max_kg,
+                v.remolque_id, v.remolque_matricula, v.chofer_id,
+                v.ubicacion_actual, v.ubicacion_fuente, v.ubicacion_ts,
+                v.gps_provider, v.gps_external_id, v.gps_lat, v.gps_lng,
+                ch.id AS chofer_id_resuelto, ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos,
+                ch.telefono AS chofer_telefono, ch.vehiculo_id AS chofer_vehiculo_id,
+                j.estado AS jornada_estado, j.actividad_actual, j.updated_at AS jornada_updated_at,
+                gps.lat AS gps_log_lat, gps.lng AS gps_log_lng, gps.ubicacion AS gps_log_ubicacion,
+                gps.provider AS gps_log_provider, gps.recorded_at AS gps_log_recorded_at,
+                app.lat AS app_log_lat, app.lng AS app_log_lng, app.ubicacion AS app_log_ubicacion,
+                app.recorded_at AS app_log_recorded_at
+           FROM vehiculos v
+           LEFT JOIN choferes ch
+             ON ch.empresa_id=v.empresa_id
+            AND COALESCE(ch.activo,true)=true
+            AND (ch.id=v.chofer_id OR (v.chofer_id IS NULL AND ch.vehiculo_id=v.id))
+           LEFT JOIN LATERAL (
+             SELECT *
+               FROM chofer_jornadas j
+              WHERE j.empresa_id=v.empresa_id
+                AND j.estado='abierta'
+                AND (j.vehiculo_id=v.id OR (ch.id IS NOT NULL AND j.chofer_id=ch.id))
+              ORDER BY j.updated_at DESC
+              LIMIT 1
+           ) j ON true
+           LEFT JOIN LATERAL (
+             SELECT lat,lng,ubicacion,provider,recorded_at
+               FROM gps_position_log l
+              WHERE l.empresa_id=v.empresa_id
+                AND l.vehiculo_id=v.id
+                AND l.provider NOT IN ('app_chofer','manual')
+                AND l.lat IS NOT NULL AND l.lng IS NOT NULL
+              ORDER BY l.recorded_at DESC
+              LIMIT 1
+           ) gps ON true
+           LEFT JOIN LATERAL (
+             SELECT lat,lng,ubicacion,recorded_at
+               FROM gps_position_log l
+              WHERE l.empresa_id=v.empresa_id
+                AND l.vehiculo_id=v.id
+                AND l.provider='app_chofer'
+                AND l.lat IS NOT NULL AND l.lng IS NOT NULL
+              ORDER BY l.recorded_at DESC
+              LIMIT 1
+           ) app ON true
+          WHERE v.empresa_id=$1
+            AND COALESCE(v.activo,true)=true
+            AND LOWER(COALESCE(v.clase, v.tipo, '')) NOT LIKE '%remolque%'
+          ORDER BY v.matricula ASC`,
+        [empresaId]
+      ).catch(async () => db.query(
+        `SELECT v.id, v.matricula, v.clase, v.tipo, v.estado, v.carga_max_kg,
+                v.remolque_id, v.remolque_matricula, v.chofer_id,
+                v.ubicacion_actual, v.ubicacion_fuente, v.ubicacion_ts,
+                v.gps_provider, v.gps_external_id, v.gps_lat, v.gps_lng,
+                ch.id AS chofer_id_resuelto, ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos,
+                ch.telefono AS chofer_telefono, ch.vehiculo_id AS chofer_vehiculo_id
+           FROM vehiculos v
+           LEFT JOIN choferes ch
+             ON ch.empresa_id=v.empresa_id
+            AND COALESCE(ch.activo,true)=true
+            AND (ch.id=v.chofer_id OR (v.chofer_id IS NULL AND ch.vehiculo_id=v.id))
+          WHERE v.empresa_id=$1
+            AND COALESCE(v.activo,true)=true
+            AND LOWER(COALESCE(v.clase, v.tipo, '')) NOT LIKE '%remolque%'
+          ORDER BY v.matricula ASC`,
+        [empresaId]
+      )),
+      fechaDesde && fechaHasta
+        ? db.query(
+            `SELECT vehiculo_id, chofer_id, COUNT(*)::int AS total
+               FROM pedidos
+              WHERE empresa_id=$1
+                AND id<>$2
+                AND estado::text NOT IN ('cancelado','facturado','entregado')
+                AND fecha_carga >= $3
+                AND fecha_carga <= $4
+                AND (vehiculo_id IS NOT NULL OR chofer_id IS NOT NULL)
+              GROUP BY vehiculo_id, chofer_id`,
+            [empresaId, req.params.id, fechaDesde.toISOString(), fechaHasta.toISOString()]
+          ).catch(() => ({ rows: [] }))
+        : Promise.resolve({ rows: [] }),
+    ]);
+
+    const conflictsByVehicle = new Map();
+    const conflictsByDriver = new Map();
+    for (const row of conflictsRes.rows || []) {
+      if (row.vehiculo_id) conflictsByVehicle.set(String(row.vehiculo_id), (conflictsByVehicle.get(String(row.vehiculo_id)) || 0) + Number(row.total || 0));
+      if (row.chofer_id) conflictsByDriver.set(String(row.chofer_id), (conflictsByDriver.get(String(row.chofer_id)) || 0) + Number(row.total || 0));
+    }
+
+    const seen = new Set();
+    const candidatos = (vehiculosRes.rows || [])
+      .filter(v => {
+        if (!v.id || seen.has(String(v.id))) return false;
+        seen.add(String(v.id));
+        return true;
+      })
+      .map(v => {
+        const choferId = v.chofer_id_resuelto || v.chofer_id || null;
+        const scored = scorePlanningCandidate({
+          pedido,
+          vehicle: v,
+          originCoord,
+          originText,
+          conflicts: {
+            vehiculo: conflictsByVehicle.get(String(v.id)) || 0,
+            chofer: choferId ? conflictsByDriver.get(String(choferId)) || 0 : 0,
+          },
+        });
+        return {
+          vehiculo_id: v.id,
+          vehiculo_matricula: v.matricula || "",
+          vehiculo_tipo: v.clase || v.tipo || "",
+          chofer_id: choferId,
+          chofer_nombre: [v.chofer_nombre, v.chofer_apellidos].filter(Boolean).join(" ").trim(),
+          remolque_id_manual: v.remolque_id || null,
+          remolque_matricula: v.remolque_matricula || null,
+          confianza: scored.score >= 78 ? "alta" : scored.score >= 55 ? "media" : "baja",
+          score: scored.score,
+          razon: scored.reasons.slice(0, 3).join(" "),
+          reasons: scored.reasons,
+          advertencias: scored.warnings,
+          distancia_origen_km: scored.distancia_origen_km,
+          ubicacion: scored.location,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+
+    const sugerencia = candidatos[0] || null;
+    res.json({
+      ok: true,
+      mode: "planning_ai_rules_v1",
+      pedido: {
+        id: pedido.id,
+        numero: pedido.numero,
+        origen: pedido.origen,
+        destino: pedido.destino,
+        fecha_carga: pedido.fecha_carga,
+        peso_kg: pedido.peso_kg,
+      },
+      origin_has_coords: !!originCoord,
+      data_policy: "Prioridad: GPS API conectado; si no hay, ultima posicion de app del chofer; si no hay coordenadas, ubicacion textual/manual.",
+      sugerencia,
+      candidatos,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudo planificar la carga con IA" });
   }
 });
 

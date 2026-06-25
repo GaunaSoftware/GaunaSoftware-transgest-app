@@ -9,6 +9,57 @@ const { authenticate, GERENTE_O_CONTABLE } = require("../middleware/auth");
 
 const router = express.Router();
 
+let clientesColumnsCache = null;
+async function getClientesColumns() {
+  if (clientesColumnsCache) return clientesColumnsCache;
+  try {
+    const { rows } = await db.query(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='clientes'"
+    );
+    clientesColumnsCache = new Set(rows.map(r => r.column_name));
+  } catch {
+    clientesColumnsCache = new Set([
+      "id", "empresa_id", "nombre", "cif", "direccion", "cp", "ciudad", "pais",
+      "email", "contacto", "telefono", "forma_pago", "vencimiento", "tipo_iva",
+      "tipo_irpf", "precio_tn_km", "notas", "activo", "created_at",
+    ]);
+  }
+  return clientesColumnsCache;
+}
+
+function clienteColumnEntries(values = {}) {
+  return Object.entries(values).filter(([, value]) => value !== undefined);
+}
+
+async function insertClienteCompat(values = {}) {
+  const columns = await getClientesColumns();
+  const entries = clienteColumnEntries(values).filter(([column]) => columns.has(column));
+  const names = entries.map(([column]) => column);
+  const params = entries.map(([, value]) => value);
+  const placeholders = params.map((_, idx) => `$${idx + 1}`);
+  const { rows } = await db.query(
+    `INSERT INTO clientes (${names.join(",")}) VALUES (${placeholders.join(",")}) RETURNING *`,
+    params
+  );
+  return rows[0] || null;
+}
+
+async function updateClienteCompat(clienteId, empresaId, values = {}) {
+  const columns = await getClientesColumns();
+  const entries = clienteColumnEntries(values).filter(([column]) => columns.has(column));
+  if (!entries.length) {
+    const { rows } = await db.query("SELECT * FROM clientes WHERE id=$1 AND empresa_id=$2", [clienteId, empresaId]);
+    return rows[0] || null;
+  }
+  const setSql = entries.map(([column], idx) => `${column}=$${idx + 3}`);
+  const params = [clienteId, empresaId, ...entries.map(([, value]) => value)];
+  const { rows } = await db.query(
+    `UPDATE clientes SET ${setSql.join(",")} WHERE id=$1 AND empresa_id=$2 RETURNING *`,
+    params
+  );
+  return rows[0] || null;
+}
+
 let integracionTokensSchemaReady = null;
 function ensureIntegracionTokensSchema() {
   if (!integracionTokensSchemaReady) {
@@ -222,21 +273,28 @@ function generatedClienteCif() {
 }
 
 async function persistClienteExtendedFields(clienteId, empresaId, data = {}) {
-  const { rows } = await db.query(`
-    UPDATE clientes SET
-      calle=$3,num_ext=$4,piso_puerta=$5,cod_postal=$6,municipio=$7,provincia=$8,pais_iso=$9,
-      dir_fiscal_distinta=$10,fiscal_calle=$11,fiscal_num_ext=$12,fiscal_piso_puerta=$13,
-      fiscal_cod_postal=$14,fiscal_municipio=$15,fiscal_provincia=$16,fiscal_pais_iso=$17,
-      web=$18,contacto_telefono=$19,updated_at=NOW()
-    WHERE id=$1 AND empresa_id=$2 RETURNING *`,
-    [clienteId, empresaId, data.calle || null, data.num_ext || null, data.piso_puerta || null,
-     data.cod_postal || null, data.municipio || null, data.provincia || null, data.pais_iso || null,
-     Boolean(data.dir_fiscal_distinta), data.fiscal_calle || null, data.fiscal_num_ext || null,
-     data.fiscal_piso_puerta || null, data.fiscal_cod_postal || null, data.fiscal_municipio || null,
-     data.fiscal_provincia || null, data.fiscal_pais_iso || null, data.web || null,
-     data.contacto_telefono || null]
-  );
-  return rows[0] || null;
+  const columns = await getClientesColumns();
+  const values = {
+    calle: data.calle || null,
+    num_ext: data.num_ext || null,
+    piso_puerta: data.piso_puerta || null,
+    cod_postal: data.cod_postal || null,
+    municipio: data.municipio || null,
+    provincia: data.provincia || null,
+    pais_iso: data.pais_iso || null,
+    dir_fiscal_distinta: Boolean(data.dir_fiscal_distinta),
+    fiscal_calle: data.fiscal_calle || null,
+    fiscal_num_ext: data.fiscal_num_ext || null,
+    fiscal_piso_puerta: data.fiscal_piso_puerta || null,
+    fiscal_cod_postal: data.fiscal_cod_postal || null,
+    fiscal_municipio: data.fiscal_municipio || null,
+    fiscal_provincia: data.fiscal_provincia || null,
+    fiscal_pais_iso: data.fiscal_pais_iso || null,
+    web: data.web || null,
+    contacto_telefono: data.contacto_telefono || null,
+    updated_at: columns.has("updated_at") ? new Date() : undefined,
+  };
+  return updateClienteCompat(clienteId, empresaId, values);
 }
 
 const TARIFA_TIPOS = new Set(["viaje", "kg", "tonelada", "km", "hora", "palet"]);
@@ -808,7 +866,37 @@ router.post("/", GERENTE_O_CONTABLE,
       !String(req.body?.cif || "").trim() || !email?.trim() || !telefono?.trim() ||
       (!cp?.trim() && !codigo_postal?.trim()) || (!ciudad?.trim());
 
-    const { rows } = await db.query(`
+    const created = await insertClienteCompat({
+      nombre,
+      cif: cif || null,
+      direccion: direccion || null,
+      cp: codigo_postal || cp || null,
+      ciudad: ciudad || null,
+      pais: pais || "EspaÃ±a",
+      email: email || null,
+      contacto: contacto || null,
+      telefono: telefono || null,
+      forma_pago: forma_pago || "Transferencia bancaria",
+      vencimiento: vencimiento || "30 dÃ­as",
+      tipo_iva: iva.tipo_iva,
+      iva_regimen: iva.iva_regimen,
+      tipo_irpf: tipo_irpf || 0,
+      precio_tn_km: precio_tn_km || 0,
+      notas: notas || null,
+      empresa_id: empresaId,
+      pendiente_revision: incompleto,
+      email_facturacion: email_facturacion || null,
+      email_facturas: email_facturacion || null,
+      emails_albaranes: emails_albaranes || null,
+      iban: iban || null,
+      horario_carga: horarioCargaNorm,
+      horario_descarga: horarioDescargaNorm,
+      minimo_facturable_toneladas: numericOrNull(minimo_facturable_toneladas),
+      limite_riesgo: numericOrNull(limite_riesgo) || 0,
+      modo_facturacion: modo_facturacion || "por_viaje",
+      bloqueado: Boolean(bloqueado),
+      bloqueo_motivo: bloqueo_motivo || null,
+    }); /*
       INSERT INTO clientes (nombre,cif,direccion,cp,ciudad,pais,email,contacto,telefono,
         forma_pago,vencimiento,tipo_iva,iva_regimen,tipo_irpf,precio_tn_km,notas,empresa_id,
         pendiente_revision,email_facturacion,emails_albaranes,iban,horario_carga,horario_descarga,minimo_facturable_toneladas,
@@ -822,10 +910,10 @@ router.post("/", GERENTE_O_CONTABLE,
        email_facturacion || null, emails_albaranes || null, iban || null, horarioCargaNorm, horarioDescargaNorm,
        numericOrNull(minimo_facturable_toneladas), numericOrNull(limite_riesgo) || 0,
        modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null]
-    );
-    createdId = rows[0]?.id || null;
-    const saved = await persistClienteExtendedFields(rows[0].id, empresaId, clienteData);
-    res.status(201).json(saved || rows[0]);
+    ); */
+    createdId = created?.id || null;
+    const saved = createdId ? await persistClienteExtendedFields(createdId, empresaId, clienteData) : null;
+    res.status(201).json(saved || created);
     } catch (e) {
       if (createdId) await db.query("DELETE FROM clientes WHERE id=$1", [createdId]).catch(() => {});
       res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo guardar el cliente", request_id: req.id });
@@ -852,7 +940,36 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
     return res.status(e.status || 400).json({ error: e.message });
   }
 
-  const { rows } = await db.query(`
+  const updated = await updateClienteCompat(req.params.id, empresaId, {
+    nombre,
+    cif,
+    direccion,
+    cp,
+    ciudad,
+    pais,
+    email,
+    contacto,
+    telefono,
+    forma_pago,
+    vencimiento,
+    tipo_iva: iva.tipo_iva,
+    iva_regimen: iva.iva_regimen,
+    tipo_irpf,
+    precio_tn_km,
+    activo: activo !== undefined ? activo : true,
+    notas,
+    email_facturacion: email_facturacion || null,
+    email_facturas: email_facturacion || null,
+    emails_albaranes: emails_albaranes || null,
+    iban: iban || null,
+    horario_carga: horarioCargaNorm,
+    horario_descarga: horarioDescargaNorm,
+    minimo_facturable_toneladas: numericOrNull(minimo_facturable_toneladas),
+    limite_riesgo: numericOrNull(limite_riesgo) || 0,
+    modo_facturacion: modo_facturacion || "por_viaje",
+    bloqueado: Boolean(bloqueado),
+    bloqueo_motivo: bloqueo_motivo || null,
+  }); /*
     UPDATE clientes SET nombre=$1,cif=$2,direccion=$3,cp=$4,ciudad=$5,pais=$6,email=$7,
       contacto=$8,telefono=$9,forma_pago=$10,vencimiento=$11,tipo_iva=$12,iva_regimen=$13,tipo_irpf=$14,
       precio_tn_km=$15,activo=$16,notas=$17,email_facturacion=$18,emails_albaranes=$19,iban=$20,horario_carga=$21,horario_descarga=$22,
@@ -864,10 +981,10 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
      numericOrNull(minimo_facturable_toneladas), numericOrNull(limite_riesgo) || 0,
      modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null,
      req.params.id,empresaId]
-  );
-  if (!rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
-  const saved = await persistClienteExtendedFields(rows[0].id, empresaId, clienteData);
-  res.json(saved || rows[0]);
+  ); */
+  if (!updated) return res.status(404).json({ error: "Cliente no encontrado" });
+  const saved = await persistClienteExtendedFields(updated.id, empresaId, clienteData);
+  res.json(saved || updated);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo actualizar el cliente", request_id: req.id });
   }

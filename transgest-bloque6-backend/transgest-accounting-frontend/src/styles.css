@@ -143,6 +143,26 @@ dd { margin: 0; word-break: break-word; }
 .advisor-export-row button { height: 32px; border: 0; border-radius: 6px; background: #3b82f6; color: #fff; font-weight: 800; cursor: pointer; }
 .advisor-export-row button:disabled { border: 1px solid var(--line); background: #fff; color: var(--muted); cursor: default; }
 .advisor-package-disclaimer { color: var(--muted); line-height: 1.4; }
+.external-import-panel { display: grid; gap: 12px; margin-top: 14px; padding: 16px; border: 1px solid #d9c7f0; border-left: 4px solid #7c3aed; border-radius: 8px; background: #fbf8ff; }
+.external-import-panel .panel-heading { margin-bottom: 0; }
+.external-import-create { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(150px, .8fr) minmax(160px, 1fr) minmax(180px, 1fr) auto; gap: 10px; align-items: end; }
+.external-import-create label, .external-import-filters label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; }
+.external-import-create input, .external-import-create select, .external-import-create textarea, .external-import-filters input, .external-import-filters select { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; background: #fff; color: var(--text); }
+.external-import-create input, .external-import-create select, .external-import-filters input, .external-import-filters select { height: 38px; }
+.external-import-create textarea { min-height: 112px; padding: 9px 10px; resize: vertical; line-height: 1.4; }
+.external-import-create .wide { grid-column: 1 / -2; }
+.external-import-create button, .external-import-filters button { height: 38px; border: 0; border-radius: 6px; padding: 0 14px; background: #7c3aed; color: #fff; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.external-import-filters { display: grid; grid-template-columns: 160px minmax(180px, 1fr) 180px auto; gap: 10px; align-items: end; padding-top: 12px; border-top: 1px solid var(--line); }
+.external-import-list { display: grid; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: #fff; }
+.external-import-row { display: grid; grid-template-columns: minmax(220px, 1.4fr) minmax(190px, 1fr) 110px minmax(220px, auto); gap: 10px; align-items: center; min-height: 58px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.external-import-row:first-child { border-top: 0; }
+.external-import-row > div:first-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.external-import-row small, .external-import-counts span { color: var(--muted); overflow-wrap: anywhere; }
+.external-import-counts { display: flex; gap: 8px; flex-wrap: wrap; }
+.external-import-actions { display: flex; gap: 7px; justify-content: flex-end; flex-wrap: wrap; }
+.external-import-actions button { height: 30px; border: 0; border-radius: 6px; padding: 0 10px; background: #7c3aed; color: #fff; font-weight: 800; cursor: pointer; }
+.external-import-actions button.secondary { border: 1px solid var(--line); background: #fff; color: var(--text); }
+.external-import-actions button:disabled { opacity: .45; cursor: default; }
 .form-grid { display: grid; grid-template-columns: 1fr 180px 180px auto; gap: 12px; align-items: end; }
 .form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; }
 .form-grid input { height: 38px; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; color: var(--text); background: #fff; }
@@ -482,7 +502,8 @@ dd { margin: 0; word-break: break-word; }
   .priority-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .quick-actions-panel { grid-column: 1 / -1; }
   .account-create, .party-create, .maturity-create, .bank-transaction-create { grid-template-columns: repeat(3, minmax(180px, 1fr)); }
-  .account-filters, .party-filters, .maturity-filters, .bank-filters, .bank-account-filters, .integration-filters, .advisor-package-filters, .ledger-filters, .reports-filters { grid-template-columns: repeat(3, minmax(160px, 1fr)); }
+  .account-filters, .party-filters, .maturity-filters, .bank-filters, .bank-account-filters, .integration-filters, .advisor-package-filters, .external-import-create, .external-import-filters, .ledger-filters, .reports-filters { grid-template-columns: repeat(3, minmax(160px, 1fr)); }
+  .external-import-create .wide { grid-column: 1 / -1; }
   .bank-forms { grid-template-columns: 1fr; }
   .bank-import-create { grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); }
   .bank-import-create label:nth-of-type(3) { grid-column: 1 / -1; }
@@ -502,7 +523,8 @@ dd { margin: 0; word-break: break-word; }
   .operator-console { grid-template-columns: 1fr; }
   .quick-actions-panel { grid-column: auto; }
   .quick-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .account-create, .party-create, .maturity-create, .bank-transaction-create, .account-filters, .party-filters, .maturity-filters, .bank-filters, .bank-account-filters, .integration-filters, .advisor-package-filters, .ledger-filters, .reports-filters, .template-create, .bank-import-create, .journal-header-fields, .bank-reconcile-form { grid-template-columns: 1fr; }
+  .account-create, .party-create, .maturity-create, .bank-transaction-create, .account-filters, .party-filters, .maturity-filters, .bank-filters, .bank-account-filters, .integration-filters, .advisor-package-filters, .external-import-create, .external-import-filters, .ledger-filters, .reports-filters, .template-create, .bank-import-create, .journal-header-fields, .bank-reconcile-form { grid-template-columns: 1fr; }
+  .external-import-create .wide { grid-column: auto; }
   .account-create .form-title, .party-create .form-title, .maturity-create .form-title, .bank-account-create .form-title, .bank-transaction-create .form-title, .bank-import-create .form-title, .template-create .form-title { grid-column: auto; align-items: flex-start; flex-direction: column; }
   .panel-heading, .bank-suggestion-heading, .source-links-heading, .focus-panel, .workspace-hint { align-items: flex-start; flex-direction: column; }
   .focus-panel-actions, .panel-actions { justify-content: flex-start; width: 100%; }
@@ -540,7 +562,7 @@ dd { margin: 0; word-break: break-word; }
   .work-grid { grid-template-columns: 1fr; }
   .work-list > button { grid-template-columns: 28px 1fr; }
   .work-list > button small { grid-column: 2; }
-  .account-filters, .account-create, .accounts-row, .party-filters, .party-create, .party-row, .maturity-filters, .maturity-create, .maturity-row, .bank-filters, .bank-account-filters, .integration-filters, .advisor-package-filters, .bank-forms, .bank-account-create, .bank-transaction-create, .bank-import-create, .bank-account-row, .bank-import-history-row, .bank-transaction-row, .bank-reconcile-form, .template-create, .template-row, .conflict-list > div { grid-template-columns: 1fr; }
+  .account-filters, .account-create, .accounts-row, .party-filters, .party-create, .party-row, .maturity-filters, .maturity-create, .maturity-row, .bank-filters, .bank-account-filters, .integration-filters, .advisor-package-filters, .external-import-create, .external-import-filters, .external-import-row, .bank-forms, .bank-account-create, .bank-transaction-create, .bank-import-create, .bank-account-row, .bank-import-history-row, .bank-transaction-row, .bank-reconcile-form, .template-create, .template-row, .conflict-list > div { grid-template-columns: 1fr; }
   .accounts-row, .party-row, .maturity-row, .bank-account-row, .bank-transaction-row, .template-row, .journal-row, .journal-line, .detail-line, .source-row, .source-link-row, .trial-row, .ledger-row, .statement-row { min-width: 0; }
   .bank-accounts-heading { align-items: flex-start; flex-direction: column; }
   .account-create .form-title, .party-create .form-title, .maturity-create .form-title, .bank-account-create .form-title, .bank-transaction-create .form-title, .bank-import-create .form-title, .template-create .form-title { grid-column: auto; align-items: flex-start; flex-direction: column; }

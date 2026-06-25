@@ -2213,8 +2213,10 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
   });
   const svgPts = points.map(xy);
   const path = svgPts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const osmBbox = [minLon - .08, minLat - .08, maxLon + .08, maxLat + .08].map(n => Number(n).toFixed(6)).join(",");
+  const osmMarker = `${points[0]?.lat?.toFixed?.(6) || points[0]?.lat},${points[0]?.lon?.toFixed?.(6) || points[0]?.lon}`;
   const osmUrl = hasCoords
-    ? `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent([minLon - .08, minLat - .08, maxLon + .08, maxLat + .08].join(","))}&layer=mapnik&marker=${encodeURIComponent(`${points[0].lat},${points[0].lon}`)}`
+    ? `https://www.openstreetmap.org/export/embed.html?bbox=${osmBbox}&layer=mapnik&marker=${encodeURIComponent(osmMarker)}`
     : "";
 
   return (

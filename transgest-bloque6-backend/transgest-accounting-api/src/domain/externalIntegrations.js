@@ -410,7 +410,7 @@ function advisorPackageIndexCsv(exports = []) {
   ].join("\n");
 }
 
-function buildAdvisorPackageZip(manifest) {
+function buildAdvisorPackageZip(manifest, embeddedFiles = []) {
   const files = [
     {
       name: "manifest.json",
@@ -421,9 +421,10 @@ function buildAdvisorPackageZip(manifest) {
       content: [
         "TransGest Contabilidad - Paquete asesoria",
         "",
-        "Este ZIP es un paquete tecnico de control para preparar exportaciones autorizadas.",
+        "Este ZIP contiene un paquete tecnico para preparar exportaciones autorizadas.",
         "No declara cumplimiento legal, certificacion ni homologacion con ningun proveedor.",
-        "Los CSV reales se descargan desde las rutas indicadas y conservan permisos y auditoria.",
+        "Algunos CSV se incluyen fisicamente cuando el exportador esta soportado.",
+        "Las rutas indicadas conservan permisos y auditoria para descargas individuales.",
         "",
         `Generado: ${manifest.generated_at}`,
         `Empresa: ${manifest.selected_company?.name || manifest.selected_company?.company_id || "-"}`,
@@ -434,6 +435,13 @@ function buildAdvisorPackageZip(manifest) {
       content: advisorPackageIndexCsv(manifest.exports || []),
     },
   ];
+
+  embeddedFiles.forEach(file => {
+    files.push({
+      name: file.name,
+      content: file.content,
+    });
+  });
 
   (manifest.exports || []).forEach(item => {
     const folder = item.available ? "exports" : "blocked";

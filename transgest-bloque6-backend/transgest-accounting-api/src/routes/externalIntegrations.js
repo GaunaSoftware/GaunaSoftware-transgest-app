@@ -3,6 +3,7 @@ const express = require("express");
 const { authenticate } = require("../middleware/auth");
 const config = require("../services/config");
 const db = require("../services/db");
+const { buildAdvisorPackageCsvFiles } = require("../services/advisorPackageExports");
 const {
   buildAdvisorPackageManifest,
   buildAdvisorPackageZip,
@@ -72,23 +73,32 @@ router.get("/external-integrations/advisor-package.zip", async (req, res, next) 
       permissions: req.accountingUser.permissions || [],
       filters: req.query,
     });
-    const zip = buildAdvisorPackageZip(manifest);
-    await db.query(
-      `INSERT INTO ${q("audit_log")}
-         (tenant_id, company_id, actor_type, actor_id, action, entity_type, request_id, detail)
-       VALUES ($1,$2,'user',$3,'external_integration.advisor_package_zip_exported','advisor_package',$4,$5::jsonb)`,
-      [
-        selected.tenant_id,
-        selected.company_id,
-        req.accountingUser.id,
-        req.id,
-        JSON.stringify({
-          available_count: manifest.available_count,
-          blocked_count: manifest.blocked_count,
-          filters: manifest.filters,
-        }),
-      ]
-    );
+    const { files: embeddedCsvFiles } = await db.transaction(async client => {
+      const csvPackage = await buildAdvisorPackageCsvFiles({
+        client,
+        companyId: selected.company_id,
+        manifest,
+      });
+      await client.query(
+        `INSERT INTO ${q("audit_log")}
+           (tenant_id, company_id, actor_type, actor_id, action, entity_type, request_id, detail)
+         VALUES ($1,$2,'user',$3,'external_integration.advisor_package_zip_exported','advisor_package',$4,$5::jsonb)`,
+        [
+          selected.tenant_id,
+          selected.company_id,
+          req.accountingUser.id,
+          req.id,
+          JSON.stringify({
+            available_count: manifest.available_count,
+            blocked_count: manifest.blocked_count,
+            filters: manifest.filters,
+            embedded_csv: csvPackage.summary,
+          }),
+        ]
+      );
+      return csvPackage;
+    });
+    const zip = buildAdvisorPackageZip(manifest, embeddedCsvFiles);
     const datePart = new Date().toISOString().slice(0, 10);
     const companyPart = selected.company_name || selected.name || "empresa";
     const filename = safeFilename(`paquete-asesoria-${companyPart}-${datePart}.zip`);

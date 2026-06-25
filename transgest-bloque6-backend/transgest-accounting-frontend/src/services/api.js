@@ -112,6 +112,27 @@ export const downloadAdvisorPackageZip = (filters = {}) => {
   return downloadFile(`/external-integrations/advisor-package.zip${suffix}`);
 };
 
+export function getExternalImportBatches(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value).trim());
+    }
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/external-import-batches${suffix}`);
+}
+
+export const createExternalImportBatch = data => apiFetch("/external-import-batches", {
+  method: "POST",
+  body: data,
+});
+
+export const updateExternalImportBatchStatus = (batchId, data) => apiFetch(`/external-import-batches/${batchId}/status`, {
+  method: "PATCH",
+  body: data,
+});
+
 export async function selectCompany(companyId) {
   const data = await apiFetch("/companies/select", {
     method: "POST",

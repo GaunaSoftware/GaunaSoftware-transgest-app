@@ -366,9 +366,11 @@ async function ensureColaboradorWorkflowSchema() {
           file_mime VARCHAR(120),
           file_size_kb INTEGER,
           notas TEXT,
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `).catch(() => {});
+      await db.query("ALTER TABLE pedido_docs ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
       await db.query(`
         CREATE TABLE IF NOT EXISTS pedido_eventos (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -5510,28 +5512,41 @@ router.post("/:id/chofer-docs", async (req, res) => {
       return res.status(403).json({ error: "No puedes adjuntar documentos a este pedido" });
     }
 
-    const { nombre, tipo, file_base64, file_mime, file_size_kb, notas } = req.body || {};
+    const { nombre, tipo, file_base64, file_mime, file_size_kb, notas, metadata } = req.body || {};
     const tipoDoc = String(tipo || "").toLowerCase();
     if (!nombre || !file_base64) return res.status(400).json({ error: "Faltan nombre o archivo" });
     if (!tipoDoc.includes("albaran")) return res.status(400).json({ error: "Desde la app del chofer solo se pueden adjuntar albaranes del viaje" });
     const upload = validateBase64Upload({ data: file_base64, mime: file_mime, filename: nombre });
 
-    const { rows } = await db.query(
-      `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING id,nombre,tipo,file_mime,file_size_kb,created_at`,
-      [
-        req.params.id,
-        empresaId,
-        String(nombre).slice(0, 255),
-        tipoDoc || "albaran",
-        upload.base64,
-        upload.mime,
-        Math.ceil(upload.sizeBytes / 1024),
-        notas || "Subido desde app chofer",
-      ]
-    );
-    await logPedidoEvento(req.params.id, empresaId, "chofer_doc.subido", { documento_id: rows[0].id, tipo: tipoDoc }, req.user?.rol === "chofer" ? "chofer" : "usuario", req.user?.id || null);
+    const values = [
+      req.params.id,
+      empresaId,
+      String(nombre).slice(0, 255),
+      tipoDoc || "albaran",
+      upload.base64,
+      upload.mime,
+      Math.ceil(upload.sizeBytes / 1024),
+      notas || "Subido desde app chofer",
+    ];
+    let rows;
+    try {
+      ({ rows } = await db.query(
+        `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+         RETURNING id,nombre,tipo,file_mime,file_size_kb,metadata,created_at`,
+        [...values, JSON.stringify(metadata && typeof metadata === "object" ? metadata : {})]
+      ));
+    } catch (err) {
+      if (err.code !== "42703") throw err;
+      ({ rows } = await db.query(
+        `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING id,nombre,tipo,file_mime,file_size_kb,created_at`,
+        values
+      ));
+      rows[0].metadata = {};
+    }
+    await logPedidoEvento(req.params.id, empresaId, "chofer_doc.subido", { documento_id: rows[0].id, tipo: tipoDoc, metadata: rows[0].metadata || {} }, req.user?.rol === "chofer" ? "chofer" : "usuario", req.user?.id || null);
     res.status(201).json(rows[0]);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });

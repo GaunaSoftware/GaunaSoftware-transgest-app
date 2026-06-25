@@ -32,6 +32,8 @@ const reversibleBankReconciliationsUpSql = fs.readFileSync(path.join(migrationsD
 const reversibleBankReconciliationsDownSql = fs.readFileSync(path.join(migrationsDir, "013_reversible_bank_reconciliations.down.sql"), "utf8");
 const bankStatementImportsUpSql = fs.readFileSync(path.join(migrationsDir, "014_bank_statement_imports.up.sql"), "utf8");
 const bankStatementImportsDownSql = fs.readFileSync(path.join(migrationsDir, "014_bank_statement_imports.down.sql"), "utf8");
+const externalImportStagingUpSql = fs.readFileSync(path.join(migrationsDir, "015_external_import_staging.up.sql"), "utf8");
+const externalImportStagingDownSql = fs.readFileSync(path.join(migrationsDir, "015_external_import_staging.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -191,4 +193,19 @@ test("migracion de importacion bancaria crea lote trazable y rollback protegido"
   assert.match(bankStatementImportsDownSql, /source_system = 'bank_csv'/i);
   assert.match(bankStatementImportsDownSql, /RAISE EXCEPTION/i);
   assert.match(bankStatementImportsDownSql, /DROP TABLE IF EXISTS accounting\.bank_statement_imports/i);
+});
+
+test("migracion de staging externo crea lotes y filas sin aplicar datos", () => {
+  assert.match(externalImportStagingUpSql, /CREATE TABLE IF NOT EXISTS accounting\.external_import_batches/i);
+  assert.match(externalImportStagingUpSql, /CREATE TABLE IF NOT EXISTS accounting\.external_import_rows/i);
+  assert.match(externalImportStagingUpSql, /UNIQUE \(company_id, request_hash\)/i);
+  assert.match(externalImportStagingUpSql, /CHECK \(status IN \('pending_review', 'approved', 'rejected', 'cancelled'\)\)/i);
+  assert.match(externalImportStagingUpSql, /external_imports\.read/i);
+  assert.match(externalImportStagingUpSql, /external_imports\.write/i);
+  assert.doesNotMatch(externalImportStagingUpSql, /INSERT INTO accounting\.journal_entries/i);
+  assert.doesNotMatch(externalImportStagingUpSql, /INSERT INTO accounting\.accounts/i);
+  assert.match(externalImportStagingDownSql, /WHERE status IN \('pending_review', 'approved'\)/i);
+  assert.match(externalImportStagingDownSql, /RAISE EXCEPTION/i);
+  assert.match(externalImportStagingDownSql, /DROP TABLE IF EXISTS accounting\.external_import_rows/i);
+  assert.match(externalImportStagingDownSql, /DROP TABLE IF EXISTS accounting\.external_import_batches/i);
 });

@@ -8,6 +8,7 @@ import {
   createJournalDraft,
   createJournalReversalDraft,
   createMaturity,
+  createExternalImportBatch,
   createParty,
   downloadAdvisorPackageFile,
   downloadAdvisorPackageZip,
@@ -31,6 +32,7 @@ import {
   getCompanies,
   getDashboard,
   getExternalIntegrations,
+  getExternalImportBatches,
   getFiscalYears,
   getMe,
   getOutboxEvents,
@@ -55,6 +57,7 @@ import {
   previewChartTemplate,
   getTrialBalance,
   updateJournalDraft,
+  updateExternalImportBatchStatus,
   updateBankTransactionStatus,
   updateMaturityStatus,
   updateParty,
@@ -174,6 +177,22 @@ const integrationStatusLabels = {
   research: "En estudio",
 };
 
+const externalImportTypeLabels = {
+  accounts: "Plan contable",
+  bank_transactions: "Bancos",
+  generic: "Generico",
+  journal_entries: "Diario",
+  maturities: "Vencimientos",
+  parties: "Terceros",
+};
+
+const externalImportStatusLabels = {
+  approved: "Aprobado",
+  cancelled: "Cancelado",
+  pending_review: "Pendiente",
+  rejected: "Rechazado",
+};
+
 function maturityStatusTone(status) {
   if (status === "pending") return "warning";
   if (status === "settled") return "ok";
@@ -183,6 +202,13 @@ function maturityStatusTone(status) {
 function integrationStatusTone(status) {
   if (status === "planned") return "ok";
   if (status === "research") return "warning";
+  return "neutral";
+}
+
+function externalImportStatusTone(status) {
+  if (status === "approved") return "ok";
+  if (status === "pending_review") return "warning";
+  if (status === "rejected") return "danger";
   return "neutral";
 }
 
@@ -563,6 +589,18 @@ export default function App() {
     date_to: "",
     include_empty: "false",
   });
+  const [externalImportBatches, setExternalImportBatches] = useState([]);
+  const [externalImportLoading, setExternalImportLoading] = useState(false);
+  const [externalImportStatus, setExternalImportStatus] = useState(null);
+  const [externalImportFilters, setExternalImportFilters] = useState({ status: "", provider_id: "", import_type: "", limit: 25 });
+  const [externalImportForm, setExternalImportForm] = useState({
+    provider_id: "generic",
+    import_type: "parties",
+    original_filename: "importacion.csv",
+    notes: "",
+    csv_text: "nombre;nif\nCliente Demo;B00000000",
+  });
+  const [externalImportReview, setExternalImportReview] = useState(null);
 
   const selectedCompany = useMemo(
     () => companies.find(c => c.id === selectedCompanyId) || null,
@@ -587,6 +625,8 @@ export default function App() {
   const canReadLedger = permissions.includes("ledger.read");
   const canReadTemplates = permissions.includes("templates.read");
   const canWriteTemplates = permissions.includes("templates.write");
+  const canReadExternalImports = permissions.includes("external_imports.read");
+  const canWriteExternalImports = permissions.includes("external_imports.write");
   const activePeriods = periods.filter(period => period.status === "open").length;
   const lockedPeriods = periods.filter(period => period.status !== "open").length;
   const journalDrafts = journalEntries.filter(entry => entry.status === "draft").length;
@@ -811,6 +851,21 @@ export default function App() {
       });
     } finally {
       setAdvisorPackageLoading(false);
+    }
+  }
+
+  async function refreshExternalImportBatches(nextFilters = externalImportFilters) {
+    if (!selectedCompanyId || !canReadExternalImports) return;
+    setExternalImportLoading(true);
+    setExternalImportStatus(null);
+    try {
+      const result = await getExternalImportBatches(nextFilters);
+      setExternalImportBatches(result.data || []);
+    } catch (err) {
+      setExternalImportBatches([]);
+      setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setExternalImportLoading(false);
     }
   }
 
@@ -1266,6 +1321,7 @@ export default function App() {
       refreshPeriods();
       refreshIntegrations();
       refreshAdvisorPackage();
+      refreshExternalImportBatches();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, session?.user?.id, selectedCompanyId]);
@@ -1388,6 +1444,8 @@ export default function App() {
       setLedgerAccount(null);
       setLedgerMovements([]);
       setLedgerAccountSummary(null);
+      setExternalImportBatches([]);
+      setExternalImportReview(null);
     } catch (err) {
       setError(err);
     }
@@ -1490,11 +1548,66 @@ export default function App() {
     try {
       const result = await downloadAdvisorPackageZip(advisorPackageFilters);
       saveBlob(result.blob, result.filename || "paquete-asesoria.zip");
-      setAdvisorPackageStatus({ tone: "ok", text: "ZIP de control para asesoria generado y auditado." });
+      setAdvisorPackageStatus({ tone: "ok", text: "ZIP de asesoria generado con CSV disponibles y auditoria." });
     } catch (err) {
       setAdvisorPackageStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
     } finally {
       setAdvisorPackageDownloading(null);
+    }
+  }
+
+  async function handleExternalImportFilter(event) {
+    event.preventDefault();
+    await refreshExternalImportBatches(externalImportFilters);
+  }
+
+  async function handleCreateExternalImportBatch(event) {
+    event.preventDefault();
+    setExternalImportStatus(null);
+    try {
+      const result = await createExternalImportBatch({
+        provider_id: externalImportForm.provider_id,
+        import_type: externalImportForm.import_type,
+        source_format: "csv",
+        original_filename: externalImportForm.original_filename,
+        notes: externalImportForm.notes,
+        csv_text: externalImportForm.csv_text,
+      });
+      setExternalImportStatus({
+        tone: result.repeated ? "warning" : "ok",
+        text: result.repeated ? "Lote ya existente reutilizado." : `Lote staged con ${result.batch.row_count} fila(s).`,
+      });
+      await refreshExternalImportBatches(externalImportFilters);
+    } catch (err) {
+      setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    }
+  }
+
+  function startExternalImportReview(batch, action) {
+    setExternalImportReview({
+      batch,
+      action,
+      reason: action === "approve" ? "Validado para siguiente fase" : "Revision manual pendiente",
+    });
+  }
+
+  async function handleExternalImportReview(event) {
+    event.preventDefault();
+    if (!externalImportReview) return;
+    setExternalImportStatus(null);
+    try {
+      const result = await updateExternalImportBatchStatus(externalImportReview.batch.id, {
+        action: externalImportReview.action,
+        reason: externalImportReview.reason,
+      });
+      setExternalImportStatus({
+        tone: "ok",
+        text: `Lote ${externalImportStatusLabels[result.batch.status] || result.batch.status}.`,
+      });
+      setExternalImportReview(null);
+      await refreshExternalImportBatches(externalImportFilters);
+    } catch (err) {
+      setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
     }
   }
 
@@ -3675,7 +3788,7 @@ export default function App() {
               <div className="panel-heading compact">
                 <div>
                   <h2>Paquete asesoria</h2>
-                  <p>Genera un manifiesto de CSV descargables para asesoria o importacion en programas externos. Mantiene permisos, auditoria y filtros por ejercicio.</p>
+                  <p>Genera un paquete ZIP con CSV disponibles, manifiesto y rutas auditadas para asesoria o importacion en programas externos.</p>
                 </div>
                 <div className="panel-actions">
                   {advisorPackageLoading && <StatusBadge tone="neutral" text="Preparando" />}
@@ -3748,6 +3861,116 @@ export default function App() {
                     ))}
                   </div>
                   <small className="advisor-package-disclaimer">{advisorPackage.disclaimer}</small>
+                </>
+              )}
+            </div>
+            <div className="external-import-panel">
+              <div className="panel-heading compact">
+                <div>
+                  <h2>Bandeja de importacion</h2>
+                  <p>Prepara ficheros externos en staging para revision. No aplica datos contables ni crea asientos.</p>
+                </div>
+                {externalImportLoading && <StatusBadge tone="neutral" text="Cargando" />}
+              </div>
+              {!canReadExternalImports ? (
+                <EmptyState title="Sin permiso" detail="Este usuario no tiene permiso external_imports.read." />
+              ) : (
+                <>
+                  {canWriteExternalImports && (
+                    <form className="external-import-create" onSubmit={handleCreateExternalImportBatch}>
+                      <label>
+                        <span>Programa</span>
+                        <select value={externalImportForm.provider_id} onChange={e => setExternalImportForm(prev => ({ ...prev, provider_id: e.target.value }))}>
+                          <option value="generic">Generico</option>
+                          {integrationCatalog.data.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Tipo</span>
+                        <select value={externalImportForm.import_type} onChange={e => setExternalImportForm(prev => ({ ...prev, import_type: e.target.value }))}>
+                          {Object.entries(externalImportTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        <span>Archivo</span>
+                        <input value={externalImportForm.original_filename} maxLength={240} onChange={e => setExternalImportForm(prev => ({ ...prev, original_filename: e.target.value }))} />
+                      </label>
+                      <label>
+                        <span>Notas</span>
+                        <input value={externalImportForm.notes} maxLength={1000} onChange={e => setExternalImportForm(prev => ({ ...prev, notes: e.target.value }))} />
+                      </label>
+                      <label className="wide">
+                        <span>CSV</span>
+                        <textarea value={externalImportForm.csv_text} onChange={e => setExternalImportForm(prev => ({ ...prev, csv_text: e.target.value }))} rows={5} required />
+                      </label>
+                      <button type="submit">Preparar staging</button>
+                    </form>
+                  )}
+                  <form className="external-import-filters" onSubmit={handleExternalImportFilter}>
+                    <label>
+                      <span>Estado</span>
+                      <select value={externalImportFilters.status} onChange={e => setExternalImportFilters(prev => ({ ...prev, status: e.target.value }))}>
+                        <option value="">Todos</option>
+                        {Object.entries(externalImportStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Programa</span>
+                      <input value={externalImportFilters.provider_id} onChange={e => setExternalImportFilters(prev => ({ ...prev, provider_id: e.target.value }))} placeholder="contasol-factusol" />
+                    </label>
+                    <label>
+                      <span>Tipo</span>
+                      <select value={externalImportFilters.import_type} onChange={e => setExternalImportFilters(prev => ({ ...prev, import_type: e.target.value }))}>
+                        <option value="">Todos</option>
+                        {Object.entries(externalImportTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                    </label>
+                    <button type="submit">Filtrar lotes</button>
+                  </form>
+                  {externalImportStatus && <div className="form-status"><StatusBadge tone={externalImportStatus.tone} text={externalImportStatus.text} /></div>}
+                  {externalImportBatches.length ? (
+                    <div className="external-import-list">
+                      {externalImportBatches.map(batch => (
+                        <div className="external-import-row" key={batch.id}>
+                          <div>
+                            <strong>{batch.original_filename || batch.provider_id}</strong>
+                            <small>{batch.provider_id} | {externalImportTypeLabels[batch.import_type] || batch.import_type} | {formatDateTime(batch.created_at)}</small>
+                          </div>
+                          <div className="external-import-counts">
+                            <span>{batch.row_count} filas</span>
+                            <span>{batch.error_count} errores</span>
+                            <span>{batch.warning_count} avisos</span>
+                          </div>
+                          <StatusBadge tone={externalImportStatusTone(batch.status)} text={externalImportStatusLabels[batch.status] || batch.status} />
+                          {canWriteExternalImports && batch.status === "pending_review" ? (
+                            <div className="external-import-actions">
+                              <button type="button" disabled={Number(batch.error_count) > 0} onClick={() => startExternalImportReview(batch, "approve")}>Aprobar</button>
+                              <button type="button" className="secondary" onClick={() => startExternalImportReview(batch, "reject")}>Rechazar</button>
+                              <button type="button" className="secondary" onClick={() => startExternalImportReview(batch, "cancel")}>Cancelar</button>
+                            </div>
+                          ) : <span />}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState title="Sin lotes staged" detail="Todavia no hay ficheros externos preparados para revision." />
+                  )}
+                  {externalImportReview && (
+                    <form className="period-action-form" onSubmit={handleExternalImportReview}>
+                      <div>
+                        <strong>{externalImportReview.action === "approve" ? "Aprobar lote" : externalImportReview.action === "reject" ? "Rechazar lote" : "Cancelar lote"}</strong>
+                        <span>{externalImportReview.batch.original_filename || externalImportReview.batch.provider_id}</span>
+                      </div>
+                      <label>
+                        <span>Motivo</span>
+                        <input minLength={5} required value={externalImportReview.reason} onChange={e => setExternalImportReview(prev => ({ ...prev, reason: e.target.value }))} />
+                      </label>
+                      <div className="period-action-buttons">
+                        <button type="submit">Confirmar</button>
+                        <button type="button" className="secondary" onClick={() => setExternalImportReview(null)}>Cancelar</button>
+                      </div>
+                    </form>
+                  )}
                 </>
               )}
             </div>

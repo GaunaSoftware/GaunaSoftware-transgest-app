@@ -16,6 +16,14 @@ const EC = {
 const PASOS_KEY = id => `tms_chofer_pasos_${id}`;
 const OFFLINE_QUEUE_KEY = "tms_offline_queue";
 const SOLICITUDES_KEY = "tms_solicitudes_mecanico";
+const PROTOCOLO_CISTERNA = [
+  { key:"protocolo_cisterna_epi", label:"EPI colocado", detail:"Guantes, gafas/pantalla y proteccion requerida para el producto." },
+  { key:"protocolo_cisterna_zona", label:"Zona segura", detail:"Vehiculo inmovilizado, zona acotada y sin fuentes de ignicion." },
+  { key:"protocolo_cisterna_tierra", label:"Toma de tierra", detail:"Puesta a tierra conectada antes de manipular mangueras." },
+  { key:"protocolo_cisterna_producto", label:"Producto/cisterna verificados", detail:"Mercancia, compatibilidad, compartimento y documentacion revisados." },
+  { key:"protocolo_cisterna_mangueras", label:"Mangueras y valvulas OK", detail:"Conexiones, juntas, valvulas y tapas revisadas antes de carga/descarga." },
+  { key:"protocolo_cisterna_fugas", label:"Sin fugas", detail:"Comprobacion visual de fugas y derrames antes de iniciar operacion." },
+];
 let choferPasosCache = {};
 let solicitudesMecanicoCache = null;
 
@@ -64,8 +72,29 @@ function normalizeChoferPasos(value = {}) {
   ].forEach((key) => {
     if (source[key]) next[key] = String(source[key]);
   });
+  Object.entries(source).forEach(([key, value]) => {
+    if (!key.startsWith("protocolo_")) return;
+    if (key.endsWith("_at")) {
+      if (value) next[key] = String(value);
+    } else {
+      next[key] = Boolean(value);
+    }
+  });
   if (source.updated_at) next.updated_at = source.updated_at;
   return next;
+}
+
+function esViajeCisterna(pedido = {}) {
+  const raw = [
+    pedido.vehiculo_clase,
+    pedido.vehiculo_tipo,
+    pedido.tipo_vehiculo,
+    pedido.remolque_clase,
+    pedido.remolque_tipo,
+    pedido.mercancia,
+    pedido.descripcion_carga,
+  ].filter(Boolean).join(" ").toLowerCase();
+  return /cisterna|tank|adr|liquido|líquido|granel liquido|granel líquido|combustible|gasoleo|gasoil|quimic/.test(raw);
 }
 
 function importLegacyChoferPasos(id) {
@@ -196,6 +225,40 @@ async function prepararArchivoEscaner(file) {
     base64: out.split(",")[1] || "",
     mime: "image/jpeg",
     sizeKb: Math.max(1, Math.round((out.length * 0.75) / 1024)),
+  };
+}
+
+function capturarUbicacionActual(timeoutMs = 4500) {
+  if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve(null);
+  return new Promise(resolve => {
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({
+        lat: Number(pos.coords.latitude),
+        lng: Number(pos.coords.longitude),
+        accuracy_m: Math.round(Number(pos.coords.accuracy || 0)),
+        captured_at: new Date().toISOString(),
+      }),
+      () => resolve(null),
+      { enableHighAccuracy:true, timeout:timeoutMs, maximumAge:60000 }
+    );
+  });
+}
+
+function buildUploadEvidence(kind, location) {
+  const at = new Date().toISOString();
+  const evidence = {
+    source: "app_chofer",
+    kind,
+    captured_at: at,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    location: location || null,
+  };
+  const locText = location
+    ? `ubicacion ${location.lat.toFixed(6)},${location.lng.toFixed(6)} precision ${location.accuracy_m || "-"}m`
+    : "ubicacion no disponible";
+  return {
+    evidence,
+    note: `Evidencia app chofer: ${new Date(at).toLocaleString("es-ES")} - ${locText}`,
   };
 }
 
@@ -353,13 +416,16 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
     try {
       await cambiarEstadoPedido(pedido.id, "incidencia", { incidencia: `[${faseLabel(fase)}] ${texto}` });
       if (doc) {
+        const location = await capturarUbicacionActual();
+        const uploadEvidence = buildUploadEvidence(`incidencia_${fase}`, location);
         await subirPedidoDoc(pedido.id, {
           nombre: `Incidencia ${faseLabel(fase)} - ${pedido.numero || pedido.id}`,
           tipo: `incidencia_${fase}`,
           file_base64: doc.base64,
           file_mime: doc.mime,
           file_size_kb: doc.sizeKb,
-          notas: texto,
+          notas: `${texto}\n\n${uploadEvidence.note}`,
+          metadata: uploadEvidence.evidence,
         });
       }
       onGuardado();
@@ -430,13 +496,16 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
     setError("");
     try {
       const tipo = fase === "carga" ? "albaran_carga" : "albaran_descarga";
+      const location = await capturarUbicacionActual();
+      const uploadEvidence = buildUploadEvidence(tipo, location);
       await subirPedidoDocChofer(pedido.id, {
         nombre: `${faseLabel(fase)} - albaran ${pedido.numero || pedido.id}`,
         tipo,
         file_base64: doc.base64,
         file_mime: doc.mime,
         file_size_kb: doc.sizeKb,
-        notas: `Subido desde app chofer en fase ${faseLabel(fase)}`,
+        notas: `Subido desde app chofer en fase ${faseLabel(fase)}\n${uploadEvidence.note}`,
+        metadata: uploadEvidence.evidence,
       });
       setArchivo(null);
       setDoc(null);
@@ -590,6 +659,9 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const dcdRevisado = !!pasos.dcd_revisado;
   const dcdDisponible = !!pasos.dcd_disponible || !!pasos.dcd_revisado;
   const dcdOperativoOk = dcdReady && dcdRevisado && dcdDisponible;
+  const requiereProtocoloCisterna = esViajeCisterna(pedido);
+  const protocoloCisternaCompletado = !requiereProtocoloCisterna || PROTOCOLO_CISTERNA.every(step => pasos[step.key]);
+  const protocoloCisternaPendientes = PROTOCOLO_CISTERNA.filter(step => !pasos[step.key]);
   const fmtDcdFecha = (v) => v ? new Date(`${String(v).slice(0,10)}T12:00:00`).toLocaleDateString("es-ES") : "-";
   const fmtDcdHora = (hora, ventana) => hora || ventana || "-";
   const registrarDcdEvento = useCallback((action) => {
@@ -788,6 +860,10 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       notify("Primero marca posicionado en carga.", "warning");
       return;
     }
+    if (requiereProtocoloCisterna && !protocoloCisternaCompletado) {
+      notify("Completa el protocolo de seguridad de cisterna antes de iniciar la carga.", "warning");
+      return;
+    }
     await marcarPaso("carga_proceso");
     notify("Carga iniciada. El contador de carga empieza ahora.", "success");
   }
@@ -950,10 +1026,60 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
         await actualizarGpsPedido(pedido.id, {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
+          accuracy_m: Math.round(Number(pos.coords.accuracy || 0)),
+          captured_at: new Date().toISOString(),
         });
         notify("Posicion actualizada", "success");
       }catch(err){notify(err.message, "error");}
     },()=>notify("No se pudo obtener la ubicacion", "error"));
+  }
+
+  async function abrirUbicacionEnApps(){
+    const location = await capturarUbicacionActual();
+    if (!location) {
+      notify("No se pudo obtener la ubicacion", "error");
+      return;
+    }
+    const label = encodeURIComponent(`TransGest ${pedido.numero || "viaje"}`);
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`;
+    const geoUrl = `geo:${location.lat},${location.lng}?q=${location.lat},${location.lng}(${label})`;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `Ubicacion viaje ${pedido.numero || ""}`.trim(),
+          text: `Ubicacion registrada por app chofer (${location.lat.toFixed(6)}, ${location.lng.toFixed(6)})`,
+          url: mapsUrl,
+        });
+        return;
+      }
+    } catch {}
+    window.location.href = geoUrl;
+    window.setTimeout(() => window.open(mapsUrl, "_blank", "noopener,noreferrer"), 700);
+  }
+
+  async function registrarVariacionCarga(){
+    const peso = window.prompt("Peso real o variacion detectada (opcional)", pedido.peso_kg || "");
+    if (peso === null) return;
+    const mercancia = window.prompt("Mercancia real o variacion detectada (opcional)", pedido.mercancia || pedido.descripcion_carga || "");
+    if (mercancia === null) return;
+    const detalle = window.prompt("Describe la variacion/incidencia para trafico", "");
+    if (detalle === null) return;
+    const partes = [
+      peso ? `Peso indicado por chofer: ${peso}` : null,
+      mercancia ? `Mercancia indicada por chofer: ${mercancia}` : null,
+      detalle ? `Detalle: ${detalle}` : null,
+    ].filter(Boolean);
+    if (!partes.length) {
+      notify("No se ha indicado ninguna variacion.", "warning");
+      return;
+    }
+    try {
+      await cambiarEstadoPedido(pedido.id, "incidencia", { incidencia: `[Variacion carga] ${partes.join(" | ")}` });
+      notify("Variacion registrada para revision de trafico.", "success");
+      onActualizar();
+    } catch (err) {
+      notify(err.message || "No se pudo registrar la variacion", "error");
+    }
   }
 
   const ACCIONES = {
@@ -1030,6 +1156,43 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
           {pedido.notas&&(
             <div style={{background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.2)",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:12,color:"var(--text3)"}}>
               Notas: {pedido.notas}
+            </div>
+          )}
+
+          {requiereProtocoloCisterna && (
+            <div style={{background:protocoloCisternaCompletado ? "rgba(16,185,129,.08)" : "rgba(245,158,11,.08)",border:`1px solid ${protocoloCisternaCompletado ? "rgba(16,185,129,.24)" : "rgba(245,158,11,.28)"}`,borderRadius:10,padding:12,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:8}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Protocolo cisterna</div>
+                  <div style={{fontSize:11,color:"var(--text5)",lineHeight:1.4}}>
+                    Confirma los pasos de seguridad antes de iniciar carga o descarga. Queda registrado con fecha y hora.
+                  </div>
+                </div>
+                <span style={{fontSize:11,fontWeight:900,color:protocoloCisternaCompletado ? "#10b981" : "#f59e0b",whiteSpace:"nowrap"}}>
+                  {protocoloCisternaCompletado ? "Completo" : `${protocoloCisternaPendientes.length} pendiente(s)`}
+                </span>
+              </div>
+              <div style={{display:"grid",gap:7}}>
+                {PROTOCOLO_CISTERNA.map(step => {
+                  const ok = !!pasos[step.key];
+                  return (
+                    <button
+                      key={step.key}
+                      type="button"
+                      onClick={() => persistirPasos({ [step.key]: !ok, [`${step.key}_at`]: new Date().toISOString() }, { silent:true })}
+                      style={{display:"grid",gridTemplateColumns:"28px 1fr",gap:8,textAlign:"left",alignItems:"center",padding:"8px 9px",borderRadius:8,border:`1px solid ${ok ? "rgba(16,185,129,.26)" : "var(--border)"}`,background:ok ? "rgba(16,185,129,.08)" : "var(--bg4)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+                    >
+                      <span style={{width:22,height:22,borderRadius:999,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,background:ok ? "#10b981" : "rgba(148,163,184,.16)",color:ok ? "#fff" : "var(--text5)"}}>
+                        {ok ? "OK" : ""}
+                      </span>
+                      <span>
+                        <span style={{display:"block",fontSize:12,fontWeight:900}}>{step.label}</span>
+                        <span style={{display:"block",fontSize:10,color:"var(--text5)",marginTop:2,lineHeight:1.35}}>{step.detail}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -1248,15 +1411,21 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
           </div>
 
           {/* Acciones secundarias */}
-          <div style={{display:"flex",gap:8,marginTop:10}}>
-            <button onClick={actualizarPosicion} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+            <button onClick={actualizarPosicion} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               Mi ubicacion
             </button>
-            <button onClick={()=>onFoto?.(pedido)} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.1)",color:"#60a5fa",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            <button onClick={abrirUbicacionEnApps} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(16,185,129,.3)",background:"rgba(16,185,129,.1)",color:"#10b981",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Abrir mapas
+            </button>
+            <button onClick={()=>onFoto?.(pedido)} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.1)",color:"#60a5fa",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               Foto
             </button>
+            <button onClick={registrarVariacionCarga} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(245,158,11,.3)",background:"rgba(245,158,11,.1)",color:"#fbbf24",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Variacion
+            </button>
             {pedido.estado!=="entregado"&&pedido.estado!=="cancelado"&&(
-              <button onClick={()=>abrirIncidencia(pedido.estado==="descarga"?"descarga":"ruta")} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid rgba(251,191,36,.3)",background:"rgba(251,191,36,.1)",color:"#fbbf24",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              <button onClick={()=>abrirIncidencia(pedido.estado==="descarga"?"descarga":"ruta")} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(251,191,36,.3)",background:"rgba(251,191,36,.1)",color:"#fbbf24",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                 Incidencia
               </button>
             )}

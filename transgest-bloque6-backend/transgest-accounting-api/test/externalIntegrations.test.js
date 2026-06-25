@@ -8,6 +8,7 @@ const {
   listExternalAccountingIntegrations,
   normalizeAdvisorPackageQuery,
 } = require("../src/domain/externalIntegrations");
+const { buildAdvisorPackageCsvFiles } = require("../src/services/advisorPackageExports");
 
 test("catalogo de integraciones externas mantiene 10 candidatos prioritarios", () => {
   const integrations = listExternalAccountingIntegrations();
@@ -78,11 +79,123 @@ test("paquete asesoria ZIP incluye manifiesto e indice de exportaciones", () => 
     permissions: ["parties.read", "maturities.read", "banks.read", "journal.read", "ledger.read"],
     filters: { fiscal_year_id: "fy-2026", include_empty: "true" },
   });
-  const zip = buildAdvisorPackageZip(manifest);
+  const zip = buildAdvisorPackageZip(manifest, [
+    { name: "exports/terceros.csv", content: "Nombre fiscal\r\nACME\r\n" },
+  ]);
   assert.ok(Buffer.isBuffer(zip));
   assert.equal(zip.readUInt32LE(0), 0x04034b50);
   assert.ok(zip.includes(Buffer.from("manifest.json")));
   assert.ok(zip.includes(Buffer.from("exports/index.csv")));
+  assert.ok(zip.includes(Buffer.from("exports/terceros.csv")));
+  assert.ok(zip.includes(Buffer.from("ACME")));
   assert.ok(zip.includes(Buffer.from("/reports/trial-balance?")));
   assert.equal(zip.readUInt32LE(zip.length - 22), 0x06054b50);
+});
+
+test("paquete asesoria construye CSV fisicos para exportaciones soportadas", async () => {
+  const manifest = buildAdvisorPackageManifest({
+    selectedCompany: { company_id: "company-1", name: "Demo" },
+    permissions: ["parties.read", "maturities.read", "banks.read", "journal.read"],
+    filters: { fiscal_year_id: "fy-2026", date_from: "2026-01-01", date_to: "2026-12-31" },
+  });
+  const journalParams = [];
+  const client = {
+    async query(sql, params = []) {
+      if (sql.includes("accounting_maturities")) {
+        return { rows: [{
+          direction: "receivable",
+          party_name: "Cliente Demo",
+          due_date: "2026-02-01",
+          document_ref: "FAC-1",
+          description: "Factura demo",
+          amount: "100.000000",
+          open_amount: "100.000000",
+          status: "pending",
+        }] };
+      }
+      if (sql.includes("bank_transactions")) {
+        return { rows: [{
+          bank_account_name: "Banco Demo",
+          transaction_date: "2026-02-02",
+          value_date: "2026-02-02",
+          direction: "inflow",
+          amount: "100.000000",
+          description: "Cobro demo",
+          reference: "REF-1",
+          counterparty_name: "Cliente Demo",
+          status: "unmatched",
+        }] };
+      }
+      if (sql.includes("journal_entries")) {
+        journalParams.push(...params);
+        return { rows: [{
+          entry_date: "2026-02-02",
+          entry_number: 1,
+          year_label: "2026",
+          period_name: "Febrero",
+          description: "Asiento demo",
+          status: "posted",
+          total_debit: "100.000000",
+          total_credit: "100.000000",
+          line_count: 2,
+        }] };
+      }
+      if (sql.includes("accounting_parties")) {
+        return { rows: [{
+          legal_name: "Cliente Demo",
+          party_type: "customer",
+          tax_id: "B00000000",
+          email: "cliente@example.com",
+          phone: "600000000",
+          default_account_code: "43000000",
+          is_active: true,
+        }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const result = await buildAdvisorPackageCsvFiles({ client, companyId: "company-1", manifest });
+  assert.deepEqual(result.files.map(file => file.name), [
+    "exports/terceros.csv",
+    "exports/vencimientos.csv",
+    "exports/movimientos_bancarios.csv",
+    "exports/diario.csv",
+  ]);
+  assert.deepEqual(result.summary.map(item => item.row_count), [1, 1, 1, 1]);
+  assert.ok(result.files[0].content.includes("Nombre fiscal"));
+  assert.ok(result.files[3].content.includes("Contabilizado"));
+  assert.equal(journalParams.includes("fy-2026"), false);
+});
+
+test("paquete asesoria incluye informes CSV cuando el ejercicio es UUID valido", async () => {
+  const fiscalYearId = "33333333-3333-3333-3333-333333333333";
+  const manifest = buildAdvisorPackageManifest({
+    selectedCompany: { company_id: "company-1", name: "Demo" },
+    permissions: ["ledger.read"],
+    filters: { fiscal_year_id: fiscalYearId, include_empty: "true" },
+  });
+  const accountRows = [
+    { id: "a1", code: "10000000", name: "Capital", account_type: "equity", is_active: true, is_postable: true, total_debit: "0.000000", total_credit: "100.000000", balance_debit: "0.000000", balance_credit: "100.000000" },
+    { id: "a2", code: "43000000", name: "Clientes", account_type: "asset", is_active: true, is_postable: true, total_debit: "100.000000", total_credit: "0.000000", balance_debit: "100.000000", balance_credit: "0.000000" },
+    { id: "a3", code: "70000000", name: "Ventas", account_type: "income", is_active: true, is_postable: true, total_debit: "0.000000", total_credit: "50.000000", balance_debit: "0.000000", balance_credit: "50.000000" },
+  ];
+  const client = {
+    async query(sql) {
+      if (sql.includes("accounting_periods")) return { rows: [{ id: "period-1" }] };
+      if (sql.includes("accounts")) return { rows: accountRows };
+      return { rows: [] };
+    },
+  };
+
+  const result = await buildAdvisorPackageCsvFiles({ client, companyId: "company-1", manifest });
+  assert.deepEqual(result.files.map(file => file.name), [
+    "exports/sumas_y_saldos.csv",
+    "exports/balance_situacion.csv",
+    "exports/perdidas_ganancias.csv",
+  ]);
+  assert.ok(result.files[0].content.includes("Suma Debe"));
+  assert.ok(result.files[0].content.includes("TOTAL"));
+  assert.ok(result.files[1].content.includes("Total activo"));
+  assert.ok(result.files[2].content.includes("Resultado"));
 });

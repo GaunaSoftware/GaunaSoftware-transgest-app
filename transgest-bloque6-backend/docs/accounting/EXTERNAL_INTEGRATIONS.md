@@ -18,7 +18,8 @@ No existe una fuente publica unica y auditada que ordene con precision los 10 pr
 - Superadmin permite exportar el seguimiento de integraciones contables a CSV desde `/api/v1/superadmin/integraciones/contabilidad/export.csv`, incluyendo el contador de modulos mapeados.
 - TransGest no debe escribir asientos directamente en bases externas ni permitir que sistemas externos escriban directamente en las tablas contables de TransGest.
 - Toda salida contable debe generarse desde casos de uso explicitos, con trazabilidad, idempotencia y auditoria.
-- Toda entrada desde terceros debe pasar por una zona de staging, validacion, deduplicacion e importacion aprobada.
+- Toda entrada desde terceros debe pasar por una zona de staging, validacion, deduplicacion y aprobacion manual antes de cualquier importacion real.
+- El staging inicial de entradas externas esta implementado en `/api/v1/external-import-batches`: crea lotes, guarda filas crudas/normalizadas, calcula hashes, bloquea duplicados por lote y registra auditoria/outbox. No aplica datos contables.
 - Para programas con API, usar outbox transaccional, workers idempotentes, reintentos controlados y mapeo versionado por proveedor.
 - Para programas on-premise o cerrados, priorizar paquetes CSV/XLSX/PDF auditables y confirmados por asesoria.
 - Facturacion fiscal, VERI*FACTU, factura electronica B2B y SII siguen siendo ambitos separados. No se debe delegar emision fiscal en un conector externo sin decision expresa de arquitectura y revision legal.
@@ -43,31 +44,49 @@ No existe una fuente publica unica y auditada que ordene con precision los 10 pr
 1. Catalogo visible en Superadmin. Implementado como `/api/v1/superadmin/integraciones/contabilidad`.
 2. Catalogo operativo visible en TransGest Contabilidad. Implementado como `/api/v1/external-integrations`.
 3. Manifiesto de paquete asesoria. Implementado como `/api/v1/external-integrations/advisor-package`.
-4. ZIP tecnico de control para asesoria con manifiesto, indice de exportaciones y rutas CSV autorizadas. Implementado como `/api/v1/external-integrations/advisor-package.zip`.
+4. ZIP para asesoria con manifiesto, indice de exportaciones, rutas CSV autorizadas y CSV fisicos para terceros, vencimientos, movimientos bancarios, diario e informes contables basicos. Implementado como `/api/v1/external-integrations/advisor-package.zip`.
 5. Persistencia y seguimiento por empresa del conector preferido, estado contractual, responsable, modo autorizado e historial auditado desde Superadmin. Implementado como `/api/v1/superadmin/integraciones/contabilidad/empresas/:empresaId`.
 6. Mapeos por empresa para plan contable, terceros, impuestos, diario, bancos y documentos. Implementado como metadatos versionables en la ficha de Superadmin.
 7. Exportaciones normalizadas: terceros, vencimientos, bancos, diario, sumas y saldos, balance y PyG.
-8. Paquete asesoria ZIP con CSV/XLSX/PDF fisicos, no solo rutas e indice.
-9. Staging de importacion: detectar duplicados, validar empresa, ejercicio, periodo y moneda.
+8. Ampliar el paquete asesoria ZIP con XLSX/PDF fisicos, adjuntos documentales y formatos especificos por proveedor.
+9. Staging de importacion: lotes externos, filas, estados, hashes, auditoria y aprobacion manual. Implementado como base generica para CSV.
 10. Conector Holded u Odoo como primer piloto API, siempre con outbox y aprobacion manual.
 11. Conectores de ficheros para Sage 50/ContaPlus, Sage 200, a3 y CONTASOL.
 12. Monitor de sincronizacion: estado, ultimo lote, errores, reintentos e idempotency keys.
 
 ## Paquete asesoria actual
 
-El manifiesto actual devuelve los CSV disponibles para el usuario autenticado y marca como bloqueados los que requieren permisos o ejercicio seleccionado. El ZIP actual es un paquete tecnico de control: incluye `manifest.json`, `exports/index.csv` y ficheros de texto con las rutas CSV autorizadas. Todavia no empaqueta fisicamente cada CSV dentro del ZIP.
+El manifiesto actual devuelve los CSV disponibles para el usuario autenticado y marca como bloqueados los que requieren permisos o ejercicio seleccionado. El ZIP actual incluye `manifest.json`, `exports/index.csv`, ficheros de texto con las rutas CSV autorizadas y CSV fisicos para las exportaciones soportadas en esta fase.
 
 Incluye:
 
-- Terceros.
-- Vencimientos.
-- Movimientos bancarios.
-- Libro diario.
-- Balance de sumas y saldos.
-- Balance de situacion.
-- Cuenta de perdidas y ganancias.
+- Terceros: incluido fisicamente como `exports/terceros.csv`.
+- Vencimientos: incluido fisicamente como `exports/vencimientos.csv`.
+- Movimientos bancarios: incluido fisicamente como `exports/movimientos_bancarios.csv`.
+- Libro diario: incluido fisicamente como `exports/diario.csv`.
+- Balance de sumas y saldos: incluido fisicamente como `exports/sumas_y_saldos.csv` cuando `fiscal_year_id` es UUID valido.
+- Balance de situacion: incluido fisicamente como `exports/balance_situacion.csv` cuando `fiscal_year_id` es UUID valido.
+- Cuenta de perdidas y ganancias: incluido fisicamente como `exports/perdidas_ganancias.csv` cuando `fiscal_year_id` es UUID valido.
 
-Los informes contables requieren `fiscal_year_id`. Las descargas usan los endpoints CSV existentes y conservan el control de permisos de cada modulo.
+Los informes contables requieren `fiscal_year_id` valido. Las descargas usan permisos contables y el ZIP registra auditoria con filtros y conteo de filas embebidas. Esta funcionalidad no declara compatibilidad productiva con ningun proveedor externo; los formatos exactos de importacion siguen pendientes de validacion por programa, version instalada y asesoria.
+
+## Staging de importaciones externas
+
+El staging de entrada permite preparar CSV externos sin escribir en tablas contables operativas. Cada lote queda en `external_import_batches` con proveedor, tipo, formato, hash, estado y conteos. Cada fila queda en `external_import_rows` con `raw_payload`, `normalized_payload`, errores, avisos y hash de fila.
+
+Estados iniciales:
+
+- `pending_review`: lote preparado y pendiente de revision.
+- `approved`: lote aceptado para una fase posterior de importacion controlada.
+- `rejected`: lote descartado por revision.
+- `cancelled`: lote cancelado operativamente.
+
+Restricciones actuales:
+
+- No crea terceros, bancos, vencimientos, cuentas ni asientos.
+- No valida todavia formatos concretos de Sage, a3, CONTASOL, Holded u Odoo.
+- No declara homologacion ni compatibilidad productiva con proveedores externos.
+- La aprobacion solo autoriza el siguiente paso tecnico; la aplicacion real de datos requerira casos de uso especificos por tipo de importacion.
 
 ## Fuentes revisadas
 

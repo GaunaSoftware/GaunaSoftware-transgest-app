@@ -5,6 +5,7 @@ require("./chartTemplates.test");
 require("./companies.test");
 require("./databasePrivileges.test");
 require("./eventContracts.test");
+require("./externalImportStaging.test");
 require("./externalIntegrations.test");
 require("./rbac.test");
 require("./sso.test");

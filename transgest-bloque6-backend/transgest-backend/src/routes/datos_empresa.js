@@ -1879,13 +1879,24 @@ router.get("/pedido-docs/:pedido_id/base64", async (req,res) => {
 
 router.post("/pedido-docs/:pedido_id", async (req,res) => {
   try {
-    const {nombre,tipo,file_base64,file_mime,file_size_kb,notas} = req.body;
+    const {nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata} = req.body;
     if (!nombre || !file_base64) return res.status(400).json({error:"Faltan nombre o archivo"});
     const upload = validateBase64Upload({ data: file_base64, mime: file_mime, filename: nombre });
-    const {rows} = await db.query(
-      "INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,nombre,tipo,file_mime,file_size_kb,created_at",
-      [req.params.pedido_id,EID(req),nombre,tipo||"otro",upload.base64,upload.mime,Math.ceil(upload.sizeBytes/1024),notas||null]
-    );
+    const values = [req.params.pedido_id,EID(req),nombre,tipo||"otro",upload.base64,upload.mime,Math.ceil(upload.sizeBytes/1024),notas||null];
+    let rows;
+    try {
+      ({rows} = await db.query(
+        "INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb) RETURNING id,nombre,tipo,file_mime,file_size_kb,metadata,created_at",
+        [...values,JSON.stringify(metadata && typeof metadata === "object" ? metadata : {})]
+      ));
+    } catch (err) {
+      if (err.code !== "42703") throw err;
+      ({rows} = await db.query(
+        "INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,nombre,tipo,file_mime,file_size_kb,created_at",
+        values
+      ));
+      rows[0].metadata = {};
+    }
     res.status(201).json(rows[0]);
   } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });

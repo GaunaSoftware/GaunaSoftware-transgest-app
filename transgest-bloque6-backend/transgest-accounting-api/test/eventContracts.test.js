@@ -179,6 +179,26 @@ test("contrato de importacion de plantilla exige checksum y resultados", () => {
   }), /Payload incompleto/);
 });
 
+test("contratos de staging externo exigen lote y revision", () => {
+  assert.doesNotThrow(() => validateEventContract("AccountingExternalImportBatchStaged", 1, {
+    import_batch_id: "batch-id",
+    provider_id: "contasol-factusol",
+    import_type: "parties",
+    row_count: 5,
+    error_count: 0,
+  }));
+  assert.doesNotThrow(() => validateEventContract("AccountingExternalImportBatchStatusChanged", 1, {
+    import_batch_id: "batch-id",
+    previous_status: "pending_review",
+    status: "approved",
+    action: "approve",
+    reason: "Validado por administracion",
+  }));
+  assert.throws(() => validateEventContract("AccountingExternalImportBatchStaged", 1, {
+    import_batch_id: "batch-id",
+  }), /Payload incompleto/);
+});
+
 test("contrato de asiento contabilizado exige numero, totales y periodo", () => {
   assert.doesNotThrow(() => validateEventContract("AccountingJournalEntryReversalDraftCreated", 1, {
     journal_entry_id: "reversal-id",

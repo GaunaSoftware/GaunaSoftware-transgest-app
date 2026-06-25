@@ -5,6 +5,7 @@ import { confirmDialog, notify, promptDialog } from "../services/notify";
 import { getEmpresaPlanLocal, normalizePlan } from "../utils/planFeatures";
 import { COMPANY_PALETTES, canUseCompanyPalette, normalizePaletteConfig, saveCompanyPalette } from "../utils/companyPalette";
 import { EUROPE_COUNTRIES, canonicalCountry, getEnabledEuropeCountries } from "../utils/europeGeo";
+import { GeoFields } from "../components/GeoFields";
 
 const S = {
   page:   { padding:"22px 26px", fontFamily:"'DM Sans',sans-serif", width:"100%", maxWidth:"none", boxSizing:"border-box" },
@@ -1409,14 +1410,13 @@ export default function Empresa() {
                 <label style={S.lbl}>Municipio</label>
                 <input style={S.inp} value={empresa.municipio} onChange={fe("municipio")} placeholder="Madrid" disabled={!esGerente}/>
               </div>
-              <div>
-                <label style={S.lbl}>Provincia</label>
-                <input style={S.inp} value={empresa.provincia} onChange={fe("provincia")} placeholder="Madrid" disabled={!esGerente}/>
-              </div>
-              <div>
-                <label style={S.lbl}>País</label>
-                <input style={S.inp} value={empresa.pais} onChange={fe("pais")} placeholder="España" disabled={!esGerente}/>
-              </div>
+              <GeoFields
+                values={empresa}
+                onChange={(campo, valor) => setEmpresa(p => ({ ...p, [campo]: valor }))}
+                inputStyle={S.inp}
+                labelStyle={S.lbl}
+                disabled={!esGerente}
+              />
             </div>
           </div>
 

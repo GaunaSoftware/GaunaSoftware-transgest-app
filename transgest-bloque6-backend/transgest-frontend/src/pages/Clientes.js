@@ -8,6 +8,7 @@ import {
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
+import { GeoFields } from "../components/GeoFields";
 
 // ---------------------------------------------------------------------------
 const PAISES_ISO = [["ES","España"],["PT","Portugal"],["FR","Francia"],["DE","Alemania"],
@@ -64,17 +65,14 @@ function DireccionFields({ prefijo="", values={}, onChange, titulo }) {
           <input style={inp} value={values[p+"municipio"]||""} onChange={set(p+"municipio")}
             placeholder="Madrid"/>
         </div>
-        <div>
-          <label style={lbl}>Provincia</label>
-          <input style={inp} value={values[p+"provincia"]||""} onChange={set(p+"provincia")}
-            placeholder="Madrid"/>
-        </div>
-        <div>
-          <label style={lbl}>País</label>
-          <select style={inp} value={values[p+"pais_iso"]||"ES"} onChange={set(p+"pais_iso")}>
-            {PAISES_ISO.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </div>
+        <GeoFields
+          values={values}
+          onChange={onChange}
+          countryField={p+"pais_iso"}
+          regionField={p+"provincia"}
+          inputStyle={inp}
+          labelStyle={lbl}
+        />
       </div>
     </div>
   );

@@ -15,6 +15,7 @@ import { confirmDialog, notify } from "../services/notify";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
+import { GeoFields } from "../components/GeoFields";
 
 let puntosInteresCache = [];
 const AI_INBOX_MAX_FILE_BYTES = 6 * 1024 * 1024;
@@ -4036,6 +4037,7 @@ ${esCol ? `
   const expedienteDocs = docControlExpediente?.documentos?.counts || {};
   const expedienteTrazas = docControlExpediente?.trazabilidad || {};
   const docControlSupportUrl = docControl?.documento?.soporte_url || "";
+  const showDcdDebug = false;
   const registrarDcdEvento = useCallback((action) => {
     if (!pedido?.id || !docControl?.documento) return;
     registrarPedidoDocumentoControlEvento(pedido.id, { action, source:"pedidos_orden_carga" }).catch(() => {});
@@ -4391,7 +4393,6 @@ ${esCol ? `
                 <div style={S2.kv}><div style={S2.lbl}>Sistema</div><div style={S2.val}>{docControl.documento?.sistema === "qr_url" ? "QR / URL" : "Codigo numerico"}</div></div>
                 <div style={S2.kv}><div style={S2.lbl}>Codigo control</div><div style={{...S2.val,fontFamily:"'JetBrains Mono',monospace"}}>{docControl.documento?.codigo_control || "Pendiente"}</div></div>
                 <div style={S2.kv}><div style={S2.lbl}>Estado</div><div style={{...S2.val,color:docControl.status?.ready?"#10b981":docControl.status?.level==="warning"?"#f59e0b":"var(--text)"}}>{docControl.status?.ready ? "Listo" : "Pendiente de completar"}</div></div>
-                <div style={S2.kv}><div style={S2.lbl}>Preparacion digital</div><div style={{...S2.val,color:Number(docControlReadiness.score || 0) >= 85 ? "#10b981" : "#f59e0b"}}>{Number(docControlReadiness.score || 0)}%</div></div>
                 <div style={S2.kv}><div style={S2.lbl}>Archivo soporte</div><div style={{...S2.val,fontSize:12}}>{docControl.remision?.filename || "Pendiente"}</div></div>
               </div>
               {(docControl.qr?.data_url || docControl.qr?.url) && (
@@ -4429,6 +4430,7 @@ ${esCol ? `
                   </div>
                 </div>
               )}
+              {showDcdDebug && (
               <details style={{marginBottom:10,border:"1px solid var(--border)",borderRadius:8,background:"var(--bg3)",padding:"8px 10px"}}>
                 <summary style={{cursor:"pointer",fontSize:12,fontWeight:900,color:"var(--text3)",userSelect:"none"}}>
                   Diagnostico interno DCD/eCMR
@@ -4558,6 +4560,7 @@ ${esCol ? `
               </div>
                 </div>
               </details>
+              )}
             </>
           )}
         </div>
@@ -4734,10 +4737,15 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
           <div><label style={lbl}>Calle / Avenida</label><input style={inp} value={form.calle} onChange={fk("calle")} placeholder="Calle Mayor"/></div>
           <div><label style={lbl}>N. / Piso / Pta</label><input style={inp} value={form.num_ext} onChange={fk("num_ext")} placeholder="12, 3oB"/></div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 2fr",gap:"0 14px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 2fr 2fr",gap:"0 14px"}}>
           <div><label style={lbl}>Codigo postal</label><input style={inp} value={form.codigo_postal} onChange={fk("codigo_postal")} placeholder="28001"/></div>
           <div><label style={lbl}>Ciudad</label><input style={inp} value={form.ciudad} onChange={fk("ciudad")}/></div>
-          <div><label style={lbl}>Provincia</label><input style={inp} value={form.provincia} onChange={fk("provincia")}/></div>
+          <GeoFields
+            values={form}
+            onChange={(campo, valor) => setForm(p => ({ ...p, [campo]: valor }))}
+            inputStyle={inp}
+            labelStyle={lbl}
+          />
         </div>
 
         {/* Contacto */}

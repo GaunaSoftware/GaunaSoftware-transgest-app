@@ -12,6 +12,7 @@ import {
 import { confirmDialog, notify, promptDialog } from "../services/notify";
 import BarcodeScanner from "../components/BarcodeScanner";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
+import { GeoFields } from "../components/GeoFields";
 
 const CATEGORIAS = ["Motor","Frenos","Neumaticos","Aceite / Lubricantes","Filtros","Electricidad","Carrocería","Hidráulica","Neumática","Refrigeración","Transmisión","EPIS","ROPA DE TRABAJO","Otros"];
 const TIPOS_INT  = ["Mantenimiento preventivo","Avería / Reparación","Cambio aceite","Cambio neumáticos","Cambio filtros","Revisión ITV","Reparación carrocería","Otro"];
@@ -1027,7 +1028,7 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
 function ModalProveedorForm({ editando, proveedores = [], onSaved, onClose }) {
   const ESPECIALIDADES = ["General","Motor / Mecánica","Carrocería","Neumaticos","Electricidad","Hidráulica","Frenos","Climatización","Tacógrafos","Grúas","Otro"];
   const [form, setForm] = useState(editando || {
-    nombre:"",cif:"",razon_social:"",direccion:"",cp:"",poblacion:"",provincia:"",
+    nombre:"",cif:"",razon_social:"",direccion:"",cp:"",poblacion:"",provincia:"",pais:"España",
     telefono:"",email:"",web:"",iban:"",especialidad:"General",notas:"",activo:true
   });
   const f = k => e => setForm(p=>({...p,[k]:e.target.value}));
@@ -1057,7 +1058,12 @@ function ModalProveedorForm({ editando, proveedores = [], onSaved, onClose }) {
         <div style={{gridColumn:"1/-1"}}><label style={lbl}>Direccion (calle y no.)</label><input style={inp} value={form.direccion} onChange={f("direccion")}/></div>
         <div><label style={lbl}>Código postal</label><input style={inp} value={form.cp} onChange={f("cp")} placeholder="28001"/></div>
         <div><label style={lbl}>Población</label><input style={inp} value={form.poblacion} onChange={f("poblacion")}/></div>
-        <div><label style={lbl}>Provincia</label><input style={inp} value={form.provincia} onChange={f("provincia")}/></div>
+        <GeoFields
+          values={form}
+          onChange={(campo, valor) => setForm(p => ({ ...p, [campo]: valor }))}
+          inputStyle={inp}
+          labelStyle={lbl}
+        />
         <div><label style={lbl}>Especialidad</label>
           <select style={sel} value={form.especialidad} onChange={f("especialidad")}>
             {ESPECIALIDADES.map(e=><option key={e} value={e}>{e}</option>)}

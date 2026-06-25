@@ -169,6 +169,40 @@ function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
 }
 
 const MAP_SIZE = { width: 640, height: 300 };
+const MAP_LAYERS = {
+  streets: {
+    label: "Mapa",
+    detail: "Calles",
+    attribution: "OpenStreetMap",
+    filter: "saturate(.82) contrast(.98) brightness(1.02)",
+    tileUrl: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
+    overlay: "linear-gradient(90deg, rgba(255,255,255,.14), rgba(255,255,255,.03))",
+  },
+  relief: {
+    label: "Relieve",
+    detail: "Terreno",
+    attribution: "OpenTopoMap",
+    filter: "saturate(.86) contrast(.98) brightness(.98)",
+    tileUrl: (z, x, y) => `https://tile.opentopomap.org/${z}/${x}/${y}.png`,
+    overlay: "linear-gradient(90deg, rgba(15,23,42,.06), rgba(255,255,255,.02))",
+  },
+  satellite: {
+    label: "Satelite",
+    detail: "Imagen",
+    attribution: "Esri",
+    filter: "saturate(.98) contrast(1.04) brightness(.88)",
+    tileUrl: (z, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,
+    overlay: "linear-gradient(90deg, rgba(2,6,23,.22), rgba(2,6,23,.04))",
+  },
+  traffic: {
+    label: "Trafico",
+    detail: "Operativo",
+    attribution: "OpenStreetMap",
+    filter: "saturate(.65) contrast(.95) brightness(1.08)",
+    tileUrl: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
+    overlay: "linear-gradient(90deg, rgba(255,255,255,.18), rgba(254,243,199,.08))",
+  },
+};
 const SPAIN_CENTER = { lat: 40.25, lng: -3.7 };
 const CITY_COORDS = {
   madrid: { lat: 40.4168, lng: -3.7038 },
@@ -361,6 +395,10 @@ function clampMap(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function getMapLayer(layerKey = "streets") {
+  return MAP_LAYERS[layerKey] || MAP_LAYERS.streets;
+}
+
 function firstStopCoords(rawStops = []) {
   const stops = parseStops(rawStops);
   for (const stop of stops) {
@@ -395,7 +433,7 @@ function getRouteGeoPoints(route = {}, item = {}) {
   return { origin, destination, gps };
 }
 
-function getMapGeometry({ route, item, zoom }) {
+function getMapGeometry({ route, item, zoom, layerKey = "streets" }) {
   const { origin, destination, gps } = getRouteGeoPoints(route, item);
   const center = gps || (origin && destination
     ? { lat: (origin.lat + destination.lat) / 2, lng: (origin.lng + destination.lng) / 2 }
@@ -422,7 +460,7 @@ function getMapGeometry({ route, item, zoom }) {
       const wrappedX = ((x % maxTiles) + maxTiles) % maxTiles;
       tiles.push({
         key: `${zoom}-${x}-${y}`,
-        src: `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
+        src: getMapLayer(layerKey).tileUrl(zoom, wrappedX, y),
         left: Math.round(x * 256 - topLeft.x),
         top: Math.round(y * 256 - topLeft.y),
       });
@@ -453,7 +491,7 @@ function centerForPoints(points = []) {
   };
 }
 
-function getTileMapGeometry(points = [], zoom) {
+function getTileMapGeometry(points = [], zoom, layerKey = "streets") {
   const center = centerForPoints(points);
   const centerPx = latLngToPixels(center, zoom);
   const topLeft = { x: centerPx.x - MAP_SIZE.width / 2, y: centerPx.y - MAP_SIZE.height / 2 };
@@ -477,7 +515,7 @@ function getTileMapGeometry(points = [], zoom) {
       const wrappedX = ((x % maxTiles) + maxTiles) % maxTiles;
       tiles.push({
         key: `${zoom}-${x}-${y}`,
-        src: `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
+        src: getMapLayer(layerKey).tileUrl(zoom, wrappedX, y),
         left: Math.round(x * 256 - topLeft.x),
         top: Math.round(y * 256 - topLeft.y),
       });
@@ -623,9 +661,9 @@ function RouteMapPanelLegacy({ item }) {
           <button onClick={() => setMapZoomDelta(z => Math.min(3, z + 1))} style={{width:34,height:32,border:"none",borderBottom:"1px solid rgba(148,163,184,.22)",background:"transparent",fontSize:18,fontWeight:900,cursor:"pointer",color:"#334155"}}>+</button>
           <button onClick={() => setMapZoomDelta(z => Math.max(-2, z - 1))} style={{width:34,height:32,border:"none",background:"transparent",fontSize:20,fontWeight:900,cursor:"pointer",color:"#334155"}}>-</button>
         </div>
-        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{position:"absolute",right:56,bottom:14,fontSize:9,color:"rgba(15,23,42,.55)",background:"rgba(255,255,255,.78)",border:"1px solid rgba(148,163,184,.24)",borderRadius:6,padding:"3px 6px",textDecoration:"none"}}>
+        <span style={{position:"absolute",right:56,bottom:14,fontSize:9,color:"rgba(15,23,42,.55)",background:"rgba(255,255,255,.78)",border:"1px solid rgba(148,163,184,.24)",borderRadius:6,padding:"3px 6px"}}>
           © OpenStreetMap
-        </a>
+        </span>
         <div style={{position:"absolute",left:14,bottom:14,width:220,background:"rgba(255,255,255,.88)",color:"#0f172a",border:"1px solid rgba(148,163,184,.28)",borderRadius:10,padding:"10px 12px",boxShadow:"0 10px 30px rgba(15,23,42,.10)"}}>
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"#0f766e",marginBottom:5}}>{hasGps ? "Ubicacion actual" : "Ruta"}</div>
           <div style={{fontSize:12,fontWeight:900,lineHeight:1.35}}>{route.origen || "Origen"} -> {route.destino || "Destino"}</div>
@@ -663,7 +701,7 @@ function RouteMapPanelLegacy({ item }) {
   );
 }
 
-function RouteMapPanelReal({ item, trips = [], onSelectTrip }) {
+function RouteMapPanelReal({ item, trips = [], onSelectTrip, mapLayer = "streets", onMapLayerChange }) {
   const normalizedItem = useMemo(() => normalizeTripForMap(item || {}) || null, [item]);
   const route = normalizedItem?.route || parseRouteFromItem(item || {});
   const selectedPoints = normalizedItem?.points || getRouteGeoPoints(route, item || {});
@@ -699,7 +737,8 @@ function RouteMapPanelReal({ item, trips = [], onSelectTrip }) {
   ].filter(Boolean), [selectedPoints, mapTrips]);
   const baseZoom = useMemo(() => fitZoomForPoints(mapPoints), [mapPoints]);
   const mapZoom = Math.max(3, Math.min(9, baseZoom + mapZoomDelta));
-  const map = useMemo(() => getTileMapGeometry(mapPoints, mapZoom), [mapPoints, mapZoom]);
+  const activeLayer = getMapLayer(mapLayer);
+  const map = useMemo(() => getTileMapGeometry(mapPoints, mapZoom, mapLayer), [mapPoints, mapZoom, mapLayer]);
   const start = map.project(selectedPoints.origin);
   const end = map.project(selectedPoints.destination);
   const gpsPoint = map.project(selectedPoints.gps);
@@ -718,15 +757,38 @@ function RouteMapPanelReal({ item, trips = [], onSelectTrip }) {
   const cx = hasRouteLine ? Math.max(70, Math.min(570, (start.x + end.x) / 2)) : 320;
   const cy = hasRouteLine ? Math.max(42, Math.min(250, Math.min(start.y, end.y) - 44)) : 120;
   const routePath = hasRouteLine ? `M${start.x} ${start.y} C${cx} ${cy}, ${cx} ${cy}, ${end.x} ${end.y}` : "";
-  const openOsmPoint = selectedPoints.gps || selectedPoints.destination || selectedPoints.origin || SPAIN_CENTER;
-  const osmHref = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(openOsmPoint.lat)}&mlon=${encodeURIComponent(openOsmPoint.lng)}#map=${mapZoom}/${encodeURIComponent(openOsmPoint.lat)}/${encodeURIComponent(openOsmPoint.lng)}`;
-
   return (
     <div style={S.card}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
         <div>
           <div style={S.sec}>Mapa operativo real</div>
           <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{title}</div>
+          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginTop:7}}>
+            {Object.entries(MAP_LAYERS).map(([key, layer]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onMapLayerChange?.(key)}
+                onPointerDown={() => onMapLayerChange?.(key)}
+                onMouseDown={() => onMapLayerChange?.(key)}
+                aria-pressed={mapLayer === key}
+                title={layer.detail}
+                style={{
+                  border:`1px solid ${mapLayer === key ? "rgba(20,184,166,.50)" : "var(--border2)"}`,
+                  background:mapLayer === key ? "rgba(15,118,110,.92)" : "var(--bg3)",
+                  color:mapLayer === key ? "#fff" : "var(--text4)",
+                  borderRadius:7,
+                  padding:"4px 8px",
+                  fontSize:10,
+                  fontWeight:900,
+                  cursor:"pointer",
+                  fontFamily:"'DM Sans',sans-serif",
+                }}
+              >
+                {layer.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
           <span style={{fontSize:10,fontWeight:900,color:hasGps ? "var(--green)" : "var(--accent-xl)",border:`1px solid ${hasGps ? "rgba(16,185,129,.30)" : "rgba(20,184,166,.30)"}`,background:hasGps ? "rgba(16,185,129,.10)" : "rgba(20,184,166,.10)",borderRadius:20,padding:"3px 8px"}}>
@@ -738,13 +800,20 @@ function RouteMapPanelReal({ item, trips = [], onSelectTrip }) {
         </div>
       </div>
 
-      <div style={{position:"relative",height:300,borderRadius:10,overflow:"hidden",border:"1px solid var(--border)",background:"#dbeafe"}}>
+      <div style={{position:"relative",height:300,borderRadius:10,overflow:"hidden",border:"1px solid var(--border)",background:"linear-gradient(135deg,#dbeafe 0%,#dcfce7 45%,#f8fafc 100%)"}}>
+        <div style={{position:"absolute",inset:0,opacity:.46,backgroundImage:"linear-gradient(rgba(15,23,42,.09) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,.08) 1px, transparent 1px), radial-gradient(circle at 22% 28%, rgba(20,184,166,.20), transparent 24%), radial-gradient(circle at 72% 68%, rgba(59,130,246,.18), transparent 26%)",backgroundSize:"42px 42px,42px 42px,100% 100%,100% 100%"}} />
         <div style={{position:"absolute",inset:0,overflow:"hidden",opacity:.96}}>
           {map.tiles.map(tile => (
-            <img key={tile.key} src={tile.src} alt="" style={{position:"absolute",left:tile.left,top:tile.top,width:256,height:256,userSelect:"none",pointerEvents:"none",filter:"saturate(.78) contrast(.96) brightness(1.02)"}} />
+            <img
+              key={tile.key}
+              src={tile.src}
+              alt=""
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
+              style={{position:"absolute",left:tile.left,top:tile.top,width:256,height:256,userSelect:"none",pointerEvents:"none",filter:activeLayer.filter}}
+            />
           ))}
         </div>
-        <div style={{position:"absolute",inset:0,background:"linear-gradient(90deg, rgba(255,255,255,.18), rgba(255,255,255,.03))"}} />
+        <div style={{position:"absolute",inset:0,background:activeLayer.overlay}} />
         <svg viewBox="0 0 640 300" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>
           <defs>
             <filter id="ct-map-shadow-real" x="-20%" y="-20%" width="140%" height="140%">
@@ -756,6 +825,9 @@ function RouteMapPanelReal({ item, trips = [], onSelectTrip }) {
             <>
               <path d={routePath} fill="none" stroke="rgba(15,118,110,.30)" strokeWidth="9" strokeLinecap="round" filter="url(#ct-map-shadow-real)" />
               <path d={routePath} fill="none" stroke="rgba(20,184,166,.90)" strokeWidth="4" strokeLinecap="round" strokeDasharray={hasGps ? "0" : "9 9"} />
+              {mapLayer === "traffic" && (
+                <path d={routePath} fill="none" stroke="#f97316" strokeWidth="6" strokeLinecap="round" strokeDasharray="18 13" opacity=".78" />
+              )}
               <circle cx={start.x} cy={start.y} r="10" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
               <circle cx={end.x} cy={end.y} r="10" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
             </>
@@ -800,9 +872,9 @@ function RouteMapPanelReal({ item, trips = [], onSelectTrip }) {
           <button onClick={() => setMapZoomDelta(z => Math.min(3, z + 1))} style={{width:34,height:32,border:"none",borderBottom:"1px solid rgba(148,163,184,.22)",background:"transparent",fontSize:18,fontWeight:900,cursor:"pointer",color:"#334155"}}>+</button>
           <button onClick={() => setMapZoomDelta(z => Math.max(-2, z - 1))} style={{width:34,height:32,border:"none",background:"transparent",fontSize:20,fontWeight:900,cursor:"pointer",color:"#334155"}}>-</button>
         </div>
-        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{position:"absolute",right:56,bottom:14,fontSize:9,color:"rgba(15,23,42,.55)",background:"rgba(255,255,255,.82)",border:"1px solid rgba(148,163,184,.24)",borderRadius:6,padding:"3px 6px",textDecoration:"none",zIndex:6}}>
-          Â© OpenStreetMap
-        </a>
+        <span style={{position:"absolute",right:56,bottom:14,fontSize:9,color:"rgba(15,23,42,.62)",background:"rgba(255,255,255,.86)",border:"1px solid rgba(148,163,184,.24)",borderRadius:6,padding:"3px 6px",zIndex:6}}>
+          Datos mapa: {activeLayer.attribution}
+        </span>
         <div style={{position:"absolute",left:14,bottom:14,width:250,background:"rgba(255,255,255,.92)",color:"#0f172a",border:"1px solid rgba(148,163,184,.28)",borderRadius:10,padding:"10px 12px",boxShadow:"0 10px 30px rgba(15,23,42,.10)",zIndex:6}}>
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"#0f766e",marginBottom:5}}>{hasGps ? "Ubicacion actual" : "Ruta"}</div>
           <div style={{fontSize:12,fontWeight:900,lineHeight:1.35}}>{route.origen || "Origen"} -> {route.destino || "Destino"}</div>
@@ -811,10 +883,15 @@ function RouteMapPanelReal({ item, trips = [], onSelectTrip }) {
             <button onClick={()=>abrirItem(normalizedItem || item)} style={{border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#0f766e",borderRadius:7,padding:"6px 9px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               Ver detalle
             </button>
-            <a href={osmHref} target="_blank" rel="noreferrer" style={{border:"1px solid rgba(59,130,246,.25)",background:"rgba(59,130,246,.08)",color:"#2563eb",borderRadius:7,padding:"6px 9px",fontSize:11,fontWeight:900,textDecoration:"none"}}>
-              Abrir mapa
-            </a>
+            <button onClick={() => setMapZoomDelta(0)} style={{border:"1px solid rgba(59,130,246,.25)",background:"rgba(59,130,246,.08)",color:"#2563eb",borderRadius:7,padding:"6px 9px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Centrar
+            </button>
           </div>
+          {mapLayer === "traffic" && (
+            <div style={{fontSize:10,color:"#b45309",fontWeight:800,marginTop:7}}>
+              Trafico mostrado como capa operativa interna.
+            </div>
+          )}
         </div>
       </div>
 
@@ -931,6 +1008,7 @@ export default function ControlTower() {
   const [loading, setLoading] = useState(true);
   const [statusPicker, setStatusPicker] = useState(null);
   const [selectedTrip, setSelectedTrip] = useState(null);
+  const [mapLayer, setMapLayer] = useState("streets");
 
   useEffect(() => {
     let alive = true;
@@ -1096,7 +1174,7 @@ export default function ControlTower() {
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12,marginBottom:12}}>
           <div style={{display:"grid",gap:12}}>
             <FlowPanel flujo={flujo} selectedKey={statusPicker?.key || selectedTrip?.estado || ""} onStatusClick={abrirEstadoFlujo} />
-            {mapItem && <RouteMapPanelReal item={mapItem} trips={mapTrips} onSelectTrip={seleccionarViajeMapa} />}
+            {mapItem && <RouteMapPanelReal item={mapItem} trips={mapTrips} onSelectTrip={seleccionarViajeMapa} mapLayer={mapLayer} onMapLayerChange={setMapLayer} />}
             <div style={{...S.card}}>
               <div style={S.sec}>Flota, recursos y señales</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>

@@ -12,6 +12,7 @@ import { getColaboradores, crearColaborador, editarColaborador,
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { readRuntimeFocus, clearRuntimeFocus } from "../services/runtimeFocus";
+import { GeoFields } from "../components/GeoFields";
 
 const S={
   page:{flex:1,padding:"24px 28px"},
@@ -1268,6 +1269,12 @@ function ModalColaborador({ editando, onClose, onSaved }) {
           <div><label style={S.lbl}>Nº / Piso</label><input style={S.inp} value={form.num_ext||""} onChange={f("num_ext")} placeholder="12, 3ºB"/></div>
           <div><label style={S.lbl}>Código postal</label><input style={S.inp} value={form.codigo_postal||""} onChange={f("codigo_postal")} placeholder="28001"/></div>
           <div><label style={S.lbl}>Ciudad</label><input style={S.inp} value={form.ciudad||""} onChange={f("ciudad")}/></div>
+          <GeoFields
+            values={form}
+            onChange={(campo, valor) => setForm(p => ({ ...p, [campo]: valor }))}
+            inputStyle={S.inp}
+            labelStyle={S.lbl}
+          />
           <div><label style={S.lbl}>Persona de contacto</label><input style={S.inp} value={form.contacto_nombre||""} onChange={f("contacto_nombre")}/></div>
           <div><label style={S.lbl}>Tel. contacto</label><input style={S.inp} value={form.contacto_telefono||""} onChange={f("contacto_telefono")}/></div>
           <div><label style={S.lbl}>Forma de pago</label>

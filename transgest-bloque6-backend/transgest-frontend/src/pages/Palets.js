@@ -9,6 +9,7 @@ import {
 } from "../services/api";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
+import { GeoFields } from "../components/GeoFields";
 
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtN = n => Number(n||0).toLocaleString("es-ES",{maximumFractionDigits:0});
@@ -1903,6 +1904,7 @@ function AlmacenCliente() {
         telefono: formCli.telefono||"",
         email:  formCli.email||"",
         ciudad: formCli.ciudad||"",
+        provincia: formCli.provincia||"",
         pais:   formCli.pais||"España",
         tipo_iva: "21",
         activo: true,
@@ -2179,7 +2181,6 @@ ${dep.notas?`<div style="font-size:11px;color:#555;margin-top:8px">Notas: ${dep.
                     ["telefono","Telefono","+34 91 000 00 00"],
                     ["email","Email","info@empresa.com"],
                     ["ciudad","Ciudad","Madrid"],
-                    ["pais","Pais","España"],
                   ].map(([k,l,ph])=>(
                     <div key={k} style={k==="nombre"?{gridColumn:"1/-1"}:{}}>
                       <label style={lbl}>{l}</label>
@@ -2188,6 +2189,12 @@ ${dep.notas?`<div style="font-size:11px;color:#555;margin-top:8px">Notas: ${dep.
                         placeholder={ph}/>
                     </div>
                   ))}
+                  <GeoFields
+                    values={formCli}
+                    onChange={(campo, valor) => setFormCli(prev => ({ ...prev, [campo]: valor }))}
+                    inputStyle={inp}
+                    labelStyle={lbl}
+                  />
                 </div>
                 <div style={{display:"flex",gap:8,marginTop:12,justifyContent:"flex-end"}}>
                   <button onClick={()=>setCrearCliente(false)}

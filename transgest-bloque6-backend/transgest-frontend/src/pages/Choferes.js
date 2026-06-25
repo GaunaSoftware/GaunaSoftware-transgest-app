@@ -5,6 +5,7 @@ import { getChoferes, crearChofer, editarChofer, getVehiculos, getNominasEmitida
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
+import { GeoFields } from "../components/GeoFields";
 
 // ---------------------------------------------------------------------------
 const EMPTY_TALLER_CHOFER = Object.freeze({ stock: [], entregas_equipos_choferes: {} });
@@ -757,14 +758,12 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
                   <label style={S.lbl}>Código Postal *</label>
                   <input style={S.inp} value={form.cp||""} onChange={f("cp")} placeholder="28001"/>
                 </div>
-                <div>
-                  <label style={S.lbl}>Provincia *</label>
-                  <input style={S.inp} value={form.provincia||""} onChange={f("provincia")} placeholder="Madrid"/>
-                </div>
-                <div>
-                  <label style={S.lbl}>País</label>
-                  <input style={S.inp} value={form.pais||""} onChange={f("pais")} placeholder="España"/>
-                </div>
+                <GeoFields
+                  values={form}
+                  onChange={(campo, valor) => setForm(p => ({ ...p, [campo]: valor }))}
+                  inputStyle={S.inp}
+                  labelStyle={S.lbl}
+                />
               </div>
 
               <div style={S.sec}>Alta / Baja</div>

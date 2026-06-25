@@ -123,6 +123,8 @@ export function getExternalImportBatches(filters = {}) {
   return apiFetch(`/external-import-batches${suffix}`);
 }
 
+export const getExternalImportBatchPreview = batchId => apiFetch(`/external-import-batches/${batchId}/preview`);
+
 export const createExternalImportBatch = data => apiFetch("/external-import-batches", {
   method: "POST",
   body: data,

@@ -8,6 +8,7 @@ const BATCH_STATUSES = ["pending_review", "approved", "rejected", "cancelled"];
 const ROW_STATUSES = ["valid", "warning", "error"];
 const REVIEW_ACTIONS = ["approve", "reject", "cancel"];
 const MAX_ROWS = 500;
+const PARTY_TYPES = ["customer", "supplier", "customer_supplier", "employee", "tax_authority", "bank", "other"];
 
 function inputError(message, status = 400) {
   const error = new Error(message);
@@ -207,10 +208,50 @@ function nextBatchStatus(currentStatus, review) {
   return "cancelled";
 }
 
+function firstValue(payload = {}, keys = []) {
+  for (const key of keys) {
+    const value = payload[key];
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+  return "";
+}
+
+function normalizePartyType(value) {
+  const raw = normalizeHeader(value);
+  if (!raw) return "customer";
+  if (["cliente", "customer"].includes(raw)) return "customer";
+  if (["proveedor", "supplier", "vendor"].includes(raw)) return "supplier";
+  if (["cliente_proveedor", "customer_supplier", "ambos"].includes(raw)) return "customer_supplier";
+  if (["empleado", "employee"].includes(raw)) return "employee";
+  if (["administracion", "tax_authority", "hacienda"].includes(raw)) return "tax_authority";
+  if (["banco", "bank"].includes(raw)) return "bank";
+  if (["otro", "other"].includes(raw)) return "other";
+  return raw;
+}
+
+function mapPartyStagingRow(row) {
+  const payload = row.normalized_payload || row.raw_payload || {};
+  const partyType = normalizePartyType(firstValue(payload, ["party_type", "tipo", "tipo_tercero"]));
+  const mapped = {
+    party_type: partyType,
+    legal_name: firstValue(payload, ["legal_name", "nombre_fiscal", "razon_social", "nombre", "name"]),
+    tax_id: firstValue(payload, ["tax_id", "nif_cif", "nif", "cif", "vat"]),
+    email: firstValue(payload, ["email", "correo", "correo_electronico"]),
+    phone: firstValue(payload, ["phone", "telefono", "tel"]),
+  };
+  const errors = [];
+  const warnings = [];
+  if (!mapped.legal_name) errors.push({ code: "missing_legal_name", message: "Falta nombre fiscal" });
+  if (!PARTY_TYPES.includes(mapped.party_type)) errors.push({ code: "unsupported_party_type", message: `Tipo de tercero no soportado: ${mapped.party_type}` });
+  if (!mapped.tax_id) warnings.push({ code: "missing_tax_id", message: "Sin NIF/CIF para detectar duplicados fiscales" });
+  return { mapped, errors, warnings };
+}
+
 module.exports = {
   BATCH_STATUSES,
   IMPORT_TYPES,
   ROW_STATUSES,
+  mapPartyStagingRow,
   normalizeExternalImportBatchInput,
   normalizeExternalImportQuery,
   normalizeExternalImportReviewInput,

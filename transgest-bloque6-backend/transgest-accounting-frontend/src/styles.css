@@ -163,6 +163,17 @@ dd { margin: 0; word-break: break-word; }
 .external-import-actions button { height: 30px; border: 0; border-radius: 6px; padding: 0 10px; background: #7c3aed; color: #fff; font-weight: 800; cursor: pointer; }
 .external-import-actions button.secondary { border: 1px solid var(--line); background: #fff; color: var(--text); }
 .external-import-actions button:disabled { opacity: .45; cursor: default; }
+.external-import-preview { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: #fff; }
+.external-import-preview-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.external-import-preview-heading > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.external-import-preview-heading span, .external-import-preview-row small { color: var(--muted); overflow-wrap: anywhere; }
+.external-import-preview-heading button { height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; background: #fff; color: var(--text); font-weight: 800; cursor: pointer; }
+.external-import-preview-summary { display: flex; gap: 8px; flex-wrap: wrap; }
+.external-import-preview-summary span { border: 1px solid #d8e3f2; border-radius: 999px; padding: 4px 9px; background: #f8fbff; color: var(--text); font-size: 12px; font-weight: 800; }
+.external-import-preview-list { display: grid; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.external-import-preview-row { display: grid; grid-template-columns: minmax(180px, 1.2fr) 90px minmax(220px, 1fr); gap: 10px; align-items: center; padding: 9px 10px; border-top: 1px solid var(--line); }
+.external-import-preview-row:first-child { border-top: 0; }
+.external-import-preview-row > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .form-grid { display: grid; grid-template-columns: 1fr 180px 180px auto; gap: 12px; align-items: end; }
 .form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; }
 .form-grid input { height: 38px; border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; color: var(--text); background: #fff; }
@@ -562,7 +573,7 @@ dd { margin: 0; word-break: break-word; }
   .work-grid { grid-template-columns: 1fr; }
   .work-list > button { grid-template-columns: 28px 1fr; }
   .work-list > button small { grid-column: 2; }
-  .account-filters, .account-create, .accounts-row, .party-filters, .party-create, .party-row, .maturity-filters, .maturity-create, .maturity-row, .bank-filters, .bank-account-filters, .integration-filters, .advisor-package-filters, .external-import-create, .external-import-filters, .external-import-row, .bank-forms, .bank-account-create, .bank-transaction-create, .bank-import-create, .bank-account-row, .bank-import-history-row, .bank-transaction-row, .bank-reconcile-form, .template-create, .template-row, .conflict-list > div { grid-template-columns: 1fr; }
+  .account-filters, .account-create, .accounts-row, .party-filters, .party-create, .party-row, .maturity-filters, .maturity-create, .maturity-row, .bank-filters, .bank-account-filters, .integration-filters, .advisor-package-filters, .external-import-create, .external-import-filters, .external-import-row, .external-import-preview-row, .bank-forms, .bank-account-create, .bank-transaction-create, .bank-import-create, .bank-account-row, .bank-import-history-row, .bank-transaction-row, .bank-reconcile-form, .template-create, .template-row, .conflict-list > div { grid-template-columns: 1fr; }
   .accounts-row, .party-row, .maturity-row, .bank-account-row, .bank-transaction-row, .template-row, .journal-row, .journal-line, .detail-line, .source-row, .source-link-row, .trial-row, .ledger-row, .statement-row { min-width: 0; }
   .bank-accounts-heading { align-items: flex-start; flex-direction: column; }
   .account-create .form-title, .party-create .form-title, .maturity-create .form-title, .bank-account-create .form-title, .bank-transaction-create .form-title, .bank-import-create .form-title, .template-create .form-title { grid-column: auto; align-items: flex-start; flex-direction: column; }

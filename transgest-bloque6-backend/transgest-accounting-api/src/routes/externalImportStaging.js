@@ -7,6 +7,7 @@ const {
   normalizeExternalImportBatchInput,
   normalizeExternalImportQuery,
   normalizeExternalImportReviewInput,
+  mapPartyStagingRow,
   nextBatchStatus,
 } = require("../domain/externalImportStaging");
 const { enqueueOutboxEvent } = require("../services/outbox");
@@ -85,6 +86,104 @@ router.get("/external-import-batches/:id", requirePermission("external_imports.r
         [req.params.id, selected.company_id]
       );
       return { batch: batch.rows[0], rows: rows.rows };
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/external-import-batches/:id/preview", requirePermission("external_imports.read"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const result = await db.transaction(async client => {
+      const batchResult = await client.query(
+        `SELECT *
+           FROM ${q("external_import_batches")}
+          WHERE id=$1 AND company_id=$2`,
+        [req.params.id, selected.company_id]
+      );
+      if (!batchResult.rows.length) {
+        const error = new Error("Lote staged no encontrado para la empresa seleccionada");
+        error.status = 404;
+        throw error;
+      }
+      const batch = batchResult.rows[0];
+      const rowsResult = await client.query(
+        `SELECT id, row_number, row_hash, status, raw_payload, normalized_payload, errors, warnings
+           FROM ${q("external_import_rows")}
+          WHERE batch_id=$1 AND company_id=$2
+          ORDER BY row_number`,
+        [batch.id, selected.company_id]
+      );
+      if (batch.import_type !== "parties") {
+        return {
+          batch,
+          supported: false,
+          summary: { rows: rowsResult.rows.length, create: 0, conflict: 0, error: rowsResult.rows.length },
+          rows: rowsResult.rows.map(row => ({
+            row_id: row.id,
+            row_number: row.row_number,
+            action: "unsupported",
+            errors: [{ code: "unsupported_import_type", message: "La previsualizacion especifica solo soporta terceros en esta fase" }],
+            warnings: row.warnings || [],
+            mapped: null,
+          })),
+        };
+      }
+
+      const sourceSystem = batch.provider_id;
+      const sourceIds = rowsResult.rows.map(row => row.row_hash);
+      const taxIds = rowsResult.rows
+        .map(row => mapPartyStagingRow(row).mapped.tax_id)
+        .filter(Boolean);
+      const sourceConflicts = sourceIds.length ? await client.query(
+        `SELECT source_party_id, id, legal_name, tax_id
+           FROM ${q("accounting_parties")}
+          WHERE company_id=$1 AND source_system=$2 AND source_party_id=ANY($3::text[])`,
+        [selected.company_id, sourceSystem, sourceIds]
+      ) : { rows: [] };
+      const taxConflicts = taxIds.length ? await client.query(
+        `SELECT id, legal_name, tax_id
+           FROM ${q("accounting_parties")}
+          WHERE company_id=$1 AND tax_id=ANY($2::text[])`,
+        [selected.company_id, taxIds]
+      ) : { rows: [] };
+      const bySource = new Map(sourceConflicts.rows.map(row => [row.source_party_id, row]));
+      const byTax = new Map(taxConflicts.rows.map(row => [row.tax_id, row]));
+
+      const previewRows = rowsResult.rows.map(row => {
+        const mapped = mapPartyStagingRow(row);
+        const sourceConflict = bySource.get(row.row_hash) || null;
+        const taxConflict = mapped.mapped.tax_id ? byTax.get(mapped.mapped.tax_id) || null : null;
+        const conflicts = [
+          ...(sourceConflict ? [{ code: "source_exists", party: sourceConflict }] : []),
+          ...(taxConflict ? [{ code: "tax_id_exists", party: taxConflict }] : []),
+        ];
+        const action = mapped.errors.length ? "error" : conflicts.length ? "conflict" : "create";
+        return {
+          row_id: row.id,
+          row_number: row.row_number,
+          action,
+          mapped: mapped.mapped,
+          errors: [...(row.errors || []), ...mapped.errors],
+          warnings: [...(row.warnings || []), ...mapped.warnings],
+          conflicts,
+        };
+      });
+
+      return {
+        batch,
+        supported: true,
+        summary: {
+          rows: previewRows.length,
+          create: previewRows.filter(row => row.action === "create").length,
+          conflict: previewRows.filter(row => row.action === "conflict").length,
+          error: previewRows.filter(row => row.action === "error").length,
+        },
+        rows: previewRows,
+      };
     });
     res.json(result);
   } catch (error) {

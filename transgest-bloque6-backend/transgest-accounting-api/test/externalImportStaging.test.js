@@ -5,6 +5,7 @@ const {
   normalizeExternalImportQuery,
   normalizeExternalImportReviewInput,
   nextBatchStatus,
+  mapPartyStagingRow,
   parseGenericCsv,
 } = require("../src/domain/externalImportStaging");
 
@@ -59,4 +60,28 @@ test("consulta y revision de lotes limitan filtros y transiciones", () => {
   assert.equal(nextBatchStatus("pending_review", { action: "approve" }), "approved");
   assert.equal(nextBatchStatus("pending_review", { action: "cancel" }), "cancelled");
   assert.throws(() => nextBatchStatus("approved", { action: "reject" }), /Solo se pueden revisar lotes pendientes/);
+});
+
+test("mapPartyStagingRow mapea alias habituales y detecta errores", () => {
+  const mapped = mapPartyStagingRow({
+    raw_payload: {
+      nombre: "Cliente Demo",
+      nif: "B00000000",
+      tipo: "Proveedor",
+      correo: "demo@example.com",
+      telefono: "600000000",
+    },
+  });
+  assert.deepEqual(mapped.mapped, {
+    party_type: "supplier",
+    legal_name: "Cliente Demo",
+    tax_id: "B00000000",
+    email: "demo@example.com",
+    phone: "600000000",
+  });
+  assert.equal(mapped.errors.length, 0);
+
+  const invalid = mapPartyStagingRow({ raw_payload: { tipo: "desconocido" } });
+  assert.equal(invalid.errors.some(error => error.code === "missing_legal_name"), true);
+  assert.equal(invalid.errors.some(error => error.code === "unsupported_party_type"), true);
 });

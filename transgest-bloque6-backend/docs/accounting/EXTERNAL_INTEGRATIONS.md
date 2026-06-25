@@ -20,6 +20,7 @@ No existe una fuente publica unica y auditada que ordene con precision los 10 pr
 - Toda salida contable debe generarse desde casos de uso explicitos, con trazabilidad, idempotencia y auditoria.
 - Toda entrada desde terceros debe pasar por una zona de staging, validacion, deduplicacion y aprobacion manual antes de cualquier importacion real.
 - El staging inicial de entradas externas esta implementado en `/api/v1/external-import-batches`: crea lotes, guarda filas crudas/normalizadas, calcula hashes, bloquea duplicados por lote y registra auditoria/outbox. No aplica datos contables.
+- La previsualizacion inicial de staging esta implementada en `/api/v1/external-import-batches/:id/preview` para terceros: mapea alias habituales, detecta campos obligatorios pendientes y senala posibles duplicados por origen o NIF/CIF antes de aprobar el lote. No crea ni modifica terceros.
 - Para programas con API, usar outbox transaccional, workers idempotentes, reintentos controlados y mapeo versionado por proveedor.
 - Para programas on-premise o cerrados, priorizar paquetes CSV/XLSX/PDF auditables y confirmados por asesoria.
 - Facturacion fiscal, VERI*FACTU, factura electronica B2B y SII siguen siendo ambitos separados. No se debe delegar emision fiscal en un conector externo sin decision expresa de arquitectura y revision legal.
@@ -73,6 +74,8 @@ Los informes contables requieren `fiscal_year_id` valido. Las descargas usan per
 ## Staging de importaciones externas
 
 El staging de entrada permite preparar CSV externos sin escribir en tablas contables operativas. Cada lote queda en `external_import_batches` con proveedor, tipo, formato, hash, estado y conteos. Cada fila queda en `external_import_rows` con `raw_payload`, `normalized_payload`, errores, avisos y hash de fila.
+
+La vista previa de lotes de terceros clasifica cada fila como `create`, `conflict` o `error`. Los conflictos iniciales se comprueban contra `accounting_parties` por `source_system + source_party_id` y por `tax_id`. Esta fase solo informa y ayuda a la revision manual; la aplicacion definitiva a terceros queda pendiente de una entrega posterior con caso de uso transaccional, auditoria y rollback operativo.
 
 Estados iniciales:
 

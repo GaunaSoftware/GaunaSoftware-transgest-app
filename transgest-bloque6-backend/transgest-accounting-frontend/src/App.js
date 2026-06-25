@@ -33,6 +33,7 @@ import {
   getDashboard,
   getExternalIntegrations,
   getExternalImportBatches,
+  getExternalImportBatchPreview,
   getFiscalYears,
   getMe,
   getOutboxEvents,
@@ -210,6 +211,13 @@ function externalImportStatusTone(status) {
   if (status === "pending_review") return "warning";
   if (status === "rejected") return "danger";
   return "neutral";
+}
+
+function formatExternalImportIssue(issue) {
+  if (!issue) return "";
+  if (typeof issue === "string") return issue;
+  if (issue.party) return `${issue.code}: ${issue.party.legal_name || issue.party.tax_id || issue.party.id}`;
+  return issue.message || issue.code || JSON.stringify(issue);
 }
 
 function StatusBadge({ text, tone = "neutral" }) {
@@ -601,6 +609,7 @@ export default function App() {
     csv_text: "nombre;nif\nCliente Demo;B00000000",
   });
   const [externalImportReview, setExternalImportReview] = useState(null);
+  const [externalImportPreview, setExternalImportPreview] = useState(null);
 
   const selectedCompany = useMemo(
     () => companies.find(c => c.id === selectedCompanyId) || null,
@@ -1446,6 +1455,7 @@ export default function App() {
       setLedgerAccountSummary(null);
       setExternalImportBatches([]);
       setExternalImportReview(null);
+      setExternalImportPreview(null);
     } catch (err) {
       setError(err);
     }
@@ -1589,6 +1599,16 @@ export default function App() {
       action,
       reason: action === "approve" ? "Validado para siguiente fase" : "Revision manual pendiente",
     });
+  }
+
+  async function handleExternalImportPreview(batch) {
+    setExternalImportStatus(null);
+    try {
+      const result = await getExternalImportBatchPreview(batch.id);
+      setExternalImportPreview(result);
+    } catch (err) {
+      setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    }
   }
 
   async function handleExternalImportReview(event) {
@@ -3942,18 +3962,61 @@ export default function App() {
                             <span>{batch.warning_count} avisos</span>
                           </div>
                           <StatusBadge tone={externalImportStatusTone(batch.status)} text={externalImportStatusLabels[batch.status] || batch.status} />
-                          {canWriteExternalImports && batch.status === "pending_review" ? (
-                            <div className="external-import-actions">
-                              <button type="button" disabled={Number(batch.error_count) > 0} onClick={() => startExternalImportReview(batch, "approve")}>Aprobar</button>
-                              <button type="button" className="secondary" onClick={() => startExternalImportReview(batch, "reject")}>Rechazar</button>
-                              <button type="button" className="secondary" onClick={() => startExternalImportReview(batch, "cancel")}>Cancelar</button>
-                            </div>
-                          ) : <span />}
+                          <div className="external-import-actions">
+                            <button type="button" className="secondary" onClick={() => handleExternalImportPreview(batch)}>Previsualizar</button>
+                            {canWriteExternalImports && batch.status === "pending_review" && (
+                              <>
+                                <button type="button" disabled={Number(batch.error_count) > 0} onClick={() => startExternalImportReview(batch, "approve")}>Aprobar</button>
+                                <button type="button" className="secondary" onClick={() => startExternalImportReview(batch, "reject")}>Rechazar</button>
+                                <button type="button" className="secondary" onClick={() => startExternalImportReview(batch, "cancel")}>Cancelar</button>
+                              </>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <EmptyState title="Sin lotes staged" detail="Todavia no hay ficheros externos preparados para revision." />
+                  )}
+                  {externalImportPreview && (
+                    <div className="external-import-preview">
+                      <div className="external-import-preview-heading">
+                        <div>
+                          <strong>Vista previa del lote</strong>
+                          <span>{externalImportPreview.batch.original_filename || externalImportPreview.batch.provider_id}</span>
+                        </div>
+                        <button type="button" className="secondary" onClick={() => setExternalImportPreview(null)}>Cerrar</button>
+                      </div>
+                      {!externalImportPreview.supported ? (
+                        <div className="scope-note">
+                          Tipo no soportado todavia para preview: {externalImportPreview.reason || externalImportPreview.batch.import_type}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="external-import-preview-summary">
+                            <span>{externalImportPreview.summary.rows} filas</span>
+                            <span>{externalImportPreview.summary.create} nuevas</span>
+                            <span>{externalImportPreview.summary.conflict} conflictos</span>
+                            <span>{externalImportPreview.summary.error} errores</span>
+                          </div>
+                          <div className="external-import-preview-list">
+                            {externalImportPreview.rows.slice(0, 30).map(row => (
+                              <div className="external-import-preview-row" key={row.row_id}>
+                                <div>
+                                  <strong>{row.mapped.legal_name || "Sin nombre fiscal"}</strong>
+                                  <small>{row.mapped.tax_id || "Sin NIF/CIF"} | {row.mapped.party_type || "tipo pendiente"}</small>
+                                </div>
+                                <StatusBadge
+                                  tone={row.action === "create" ? "ok" : row.action === "conflict" ? "warning" : "danger"}
+                                  text={row.action === "create" ? "Nueva" : row.action === "conflict" ? "Conflicto" : "Error"}
+                                />
+                                <small>{[...row.errors, ...row.warnings, ...row.conflicts].map(formatExternalImportIssue).filter(Boolean).join(" | ") || "Lista para siguiente fase"}</small>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   )}
                   {externalImportReview && (
                     <form className="period-action-form" onSubmit={handleExternalImportReview}>

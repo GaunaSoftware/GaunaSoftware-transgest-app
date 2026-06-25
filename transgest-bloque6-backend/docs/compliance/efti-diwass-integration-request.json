@@ -1,0 +1,77 @@
+{
+  "schema": "transgest.integration_request.efti_diwass.v1",
+  "prepared_at": "2026-06-25",
+  "product": {
+    "name": "TransGest",
+    "production_base_url": "https://app.gauna.es",
+    "role_requested": "TMS master system integrated with certified eCMR/eFTI/DIWASS provider",
+    "strategy_recommended": "certified_provider_first"
+  },
+  "requested_scopes": [
+    "deca_dcd",
+    "ecmr",
+    "efti",
+    "diwass_eannex_vii",
+    "eidas_advanced_signature"
+  ],
+  "current_capabilities": {
+    "deca_dcd_pdf": true,
+    "tokenized_public_url": true,
+    "qr_or_numeric_control_code": true,
+    "sha256_hashes": true,
+    "document_repository": true,
+    "document_versions": true,
+    "audit_logs": true,
+    "efti_internal_payload": true,
+    "ecmr_internal_payload": true,
+    "diwass_internal_payload": true,
+    "regulatory_dossier_pdf": true,
+    "transmission_draft": true,
+    "external_provider_connected": false,
+    "official_certification_granted": false
+  },
+  "available_endpoints": {
+    "document_control": "GET /api/v1/pedidos/:id/documento-control-digital",
+    "generate_deca": "POST /api/v1/pedidos/:id/documento-control-digital/generar",
+    "document_control_export": "GET /api/v1/pedidos/:id/documento-control-digital/export",
+    "signature_package": "GET /api/v1/pedidos/:id/documento-control-digital/firma-paquete",
+    "regulatory_package": "GET /api/v1/pedidos/:id/regulatory-core/export",
+    "regulatory_dossier_pdf": "GET /api/v1/pedidos/:id/regulatory-core/dossier.pdf",
+    "regulatory_payload": "GET /api/v1/pedidos/:id/regulatory-core/payload/:type",
+    "transmission_draft": "POST /api/v1/pedidos/:id/regulatory-core/transmission-draft",
+    "deca_repository": "GET /api/v1/pedidos/documento-control-repositorio"
+  },
+  "payload_types": [
+    "efti",
+    "ecmr",
+    "diwass"
+  ],
+  "security_controls": {
+    "tenant_isolation": "empresa_id",
+    "internal_auth": "JWT/RBAC",
+    "public_document_access": "HMAC token and verification code",
+    "cache_policy": "no-store",
+    "indexing_policy": "noindex",
+    "integrity": "SHA-256 hashes for documents, payloads and packages"
+  },
+  "pending_external_decisions": [
+    "certified provider selection",
+    "sandbox credentials",
+    "official payload mapping",
+    "signature/eIDAS provider workflow",
+    "webhook and status mapping",
+    "DIWASS/eAnnex VII official process",
+    "legal retention responsibilities",
+    "production go-live criteria"
+  ],
+  "attachments_to_send": [
+    "EFTI_DIWASS_CERTIFICATION_REQUEST_PACK.md",
+    "EFTI_DIWASS_TECHNICAL_EVIDENCE.md",
+    "EFTI_DIWASS_PROVIDER_QUESTIONNAIRE.md",
+    "EFTI_DIWASS_CERTIFICATION_TEST_PLAN.md",
+    "sample-regulatory-package.json",
+    "sample-efti-payload.json",
+    "sample-diwass-payload.json",
+    "sample-regulatory-dossier.pdf"
+  ]
+}

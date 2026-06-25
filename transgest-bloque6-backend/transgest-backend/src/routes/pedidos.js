@@ -8,7 +8,7 @@ const { getPaginationParams, paginatedResponse } = require("../services/paginate
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
 const { crearNotificacion } = require("../services/notificaciones");
-const { buildDocumentoControlPayload, buildDocumentoControlExpediente, buildDocumentoControlStructuredExport, buildDocumentoControlSignaturePackage, buildDocumentoControlHtml, generateDocumentoControlPdf, buildDocumentoControlFilename, buildDocumentoControlExportFilename, verifyPublicToken, verifyPublicVerificationCode } = require("../services/documentoControl");
+const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload, buildDocumentoControlExpediente, buildDocumentoControlStructuredExport, buildDocumentoControlSignaturePackage, buildDocumentoControlHtml, generateDocumentoControlPdf, buildDocumentoControlFilename, buildDocumentoControlExportFilename, verifyPublicToken, verifyPublicVerificationCode } = require("../services/documentoControl");
 const {
   syncPedidoRegulatoryCore,
   getPedidoRegulatoryCoreSummary,
@@ -762,6 +762,170 @@ function ageHours(value) {
   return Math.max(0, (Date.now() - t) / 36e5);
 }
 
+function lastPedidoStopWithCoords(pedido = {}) {
+  const stops = normalizePedidoJsonList(pedido.puntos_descarga);
+  for (let i = stops.length - 1; i >= 0; i -= 1) {
+    const stop = stops[i] || {};
+    const lat = Number(stop.lat ?? stop.latitude);
+    const lng = Number(stop.lng ?? stop.lon ?? stop.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, text: stopDireccion(stop) };
+  }
+  return null;
+}
+
+function combinePedidoDateTime(dateValue, timeValue) {
+  if (!dateValue) return null;
+  const datePart = dateOnly(dateValue);
+  if (!datePart) return null;
+  const rawTime = String(timeValue || "").trim();
+  const match = /^(\d{1,2}):(\d{2})/.exec(rawTime);
+  const timePart = match ? `${match[1].padStart(2, "0")}:${match[2]}:00` : "12:00:00";
+  const date = new Date(`${datePart}T${timePart}`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function estimateTruckTravelMinutes(distanceKmValue) {
+  const km = Number(distanceKmValue);
+  if (!Number.isFinite(km) || km < 0) return null;
+  const driving = (km / 70) * 60;
+  const buffer = km > 250 ? 45 : km > 100 ? 30 : 15;
+  return Math.max(5, Math.round(driving + buffer));
+}
+
+function buildRepositioningPlan({ vehicle, originCoord, previousTrip, targetPedido }) {
+  const now = new Date();
+  const currentLocation = pickVehiclePlanningLocation(vehicle);
+  const previousCoord = previousTrip ? lastPedidoStopWithCoords(previousTrip) : null;
+  const previousFinishAt = previousTrip ? combinePedidoDateTime(previousTrip.fecha_descarga || previousTrip.fecha_entrega || previousTrip.fecha_carga, previousTrip.hora_descarga) : null;
+  const fromLocation = previousCoord || currentLocation;
+  const source = previousCoord ? "fin_viaje_asignado" : (currentLocation.priority || "sin_posicion");
+  const distance = distanceKm(fromLocation, originCoord);
+  const travelMin = estimateTruckTravelMinutes(distance);
+  const departureBase = previousFinishAt && previousFinishAt > now ? previousFinishAt : now;
+  const arrivalAt = travelMin !== null ? new Date(departureBase.getTime() + travelMin * 60000) : null;
+  const targetLoadAt = combinePedidoDateTime(targetPedido?.fecha_carga || targetPedido?.fecha_pedido, targetPedido?.hora_carga);
+  return {
+    source,
+    source_label: previousCoord
+      ? `Fin previsto del viaje ${previousTrip.numero || ""}`.trim()
+      : (currentLocation.priority === "gps_api" ? "Posicion GPS actual" : currentLocation.priority === "app_chofer" ? "Ultima posicion app chofer" : "Ultima posicion conocida"),
+    from_text: previousCoord?.text || currentLocation.text || "",
+    from_recorded_at: previousCoord ? previousFinishAt?.toISOString() || null : currentLocation.recorded_at || null,
+    previous_trip: previousTrip ? {
+      id: previousTrip.id,
+      numero: previousTrip.numero,
+      destino: previousTrip.destino || "",
+      fecha_fin_prevista: previousFinishAt?.toISOString() || null,
+    } : null,
+    distancia_hasta_carga_km: distance === null ? null : Number(distance.toFixed(1)),
+    tiempo_hasta_carga_min: travelMin,
+    salida_considerada_at: travelMin !== null ? departureBase.toISOString() : null,
+    llegada_estimada_carga_at: arrivalAt?.toISOString() || null,
+    hora_carga_objetivo_at: targetLoadAt?.toISOString() || null,
+    llega_antes_hora_carga: arrivalAt && targetLoadAt ? arrivalAt <= targetLoadAt : null,
+    calculado_desde_hora_actual: !(previousFinishAt && previousFinishAt > now),
+  };
+}
+
+function parseMaybeJson(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  if (typeof value === "string") {
+    try { return JSON.parse(value); } catch { return null; }
+  }
+  return null;
+}
+
+function numericFromDeep(raw, keys = []) {
+  const stack = [raw].filter(Boolean);
+  const wanted = new Set(keys.map(k => String(k).toLowerCase()));
+  while (stack.length) {
+    const item = stack.pop();
+    if (!item || typeof item !== "object") continue;
+    for (const [key, value] of Object.entries(item)) {
+      const normalized = String(key).toLowerCase();
+      if (wanted.has(normalized) && Number.isFinite(Number(value))) return Number(value);
+      if (value && typeof value === "object") stack.push(value);
+    }
+  }
+  return null;
+}
+
+function jornadaEventosForPlanning(row = {}) {
+  const raw = row.jornada_eventos;
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function minutesBetweenSafe(a, b) {
+  const start = new Date(a).getTime();
+  const end = new Date(b).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return Math.round((end - start) / 60000);
+}
+
+function buildDriverHoursInfo(vehicle = {}) {
+  const raw = parseMaybeJson(vehicle.gps_log_raw);
+  const tachoRemaining = numericFromDeep(raw, [
+    "driving_remaining_min",
+    "remaining_driving_min",
+    "remainingdrivingminutes",
+    "driver_remaining_minutes",
+    "conduccion_restante_min",
+    "minutos_conduccion_restantes",
+  ]);
+  if (tachoRemaining !== null) {
+    return {
+      integrated: true,
+      source: vehicle.gps_log_provider || vehicle.gps_provider || "tacografo",
+      conduccion_disponible_min: Math.max(0, Math.round(tachoRemaining)),
+      jornada_disponible_min: numericFromDeep(raw, ["shift_remaining_min", "jornada_restante_min", "working_time_remaining_min"]),
+      avisos: [],
+    };
+  }
+  if (vehicle.jornada_estado !== "abierta") {
+    return {
+      integrated: false,
+      source: "sin_tacografo",
+      conduccion_disponible_min: null,
+      jornada_disponible_min: null,
+      avisos: ["Sin dato de tacografo integrado ni jornada abierta."],
+    };
+  }
+  const nowIso = new Date().toISOString();
+  const eventos = jornadaEventosForPlanning(vehicle);
+  const normalized = eventos.length ? eventos : [{ tipo: vehicle.actividad_actual || "otros_trabajos", at: vehicle.jornada_inicio_at || nowIso }];
+  let conduccion = 0;
+  let conduccionDesdePausa = 0;
+  for (let i = 0; i < normalized.length; i += 1) {
+    const ev = normalized[i] || {};
+    const nextAt = normalized[i + 1]?.at || nowIso;
+    const mins = minutesBetweenSafe(ev.at, nextAt);
+    if (ev.tipo === "conduccion") {
+      conduccion += mins;
+      conduccionDesdePausa += mins;
+    } else if (["pausa", "descanso"].includes(ev.tipo) && mins >= 45) {
+      conduccionDesdePausa = 0;
+    }
+  }
+  return {
+    integrated: false,
+    source: "app_chofer_estimado",
+    conduccion_disponible_min: Math.max(0, 540 - conduccion),
+    conduccion_continua_disponible_min: Math.max(0, 270 - conduccionDesdePausa),
+    jornada_disponible_min: null,
+    avisos: ["Estimacion interna por app; no sustituye el tacografo legal."],
+  };
+}
+
 function pickVehiclePlanningLocation(v = {}) {
   const gpsLat = Number(v.gps_log_lat);
   const gpsLng = Number(v.gps_log_lng);
@@ -811,7 +975,7 @@ function pickVehiclePlanningLocation(v = {}) {
   };
 }
 
-function scorePlanningCandidate({ pedido, vehicle, originCoord, originText, conflicts }) {
+function scorePlanningCandidate({ pedido, vehicle, originCoord, originText, conflicts, previousTrip = null }) {
   let score = 45;
   const reasons = [];
   const warnings = [];
@@ -822,6 +986,8 @@ function scorePlanningCandidate({ pedido, vehicle, originCoord, originText, conf
   const cargaMax = Number(vehicle.carga_max_kg || 0);
   const estado = String(vehicle.estado || "").toLowerCase();
   const fuente = String(location.priority || "");
+  const reposicionamiento = buildRepositioningPlan({ vehicle, originCoord, previousTrip, targetPedido: pedido });
+  const tachograph = buildDriverHoursInfo(vehicle);
 
   if (estado === "disponible") { score += 18; reasons.push("Vehiculo disponible."); }
   else if (["en_ruta", "ruta", "en ruta"].includes(estado)) { score -= 14; warnings.push("Vehiculo marcado en ruta."); }
@@ -873,6 +1039,18 @@ function scorePlanningCandidate({ pedido, vehicle, originCoord, originText, conf
     }
   }
 
+  if (reposicionamiento.distancia_hasta_carga_km !== null && reposicionamiento.distancia_hasta_carga_km !== distancia_origen_km) {
+    reasons.push(`Reposicionamiento desde ${reposicionamiento.source_label}: ${reposicionamiento.distancia_hasta_carga_km} km.`);
+  }
+  if (reposicionamiento.llega_antes_hora_carga === false) {
+    score -= 20;
+    warnings.push("La llegada estimada al punto de carga queda despues de la hora prevista.");
+  }
+  if (tachograph.conduccion_disponible_min !== null && reposicionamiento.tiempo_hasta_carga_min !== null && tachograph.conduccion_disponible_min < reposicionamiento.tiempo_hasta_carga_min) {
+    score -= 18;
+    warnings.push("Las horas de conduccion disponibles no cubren el reposicionamiento estimado.");
+  }
+
   const vehicleConflicts = Number(conflicts?.vehiculo || 0);
   const driverConflicts = Number(conflicts?.chofer || 0);
   if (vehicleConflicts > 0) {
@@ -896,6 +1074,8 @@ function scorePlanningCandidate({ pedido, vehicle, originCoord, originText, conf
     warnings,
     distancia_origen_km: distancia_origen_km === null ? null : Number(distancia_origen_km.toFixed(1)),
     location,
+    reposicionamiento,
+    tachograph,
   };
 }
 
@@ -2787,26 +2967,45 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
       res.setHeader("X-DCD-Repository-State", archived.estado || "archivado");
       res.setHeader("X-DCD-Archived", "true");
       res.setHeader("X-DCD-Public-Expires-At", archived.public_expires_at || "");
-      if (archived.pdf_base64 && !wantsHtml) {
-        const pdfBuffer = Buffer.from(archived.pdf_base64, "base64");
-        res.setHeader("Content-Disposition", `${isDownload ? "attachment" : "inline"}; filename="${archived.pdf_filename || archived.filename || "documento-control.pdf"}"`);
-        res.setHeader("Content-Type", archived.pdf_mime || "application/pdf");
-        return res.send(pdfBuffer);
+      const livePayload = buildDocumentoControlPublicPayload(buildDocumentoControlPayload({
+        empresaId,
+        pedido: ctx.pedido,
+        empresa: ctx.empresa,
+        cliente: ctx.cliente,
+        colaborador: ctx.colaborador,
+        appBaseUrl: publicBaseUrl(req),
+      }));
+      if (!wantsHtml) {
+        const pdf = await generateDocumentoControlPdf({
+          documento: livePayload.documento,
+          empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
+          generatedAt: new Date().toISOString(),
+          publicView: true,
+        });
+        res.setHeader("Content-Disposition", `${isDownload ? "attachment" : "inline"}; filename="${pdf.filename}"`);
+        res.setHeader("Content-Type", pdf.mime);
+        return res.send(pdf.buffer);
       }
       if (isDownload) {
         res.setHeader("Content-Disposition", `attachment; filename="${archived.filename || "documento-control.html"}"`);
       }
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(archived.html);
+      return res.send(buildDocumentoControlHtml({
+        documento: livePayload.documento,
+        empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
+        generatedAt: new Date().toISOString(),
+        autoPrint: isPrint,
+        publicView: true,
+      }));
     }
-    const payload = buildDocumentoControlPayload({
+    const payload = buildDocumentoControlPublicPayload(buildDocumentoControlPayload({
       empresaId,
       pedido: ctx.pedido,
       empresa: ctx.empresa,
       cliente: ctx.cliente,
       colaborador: ctx.colaborador,
       appBaseUrl: publicBaseUrl(req),
-    });
+    }));
     const eventoDcd = isDownload ? "documento_control.descargado" : isPrint ? "documento_control.impreso" : "documento_control.consultado";
     await logPedidoEvento(pedidoId, empresaId, eventoDcd, {
       source: "public_documento_control",
@@ -2825,6 +3024,7 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
         documento: payload.documento,
         empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
         generatedAt: new Date().toISOString(),
+        publicView: true,
       });
       res.setHeader("Content-Disposition", `${isDownload ? "attachment" : "inline"}; filename="${pdf.filename}"`);
       res.setHeader("Content-Type", pdf.mime);
@@ -2836,6 +3036,7 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
       empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
       generatedAt: new Date().toISOString(),
       autoPrint: isPrint,
+      publicView: true,
     }));
   } catch (e) {
     res.status(500).send(e.message);
@@ -4896,9 +5097,10 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
                 v.gps_provider, v.gps_external_id, v.gps_lat, v.gps_lng,
                 ch.id AS chofer_id_resuelto, ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos,
                 ch.telefono AS chofer_telefono, ch.vehiculo_id AS chofer_vehiculo_id,
-                j.estado AS jornada_estado, j.actividad_actual, j.updated_at AS jornada_updated_at,
+                j.estado AS jornada_estado, j.actividad_actual, j.inicio_at AS jornada_inicio_at,
+                j.eventos AS jornada_eventos, j.updated_at AS jornada_updated_at,
                 gps.lat AS gps_log_lat, gps.lng AS gps_log_lng, gps.ubicacion AS gps_log_ubicacion,
-                gps.provider AS gps_log_provider, gps.recorded_at AS gps_log_recorded_at,
+                gps.provider AS gps_log_provider, gps.raw AS gps_log_raw, gps.recorded_at AS gps_log_recorded_at,
                 app.lat AS app_log_lat, app.lng AS app_log_lng, app.ubicacion AS app_log_ubicacion,
                 app.recorded_at AS app_log_recorded_at
            FROM vehiculos v
@@ -4916,7 +5118,7 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
               LIMIT 1
            ) j ON true
            LEFT JOIN LATERAL (
-             SELECT lat,lng,ubicacion,provider,recorded_at
+             SELECT lat,lng,ubicacion,provider,raw,recorded_at
                FROM gps_position_log l
               WHERE l.empresa_id=v.empresa_id
                 AND l.vehiculo_id=v.id
@@ -4946,7 +5148,13 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
                 v.ubicacion_actual, v.ubicacion_fuente, v.ubicacion_ts,
                 v.gps_provider, v.gps_external_id, v.gps_lat, v.gps_lng,
                 ch.id AS chofer_id_resuelto, ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos,
-                ch.telefono AS chofer_telefono, ch.vehiculo_id AS chofer_vehiculo_id
+                ch.telefono AS chofer_telefono, ch.vehiculo_id AS chofer_vehiculo_id,
+                NULL::text AS jornada_estado, NULL::text AS actividad_actual, NULL::timestamptz AS jornada_inicio_at,
+                '[]'::jsonb AS jornada_eventos, NULL::timestamptz AS jornada_updated_at,
+                NULL::numeric AS gps_log_lat, NULL::numeric AS gps_log_lng, NULL::text AS gps_log_ubicacion,
+                NULL::text AS gps_log_provider, NULL::jsonb AS gps_log_raw, NULL::timestamptz AS gps_log_recorded_at,
+                NULL::numeric AS app_log_lat, NULL::numeric AS app_log_lng, NULL::text AS app_log_ubicacion,
+                NULL::timestamptz AS app_log_recorded_at
            FROM vehiculos v
            LEFT JOIN choferes ch
              ON ch.empresa_id=v.empresa_id
@@ -4981,6 +5189,32 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
       if (row.chofer_id) conflictsByDriver.set(String(row.chofer_id), (conflictsByDriver.get(String(row.chofer_id)) || 0) + Number(row.total || 0));
     }
 
+    const vehiculoIds = Array.from(new Set((vehiculosRes.rows || []).map(v => v.id).filter(Boolean).map(String)));
+    const choferIds = Array.from(new Set((vehiculosRes.rows || []).map(v => v.chofer_id_resuelto || v.chofer_id).filter(Boolean).map(String)));
+    const previousByVehicle = new Map();
+    const previousByDriver = new Map();
+    if (vehiculoIds.length || choferIds.length) {
+      const previousTrips = await db.query(
+        `SELECT id, numero, vehiculo_id, chofer_id, destino, puntos_descarga,
+                fecha_carga, fecha_descarga, fecha_entrega, hora_descarga, estado::text AS estado
+           FROM pedidos
+          WHERE empresa_id=$1
+            AND id<>$2
+            AND estado::text NOT IN ('cancelado','facturado')
+            AND (
+              ($3::uuid[] IS NOT NULL AND vehiculo_id = ANY($3::uuid[]))
+              OR ($4::uuid[] IS NOT NULL AND chofer_id = ANY($4::uuid[]))
+            )
+          ORDER BY COALESCE(fecha_descarga, fecha_entrega, fecha_carga, created_at) DESC
+          LIMIT 300`,
+        [empresaId, req.params.id, vehiculoIds, choferIds]
+      ).catch(() => ({ rows: [] }));
+      for (const trip of previousTrips.rows || []) {
+        if (trip.vehiculo_id && !previousByVehicle.has(String(trip.vehiculo_id))) previousByVehicle.set(String(trip.vehiculo_id), trip);
+        if (trip.chofer_id && !previousByDriver.has(String(trip.chofer_id))) previousByDriver.set(String(trip.chofer_id), trip);
+      }
+    }
+
     const seen = new Set();
     const candidatos = (vehiculosRes.rows || [])
       .filter(v => {
@@ -4990,11 +5224,13 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
       })
       .map(v => {
         const choferId = v.chofer_id_resuelto || v.chofer_id || null;
+        const previousTrip = previousByVehicle.get(String(v.id)) || (choferId ? previousByDriver.get(String(choferId)) : null) || null;
         const scored = scorePlanningCandidate({
           pedido,
           vehicle: v,
           originCoord,
           originText,
+          previousTrip,
           conflicts: {
             vehiculo: conflictsByVehicle.get(String(v.id)) || 0,
             chofer: choferId ? conflictsByDriver.get(String(choferId)) || 0 : 0,
@@ -5014,6 +5250,8 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
           reasons: scored.reasons,
           advertencias: scored.warnings,
           distancia_origen_km: scored.distancia_origen_km,
+          reposicionamiento: scored.reposicionamiento,
+          tacografo: scored.tachograph,
           ubicacion: scored.location,
         };
       })

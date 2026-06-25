@@ -1069,11 +1069,56 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   };
 }
 
+function buildDocumentoControlPublicPayload(payload = {}) {
+  const documento = payload.documento || {};
+  return {
+    config: {
+      sistema: payload.config?.sistema || documento.sistema || "",
+    },
+    documento: {
+      codigo_control: documento.codigo_control || "",
+      sistema: documento.sistema || "",
+      cmr_tipo: documento.cmr_tipo || "",
+      soporte_url: documento.soporte_url || "",
+      qr_url: documento.qr_url || "",
+      referencia_pedido: documento.referencia_pedido || "",
+      fecha_transporte: documento.fecha_transporte || "",
+      horarios: documento.horarios || {},
+      cargador_contractual: documento.cargador_contractual || {},
+      transportista_efectivo: documento.transportista_efectivo || {},
+      origen: documento.origen || {},
+      destino: documento.destino || {},
+      cargas: Array.isArray(documento.cargas) ? documento.cargas : [],
+      descargas: Array.isArray(documento.descargas) ? documento.descargas : [],
+      mercancia: documento.mercancia || {},
+      vehiculo: documento.vehiculo || {},
+      verificacion: documento.verificacion || {},
+      observaciones: documento.observaciones || "",
+    },
+    orden_carga_numero: payload.orden_carga_numero || "",
+    orden_carga_generada_at: payload.orden_carga_generada_at || null,
+    status: {
+      level: payload.status?.level || "info",
+      ready: !!payload.status?.ready,
+      summary: payload.status?.ready
+        ? "Documento digital disponible."
+        : "Documento digital pendiente de completar por trafico.",
+    },
+    remision: {
+      canal: payload.remision?.canal || "",
+      etiqueta: payload.remision?.etiqueta || "",
+      filename: payload.remision?.filename || buildDocumentoControlFilename(documento),
+      download_url: payload.remision?.download_url || "",
+    },
+  };
+}
+
 function buildDocumentoControlHtml({
   documento,
   empresaNombre = "TransGest TMS",
   generatedAt = new Date().toISOString(),
   autoPrint = false,
+  publicView = false,
 }) {
   const fecha = documento?.fecha_transporte ? new Date(`${documento.fecha_transporte}T12:00:00`).toLocaleDateString("es-ES") : "-";
   const fechaCarga = documento?.horarios?.fecha_carga ? new Date(`${documento.horarios.fecha_carga}T12:00:00`).toLocaleDateString("es-ES") : "-";
@@ -1105,7 +1150,7 @@ function buildDocumentoControlHtml({
     : "";
   const operativa = Array.isArray(documento?.condiciones?.operativa_carga) ? documento.condiciones.operativa_carga : [];
   const clausulasOrden = Array.isArray(documento?.condiciones?.clausulas_orden_carga) ? documento.condiciones.clausulas_orden_carga : [];
-  const condicionesBlock = `<div class="note"><strong>Condiciones del servicio:</strong><br>
+  const condicionesBlock = publicView ? "" : `<div class="note"><strong>Condiciones del servicio:</strong><br>
     Forma de pago: ${escapeHtml(documento?.condiciones?.forma_pago || "-")}<br>
     ${operativa.length ? `Operativa: ${escapeHtml(operativa.join(" | "))}<br>` : ""}
     ${escapeHtml(documento?.condiciones?.revision_combustible || "")}
@@ -1114,7 +1159,7 @@ function buildDocumentoControlHtml({
   const prep = documento?.preparacion_digital || {};
   const cumplimiento = prep?.cumplimiento_operativo || {};
   const cumplimientoAvisos = Array.isArray(cumplimiento.avisos) ? cumplimiento.avisos : [];
-  const cumplimientoBlock = `<div class="note"><strong>Checklist de cumplimiento operativo:</strong><br>
+  const cumplimientoBlock = publicView ? "" : `<div class="note"><strong>Checklist de cumplimiento operativo:</strong><br>
     Estado: ${escapeHtml(cumplimiento.estado || "sin_senales_automaticas")}.<br>
     ADR: ${cumplimiento?.adr?.requiere_revision ? "revisar antes de confirmar" : "sin senal automatica"}.<br>
     ZBE/accesos urbanos: ${cumplimiento?.zbe?.requiere_revision ? `revisar ${escapeHtml((cumplimiento.zbe.zonas_detectadas || []).join(", "))}` : "sin senal automatica"}.<br>
@@ -1123,14 +1168,14 @@ function buildDocumentoControlHtml({
     Tacografo/horas: ${cumplimiento?.tacografo?.requiere_revision ? "confirmar horas, descansos y dispositivo" : "validacion ordinaria si aplica"}.
     ${cumplimientoAvisos.length ? `<ul>${cumplimientoAvisos.map(aviso => `<li>${escapeHtml(aviso)}</li>`).join("")}</ul>` : ""}
   </div>`;
-  const preparacionBlock = `<div class="note"><strong>Preparacion normativa digital:</strong><br>
+  const preparacionBlock = publicView ? "" : `<div class="note"><strong>Preparacion normativa digital:</strong><br>
     Documento de Control digital en Espana: obligatorio desde ${escapeHtml(prep?.documento_control?.fecha_obligacion_espana || "2026-10-05")}.<br>
     Firma objetivo: ${escapeHtml(prep?.firma_eidas?.minimo_objetivo || "firma electronica avanzada")}.<br>
     eFTI/e-CMR: plena aplicacion prevista desde ${escapeHtml(prep?.efti_ecmr?.fecha_aplicacion_ue || "2027-07-09")}.<br>
     DIWASS Annex VII: revisar si hay residuos transfronterizos; entrada en vigor ${escapeHtml(prep?.diwass_annex_vii?.entrada_vigor_diwass || "2026-05-21")} y transicion Annex VII hasta ${escapeHtml(prep?.diwass_annex_vii?.transicion_annex_vii_hasta || "2026-12-31")}.<br>
     Senal residuos: ${prep?.diwass_annex_vii?.senal_residuo ? "requiere revision" : "sin senal automatica"}.
   </div>`;
-  const ecmrBlock = `<div class="note"><strong>Preparacion para certificacion eCMR:</strong><br>
+  const ecmrBlock = publicView ? "" : `<div class="note"><strong>Preparacion para certificacion eCMR:</strong><br>
     Estado: ${escapeHtml(ecmr.status || "pendiente")}. Proveedor certificado conectado: ${ecmr.certified_provider_connected ? "si" : "no"}.<br>
     ${ecmr.missing_fields?.length ? `Faltantes: ${escapeHtml(ecmr.missing_fields.join(" | "))}<br>` : "Datos minimos eCMR completos para preparacion interna.<br>"}
     Nota: ${escapeHtml(ecmr.nota || "")}
@@ -1208,6 +1253,7 @@ async function generateDocumentoControlPdf({
   documento,
   empresaNombre = "TransGest TMS",
   generatedAt = new Date().toISOString(),
+  publicView = false,
 }) {
   const PDFDocument = require("pdfkit");
   const QRCode = require("qrcode");
@@ -1313,11 +1359,17 @@ async function generateDocumentoControlPdf({
   writeLine("Codigo de verificacion", documento?.verificacion?.codigo_verificacion);
   writeLine("Politica de acceso", "Enlace tokenizado, noindex, no-store. La descarga publica puede desactivarse; el repositorio interno conserva el documento.");
 
-  ensureSpace(150);
-  section("Condiciones y observaciones");
-  writeLine("Forma de pago", documento?.condiciones?.forma_pago);
-  writeLine("Observaciones", documento?.observaciones || "-");
-  if (documento?.condiciones?.revision_combustible) writeLine("Revision combustible", documento.condiciones.revision_combustible, { size: 8 });
+  if (!publicView) {
+    ensureSpace(150);
+    section("Condiciones y observaciones");
+    writeLine("Forma de pago", documento?.condiciones?.forma_pago);
+    writeLine("Observaciones", documento?.observaciones || "-");
+    if (documento?.condiciones?.revision_combustible) writeLine("Revision combustible", documento.condiciones.revision_combustible, { size: 8 });
+  } else if (documento?.observaciones) {
+    ensureSpace(80);
+    section("Observaciones");
+    writeLine("Observaciones", documento.observaciones, { size: 9 });
+  }
 
   doc.font("Helvetica").fontSize(7).fillColor("#64748b")
     .text("Documento generado automaticamente por TransGest. Validez operativa vinculada a los datos guardados y al historial de modificaciones del pedido.", 42, 792, { width: 510, align: "center" });
@@ -1358,6 +1410,7 @@ module.exports = {
   detectWasteSignals,
   detectTransportComplianceSignals,
   buildDocumentoControlPayload,
+  buildDocumentoControlPublicPayload,
   buildDocumentoControlExpediente,
   buildDocumentoControlStructuredExport,
   buildDocumentoControlSignaturePackage,

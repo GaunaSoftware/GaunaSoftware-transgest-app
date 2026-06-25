@@ -2,7 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 const db = require("../services/db");
 const { crearNotificacion } = require("../services/notificaciones");
-const { buildDocumentoControlPayload } = require("../services/documentoControl");
+const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload } = require("../services/documentoControl");
 
 const router = express.Router();
 
@@ -970,14 +970,14 @@ router.get("/pedidos/:id/eventos", requireCliente, async (req, res) => {
 router.get("/pedidos/:id/documento-control", requireCliente, async (req, res) => {
   const ctx = await getPortalPedidoDocumentoControlContext(req, req.params.id);
   if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-  res.json(buildDocumentoControlPayload({
+  res.json(buildDocumentoControlPublicPayload(buildDocumentoControlPayload({
     empresaId: empresaId(req),
     pedido: ctx.pedido,
     empresa: ctx.empresa,
     cliente: ctx.cliente,
     colaborador: ctx.colaborador,
     appBaseUrl: publicBaseUrl(req),
-  }));
+  })));
 });
 
 router.get("/solicitudes", requireCliente, async (req, res) => {

@@ -4787,6 +4787,19 @@ function ModalAutoAsignacion({ pedido, vehiculos, choferes, onAsignar, onClose }
   useEffect(() => { analizar(); }, [analizar]);
 
   const CONFIANZA_COLOR = { alta:"#10b981", media:"#f59e0b", baja:"#f97316" };
+  const fmtMin = (mins) => {
+    const n = Number(mins);
+    if (!Number.isFinite(n)) return "-";
+    const h = Math.floor(n / 60);
+    const m = Math.round(n % 60);
+    return h <= 0 ? `${m} min` : `${h} h ${String(m).padStart(2, "0")} min`;
+  };
+  const fmtDateTime = (value) => {
+    if (!value) return "-";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "-";
+    return d.toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" });
+  };
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -4858,6 +4871,39 @@ function ModalAutoAsignacion({ pedido, vehiculos, choferes, onAsignar, onClose }
               </div>
               {policy && <div style={{fontSize:10,color:"var(--text5)",marginTop:5}}>{policy}</div>}
             </div>
+
+            {sugerencia.reposicionamiento && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:12}}>
+                <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 11px"}}>
+                  <div style={{fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Termina / sale desde</div>
+                  <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{sugerencia.reposicionamiento.source_label || "-"}</div>
+                  {sugerencia.reposicionamiento.from_text && <div style={{fontSize:10,color:"var(--text5)",marginTop:3}}>{sugerencia.reposicionamiento.from_text}</div>}
+                </div>
+                <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 11px"}}>
+                  <div style={{fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Hasta carga</div>
+                  <div style={{fontSize:14,fontWeight:900,color:"var(--text)"}}>
+                    {sugerencia.reposicionamiento.distancia_hasta_carga_km != null ? `${sugerencia.reposicionamiento.distancia_hasta_carga_km} km` : "-"}
+                  </div>
+                  <div style={{fontSize:10,color:"var(--text5)",marginTop:3}}>{fmtMin(sugerencia.reposicionamiento.tiempo_hasta_carga_min)}</div>
+                </div>
+                <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 11px"}}>
+                  <div style={{fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Llegada prevista</div>
+                  <div style={{fontSize:13,fontWeight:900,color:sugerencia.reposicionamiento.llega_antes_hora_carga === false ? "#f59e0b" : "#10b981"}}>
+                    {fmtDateTime(sugerencia.reposicionamiento.llegada_estimada_carga_at)}
+                  </div>
+                  <div style={{fontSize:10,color:"var(--text5)",marginTop:3}}>salida {fmtDateTime(sugerencia.reposicionamiento.salida_considerada_at)}</div>
+                </div>
+                <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 11px"}}>
+                  <div style={{fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Horas chofer</div>
+                  <div style={{fontSize:13,fontWeight:900,color:sugerencia.tacografo?.integrated ? "#10b981" : "var(--text)"}}>
+                    {sugerencia.tacografo?.conduccion_disponible_min != null ? fmtMin(sugerencia.tacografo.conduccion_disponible_min) : "Sin dato"}
+                  </div>
+                  <div style={{fontSize:10,color:"var(--text5)",marginTop:3}}>
+                    {sugerencia.tacografo?.integrated ? `Tacografo ${sugerencia.tacografo.source || ""}` : sugerencia.tacografo?.source === "app_chofer_estimado" ? "Estimado por app chofer" : "Sin tacografo integrado"}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {candidatos.length > 1 && (
               <div style={{display:"grid",gap:6,marginBottom:12}}>

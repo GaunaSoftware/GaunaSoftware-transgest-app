@@ -96,6 +96,28 @@ const ivaOption = (tipoIva, regimen) => {
 };
 const ivaLabel = (tipoIva, regimen) => ivaOption(tipoIva, regimen).label;
 const FORMAS_PAGO = ["transferencia","domiciliacion","cheque","efectivo","confirming"];
+const PLAZOS_PAGO_CLIENTE = [
+  "Al finalizar viaje",
+  "Contado",
+  "15 dias fecha factura",
+  "30 dias fecha factura",
+  "45 dias fecha factura",
+  "60 dias fecha factura",
+  "90 dias fecha factura",
+  "Fin de mes",
+  "Fin de mes + 30 dias",
+  "Personalizado",
+];
+function normalizePlazoPagoCliente(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "30 dias fecha factura";
+  if (/^\d+$/.test(raw)) return `${raw} dias fecha factura`;
+  return raw;
+}
+function plazoPagoSelectValue(value) {
+  const normalized = normalizePlazoPagoCliente(value);
+  return PLAZOS_PAGO_CLIENTE.includes(normalized) ? normalized : "Personalizado";
+}
 const TIPO_TARIFA_RUTA = [
   {v:"viaje",l:"Viaje cerrado"},
   {v:"tonelada",l:"Por tonelada"},
@@ -315,8 +337,7 @@ function PuntoClienteSelector({ cliente, onApply }) {
 
 function buildClienteForm(cliente) {
   const source = cliente || {};
-  const vencimiento = String(source.dias_pago || source.vencimiento || "30");
-  const dias = vencimiento.match(/\d+/)?.[0] || "30";
+  const plazoPago = normalizePlazoPagoCliente(source.dias_pago || source.vencimiento || "30 dias fecha factura");
   return {
     tipo_iva:"21",
     iva_regimen:"general",
@@ -332,7 +353,8 @@ function buildClienteForm(cliente) {
     pais_iso: normalizePaisIso(source.pais_iso || source.pais || "ES"),
     contacto_nombre: source.contacto_nombre || source.contacto || "",
     contacto_telefono: source.contacto_telefono || "",
-    dias_pago: dias,
+    dias_pago: plazoPago,
+    dias_pago_custom: PLAZOS_PAGO_CLIENTE.includes(plazoPago) ? "" : plazoPago,
     emails_albaranes: normalizeEmailListText(source.emails_albaranes || ""),
   };
 }
@@ -443,7 +465,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
         ciudad: form.municipio || "",
         pais: form.pais_iso || "ES",
         contacto: form.contacto_nombre || "",
-        vencimiento: form.dias_pago || "30",
+        vencimiento: normalizePlazoPagoCliente(form.dias_pago === "Personalizado" ? form.dias_pago_custom : form.dias_pago),
         emails_albaranes: emailsAlbaranes.join("\n"),
         horario_carga: normalizarHorarioHabitual(form.horario_carga),
         horario_descarga: normalizarHorarioHabitual(form.horario_descarga),
@@ -898,11 +920,25 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
               </select>
             </div>
             <div>
-              <label style={S.lbl}>Días de pago</label>
-              <select value={form.dias_pago||"30"} onChange={f("dias_pago")} style={S.sel}>
-                {["0","15","30","45","60","90"].map(d=><option key={d} value={d}>{d} días</option>)}
+              <label style={S.lbl}>Condicion de pago</label>
+              <select
+                value={plazoPagoSelectValue(form.dias_pago)}
+                onChange={e=>setForm(p=>({
+                  ...p,
+                  dias_pago: e.target.value,
+                  dias_pago_custom: e.target.value === "Personalizado" ? (p.dias_pago_custom || (!PLAZOS_PAGO_CLIENTE.includes(p.dias_pago) ? p.dias_pago : "")) : "",
+                }))}
+                style={S.sel}
+              >
+                {PLAZOS_PAGO_CLIENTE.map(d=><option key={d} value={d}>{d}</option>)}
               </select>
             </div>
+            {plazoPagoSelectValue(form.dias_pago) === "Personalizado" && (
+              <div>
+                <label style={S.lbl}>Condicion personalizada</label>
+                <input style={S.inp} value={form.dias_pago_custom||""} onChange={f("dias_pago_custom")} placeholder="Ej: 60 dias fecha recepcion factura"/>
+              </div>
+            )}
             <div>
               <label style={S.lbl}>Forma de pago</label>
               <select value={form.forma_pago||"transferencia"} onChange={f("forma_pago")} style={S.sel}>

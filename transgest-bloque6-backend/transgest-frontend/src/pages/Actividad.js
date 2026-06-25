@@ -52,6 +52,14 @@ function metodoColor(accion) {
   return "var(--accent-l)";
 }
 
+function metodoNegocio(method) {
+  if (method === "POST") return "Alta";
+  if (method === "PUT") return "Edicion";
+  if (method === "PATCH") return "Cambio";
+  if (method === "DELETE") return "Baja";
+  return "Accion";
+}
+
 function criticidadColor(criticidad) {
   if (criticidad === "critica") return "#ef4444";
   if (criticidad === "alta") return "#f59e0b";
@@ -63,7 +71,7 @@ function accionVisible(item = {}) {
   const method = item.method || String(item.accion || "").split(" ")[0] || "ACCION";
   const path = item.path || String(item.accion || "").replace(method, "").trim();
   const modulo = item.modulo || etiquetaAccion(item.accion);
-  const verb = method === "POST" ? "Creacion" : method === "PUT" ? "Actualizacion" : method === "PATCH" ? "Cambio" : method === "DELETE" ? "Eliminacion" : "Accion";
+  const verb = method === "POST" ? "Alta" : method === "PUT" ? "Edicion" : method === "PATCH" ? "Cambio" : method === "DELETE" ? "Baja" : "Accion";
   const id = item.detalle?.params?.id || item.detalle?.body?.id || "";
   if (path.includes("/pedidos")) return `${verb} en pedidos${id ? ` (${id})` : ""}`;
   if (path.includes("/facturas")) return `${verb} en facturacion${id ? ` (${id})` : ""}`;
@@ -74,6 +82,13 @@ function accionVisible(item = {}) {
   if (path.includes("/taller")) return `${verb} en taller${id ? ` (${id})` : ""}`;
   if (path.includes("/palets")) return `${verb} en almacen${id ? ` (${id})` : ""}`;
   return `${verb} en ${modulo}`;
+}
+
+function detalleVisible(item = {}) {
+  const body = item.detalle?.body && typeof item.detalle.body === "object" ? item.detalle.body : {};
+  const keys = Object.keys(body).filter(k => !["password", "token", "file_base64", "firma"].some(bad => k.toLowerCase().includes(bad))).slice(0, 6);
+  if (!keys.length) return "";
+  return `Campos: ${keys.map(k => k.replace(/_/g, " ")).join(", ")}`;
 }
 
 function csvCell(value) {
@@ -256,7 +271,7 @@ export default function Actividad() {
               <div key={item.id} style={{...S.card,display:"grid",gridTemplateColumns:"minmax(92px,.35fr) minmax(220px,1fr) minmax(150px,.45fr)",gap:12,alignItems:"center",borderColor:status >= 400 ? "rgba(239,68,68,.45)" : "var(--border)",overflow:"hidden"}}>
                 <div style={{minWidth:0}}>
                   <div style={{display:"inline-flex",padding:"3px 9px",borderRadius:20,background:`${color}18`,color,fontSize:11,fontWeight:900}}>
-                    {method}
+                    {metodoNegocio(method)}
                   </div>
                   <div style={{fontSize:11,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",marginTop:7}}>
                     {item.modulo || etiquetaAccion(item.accion)}
@@ -267,6 +282,9 @@ export default function Actividad() {
                   <div style={{fontSize:12,color:"var(--text4)",overflowWrap:"anywhere",lineHeight:1.35}}>
                     {item.actor_email || "usuario"} - {status ? `estado ${status}` : "accion registrada"}
                   </div>
+                  {detalleVisible(item) && (
+                    <div style={{fontSize:11,color:"var(--text5)",marginTop:4,overflowWrap:"anywhere"}}>{detalleVisible(item)}</div>
+                  )}
                   <div style={{display:"inline-flex",marginTop:6,padding:"2px 8px",borderRadius:999,background:`${cColor}18`,border:`1px solid ${cColor}44`,color:cColor,fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".05em"}}>
                     {item.criticidad || "baja"}
                   </div>

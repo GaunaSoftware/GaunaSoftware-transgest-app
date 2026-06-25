@@ -77,6 +77,21 @@ function pedidoEstadoDesdeFacturaEstado(estadoFactura) {
   return "entregado";
 }
 
+function parseClientePaymentDays(value) {
+  const raw = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  if (!raw) return 30;
+  if (raw.includes("finalizar") || raw.includes("fin viaje") || raw.includes("contado") || raw === "0") return 0;
+  const n = parseInt(raw.match(/\d+/)?.[0] || "", 10);
+  return Number.isFinite(n) ? Math.max(0, Math.min(n, 365)) : 30;
+}
+
+function addDaysDateOnly(value, days = 0) {
+  const base = value ? new Date(String(value).includes("T") ? value : `${value}T12:00:00`) : new Date();
+  if (Number.isNaN(base.getTime())) return null;
+  base.setDate(base.getDate() + Number(days || 0));
+  return base.toISOString().slice(0, 10);
+}
+
 async function getFacturaPedidosSinSoporte(facturaId, empresaId, client = db) {
   const { rows } = await client.query(
     `SELECT p.id, p.numero,
@@ -906,7 +921,10 @@ router.post("/", GERENTE_O_CONTABLE,
       // Calcular totales
       const base = lineas.reduce((s, l) => s + (l.cantidad * l.precio_unit), 0)
                  + (extracostes||[]).reduce((s, e) => s + parseFloat(e.importe || 0), 0);
-      const { rows: cliRows } = await client.query("SELECT tipo_iva, iva_regimen, tipo_irpf FROM clientes WHERE id=$1 AND empresa_id=$2", [cliente_id, empresaId]);
+      const { rows: cliRows } = await client.query(
+        "SELECT tipo_iva, iva_regimen, tipo_irpf, forma_pago, vencimiento FROM clientes WHERE id=$1 AND empresa_id=$2",
+        [cliente_id, empresaId]
+      );
       if (!cliRows[0]) throw new Error("Cliente no encontrado");
       const tipoIva  = cliRows[0]?.tipo_iva !== undefined && cliRows[0]?.tipo_iva !== null ? Number(cliRows[0].tipo_iva) : 21;
       const ivaRegimen = ivaRegimenFromPct(tipoIva, cliRows[0]?.iva_regimen);
@@ -914,9 +932,12 @@ router.post("/", GERENTE_O_CONTABLE,
       const cuotaIva  = base * tipoIva  / 100;
       const cuotaIrpf = base * tipoIrpf / 100;
       const total     = base + cuotaIva - cuotaIrpf;
+      const clienteVencimiento = String(vencimiento || cliRows[0]?.vencimiento || "30 dias").trim();
+      const facturaFecha = fecha || new Date();
+      const fechaVencimientoFinal = fecha_vencimiento || addDaysDateOnly(facturaFecha, parseClientePaymentDays(clienteVencimiento));
       let revisionCobroAt = null;
-      if (fecha_vencimiento) {
-        const d = new Date(fecha_vencimiento);
+      if (fechaVencimientoFinal) {
+        const d = new Date(fechaVencimientoFinal);
         if (!Number.isNaN(d.getTime())) {
           d.setDate(d.getDate() + cobrosConfig.dias_revision_post_vencimiento);
           revisionCobroAt = d.toISOString().slice(0, 10);
@@ -931,8 +952,8 @@ router.post("/", GERENTE_O_CONTABLE,
           referencia_cliente)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
         RETURNING *`,
-        [numero, serie, cliente_id, fecha || new Date(), fecha_vencimiento, estado || "borrador",
-         forma_pago, vencimiento, base, tipoIva, cuotaIva, tipoIrpf, cuotaIrpf, total,
+        [numero, serie, cliente_id, facturaFecha, fechaVencimientoFinal, estado || "borrador",
+         forma_pago || cliRows[0]?.forma_pago || null, clienteVencimiento, base, tipoIva, cuotaIva, tipoIrpf, cuotaIrpf, total,
          ivaRegimen, observaciones, notas_internas, req.user.id, empresaId, revisionCobroAt,
          cobrosConfig.dias_entre_reclamaciones, String(referencia_cliente || "").trim() || null]
       );

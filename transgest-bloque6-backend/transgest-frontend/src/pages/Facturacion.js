@@ -145,6 +145,21 @@ function localDateValue(value = new Date()) {
   return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, "0")}-${String(dateValue.getDate()).padStart(2, "0")}`;
 }
 
+function parsePaymentTermDays(value) {
+  const raw = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  if (!raw) return 30;
+  if (raw.includes("finalizar") || raw.includes("fin viaje") || raw.includes("contado") || raw === "0") return 0;
+  const n = parseInt(raw.match(/\d+/)?.[0] || "", 10);
+  return Number.isFinite(n) ? Math.max(0, Math.min(n, 365)) : 30;
+}
+
+function addDaysLocalDate(value, days) {
+  const base = value ? new Date(`${value}T12:00:00`) : new Date();
+  if (Number.isNaN(base.getTime())) return "";
+  base.setDate(base.getDate() + Number(days || 0));
+  return localDateValue(base);
+}
+
 function latestFacturacionAi(pedido = {}) {
   const raw = pedido.facturacion_ai_metadata;
   const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
@@ -1360,6 +1375,8 @@ function ModalFacturarMultiple({ onClose }) {
   const [modo,       setModo]       = useState("linea"); // linea|detalle|kg
   const [concepto,   setConcepto]   = useState("");
   const [referenciaFactura, setReferenciaFactura] = useState("");
+  const [fechaFactura, setFechaFactura] = useState(() => localDateValue());
+  const [fechaVencimiento, setFechaVencimiento] = useState("");
   const [loading,    setLoading]    = useState(false);
   const [loadingResumen, setLoadingResumen] = useState(false);
   const [saving,     setSaving]     = useState(false);
@@ -1433,6 +1450,13 @@ function ModalFacturarMultiple({ onClose }) {
     const fmtD = d => d ? new Date(d).toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"}).toUpperCase() : "";
     setConcepto(`VIAJES REALIZADOS DEL ${fmtD(fechaDesde)} AL ${fmtD(fechaHasta)}`);
   },[fechaDesde, fechaHasta]);
+
+  useEffect(() => {
+    if (!clienteSel || fechaVencimiento) return;
+    const cliente = clientes.find(c => String(c.id) === String(clienteSel));
+    if (!cliente) return;
+    setFechaVencimiento(addDaysLocalDate(fechaFactura, parsePaymentTermDays(cliente.vencimiento || cliente.dias_pago)));
+  }, [clienteSel, clientes, fechaFactura, fechaVencimiento]);
 
   const selArr   = pedidos.filter(p=>selIds.has(p.id));
   const totalSel = selArr.reduce((s,p)=>s+Number(p.importe||0),0);
@@ -1541,7 +1565,8 @@ function ModalFacturarMultiple({ onClose }) {
       const created = await crearFactura({
         cliente_id:  clienteSel,
         serie:       empresa.serie_facturas||"A",
-        fecha:       localDateValue(),
+        fecha:       fechaFactura || localDateValue(),
+        fecha_vencimiento: fechaVencimiento || null,
         estado:      "borrador",
         pedidos_ids: selArr.map(p=>p.id),
         lineas,
@@ -1616,7 +1641,7 @@ function ModalFacturarMultiple({ onClose }) {
         {paso===1 && <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10,marginBottom:14}}>
           <div>
             <label style={lbl}>Cliente *</label>
-            <select value={clienteSel} onChange={e=>setClienteSel(e.target.value)} style={inp}>
+            <select value={clienteSel} onChange={e=>{ setClienteSel(e.target.value); setFechaVencimiento(""); }} style={inp}>
               <option value="">Seleccionar cliente...</option>
               {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}{c.cif?" - "+c.cif:""}</option>)}
             </select>
@@ -1825,6 +1850,16 @@ function ModalFacturarMultiple({ onClose }) {
                 placeholder="Referencia libre del cliente, contrato, obra o expediente"
               />
               <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>Es independiente del numero legal correlativo de factura.</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+              <div>
+                <label style={lbl}>Fecha factura</label>
+                <input type="date" value={fechaFactura} onChange={e=>{ setFechaFactura(e.target.value); setFechaVencimiento(""); }} style={inp}/>
+              </div>
+              <div>
+                <label style={lbl}>Vencimiento</label>
+                <input type="date" value={fechaVencimiento} onChange={e=>setFechaVencimiento(e.target.value)} style={inp}/>
+              </div>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
               <div>

@@ -4394,6 +4394,17 @@ ${esCol ? `
                 <div style={S2.kv}><div style={S2.lbl}>Preparacion digital</div><div style={{...S2.val,color:Number(docControlReadiness.score || 0) >= 85 ? "#10b981" : "#f59e0b"}}>{Number(docControlReadiness.score || 0)}%</div></div>
                 <div style={S2.kv}><div style={S2.lbl}>Archivo soporte</div><div style={{...S2.val,fontSize:12}}>{docControl.remision?.filename || "Pendiente"}</div></div>
               </div>
+              {(docControl.qr?.data_url || docControl.qr?.url) && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.24)",display:"flex",gap:12,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontWeight:900,color:"#10b981",fontSize:12,marginBottom:3}}>QR del documento</div>
+                    <div style={{fontSize:11,color:"var(--text4)",overflowWrap:"anywhere"}}>{docControl.qr?.url || docControlSupportUrl}</div>
+                  </div>
+                  {docControl.qr?.data_url && (
+                    <img src={docControl.qr.data_url} alt="QR documento de control" style={{width:118,height:118,objectFit:"contain",background:"#fff",border:"1px solid var(--border2)",borderRadius:8,padding:6}}/>
+                  )}
+                </div>
+              )}
               {docControl.repositorio && (
                 <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.24)",fontSize:12,color:"var(--text3)",display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
                   <div>
@@ -4418,6 +4429,11 @@ ${esCol ? `
                   </div>
                 </div>
               )}
+              <details style={{marginBottom:10,border:"1px solid var(--border)",borderRadius:8,background:"var(--bg3)",padding:"8px 10px"}}>
+                <summary style={{cursor:"pointer",fontSize:12,fontWeight:900,color:"var(--text3)",userSelect:"none"}}>
+                  Diagnostico interno DCD/eCMR
+                </summary>
+                <div style={{marginTop:10}}>
               {docControlExpediente && (
                 <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(20,184,166,.07)",border:"1px solid rgba(20,184,166,.20)",fontSize:12,color:"var(--text3)"}}>
                   <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap",marginBottom:8}}>
@@ -4540,6 +4556,8 @@ ${esCol ? `
                   </div>
                 ))}
               </div>
+                </div>
+              </details>
             </>
           )}
         </div>
@@ -5124,6 +5142,7 @@ function PedidoTimeline({ pedido }) {
 
   const labelEvento = tipo => ({
     "estado.actualizado": "Estado actualizado",
+    "pedido.editado": "Pedido editado",
     "pedido.creado_bandeja_ia": "Creado desde Bandeja IA",
     "pedido.editado_estado": "Estado editado",
     "firma.contexto_modificado": "Firma con cambios posteriores",
@@ -5153,7 +5172,7 @@ function PedidoTimeline({ pedido }) {
       detalle.codigo_control ? `DCD: ${detalle.codigo_control}` : "",
       detalle.source ? `Origen: ${detalle.source}` : "",
       detalle.mensaje ? detalle.mensaje : "",
-      Array.isArray(detalle.changes) && detalle.changes.length ? `Cambios: ${detalle.changes.map(change => `${change.field}: ${change.signed || "-"} -> ${change.current || "-"}`).slice(0, 3).join(" | ")}` : "",
+      Array.isArray(detalle.changes) && detalle.changes.length ? `Cambios: ${detalle.changes.map(change => `${change.label || change.field}: ${change.before ?? change.signed ?? "-"} -> ${change.after ?? change.current ?? "-"}`).slice(0, 3).join(" | ")}` : "",
       detalle.firma_nombre ? `Firmante: ${detalle.firma_nombre}` : "",
       detalle.firma_hash ? `Hash firma: ${String(detalle.firma_hash).slice(0, 12)}...` : "",
       detalle.filename ? `Documento: ${detalle.filename}` : "",

@@ -492,6 +492,40 @@ async function logPedidoEvento(pedidoId, empresaId, tipo, detalle = {}, actorTip
   ).catch(e => logger.warn("No se pudo registrar evento de pedido:", e.message));
 }
 
+function summarizePedidoChanges(before = {}, after = {}, fieldNames = []) {
+  const labels = {
+    cliente_id: "Cliente",
+    ruta_id: "Ruta",
+    origen: "Origen",
+    destino: "Destino",
+    fecha_carga: "Fecha carga",
+    fecha_descarga: "Fecha descarga",
+    fecha_entrega: "Fecha entrega",
+    estado: "Estado",
+    vehiculo_id: "Vehiculo",
+    chofer_id: "Chofer",
+    chofer2_id: "Segundo chofer",
+    remolque_id: "Remolque",
+    colaborador_id: "Colaborador",
+    importe: "Importe",
+    precio_unitario: "Precio unitario",
+    peso_kg: "Peso",
+    bultos: "Bultos",
+    referencia_cliente: "Referencia cliente",
+    condiciones_adicionales: "Condiciones",
+  };
+  const norm = (value) => value === null || value === undefined ? "" : String(value);
+  return [...new Set(fieldNames)]
+    .map(field => ({
+      field,
+      label: labels[field] || field.replace(/_/g, " "),
+      before: norm(before[field]).slice(0, 160),
+      after: norm(after[field]).slice(0, 160),
+    }))
+    .filter(change => change.before !== change.after)
+    .slice(0, 20);
+}
+
 async function logAiInboxRun({
   empresaId,
   userId = null,
@@ -1835,7 +1869,7 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
     postSignatureIntegrity,
   });
   const exportData = buildDocumentoControlStructuredExport(payload);
-  const html = buildDocumentoControlHtml({
+  const html = await buildDocumentoControlHtml({
     documento: payload.documento,
     empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
     generatedAt: new Date().toISOString(),
@@ -3115,7 +3149,7 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
         res.setHeader("Content-Disposition", `attachment; filename="${archived.filename || "documento-control.html"}"`);
       }
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(buildDocumentoControlHtml({
+      return res.send(await buildDocumentoControlHtml({
         documento: livePayload.documento,
         empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
         generatedAt: new Date().toISOString(),
@@ -3156,7 +3190,7 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
       return res.send(pdf.buffer);
     }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(buildDocumentoControlHtml({
+    res.send(await buildDocumentoControlHtml({
       documento: payload.documento,
       empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
       generatedAt: new Date().toISOString(),
@@ -7410,6 +7444,13 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
         estado: pedidoActualizado.estado,
       }, req.user?.rol || "usuario", req.user?.id || null);
     }
+    const cambiosPedido = summarizePedidoChanges(pedidoActualRows[0], pedidoActualizado, fields.map(([k]) => k));
+    if (cambiosPedido.length) {
+      await logPedidoEvento(pedidoActualizado.id, empresaId, "pedido.editado", {
+        campos: cambiosPedido.map(c => c.label),
+        changes: cambiosPedido,
+      }, req.user?.rol || "usuario", req.user?.id || null);
+    }
     await logFirmaContextoModificadoSiProcede({
       before: pedidoActualRows[0],
       after: pedidoActualizado,
@@ -7453,6 +7494,13 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
       if ("estado" in body) {
         await logPedidoEvento(updatedPedido.id, empresaId, "pedido.editado_estado", {
           estado: updatedPedido.estado,
+        }, req.user?.rol || "usuario", req.user?.id || null);
+      }
+      const cambiosPedido = summarizePedidoChanges(pedidoActualRows[0], updatedPedido, fields.map(([k]) => k));
+      if (cambiosPedido.length) {
+        await logPedidoEvento(updatedPedido.id, empresaId, "pedido.editado", {
+          campos: cambiosPedido.map(c => c.label),
+          changes: cambiosPedido,
         }, req.user?.rol || "usuario", req.user?.id || null);
       }
       await logFirmaContextoModificadoSiProcede({

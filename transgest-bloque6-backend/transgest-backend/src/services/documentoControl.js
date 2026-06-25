@@ -1175,7 +1175,7 @@ async function buildDocumentoControlQrDataUrl(documento = {}) {
   return QRCode.toDataURL(url, { errorCorrectionLevel: "M", margin: 1, width: 360 });
 }
 
-function buildDocumentoControlHtml({
+async function buildDocumentoControlHtml({
   documento,
   empresaNombre = "TransGest TMS",
   generatedAt = new Date().toISOString(),
@@ -1189,6 +1189,11 @@ function buildDocumentoControlHtml({
   const horaDescarga = documento?.horarios?.hora_descarga || documento?.horarios?.ventana_descarga || "-";
   const peso = documento?.mercancia?.peso_kg ? `${Number(documento.mercancia.peso_kg).toLocaleString("es-ES")} kg` : "-";
   const ecmr = buildEcmrConsignmentNote(documento || {});
+  const qrUrl = documento?.qr_url || documento?.soporte_url || documento?.verificacion?.url_segura || "";
+  const qrDataUrl = qrUrl ? await buildDocumentoControlQrDataUrl({ ...documento, qr_url: qrUrl }).catch(() => "") : "";
+  const docTipoLabel = documentIsInternational(documento || {})
+    ? "Carta de porte CMR/eCMR internacional"
+    : "Documento de control nacional";
   const buildStopsRows = (items = []) => (Array.isArray(items) && items.length ? items : []).map(item => `
     <tr>
       <td>${escapeHtml(item.orden || "")}</td>
@@ -1214,8 +1219,8 @@ function buildDocumentoControlHtml({
     ${firmaBox("Firma chofer / transportista", firmas.chofer, [documento?.chofer?.nombre, documento?.chofer?.dni, documento?.chofer?.telefono].filter(Boolean).join(" · "))}
     ${firmaBox("Firma destinatario", firmas.destinatario, documento?.destino?.destinatario || documento?.destino?.nombre || "")}
   </section>`;
-  const qrBlock = documento?.qr_url
-    ? `<div class="note"><strong>QR / URL de acceso:</strong><br><a href="${escapeHtml(documento.qr_url)}">${escapeHtml(documento.qr_url)}</a></div>`
+  const qrBlock = qrUrl
+    ? `<div class="qr-card"><div><strong>QR de inspeccion / acceso seguro</strong><br><a href="${escapeHtml(qrUrl)}">${escapeHtml(qrUrl)}</a><div class="sub">Escaneable para visualizar el documento alojado por empresa.</div></div>${qrDataUrl ? `<img class="qr-img" src="${escapeHtml(qrDataUrl)}" alt="QR documento de control">` : ""}</div>`
     : `<div class="note"><strong>Codigo numerico de control:</strong> ${escapeHtml(documento?.codigo_control || "-")}</div>`;
   const supportBlock = documento?.soporte_url
     ? `<div class="note"><strong>Soporte digital:</strong><br><a href="${escapeHtml(documento.soporte_url)}">${escapeHtml(documento.soporte_url)}</a></div>`
@@ -1282,6 +1287,8 @@ function buildDocumentoControlHtml({
     .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;font-weight:700;margin-bottom:6px}
     .val{font-size:14px;font-weight:700;color:#111827}
     .note{margin-top:14px;padding:12px 14px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;font-size:12px;word-break:break-all}
+    .qr-card{margin-top:14px;display:flex;justify-content:space-between;gap:16px;align-items:center;padding:12px 14px;border-radius:10px;background:#ecfdf5;border:1px solid #99f6e4;font-size:12px;word-break:break-all}
+    .qr-img{width:126px;height:126px;object-fit:contain;background:#fff;border:1px solid #d1d5db;border-radius:8px;padding:6px;flex:0 0 auto}
     table{width:100%;border-collapse:collapse;margin-top:8px}
     th,td{padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:12px}
     th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
@@ -1294,7 +1301,7 @@ function buildDocumentoControlHtml({
     @media print{body{padding:0;background:#fff}.sheet{max-width:none;border:none;border-radius:0;padding:0}.no-print{display:none!important}.firmas{break-inside:avoid}}
   </style></head><body>${controls}<main class="sheet">
   <div class="top">
-    <div class="brand">${documento?.empresa?.logo_url ? `<img class="logo" src="${escapeHtml(documento.empresa.logo_url)}" alt="Logo empresa">` : ""}<div><h1>Documento de control digital</h1><div class="sub">${escapeHtml(empresaNombre)} · Transporte publico de mercancias por carretera</div></div></div>
+    <div class="brand">${documento?.empresa?.logo_url ? `<img class="logo" src="${escapeHtml(documento.empresa.logo_url)}" alt="Logo empresa">` : ""}<div><h1>${escapeHtml(docTipoLabel)}</h1><div class="sub">${escapeHtml(empresaNombre)} · Transporte publico de mercancias por carretera</div></div></div>
     <div><div class="lbl">Codigo de control</div><div class="code">${escapeHtml(documento?.codigo_control || "-")}</div><div class="sub">${escapeHtml(documento?.sistema || "")}</div></div>
   </div>
   <div class="grid">

@@ -38,7 +38,9 @@ function clienteColumnEntries(values = {}) {
 }
 
 async function insertClienteCompat(values = {}) {
-  const entries = clienteColumnEntries(values).filter(([column]) => CLIENTES_CREATE_BASE_COLUMNS.has(column));
+  const columns = await getClientesColumns();
+  const entries = clienteColumnEntries(values)
+    .filter(([column]) => CLIENTES_CREATE_BASE_COLUMNS.has(column) && columns.has(column));
   const names = entries.map(([column]) => column);
   const params = entries.map(([, value]) => value);
   const placeholders = params.map((_, idx) => `$${idx + 1}`);
@@ -257,6 +259,18 @@ async function persistClienteExtendedFields(clienteId, empresaId, data = {}) {
     fiscal_pais_iso: data.fiscal_pais_iso || null,
     web: data.web || null,
     contacto_telefono: data.contacto_telefono || null,
+    email_facturacion: data.email_facturacion || null,
+    email_facturas: data.email_facturacion || null,
+    emails_albaranes: data.emails_albaranes || null,
+    iban: data.iban || null,
+    horario_carga: data.horario_carga || null,
+    horario_descarga: data.horario_descarga || null,
+    minimo_facturable_toneladas: numericOrNull(data.minimo_facturable_toneladas),
+    limite_riesgo: numericOrNull(data.limite_riesgo) || 0,
+    modo_facturacion: data.modo_facturacion || "por_viaje",
+    bloqueado: Boolean(data.bloqueado),
+    bloqueo_motivo: data.bloqueo_motivo || null,
+    pendiente_revision: data.pendiente_revision === undefined ? undefined : Boolean(data.pendiente_revision),
     updated_at: columns.has("updated_at") ? new Date() : undefined,
   };
   return updateClienteCompat(clienteId, empresaId, values);
@@ -866,7 +880,21 @@ router.post("/", GERENTE_O_CONTABLE,
        modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null]
     ); */
     createdId = created?.id || null;
-    res.status(201).json(created);
+    const saved = createdId ? await persistClienteExtendedFields(createdId, empresaId, {
+      ...clienteData,
+      email_facturacion: email_facturacion || null,
+      emails_albaranes: emails_albaranes || null,
+      iban: iban || null,
+      horario_carga: horarioCargaNorm,
+      horario_descarga: horarioDescargaNorm,
+      minimo_facturable_toneladas: numericOrNull(minimo_facturable_toneladas),
+      limite_riesgo: numericOrNull(limite_riesgo) || 0,
+      modo_facturacion: modo_facturacion || "por_viaje",
+      bloqueado: Boolean(bloqueado),
+      bloqueo_motivo: bloqueo_motivo || null,
+      pendiente_revision: Boolean(incompleto),
+    }) : null;
+    res.status(201).json(saved || created);
     } catch (e) {
       if (createdId) await db.query("DELETE FROM clientes WHERE id=$1", [createdId]).catch(() => {});
       res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo guardar el cliente", request_id: req.id });

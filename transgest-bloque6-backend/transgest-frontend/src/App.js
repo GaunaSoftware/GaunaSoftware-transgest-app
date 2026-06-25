@@ -699,7 +699,7 @@ function writeAvimMinimized(user, value) {
   catch {}
 }
 
-function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove }) {
+function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove, hidden = false }) {
   const items = Array.isArray(data?.items) ? data.items : [];
   const pageSize = 12;
   const minimizedKey = avimStorageKey(user);
@@ -718,7 +718,7 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove 
   useEffect(() => {
     setVisibleCount(pageSize);
   }, [open, items.length]);
-  if (!items.length) return null;
+  if (!items.length || hidden) return null;
   const resumen = data?.resumen || {};
   const esGerente = user?.rol === "gerente";
   const importantes = items.filter(i => i.severity === "alta");
@@ -903,6 +903,7 @@ function AppInner() {
   const [colaboradoresPendientes, setColaboradoresPendientes] = useState(0);
   const [avisosOperativosColaboradores, setAvisosOperativosColaboradores] = useState({ items: [], resumen: {} });
   const [avisosOperativosOpen, setAvisosOperativosOpen] = useState(false);
+  const [pedidoActionMenuOpen, setPedidoActionMenuOpen] = useState(false);
   const [guidedModule, setGuidedModule] = useState(null);
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Estado de bloqueo por suscripciÃƒÂ³n Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
@@ -922,6 +923,13 @@ function AppInner() {
       return s?.aviso ? s : null;
     } catch { return null; }
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handlePedidoActionMenu = (event) => setPedidoActionMenuOpen(Boolean(event?.detail?.open));
+    window.addEventListener("tms:pedido-action-menu", handlePedidoActionMenu);
+    return () => window.removeEventListener("tms:pedido-action-menu", handlePedidoActionMenu);
+  }, []);
 
   useEffect(() => {
     const handleBloqueado = (e) => setBloqueado(e.detail);
@@ -1206,6 +1214,7 @@ function AppInner() {
         user={user}
         data={avisosOperativosColaboradores}
         open={avisosOperativosOpen}
+        hidden={pedidoActionMenuOpen}
         onToggle={setAvisosOperativosOpen}
         onRefresh={() => getAvisosOperativosColaboradores().then(d => setAvisosOperativosColaboradores(d && Array.isArray(d.items) ? d : { items: [], resumen: {} })).catch(()=>{})}
         onRemove={(key) => setAvisosOperativosColaboradores(prev => {

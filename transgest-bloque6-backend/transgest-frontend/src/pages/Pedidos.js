@@ -594,7 +594,7 @@ const TIPOS_PRECIO = [
   { v:"palet",    l:"Por palet (EUR/palet)" },
 ];
 const S = {
-  page:{flex:1,padding:"34px 36px",minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 45%,#f7fafc 100%)"},
+  page:{flex:1,padding:"34px 36px",minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 45%,#f7fafc 100%)",boxSizing:"border-box",minWidth:0,width:"100%"},
   title:{fontFamily:"'Syne',sans-serif",fontSize:36,fontWeight:900,marginBottom:16,color:"#0f172a"},
   bar:{display:"flex",gap:12,marginBottom:18,alignItems:"center",flexWrap:"wrap"},
   btn:{padding:"10px 16px",borderRadius:8,border:"1px solid #dbe5ec",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:6,background:"#fff",color:"#0f172a"},
@@ -8051,6 +8051,11 @@ export default function Pedidos() {
     window.addEventListener("click", handleClose);
     return () => window.removeEventListener("click", handleClose);
   }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("tms:pedido-action-menu", { detail: { open: Boolean(openActionMenuPedidoId) } }));
+    return () => window.dispatchEvent(new CustomEvent("tms:pedido-action-menu", { detail: { open: false } }));
+  }, [openActionMenuPedidoId]);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -9148,8 +9153,8 @@ export default function Pedidos() {
         </div>
       )}
 
-      <div style={{...S.card, overflow:"visible"}}>
-        <table style={{width:"100%",borderCollapse:"collapse"}}>
+      <div style={{...S.card, overflow:"visible",width:"100%",maxWidth:"100%",boxSizing:"border-box"}}>
+        <table style={{width:"100%",maxWidth:"100%",borderCollapse:"collapse"}}>
           <thead><tr>
             <th style={{...S.th,width:42}}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
@@ -9403,6 +9408,12 @@ export default function Pedidos() {
                               <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirEditar(p, {_focus_asignacion:true});}}
                                 style={{...S.btn,textAlign:"left",background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)",padding:"6px 10px",fontSize:11}}>
                                 Cambiar vehiculo/chofer
+                              </button>
+                            )}
+                            {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
+                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");setAutoAsignando(p);}}
+                                style={{...S.btn,textAlign:"left",background:"rgba(139,92,246,.12)",color:"#a78bfa",border:"1px solid rgba(139,92,246,.25)",padding:"6px 10px",fontSize:11}}>
+                                Autoasignacion IA
                               </button>
                             )}
                             {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual) && (

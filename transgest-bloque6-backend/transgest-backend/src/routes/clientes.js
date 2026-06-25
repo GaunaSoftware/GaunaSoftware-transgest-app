@@ -856,6 +856,24 @@ router.post("/", GERENTE_O_CONTABLE,
       modo_facturacion: modo_facturacion || "por_viaje",
       bloqueado: Boolean(bloqueado),
       bloqueo_motivo: bloqueo_motivo || null,
+      calle: clienteData.calle || null,
+      num_ext: clienteData.num_ext || null,
+      piso_puerta: clienteData.piso_puerta || null,
+      cod_postal: clienteData.cod_postal || null,
+      municipio: clienteData.municipio || null,
+      provincia: clienteData.provincia || null,
+      pais_iso: clienteData.pais_iso || null,
+      dir_fiscal_distinta: Boolean(clienteData.dir_fiscal_distinta),
+      fiscal_calle: clienteData.fiscal_calle || null,
+      fiscal_num_ext: clienteData.fiscal_num_ext || null,
+      fiscal_piso_puerta: clienteData.fiscal_piso_puerta || null,
+      fiscal_cod_postal: clienteData.fiscal_cod_postal || null,
+      fiscal_municipio: clienteData.fiscal_municipio || null,
+      fiscal_provincia: clienteData.fiscal_provincia || null,
+      fiscal_pais_iso: clienteData.fiscal_pais_iso || null,
+      web: clienteData.web || null,
+      contacto_telefono: clienteData.contacto_telefono || null,
+      updated_at: new Date(),
     }); /*
       INSERT INTO clientes (nombre,cif,direccion,cp,ciudad,pais,email,contacto,telefono,
         forma_pago,vencimiento,tipo_iva,iva_regimen,tipo_irpf,precio_tn_km,notas,empresa_id,
@@ -872,8 +890,7 @@ router.post("/", GERENTE_O_CONTABLE,
        modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null]
     ); */
     createdId = created?.id || null;
-    const saved = createdId ? await persistClienteExtendedFields(createdId, empresaId, clienteData) : null;
-    res.status(201).json(saved || created);
+    res.status(201).json(created);
     } catch (e) {
       if (createdId) await db.query("DELETE FROM clientes WHERE id=$1", [createdId]).catch(() => {});
       res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo guardar el cliente", request_id: req.id });

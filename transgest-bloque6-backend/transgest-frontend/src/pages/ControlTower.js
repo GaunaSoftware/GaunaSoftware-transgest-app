@@ -168,7 +168,7 @@ function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
   );
 }
 
-const MAP_SIZE = { width: 640, height: 220 };
+const MAP_SIZE = { width: 640, height: 300 };
 const SPAIN_CENTER = { lat: 40.25, lng: -3.7 };
 const CITY_COORDS = {
   madrid: { lat: 40.4168, lng: -3.7038 },
@@ -190,8 +190,11 @@ const CITY_COORDS = {
   lorqui: { lat: 38.0819, lng: -1.251 },
   arganda_del_rey: { lat: 40.3069, lng: -3.4477 },
   alcala_de_henares: { lat: 40.4819, lng: -3.3635 },
+  alcala: { lat: 40.4819, lng: -3.3635 },
+  cabanas_de_yepes: { lat: 39.889, lng: -3.535 },
   lucena: { lat: 37.4088, lng: -4.4852 },
   gandia: { lat: 38.968, lng: -0.1845 },
+  torrelavit: { lat: 41.446, lng: 1.729 },
   santago: { lat: 40.9701, lng: -3.6434 },
 };
 
@@ -330,6 +333,17 @@ function coordsForPlace(...values) {
     if (cityMatch) return CITY_COORDS[cityMatch];
     const regionMatch = Object.keys(REGION_COORDS).find(k => key.includes(k) || k.includes(key));
     if (regionMatch) return REGION_COORDS[regionMatch];
+    const tokens = key.split("_").filter(t => t.length >= 4 && !["centro", "norte", "sur", "este", "oeste", "terminal", "plataforma"].includes(t));
+    const tokenCityMatch = Object.keys(CITY_COORDS).find(k => {
+      const kt = k.split("_").filter(t => t.length >= 4);
+      return tokens.some(t => k.includes(t)) || kt.some(t => key.includes(t));
+    });
+    if (tokenCityMatch) return CITY_COORDS[tokenCityMatch];
+    const tokenRegionMatch = Object.keys(REGION_COORDS).find(k => {
+      const kt = k.split("_").filter(t => t.length >= 4);
+      return tokens.some(t => k.includes(t)) || kt.some(t => key.includes(t));
+    });
+    if (tokenRegionMatch) return REGION_COORDS[tokenRegionMatch];
   }
   return null;
 }
@@ -423,7 +437,92 @@ function getMapGeometry({ route, item, zoom }) {
     start: project(origin) || { x: 112, y: 148 },
     end: project(destination) || { x: 520, y: 106 },
     gpsPoint: project(gps),
+    project,
   };
+}
+
+function centerForPoints(points = []) {
+  const valid = points.filter(Boolean);
+  if (!valid.length) return SPAIN_CENTER;
+  if (valid.length === 1) return valid[0];
+  const lats = valid.map(p => p.lat);
+  const lngs = valid.map(p => p.lng);
+  return {
+    lat: (Math.min(...lats) + Math.max(...lats)) / 2,
+    lng: (Math.min(...lngs) + Math.max(...lngs)) / 2,
+  };
+}
+
+function getTileMapGeometry(points = [], zoom) {
+  const center = centerForPoints(points);
+  const centerPx = latLngToPixels(center, zoom);
+  const topLeft = { x: centerPx.x - MAP_SIZE.width / 2, y: centerPx.y - MAP_SIZE.height / 2 };
+  const project = point => {
+    if (!point) return null;
+    const px = latLngToPixels(point, zoom);
+    return {
+      x: clampMap(px.x - topLeft.x, 22, MAP_SIZE.width - 22),
+      y: clampMap(px.y - topLeft.y, 22, MAP_SIZE.height - 24),
+    };
+  };
+  const tileStartX = Math.floor(topLeft.x / 256);
+  const tileStartY = Math.floor(topLeft.y / 256);
+  const tileEndX = Math.floor((topLeft.x + MAP_SIZE.width) / 256);
+  const tileEndY = Math.floor((topLeft.y + MAP_SIZE.height) / 256);
+  const maxTiles = 2 ** zoom;
+  const tiles = [];
+  for (let x = tileStartX; x <= tileEndX; x += 1) {
+    for (let y = tileStartY; y <= tileEndY; y += 1) {
+      if (y < 0 || y >= maxTiles) continue;
+      const wrappedX = ((x % maxTiles) + maxTiles) % maxTiles;
+      tiles.push({
+        key: `${zoom}-${x}-${y}`,
+        src: `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
+        left: Math.round(x * 256 - topLeft.x),
+        top: Math.round(y * 256 - topLeft.y),
+      });
+    }
+  }
+  return { center, tiles, project };
+}
+
+function tripIdentity(item = {}) {
+  return String(item.id || item.entity_id || item.numero || item.pedido_numero || item.title || "");
+}
+
+function normalizeTripForMap(item = {}) {
+  const route = parseRouteFromItem(item);
+  const points = getRouteGeoPoints(route, item);
+  const current = points.gps || points.origin || points.destination;
+  if (!current) return null;
+  return {
+    ...item,
+    id: item.id || item.entity_id || item.numero || item.pedido_numero || `trip-${current.lat}-${current.lng}`,
+    entity_id: item.entity_id || item.id || "",
+    title: item.title || `Viaje ${item.numero || item.pedido_numero || ""}`.trim(),
+    view: item.view || "pedidos",
+    description: item.description || `${item.cliente_nombre || "Cliente"} - ${route.origen || "-"} > ${route.destino || "-"}`,
+    route,
+    points,
+    current,
+  };
+}
+
+function collectMapTrips(viajesPorEstado = {}, fallbackItems = []) {
+  const raw = [
+    ...Object.values(viajesPorEstado || {}).flatMap(group => Array.isArray(group) ? group : []),
+    ...(Array.isArray(fallbackItems) ? fallbackItems : []),
+  ];
+  const seen = new Set();
+  return raw
+    .map(normalizeTripForMap)
+    .filter(Boolean)
+    .filter(item => {
+      const key = tripIdentity(item);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function parseRouteFromItem(item = {}) {
@@ -434,7 +533,8 @@ function parseRouteFromItem(item = {}) {
   return { origen, destino };
 }
 
-function RouteMapPanel({ item }) {
+// eslint-disable-next-line no-unused-vars
+function RouteMapPanelLegacy({ item }) {
   const route = useMemo(() => parseRouteFromItem(item || {}), [item]);
   const hasGps = Number.isFinite(Number(item?.gps_lat)) && Number.isFinite(Number(item?.gps_lng));
   const title = item?.title || item?.numero || item?.pedido_numero || "Viaje en seguimiento";
@@ -535,6 +635,189 @@ function RouteMapPanel({ item }) {
           </button>
         </div>
       </div>
+      {hereConfigured && (
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10,alignItems:"center"}}>
+          <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>Rutas HERE</span>
+          {routeModes.map(mode => (
+            <button
+              key={mode.key}
+              onClick={() => setRouteMode(mode.key)}
+              style={{
+                border:`1px solid ${routeMode === mode.key ? "rgba(20,184,166,.45)" : "var(--border2)"}`,
+                background:routeMode === mode.key ? "rgba(20,184,166,.12)" : "var(--bg3)",
+                color:routeMode === mode.key ? "var(--accent-xl)" : "var(--text4)",
+                borderRadius:20,
+                padding:"5px 10px",
+                fontSize:11,
+                fontWeight:900,
+                cursor:"pointer",
+                fontFamily:"'DM Sans',sans-serif",
+              }}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RouteMapPanelReal({ item, trips = [], onSelectTrip }) {
+  const normalizedItem = useMemo(() => normalizeTripForMap(item || {}) || null, [item]);
+  const route = normalizedItem?.route || parseRouteFromItem(item || {});
+  const selectedPoints = normalizedItem?.points || getRouteGeoPoints(route, item || {});
+  const hasGps = Boolean(selectedPoints.gps);
+  const title = normalizedItem?.title || item?.numero || item?.pedido_numero || "Viaje en seguimiento";
+  const [providerInfo, setProviderInfo] = useState(null);
+  const [routeMode, setRouteMode] = useState("camion");
+  const [mapZoomDelta, setMapZoomDelta] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    getRouteProviders()
+      .then(info => { if (alive) setProviderInfo(info); })
+      .catch(() => { if (alive) setProviderInfo(null); });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    setMapZoomDelta(0);
+  }, [item?.id, item?.numero, route.origen, route.destino]);
+
+  const hereConfigured = Boolean(providerInfo?.providers?.here?.configured || providerInfo?.here?.configured);
+  const mapTrips = useMemo(() => {
+    const selected = normalizedItem ? [normalizedItem] : [];
+    return collectMapTrips({}, [...selected, ...(Array.isArray(trips) ? trips : [])]);
+  }, [trips, normalizedItem]);
+  const selectedKey = tripIdentity(normalizedItem || item || {});
+  const mapPoints = useMemo(() => [
+    selectedPoints.origin,
+    selectedPoints.destination,
+    selectedPoints.gps,
+    ...mapTrips.map(t => t.current),
+  ].filter(Boolean), [selectedPoints, mapTrips]);
+  const baseZoom = useMemo(() => fitZoomForPoints(mapPoints), [mapPoints]);
+  const mapZoom = Math.max(3, Math.min(9, baseZoom + mapZoomDelta));
+  const map = useMemo(() => getTileMapGeometry(mapPoints, mapZoom), [mapPoints, mapZoom]);
+  const start = map.project(selectedPoints.origin);
+  const end = map.project(selectedPoints.destination);
+  const gpsPoint = map.project(selectedPoints.gps);
+  const tripMarkers = mapTrips.map(trip => ({
+    ...trip,
+    screen: map.project(trip.current),
+    selected: tripIdentity(trip) === selectedKey,
+  })).filter(m => m.screen);
+  const routeModes = [
+    { key:"camion", label:"Camion", detail:"Perfil pesado" },
+    { key:"rapida", label:"Rapida", detail:"Menor tiempo" },
+    { key:"economica", label:"Economica", detail:"Menor coste" },
+  ];
+  const routeLabel = routeModes.find(m => m.key === routeMode)?.detail || "Ruta prevista";
+  const hasRouteLine = Boolean(start && end);
+  const cx = hasRouteLine ? Math.max(70, Math.min(570, (start.x + end.x) / 2)) : 320;
+  const cy = hasRouteLine ? Math.max(42, Math.min(250, Math.min(start.y, end.y) - 44)) : 120;
+  const routePath = hasRouteLine ? `M${start.x} ${start.y} C${cx} ${cy}, ${cx} ${cy}, ${end.x} ${end.y}` : "";
+  const openOsmPoint = selectedPoints.gps || selectedPoints.destination || selectedPoints.origin || SPAIN_CENTER;
+  const osmHref = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(openOsmPoint.lat)}&mlon=${encodeURIComponent(openOsmPoint.lng)}#map=${mapZoom}/${encodeURIComponent(openOsmPoint.lat)}/${encodeURIComponent(openOsmPoint.lng)}`;
+
+  return (
+    <div style={S.card}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
+        <div>
+          <div style={S.sec}>Mapa operativo real</div>
+          <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{title}</div>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
+          <span style={{fontSize:10,fontWeight:900,color:hasGps ? "var(--green)" : "var(--accent-xl)",border:`1px solid ${hasGps ? "rgba(16,185,129,.30)" : "rgba(20,184,166,.30)"}`,background:hasGps ? "rgba(16,185,129,.10)" : "rgba(20,184,166,.10)",borderRadius:20,padding:"3px 8px"}}>
+            {hasGps ? "GPS activo" : "Ruta prevista"}
+          </span>
+          <span style={{fontSize:10,fontWeight:900,color:"var(--text4)",border:"1px solid var(--border2)",background:"var(--bg3)",borderRadius:20,padding:"3px 8px"}}>
+            {tripMarkers.length} viaje{tripMarkers.length!==1?"s":""}
+          </span>
+        </div>
+      </div>
+
+      <div style={{position:"relative",height:300,borderRadius:10,overflow:"hidden",border:"1px solid var(--border)",background:"#dbeafe"}}>
+        <div style={{position:"absolute",inset:0,overflow:"hidden",opacity:.96}}>
+          {map.tiles.map(tile => (
+            <img key={tile.key} src={tile.src} alt="" style={{position:"absolute",left:tile.left,top:tile.top,width:256,height:256,userSelect:"none",pointerEvents:"none",filter:"saturate(.78) contrast(.96) brightness(1.02)"}} />
+          ))}
+        </div>
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(90deg, rgba(255,255,255,.18), rgba(255,255,255,.03))"}} />
+        <svg viewBox="0 0 640 300" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>
+          <defs>
+            <filter id="ct-map-shadow-real" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="6" stdDeviation="6" floodColor="#0f172a" floodOpacity=".10" />
+            </filter>
+          </defs>
+          <rect width="640" height="300" fill="transparent" />
+          {hasRouteLine && (
+            <>
+              <path d={routePath} fill="none" stroke="rgba(15,118,110,.30)" strokeWidth="9" strokeLinecap="round" filter="url(#ct-map-shadow-real)" />
+              <path d={routePath} fill="none" stroke="rgba(20,184,166,.90)" strokeWidth="4" strokeLinecap="round" strokeDasharray={hasGps ? "0" : "9 9"} />
+              <circle cx={start.x} cy={start.y} r="10" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
+              <circle cx={end.x} cy={end.y} r="10" fill="#fff" stroke="var(--accent)" strokeWidth="4" />
+            </>
+          )}
+          {hasGps && gpsPoint && (
+            <g transform={`translate(${gpsPoint.x - 12} ${gpsPoint.y - 12})`}>
+              <circle cx="12" cy="12" r="18" fill="rgba(16,185,129,.18)" stroke="rgba(16,185,129,.42)" />
+              <rect x="3" y="7" width="18" height="10" rx="3" fill="var(--green)" />
+              <circle cx="7" cy="19" r="3" fill="#fff" />
+              <circle cx="19" cy="19" r="3" fill="#fff" />
+            </g>
+          )}
+        </svg>
+
+        {tripMarkers.map(marker => {
+          const color = marker.selected ? "#0f766e" : marker.points.gps ? "#10b981" : "#3b82f6";
+          return (
+            <button
+              key={tripIdentity(marker)}
+              type="button"
+              title={`${marker.numero || marker.pedido_numero || marker.title || "Viaje"} - ${marker.route?.origen || "-"} > ${marker.route?.destino || "-"}`}
+              onClick={() => onSelectTrip?.(marker)}
+              style={{
+                position:"absolute",
+                left:marker.screen.x - 12,
+                top:marker.screen.y - 12,
+                width:24,
+                height:24,
+                borderRadius:999,
+                border:`3px solid ${marker.selected ? "#fff" : "rgba(255,255,255,.92)"}`,
+                background:color,
+                boxShadow:marker.selected ? "0 0 0 4px rgba(20,184,166,.24), 0 10px 24px rgba(15,23,42,.28)" : "0 6px 16px rgba(15,23,42,.22)",
+                cursor:"pointer",
+                padding:0,
+                zIndex:marker.selected ? 5 : 4,
+              }}
+            />
+          );
+        })}
+
+        <div style={{position:"absolute",right:12,bottom:14,display:"grid",overflow:"hidden",border:"1px solid rgba(148,163,184,.32)",borderRadius:8,background:"rgba(255,255,255,.90)",boxShadow:"0 8px 20px rgba(15,23,42,.08)",zIndex:6}}>
+          <button onClick={() => setMapZoomDelta(z => Math.min(3, z + 1))} style={{width:34,height:32,border:"none",borderBottom:"1px solid rgba(148,163,184,.22)",background:"transparent",fontSize:18,fontWeight:900,cursor:"pointer",color:"#334155"}}>+</button>
+          <button onClick={() => setMapZoomDelta(z => Math.max(-2, z - 1))} style={{width:34,height:32,border:"none",background:"transparent",fontSize:20,fontWeight:900,cursor:"pointer",color:"#334155"}}>-</button>
+        </div>
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{position:"absolute",right:56,bottom:14,fontSize:9,color:"rgba(15,23,42,.55)",background:"rgba(255,255,255,.82)",border:"1px solid rgba(148,163,184,.24)",borderRadius:6,padding:"3px 6px",textDecoration:"none",zIndex:6}}>
+          Â© OpenStreetMap
+        </a>
+        <div style={{position:"absolute",left:14,bottom:14,width:250,background:"rgba(255,255,255,.92)",color:"#0f172a",border:"1px solid rgba(148,163,184,.28)",borderRadius:10,padding:"10px 12px",boxShadow:"0 10px 30px rgba(15,23,42,.10)",zIndex:6}}>
+          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"#0f766e",marginBottom:5}}>{hasGps ? "Ubicacion actual" : "Ruta"}</div>
+          <div style={{fontSize:12,fontWeight:900,lineHeight:1.35}}>{route.origen || "Origen"} -> {route.destino || "Destino"}</div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:5}}>{hasGps ? "Mostrando posicion GPS recibida." : `Sin GPS reciente: ${routeLabel.toLowerCase()}.`}</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:9}}>
+            <button onClick={()=>abrirItem(normalizedItem || item)} style={{border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#0f766e",borderRadius:7,padding:"6px 9px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Ver detalle
+            </button>
+            <a href={osmHref} target="_blank" rel="noreferrer" style={{border:"1px solid rgba(59,130,246,.25)",background:"rgba(59,130,246,.08)",color:"#2563eb",borderRadius:7,padding:"6px 9px",fontSize:11,fontWeight:900,textDecoration:"none"}}>
+              Abrir mapa
+            </a>
+          </div>
+        </div>
+      </div>
+
       {hereConfigured && (
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10,alignItems:"center"}}>
           <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>Rutas HERE</span>
@@ -676,6 +959,7 @@ export default function ControlTower() {
   const visibilidad = data?.visibilidad || {};
   const decisiones = Array.isArray(data?.decisiones) ? data.decisiones : [];
   const eventos = Array.isArray(data?.eventos_recientes) ? data.eventos_recientes : [];
+  const mapTrips = useMemo(() => collectMapTrips(viajesPorEstado, items), [viajesPorEstado, items]);
   const mapItem = useMemo(() => {
     if (selectedTrip) return selectedTrip;
     const enRuta = Array.isArray(viajesPorEstado.en_curso) ? viajesPorEstado.en_curso[0] : null;
@@ -701,6 +985,16 @@ export default function ControlTower() {
       description: `${trip.cliente_nombre || "Cliente"} - ${trip.origen || "-"} > ${trip.destino || "-"}`,
     });
     setStatusPicker(null);
+  }
+  function seleccionarViajeMapa(trip) {
+    const route = trip?.route || parseRouteFromItem(trip || {});
+    setSelectedTrip({
+      ...trip,
+      title: trip?.title || `Viaje ${trip?.numero || trip?.pedido_numero || ""}`.trim(),
+      entity_id: trip?.entity_id || trip?.id || "",
+      view: trip?.view || "pedidos",
+      description: trip?.description || `${trip?.cliente_nombre || "Cliente"} - ${route.origen || "-"} > ${route.destino || "-"}`,
+    });
   }
   const grupos = useMemo(() => ({
     todas: items,
@@ -802,7 +1096,7 @@ export default function ControlTower() {
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12,marginBottom:12}}>
           <div style={{display:"grid",gap:12}}>
             <FlowPanel flujo={flujo} selectedKey={statusPicker?.key || selectedTrip?.estado || ""} onStatusClick={abrirEstadoFlujo} />
-            {mapItem && <RouteMapPanel item={mapItem} />}
+            {mapItem && <RouteMapPanelReal item={mapItem} trips={mapTrips} onSelectTrip={seleccionarViajeMapa} />}
             <div style={{...S.card}}>
               <div style={S.sec}>Flota, recursos y señales</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>

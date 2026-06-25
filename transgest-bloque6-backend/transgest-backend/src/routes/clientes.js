@@ -9,6 +9,12 @@ const { authenticate, GERENTE_O_CONTABLE } = require("../middleware/auth");
 
 const router = express.Router();
 
+const CLIENTES_CREATE_BASE_COLUMNS = new Set([
+  "empresa_id", "nombre", "cif", "direccion", "cp", "ciudad", "pais",
+  "email", "contacto", "telefono", "forma_pago", "vencimiento",
+  "tipo_iva", "tipo_irpf", "precio_tn_km", "activo", "notas",
+]);
+
 let clientesColumnsCache = null;
 async function getClientesColumns() {
   if (clientesColumnsCache) return clientesColumnsCache;
@@ -32,8 +38,7 @@ function clienteColumnEntries(values = {}) {
 }
 
 async function insertClienteCompat(values = {}) {
-  const columns = await getClientesColumns();
-  const entries = clienteColumnEntries(values).filter(([column]) => columns.has(column));
+  const entries = clienteColumnEntries(values).filter(([column]) => CLIENTES_CREATE_BASE_COLUMNS.has(column));
   const names = entries.map(([column]) => column);
   const params = entries.map(([, value]) => value);
   const placeholders = params.map((_, idx) => `$${idx + 1}`);
@@ -842,38 +847,9 @@ router.post("/", GERENTE_O_CONTABLE,
       iva_regimen: iva.iva_regimen,
       tipo_irpf: tipo_irpf || 0,
       precio_tn_km: precio_tn_km || 0,
+      activo: true,
       notas: notas || null,
       empresa_id: empresaId,
-      pendiente_revision: incompleto,
-      email_facturacion: email_facturacion || null,
-      email_facturas: email_facturacion || null,
-      emails_albaranes: emails_albaranes || null,
-      iban: iban || null,
-      horario_carga: horarioCargaNorm,
-      horario_descarga: horarioDescargaNorm,
-      minimo_facturable_toneladas: numericOrNull(minimo_facturable_toneladas),
-      limite_riesgo: numericOrNull(limite_riesgo) || 0,
-      modo_facturacion: modo_facturacion || "por_viaje",
-      bloqueado: Boolean(bloqueado),
-      bloqueo_motivo: bloqueo_motivo || null,
-      calle: clienteData.calle || null,
-      num_ext: clienteData.num_ext || null,
-      piso_puerta: clienteData.piso_puerta || null,
-      cod_postal: clienteData.cod_postal || null,
-      municipio: clienteData.municipio || null,
-      provincia: clienteData.provincia || null,
-      pais_iso: clienteData.pais_iso || null,
-      dir_fiscal_distinta: Boolean(clienteData.dir_fiscal_distinta),
-      fiscal_calle: clienteData.fiscal_calle || null,
-      fiscal_num_ext: clienteData.fiscal_num_ext || null,
-      fiscal_piso_puerta: clienteData.fiscal_piso_puerta || null,
-      fiscal_cod_postal: clienteData.fiscal_cod_postal || null,
-      fiscal_municipio: clienteData.fiscal_municipio || null,
-      fiscal_provincia: clienteData.fiscal_provincia || null,
-      fiscal_pais_iso: clienteData.fiscal_pais_iso || null,
-      web: clienteData.web || null,
-      contacto_telefono: clienteData.contacto_telefono || null,
-      updated_at: new Date(),
     }); /*
       INSERT INTO clientes (nombre,cif,direccion,cp,ciudad,pais,email,contacto,telefono,
         forma_pago,vencimiento,tipo_iva,iva_regimen,tipo_irpf,precio_tn_km,notas,empresa_id,

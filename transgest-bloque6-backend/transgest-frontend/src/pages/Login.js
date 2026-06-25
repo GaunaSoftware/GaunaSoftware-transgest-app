@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { BRAND_NAME, getBrandDisplayName, getBrandVersionLabel } from "../branding";
-import { getLoginBrand, getPublicAppMeta, healthCheck } from "../services/api";
+import { getLoginBrand, getPublicAppMeta, healthCheck, requestPasswordReset } from "../services/api";
 import { confirmDialog } from "../services/notify";
 import { getEmpresaPlanLocal } from "../utils/planFeatures";
 import { useTheme } from "../context/ThemeContext";
@@ -39,6 +39,7 @@ const S = {
   demoRow:   { display:"flex", justifyContent:"space-between", fontSize:12, color:"#5b7099",
                fontFamily:"'JetBrains Mono',monospace", padding:"2px 0", cursor:"pointer" },
   footer: { textAlign:"center", marginTop:20, fontSize:11, color:"var(--text5)" },
+  linkBtn: { border:"none", background:"transparent", color:"var(--accent)", fontSize:12, fontWeight:800, cursor:"pointer", padding:0, fontFamily:"'DM Sans',sans-serif" },
 };
 
 export default function Login() {
@@ -56,6 +57,11 @@ export default function Login() {
   const [checkingServer, setCheckingServer] = useState(false);
   const [serverOk, setServerOk] = useState(null);
   const [serverMessage, setServerMessage] = useState("");
+  const [remember, setRemember] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotIdentifier, setForgotIdentifier] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState("");
 
   async function checkServerStatus() {
     setCheckingServer(true);
@@ -75,6 +81,14 @@ export default function Login() {
   useEffect(() => {
     checkServerStatus();
     getPublicAppMeta().then(setAppMeta).catch(() => {});
+    try {
+      const saved = JSON.parse(localStorage.getItem("tms_remember_credentials") || "null");
+      if (saved?.remember) {
+        setEmail(saved.email || "");
+        setPass(saved.password || "");
+        setRemember(true);
+      }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -101,6 +115,13 @@ export default function Login() {
     setLoading(true); setError("");
     try {
       await login(email, pass);
+      try {
+        if (remember) {
+          localStorage.setItem("tms_remember_credentials", JSON.stringify({ remember:true, email, password:pass }));
+        } else {
+          localStorage.removeItem("tms_remember_credentials");
+        }
+      } catch {}
     } catch (err) {
       const apiError = typeof window !== "undefined" ? window.__TMS_LAST_API_ERROR : null;
       const hint = apiError?.request_id ? ` Codigo: ${apiError.request_id}.` : "";
@@ -124,6 +145,25 @@ export default function Login() {
       }
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleForgotPassword(e) {
+    e?.preventDefault();
+    const identifier = String(forgotIdentifier || email || "").trim();
+    if (!identifier || identifier.length < 3) {
+      setForgotMessage("Indica tu usuario o email.");
+      return;
+    }
+    setForgotLoading(true);
+    setForgotMessage("");
+    try {
+      const data = await requestPasswordReset(identifier);
+      setForgotMessage(data?.message || "Solicitud enviada. Superadmin recibira el aviso.");
+    } catch (err) {
+      setForgotMessage(err?.message || "No se pudo registrar la solicitud.");
+    } finally {
+      setForgotLoading(false);
     }
   }
 
@@ -183,6 +223,34 @@ export default function Login() {
             placeholder="••••••••" />
         </div>
 
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginTop:-8,marginBottom:18,flexWrap:"wrap"}}>
+          <label style={{display:"inline-flex",alignItems:"center",gap:7,fontSize:12,color:"var(--text3)",fontWeight:700,cursor:"pointer"}}>
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={e=>{
+                const next = e.target.checked;
+                setRemember(next);
+                if (!next) {
+                  try { localStorage.removeItem("tms_remember_credentials"); } catch {}
+                }
+              }}
+            />
+            Recordar en este equipo
+          </label>
+          <button
+            type="button"
+            style={S.linkBtn}
+            onClick={() => {
+              setForgotIdentifier(email || "");
+              setForgotMessage("");
+              setForgotOpen(true);
+            }}
+          >
+            He olvidado la contraseña
+          </button>
+        </div>
+
         <button style={{ ...S.btn, opacity: loading ? .7 : 1 }}
           onClick={handleLogin} disabled={loading}>
           {loading ? "Entrando..." : "Iniciar sesión"}
@@ -206,6 +274,36 @@ export default function Login() {
           © {new Date().getFullYear()} {BRAND_NAME} {versionLabel} · Todos los derechos reservados
         </div>
       </div>
+      {forgotOpen && (
+        <div style={{position:"fixed",inset:0,zIndex:8000,background:"rgba(15,20,32,.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
+          <form onSubmit={handleForgotPassword} style={{width:"min(390px,96vw)",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:22,boxShadow:"var(--shadow)"}}>
+            <div style={{fontSize:17,fontWeight:900,color:"var(--text)",marginBottom:6}}>Recuperar contrasena</div>
+            <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:14}}>
+              Se enviara un aviso a superadmin para revisar y resetear la clave de este usuario.
+            </div>
+            <label style={S.label}>Usuario o email</label>
+            <input
+              autoFocus
+              style={S.input}
+              type="text"
+              value={forgotIdentifier}
+              onChange={e=>setForgotIdentifier(e.target.value)}
+              placeholder="usuario o tu@empresa.com"
+            />
+            {forgotMessage && (
+              <div style={{marginTop:12,fontSize:12,color:forgotMessage.includes("Solicitud") || forgotMessage.includes("recibida") ? "var(--green)" : "#fbbf24",lineHeight:1.45}}>
+                {forgotMessage}
+              </div>
+            )}
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
+              <button type="button" onClick={()=>setForgotOpen(false)} style={{padding:"8px 13px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontWeight:800,cursor:"pointer"}}>Cerrar</button>
+              <button type="submit" disabled={forgotLoading} style={{padding:"8px 14px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontWeight:900,cursor:"pointer",opacity:forgotLoading?.7:1}}>
+                {forgotLoading ? "Enviando..." : "Enviar aviso"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

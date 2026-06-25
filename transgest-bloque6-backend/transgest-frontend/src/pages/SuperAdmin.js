@@ -70,10 +70,10 @@ async function saFetch(path, opts={}){
   return data;
 }
 
-const PLAN_COLOR   = {basico:"#6b7280",profesional:"#3b82f6",enterprise:"#8b5cf6"};
+const PLAN_COLOR   = {lite:"#0f766e",basico:"#6b7280",profesional:"#3b82f6",enterprise:"#8b5cf6"};
 const ESTADO_COLOR = {activo:"#10b981",suspendido:"#f59e0b",cancelado:"#ef4444"};
-const PLANES_OPTS  = ["basico","profesional","enterprise"];
-const PLAN_PRICES  = {basico:99,profesional:199,enterprise:399};
+const PLANES_OPTS  = ["lite","basico","profesional","enterprise"];
+const PLAN_PRICES  = {lite:49,basico:99,profesional:199,enterprise:399};
 const ACCOUNTING_MAPPING_ITEM_LABELS = {
   chart_of_accounts:"Plan contable",
   parties:"Terceros",
@@ -2676,6 +2676,47 @@ const SaaS = {
   btnWarn:{padding:"4px 9px",borderRadius:6,border:"1px solid rgba(245,158,11,.25)",background:"rgba(245,158,11,.12)",color:"#fbbf24",fontSize:11,fontWeight:700,cursor:"pointer"},
 };
 
+function PasswordResetRequestsPanel({ items = [], onReset, onDismiss, onRefresh }) {
+  return (
+    <div style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:12,padding:"14px 18px",marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:12,fontWeight:800,color:"#fbbf24",textTransform:"uppercase",letterSpacing:".06em"}}>Solicitudes de contraseña</div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{items.length ? `${items.length} pendientes de revisar` : "Sin solicitudes pendientes"}</div>
+        </div>
+        <button onClick={onRefresh} style={{padding:"6px 11px",borderRadius:7,border:"1px solid #1c2740",background:"#1e2d45",color:"#94a3b8",fontSize:11,fontWeight:800,cursor:"pointer"}}>Actualizar</button>
+      </div>
+      {!items.length ? (
+        <div style={{fontSize:13,color:"#34d399",padding:"8px 0"}}>OK No hay resets pendientes.</div>
+      ) : (
+        <div style={{display:"grid",gap:8}}>
+          {items.slice(0, 8).map(item => (
+            <div key={item.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"center",padding:"10px 12px",border:"1px solid #1c2740",borderRadius:8,background:"#0f1420"}}>
+              <div>
+                <div style={{fontSize:13,color:"#e2e8f0",fontWeight:800}}>
+                  {item.nombre || item.email || item.identifier}
+                </div>
+                <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>
+                  {(item.empresa_nombre || "Empresa no localizada")} - {item.email || item.identifier} {item.rol ? `- ${item.rol}` : ""}
+                </div>
+                <div style={{fontSize:10,color:item.usuario_id ? "#64748b" : "#fbbf24",marginTop:2}}>
+                  {item.usuario_id ? `Solicitado ${fmtDate(item.requested_at)}` : "Usuario no localizado: revisar manualmente"}
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                {item.usuario_id && (
+                  <button onClick={()=>onReset(item)} style={{padding:"6px 10px",borderRadius:7,border:"1px solid rgba(20,184,166,.24)",background:"rgba(20,184,166,.10)",color:"#5eead4",fontSize:11,fontWeight:800,cursor:"pointer"}}>Resetear</button>
+                )}
+                <button onClick={()=>onDismiss(item)} style={{padding:"6px 10px",borderRadius:7,border:"1px solid rgba(239,68,68,.22)",background:"rgba(239,68,68,.10)",color:"#f87171",fontSize:11,fontWeight:800,cursor:"pointer"}}>Descartar</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SuperAdmin(){
   const [loggedIn,setLoggedIn]=useState(!!saToken());
   const [tab,setTab]=useState("dashboard"); // dashboard | empresas
@@ -2690,14 +2731,23 @@ export default function SuperAdmin(){
   const [passwordEmpresa,setPasswordEmpresa]=useState(null);
   const [passwordValue,setPasswordValue]=useState("");
   const [passwordSaving,setPasswordSaving]=useState(false);
+  const [passwordRequests,setPasswordRequests]=useState([]);
+  const [passwordSolicitud,setPasswordSolicitud]=useState(null);
+  const [passwordSolicitudValue,setPasswordSolicitudValue]=useState("");
+  const [passwordSolicitudSaving,setPasswordSolicitudSaving]=useState(false);
 
   const cargar=useCallback(async()=>{
     if(!loggedIn)return;
     setLoading(true);
     try{
-      const [e,s]=await Promise.all([saFetch("/empresas"),saFetch("/stats")]);
+      const [e,s,pr]=await Promise.all([
+        saFetch("/empresas"),
+        saFetch("/stats"),
+        saFetch("/password-reset-requests?estado=pendiente").catch(() => []),
+      ]);
       setEmpresas(Array.isArray(e) ? e : []);
       setStats(s);
+      setPasswordRequests(Array.isArray(pr) ? pr : []);
     }catch(err){
       if(err.message.includes("invalido")||err.message.includes("nvalid")||err.message.includes("No autorizado")||err.message.includes("Sesion de superadmin")){saTokenRem();setLoggedIn(false);}
     }finally{setLoading(false);}
@@ -2774,6 +2824,39 @@ export default function SuperAdmin(){
       setPasswordValue("");
     }catch(e){ notify(e.message || "No se pudo cambiar la contrasena", "error"); }
     finally{ setPasswordSaving(false); }
+  }
+
+  async function confirmarResetSolicitud(){
+    const solicitud = passwordSolicitud;
+    if(!solicitud) return;
+    if(String(passwordSolicitudValue || "").length < 8){
+      notify("La contrasena debe tener al menos 8 caracteres.", "warning");
+      return;
+    }
+    setPasswordSolicitudSaving(true);
+    try{
+      await saFetch(`/password-reset-requests/${solicitud.id}/reset`,{method:"POST",body:{password:passwordSolicitudValue}});
+      notify("Contrasena reseteada y solicitud cerrada.", "success");
+      setPasswordSolicitud(null);
+      setPasswordSolicitudValue("");
+      await cargar();
+    }catch(e){ notify(e.message || "No se pudo resetear la contrasena", "error"); }
+    finally{ setPasswordSolicitudSaving(false); }
+  }
+
+  async function descartarSolicitudPassword(solicitud){
+    const ok = await confirmDialog({
+      title: "Descartar solicitud",
+      message: `Descartar la solicitud de ${solicitud.email || solicitud.identifier}?`,
+      confirmText: "Descartar",
+      tone: "danger",
+    });
+    if(!ok) return;
+    try{
+      await saFetch(`/password-reset-requests/${solicitud.id}/descartar`,{method:"POST",body:{note:"Descartada desde dashboard superadmin"}});
+      notify("Solicitud descartada.", "success");
+      await cargar();
+    }catch(e){ notify(e.message || "No se pudo descartar la solicitud", "error"); }
   }
 
   async function reinvitarEmpresa(empresa){
@@ -2855,6 +2938,13 @@ export default function SuperAdmin(){
                 </div>
               ))}
             </div>
+
+            <PasswordResetRequestsPanel
+              items={passwordRequests}
+              onReset={(item)=>{setPasswordSolicitud(item);setPasswordSolicitudValue("");}}
+              onDismiss={descartarSolicitudPassword}
+              onRefresh={cargar}
+            />
 
             {/* Section */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
@@ -3074,6 +3164,31 @@ export default function SuperAdmin(){
               <button type="button" onClick={()=>{setPasswordEmpresa(null);setPasswordValue("");}} style={{padding:"8px 13px",borderRadius:7,border:"1px solid #334155",background:"transparent",color:"#94a3b8",fontWeight:800,cursor:"pointer"}}>Cancelar</button>
               <button type="submit" disabled={passwordSaving} style={{padding:"8px 14px",borderRadius:7,border:"none",background:"#0f766e",color:"#fff",fontWeight:900,cursor:"pointer",opacity:passwordSaving?.7:1}}>
                 {passwordSaving ? "Guardando..." : "Cambiar clave"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {passwordSolicitud&&(
+        <div style={{position:"fixed",inset:0,zIndex:7100,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
+          <form onSubmit={e=>{e.preventDefault();confirmarResetSolicitud();}} style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:12,padding:22,width:"min(440px,96vw)",boxShadow:"0 24px 80px rgba(0,0,0,.35)"}}>
+            <div style={{fontSize:17,fontWeight:900,color:"#e2e8f0",marginBottom:6}}>Resetear solicitud</div>
+            <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.5,marginBottom:14}}>
+              Nueva contrasena para {passwordSolicitud.nombre || passwordSolicitud.email || passwordSolicitud.identifier}.
+              {passwordSolicitud.empresa_nombre ? ` Empresa: ${passwordSolicitud.empresa_nombre}.` : ""}
+            </div>
+            <input
+              autoFocus
+              type="password"
+              value={passwordSolicitudValue}
+              onChange={e=>setPasswordSolicitudValue(e.target.value)}
+              placeholder="Minimo 8 caracteres"
+              style={{width:"100%",boxSizing:"border-box",background:"#1a2035",border:"1px solid #28344f",color:"#e2e8f0",padding:"11px 13px",borderRadius:8,outline:"none",fontFamily:"'DM Sans',sans-serif",fontSize:14}}
+            />
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:16}}>
+              <button type="button" onClick={()=>{setPasswordSolicitud(null);setPasswordSolicitudValue("");}} style={{padding:"8px 13px",borderRadius:7,border:"1px solid #334155",background:"transparent",color:"#94a3b8",fontWeight:800,cursor:"pointer"}}>Cancelar</button>
+              <button type="submit" disabled={passwordSolicitudSaving} style={{padding:"8px 14px",borderRadius:7,border:"none",background:"#0f766e",color:"#fff",fontWeight:900,cursor:"pointer",opacity:passwordSolicitudSaving?.7:1}}>
+                {passwordSolicitudSaving ? "Guardando..." : "Resetear clave"}
               </button>
             </div>
           </form>

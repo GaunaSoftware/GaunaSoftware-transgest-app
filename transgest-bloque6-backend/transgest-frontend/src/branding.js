@@ -5,6 +5,7 @@ export const BRAND_VERSION_LABEL = `${BRAND_VERSION_NAME} v${BRAND_VERSION}`;
 export const BRAND_FULL_NAME = `${BRAND_NAME} ${BRAND_VERSION_LABEL}`;
 
 const PLAN_BRAND_SUFFIX = {
+  lite: "Lite",
   basico: "Basic",
   profesional: "Pro",
   enterprise: "Enterprise",

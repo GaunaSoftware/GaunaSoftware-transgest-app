@@ -1,8 +1,8 @@
 ﻿const crypto = require("crypto");
 
 const DOC_CONTROL_DEFAULTS = {
-  habilitado: false,
-  sistema: "codigo_numerico", // codigo_numerico | qr_url
+  habilitado: true,
+  sistema: "qr_url", // codigo_numerico | qr_url
   dominio_url: "",
   dominio_comunicado: false,
   usar_orden_carga_como_soporte: true,
@@ -804,6 +804,47 @@ function buildDocumentoControlSignaturePackage(payload = {}, firma = {}) {
   return packageData;
 }
 
+function dataUrlFromBase64(base64 = "", mime = "image/png") {
+  const raw = String(base64 || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("data:")) return raw;
+  return `data:${mime || "image/png"};base64,${raw}`;
+}
+
+function buildDocumentoControlSignatures(pedido = {}) {
+  const evidencia = pedido?.firma_evidencia && typeof pedido.firma_evidencia === "object" ? pedido.firma_evidencia : {};
+  const firmas = evidencia.firmas && typeof evidencia.firmas === "object" ? evidencia.firmas : {};
+  const pick = (role, fallback = {}) => {
+    const ev = firmas[role] || {};
+    return {
+      rol: role,
+      nombre: fallback.nombre || ev.firmante?.nombre || "",
+      fecha: fallback.fecha || ev.firmado_at || "",
+      hash: fallback.hash || ev.firma?.hash || "",
+      imagen: fallback.imagen || ev.firma?.data_url || ev.firma?.imagen || "",
+      evidencia: ev,
+    };
+  };
+  return {
+    cargador: pick("cargador", {
+      nombre: pedido?.firma_cargador_nombre || "",
+      fecha: pedido?.firma_cargador_fecha || "",
+      imagen: pedido?.firma_cargador || "",
+    }),
+    chofer: pick("chofer", {
+      nombre: pedido?.firma_chofer_nombre || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim(),
+      fecha: pedido?.firma_chofer_fecha || "",
+      imagen: pedido?.firma_chofer || "",
+    }),
+    destinatario: pick("destinatario", {
+      nombre: pedido?.firma_nombre || "",
+      fecha: pedido?.firma_fecha || "",
+      hash: pedido?.firma_hash || "",
+      imagen: pedido?.firma_destinatario || "",
+    }),
+  };
+}
+
 function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente = {}, colaborador = {}, appBaseUrl = "" }) {
   const config = normalizeDocumentoControlConfig(empresa?.documento_control);
   const cargas = parseStops(pedido?.puntos_carga);
@@ -861,6 +902,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   const cmrTipo = String(pedido?.cmr_tipo || "").toLowerCase() === "internacional" || !isSpainLike(origenPais) || !isSpainLike(destinoPais)
     ? "internacional"
     : "nacional";
+  const choferNombre = [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim();
+  const firmas = buildDocumentoControlSignatures(pedido);
 
   const documento = {
     codigo_control: codigoControl,
@@ -880,6 +923,18 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     },
     cargador_contractual: cargador,
     transportista_efectivo: transportista,
+    empresa: {
+      nombre: companyName(empresa),
+      cif: empresa?.cif || "",
+      logo_url: dataUrlFromBase64(empresa?.logo_base64 || "", empresa?.logo_mime || "image/png"),
+    },
+    chofer: {
+      nombre: choferNombre || firmas.chofer.nombre || "",
+      dni: pedido?.chofer_dni || "",
+      telefono: pedido?.chofer_telefono || pedido?.chofer_tel || "",
+      email: pedido?.chofer_email || "",
+    },
+    firmas,
     origen: {
       nombre: carga.nombre || pedido?.origen || "",
       direccion: carga.direccion || pedido?.origen || "",
@@ -1018,8 +1073,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
 
   if (config.sistema === "qr_url") {
     checks.push(
-      { key: "dominio_url", ok: /^https:\/\//i.test(config.dominio_url || ""), label: "Dominio HTTPS configurado", category: "sistema" },
-      { key: "dominio_comunicado", ok: !!config.dominio_comunicado, label: "Dominio comunicado al Ministerio", category: "sistema" },
+      { key: "dominio_url", ok: /^https:\/\//i.test(config.dominio_url || publicUrl || ""), label: "Dominio HTTPS configurado", category: "sistema" },
+      { key: "dominio_comunicado", ok: !!config.dominio_comunicado, label: "Dominio comunicado al Ministerio", category: "sistema", required: false },
       { key: "qr_public_url", ok: !!publicUrl, label: "URL publica para QR", category: "sistema" },
     );
   }
@@ -1113,6 +1168,13 @@ function buildDocumentoControlPublicPayload(payload = {}) {
   };
 }
 
+async function buildDocumentoControlQrDataUrl(documento = {}) {
+  const QRCode = require("qrcode");
+  const url = documento?.qr_url || documento?.soporte_url || documento?.verificacion?.url_segura || "";
+  if (!url) return "";
+  return QRCode.toDataURL(url, { errorCorrectionLevel: "M", margin: 1, width: 360 });
+}
+
 function buildDocumentoControlHtml({
   documento,
   empresaNombre = "TransGest TMS",
@@ -1136,6 +1198,22 @@ function buildDocumentoControlHtml({
       <td>${escapeHtml(item.hora || item.ventana || "-")}</td>
     </tr>
   `).join("");
+  const firmaBox = (label, firma = {}, extra = "") => {
+    const hasImage = !!firma?.imagen;
+    return `<div class="firma-box">
+      <div class="lbl">${escapeHtml(label)}</div>
+      ${extra ? `<div class="sub">${escapeHtml(extra)}</div>` : ""}
+      ${hasImage ? `<img class="firma-img" src="${escapeHtml(firma.imagen)}" alt="${escapeHtml(label)}">` : `<div class="firma-line">Nombre, firma y sello</div>`}
+      <div class="sub">${escapeHtml(firma?.nombre || "Pendiente")}${firma?.fecha ? ` · ${escapeHtml(new Date(firma.fecha).toLocaleString("es-ES"))}` : ""}</div>
+      ${firma?.hash ? `<div class="sub hash">SHA-256 ${escapeHtml(firma.hash)}</div>` : ""}
+    </div>`;
+  };
+  const firmas = documento?.firmas || {};
+  const firmaBlock = `<section class="firmas">
+    ${firmaBox("Firma cargador / remitente", firmas.cargador, documento?.cargador_contractual?.nombre || "")}
+    ${firmaBox("Firma chofer / transportista", firmas.chofer, [documento?.chofer?.nombre, documento?.chofer?.dni, documento?.chofer?.telefono].filter(Boolean).join(" · "))}
+    ${firmaBox("Firma destinatario", firmas.destinatario, documento?.destino?.destinatario || documento?.destino?.nombre || "")}
+  </section>`;
   const qrBlock = documento?.qr_url
     ? `<div class="note"><strong>QR / URL de acceso:</strong><br><a href="${escapeHtml(documento.qr_url)}">${escapeHtml(documento.qr_url)}</a></div>`
     : `<div class="note"><strong>Codigo numerico de control:</strong> ${escapeHtml(documento?.codigo_control || "-")}</div>`;
@@ -1194,6 +1272,8 @@ function buildDocumentoControlHtml({
     .actions button{border:1px solid #0f766e;background:#ecfeff;color:#0f766e;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:700;cursor:pointer}
     .sheet{max-width:900px;margin:0 auto;background:#fff;border:1px solid #dbe3ef;border-radius:14px;padding:24px 26px}
     .top{display:flex;justify-content:space-between;gap:20px;border-bottom:2px solid #0f766e;padding-bottom:14px;margin-bottom:18px}
+    .brand{display:flex;gap:12px;align-items:center}
+    .logo{width:54px;height:54px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;padding:4px}
     h1{font-size:24px;margin:0 0 4px}
     .sub{font-size:12px;color:#64748b}
     .code{font-size:22px;font-weight:800;color:#0f766e}
@@ -1205,17 +1285,23 @@ function buildDocumentoControlHtml({
     table{width:100%;border-collapse:collapse;margin-top:8px}
     th,td{padding:8px 10px;border-bottom:1px solid #e5e7eb;text-align:left;font-size:12px}
     th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#64748b}
+    .firmas{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px}
+    .firma-box{border:1px solid #e5e7eb;border-radius:10px;padding:12px;min-height:118px}
+    .firma-line{border-top:1px solid #94a3b8;margin-top:56px;padding-top:5px;font-size:11px;color:#64748b}
+    .firma-img{display:block;max-width:100%;height:58px;object-fit:contain;margin:8px 0;background:#fff}
+    .hash{font-family:monospace;word-break:break-all}
     .no-print{display:flex}
-    @media print{body{padding:0;background:#fff}.sheet{max-width:none;border:none;border-radius:0;padding:0}.no-print{display:none!important}}
+    @media print{body{padding:0;background:#fff}.sheet{max-width:none;border:none;border-radius:0;padding:0}.no-print{display:none!important}.firmas{break-inside:avoid}}
   </style></head><body>${controls}<main class="sheet">
   <div class="top">
-    <div><h1>Documento de control digital</h1><div class="sub">${escapeHtml(empresaNombre)} · Transporte publico de mercancias por carretera</div></div>
+    <div class="brand">${documento?.empresa?.logo_url ? `<img class="logo" src="${escapeHtml(documento.empresa.logo_url)}" alt="Logo empresa">` : ""}<div><h1>Documento de control digital</h1><div class="sub">${escapeHtml(empresaNombre)} · Transporte publico de mercancias por carretera</div></div></div>
     <div><div class="lbl">Codigo de control</div><div class="code">${escapeHtml(documento?.codigo_control || "-")}</div><div class="sub">${escapeHtml(documento?.sistema || "")}</div></div>
   </div>
   <div class="grid">
     <div class="box"><div class="lbl">Cargador contractual</div><div class="val">${escapeHtml(documento?.cargador_contractual?.nombre || "-")}</div><div class="sub">${escapeHtml(documento?.cargador_contractual?.nif || "-")} · ${escapeHtml(documento?.cargador_contractual?.domicilio || "-")}</div><div class="sub">${escapeHtml([documento?.cargador_contractual?.contacto, documento?.cargador_contractual?.email, documento?.cargador_contractual?.telefono].filter(Boolean).join(" · ") || "Contacto no informado")}</div></div>
     <div class="box"><div class="lbl">Transportista efectivo</div><div class="val">${escapeHtml(documento?.transportista_efectivo?.nombre || "-")}</div><div class="sub">${escapeHtml(documento?.transportista_efectivo?.nif || "-")} · ${escapeHtml(documento?.transportista_efectivo?.domicilio || "-")}</div><div class="sub">${escapeHtml([documento?.transportista_efectivo?.contacto, documento?.transportista_efectivo?.email, documento?.transportista_efectivo?.telefono].filter(Boolean).join(" · ") || "Contacto no informado")}</div></div>
   </div>
+  <div class="box"><div class="lbl">Chofer</div><div class="val">${escapeHtml(documento?.chofer?.nombre || "-")}</div><div class="sub">${escapeHtml([documento?.chofer?.dni, documento?.chofer?.telefono, documento?.chofer?.email].filter(Boolean).join(" · ") || "Datos de chofer no informados")}</div></div>
   <div class="grid">
     <div class="box"><div class="lbl">Origen</div><div class="val">${escapeHtml(documento?.origen?.nombre || documento?.origen?.direccion || "-")}</div><div class="sub">${escapeHtml(documento?.origen?.direccion || "-")}</div>${documento?.origen?.google_maps_url ? `<div class="sub"><a href="${escapeHtml(documento.origen.google_maps_url)}">${escapeHtml(documento.origen.google_maps_url)}</a></div>` : ""}</div>
     <div class="box"><div class="lbl">Destino</div><div class="val">${escapeHtml(documento?.destino?.nombre || documento?.destino?.direccion || "-")}</div><div class="sub">${escapeHtml(documento?.destino?.direccion || "-")}</div>${documento?.destino?.google_maps_url ? `<div class="sub"><a href="${escapeHtml(documento.destino.google_maps_url)}">${escapeHtml(documento.destino.google_maps_url)}</a></div>` : ""}</div>
@@ -1238,6 +1324,7 @@ function buildDocumentoControlHtml({
     <tbody>${buildStopsRows(documento?.descargas) || `<tr><td colspan="5">Sin puntos adicionales.</td></tr>`}</tbody>
   </table>` : ""}
   ${qrBlock}
+  ${firmaBlock}
   ${supportBlock}
   ${verificationBlock}
   ${condicionesBlock}
@@ -1263,6 +1350,14 @@ async function generateDocumentoControlPdf({
     ? await QRCode.toDataURL(qrUrl, { errorCorrectionLevel: "M", margin: 1, width: 180 })
     : "";
   const qrBuffer = qrDataUrl ? Buffer.from(qrDataUrl.split(",")[1] || "", "base64") : null;
+  const imageBufferFromDataUrl = (value = "") => {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const base64 = raw.startsWith("data:") ? raw.split(",")[1] : raw;
+    try { return Buffer.from(base64 || "", "base64"); } catch { return null; }
+  };
+  const logoBuffer = imageBufferFromDataUrl(documento?.empresa?.logo_url);
+  const firmaImageBuffer = (firma = {}) => imageBufferFromDataUrl(firma?.imagen);
   const doc = new PDFDocument({
     size: "A4",
     margin: 42,
@@ -1323,7 +1418,10 @@ async function generateDocumentoControlPdf({
     });
   };
 
-  doc.font("Helvetica-Bold").fontSize(18).fillColor("#0f172a").text("Documento de Control Digital (DeCA)", 42, 42, { width: 360 });
+  if (logoBuffer) {
+    try { doc.image(logoBuffer, 42, 38, { fit: [54, 54] }); } catch {}
+  }
+  doc.font("Helvetica-Bold").fontSize(18).fillColor("#0f172a").text("Documento de Control Digital (DeCA)", logoBuffer ? 106 : 42, 42, { width: logoBuffer ? 296 : 360 });
   doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(empresaNombre, { width: 360 });
   doc.font("Helvetica-Bold").fontSize(10).fillColor("#0f766e").text("Codigo de control", 420, 42, { width: 130, align: "right" });
   doc.font("Helvetica-Bold").fontSize(12).fillColor("#111827").text(text(documento?.codigo_control), 350, 57, { width: 200, align: "right" });
@@ -1340,6 +1438,7 @@ async function generateDocumentoControlPdf({
   writeLine("Domicilio cargador", documento?.cargador_contractual?.domicilio);
   writeLine("Transportista efectivo", `${text(documento?.transportista_efectivo?.nombre)} | ${text(documento?.transportista_efectivo?.nif)}`);
   writeLine("Domicilio transportista", documento?.transportista_efectivo?.domicilio);
+  writeLine("Chofer", `${text(documento?.chofer?.nombre)} | DNI: ${text(documento?.chofer?.dni)} | Tel: ${text(documento?.chofer?.telefono)}`);
 
   section("Viaje y mercancia");
   writeLine("Referencia pedido", documento?.referencia_pedido);
@@ -1358,6 +1457,32 @@ async function generateDocumentoControlPdf({
   writeLine("URL segura", documento?.soporte_url || qrUrl, { size: 8, width: 500 });
   writeLine("Codigo de verificacion", documento?.verificacion?.codigo_verificacion);
   writeLine("Politica de acceso", "Enlace tokenizado, noindex, no-store. La descarga publica puede desactivarse; el repositorio interno conserva el documento.");
+
+  ensureSpace(180);
+  section("Firmas");
+  const firmas = documento?.firmas || {};
+  const firmaRows = [
+    ["Cargador / remitente", firmas.cargador, documento?.cargador_contractual?.nombre || ""],
+    ["Chofer / transportista", firmas.chofer, [documento?.chofer?.nombre, documento?.chofer?.dni].filter(Boolean).join(" | ")],
+    ["Destinatario", firmas.destinatario, documento?.destino?.destinatario || documento?.destino?.nombre || ""],
+  ];
+  const startY = doc.y;
+  firmaRows.forEach(([label, firma, extra], idx) => {
+    const x = 42 + idx * 171;
+    doc.roundedRect(x, startY, 158, 104, 6).strokeColor("#cbd5e1").lineWidth(0.7).stroke();
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#64748b").text(String(label).toUpperCase(), x + 8, startY + 8, { width: 142 });
+    doc.font("Helvetica").fontSize(7).fillColor("#64748b").text(text(extra), x + 8, startY + 21, { width: 142, height: 18 });
+    const img = firmaImageBuffer(firma);
+    if (img) {
+      try { doc.image(img, x + 10, startY + 42, { fit: [138, 32] }); } catch {}
+    } else {
+      doc.moveTo(x + 12, startY + 68).lineTo(x + 146, startY + 68).strokeColor("#94a3b8").lineWidth(0.6).stroke();
+      doc.font("Helvetica").fontSize(7).fillColor("#64748b").text("Nombre, firma y sello", x + 12, startY + 72, { width: 134 });
+    }
+    doc.font("Helvetica").fontSize(7).fillColor("#334155").text(text(firma?.nombre || "Pendiente"), x + 8, startY + 82, { width: 142 });
+    if (firma?.fecha) doc.font("Helvetica").fontSize(6).fillColor("#64748b").text(new Date(firma.fecha).toLocaleString("es-ES"), x + 8, startY + 94, { width: 142 });
+  });
+  doc.y = startY + 116;
 
   if (!publicView) {
     ensureSpace(150);
@@ -1414,6 +1539,7 @@ module.exports = {
   buildDocumentoControlExpediente,
   buildDocumentoControlStructuredExport,
   buildDocumentoControlSignaturePackage,
+  buildDocumentoControlQrDataUrl,
   buildDocumentoControlHtml,
   generateDocumentoControlPdf,
   buildDocumentoControlFilename,

@@ -7,7 +7,7 @@ import MojibakeFixer from "./components/MojibakeFixer";
 import Login  from "./pages/Login";
 import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
-import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, getEmpresaBackend, saveEmpresa } from "./services/api";
+import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
 import { getEmpresaPlanLocal, normalizePlan } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
@@ -180,6 +180,13 @@ const IC = {
 // profesional: incluye rutas/HERE y KPIs avanzados
 // enterprise: incluye todo
 const MODULOS_POR_PLAN = {
+    lite: [
+      "app_chofer",
+      "clientes",
+      "rutas",
+      "pedidos",
+      "mi_cuenta"
+    ],
     basico: [
       "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","calculador_portes","palets","app_chofer",
       "clientes","colaboradores","vehiculos","choferes","taller","grupajes","solicitudes",
@@ -889,8 +896,177 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
   );
 }
 
+const DEMO_PLAN_META = {
+  lite: {
+    label: "TransGest Lite",
+    detail: "Chofer, pedidos, clientes, rutas, tarifas sin IA, DCD y tacografo.",
+  },
+  basico: {
+    label: "Basico",
+    detail: "Operacion principal con modulos esenciales y sin IA avanzada.",
+  },
+  profesional: {
+    label: "Profesional",
+    detail: "Gestion completa con KPIs y optimizacion, sin IA enterprise.",
+  },
+  enterprise: {
+    label: "Enterprise",
+    detail: "Suite completa con IA, KPIs avanzados y todos los modulos.",
+  },
+};
+
+const DEMO_ROLE_LABELS = {
+  gerente: "Gerencia",
+  trafico: "Trafico",
+  contable: "Contabilidad",
+  chofer: "Chofer",
+  administrativo: "Administrativo",
+  responsable_taller: "Taller",
+  visualizador: "Visualizador",
+};
+
+function emitDemoToast(type, message) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("tms:notify", { detail:{ type, message } }));
+}
+
+function DemoShowcasePanel({ user, currentPlan, onSessionChanged }) {
+  const [options, setOptions] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
+  const plan = normalizePlan(user?.plan || currentPlan);
+
+  useEffect(() => {
+    let active = true;
+    if (!user?.demo_mode) {
+      setOptions(null);
+      return () => { active = false; };
+    }
+    getDemoOptions()
+      .then(data => { if (active) setOptions(data); })
+      .catch(() => { if (active) setOptions(null); });
+    return () => { active = false; };
+  }, [user?.id, user?.empresa_id, user?.demo_mode]);
+
+  if (!user?.demo_mode) return null;
+
+  const plans = (Array.isArray(options?.plans) && options.plans.length ? options.plans : Object.keys(DEMO_PLAN_META))
+    .map(item => normalizePlan(item?.id || item?.plan || item))
+    .filter((value, index, arr) => value && arr.indexOf(value) === index);
+  const usuarios = Array.isArray(options?.usuarios) ? options.usuarios : [];
+  const activeUserId = String(user?.id || "");
+
+  async function handlePlanChange(nextPlan) {
+    const normalized = normalizePlan(nextPlan);
+    if (!normalized || normalized === plan || busy) return;
+    setBusy("plan");
+    try {
+      await switchDemoPlan(normalized);
+      setOptions(prev => prev ? { ...prev, empresa:{ ...(prev.empresa || {}), plan:normalized } } : prev);
+      await onSessionChanged?.({ resetVista:false });
+      emitDemoToast("success", `Demo cambiada a ${DEMO_PLAN_META[normalized]?.label || normalized}.`);
+    } catch (err) {
+      emitDemoToast("error", err?.message || "No se pudo cambiar la version demo.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleUserChange(nextUserId) {
+    if (!nextUserId || String(nextUserId) === activeUserId || busy) return;
+    setBusy("user");
+    try {
+      await switchDemoUser(nextUserId);
+      const nextUser = await onSessionChanged?.({ resetVista:true });
+      emitDemoToast("success", `Sesion demo cambiada a ${DEMO_ROLE_LABELS[nextUser?.rol] || nextUser?.rol || "usuario"}.`);
+    } catch (err) {
+      emitDemoToast("error", err?.message || "No se pudo cambiar el usuario demo.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const currentUserLabel = `${DEMO_ROLE_LABELS[user?.rol] || user?.rol || "Usuario"} - ${user?.nombre || user?.email || ""}`;
+
+  return (
+    <div style={{
+      margin:"0 0 14px 0",
+      padding:"12px 14px",
+      border:"1px solid rgba(22,163,74,.22)",
+      background:"linear-gradient(135deg, rgba(240,253,244,.96), rgba(239,246,255,.96))",
+      borderRadius:8,
+      boxShadow:"0 10px 28px rgba(15,23,42,.08)",
+      color:"#0f172a",
+      fontFamily:"'DM Sans',sans-serif",
+    }}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+        <div style={{minWidth:220}}>
+          <div style={{fontSize:11,fontWeight:900,letterSpacing:.4,textTransform:"uppercase",color:"#15803d"}}>
+            Cuenta demo TransGest
+          </div>
+          <div style={{fontSize:13,fontWeight:900,color:"#102033"}}>
+            {currentUserLabel}
+          </div>
+          {!collapsed && (
+            <div style={{fontSize:11,color:"#475569",marginTop:2}}>
+              Cambia de version y de perfil para comprobar limitaciones reales sin salir de la pantalla principal.
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setCollapsed(v => !v)}
+          style={{border:"1px solid rgba(15,23,42,.12)",background:"#fff",borderRadius:7,padding:"7px 10px",fontSize:11,fontWeight:800,color:"#334155",cursor:"pointer"}}
+        >
+          {collapsed ? "Mostrar demo" : "Ocultar"}
+        </button>
+      </div>
+      {!collapsed && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(220px, 1fr))",gap:10,marginTop:12}}>
+          <label style={{display:"grid",gap:5,fontSize:11,fontWeight:800,color:"#334155"}}>
+            Version del programa
+            <select
+              value={plan}
+              disabled={busy === "plan"}
+              onChange={(event) => handlePlanChange(event.target.value)}
+              style={{height:36,borderRadius:7,border:"1px solid rgba(15,23,42,.16)",padding:"0 10px",fontSize:13,fontWeight:800,background:"#fff",color:"#0f172a"}}
+            >
+              {plans.map(item => (
+                <option key={item} value={item}>{DEMO_PLAN_META[item]?.label || item}</option>
+              ))}
+            </select>
+            <span style={{fontSize:10,fontWeight:600,color:"#64748b",lineHeight:1.35}}>
+              {DEMO_PLAN_META[plan]?.detail || "Limitaciones aplicadas por plan."}
+            </span>
+          </label>
+          <label style={{display:"grid",gap:5,fontSize:11,fontWeight:800,color:"#334155"}}>
+            Usuario demo
+            <select
+              value={activeUserId}
+              disabled={busy === "user" || !usuarios.length}
+              onChange={(event) => handleUserChange(event.target.value)}
+              style={{height:36,borderRadius:7,border:"1px solid rgba(15,23,42,.16)",padding:"0 10px",fontSize:13,fontWeight:800,background:"#fff",color:"#0f172a"}}
+            >
+              {usuarios.length ? usuarios.map(item => (
+                <option key={item.id} value={item.id}>
+                  {(DEMO_ROLE_LABELS[item.rol] || item.rol)} - {item.nombre || item.email}
+                </option>
+              )) : (
+                <option value={activeUserId}>{currentUserLabel}</option>
+              )}
+            </select>
+            <span style={{fontSize:10,fontWeight:600,color:"#64748b",lineHeight:1.35}}>
+              El backend entrega un token nuevo, asi que permisos, menu y vistas se recalculan como una cuenta real.
+            </span>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppInner() {
-  const { user, loading } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
   const [vista, setVista] = useState(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [avisosCriticos,   setAvisosCriticos]   = useState(0);
@@ -1119,7 +1295,7 @@ function AppInner() {
   if (bloqueado) return <Bloqueado motivo={bloqueado.motivo} mensaje={bloqueado.mensaje} user={user} />;
 
   // Obtener plan de la empresa del usuario
-  const empresaPlan = normalizePlan(getEmpresaPlanLocal());
+  const empresaPlan = normalizePlan(user?.plan || getEmpresaPlanLocal());
 
   const modulosBase = MODULOS_POR_ROL[user.rol] || MODULOS_VISOR;
   const modulosPlan = empresaPlan ? filtrarModulosPorPlan(modulosBase, empresaPlan) : modulosBase;
@@ -1165,6 +1341,13 @@ function AppInner() {
     });
   }
 
+  async function handleDemoSessionChanged({ resetVista = false } = {}) {
+    const nextUser = await refreshUser();
+    if (resetVista) setVista(VISTA_DEFAULT(nextUser?.rol));
+    setGuidedModule(null);
+    return nextUser;
+  }
+
   return (
     <>
     <LaunchSplash rol={user?.rol} />
@@ -1205,6 +1388,11 @@ function AppInner() {
       solicitudesPendientes={solicitudesPendientes}
       excepcionesPendientes={excepcionesPendientes}
       colaboradoresPendientes={colaboradoresPendientes}>
+      <DemoShowcasePanel
+        user={user}
+        currentPlan={empresaPlan}
+        onSessionChanged={handleDemoSessionChanged}
+      />
       <Suspense fallback={<Spinner />}>
         {contenido}
       </Suspense>

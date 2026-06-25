@@ -6,6 +6,10 @@ const logger = require("../services/logger");
 const GRACE_DAYS = 7;
 
 const PLAN_ALIAS = {
+  lite: "lite",
+  mini: "lite",
+  transgest_lite: "lite",
+  transgest_mini: "lite",
   basic: "basico",
   basico: "basico",
   profesional: "profesional",
@@ -14,6 +18,13 @@ const PLAN_ALIAS = {
 };
 
 const PLAN_FEATURES = {
+  lite: {
+    ai: false,
+    kpis_avanzados: false,
+    here_routing: false,
+    optimizacion_rutas: false,
+    gestion_rutas: true,
+  },
   basico: {
     ai: false,
     kpis_avanzados: false,
@@ -35,6 +46,16 @@ const PLAN_FEATURES = {
     optimizacion_rutas: true,
     gestion_rutas: true,
   },
+};
+
+const PLAN_DISABLED_MODULES = {
+  lite: new Set([
+    "dashboard", "control_tower", "agenda", "plan_diario", "gestion_trafico", "calculador_portes",
+    "palets", "colaboradores", "vehiculos", "choferes", "taller", "grupajes", "solicitudes",
+    "hojas_ruta", "nominas", "control_horario", "documentos", "facturacion",
+    "contabilidad", "informes", "excepciones", "objetivos", "ia", "rutas_recomendadas",
+    "rutas_recomendadas_chofer", "importacion", "actividad", "usuarios",
+  ]),
 };
 
 const MODULE_IDS = [
@@ -99,6 +120,18 @@ const ROLE_PERMISSION_PRESETS = {
   chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","mi_cuenta"], editar: ["app_chofer","mi_cuenta"] },
   cliente: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
 };
+
+function isChoferPedidosOperationalPath(req) {
+  const method = String(req.method || "GET").toUpperCase();
+  const path = String(req.path || "");
+  if (method === "GET" && path === "/") return true;
+  if (method === "POST" && path === "/chofer") return true;
+  if (["GET", "POST"].includes(method) && /^\/chofer\/(clientes|rutas)(\/|$)/.test(path)) return true;
+  if (method === "GET" && /^\/[^/]+$/.test(path)) return true;
+  if (["GET", "POST", "PATCH"].includes(method) && /^\/[^/]+\/(documento-control-digital|chofer-pasos|chofer-docs|estado|gps|firma)(\/|$)/.test(path)) return true;
+  if (method === "GET" && /^\/[^/]+\/(eventos|carta-porte)$/.test(path)) return true;
+  return false;
+}
 
 let authChoferSchemaReady = false;
 async function ensureAuthChoferSchema() {
@@ -447,6 +480,15 @@ function requireRole(...roles) {
 function requireModulePermission(modulo) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "No autenticado" });
+    const plan = normalizePlan(req.user?.plan || req.suscripcion?.plan);
+    if (PLAN_DISABLED_MODULES[plan]?.has(modulo)) {
+      return res.status(403).json({
+        error: "Tu plan actual no incluye este modulo.",
+        modulo,
+        plan,
+        upgrade_required: true,
+      });
+    }
 
     const reglas = normalizePermissionsForRole(req.user.permisos, req.user.rol).modulos;
 
@@ -457,6 +499,9 @@ function requireModulePermission(modulo) {
       req.path.startsWith("/solicitudes") &&
       ["GET", "POST", "HEAD"].includes(String(req.method || "GET").toUpperCase())
     ) {
+      return next();
+    }
+    if (modulo === "pedidos" && req.user.rol === "chofer" && isChoferPedidosOperationalPath(req)) {
       return next();
     }
 

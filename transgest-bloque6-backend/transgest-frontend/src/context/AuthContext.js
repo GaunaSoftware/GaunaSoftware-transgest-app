@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { getToken, getUser, removeToken, login as apiLogin, getMe } from "../services/api";
+import { getToken, getUser, setUser as setCachedUser, removeToken, login as apiLogin, getMe } from "../services/api";
 
 const AuthContext = createContext(null);
 
@@ -15,6 +15,7 @@ export function AuthProvider({ children }) {
       try {
         const me = await getMe();
         setUser(me);
+        setCachedUser(me);
       } catch (err) {
         const cachedUser = getUser();
         if (err?.message === "suscripcion_bloqueada") {
@@ -42,6 +43,13 @@ export function AuthProvider({ children }) {
     return data;
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    const me = await getMe();
+    setUser(me);
+    setCachedUser(me);
+    return me;
+  }, []);
+
   const logout = useCallback(() => {
     removeToken();
     setUser(null);
@@ -52,7 +60,7 @@ export function AuthProvider({ children }) {
   const puedeEditar = (modulo) => checkPermiso(user, modulo, "editar");
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, puedeVer, puedeEditar }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, puedeVer, puedeEditar }}>
       {children}
     </AuthContext.Provider>
   );

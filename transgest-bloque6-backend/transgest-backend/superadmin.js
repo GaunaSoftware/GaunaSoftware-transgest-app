@@ -55,6 +55,7 @@ router.post("/empresas", superAuth, async (req, res) => {
   }
   try {
     const PLANES = {
+      lite:        { max_vehiculos: 1,  max_usuarios: 2 },
       basico:      { max_vehiculos: 3,  max_usuarios: 2 },
       profesional: { max_vehiculos: 10, max_usuarios: 5 },
       enterprise:  { max_vehiculos: 50, max_usuarios: 20 },

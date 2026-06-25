@@ -22,6 +22,24 @@ async function ensureAuthSchema() {
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ").catch(() => {});
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS password_reset_requests (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL,
+      usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+      identifier VARCHAR(180) NOT NULL,
+      email VARCHAR(180),
+      nombre VARCHAR(180),
+      rol VARCHAR(40),
+      estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+      ip VARCHAR(80),
+      user_agent TEXT,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ,
+      resolved_by UUID REFERENCES superadmins(id) ON DELETE SET NULL,
+      resolution_note TEXT
+    )
+  `).catch(() => {});
   authSchemaReady = true;
 }
 
@@ -35,6 +53,48 @@ function logoDataUrl(row = {}) {
   if (logo.startsWith("data:")) return logo;
   const mime = String(row.logo_mime || "image/png").trim() || "image/png";
   return `data:${mime};base64,${logo}`;
+}
+
+function isDemoEmpresa(row = {}) {
+  const cfg = row.cfg_precios && typeof row.cfg_precios === "object" ? row.cfg_precios : {};
+  const nombre = String(row.nombre || row.razon_social || "").toLowerCase();
+  const dominio = String(row.dominio || "").toLowerCase();
+  const email = String(row.email_admin || "").toLowerCase();
+  return Boolean(
+    cfg.demo_mode === true ||
+    dominio === "demo" ||
+    dominio.startsWith("demo-") ||
+    email === "gerente@demo.com" ||
+    nombre.includes("demo")
+  );
+}
+
+function signUserToken(user = {}) {
+  return jwt.sign(
+    { sub: user.id, rol: user.rol, empresa_id: user.empresa_id, plan: user.plan },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || "8h" }
+  );
+}
+
+function authUserPayload(user = {}, extra = {}) {
+  const permisos = normalizePermissionsForRole(user.permisos, user.rol);
+  return {
+    id: user.id,
+    nombre: user.nombre,
+    email: user.email,
+    username: user.username,
+    rol: user.rol,
+    empresa_id: user.empresa_id,
+    empresa_nombre: user.empresa_nombre || extra.empresa_nombre || "",
+    plan: user.plan,
+    demo_mode: Boolean(user.demo_mode ?? extra.demo_mode),
+    cliente_id: user.cliente_id,
+    chofer_id: user.chofer_id,
+    perfil: user.perfil,
+    permisos,
+    trafico_config: user.trafico_config || {},
+  };
 }
 
 async function auditLogin({ user, identifier, ok, req, motivo }) {
@@ -88,6 +148,53 @@ router.get("/login-brand", async (req, res) => {
   }
 });
 
+router.post("/forgot-password",
+  body("identifier").optional().isString().trim().isLength({ min: 3 }),
+  body("email").optional().isString().trim().isLength({ min: 3 }),
+  async (req, res) => {
+    const raw = String(req.body?.identifier || req.body?.email || "").trim().toLowerCase();
+    if (!raw || raw.length < 3) {
+      return res.status(400).json({ error: "Indica tu usuario o email" });
+    }
+    try {
+      await ensureAuthSchema();
+      const { rows } = await db.query(
+        `SELECT u.id,u.nombre,u.email,u.username,u.rol,u.empresa_id,e.nombre AS empresa_nombre
+           FROM usuarios u
+           LEFT JOIN empresas e ON e.id=u.empresa_id
+          WHERE LOWER(u.email)=$1 OR LOWER(u.username)=$1
+          ORDER BY u.activo DESC, u.created_at ASC
+          LIMIT 1`,
+        [raw]
+      );
+      const user = rows[0] || null;
+      await db.query(
+        `INSERT INTO password_reset_requests
+          (empresa_id,usuario_id,identifier,email,nombre,rol,estado,ip,user_agent)
+         VALUES ($1,$2,$3,$4,$5,$6,'pendiente',$7,$8)`,
+        [
+          user?.empresa_id || null,
+          user?.id || null,
+          raw,
+          user?.email || raw,
+          user?.nombre || null,
+          user?.rol || null,
+          req.ip || null,
+          req.get("user-agent") || null,
+        ]
+      );
+      logger.info(`Solicitud de recuperacion de contrasena: ${raw}${user ? ` (${user.empresa_nombre || user.empresa_id})` : " (sin usuario localizado)"}`);
+      res.json({
+        ok: true,
+        message: "Solicitud recibida. Un administrador revisara el reset de contrasena.",
+      });
+    } catch (err) {
+      logger.error("Forgot password error:", err.message);
+      res.status(500).json({ error: "No se pudo registrar la solicitud" });
+    }
+  }
+);
+
 router.post("/login",
   body("email").optional().isString().trim().isLength({ min: 1 }),
   body("usuario").optional().isString().trim().isLength({ min: 1 }),
@@ -106,6 +213,7 @@ router.post("/login",
         `SELECT u.id, u.nombre, u.email, u.password_hash, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id,
                 u.username, u.perfil, u.permisos, u.trafico_config,
                 u.login_failed_count, u.login_locked_until,
+                e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.cfg_precios,
                 e.plan, e.estado AS empresa_estado, e.fecha_vencimiento,
                 e.bloqueo_manual, e.bloqueo_motivo
          FROM usuarios u
@@ -169,31 +277,15 @@ router.post("/login",
         bloqueo_motivo: user.bloqueo_motivo,
       } : null);
 
-      const token = jwt.sign(
-        { sub: user.id, rol: user.rol, empresa_id: user.empresa_id, plan: user.plan },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || "8h" }
-      );
+      user.demo_mode = isDemoEmpresa(user);
+      const token = signUserToken(user);
 
       logger.info(`Login exitoso: ${identifier} (${user.rol})`);
       auditLogin({ user, identifier, ok: true, req, motivo: "acceso_concedido" });
 
-      const permisos = normalizePermissionsForRole(user.permisos, user.rol);
-
       res.json({
         token,
-        user: {
-          id:     user.id,
-          nombre: user.nombre,
-          email:  user.email,
-          username: user.username,
-          rol:    user.rol,
-          cliente_id: user.cliente_id,
-          chofer_id: user.chofer_id,
-          perfil: user.perfil,
-          permisos,
-          trafico_config: user.trafico_config || {},
-        },
+        user: authUserPayload(user),
         suscripcion: subState.suscripcion,
         bloqueado: subState.blocked ? {
           motivo: subState.motivo,
@@ -209,18 +301,127 @@ router.post("/login",
 
 // ── GET /api/v1/auth/me ───────────────────────────────
 router.get("/me", authenticate, async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.empresa_id, u.cliente_id, u.chofer_id,
+            u.perfil, u.permisos, u.trafico_config,
+            e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.plan, e.cfg_precios
+       FROM usuarios u
+       LEFT JOIN empresas e ON e.id=u.empresa_id
+      WHERE u.id=$1
+      LIMIT 1`,
+    [req.user.id]
+  ).catch(() => ({ rows: [] }));
+  const user = rows[0] || req.user;
+  user.demo_mode = isDemoEmpresa(user);
+  res.json(authUserPayload(user));
+});
+
+async function assertDemoSession(req, res) {
+  const empresaId = req.user?.empresa_id;
+  if (!empresaId) {
+    res.status(403).json({ error: "Solo disponible en cuenta demo." });
+    return null;
+  }
+  const { rows } = await db.query(
+    "SELECT id,nombre,email_admin,dominio,plan,cfg_precios FROM empresas WHERE id=$1 LIMIT 1",
+    [empresaId]
+  );
+  const empresa = rows[0];
+  if (!empresa || !isDemoEmpresa(empresa)) {
+    res.status(403).json({ error: "Solo disponible en cuenta demo." });
+    return null;
+  }
+  return empresa;
+}
+
+router.get("/demo/options", authenticate, async (req, res) => {
+  const empresa = await assertDemoSession(req, res);
+  if (!empresa) return;
+  const { rows } = await db.query(
+    `SELECT id,nombre,email,username,rol,chofer_id,cliente_id
+       FROM usuarios
+      WHERE empresa_id=$1 AND activo IS DISTINCT FROM false
+        AND rol::text IN ('gerente','trafico','contable','chofer','administrativo','responsable_taller','visualizador')
+      ORDER BY CASE rol::text
+        WHEN 'gerente' THEN 1
+        WHEN 'trafico' THEN 2
+        WHEN 'contable' THEN 3
+        WHEN 'chofer' THEN 4
+        ELSE 9
+      END, nombre`,
+    [empresa.id]
+  );
   res.json({
-    id:     req.user.id,
-    nombre: req.user.nombre,
-    email:  req.user.email,
-    username: req.user.username,
-    rol:    req.user.rol,
-    cliente_id: req.user.cliente_id,
-    chofer_id: req.user.chofer_id,
-    perfil: req.user.perfil,
-    permisos: req.user.permisos || {},
-    trafico_config: req.user.trafico_config || {},
+    demo: true,
+    empresa: { id: empresa.id, nombre: empresa.nombre, plan: empresa.plan },
+    plans: [
+      { id: "lite", label: "Lite / Mini" },
+      { id: "basico", label: "Basico" },
+      { id: "profesional", label: "Profesional" },
+      { id: "enterprise", label: "Enterprise" },
+    ],
+    usuarios: rows,
   });
+});
+
+router.post("/demo/switch-plan", authenticate, async (req, res) => {
+  const empresa = await assertDemoSession(req, res);
+  if (!empresa) return;
+  const plan = String(req.body?.plan || "").toLowerCase();
+  if (!["lite", "basico", "profesional", "enterprise"].includes(plan)) {
+    return res.status(400).json({ error: "Plan demo no valido" });
+  }
+  await db.query(
+    `UPDATE empresas
+        SET plan=$2,
+            cfg_precios=jsonb_set(COALESCE(cfg_precios,'{}'::jsonb), '{demo_mode}', 'true'::jsonb, true)
+      WHERE id=$1`,
+    [empresa.id, plan]
+  );
+  const { rows } = await db.query(
+    `SELECT u.id,u.nombre,u.email,u.username,u.rol,u.empresa_id,u.cliente_id,u.chofer_id,u.perfil,u.permisos,u.trafico_config,
+            e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.plan, e.cfg_precios
+       FROM usuarios u
+       JOIN empresas e ON e.id=u.empresa_id
+      WHERE u.id=$1 AND u.empresa_id=$2
+      LIMIT 1`,
+    [req.user.id, empresa.id]
+  );
+  const user = rows[0];
+  user.demo_mode = true;
+  res.json({ token: signUserToken(user), user: authUserPayload(user), plan });
+});
+
+router.post("/demo/switch-user", authenticate, async (req, res) => {
+  const empresa = await assertDemoSession(req, res);
+  if (!empresa) return;
+  const targetId = String(req.body?.user_id || "").trim();
+  const targetRol = String(req.body?.rol || "").trim().toLowerCase();
+  const params = [empresa.id];
+  let where = "u.empresa_id=$1 AND u.activo IS DISTINCT FROM false";
+  if (targetId) {
+    params.push(targetId);
+    where += ` AND u.id=$${params.length}`;
+  } else if (targetRol) {
+    params.push(targetRol);
+    where += ` AND u.rol::text=$${params.length}`;
+  } else {
+    return res.status(400).json({ error: "Indica usuario demo" });
+  }
+  const { rows } = await db.query(
+    `SELECT u.id,u.nombre,u.email,u.username,u.rol,u.empresa_id,u.cliente_id,u.chofer_id,u.perfil,u.permisos,u.trafico_config,
+            e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.plan, e.cfg_precios
+       FROM usuarios u
+       JOIN empresas e ON e.id=u.empresa_id
+      WHERE ${where}
+      ORDER BY u.nombre
+      LIMIT 1`,
+    params
+  );
+  const user = rows[0];
+  if (!user) return res.status(404).json({ error: "Usuario demo no encontrado" });
+  user.demo_mode = true;
+  res.json({ token: signUserToken(user), user: authUserPayload(user) });
 });
 
 router.post("/billing/checkout", async (req, res) => {

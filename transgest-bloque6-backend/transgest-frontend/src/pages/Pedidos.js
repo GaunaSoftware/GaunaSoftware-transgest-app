@@ -7336,9 +7336,9 @@ function CartaPorteModal({ data, onClose }) {
   const destinoPostalGeo = stopPostalLine(descargaPrincipalGeo, data.destino_provincia || "", data.destino_pais || "España");
   const [firmaMode, setFirmaMode] = React.useState(null); // null | 'remitente' | 'destinatario' | 'chofer'
   const [firmas, setFirmas] = React.useState({
-    remitente:    data.firma_destinatario || null,
+    remitente:    data.firma_cargador || null,
     destinatario: data.firma_destinatario || null,
-    chofer:       null,
+    chofer:       data.firma_chofer || null,
   });
   const [firmaNombre, setFirmaNombre] = React.useState('');
   const [guardandoFirma, setGuardandoFirma] = React.useState(false);
@@ -7376,17 +7376,20 @@ function CartaPorteModal({ data, onClose }) {
     const imgData = canvas.toDataURL('image/png');
     setFirmas(prev => ({ ...prev, [firmaMode]: imgData }));
 
-    // Save destinatario signature to backend
-    if (firmaMode === 'destinatario') {
-      setGuardandoFirma(true);
-      try {
-        await guardarFirmaEntrega(data.id, {
-          firma_destinatario: imgData,
-          firma_nombre: firmaNombre || 'Destinatario',
-          source: "carta_porte",
-        });
-      } catch(e) { console.warn('Firma no guardada:', e.message); }
-      finally { setGuardandoFirma(false); }
+    setGuardandoFirma(true);
+    try {
+      await guardarFirmaEntrega(data.id, {
+        rol: firmaMode === "remitente" ? "cargador" : firmaMode,
+        firma_destinatario: imgData,
+        firma_nombre: firmaNombre || (firmaMode === "remitente" ? "Cargador" : firmaMode === "chofer" ? "Chofer" : "Destinatario"),
+        source: "carta_porte",
+      });
+      notify("Firma guardada en el DCD.", "success");
+    } catch(e) {
+      console.warn('Firma no guardada:', e.message);
+      notify("No se pudo guardar la firma en el servidor.", "warning");
+    } finally {
+      setGuardandoFirma(false);
     }
     setFirmaMode(null);
   }

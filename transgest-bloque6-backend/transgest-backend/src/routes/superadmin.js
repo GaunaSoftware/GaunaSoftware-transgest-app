@@ -59,7 +59,7 @@ function extractProviderUuid(response = {}) {
     || null;
 }
 
-const PLAN_PRICES = { basico: 99, profesional: 199, enterprise: 399 };
+const PLAN_PRICES = { lite: 49, basico: 99, profesional: 199, enterprise: 399 };
 const API_PROVIDERS = ["here", "ors", "anthropic", "openai", "ai_generic", "locatel", "tacogest", "movildata", "gps_generic"];
 const AI_PROVIDERS = ["anthropic", "openai", "ai_generic"];
 const GPS_PROVIDERS = ["locatel", "tacogest", "movildata", "gps_generic"];
@@ -757,6 +757,27 @@ function superAuth(req, res, next) {
 }
 
 // ── POST /superadmin/login ────────────────────────────────────────────────
+async function ensurePasswordResetRequestsSchema() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS password_reset_requests (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL,
+      usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+      identifier VARCHAR(180) NOT NULL,
+      email VARCHAR(180),
+      nombre VARCHAR(180),
+      rol VARCHAR(40),
+      estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+      ip VARCHAR(80),
+      user_agent TEXT,
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ,
+      resolved_by UUID REFERENCES superadmins(id) ON DELETE SET NULL,
+      resolution_note TEXT
+    )
+  `).catch(() => {});
+}
+
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: "Email y contraseña requeridos" });
@@ -841,6 +862,91 @@ router.get("/usuarios-admin", superAuth, async (req, res) => {
     "SELECT id,nombre,email,rol,activo,created_at FROM superadmins ORDER BY created_at DESC"
   );
   res.json(rows);
+});
+
+router.get("/password-reset-requests", superAuth, async (req, res) => {
+  await ensurePasswordResetRequestsSchema();
+  const estado = String(req.query?.estado || "pendiente").trim().toLowerCase();
+  const params = [];
+  const where = [];
+  if (estado && estado !== "todos") {
+    params.push(estado);
+    where.push(`r.estado=$${params.length}`);
+  }
+  const { rows } = await db.query(
+    `SELECT r.id,r.empresa_id,r.usuario_id,r.identifier,r.email,r.nombre,r.rol,r.estado,
+            r.requested_at,r.resolved_at,r.resolution_note,
+            e.nombre AS empresa_nombre,
+            u.email AS usuario_email,u.username AS usuario_username,u.activo AS usuario_activo,
+            s.email AS resolved_by_email
+       FROM password_reset_requests r
+       LEFT JOIN empresas e ON e.id=r.empresa_id
+       LEFT JOIN usuarios u ON u.id=r.usuario_id
+       LEFT JOIN superadmins s ON s.id=r.resolved_by
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY CASE WHEN r.estado='pendiente' THEN 0 ELSE 1 END, r.requested_at DESC
+      LIMIT 100`,
+    params
+  );
+  res.json(rows);
+});
+
+router.post("/password-reset-requests/:id/reset", superAuth, async (req, res) => {
+  await ensurePasswordResetRequestsSchema();
+  const password = String(req.body?.password || "").trim();
+  if (password.length < 8) return res.status(400).json({ error: "La contrasena debe tener al menos 8 caracteres" });
+  const { rows } = await db.query(
+    `SELECT r.*, u.email AS usuario_email, u.username AS usuario_username, u.empresa_id AS usuario_empresa_id
+       FROM password_reset_requests r
+       LEFT JOIN usuarios u ON u.id=r.usuario_id
+      WHERE r.id=$1
+      LIMIT 1`,
+    [req.params.id]
+  );
+  const solicitud = rows[0];
+  if (!solicitud) return res.status(404).json({ error: "Solicitud no encontrada" });
+  if (!solicitud.usuario_id) return res.status(400).json({ error: "No hay un usuario asociado a esta solicitud" });
+
+  const hash = await bcrypt.hash(password, 12);
+  const updated = await db.query(
+    `UPDATE usuarios
+        SET password_hash=$1, activo=true, debe_cambiar_password=false,
+            login_failed_count=0, login_locked_until=NULL
+      WHERE id=$2
+      RETURNING id,nombre,email,username,rol,empresa_id`,
+    [hash, solicitud.usuario_id]
+  );
+  const usuario = updated.rows[0];
+  await db.query(
+    `UPDATE password_reset_requests
+        SET estado='resuelto', resolved_at=NOW(), resolved_by=$2, resolution_note=$3
+      WHERE id=$1`,
+    [solicitud.id, req.superadmin?.id || null, "Password reseteada desde superadmin"]
+  );
+  await audit(req, "password_reset_request.resuelta", {
+    solicitud_id: solicitud.id,
+    usuario_id: usuario.id,
+    email: usuario.email || usuario.username,
+  }, usuario.empresa_id || solicitud.empresa_id || null);
+  res.json({ ok: true, usuario: usuario.email || usuario.username });
+});
+
+router.post("/password-reset-requests/:id/descartar", superAuth, async (req, res) => {
+  await ensurePasswordResetRequestsSchema();
+  const note = String(req.body?.note || "Solicitud descartada desde superadmin").trim().slice(0, 300);
+  const { rows } = await db.query(
+    `UPDATE password_reset_requests
+        SET estado='descartado', resolved_at=NOW(), resolved_by=$2, resolution_note=$3
+      WHERE id=$1
+      RETURNING id,empresa_id,identifier`,
+    [req.params.id, req.superadmin?.id || null, note]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "Solicitud no encontrada" });
+  await audit(req, "password_reset_request.descartada", {
+    solicitud_id: rows[0].id,
+    identifier: rows[0].identifier,
+  }, rows[0].empresa_id || null);
+  res.json({ ok: true });
 });
 
 router.post("/usuarios-admin", superAuth, async (req, res) => {
@@ -1213,7 +1319,7 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
   const updates = [], params = [];
   let i = 1;
   if (plan !== undefined) {
-    if (!["basico","profesional","enterprise"].includes(plan)) return res.status(400).json({ error: "Plan no válido" });
+    if (!["lite","basico","profesional","enterprise"].includes(plan)) return res.status(400).json({ error: "Plan no válido" });
     updates.push(`plan=$${i++}`); params.push(plan);
   }
   if (estado !== undefined) {
@@ -1380,6 +1486,10 @@ router.get("/stripe/status", superAuth, async (req, res) => {
   res.json({
     configured: stripe.configured(),
     prices: {
+      lite: {
+        mensual: Boolean(stripe.planPriceId("lite", "mensual")),
+        anual: Boolean(stripe.planPriceId("lite", "anual")),
+      },
       basico: {
         mensual: Boolean(stripe.planPriceId("basico", "mensual")),
         anual: Boolean(stripe.planPriceId("basico", "anual")),

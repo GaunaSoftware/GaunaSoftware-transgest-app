@@ -1,4 +1,8 @@
 const PLAN_ALIAS = {
+  lite: "lite",
+  mini: "lite",
+  transgest_lite: "lite",
+  transgest_mini: "lite",
   basic: "basico",
   basico: "basico",
   profesional: "profesional",
@@ -30,6 +34,13 @@ export function getEmpresaPlanLocal() {
 }
 
 const PLAN_FEATURES = {
+  lite: {
+    ai: false,
+    kpis_avanzados: false,
+    here_routing: false,
+    optimizacion_rutas: false,
+    gestion_rutas: true,
+  },
   basico: {
     ai: false,
     kpis_avanzados: false,

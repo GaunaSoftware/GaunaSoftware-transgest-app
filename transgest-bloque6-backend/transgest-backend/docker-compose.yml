@@ -32,6 +32,7 @@ services:
     environment:
       NODE_ENV:    production
       PORT:        3001
+      DEMO_SHOWCASE_SEED: ${DEMO_SHOWCASE_SEED:-true}
       DB_HOST:     postgres
       DB_PORT:     5432
       DB_NAME:     ${DB_NAME:-transgest}

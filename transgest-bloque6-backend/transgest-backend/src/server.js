@@ -485,6 +485,26 @@ async function applyMigrations() {
     await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS perfil VARCHAR(80)").catch(() => {});
     await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permisos JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
     await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN DEFAULT false").catch(() => {});
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ").catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_requests (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL,
+        usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+        identifier VARCHAR(180) NOT NULL,
+        email VARCHAR(180),
+        nombre VARCHAR(180),
+        rol VARCHAR(40),
+        estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+        ip VARCHAR(80),
+        user_agent TEXT,
+        requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at TIMESTAMPTZ,
+        resolved_by UUID REFERENCES superadmins(id) ON DELETE SET NULL,
+        resolution_note TEXT
+      )
+    `).catch(() => {});
     await db.query("ALTER TABLE usuarios ALTER COLUMN email DROP NOT NULL").catch(() => {});
     await db.query("UPDATE usuarios SET username=LOWER(email) WHERE username IS NULL AND email IS NOT NULL").catch(() => {});
     await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_empresa_username ON usuarios(empresa_id, LOWER(username)) WHERE username IS NOT NULL").catch(() => {});
@@ -947,6 +967,20 @@ async function applyMigrations() {
 
 
 // ── Auto-seed: carga datos demo si la BD está vacía ──
+function runStartupScript(scriptName, label) {
+  const { execFile } = require("child_process");
+  const path = require("path");
+  const scriptPath = path.join(__dirname, "../scripts", scriptName);
+  execFile("node", [scriptPath], { env: process.env }, (err, stdout, stderr) => {
+    if (err) {
+      logger.warn(`${label} fallo: ${err.message}`);
+      if (stderr) logger.warn(String(stderr).slice(0, 800));
+      return;
+    }
+    logger.info(`${label} completado:\n${String(stdout || "").slice(0, 800)}`);
+  });
+}
+
 async function autoSeedIfEmpty() {
   if (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_SEED !== "true") return;
   try {
@@ -968,6 +1002,11 @@ async function autoSeedIfEmpty() {
   }
 }
 // ── Arranque ──────────────────────────────────────────
+function seedDemoShowcaseIfEnabled() {
+  if (process.env.DEMO_SHOWCASE_SEED !== "true") return;
+  runStartupScript("ensure_demo_showcase.js", "Demo showcase");
+}
+
 async function startServer() {
   try {
   logger.info("🚛 TransGest API — puerto " + PORT + " — " + process.env.NODE_ENV);
@@ -976,6 +1015,7 @@ async function startServer() {
   app.listen(PORT, () => {
     logger.info("TransGest API lista en puerto " + PORT + " - " + process.env.NODE_ENV);
     if (process.env.ALLOW_DEMO_SEED === "true") setTimeout(autoSeedIfEmpty, 5000);
+    if (process.env.DEMO_SHOWCASE_SEED === "true") setTimeout(seedDemoShowcaseIfEnabled, 7000);
     try { backupService.startScheduler(); } catch (e) { logger.warn("Backup: " + e.message); }
     try { fiscalScheduler.startScheduler(); } catch (e) { logger.warn("Fiscal: " + e.message); }
     try { pedidosRoutes.startAlbaranesReminderScheduler?.(); } catch (e) { logger.warn("Albaranes: " + e.message); }

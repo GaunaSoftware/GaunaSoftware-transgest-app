@@ -8,7 +8,7 @@ const { getPaginationParams, paginatedResponse } = require("../services/paginate
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
 const { crearNotificacion } = require("../services/notificaciones");
-const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload, buildDocumentoControlExpediente, buildDocumentoControlStructuredExport, buildDocumentoControlSignaturePackage, buildDocumentoControlHtml, generateDocumentoControlPdf, buildDocumentoControlFilename, buildDocumentoControlExportFilename, verifyPublicToken, verifyPublicVerificationCode } = require("../services/documentoControl");
+const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload, buildDocumentoControlExpediente, buildDocumentoControlStructuredExport, buildDocumentoControlSignaturePackage, buildDocumentoControlQrDataUrl, buildDocumentoControlHtml, generateDocumentoControlPdf, buildDocumentoControlFilename, buildDocumentoControlExportFilename, verifyPublicToken, verifyPublicVerificationCode } = require("../services/documentoControl");
 const {
   syncPedidoRegulatoryCore,
   getPedidoRegulatoryCoreSummary,
@@ -73,7 +73,37 @@ function buildFirmaPedidoContext(pedido = {}) {
   };
 }
 
+function normalizeFirmaRol(value = "") {
+  const raw = String(value || "").toLowerCase().trim();
+  if (["cargador", "remitente", "origen"].includes(raw)) return "cargador";
+  if (["chofer", "transportista", "carrier"].includes(raw)) return "chofer";
+  return "destinatario";
+}
+
+function mergeFirmaEvidencia(existing = null, role = "destinatario", evidencia = {}) {
+  const base = existing && typeof existing === "object" ? { ...existing } : {};
+  const firmas = base.firmas && typeof base.firmas === "object" ? { ...base.firmas } : {};
+  firmas[role] = evidencia;
+  return {
+    ...base,
+    version: "transgest-firma-evidencia-multirrol-2026.06",
+    estado: "evidencia_interna_pre_eidas",
+    provider: "transgest_internal",
+    firmas,
+    last_role: role,
+    last_signed_at: evidencia.firmado_at || new Date().toISOString(),
+  };
+}
+
+function getFirmaEvidenciaPrincipal(evidencia = null) {
+  if (!evidencia || typeof evidencia !== "object") return evidencia;
+  if (evidencia.pedido_context) return evidencia;
+  const role = evidencia.last_role || "destinatario";
+  return evidencia.firmas?.[role] || evidencia.firmas?.destinatario || evidencia.firmas?.cargador || evidencia.firmas?.chofer || evidencia;
+}
+
 function buildFirmaPostSignatureIntegrity(pedido = {}, evidencia = null) {
+  evidencia = getFirmaEvidenciaPrincipal(evidencia);
   if (!evidencia || typeof evidencia !== "object") {
     return {
       checked: false,
@@ -355,6 +385,12 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_en_camino_confirmada_at TIMESTAMPTZ").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_descarga_confirmada_at TIMESTAMPTZ").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_workflow_enviado_at TIMESTAMPTZ").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_cargador TEXT").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_cargador_nombre VARCHAR(180)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_cargador_fecha TIMESTAMPTZ").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_chofer TEXT").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_chofer_nombre VARCHAR(180)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_chofer_fecha TIMESTAMPTZ").catch(() => {});
       await db.query(`
         CREATE TABLE IF NOT EXISTS pedido_docs (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -552,6 +588,21 @@ function normalizeChoferPasosPayload(value = {}) {
       if (Number.isFinite(n) && n >= 0) next[key] = Math.round(n * 10) / 10;
     }
   }
+  if (source.carga_ubicacion && typeof source.carga_ubicacion === "object") {
+    const lat = Number(source.carga_ubicacion.lat);
+    const lng = Number(source.carga_ubicacion.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      const capturedDate = source.carga_ubicacion.captured_at ? new Date(source.carga_ubicacion.captured_at) : null;
+      next.carga_ubicacion = {
+        lat,
+        lng,
+        accuracy_m: Number.isFinite(Number(source.carga_ubicacion.accuracy_m)) ? Math.round(Number(source.carga_ubicacion.accuracy_m)) : null,
+        captured_at: capturedDate && Number.isFinite(capturedDate.getTime()) ? capturedDate.toISOString() : new Date().toISOString(),
+        google_maps_url: googleMapsSearchUrl(`${lat},${lng}`),
+        source: "app_chofer",
+      };
+    }
+  }
   if (source.updated_at) next.updated_at = source.updated_at;
   [
     "carga_iniciada_at",
@@ -575,6 +626,64 @@ function normalizeChoferPasosPayload(value = {}) {
     }
   });
   return next;
+}
+
+function hasStopUsableLocation(stop = {}) {
+  if (!stop || typeof stop !== "object") return false;
+  if (String(stop.google_maps_url || stop.maps_url || "").trim()) return true;
+  const lat = Number(stop.lat ?? stop.latitude);
+  const lng = Number(stop.lng ?? stop.lon ?? stop.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng);
+}
+
+async function guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location = {}, actorId = null }) {
+  const lat = Number(location?.lat);
+  const lng = Number(location?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const { rows } = await db.query(
+    "SELECT id, numero, origen, puntos_carga, ultima_posicion FROM pedidos WHERE id=$1 AND empresa_id=$2 LIMIT 1",
+    [pedidoId, empresaId]
+  );
+  const pedido = rows[0];
+  if (!pedido) return null;
+  const puntos = normalizePedidoJsonList(pedido.puntos_carga);
+  const first = puntos[0] && typeof puntos[0] === "object" ? { ...puntos[0] } : { direccion: pedido.origen || "", tipo: "carga" };
+  if (hasStopUsableLocation(first) || String(pedido.ultima_posicion || "").trim()) return null;
+  const capturedAt = location.captured_at || new Date().toISOString();
+  const mapsUrl = googleMapsSearchUrl(`${lat},${lng}`);
+  const nextFirst = {
+    ...first,
+    lat,
+    lng,
+    google_maps_url: mapsUrl,
+    ubicacion_fuente: "app_chofer_carga",
+    ubicacion_precision_m: location.accuracy_m ?? null,
+    ubicacion_capturada_at: capturedAt,
+  };
+  const nextPuntos = [nextFirst, ...puntos.slice(1)];
+  await db.query(
+    `UPDATE pedidos
+        SET puntos_carga=$1::jsonb,
+            updated_at=NOW()
+      WHERE id=$2 AND empresa_id=$3`,
+    [JSON.stringify(nextPuntos), pedidoId, empresaId]
+  );
+  await logPedidoEvento(pedidoId, empresaId, "chofer.ubicacion_carga_guardada", {
+    lat,
+    lng,
+    accuracy_m: location.accuracy_m ?? null,
+    google_maps_url: mapsUrl,
+    captured_at: capturedAt,
+  }, "chofer", actorId || null);
+  await notificarGestionPedido(
+    empresaId,
+    "chofer_ubicacion_carga",
+    "Ubicacion de carga guardada por chofer",
+    `El chofer ha marcado posicion de carga para el pedido ${pedido.numero || pedidoId}.`,
+    { pedido_id: pedidoId, lat, lng, google_maps_url: mapsUrl, dedupe_key: `ubicacion-carga:${pedidoId}` },
+    actorId
+  );
+  return nextPuntos;
 }
 
 function minutosEntreIso(a, b) {
@@ -1365,6 +1474,10 @@ async function savePedidoChoferPasos({
   if (patch.km_carga !== undefined) {
     await aplicarKmVacioDesdePasos({ pedidoId, empresaId, patch: nextData, actorId }).catch(e => logger.warn("No se pudo calcular km en vacio desde pasos:", e.message));
   }
+  if (patch.carga_iniciada && patch.carga_ubicacion) {
+    await guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location: patch.carga_ubicacion, actorId })
+      .catch(e => logger.warn("No se pudo guardar ubicacion de carga desde app chofer:", e.message));
+  }
   return nextData;
 }
 
@@ -1410,19 +1523,23 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
     SELECT p.*,
            c.id AS cliente_ref_id, c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.direccion AS cliente_direccion, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, NULL::text AS cliente_provincia, c.pais AS cliente_pais,
            c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion, c.emails_albaranes AS cliente_emails_albaranes, c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
+           ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.dni AS chofer_dni, ch.telefono AS chofer_telefono, ch.email AS chofer_email,
            co.id AS colaborador_ref_id, co.nombre AS colaborador_nombre, co.cif AS colaborador_cif, co.email AS colaborador_email, co.telefono AS colaborador_telefono, co.contacto_nombre AS colaborador_contacto,
            TRIM(BOTH ' ' FROM CONCAT_WS(' ', co.calle, co.num_ext)) AS colaborador_direccion, co.codigo_postal AS colaborador_cp, co.ciudad AS colaborador_ciudad, co.provincia AS colaborador_provincia, co.pais AS colaborador_pais
     FROM pedidos p
     LEFT JOIN clientes c ON c.id=p.cliente_id
+    LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
     LEFT JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
     WHERE p.id=$1 AND p.empresa_id=$2
   `, `
     SELECT p.*,
            c.id AS cliente_ref_id, c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.direccion AS cliente_direccion, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, NULL::text AS cliente_provincia, c.pais AS cliente_pais,
            c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion, c.emails_albaranes AS cliente_emails_albaranes, c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
+           ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.dni AS chofer_dni, ch.telefono AS chofer_telefono, ch.email AS chofer_email,
            NULL AS colaborador_ref_id, NULL AS colaborador_nombre, NULL AS colaborador_cif, NULL AS colaborador_email, NULL AS colaborador_telefono, NULL AS colaborador_contacto, NULL AS colaborador_direccion, NULL AS colaborador_cp, NULL AS colaborador_ciudad, NULL AS colaborador_provincia, NULL AS colaborador_pais
     FROM pedidos p
     LEFT JOIN clientes c ON c.id=p.cliente_id
+    LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
     WHERE p.id=$1 AND p.empresa_id=$2
   `, [pedidoId, empresaId]);
   const pedido = rows[0];
@@ -1435,11 +1552,13 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
     pedido.orden_carga_numero = ordenCarga.numero;
     pedido.orden_carga_generada_at = ordenCarga.generated_at || pedido.orden_carga_generada_at || null;
   }
-  const empresaRes = await db.query("SELECT cfg_precios FROM empresas WHERE id=$1 LIMIT 1", [empresaId]);
-  const perfil = empresaRes.rows[0]?.cfg_precios?.empresa_perfil || empresaRes.rows[0]?.cfg_precios || {};
+  const empresaRes = await db.query("SELECT nombre, cif, logo_base64, cfg_precios FROM empresas WHERE id=$1 LIMIT 1", [empresaId]);
+  const empresaRow = empresaRes.rows[0] || {};
+  const perfil = empresaRow?.cfg_precios?.empresa_perfil || empresaRow?.cfg_precios || {};
+  const logoMime = empresaRow?.cfg_precios?.logo_mime || perfil?.logo_mime || "image/png";
   return {
     pedido,
-    empresa: perfil || {},
+    empresa: { nombre: empresaRow.nombre || "", cif: empresaRow.cif || "", ...(perfil || {}), logo_base64: empresaRow.logo_base64 || perfil?.logo_base64 || "", logo_mime: logoMime },
     cliente: {
       id: pedido.cliente_ref_id,
       nombre: pedido.cliente_nombre,
@@ -1514,8 +1633,14 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
   const postSignatureIntegrity = buildFirmaPostSignatureIntegrity(ctx.pedido, ctx.pedido?.firma_evidencia || null);
   const repositorio = await getDocumentoControlRepositorioByPedido(ctx.pedido.id, empresaId).catch(() => null);
   const regulatoryCore = await getPedidoRegulatoryCoreSummary(ctx.pedido.id, empresaId).catch(() => null);
+  const qrDataUrl = await buildDocumentoControlQrDataUrl(payload.documento).catch(() => "");
   return {
     ...payload,
+    qr: {
+      url: payload.documento?.qr_url || payload.documento?.soporte_url || "",
+      data_url: qrDataUrl,
+      label: "QR de verificacion DCD",
+    },
     repositorio: repositorio ? {
       id: repositorio.id,
       estado: repositorio.estado,
@@ -4308,6 +4433,85 @@ async function getChoferAccessForUser(user, empresaId) {
   };
 }
 
+async function resolveChoferPrincipalForUser(user, empresaId) {
+  const access = await getChoferAccessForUser(user, empresaId);
+  if (!access.choferIds.length) return null;
+  const { rows } = await db.query(
+    `SELECT ch.id, ch.vehiculo_id, v.remolque_id
+       FROM choferes ch
+       LEFT JOIN vehiculos v ON v.id=ch.vehiculo_id AND v.empresa_id=ch.empresa_id
+      WHERE ch.empresa_id=$1
+        AND ch.id = ANY($2::uuid[])
+      ORDER BY CASE WHEN ch.id=$3 THEN 0 ELSE 1 END
+      LIMIT 1`,
+    [empresaId, access.choferIds, normalizePedidoUuid(user?.chofer_id)]
+  ).catch(() => ({ rows: [] }));
+  if (rows[0]) return rows[0];
+  const explicitChoferId = normalizePedidoUuid(user?.chofer_id);
+  if (!explicitChoferId) return null;
+  return {
+    id: explicitChoferId,
+    vehiculo_id: access.vehiculoIds[0] || null,
+    remolque_id: null,
+  };
+}
+
+async function resolveClienteLitePedido(client, empresaId, body = {}) {
+  const clienteId = normalizePedidoUuid(body.cliente_id);
+  if (clienteId) {
+    const { rows } = await client.query(
+      "SELECT id FROM clientes WHERE id=$1 AND empresa_id=$2 AND COALESCE(activo,true)=true LIMIT 1",
+      [clienteId, empresaId]
+    );
+    if (!rows[0]) {
+      const err = new Error("Cliente no encontrado para este viaje.");
+      err.status = 404;
+      throw err;
+    }
+    return clienteId;
+  }
+  const nombre = String(body.cliente_nombre || body.cliente || body.destinatario || "Cliente app chofer").trim().slice(0, 180);
+  const cif = String(body.cliente_cif || "").trim().slice(0, 30);
+  const direccion = String(body.cliente_direccion || body.destino || "").trim().slice(0, 240);
+  const { rows: existing } = await client.query(
+    `SELECT id FROM clientes
+      WHERE empresa_id=$1
+        AND LOWER(TRIM(nombre))=LOWER(TRIM($2))
+      ORDER BY created_at ASC NULLS LAST
+      LIMIT 1`,
+    [empresaId, nombre]
+  ).catch(() => ({ rows: [] }));
+  if (existing[0]?.id) return existing[0].id;
+  const { rows } = await client.query(
+    `INSERT INTO clientes (empresa_id,nombre,cif,direccion,pais,activo,notas)
+     VALUES ($1,$2,$3,$4,$5,true,$6)
+     RETURNING id`,
+    [
+      empresaId,
+      nombre || "Cliente app chofer",
+      cif || "",
+      direccion || "",
+      normalizePaisPedido(body.destino_pais || "España"),
+      "Alta automatica desde TransGest Lite / app chofer para DCD.",
+    ]
+  );
+  return rows[0].id;
+}
+
+async function nextPedidoNumero(client, empresaId, prefix = "DCD") {
+  const anio = new Date().getFullYear();
+  const like = `${prefix}-${anio}-%`;
+  const { rows } = await client.query(
+    `SELECT numero FROM pedidos
+      WHERE empresa_id=$1 AND numero LIKE $2
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [empresaId, like]
+  );
+  const lastNum = rows[0] ? parseInt(String(rows[0].numero || "").split("-").pop(), 10) || 0 : 0;
+  return `${prefix}-${anio}-${String(lastNum + 1).padStart(4, "0")}`;
+}
+
 async function usuarioPuedeGestionarPedido(req, pedido) {
   if (ROLES_GESTION_PEDIDOS.has(req.user?.rol)) return true;
   if (req.user?.rol !== "chofer") return false;
@@ -4316,6 +4520,111 @@ async function usuarioPuedeGestionarPedido(req, pedido) {
   return access.choferIds.some(id => id === String(pedido.chofer_id || "") || id === String(pedido.chofer2_id || ""))
     || access.vehiculoIds.some(id => id === String(pedido.vehiculo_id || ""));
 }
+
+router.get("/chofer/clientes", async (req, res) => {
+  try {
+    if (req.user?.rol !== "chofer") return res.status(403).json({ error: "Solo app chofer" });
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const q = String(req.query?.q || "").trim();
+    const params = [empresaId];
+    let where = "empresa_id=$1 AND COALESCE(activo,true)=true";
+    if (q) {
+      params.push(`%${q.toLowerCase()}%`);
+      where += ` AND (LOWER(nombre) LIKE $${params.length} OR LOWER(COALESCE(cif,'')) LIKE $${params.length})`;
+    }
+    const { rows } = await db.query(
+      `SELECT id, nombre, cif, direccion, ciudad, pais
+         FROM clientes
+        WHERE ${where}
+        ORDER BY nombre ASC
+        LIMIT 30`,
+      params
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudieron cargar clientes" });
+  }
+});
+
+router.get("/chofer/clientes/:clienteId/rutas", async (req, res) => {
+  try {
+    if (req.user?.rol !== "chofer") return res.status(403).json({ error: "Solo app chofer" });
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const clienteId = normalizePedidoUuid(req.params.clienteId);
+    if (!clienteId) return res.status(400).json({ error: "Cliente no valido" });
+    const { rows: clienteRows } = await db.query(
+      "SELECT id FROM clientes WHERE id=$1 AND empresa_id=$2 AND COALESCE(activo,true)=true LIMIT 1",
+      [clienteId, empresaId]
+    );
+    if (!clienteRows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
+    const { rows } = await db.query(
+      `SELECT r.id, r.origen, r.destino, r.km, r.tipo_vehiculo, r.notas
+         FROM rutas r
+         LEFT JOIN ruta_precios_cliente rc ON rc.ruta_id=r.id AND rc.cliente_id=$1
+        WHERE (r.cliente_id=$1 OR rc.cliente_id=$1)
+          AND COALESCE(r.activa,true)=true
+          AND (r.empresa_id=$2 OR r.empresa_id IS NULL)
+        ORDER BY r.origen, r.destino
+        LIMIT 100`,
+      [clienteId, empresaId]
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudieron cargar rutas del cliente" });
+  }
+});
+
+router.post("/chofer/rutas", async (req, res) => {
+  try {
+    if (req.user?.rol !== "chofer") return res.status(403).json({ error: "Solo app chofer" });
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const clienteId = normalizePedidoUuid(req.body?.cliente_id);
+    const origen = String(req.body?.origen || "").trim();
+    const destino = String(req.body?.destino || "").trim();
+    if (!clienteId || !origen || !destino) return res.status(400).json({ error: "Indica cliente, origen y destino" });
+    const { rows: clienteRows } = await db.query(
+      "SELECT id, nombre FROM clientes WHERE id=$1 AND empresa_id=$2 AND COALESCE(activo,true)=true LIMIT 1",
+      [clienteId, empresaId]
+    );
+    const cliente = clienteRows[0];
+    if (!cliente) return res.status(404).json({ error: "Cliente no encontrado" });
+    const notas = [
+      "Creada desde App Chofer sin precio. Pendiente de revision por trafico/gerencia.",
+      String(req.body?.notas || "").trim(),
+    ].filter(Boolean).join(" ");
+    const { rows: existing } = await db.query(
+      `SELECT id FROM rutas
+        WHERE empresa_id=$1
+          AND cliente_id=$2
+          AND LOWER(TRIM(origen))=LOWER(TRIM($3))
+          AND LOWER(TRIM(destino))=LOWER(TRIM($4))
+          AND COALESCE(activa,true)=true
+        LIMIT 1`,
+      [empresaId, clienteId, origen, destino]
+    );
+    let rutaId = existing[0]?.id || null;
+    if (!rutaId) {
+      const { rows } = await db.query(
+        `INSERT INTO rutas (empresa_id, cliente_id, origen, destino, km, tipo_vehiculo, tarifa_tipo, precio_base, notas, activa)
+         VALUES ($1,$2,$3,$4,$5,'cualquiera','viaje',0,$6,true)
+         RETURNING id`,
+        [empresaId, clienteId, origen, destino, parseLocaleNumber(req.body?.km) || null, notas]
+      );
+      rutaId = rows[0].id;
+    }
+    await notificarGestionPedido(
+      empresaId,
+      "ruta_chofer_pendiente_revision",
+      "Nueva ruta creada por chofer",
+      `El chofer ha creado una ruta para ${cliente.nombre}: ${origen} -> ${destino}. Revisar tarifa antes de usarla en facturacion.`,
+      { cliente_id: clienteId, cliente_nombre: cliente.nombre, ruta_id: rutaId, origen, destino, dedupe_key: `ruta-chofer:${rutaId}` },
+      req.user?.id || null
+    );
+    res.status(existing[0] ? 200 : 201).json({ ok: true, ruta_id: rutaId, origen, destino, pendiente_revision: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudo crear la ruta desde app chofer" });
+  }
+});
 
 // GET /pedidos
 router.get("/", async (req, res) => {
@@ -6262,6 +6571,152 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
   }
 });
 
+router.post("/chofer", async (req, res) => {
+  try {
+    if (req.user?.rol !== "chofer") {
+      return res.status(403).json({ error: "Solo la app de chofer puede crear viajes propios desde este endpoint." });
+    }
+    await ensureColaboradorWorkflowSchema();
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const chofer = await resolveChoferPrincipalForUser(req.user, empresaId);
+    if (!chofer?.id) {
+      return res.status(400).json({ error: "Tu usuario no esta vinculado a una ficha de chofer activa." });
+    }
+
+    const origen = String(req.body?.origen || "").trim();
+    const destino = String(req.body?.destino || "").trim();
+    const mercancia = String(req.body?.mercancia || req.body?.descripcion_carga || "").trim();
+    if (!origen || !destino || !mercancia) {
+      return res.status(400).json({ error: "Indica origen, destino y mercancia para crear el DCD." });
+    }
+
+    const fechaCargaNorm = normalizePedidoDate(req.body?.fecha_carga) || new Date().toISOString().slice(0, 10);
+    const fechaDescargaNorm = normalizePedidoDate(req.body?.fecha_descarga || req.body?.fecha_entrega) || fechaCargaNorm;
+    const horaCargaNorm = normalizePedidoTime(req.body?.hora_carga);
+    const horaDescargaNorm = normalizePedidoTime(req.body?.hora_descarga);
+    assertPedidoDateOrder(fechaCargaNorm, fechaDescargaNorm);
+
+    let pedido;
+    await db.transaction(async (client) => {
+      const clienteId = await resolveClienteLitePedido(client, empresaId, req.body || {});
+      await assertClienteAdmiteNuevoPedido(client, req, clienteId, 0);
+      let rutaId = normalizePedidoUuid(req.body?.ruta_id);
+      if (rutaId) {
+        const { rows: rutaRows } = await client.query(
+          `SELECT r.id
+             FROM rutas r
+             LEFT JOIN ruta_precios_cliente rc ON rc.ruta_id=r.id AND rc.cliente_id=$2
+            WHERE r.id=$1
+              AND (r.cliente_id=$2 OR rc.cliente_id=$2)
+              AND (r.empresa_id=$3 OR r.empresa_id IS NULL)
+              AND COALESCE(r.activa,true)=true
+            LIMIT 1`,
+          [rutaId, clienteId, empresaId]
+        );
+        if (!rutaRows[0]) rutaId = null;
+      }
+      const numero = await nextPedidoNumero(client, empresaId, "DCD");
+      const origenPais = normalizePaisPedido(req.body?.origen_pais || "España");
+      const destinoPais = normalizePaisPedido(req.body?.destino_pais || "España");
+      const puntosCarga = normalizePedidoStopsForStorage(req.body?.puntos_carga || [{
+        nombre: req.body?.origen_nombre || origen,
+        direccion: origen,
+        fecha: fechaCargaNorm,
+        hora: horaCargaNorm || "",
+        pais: origenPais,
+      }], origen, origenPais, req.body?.origen_provincia || "");
+      const puntosDescarga = normalizePedidoStopsForStorage(req.body?.puntos_descarga || [{
+        nombre: req.body?.destino_nombre || destino,
+        direccion: destino,
+        fecha: fechaDescargaNorm,
+        hora: horaDescargaNorm || "",
+        pais: destinoPais,
+      }], destino, destinoPais, req.body?.destino_provincia || "");
+      const geoPedido = derivePedidoGeoFromStops(puntosCarga, puntosDescarga, {
+        origen_pais: origenPais,
+        destino_pais: destinoPais,
+        origen_provincia: req.body?.origen_provincia || "",
+        destino_provincia: req.body?.destino_provincia || "",
+      });
+
+      const { rows } = await client.query(`
+        INSERT INTO pedidos
+          (numero, cliente_id, ruta_id, vehiculo_id, chofer_id, origen, destino,
+           fecha_pedido, fecha_carga, hora_carga, fecha_entrega, empresa_id,
+           mercancia, peso_kg, bultos, importe, notas, estado)
+        VALUES
+          ($1,$2,$3,$4,$5,$6,$7,CURRENT_DATE,$8,$9,$10,$11,$12,$13,$14,0,$15,'confirmado')
+        RETURNING *`,
+        [
+          numero,
+          clienteId,
+          rutaId,
+          normalizePedidoUuid(req.body?.vehiculo_id) || chofer.vehiculo_id || null,
+          chofer.id,
+          origen,
+          destino,
+          fechaCargaNorm,
+          horaCargaNorm,
+          fechaDescargaNorm,
+          empresaId,
+          mercancia,
+          normalizePedidoValue("peso_kg", req.body?.peso_kg),
+          normalizePedidoValue("bultos", req.body?.bultos),
+          String(req.body?.notas || "Creado desde app chofer para DCD.").trim().slice(0, 1000),
+        ]
+      );
+      pedido = rows[0];
+
+      const extraFields = [
+        ["fecha_descarga", fechaDescargaNorm],
+        ["hora_descarga", horaDescargaNorm],
+        ["ventana_carga", req.body?.ventana_carga || null],
+        ["ventana_descarga", req.body?.ventana_descarga || null],
+        ["origen_pais", geoPedido.origen_pais],
+        ["origen_provincia", geoPedido.origen_provincia || req.body?.origen_provincia || null],
+        ["destino_pais", geoPedido.destino_pais],
+        ["destino_provincia", geoPedido.destino_provincia || req.body?.destino_provincia || null],
+        ["cmr_tipo", cmrTipoPedido(geoPedido.origen_pais, geoPedido.destino_pais, req.body?.cmr_tipo)],
+        ["referencia_cliente", req.body?.referencia_cliente || null],
+        ["tipo_carga", req.body?.tipo_carga || null],
+        ["puntos_carga", JSON.stringify(puntosCarga)],
+        ["puntos_descarga", JSON.stringify(puntosDescarga)],
+        ["remolque_id", normalizePedidoUuid(req.body?.remolque_id) || chofer.remolque_id || null],
+      ].filter(([, value]) => value !== undefined);
+      const updated = await updateExistingPedidoFields(client, extraFields, pedido.id, empresaId);
+      pedido = updated || pedido;
+      await logPedidoEvento(pedido.id, empresaId, "pedido.creado_app_chofer", {
+        source: "app_chofer",
+        transgest_lite: true,
+        dcd_required: true,
+      }, "chofer", req.user?.id || null, client);
+    });
+
+    const repo = await archivarDocumentoControlPedido({
+      pedidoId: pedido.id,
+      empresaId,
+      appBaseUrl: publicBaseUrl(req),
+      userId: req.user?.id || null,
+      motivo: "creacion_app_chofer_dcd",
+    }).catch(e => {
+      logger.warn("No se pudo prearchivar el DCD creado por chofer:", e.message);
+      return null;
+    });
+    const ctx = await getPedidoDocumentoControlContext(pedido.id, empresaId);
+    res.status(201).json({
+      ok: true,
+      pedido,
+      repositorio: repo,
+      documento_control: ctx ? await buildPedidoDocumentoControlResponse(req, ctx, empresaId) : null,
+    });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    if (e.code === "22P02") return res.status(400).json({ error: "Alguno de los datos del viaje no tiene formato valido." });
+    if (e.code === "23503") return res.status(400).json({ error: "Cliente, chofer o vehiculo no pertenecen a esta empresa." });
+    res.status(500).json({ error: e.message || "No se pudo crear el viaje desde la app de chofer" });
+  }
+});
+
 router.post("/", GERENTE_O_TRAFICO,
   body("cliente_id").isUUID(),
   body("importe").optional({ checkFalsy: true }).custom(value => parseLocaleNumber(value) !== null),
@@ -7263,15 +7718,19 @@ router.post("/:id/gps", async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /pedidos/:id/firma - guardar firma digital del destinatario
+// POST /pedidos/:id/firma - guardar firma digital por rol y actualizar DCD
 router.post("/:id/firma", async (req, res) => {
   try {
     const empresaId = req.user && req.user.empresa_id;
+    await ensureColaboradorWorkflowSchema();
     const { firma_destinatario, firma_nombre } = req.body;
-    if (!firma_destinatario) return res.status(400).json({ error: "Firma requerida" });
+    const firmaImagen = firma_destinatario || req.body?.firma || req.body?.firma_png || req.body?.firma_data_url;
+    const firmaRol = normalizeFirmaRol(req.body?.rol || req.body?.firma_rol || "destinatario");
+    if (!firmaImagen) return res.status(400).json({ error: "Firma requerida" });
     const { rows: pedidoRows } = await db.query(
       `SELECT id, numero, origen, destino, fecha_carga, fecha_descarga, fecha_entrega,
-              vehiculo_id, chofer_id, chofer2_id, estado::text AS estado
+              vehiculo_id, chofer_id, chofer2_id, estado::text AS estado,
+              firma_evidencia
          FROM pedidos
         WHERE id=$1 AND empresa_id=$2
         LIMIT 1`,
@@ -7284,8 +7743,9 @@ router.post("/:id/firma", async (req, res) => {
     }
 
     const firmadoAt = new Date().toISOString();
-    const firmaHash = sha256Hex(firma_destinatario);
+    const firmaHash = sha256Hex(firmaImagen);
     const pedidoContext = buildFirmaPedidoContext(pedido);
+    const defaultNombre = firmaRol === "chofer" ? "Chofer" : firmaRol === "cargador" ? "Cargador" : "Destinatario";
     const evidenciaBase = {
       version: "transgest-firma-evidencia-2026.05",
       estado: "evidencia_interna_pre_eidas",
@@ -7301,13 +7761,14 @@ router.post("/:id/firma", async (req, res) => {
       pedido_context: pedidoContext,
       pedido_context_hash_sha256: sha256Hex(stableJson(pedidoContext)),
       firmante: {
-        nombre: String(firma_nombre || "Destinatario").trim(),
-        rol: "destinatario",
+        nombre: String(firma_nombre || defaultNombre).trim(),
+        rol: firmaRol,
       },
       firma: {
         algoritmo_hash: "SHA-256",
         hash: firmaHash,
-        formato: String(firma_destinatario).startsWith("data:image/") ? "data_url_image" : "desconocido",
+        formato: String(firmaImagen).startsWith("data:image/") ? "data_url_image" : "desconocido",
+        data_url: String(firmaImagen).startsWith("data:image/") ? firmaImagen : "",
       },
       captura: {
         ip: req.ip || req.headers["x-forwarded-for"] || "",
@@ -7322,27 +7783,33 @@ router.post("/:id/firma", async (req, res) => {
       ...evidenciaBase,
       integrity_hash_sha256: sha256Hex(stableJson(evidenciaBase)),
     };
+    const evidenciaMulti = mergeFirmaEvidencia(pedido.firma_evidencia || null, firmaRol, evidencia);
+
+    const roleSetSql = {
+      cargador: "firma_cargador = $1, firma_cargador_nombre = $2, firma_cargador_fecha = $5",
+      chofer: "firma_chofer = $1, firma_chofer_nombre = $2, firma_chofer_fecha = $5",
+      destinatario: "firma_destinatario = $1, firma_nombre = $2, firma_fecha = $5, firma_hash = $7",
+    }[firmaRol];
 
     const { rows } = await db.query(`
       UPDATE pedidos
-      SET firma_destinatario = $1,
-          firma_nombre = $2,
-          firma_fecha  = $5,
+      SET ${roleSetSql},
           firma_evidencia = $6::jsonb,
-          firma_hash = $7
+          updated_at = NOW()
       WHERE id = $3 AND empresa_id = $4
-      RETURNING id, numero, firma_fecha, firma_nombre, firma_hash, firma_evidencia
+      RETURNING id, numero, firma_fecha, firma_nombre, firma_hash, firma_cargador_fecha, firma_cargador_nombre, firma_chofer_fecha, firma_chofer_nombre, firma_evidencia
     `, [
-      firma_destinatario,
-      evidencia.firmante.nombre || "Destinatario",
+      firmaImagen,
+      evidencia.firmante.nombre || defaultNombre,
       req.params.id,
       empresaId,
       firmadoAt,
-      JSON.stringify(evidencia),
+      JSON.stringify(evidenciaMulti),
       firmaHash,
     ]);
 
-    await logPedidoEvento(req.params.id, empresaId, "firma.evidencia_registrada", {
+    await logPedidoEvento(req.params.id, empresaId, `firma.${firmaRol}_registrada`, {
+      firma_rol: firmaRol,
       firma_nombre: evidencia.firmante.nombre,
       firma_hash: firmaHash,
       integrity_hash_sha256: evidencia.integrity_hash_sha256,
@@ -7351,7 +7818,23 @@ router.post("/:id/firma", async (req, res) => {
       source: evidencia.captura.source,
     }, req.user?.rol || "usuario", req.user?.id || null);
 
-    res.json({ ok: true, ...rows[0] });
+    let repositorio = null;
+    try {
+      const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
+      if (ctx) {
+        repositorio = await archivarDocumentoControlPedido({
+          pedidoId: req.params.id,
+          empresaId,
+          appBaseUrl: publicBaseUrl(req),
+          userId: req.user?.id || null,
+          motivo: `firma_${firmaRol}`,
+        });
+      }
+    } catch (repoErr) {
+      logger.warn("No se pudo actualizar el repositorio DCD tras firma:", repoErr.message);
+    }
+
+    res.json({ ok: true, firma_rol: firmaRol, repositorio, ...rows[0] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

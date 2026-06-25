@@ -138,6 +138,12 @@ export function setUser(u) {
   localStorage.setItem("tms_user", JSON.stringify(u));
 }
 
+function applyAuthSession(data = {}) {
+  if (data.token) setToken(data.token);
+  if (data.user) setUser(data.user);
+  return data;
+}
+
 // ── Fetch base ────────────────────────────────────────
 async function apiFetch(path, options = {}) {
   const { silentSuccess = false, silentError = false, ...fetchOptions } = options;
@@ -290,8 +296,7 @@ export async function login(email, password) {
     method: "POST",
     body: { email, password },
   });
-  setToken(data.token);
-  setUser(data.user);
+  applyAuthSession(data);
   if (data.bloqueado) {
     if (typeof window !== "undefined") window.__TMS_BLOQUEADO = data.bloqueado;
     localStorage.setItem("tms_bloqueado", JSON.stringify(data.bloqueado));
@@ -313,6 +318,11 @@ export async function login(email, password) {
 export async function getMe() {
   return apiFetch("/auth/me");
 }
+
+export const getDemoOptions = () => apiFetch("/auth/demo/options", { silentSuccess:true });
+export const switchDemoPlan = (plan) => apiFetch("/auth/demo/switch-plan", { method:"POST", body:{ plan }, silentSuccess:true }).then(applyAuthSession);
+export const switchDemoUser = (user_id) => apiFetch("/auth/demo/switch-user", { method:"POST", body:{ user_id }, silentSuccess:true }).then(applyAuthSession);
+export const requestPasswordReset = (identifier) => apiFetch("/auth/forgot-password", { method:"POST", body:{ identifier }, silentSuccess:true });
 
 export async function getAccountingLaunch() {
   return apiFetch("/accounting/launch-token", { silentSuccess: true });
@@ -389,6 +399,10 @@ export const getAiInboxStatus = () =>
 export const getPlanificacionCargaIA = (id) =>
   apiFetch(`/pedidos/${id}/planificacion-ia`, { silentSuccess:true });
 export const crearPedido    = (data)      => apiFetch("/pedidos", { method:"POST", body:data });
+export const crearPedidoChofer = (data)   => apiFetch("/pedidos/chofer", { method:"POST", body:data });
+export const getChoferClientes = (q = "") => apiFetch(`/pedidos/chofer/clientes${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+export const getChoferClienteRutas = (clienteId) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/rutas`);
+export const crearChoferRuta = (data) => apiFetch("/pedidos/chofer/rutas", { method:"POST", body:data });
 export const editarPedido   = (id,data)   => apiFetch(`/pedidos/${id}`, { method:"PUT", body:data });
 export const cambiarEstadoPedido = (id, estado, extra = {}) =>
   apiFetch(`/pedidos/${id}/estado`, { method:"PATCH", body:{ estado, ...extra } });

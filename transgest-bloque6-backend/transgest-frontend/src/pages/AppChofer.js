@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp } from "../services/api";
+import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -54,6 +54,18 @@ function normalizeChoferPasos(value = {}) {
       if (Number.isFinite(n) && n >= 0) next[key] = Math.round(n * 10) / 10;
     }
   });
+  if (source.carga_ubicacion && typeof source.carga_ubicacion === "object") {
+    const lat = Number(source.carga_ubicacion.lat);
+    const lng = Number(source.carga_ubicacion.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      next.carga_ubicacion = {
+        lat,
+        lng,
+        accuracy_m: source.carga_ubicacion.accuracy_m ?? null,
+        captured_at: source.carga_ubicacion.captured_at || new Date().toISOString(),
+      };
+    }
+  }
   [
     "carga_iniciada_at",
     "carga_proceso_at",
@@ -599,6 +611,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const [tick,         setTick]         = useState(0);
   const [docControl,   setDocControl]   = useState(null);
   const [docControlLoading, setDocControlLoading] = useState(false);
+  const [qrVisible, setQrVisible] = useState(false);
   const e = EC[pedido.estado]||EC.pendiente;
   const isEnCurso = ["en_curso","descarga"].includes(pedido.estado);
   const isProxima = pedido.es_proxima_carga;
@@ -677,6 +690,17 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     registrarDcdEvento(printMode ? "impreso" : "abierto");
     const opened = window.open(url, "_blank");
     if (!opened) window.location.href = url;
+  }
+
+  async function verQrDocumentoControl() {
+    const data = docControl || await cargarDocumentoControl();
+    if (!data?.qr?.data_url && !data?.qr?.url && !data?.documento?.soporte_url) {
+      notify("No se pudo preparar el QR del DCD.", "warning");
+      return;
+    }
+    setDocControl(data);
+    registrarDcdEvento("qr_mostrado");
+    setQrVisible(true);
   }
 
   function descargarDocumentoControl() {
@@ -845,8 +869,15 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     if (!(await confirmarDcdAntesDeSalir())) return;
     setLoading(true);
     try {
+      const location = await capturarUbicacionActual();
+      if (!location) notify("No se pudo capturar la ubicacion de carga. Puedes continuar, queda pendiente para trafico.", "warning");
       if (!["en_curso","descarga","entregado"].includes(pedido.estado)) await cambiarEstadoPedido(pedido.id, "en_curso");
-      await marcarPaso("carga_iniciada");
+      await persistirPasos({
+        carga_iniciada:true,
+        carga_iniciada_at:new Date().toISOString(),
+        ...(location ? { carga_ubicacion: location } : {}),
+        ...patchKmParaPaso("carga_iniciada"),
+      }, { silent:true });
       onActualizar();
     } catch (err) {
       notify(err.message, "error");
@@ -963,7 +994,10 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     setLoading(true);
     try{
       await cambiarEstadoPedido(pedido.id,nuevoEstado);
-      if(nuevoEstado==="en_curso") await persistirPasos({ carga_iniciada:true, ...patchKmParaPaso("carga_iniciada") }, { silent:true });
+      if(nuevoEstado==="en_curso") {
+        const location = await capturarUbicacionActual();
+        await persistirPasos({ carga_iniciada:true, carga_iniciada_at:new Date().toISOString(), ...(location ? { carga_ubicacion: location } : {}), ...patchKmParaPaso("carga_iniciada") }, { silent:true });
+      }
       if(nuevoEstado==="descarga") await persistirPasos({ descarga_iniciada:true, ...patchKmParaPaso("descarga_iniciada") }, { silent:true });
       if(nuevoEstado==="entregado") {
         await persistirPasos({ descarga_ok:true, firma_entrega:true, ...patchKmParaPaso("firma_entrega") }, { silent:true });
@@ -1293,6 +1327,11 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                       {dcdOperativoOk ? "DCD revisado y disponible" : "Marcar DCD revisado y disponible"}
                     </button>
                     <button
+                      onClick={verQrDocumentoControl}
+                      style={{gridColumn:"1/-1",padding:"13px",borderRadius:8,border:"1px solid rgba(20,184,166,.38)",background:"rgba(20,184,166,.12)",color:"#2dd4bf",fontSize:13,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      Ver QR
+                    </button>
+                    <button
                       onClick={()=>abrirDocumentoControl(false)}
                       style={{padding:"10px",borderRadius:8,border:"1px solid rgba(16,185,129,.3)",background:"rgba(16,185,129,.08)",color:"#10b981",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Abrir soporte
@@ -1438,6 +1477,27 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
 
       {firmando&&<FirmaCanvas pedido={pedido} onFirma={registrarFirma} onCancel={()=>setFirmando(false)}/>}
       {incidencia&&<ModalIncidencia pedido={pedido} fase={incidenciaFase} onClose={()=>setIncidencia(false)} onGuardado={()=>{setIncidencia(false);onActualizar();}}/>}
+      {qrVisible&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(2,6,23,.96)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
+          <div style={{width:"min(390px,94vw)",background:"#fff",color:"#111827",borderRadius:12,padding:18,textAlign:"center",boxShadow:"0 24px 80px rgba(0,0,0,.45)"}}>
+            <div style={{fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"#0f766e",marginBottom:4}}>Documento de control digital</div>
+            <div style={{fontSize:18,fontWeight:900,marginBottom:4}}>{pedido.numero || dcd?.referencia_pedido || "Viaje"}</div>
+            <div style={{fontSize:11,color:"#64748b",marginBottom:12}}>Muestra este QR para abrir el documento alojado en el servidor.</div>
+            {docControl?.qr?.data_url ? (
+              <img src={docControl.qr.data_url} alt="QR documento de control" style={{width:"min(300px,78vw)",height:"min(300px,78vw)",objectFit:"contain",border:"1px solid #e5e7eb",borderRadius:8,padding:10,background:"#fff"}}/>
+            ) : (
+              <div style={{border:"1px solid #e5e7eb",borderRadius:8,padding:14,fontSize:12,wordBreak:"break-all",color:"#0f766e"}}>
+                {docControl?.qr?.url || docControlSupportUrl}
+              </div>
+            )}
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:900,marginTop:10,color:"#0f172a"}}>{dcd?.codigo_control || ""}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:14}}>
+              <button onClick={()=>abrirDocumentoControl(false)} style={{padding:"11px",borderRadius:8,border:"1px solid #99f6e4",background:"#ccfbf1",color:"#0f766e",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Abrir DCD</button>
+              <button onClick={()=>setQrVisible(false)} style={{padding:"11px",borderRadius:8,border:"1px solid #cbd5e1",background:"#f8fafc",color:"#334155",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -1977,14 +2037,209 @@ function VacacionesChofer({ items = [], chofer, onRefresh }) {
   );
 }
 
+function NuevoViajeChofer({ onCreado }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState({
+    cliente_id: "",
+    cliente_nombre: "",
+    ruta_id: "",
+    origen: "",
+    destino: "",
+    fecha_carga: today,
+    hora_carga: "",
+    fecha_descarga: today,
+    hora_descarga: "",
+    mercancia: "",
+    peso_kg: "",
+    bultos: "",
+    referencia_cliente: "",
+    notas: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [created, setCreated] = useState(null);
+  const [clientes, setClientes] = useState([]);
+  const [rutas, setRutas] = useState([]);
+  const [loadingRutas, setLoadingRutas] = useState(false);
+  const [creatingRuta, setCreatingRuta] = useState(false);
+  const set = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
+  const inputStyle = {width:"100%",boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:8,padding:"10px 11px",fontSize:13,fontFamily:"'DM Sans',sans-serif",outline:"none"};
+
+  useEffect(() => {
+    const q = form.cliente_nombre.trim();
+    const timer = setTimeout(async () => {
+      try {
+        const data = await getChoferClientes(q);
+        setClientes(Array.isArray(data) ? data : []);
+      } catch {
+        setClientes([]);
+      }
+    }, 260);
+    return () => clearTimeout(timer);
+  }, [form.cliente_nombre]);
+
+  useEffect(() => {
+    if (!form.cliente_id) {
+      setRutas([]);
+      return;
+    }
+    setLoadingRutas(true);
+    getChoferClienteRutas(form.cliente_id)
+      .then(data => setRutas(Array.isArray(data) ? data : []))
+      .catch(() => setRutas([]))
+      .finally(() => setLoadingRutas(false));
+  }, [form.cliente_id]);
+
+  function seleccionarCliente(cliente) {
+    setForm(prev => ({
+      ...prev,
+      cliente_id: cliente.id,
+      cliente_nombre: cliente.nombre || prev.cliente_nombre,
+      ruta_id: "",
+    }));
+  }
+
+  function seleccionarRuta(rutaId) {
+    const ruta = rutas.find(r => String(r.id) === String(rutaId));
+    setForm(prev => ({
+      ...prev,
+      ruta_id: rutaId,
+      origen: ruta?.origen || prev.origen,
+      destino: ruta?.destino || prev.destino,
+    }));
+  }
+
+  async function crearRutaPendiente() {
+    if (!form.cliente_id || !form.origen.trim() || !form.destino.trim()) {
+      notify("Selecciona cliente e indica origen y destino para crear la ruta.", "warning");
+      return;
+    }
+    setCreatingRuta(true);
+    try {
+      const ruta = await crearChoferRuta({
+        cliente_id: form.cliente_id,
+        origen: form.origen,
+        destino: form.destino,
+        notas: "Propuesta desde nuevo viaje DCD.",
+      });
+      notify("Ruta creada y enviada a trafico para revisar tarifa.", "success");
+      const fresh = await getChoferClienteRutas(form.cliente_id).catch(() => []);
+      setRutas(Array.isArray(fresh) ? fresh : []);
+      setForm(prev => ({ ...prev, ruta_id: ruta?.ruta_id || prev.ruta_id }));
+    } catch (err) {
+      notify(err.message || "No se pudo crear la ruta", "error");
+    } finally {
+      setCreatingRuta(false);
+    }
+  }
+
+  async function guardar() {
+    if (!form.cliente_nombre.trim() || !form.origen.trim() || !form.destino.trim() || !form.mercancia.trim()) {
+      notify("Completa cliente, origen, destino y mercancia.", "warning");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await crearPedidoChofer(form);
+      setCreated(res);
+      notify("Viaje creado con DCD y QR.", "success");
+      setForm(prev => ({
+        ...prev,
+        ruta_id: "",
+        cliente_nombre: "",
+        cliente_id: "",
+        origen: "",
+        destino: "",
+        mercancia: "",
+        peso_kg: "",
+        bultos: "",
+        referencia_cliente: "",
+        notas: "",
+      }));
+      onCreado?.();
+    } catch (err) {
+      notify(err.message || "No se pudo crear el viaje", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{padding:"12px 16px"}}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+        <div style={{fontSize:15,fontWeight:900,color:"var(--text)",marginBottom:4}}>Nuevo viaje DCD</div>
+        <div style={{fontSize:11,color:"var(--text5)",lineHeight:1.4,marginBottom:12}}>Crea un viaje propio para disponer del documento de control digital y su QR.</div>
+        <div style={{display:"grid",gap:10}}>
+          <input value={form.cliente_nombre} onChange={e=>set("cliente_nombre", e.target.value)} placeholder="Cliente / destinatario" style={inputStyle}/>
+          {clientes.length > 0 && (
+            <div style={{display:"grid",gap:6}}>
+              {clientes.slice(0, 5).map(cliente => (
+                <button key={cliente.id} type="button" onClick={()=>seleccionarCliente(cliente)}
+                  style={{textAlign:"left",padding:"8px 10px",borderRadius:8,border:`1px solid ${form.cliente_id===cliente.id ? "rgba(20,184,166,.45)" : "var(--border2)"}`,background:form.cliente_id===cliente.id ? "rgba(20,184,166,.10)" : "var(--bg3)",color:"var(--text)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  {cliente.nombre}
+                  {cliente.cif ? <span style={{fontWeight:600,color:"var(--text5)"}}> · {cliente.cif}</span> : null}
+                </button>
+              ))}
+            </div>
+          )}
+          {form.cliente_id && (
+            <div style={{display:"grid",gap:6}}>
+              <select value={form.ruta_id || ""} onChange={e=>seleccionarRuta(e.target.value)} style={inputStyle}>
+                <option value="">{loadingRutas ? "Cargando rutas..." : "Sin ruta / crear manual"}</option>
+                {rutas.map(r => (
+                  <option key={r.id} value={r.id}>{r.origen} -> {r.destino}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <input value={form.origen} onChange={e=>set("origen", e.target.value)} placeholder="Origen / punto de carga" style={inputStyle}/>
+          <input value={form.destino} onChange={e=>set("destino", e.target.value)} placeholder="Destino / punto de descarga" style={inputStyle}/>
+          {form.cliente_id && form.origen.trim() && form.destino.trim() && !form.ruta_id && (
+            <button type="button" onClick={crearRutaPendiente} disabled={creatingRuta}
+              style={{padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontSize:12,fontWeight:900,cursor:creatingRuta?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              {creatingRuta ? "Creando ruta..." : "Crear ruta para revisar"}
+            </button>
+          )}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <input type="date" value={form.fecha_carga} onChange={e=>set("fecha_carga", e.target.value)} style={inputStyle}/>
+            <input type="time" value={form.hora_carga} onChange={e=>set("hora_carga", e.target.value)} style={inputStyle}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <input type="date" value={form.fecha_descarga} onChange={e=>set("fecha_descarga", e.target.value)} style={inputStyle}/>
+            <input type="time" value={form.hora_descarga} onChange={e=>set("hora_descarga", e.target.value)} style={inputStyle}/>
+          </div>
+          <input value={form.mercancia} onChange={e=>set("mercancia", e.target.value)} placeholder="Mercancia" style={inputStyle}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <input inputMode="decimal" value={form.peso_kg} onChange={e=>set("peso_kg", e.target.value)} placeholder="Peso kg" style={inputStyle}/>
+            <input inputMode="numeric" value={form.bultos} onChange={e=>set("bultos", e.target.value)} placeholder="Bultos" style={inputStyle}/>
+          </div>
+          <input value={form.referencia_cliente} onChange={e=>set("referencia_cliente", e.target.value)} placeholder="Referencia cliente" style={inputStyle}/>
+          <textarea value={form.notas} onChange={e=>set("notas", e.target.value)} placeholder="Notas" rows={3} style={{...inputStyle,resize:"none"}}/>
+          <button onClick={guardar} disabled={saving} style={{padding:"13px",borderRadius:8,border:"none",background:"#0f766e",color:"#fff",fontSize:13,fontWeight:900,cursor:saving?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            {saving ? "Creando..." : "Crear viaje y DCD"}
+          </button>
+        </div>
+        {created?.documento_control?.qr?.data_url && (
+          <div style={{marginTop:14,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.22)",borderRadius:10,padding:12,textAlign:"center"}}>
+            <div style={{fontSize:12,fontWeight:900,color:"#10b981",marginBottom:8}}>QR generado</div>
+            <img src={created.documento_control.qr.data_url} alt="QR DCD creado" style={{width:190,height:190,objectFit:"contain",background:"#fff",borderRadius:8,padding:8}}/>
+            <div style={{fontSize:11,color:"var(--text5)",marginTop:8}}>El viaje aparece ya en Activos.</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AppChofer(){
   const { user, logout } = useAuth();
+  const planNorm = String(user?.plan || "").toLowerCase();
+  const isLitePlan = ["lite", "mini", "transgest_lite", "transgest_mini"].includes(planNorm);
   const [pedidos,   setPedidos]   = useState([]);
   const [solicitudesChofer, setSolicitudesChofer] = useState([]);
   const [vacacionesChofer, setVacacionesChofer] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [filtroFecha,setFiltroFecha]=useState("semana"); // hoy | semana | todos
-  const [tab,       setTab]       = useState("activos"); // activos | historial | solicitud
+  const [tab,       setTab]       = useState("activos"); // activos | nuevo | historial | solicitud
 
   // PWA state
   const [offline,        setOffline]        = useState(!navigator.onLine);
@@ -2007,17 +2262,26 @@ export default function AppChofer(){
       setPedidos(arr);
       const jornada = await getChoferJornadaApp().catch(() => null);
       setJornadaInfo(jornada);
-      const solicitudes = await getTallerSolicitudes().catch(() => []);
-      const nextSolicitudes = Array.isArray(solicitudes) ? solicitudes.slice(0, 50) : [];
-      setSolicitudesChofer(nextSolicitudes);
-      const vacaciones = await getChoferVacacionesApp().catch(() => []);
-      const vacacionesArr = Array.isArray(vacaciones) ? vacaciones : Array.isArray(vacaciones?.solicitudes) ? vacaciones.solicitudes : [];
-      setVacacionesChofer(vacacionesArr.slice(0, 50));
+      if (isLitePlan) {
+        setSolicitudesChofer([]);
+        setVacacionesChofer([]);
+      } else {
+        const solicitudes = await getTallerSolicitudes().catch(() => []);
+        const nextSolicitudes = Array.isArray(solicitudes) ? solicitudes.slice(0, 50) : [];
+        setSolicitudesChofer(nextSolicitudes);
+        const vacaciones = await getChoferVacacionesApp().catch(() => []);
+        const vacacionesArr = Array.isArray(vacaciones) ? vacaciones : Array.isArray(vacaciones?.solicitudes) ? vacaciones.solicitudes : [];
+        setVacacionesChofer(vacacionesArr.slice(0, 50));
+      }
     }catch(e){ console.error(e); }
     finally{ setLoading(false); }
-  }, [user?.id, user?.chofer_id]);
+  }, [user?.id, user?.chofer_id, isLitePlan]);
 
   useEffect(()=>{ cargar(); },[cargar]);
+
+  useEffect(() => {
+    if (isLitePlan && ["solicitud", "vacaciones"].includes(tab)) setTab("activos");
+  }, [isLitePlan, tab]);
 
   useEffect(() => {
     const refreshQueue = (event) => {
@@ -2108,6 +2372,9 @@ export default function AppChofer(){
       vehiculo_id: jornadaInfo.chofer.vehiculo_id,
       matricula: jornadaInfo.chofer.matricula || jornadaInfo.chofer.vehiculo_matricula || "",
     } : null);
+  const tabsChofer = isLitePlan
+    ? [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["historial","Historial"]]
+    : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Mecanico"]];
 
   // PWA helpers
   async function installApp() {
@@ -2227,7 +2494,7 @@ export default function AppChofer(){
 
       {/* Tabs */}
       <div style={{display:"flex",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
-        {[["activos","Activos"],["jornada","Jornada"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Mecanico"]].map(([id,l])=>(
+        {tabsChofer.map(([id,l])=>(
           <button key={id} onClick={()=>setTab(id)}
             style={{flex:1,padding:"11px",border:"none",borderBottom:`2px solid ${tab===id?"var(--accent)":"transparent"}`,
               color:tab===id?"var(--accent)":"var(--text4)",background:"transparent",
@@ -2275,7 +2542,7 @@ export default function AppChofer(){
       </div>
 
       {/* Lista viajes */}
-      {tab!=="solicitud" && tab!=="jornada" && tab!=="vacaciones" && (
+      {tab!=="solicitud" && tab!=="jornada" && tab!=="vacaciones" && tab!=="nuevo" && (
         <div style={{padding:"12px 16px"}}>
           {loading?(
             <div style={{padding:40,textAlign:"center",color:"var(--text5)"}}>Cargando viajes...</div>
@@ -2296,6 +2563,10 @@ export default function AppChofer(){
             />)
           )}
         </div>
+      )}
+
+      {tab==="nuevo" && (
+        <NuevoViajeChofer onCreado={()=>{ cargar(); setFiltroFecha("todos"); }} />
       )}
 
       {/* Solicitud mecanico */}

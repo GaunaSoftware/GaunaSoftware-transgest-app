@@ -7879,7 +7879,7 @@ export default function Pedidos() {
   const canEdit = puedeEditar("pedidos");
   const empresaPlan = getEmpresaPlanLocal();
   const aiVisualPlanActivo = planHasFeature(empresaPlan, "ai");
-  const aiDisponible = true;
+  const aiDisponible = planHasFeature(empresaPlan, "ai");
   const [focusPedido] = useState(() => readPedidosFocus());
   const focusNuevoAplicadoRef = useRef(false);
   const [guidedPedido, setGuidedPedido] = useState(() => {
@@ -9086,7 +9086,7 @@ export default function Pedidos() {
         </span>
       </div>
 
-      {vistaPedidos === "ia" && (
+      {aiDisponible && vistaPedidos === "ia" && (
         <div style={{margin:"0 0 16px"}}>
           {noHayViajesParaPlanificar && (
             <div style={{background:"rgba(245,158,11,.10)",border:"1px solid rgba(245,158,11,.26)",borderRadius:9,padding:"12px 14px",color:"var(--text3)",fontSize:12,marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>

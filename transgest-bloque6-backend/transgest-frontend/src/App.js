@@ -179,6 +179,7 @@ const IC = {
 // basico: operaciones generales, sin IA, sin gestion/optimizacion de rutas ni KPIs avanzados
 // profesional: incluye rutas/HERE y KPIs avanzados
 // enterprise: incluye todo
+// Matriz efectiva: Lite=minimo DCD, Basico=trafico core, Profesional=avanzado sin IA, Enterprise=todo.
 const MODULOS_POR_PLAN = {
     lite: [
       "app_chofer",
@@ -189,19 +190,19 @@ const MODULOS_POR_PLAN = {
     ],
     basico: [
       "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","calculador_portes","palets","app_chofer",
-      "clientes","colaboradores","vehiculos","choferes","taller","grupajes","solicitudes",
-      "hojas_ruta","nominas","control_horario","documentos","avisos","facturacion","contabilidad","empresa",
-      "usuarios","actividad","importacion","mi_cuenta",
-      "cuadrante_grupo","plan_diario","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
+      "clientes","rutas","vehiculos","choferes","grupajes","solicitudes",
+      "hojas_ruta","control_horario","documentos","avisos","facturacion","empresa",
+      "usuarios","mi_cuenta",
+      "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
       "facturacion_grupo"
     ],
     profesional: [
       "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","rutas_recomendadas","calculador_portes","palets","app_chofer",
       "clientes","tarifas","colaboradores","vehiculos","choferes","taller","grupajes","rutas","solicitudes",
       "explotacion","hojas_ruta","gastos_estructura","nominas","control_horario",
-      "documentos","avisos","facturacion","contabilidad","informes","excepciones","objetivos",
-    "empresa","usuarios","actividad","importacion","mi_cuenta",
-    "cuadrante_grupo","plan_diario","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
+      "documentos","avisos","facturacion","contabilidad","informes","excepciones",
+    "empresa","usuarios","actividad","mi_cuenta",
+    "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
     "facturacion_grupo","informes_grupo","rutas_recomendadas_chofer"
   ],
   enterprise: null,
@@ -899,15 +900,15 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
 const DEMO_PLAN_META = {
   lite: {
     label: "TransGest Lite",
-    detail: "Chofer, pedidos, clientes, rutas, tarifas sin IA, DCD y tacografo.",
+    detail: "DCD, app chofer, pedidos, clientes, rutas/tarifas y tacografo. Sin IA ni modulos avanzados.",
   },
   basico: {
     label: "Basico",
-    detail: "Operacion principal con modulos esenciales y sin IA avanzada.",
+    detail: "Trafico core con documentos y facturacion basica. Sin IA, KPIs avanzados, taller ni contabilidad.",
   },
   profesional: {
     label: "Profesional",
-    detail: "Gestion completa con KPIs y optimizacion, sin IA enterprise.",
+    detail: "KPIs, informes, rutas avanzadas, taller y contabilidad. IA desactivada.",
   },
   enterprise: {
     label: "Enterprise",

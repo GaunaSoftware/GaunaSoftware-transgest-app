@@ -24,13 +24,21 @@ const PLAN_FEATURES = {
     here_routing: false,
     optimizacion_rutas: false,
     gestion_rutas: true,
+    contabilidad: false,
+    taller: false,
+    importacion: false,
+    objetivos: false,
   },
   basico: {
     ai: false,
     kpis_avanzados: false,
     here_routing: false,
     optimizacion_rutas: false,
-    gestion_rutas: false,
+    gestion_rutas: true,
+    contabilidad: false,
+    taller: false,
+    importacion: false,
+    objetivos: false,
   },
   profesional: {
     ai: false,
@@ -38,6 +46,10 @@ const PLAN_FEATURES = {
     here_routing: true,
     optimizacion_rutas: true,
     gestion_rutas: true,
+    contabilidad: true,
+    taller: true,
+    importacion: false,
+    objetivos: false,
   },
   enterprise: {
     ai: true,
@@ -45,6 +57,10 @@ const PLAN_FEATURES = {
     here_routing: true,
     optimizacion_rutas: true,
     gestion_rutas: true,
+    contabilidad: true,
+    taller: true,
+    importacion: true,
+    objetivos: true,
   },
 };
 
@@ -55,6 +71,14 @@ const PLAN_DISABLED_MODULES = {
     "hojas_ruta", "nominas", "control_horario", "documentos", "facturacion",
     "contabilidad", "informes", "excepciones", "objetivos", "ia", "rutas_recomendadas",
     "rutas_recomendadas_chofer", "importacion", "actividad", "usuarios",
+  ]),
+  basico: new Set([
+    "ia", "informes", "excepciones", "objetivos", "rutas_recomendadas", "rutas_recomendadas_chofer",
+    "taller", "contabilidad", "nominas", "explotacion", "gastos_estructura", "importacion",
+    "actividad", "colaboradores",
+  ]),
+  profesional: new Set([
+    "ia", "objetivos", "importacion",
   ]),
 };
 

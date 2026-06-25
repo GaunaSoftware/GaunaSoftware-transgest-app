@@ -155,14 +155,14 @@ const rutaEditPayload = r => ({
 // ---------------------------------------------------------------------------
 const S = {
   page: {flex:1, padding:"30px 36px", background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)", minHeight:"100vh", fontFamily:"'DM Sans',sans-serif"},
-  title:{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:900,marginBottom:0,color:"#0f172a",letterSpacing:"-.02em"},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:900,marginBottom:0,color:"var(--text)",letterSpacing:"-.02em"},
   bar:  {display:"flex",gap:12,marginBottom:18,alignItems:"center",flexWrap:"wrap"},
   btn:  {padding:"10px 16px",borderRadius:8,border:"1px solid var(--border2)",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:6,boxShadow:"0 8px 18px rgba(15,23,42,.04)"},
-  card: {background:"rgba(255,255,255,.92)",border:"1px solid #dbe5ec",borderRadius:12,overflow:"hidden",boxShadow:"0 16px 36px rgba(15,23,42,.06)"},
-  th:   {textAlign:"left",padding:"14px 18px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"#64748b",borderBottom:"1px solid #dbe5ec",background:"rgba(248,250,252,.85)",whiteSpace:"nowrap"},
-  td:   {padding:"13px 18px",borderBottom:"1px solid #e5edf2",fontSize:13,color:"#1e293b",verticalAlign:"middle"},
-  inp:  {background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxShadow:"0 6px 14px rgba(15,23,42,.03)"},
-  sel:  {background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
+  card: {background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:12,overflow:"hidden",boxShadow:"0 16px 36px rgba(15,23,42,.06)"},
+  th:   {textAlign:"left",padding:"14px 18px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid var(--border2)",background:"var(--bg3)",whiteSpace:"nowrap"},
+  td:   {padding:"13px 18px",borderBottom:"1px solid var(--border2)",fontSize:13,color:"var(--text2)",verticalAlign:"middle"},
+  inp:  {background:"var(--bg2)",border:"1px solid var(--border2)",color:"var(--text)",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxShadow:"0 6px 14px rgba(15,23,42,.03)"},
+  sel:  {background:"var(--bg2)",border:"1px solid var(--border2)",color:"var(--text)",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"stretch",justifyContent:"center",padding:12,overflow:"hidden"},
   mbox: {background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:24,width:"min(1320px,calc(100vw - 24px))",height:"calc(100vh - 24px)",maxHeight:"calc(100vh - 24px)",overflowY:"auto",overflowX:"hidden"},
   lbl:  {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:5,marginTop:12},
@@ -1519,7 +1519,7 @@ export default function Clientes() {
     <div style={S.page}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:18}}>
         <div style={S.title}>Clientes</div>
-        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:"#334155",cursor:"pointer",userSelect:"none",fontWeight:700}}>
+        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:"var(--text3)",cursor:"pointer",userSelect:"none",fontWeight:700}}>
           <input type="checkbox" checked={mostrarBaja} onChange={e=>{setMostrarBaja(e.target.checked);}}
             style={{accentColor:"var(--accent)",cursor:"pointer"}}/>
           Ver dados de baja
@@ -1534,7 +1534,7 @@ export default function Clientes() {
         )}
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar por nombre, CIF..."
           style={{...S.inp,width:330}}/>
-        <span style={{fontSize:13,color:"#64748b",marginLeft:"auto",fontWeight:700}}>
+        <span style={{fontSize:13,color:"var(--text4)",marginLeft:"auto",fontWeight:700}}>
           {clientes.length} cliente{clientes.length!==1?"s":""}
         </span>
       </div>
@@ -1571,12 +1571,12 @@ export default function Clientes() {
                 style={{
                   cursor:"pointer",
                   background: c.pendiente_revision
-                    ? "linear-gradient(90deg, rgba(251,191,36,.08), rgba(255,255,255,.92) 22%)"
+                    ? "linear-gradient(90deg, rgba(251,191,36,.14), rgba(251,191,36,.03) 24%)"
                     : "transparent",
                   boxShadow: c.pendiente_revision ? "inset 3px 0 0 #f59e0b" : "inset 3px 0 0 transparent",
                 }}
                 onClick={()=>setFicha(c)}>
-                <td style={{...S.td,fontWeight:700}}>
+                <td style={{...S.td,fontWeight:700,color:"var(--text)"}}>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     {c.nombre}
                     {c.pendiente_revision && (
@@ -1610,7 +1610,7 @@ export default function Clientes() {
                 </td>
                 <td style={S.td} onClick={e=>e.stopPropagation()}>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    <button style={{...S.btn,background:"#fff",color:"#334155",padding:"6px 12px",fontSize:12,boxShadow:"none"}} onClick={()=>setFicha(c)}>Abrir ficha</button>
+                    <button style={{...S.btn,background:"rgba(148,163,184,.08)",color:"var(--text)",padding:"6px 12px",fontSize:12,boxShadow:"none"}} onClick={()=>setFicha(c)}>Abrir ficha</button>
                     {c.pendiente_revision && canEdit && (
                       <button style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#059669",padding:"6px 12px",fontSize:12,border:"1px solid rgba(16,185,129,.25)",boxShadow:"none"}}
                         onClick={async e=>{

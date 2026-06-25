@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
+import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 
 const ESTADOS = ["borrador","emitida","enviada","cobrada","vencida","reclamada","sin_cobrar"];
 const EC = { borrador:"#6b7280",emitida:"var(--accent-l)",enviada:"#22d3ee",cobrada:"var(--green)",vencida:"#ef4444",reclamada:"#f97316",sin_cobrar:"#b91c1c",rectificada:"#f97316" };
@@ -568,7 +569,7 @@ function getFacturaFiscalRowMeta(factura) {
   };
 }
 
-function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set()}) {
+function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
   const empresa = useEmpresaPerfil();
   // Safety: ensure factura has required fields
   if (!factura || !factura.id) {
@@ -851,10 +852,12 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                         {fmt2(p.importe || 0)} EUR
                       </div>
                       <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap"}}>
-                        <span title={ai?.resumen || "Sin analisis IA"} style={{display:"inline-flex",alignItems:"center",padding:"3px 7px",borderRadius:999,background:tone.bg,color:tone.color,fontSize:10,fontWeight:900,border:`1px solid ${tone.color}33`}}>
-                          {tone.label}{diffs.length ? ` (${diffs.length})` : ""}
-                        </span>
-                        {onAnalizarPedido && (
+                        {aiDisponible && (
+                          <span title={ai?.resumen || "Sin analisis IA"} style={{display:"inline-flex",alignItems:"center",padding:"3px 7px",borderRadius:999,background:tone.bg,color:tone.color,fontSize:10,fontWeight:900,border:`1px solid ${tone.color}33`}}>
+                            {tone.label}{diffs.length ? ` (${diffs.length})` : ""}
+                          </span>
+                        )}
+                        {aiDisponible && onAnalizarPedido && (
                           <button type="button" onClick={()=>onAnalizarPedido(p)} disabled={analizandoPedidoId===p.id} style={{...S.btn,padding:"4px 7px",fontSize:10,background:"rgba(139,92,246,.12)",color:"#8b5cf6",border:"1px solid rgba(139,92,246,.24)"}}>
                             {analizandoPedidoId===p.id ? "Analizando..." : "Analizar IA"}
                           </button>
@@ -865,7 +868,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                           </button>
                         )}
                       </div>
-                      {ai?.resumen && (
+                      {aiDisponible && ai?.resumen && (
                         <div style={{gridColumn:"1 / -1",fontSize:10,color:"var(--text5)",lineHeight:1.35}}>
                           IA: {ai.resumen}
                         </div>
@@ -1348,6 +1351,7 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
 // Modal: Facturar multiples pedidos de un cliente
 function ModalFacturarMultiple({ onClose }) {
   const empresa  = useEmpresaPerfil();
+  const aiDisponible = planHasFeature(getEmpresaPlanLocal(), "ai");
   const [clientes,   setClientes]   = useState([]);
   const [clienteSel, setClienteSel] = useState("");
   const [pedidos,    setPedidos]    = useState([]);
@@ -1557,6 +1561,7 @@ function ModalFacturarMultiple({ onClose }) {
   }
 
   async function analizarSeleccionIA() {
+    if (!aiDisponible) { notify("La IA solo esta disponible en Enterprise.", "warning"); return; }
     if (!selArr.length) { notify("Selecciona pedidos para analizar.", "warning"); return; }
     setAnalizandoIA(true);
     try {
@@ -1852,9 +1857,11 @@ function ModalFacturarMultiple({ onClose }) {
                 <div style={{fontWeight:800,fontSize:13,color:"var(--text)",marginBottom:4}}>Control previo antes de facturar</div>
                 <div style={{fontSize:11,color:"var(--text5)"}}>Este paso evita devoluciones por referencias, albaranes, tickets de bascula o importes incorrectos.</div>
               </div>
-              <button type="button" onClick={analizarSeleccionIA} disabled={analizandoIA || !selArr.length} style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#8b5cf6",border:"1px solid rgba(139,92,246,.24)",padding:"6px 9px"}}>
-                {analizandoIA ? "Analizando IA..." : "Analizar soportes IA"}
-              </button>
+              {aiDisponible && (
+                <button type="button" onClick={analizarSeleccionIA} disabled={analizandoIA || !selArr.length} style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#8b5cf6",border:"1px solid rgba(139,92,246,.24)",padding:"6px 9px"}}>
+                  {analizandoIA ? "Analizando IA..." : "Analizar soportes IA"}
+                </button>
+              )}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
               {[
@@ -1881,7 +1888,7 @@ function ModalFacturarMultiple({ onClose }) {
                 Revision automatica sin incidencias detectadas.
               </div>
             )}
-            {Object.keys(analisisIA).length > 0 && (
+            {aiDisponible && Object.keys(analisisIA).length > 0 && (
               <div style={{border:"1px solid rgba(139,92,246,.22)",background:"rgba(139,92,246,.07)",borderRadius:8,padding:"9px 10px",marginBottom:12}}>
                 <div style={{fontSize:11,fontWeight:900,color:"#8b5cf6",textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>Resultado IA documental</div>
                 <div style={{display:"grid",gap:6}}>
@@ -1983,6 +1990,7 @@ function monthBounds(value = new Date()) {
 export default function Facturacion() {
   const { puedeEditar } = useAuth();
   const canEdit           = puedeEditar("facturas");
+  const aiDisponible      = planHasFeature(getEmpresaPlanLocal(), "ai");
   const [activeFacturacionTab, setActiveFacturacionTab] = useState("facturas");
   const [focusFactura]    = useState(() => readFacturacionFocus());
   const [facturas,     setFacturas]     = useState([]);
@@ -2122,6 +2130,7 @@ export default function Facturacion() {
 
   async function analizarSoportesPedidoFactura(pedido) {
     if (!pedido?.id) return;
+    if (!aiDisponible) { notify("La IA solo esta disponible en Enterprise.", "warning"); return; }
     setAnalizandoPedidoId(pedido.id);
     try {
       const result = await analizarPedidoFacturacionIA(pedido.id, { factura_id: vistaFact?.id || null });
@@ -3415,8 +3424,9 @@ export default function Facturacion() {
           onExportFiscal={descargarJustificanteFiscal}
           onCambiarEstado={canEdit ? cambiarEstado : null}
           onCorregirPedido={canEdit ? setPedidoCorreccion : null}
-          onAnalizarPedido={canEdit ? analizarSoportesPedidoFactura : null}
+          onAnalizarPedido={canEdit && aiDisponible ? analizarSoportesPedidoFactura : null}
           analizandoPedidoId={analizandoPedidoId}
+          aiDisponible={aiDisponible}
           rectificadasIds={rectificadasIds}
           onRectificar={f=>{setVistaFact(null);setModalRect(f);}}
         />;

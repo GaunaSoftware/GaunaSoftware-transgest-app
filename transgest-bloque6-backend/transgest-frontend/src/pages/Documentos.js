@@ -9,6 +9,7 @@ import {
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
+import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 
 // ── Tipos de documentos ────────────────────────────────────────────────────
 const DOCS_VEHICULO = [
@@ -229,6 +230,7 @@ function DocsEntidad({ tipo, entidad, onAnadirDoc, refreshKey, onChanged }) {
 }
 
 export default function Documentos() {
+  const aiDisponible = planHasFeature(getEmpresaPlanLocal(), "ai");
   const [tab,       setTab]       = useState("vehiculos");
   const [vehiculos, setVehiculos] = useState([]);
   const [filtroTipoVeh, setFiltroTipoVeh] = useState("todos"); // todos | tractora | remolque | <clase>
@@ -303,6 +305,7 @@ export default function Documentos() {
   const [analizando, setAnalizando] = useState(false);
 
   async function analizarConIA(fileBase64, fileName) {
+    if (!aiDisponible) return;
     setAnalizando(true);
     try {
       const esImagen = fileBase64.startsWith("data:image/");
@@ -601,7 +604,7 @@ Responde SOLO con el JSON, sin texto adicional.`;
                         setFormDoc(p=>({...p, file_url:base64, file_nombre:file.name, file_size:file.size, usar_nombre_archivistico:true}));
                         // Auto-analizar con IA si es imagen o PDF
                         const esAnalizable = file.type.startsWith("image/") || file.type === "application/pdf";
-                        if (esAnalizable) {
+                        if (aiDisponible && esAnalizable) {
                           analizarConIA(base64, file.name);
                         }
                       };
@@ -637,14 +640,14 @@ Responde SOLO con el JSON, sin texto adicional.`;
                     </div>
                   </div>
                 )}
-                {iaResultado && (
+                {aiDisponible && iaResultado && (
                   <div style={{marginTop:8,padding:"8px 12px",background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.2)",borderRadius:7,fontSize:12,color:"var(--text3)"}}>
                     <div style={{fontWeight:800,color:"var(--green)",marginBottom:4}}>Analisis IA aplicado</div>
                     <div>Campos detectados: {iaResultado.encontrados.length ? iaResultado.encontrados.join(", ") : "sin campos fiables"}</div>
                     <div style={{marginTop:3,color:"var(--text4)"}}>Revisa los datos antes de guardar el documento.</div>
                   </div>
                 )}
-                {analizando && (
+                {aiDisponible && analizando && (
                   <div style={{marginTop:8,padding:"8px 12px",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.2)",borderRadius:7,fontSize:12,color:"var(--accent)",display:"flex",alignItems:"center",gap:8}}>
                     Analizando documento con IA... los campos se rellenarán automáticamente.
                   </div>

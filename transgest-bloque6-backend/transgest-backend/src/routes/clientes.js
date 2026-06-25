@@ -159,48 +159,8 @@ function normalizeHorarioHabitual(value) {
 }
 router.use(authenticate);
 
-router.use(async (req, res, next) => {
-  try {
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30)");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS iva_pct NUMERIC DEFAULT 21");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pendiente_revision BOOLEAN DEFAULT false");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email_facturacion TEXT");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS emails_albaranes TEXT");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS iban VARCHAR(64)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_carga TEXT");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_descarga TEXT");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS minimo_facturable_toneladas NUMERIC");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS limite_riesgo NUMERIC DEFAULT 0");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS modo_facturacion VARCHAR(40) DEFAULT 'por_viaje'");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueado BOOLEAN DEFAULT false");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS calle TEXT");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS num_ext VARCHAR(30)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS piso_puerta VARCHAR(60)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS cod_postal VARCHAR(20)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS municipio VARCHAR(120)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS provincia VARCHAR(120)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pais_iso VARCHAR(10)");
-    await db.query("ALTER TABLE clientes ALTER COLUMN pais_iso TYPE VARCHAR(120)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS dir_fiscal_distinta BOOLEAN DEFAULT false");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_calle TEXT");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_num_ext VARCHAR(30)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_piso_puerta VARCHAR(60)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_cod_postal VARCHAR(20)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_municipio VARCHAR(120)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_provincia VARCHAR(120)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS fiscal_pais_iso VARCHAR(10)");
-    await db.query("ALTER TABLE clientes ALTER COLUMN fiscal_pais_iso TYPE VARCHAR(120)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)");
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()");
-  } catch (e) {}
-  next();
-});
+// Las migraciones de esquema se ejecutan fuera del request. En produccion,
+// hacer ALTER TABLE aqui bloqueaba /clientes y dejaba las altas colgadas.
 
 function normalizeIva(tipoIva, ivaRegimen) {
   const rawRegimen = String(ivaRegimen || "").trim().toLowerCase();

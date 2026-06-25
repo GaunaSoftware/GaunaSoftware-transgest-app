@@ -8828,6 +8828,7 @@ export default function Pedidos() {
   const allVisibleSelected = pedidosVisiblesAccionables.length > 0 && pedidosVisiblesAccionables.every(p => selectedPedidoIds.includes(String(p.id)));
   const searchActive = q.trim().length > 0;
   const searchHasMatches = searchActive && pedidosVisiblesAccionables.length > 0;
+  const noHayViajesParaPlanificar = !loading && !soloCriticos && pedidosVisiblesAccionables.length === 0;
 
   function togglePedidoSelected(pedidoId) {
     setSelectedPedidoIds(prev => prev.includes(String(pedidoId))
@@ -9033,6 +9034,23 @@ export default function Pedidos() {
 
       {vistaPedidos === "ia" && (
         <div style={{margin:"0 0 16px"}}>
+          {noHayViajesParaPlanificar && (
+            <div style={{background:"rgba(245,158,11,.10)",border:"1px solid rgba(245,158,11,.26)",borderRadius:9,padding:"12px 14px",color:"var(--text3)",fontSize:12,marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontWeight:900,color:"var(--text)",marginBottom:3}}>La IA no puede planificar cargas</div>
+                <div style={{color:"var(--text4)"}}>No hay viajes disponibles con los filtros actuales. Quieres crear un nuevo viaje?</div>
+              </div>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={()=>setQuickCreando(true)}
+                  style={{...S.btn,background:"#f59e0b",color:"#fff",border:"1px solid #f59e0b",padding:"8px 12px"}}
+                >
+                  Crear nuevo viaje
+                </button>
+              )}
+            </div>
+          )}
           {!aiVisualPlanActivo && (
             <div style={{background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.20)",borderRadius:9,padding:"9px 12px",color:"var(--text3)",fontSize:12,marginBottom:10}}>
               Bandeja IA en modo basico: emails, PDF/DOCX con texto y documentos legibles funcionan sin API externa. Imagenes o PDFs escaneados necesitan IA visual configurada.
@@ -9140,7 +9158,23 @@ export default function Pedidos() {
           </tr></thead>
           <tbody>
             {loading ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
-            : pedidosVisibles.length===0 ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>{soloCriticos ? "No hay pedidos criticos con los filtros actuales." : <>No hay pedidos.{canEdit&&" Crea el primero."}</>}</td></tr>
+            : pedidosVisibles.length===0 ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)",padding:26}}>
+              {soloCriticos ? "No hay pedidos criticos con los filtros actuales." : (
+                <div style={{display:"grid",justifyItems:"center",gap:8}}>
+                  <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>La IA no puede planificar cargas porque no hay viajes disponibles.</div>
+                  <div style={{fontSize:12,color:"var(--text4)"}}>Quieres crear un nuevo viaje?</div>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={()=>setQuickCreando(true)}
+                      style={{...S.btn,background:"var(--accent)",color:"#fff",border:"none",padding:"7px 12px",fontSize:12}}
+                    >
+                      Crear nuevo viaje
+                    </button>
+                  )}
+                </div>
+              )}
+            </td></tr>
             : pedidosRenderList.map((entry)=>{
               if (entry?._group) {
                 const isMonth = entry.type === "month";

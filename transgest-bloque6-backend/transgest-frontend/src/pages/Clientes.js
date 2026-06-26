@@ -357,7 +357,7 @@ function buildClienteForm(cliente) {
   };
 }
 
-function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
+function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExistentes = [] }) {
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("clientes");
   const esNuevo = !cliente;
@@ -453,6 +453,18 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
     if (invalidEmails.length) {
       notify(`Revisa estos correos de albaranes: ${invalidEmails.join(", ")}`, "warning");
       return;
+    }
+    const cifKey = String(form.cif || "").trim().toUpperCase();
+    if (cifKey && !cifKey.startsWith("CLI-")) {
+      const duplicado = clientesExistentes.find(c =>
+        c?.id !== cliente?.id &&
+        c?.activo !== false &&
+        String(c?.cif || "").trim().toUpperCase() === cifKey
+      );
+      if (duplicado) {
+        notify(`Ya existe un cliente activo con el CIF ${cifKey}: ${duplicado.nombre || "sin nombre"}. Abre esa ficha o da de baja el duplicado antes de crear otro.`, "error");
+        return;
+      }
     }
     setSaving(true);
     try {
@@ -1704,6 +1716,7 @@ export default function Clientes() {
         <FichaCliente
           cliente={ficha==="nuevo" ? null : ficha}
           rutasGlobales={rutasG}
+          clientesExistentes={clientes}
           onClose={()=>setFicha(null)}
           onSaved={(saved)=>{
             setFicha(null);

@@ -16,6 +16,7 @@ import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
 import { GeoFields } from "../components/GeoFields";
+import { inferPlaceGeo } from "../utils/placeGeo";
 
 let puntosInteresCache = [];
 const AI_INBOX_MAX_FILE_BYTES = 6 * 1024 * 1024;
@@ -3280,14 +3281,17 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     setForm(p => {
       const stopsToStore = nextStops
         .filter(stop => stopAddress(stop) || stop?.cliente_nombre || stop?.google_maps_url)
-        .map((stop, idx) => ({
-          ...stop,
-          pais: stopCountryInputValue(stop, idx === 0 ? (tipo === "carga" ? p.origen_pais : p.destino_pais) : "España"),
-          provincia: stopRegion(stop),
-          tipo,
-          es_principal: idx === 0,
-          es_adicional: idx !== 0,
-        }));
+        .map((stop, idx) => {
+          const inferred = inferPlaceGeo(stopAddress(stop), stop.provincia, stop.pais);
+          return {
+            ...stop,
+            pais: stopCountryInputValue(stop, idx === 0 ? (tipo === "carga" ? p.origen_pais : p.destino_pais) : "Espa??a") || inferred?.pais || "Espa??a",
+            provincia: stopRegion(stop) || inferred?.provincia || "",
+            tipo,
+            es_principal: idx === 0,
+            es_adicional: idx !== 0,
+          };
+        });
       const first = stopsToStore[0] || {};
       const updated = {...p, [key]: stopsToStore};
       if (tipo === "carga") {

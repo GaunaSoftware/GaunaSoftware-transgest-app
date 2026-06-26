@@ -3,6 +3,7 @@ import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getP
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
+import { inferPlaceGeo } from "../utils/placeGeo";
 
 // â”€â”€ Calculadora de tiempo de conducciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function calcTiempoTransito(km, cfg){
@@ -1139,6 +1140,21 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
   useEffect(() => {
     setForm(normalizePedidoForModal(pedido));
   }, [pedido]);
+
+  useEffect(() => {
+    setForm(prev => {
+      let next = prev;
+      const origenGeo = inferPlaceGeo(prev.origen, prev.origen_provincia, prev.origen_pais);
+      const destinoGeo = inferPlaceGeo(prev.destino, prev.destino_provincia, prev.destino_pais);
+      if (origenGeo && !prev.origen_provincia) {
+        next = { ...next, origen_provincia: origenGeo.provincia, origen_pais: prev.origen_pais || origenGeo.pais || "Espana" };
+      }
+      if (destinoGeo && !prev.destino_provincia) {
+        next = { ...next, destino_provincia: destinoGeo.provincia, destino_pais: prev.destino_pais || destinoGeo.pais || "Espana" };
+      }
+      return next;
+    });
+  }, [form.origen, form.destino, form.origen_provincia, form.destino_provincia, form.origen_pais, form.destino_pais]);
 
 
   useEffect(() => {

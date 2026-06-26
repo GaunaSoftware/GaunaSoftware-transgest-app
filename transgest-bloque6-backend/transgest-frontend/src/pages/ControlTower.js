@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getControlTower, getRouteProviders } from "../services/api";
 import { setRuntimeFocus } from "../services/runtimeFocus";
+import { coordsForKnownPlace, inferPlaceGeo } from "../utils/placeGeo";
 
 const S = {
   page: { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },
@@ -173,10 +174,10 @@ const MAP_LAYERS = {
   streets: {
     label: "Mapa",
     detail: "Calles",
-    attribution: "OpenStreetMap",
-    filter: "saturate(.82) contrast(.98) brightness(1.02)",
-    tileUrl: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
-    overlay: "linear-gradient(90deg, rgba(255,255,255,.14), rgba(255,255,255,.03))",
+    attribution: "CARTO / OpenStreetMap",
+    filter: "saturate(.9) contrast(1.02) brightness(1.02)",
+    tileUrl: (z, x, y) => `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`,
+    overlay: "linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,.02))",
   },
   relief: {
     label: "Relieve",
@@ -197,9 +198,9 @@ const MAP_LAYERS = {
   traffic: {
     label: "Trafico",
     detail: "Operativo",
-    attribution: "OpenStreetMap",
-    filter: "saturate(.65) contrast(.95) brightness(1.08)",
-    tileUrl: (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`,
+    attribution: "CARTO / OpenStreetMap",
+    filter: "saturate(.78) contrast(1.02) brightness(1.08)",
+    tileUrl: (z, x, y) => `https://a.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`,
     overlay: "linear-gradient(90deg, rgba(255,255,255,.18), rgba(254,243,199,.08))",
   },
 };
@@ -361,6 +362,8 @@ function coordsForPlace(...values) {
     }
     const key = normalizePlaceKey(value);
     if (!key) continue;
+    const known = coordsForKnownPlace(value);
+    if (known) return known;
     if (CITY_COORDS[key]) return CITY_COORDS[key];
     if (REGION_COORDS[key]) return REGION_COORDS[key];
     const cityMatch = Object.keys(CITY_COORDS).find(k => key.includes(k) || k.includes(key));
@@ -701,7 +704,64 @@ function RouteMapPanelLegacy({ item }) {
   );
 }
 
-function RouteMapPanelReal({ item, trips = [], onSelectTrip, mapLayer = "streets", onMapLayerChange }) {
+function ControlTowerTripDetail({ item, onClose, onOpenTraffic }) {
+  const normalized = useMemo(() => normalizeTripForMap(item || {}) || item || {}, [item]);
+  const route = normalized?.route || parseRouteFromItem(normalized || {});
+  const originGeo = inferPlaceGeo(route.origen, normalized?.origen_provincia, normalized?.origen_pais);
+  const destinationGeo = inferPlaceGeo(route.destino, normalized?.destino_provincia, normalized?.destino_pais);
+  if (!item) return null;
+  const facts = [
+    ["Cliente", normalized.cliente_nombre || normalized.cliente || "-"],
+    ["Origen", [route.origen, originGeo?.provincia || normalized.origen_provincia].filter(Boolean).join(" · ") || "-"],
+    ["Destino", [route.destino, destinationGeo?.provincia || normalized.destino_provincia].filter(Boolean).join(" · ") || "-"],
+    ["Estado", normalized.estado || normalized.status || "-"],
+    ["Carga", normalized.fecha_carga || normalized.fecha || "-"],
+    ["Descarga", normalized.fecha_descarga || normalized.fecha_entrega || "-"],
+    ["Vehiculo", normalized.matricula || normalized.vehiculo || "Sin asignar"],
+    ["Chofer", normalized.chofer_nombre || normalized.chofer || "Sin asignar"],
+  ];
+  return (
+    <div
+      style={{position:"fixed",inset:0,zIndex:520,background:"rgba(15,23,42,.58)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+      onClick={e => e.target === e.currentTarget && onClose?.()}
+    >
+      <div style={{width:"min(720px,96vw)",maxHeight:"86vh",overflowY:"auto",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,padding:18,boxShadow:"0 24px 70px rgba(15,23,42,.28)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:14}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent-xl)"}}>Detalle operativo</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:20,fontWeight:900,color:"var(--text)",marginTop:4}}>{normalized.numero || normalized.pedido_numero || normalized.title || "Viaje"}</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>{normalized.description || `${route.origen || "-"} -> ${route.destino || "-"}`}</div>
+          </div>
+          <button onClick={onClose} style={{border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",borderRadius:8,width:34,height:34,fontSize:18,fontWeight:900,cursor:"pointer"}}>x</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:8}}>
+          {facts.map(([label, value]) => (
+            <div key={label} style={{border:"1px solid var(--border)",background:"var(--bg3)",borderRadius:9,padding:"9px 10px"}}>
+              <div style={{fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>{label}</div>
+              <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginTop:4,lineHeight:1.3}}>{value}</div>
+            </div>
+          ))}
+        </div>
+        {(!normalized.destino_provincia && destinationGeo?.provincia) || (!normalized.origen_provincia && originGeo?.provincia) ? (
+          <div style={{marginTop:12,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.10)",borderRadius:10,padding:"10px 12px",fontSize:12,color:"var(--text2)",lineHeight:1.45}}>
+            Geografia detectada: {[originGeo && `${route.origen}: ${originGeo.provincia}`, destinationGeo && `${route.destino}: ${destinationGeo.provincia}`].filter(Boolean).join(" · ")}.
+            Al guardar desde Trafico se completara en el pedido si estaba vacia.
+          </div>
+        ) : null}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:14}}>
+          <button onClick={() => onOpenTraffic?.(normalized)} style={{border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.12)",color:"var(--accent-xl)",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            Editar en trafico
+          </button>
+          <button onClick={onClose} style={{border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            Volver al mapa
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RouteMapPanelReal({ item, trips = [], onSelectTrip, onOpenDetail, mapLayer = "streets", onMapLayerChange }) {
   const normalizedItem = useMemo(() => normalizeTripForMap(item || {}) || null, [item]);
   const route = normalizedItem?.route || parseRouteFromItem(item || {});
   const selectedPoints = normalizedItem?.points || getRouteGeoPoints(route, item || {});
@@ -880,7 +940,7 @@ function RouteMapPanelReal({ item, trips = [], onSelectTrip, mapLayer = "streets
           <div style={{fontSize:12,fontWeight:900,lineHeight:1.35}}>{route.origen || "Origen"} -> {route.destino || "Destino"}</div>
           <div style={{fontSize:11,color:"#64748b",marginTop:5}}>{hasGps ? "Mostrando posicion GPS recibida." : `Sin GPS reciente: ${routeLabel.toLowerCase()}.`}</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:9}}>
-            <button onClick={()=>abrirItem(normalizedItem || item)} style={{border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#0f766e",borderRadius:7,padding:"6px 9px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            <button onClick={()=>onOpenDetail?.(normalizedItem || item)} style={{border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#0f766e",borderRadius:7,padding:"6px 9px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               Ver detalle
             </button>
             <button onClick={() => setMapZoomDelta(0)} style={{border:"1px solid rgba(59,130,246,.25)",background:"rgba(59,130,246,.08)",color:"#2563eb",borderRadius:7,padding:"6px 9px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
@@ -1008,6 +1068,7 @@ export default function ControlTower() {
   const [loading, setLoading] = useState(true);
   const [statusPicker, setStatusPicker] = useState(null);
   const [selectedTrip, setSelectedTrip] = useState(null);
+  const [detailTrip, setDetailTrip] = useState(null);
   const [mapLayer, setMapLayer] = useState("streets");
 
   useEffect(() => {
@@ -1174,7 +1235,7 @@ export default function ControlTower() {
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12,marginBottom:12}}>
           <div style={{display:"grid",gap:12}}>
             <FlowPanel flujo={flujo} selectedKey={statusPicker?.key || selectedTrip?.estado || ""} onStatusClick={abrirEstadoFlujo} />
-            {mapItem && <RouteMapPanelReal item={mapItem} trips={mapTrips} onSelectTrip={seleccionarViajeMapa} mapLayer={mapLayer} onMapLayerChange={setMapLayer} />}
+            {mapItem && <RouteMapPanelReal item={mapItem} trips={mapTrips} onSelectTrip={seleccionarViajeMapa} onOpenDetail={setDetailTrip} mapLayer={mapLayer} onMapLayerChange={setMapLayer} />}
             <div style={{...S.card}}>
               <div style={S.sec}>Flota, recursos y señales</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
@@ -1250,6 +1311,16 @@ export default function ControlTower() {
             </section>
           ))}
         </div>
+      )}
+      {detailTrip && (
+        <ControlTowerTripDetail
+          item={detailTrip}
+          onClose={() => setDetailTrip(null)}
+          onOpenTraffic={(trip) => {
+            setDetailTrip(null);
+            abrirItem(trip);
+          }}
+        />
       )}
     </div>
   );

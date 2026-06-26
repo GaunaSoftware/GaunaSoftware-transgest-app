@@ -1328,8 +1328,8 @@ async function getPortalProveedorPedido(tokenValue, pedidoId) {
   if (!data?.token) return null;
   const { rows } = await db.query(
     `SELECT p.id, p.numero, p.empresa_id, p.colaborador_id, p.estado, p.origen, p.destino, p.fecha_carga,
-            p.fecha_descarga, p.hora_carga, p.hora_descarga, p.mercancia, p.descripcion_carga, p.notas,
-            p.peso_kg, p.bultos, p.km, p.km_ruta, p.precio_colaborador,
+            p.fecha_descarga, p.hora_carga, p.hora_descarga, p.mercancia, p.mercancia AS descripcion_carga, p.notas,
+            p.peso_kg, p.bultos, p.km_ruta AS km, p.km_ruta, p.precio_colaborador,
             c.nombre AS cliente_nombre,
             co.nombre AS colaborador_nombre
        FROM pedidos p

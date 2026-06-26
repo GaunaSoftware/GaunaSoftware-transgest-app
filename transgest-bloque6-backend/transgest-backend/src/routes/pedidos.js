@@ -99,7 +99,23 @@ function getFirmaEvidenciaPrincipal(evidencia = null) {
   if (!evidencia || typeof evidencia !== "object") return evidencia;
   if (evidencia.pedido_context) return evidencia;
   const role = evidencia.last_role || "destinatario";
-  return evidencia.firmas?.[role] || evidencia.firmas?.destinatario || evidencia.firmas?.cargador || evidencia.firmas?.chofer || evidencia;
+  const principal = evidencia.firmas?.[role] || evidencia.firmas?.destinatario || evidencia.firmas?.cargador || evidencia.firmas?.chofer || null;
+  if (principal && typeof principal === "object") return principal;
+  if (evidencia.firma?.hash || evidencia.firma_hash || evidencia.pedido_context_hash_sha256 || evidencia.integrity_hash_sha256) return evidencia;
+  return null;
+}
+
+function normalizeFirmaEvidenciaForResponse(evidencia = null) {
+  const principal = getFirmaEvidenciaPrincipal(evidencia);
+  if (!principal || typeof principal !== "object") return null;
+  if (/^[a-f0-9]{64}$/i.test(String(principal.integrity_hash_sha256 || ""))) return principal;
+  return {
+    ...principal,
+    integrity_hash_sha256: sha256Hex(stableJson({
+      ...principal,
+      integrity_hash_sha256: undefined,
+    })),
+  };
 }
 
 function buildFirmaPostSignatureIntegrity(pedido = {}, evidencia = null) {
@@ -7975,15 +7991,16 @@ router.get("/:id/firma/evidencia", GERENTE_O_TRAFICO, async (req, res) => {
     `, [req.params.id, empresaId]);
     const pedido = rows[0];
     if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    const evidencia = normalizeFirmaEvidenciaForResponse(pedido.firma_evidencia || null);
     const postSignatureIntegrity = buildFirmaPostSignatureIntegrity(pedido, pedido.firma_evidencia || null);
     res.json({
       pedido_id: pedido.id,
       pedido_numero: pedido.numero,
-      firmado: !!pedido.firma_fecha,
-      firma_fecha: pedido.firma_fecha || null,
-      firma_nombre: pedido.firma_nombre || "",
-      firma_hash: pedido.firma_hash || "",
-      evidencia: pedido.firma_evidencia || null,
+      firmado: !!(pedido.firma_fecha || evidencia),
+      firma_fecha: pedido.firma_fecha || evidencia?.firmado_at || null,
+      firma_nombre: pedido.firma_nombre || evidencia?.firmante?.nombre || "",
+      firma_hash: pedido.firma_hash || evidencia?.firma?.hash || "",
+      evidencia,
       post_signature_integrity: postSignatureIntegrity,
       target_eidas: "firma electronica avanzada",
     });
@@ -8004,7 +8021,7 @@ router.get("/:id/firma/evidencia/informe", GERENTE_O_TRAFICO, async (req, res) =
     `, [req.params.id, empresaId]);
     const pedido = rows[0];
     if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    const evidencia = pedido.firma_evidencia || {};
+    const evidencia = normalizeFirmaEvidenciaForResponse(pedido.firma_evidencia || null) || {};
     const captura = evidencia.captura || {};
     const firmante = evidencia.firmante || {};
     const firma = evidencia.firma || {};

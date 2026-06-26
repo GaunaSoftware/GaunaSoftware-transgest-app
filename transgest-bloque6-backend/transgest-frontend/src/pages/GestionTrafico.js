@@ -791,6 +791,28 @@ function getWeekDays(anchor) {
   });
 }
 
+function dateOnly(value) {
+  return value ? String(value).slice(0, 10) : "";
+}
+
+function addDaysLocal(base, days) {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function nearestActivePedidoDate(pedidos, anchor = new Date()) {
+  const anchorTime = new Date(anchor).getTime();
+  const active = (Array.isArray(pedidos) ? pedidos : [])
+    .filter(p => !["cancelado", "entregado", "facturado"].includes(String(p?.estado || "").toLowerCase()))
+    .map(p => dateOnly(p?.fecha_carga) || dateOnly(p?.fecha_pedido))
+    .filter(Boolean)
+    .map(fecha => ({ fecha, time: new Date(`${fecha}T12:00:00`).getTime() }))
+    .filter(item => Number.isFinite(item.time))
+    .sort((a, b) => Math.abs(a.time - anchorTime) - Math.abs(b.time - anchorTime));
+  return active[0]?.fecha || "";
+}
+
 const DIA_NAMES = ["LUN","MAR","MIE","JUE","VIE","SAB","DOM"];
 const TRAFICO_TRIP_ORDER_KEY = "tms_gestion_trafico_trip_order_v1";
 
@@ -2319,6 +2341,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   const [resumenSemanaVisible, setResumenSemanaVisible] = useState(true);
   const [collapsedClienteGroups, setCollapsedClienteGroups] = useState({});
   const [vistaMain, setVistaMain] = useState(esModoChoferOptimizacion ? "optimizacion" : initialVista);
+  const autoAnchorAppliedRef = useRef(false);
 
   const dias = getWeekDays(anchor);
   const today = new Date().toISOString().slice(0,10);
@@ -2328,8 +2351,10 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       const semana = getWeekDays(anchor);
       const desde = semana[0].toISOString().slice(0,10);
       const hasta = semana[6].toISOString().slice(0,10);
+      const desdeCarga = addDaysLocal(semana[0], -45).toISOString().slice(0,10);
+      const hastaCarga = addDaysLocal(semana[6], 75).toISOString().slice(0,10);
       const [p, pg, v, c, r, cfgEmpresa, notifs] = await Promise.all([
-        getPedidos({ desde, hasta, limit: 1000 }, { timeoutMs: 45000, silentError: true }).catch(() => []),
+        getPedidos({ desde: desdeCarga, hasta: hastaCarga, limit: 1000 }, { timeoutMs: 45000, silentError: true }).catch(() => []),
         getPedidos({
           tipo_carga: "grupaje",
           estado: "pendiente,confirmado,en_curso,descarga,incidencia",
@@ -2342,7 +2367,20 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         getEmpresaConfig().catch(() => ({})),
         getNotificaciones(80).catch(() => ({ data: [] })),
       ]);
-      setPedidos(Array.isArray(p?.data) ? p.data : Array.isArray(p) ? p : []);
+      const pedidosData = Array.isArray(p?.data) ? p.data : Array.isArray(p) ? p : [];
+      setPedidos(pedidosData);
+      const hasCurrentWeek = pedidosData.some(item => {
+        if (String(item?.estado || "").toLowerCase() === "cancelado") return false;
+        const fecha = dateOnly(item?.fecha_carga) || dateOnly(item?.fecha_pedido);
+        return fecha >= desde && fecha <= hasta;
+      });
+      if (!autoAnchorAppliedRef.current && !hasCurrentWeek && pedidosData.length) {
+        const nearest = nearestActivePedidoDate(pedidosData, anchor);
+        if (nearest && (nearest < desde || nearest > hasta)) {
+          autoAnchorAppliedRef.current = true;
+          setAnchor(new Date(`${nearest}T12:00:00`));
+        }
+      }
       setPedidosGrupajeActivos(Array.isArray(pg?.data) ? pg.data : Array.isArray(pg) ? pg : []);
       const cfg = cfgEmpresa?.cfg_trafico && typeof cfgEmpresa.cfg_trafico === "object" ? cfgEmpresa.cfg_trafico : {};
       try { window.__TMS_CFG_TRAFICO = cfg; } catch {}

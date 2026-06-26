@@ -100,16 +100,6 @@ function currentWeekRangeLocal(now = new Date()) {
   };
 }
 
-function currentMonthRangeLocal(now = new Date()) {
-  const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  return {
-    month: formatDateInputLocal(first).slice(0, 7),
-    desde: formatDateInputLocal(first),
-    hasta: formatDateInputLocal(last),
-  };
-}
-
 function addDaysLocal(dateIso, days) {
   const base = new Date(`${String(dateIso || "").slice(0, 10)}T00:00:00`);
   if (Number.isNaN(base.getTime())) return "";
@@ -7942,13 +7932,12 @@ export default function Pedidos() {
   const [choferes,   setChoferes]   = useState([]);
   const [rutas,      setRutas]      = useState([]);
   const [loading,    setLoading]    = useState(true);
-  const _rangoMesActual = currentMonthRangeLocal();
   const _rangoSemanaActual = currentWeekRangeLocal();
   const [filtroEst,  setFiltroEst]  = useState(() => focusPedido?.pedido_id ? "todos" : "activos");
-  const [filtroMes,  setFiltroMes]  = useState(() => focusPedido?.pedido_id ? "" : _rangoMesActual.month);
+  const [filtroMes,  setFiltroMes]  = useState("");
   const [filtroFechasCustom, setFiltroFechasCustom] = useState(false);
-  const [filtroDesde, setFiltroDesde] = useState(() => focusPedido?.pedido_id ? "" : _rangoMesActual.desde);
-  const [filtroHasta, setFiltroHasta] = useState(() => focusPedido?.pedido_id ? "" : _rangoMesActual.hasta);
+  const [filtroDesde, setFiltroDesde] = useState("");
+  const [filtroHasta, setFiltroHasta] = useState("");
   const [filtroCliente,setFiltroCliente]=useState("");
   const [q,          setQ]          = useState(() => focusPedido?.numero || "");
   const [soloCriticos, setSoloCriticos] = useState(false);
@@ -8045,10 +8034,10 @@ export default function Pedidos() {
 
   function aplicarSemanaActual() {
     if (filtroSemanaActualActivo) {
-      setFiltroMes(_rangoMesActual.month);
+      setFiltroMes("");
       setFiltroFechasCustom(false);
-      setFiltroDesde(_rangoMesActual.desde);
-      setFiltroHasta(_rangoMesActual.hasta);
+      setFiltroDesde("");
+      setFiltroHasta("");
       setPage(1);
       return;
     }
@@ -8167,8 +8156,9 @@ export default function Pedidos() {
       if (debouncedQ) params.q = debouncedQ;
       if (filtroCliente) params.cliente_id = filtroCliente;
       const busquedaHistorica = Boolean(debouncedQ || filtroCliente);
-      if (!busquedaHistorica && filtroDesde) params.desde = filtroDesde;
-      if (!busquedaHistorica && filtroHasta) params.hasta = filtroHasta;
+      const aplicarRangoFechas = filtroFechasCustom || Boolean(filtroMes);
+      if (!busquedaHistorica && aplicarRangoFechas && filtroDesde) params.desde = filtroDesde;
+      if (!busquedaHistorica && aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
       params.page  = page;
       params.limit = PAGE_SIZE;
         const [p, c, v, ch, r, col, cfgEmpresa] = await Promise.all([
@@ -8219,7 +8209,7 @@ export default function Pedidos() {
         }
       } catch(e) { console.error(e); }
     finally { setLoading(false); }
-  }, [filtroEst, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page]);
+  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {
@@ -8893,8 +8883,8 @@ export default function Pedidos() {
         }, {})
       ).map(([key, group]) => ({ key, ...group }))
     : buildPedidoCalendarGroups(pedidosVisibles, {
-        desde: filtroDesde || _rangoMesActual.desde,
-        hasta: filtroHasta || _rangoMesActual.hasta,
+        desde: filtroDesde || undefined,
+        hasta: filtroHasta || undefined,
         currentWeek: filtroSemanaActualActivo,
       });
   const pedidosRenderList = groupByCliente
@@ -9083,9 +9073,9 @@ export default function Pedidos() {
         {canEdit && <button style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#008b82",border:"1px solid rgba(16,185,129,.24)"}} onClick={()=>setQuickCreando(true)}>+ Pedido rapido</button>}
         {canEdit && aiDisponible && <button style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#6d5dfc",border:"1px solid rgba(139,92,246,.22)"}} onClick={()=>setVistaPedidos("ia")}>IA: email / PDF</button>}
         <button onClick={aplicarSemanaActual}
-          title={filtroSemanaActualActivo ? "Volver al mes en curso" : "Mostrar solo la semana actual"}
+          title={filtroSemanaActualActivo ? "Volver a todos los activos" : "Mostrar solo la semana actual"}
           style={{...S.btn,background:filtroSemanaActualActivo?"#008b82":"#fff",color:filtroSemanaActualActivo?"#fff":"#475569",border:filtroSemanaActualActivo?"1px solid #008b82":"1px solid #dbe5ec"}}>
-          {filtroSemanaActualActivo ? "Mes en curso" : "Semana actual"}
+          {filtroSemanaActualActivo ? "Todos activos" : "Semana actual"}
         </button>
         <input type="date" value={filtroDesde} onChange={e=>{setFiltroFechasCustom(true);setFiltroDesde(e.target.value);}}
           style={{...S.input,width:132}} title="Desde"/>
@@ -9115,8 +9105,8 @@ export default function Pedidos() {
           style={{...S.btn,background:soloCriticos?"#dc2626":"#fff",color:soloCriticos?"#fff":"#475569",border:soloCriticos?"1px solid #dc2626":"1px solid #dbe5ec"}}>
           {soloCriticos ? "Solo criticos" : "Ver criticos"}
         </button>
-        {(filtroEst!=="activos"||filtroDesde!==_rangoMesActual.desde||filtroHasta!==_rangoMesActual.hasta||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
-          <button onClick={()=>{setFiltroEst("activos");setFiltroMes(_rangoMesActual.month);setFiltroFechasCustom(false);setFiltroDesde(_rangoMesActual.desde);setFiltroHasta(_rangoMesActual.hasta);setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);}}
+        {(filtroEst!=="activos"||filtroDesde||filtroHasta||filtroMes||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
+          <button onClick={()=>{setFiltroEst("activos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);}}
             style={{...S.btn,background:"rgba(239,68,68,.12)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",fontSize:11,padding:"4px 10px"}}>Reset</button>
         )}
         <span style={{

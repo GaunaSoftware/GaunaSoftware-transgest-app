@@ -227,6 +227,9 @@ function colaboradoresAuthUnlessPublic(req, res, next) {
   });
 }
 function portalClientePermission(req, res, next) {
+  if (req.user?.integracion_token_id && req.path.startsWith("/integracion/")) {
+    return next();
+  }
   const modulo = req.path.startsWith("/admin/") ? "solicitudes" : "portal-cliente";
   return requireModulePermission(modulo)(req, res, next);
 }

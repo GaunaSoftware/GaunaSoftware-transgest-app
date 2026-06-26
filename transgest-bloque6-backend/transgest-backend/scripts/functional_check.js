@@ -1331,7 +1331,7 @@ async function checkPedidoToneladaNormalizacion(auth) {
         await request("pedido colaborador precio cerrado cancelar", `/api/v1/pedidos/${encodeURIComponent(pedidoColaboradorFijoId)}/estado`, {
           method: "PATCH",
           headers: auth,
-          body: JSON.stringify({ estado: "cancelado" }),
+          body: JSON.stringify({ estado: "cancelado", motivo_cancelacion: "Limpieza automatica QA" }),
         });
         await request("pedido colaborador precio cerrado limpiar", `/api/v1/pedidos/${encodeURIComponent(pedidoColaboradorFijoId)}`, {
           method: "DELETE",
@@ -1346,7 +1346,7 @@ async function checkPedidoToneladaNormalizacion(auth) {
         await request("pedido toneladas colaborador precio cliente cancelar", `/api/v1/pedidos/${encodeURIComponent(pedidoColaboradorId)}/estado`, {
           method: "PATCH",
           headers: auth,
-          body: JSON.stringify({ estado: "cancelado" }),
+          body: JSON.stringify({ estado: "cancelado", motivo_cancelacion: "Limpieza automatica QA" }),
         });
         await request("pedido toneladas colaborador precio cliente limpiar", `/api/v1/pedidos/${encodeURIComponent(pedidoColaboradorId)}`, {
           method: "DELETE",
@@ -1361,7 +1361,7 @@ async function checkPedidoToneladaNormalizacion(auth) {
         await request("pedido colaborador toneladas legacy cancelar", `/api/v1/pedidos/${encodeURIComponent(pedidoColaboradorLegacyId)}/estado`, {
           method: "PATCH",
           headers: auth,
-          body: JSON.stringify({ estado: "cancelado" }),
+          body: JSON.stringify({ estado: "cancelado", motivo_cancelacion: "Limpieza automatica QA" }),
         });
         await request("pedido colaborador toneladas legacy limpiar", `/api/v1/pedidos/${encodeURIComponent(pedidoColaboradorLegacyId)}`, {
           method: "DELETE",
@@ -1376,7 +1376,7 @@ async function checkPedidoToneladaNormalizacion(auth) {
         await request("pedido toneladas normaliza cancelar", `/api/v1/pedidos/${encodeURIComponent(pedidoId)}/estado`, {
           method: "PATCH",
           headers: auth,
-          body: JSON.stringify({ estado: "cancelado" }),
+          body: JSON.stringify({ estado: "cancelado", motivo_cancelacion: "Limpieza automatica QA" }),
         });
         await request("pedido toneladas normaliza limpiar", `/api/v1/pedidos/${encodeURIComponent(pedidoId)}`, {
           method: "DELETE",
@@ -1475,7 +1475,7 @@ async function checkPedidoKmRutaYSaneadoParadas(auth) {
         await request("pedido ruta incompatible cancelar", `/api/v1/pedidos/${encodeURIComponent(pedidoIncompatibleId)}/estado`, {
           method: "PATCH",
           headers: auth,
-          body: JSON.stringify({ estado: "cancelado" }),
+          body: JSON.stringify({ estado: "cancelado", motivo_cancelacion: "Limpieza automatica QA" }),
         });
         await request("pedido ruta incompatible limpiar", `/api/v1/pedidos/${encodeURIComponent(pedidoIncompatibleId)}`, {
           method: "DELETE",
@@ -1490,7 +1490,7 @@ async function checkPedidoKmRutaYSaneadoParadas(auth) {
         await request("pedido km auto cancelar", `/api/v1/pedidos/${encodeURIComponent(pedidoId)}/estado`, {
           method: "PATCH",
           headers: auth,
-          body: JSON.stringify({ estado: "cancelado" }),
+          body: JSON.stringify({ estado: "cancelado", motivo_cancelacion: "Limpieza automatica QA" }),
         });
         await request("pedido km auto limpiar", `/api/v1/pedidos/${encodeURIComponent(pedidoId)}`, {
           method: "DELETE",
@@ -1737,8 +1737,12 @@ async function checkDocumentoControlDigital(auth) {
     if (!remisionRes.ok || remisionData?.action !== "remitido") {
       throw new Error(`documento control remision formal: respuesta inesperada ${remisionRes.status}`);
     }
-  } else if (remisionRes.status !== 409 || remisionData?.requiere_confirmacion !== true || remisionData?.dcd_incompleto !== true) {
-    throw new Error(`documento control remision formal: esperado bloqueo 409 por DCD incompleto, recibido ${remisionRes.status}`);
+  } else {
+    const bloqueoValido = remisionData?.requiere_confirmacion === true &&
+      (remisionData?.dcd_incompleto === true || remisionData?.firma_modificada === true);
+    if (remisionRes.status !== 409 || !bloqueoValido) {
+      throw new Error(`documento control remision formal: esperado bloqueo 409 por DCD incompleto o firma modificada, recibido ${remisionRes.status}`);
+    }
   }
   console.log("OK documento control remision formal protegida");
 }
@@ -2032,7 +2036,7 @@ async function checkFirmaEvidenciaPedido(auth) {
         await request("firma postfirma cancelar QA", `/api/v1/pedidos/${encodeURIComponent(pedidoFirmadoId)}/estado`, {
           method: "PATCH",
           headers: auth,
-          body: JSON.stringify({ estado: "cancelado" }),
+          body: JSON.stringify({ estado: "cancelado", motivo_cancelacion: "Limpieza automatica QA" }),
         });
         await request("firma postfirma limpiar QA", `/api/v1/pedidos/${encodeURIComponent(pedidoFirmadoId)}`, {
           method: "DELETE",

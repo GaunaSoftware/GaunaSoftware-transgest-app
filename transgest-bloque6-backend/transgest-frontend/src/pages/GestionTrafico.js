@@ -2328,15 +2328,14 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       const semana = getWeekDays(anchor);
       const desde = semana[0].toISOString().slice(0,10);
       const hasta = semana[6].toISOString().slice(0,10);
-      const _tout = (pr, ms=8000) => Promise.race([pr, new Promise(r=>setTimeout(()=>r([]),ms))]);
       const [p, pg, v, c, r, cfgEmpresa, notifs] = await Promise.all([
-        _tout(getPedidos({ desde, hasta, limit: 1000 }).catch(() => [])),
-        _tout(getPedidos({
+        getPedidos({ desde, hasta, limit: 1000 }, { timeoutMs: 45000, silentError: true }).catch(() => []),
+        getPedidos({
           tipo_carga: "grupaje",
           estado: "pendiente,confirmado,en_curso,descarga,incidencia",
           facturado: "false",
           limit: 1000,
-        }).catch(() => [])),
+        }, { timeoutMs: 45000, silentError: true }).catch(() => []),
         getVehiculos().catch(() => []),
         getChoferes().catch(() => []),
         getRutas().catch(() => []),

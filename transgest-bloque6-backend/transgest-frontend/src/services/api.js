@@ -365,7 +365,7 @@ export const crearClienteIntegracionToken = (id, data={}) => apiFetch(`/clientes
 export const revocarClienteIntegracionToken = (id, tokenId) => apiFetch(`/clientes/${id}/integracion-tokens/${encodeURIComponent(tokenId)}`, { method:"DELETE" });
 
 // ── Pedidos ───────────────────────────────────────────
-export const getPedidos     = (params={}) => apiFetch(`/pedidos?${new URLSearchParams(params)}`);
+export const getPedidos     = (params={}, options = {}) => apiFetch(`/pedidos?${new URLSearchParams(params)}`, options);
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
 export const getPedidoIdaRetorno = (id)   => apiFetch(`/pedidos/${id}/ida-retorno`);
 export const enlazarPedidoRetorno = (id, data) => apiFetch(`/pedidos/${id}/ida-retorno`, { method:"POST", body:data });

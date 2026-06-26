@@ -345,8 +345,11 @@ async function applyMigrations() {
     const idxs = [
       "CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_estado  ON pedidos(empresa_id, estado)",
       "CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_fecha   ON pedidos(empresa_id, fecha_carga DESC NULLS LAST)",
+      "CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_fecha_operativa ON pedidos(empresa_id, (COALESCE(fecha_carga, fecha_pedido)))",
+      "CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_fecha_pedido_created ON pedidos(empresa_id, fecha_pedido DESC, created_at DESC)",
       "CREATE INDEX IF NOT EXISTS idx_pedidos_vehiculo        ON pedidos(vehiculo_id) WHERE vehiculo_id IS NOT NULL",
       "CREATE INDEX IF NOT EXISTS idx_pedidos_cliente         ON pedidos(cliente_id)  WHERE cliente_id  IS NOT NULL",
+      "CREATE INDEX IF NOT EXISTS idx_pedido_docs_pedido_empresa ON pedido_docs(pedido_id, empresa_id)",
       "CREATE INDEX IF NOT EXISTS idx_facturas_empresa_estado ON facturas(empresa_id, estado)",
       "CREATE INDEX IF NOT EXISTS idx_facturas_empresa_fecha  ON facturas(empresa_id, fecha DESC)",
       "CREATE INDEX IF NOT EXISTS idx_vehiculos_empresa       ON vehiculos(empresa_id) WHERE activo = true",

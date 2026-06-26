@@ -269,7 +269,7 @@ export default function Dashboard() {
       try {
       const _tout = (p, ms=8000) => Promise.race([p, new Promise(r=>setTimeout(()=>r([]),ms))]);
         const [p, f, v, c, ex, cfg, taller, palets] = await Promise.all([
-          _tout(getPedidos().catch(()=>[])),
+          _tout(getPedidos({}, { timeoutMs: 45000, silentError: true }).catch(()=>[]), 45000),
           getFacturas().catch(()=>[]),
           getVehiculos().catch(()=>[]),
           getChoferes().catch(()=>[]),

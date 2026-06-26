@@ -4791,6 +4791,13 @@ router.get("/", async (req, res) => {
   }
 
   const { rows } = await queryWithColaboradorFallback(`
+    WITH filtered AS (
+      SELECT p.* -- empresa_id filtrado en where dinamico
+        FROM pedidos p
+       WHERE ${where.join(" AND ")}
+       ORDER BY p.fecha_pedido DESC, p.created_at DESC
+       LIMIT $${i++} OFFSET $${i++}
+    )
     SELECT p.*,
            c.nombre  AS cliente_nombre,
            c.telefono AS cliente_telefono,
@@ -4806,24 +4813,32 @@ router.get("/", async (req, res) => {
            r.matricula AS remolque_matricula,
            f.estado AS factura_estado,
            f.numero AS factura_numero,
-           (SELECT COUNT(*)::int
-              FROM pedido_docs d
-             WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id) AS documentos_count,
-           (SELECT COUNT(*)::int
-              FROM pedido_docs d
-             WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
-               AND LOWER(COALESCE(d.tipo,'') || ' ' || COALESCE(d.nombre,'') || ' ' || COALESCE(d.notas,'')) LIKE '%albar%') AS albaranes_count
-    FROM pedidos p
-    LEFT JOIN clientes  c  ON c.id  = p.cliente_id
+           COALESCE(docs.documentos_count,0)::int AS documentos_count,
+           COALESCE(docs.albaranes_count,0)::int AS albaranes_count
+    FROM filtered p
+    LEFT JOIN clientes  c  ON c.id  = p.cliente_id AND c.empresa_id = p.empresa_id
     LEFT JOIN colaboradores co ON co.id = p.colaborador_id AND co.empresa_id = p.empresa_id
-    LEFT JOIN choferes  ch ON ch.id = p.chofer_id
-    LEFT JOIN vehiculos v  ON v.id  = p.vehiculo_id
-    LEFT JOIN vehiculos r  ON r.id  = p.remolque_id
+    LEFT JOIN choferes  ch ON ch.id = p.chofer_id AND ch.empresa_id = p.empresa_id
+    LEFT JOIN vehiculos v  ON v.id  = p.vehiculo_id AND v.empresa_id = p.empresa_id
+    LEFT JOIN vehiculos r  ON r.id  = p.remolque_id AND r.empresa_id = p.empresa_id
     LEFT JOIN facturas  f  ON f.id  = p.factura_id AND f.empresa_id = p.empresa_id
-    WHERE ${where.join(" AND ")}
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS documentos_count,
+             COUNT(*) FILTER (
+               WHERE LOWER(COALESCE(d.tipo,'') || ' ' || COALESCE(d.nombre,'') || ' ' || COALESCE(d.notas,'')) LIKE '%albar%'
+             )::int AS albaranes_count
+        FROM pedido_docs d
+       WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
+    ) docs ON true
     ORDER BY p.fecha_pedido DESC, p.created_at DESC
-    LIMIT $${i++} OFFSET $${i++}
   `, `
+    WITH filtered AS (
+      SELECT p.* -- empresa_id filtrado en where dinamico
+        FROM pedidos p
+       WHERE ${where.join(" AND ")}
+       ORDER BY p.fecha_pedido DESC, p.created_at DESC
+       LIMIT $${i - 2} OFFSET $${i - 1}
+    )
     SELECT p.*,
            c.nombre  AS cliente_nombre,
            c.telefono AS cliente_telefono,
@@ -4839,22 +4854,23 @@ router.get("/", async (req, res) => {
            r.matricula AS remolque_matricula,
            f.estado AS factura_estado,
            f.numero AS factura_numero,
-           (SELECT COUNT(*)::int
-              FROM pedido_docs d
-             WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id) AS documentos_count,
-           (SELECT COUNT(*)::int
-              FROM pedido_docs d
-             WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
-               AND LOWER(COALESCE(d.tipo,'') || ' ' || COALESCE(d.nombre,'') || ' ' || COALESCE(d.notas,'')) LIKE '%albar%') AS albaranes_count
-    FROM pedidos p
-    LEFT JOIN clientes  c  ON c.id  = p.cliente_id
-    LEFT JOIN choferes  ch ON ch.id = p.chofer_id
-    LEFT JOIN vehiculos v  ON v.id  = p.vehiculo_id
-    LEFT JOIN vehiculos r  ON r.id  = p.remolque_id
+           COALESCE(docs.documentos_count,0)::int AS documentos_count,
+           COALESCE(docs.albaranes_count,0)::int AS albaranes_count
+    FROM filtered p
+    LEFT JOIN clientes  c  ON c.id  = p.cliente_id AND c.empresa_id = p.empresa_id
+    LEFT JOIN choferes  ch ON ch.id = p.chofer_id AND ch.empresa_id = p.empresa_id
+    LEFT JOIN vehiculos v  ON v.id  = p.vehiculo_id AND v.empresa_id = p.empresa_id
+    LEFT JOIN vehiculos r  ON r.id  = p.remolque_id AND r.empresa_id = p.empresa_id
     LEFT JOIN facturas  f  ON f.id  = p.factura_id AND f.empresa_id = p.empresa_id
-    WHERE ${where.join(" AND ")}
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS documentos_count,
+             COUNT(*) FILTER (
+               WHERE LOWER(COALESCE(d.tipo,'') || ' ' || COALESCE(d.nombre,'') || ' ' || COALESCE(d.notas,'')) LIKE '%albar%'
+             )::int AS albaranes_count
+        FROM pedido_docs d
+       WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
+    ) docs ON true
     ORDER BY p.fecha_pedido DESC, p.created_at DESC
-    LIMIT $${i - 2} OFFSET $${i - 1}
   `, [...params, limit, offset]);
 
   // Get total count for pagination (params already excludes limit/offset)

@@ -8172,7 +8172,7 @@ export default function Pedidos() {
       params.page  = page;
       params.limit = PAGE_SIZE;
         const [p, c, v, ch, r, col, cfgEmpresa] = await Promise.all([
-          getPedidos(params),
+          getPedidos(params, { timeoutMs: 45000, silentError: true }),
           getClientes(),
           getVehiculos(),
           getChoferes(),

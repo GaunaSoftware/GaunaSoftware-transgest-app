@@ -468,9 +468,8 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
         horario_carga: normalizarHorarioHabitual(form.horario_carga),
         horario_descarga: normalizarHorarioHabitual(form.horario_descarga),
       };
-      if (esNuevo) await crearCliente(payload);
-      else         await editarCliente(cliente.id, payload);
-      onSaved();
+      const saved = esNuevo ? await crearCliente(payload) : await editarCliente(cliente.id, payload);
+      onSaved?.(saved);
     } catch(e) { notify(e.message, "error"); }
     finally { setSaving(false); }
   }
@@ -1668,7 +1667,7 @@ export default function Clientes() {
           cliente={ficha==="nuevo" ? null : ficha}
           rutasGlobales={rutasG}
           onClose={()=>setFicha(null)}
-          onSaved={()=>{ setFicha(null); cargar(); }}
+          onSaved={(saved)=>{ setFicha(null); if (saved?.id) setClientes(prev => [saved, ...prev.filter(c => c.id !== saved.id)]); cargar().catch(()=>{}); }}
         />
       )}
     </div>

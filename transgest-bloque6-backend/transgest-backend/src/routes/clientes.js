@@ -13,6 +13,14 @@ const CLIENTES_CREATE_BASE_COLUMNS = new Set([
   "empresa_id", "nombre", "cif", "direccion", "cp", "ciudad", "pais",
   "email", "contacto", "telefono", "forma_pago", "vencimiento",
   "tipo_iva", "tipo_irpf", "precio_tn_km", "activo", "notas",
+  "iva_regimen", "calle", "num_ext", "piso_puerta", "cod_postal", "municipio",
+  "provincia", "pais_iso", "dir_fiscal_distinta", "fiscal_calle",
+  "fiscal_num_ext", "fiscal_piso_puerta", "fiscal_cod_postal",
+  "fiscal_municipio", "fiscal_provincia", "fiscal_pais_iso", "web",
+  "contacto_telefono", "email_facturacion", "email_facturas",
+  "emails_albaranes", "iban", "horario_carga", "horario_descarga",
+  "minimo_facturable_toneladas", "limite_riesgo", "modo_facturacion",
+  "bloqueado", "bloqueo_motivo", "pendiente_revision",
 ]);
 
 let clientesColumnsCache = null;
@@ -864,6 +872,35 @@ router.post("/", GERENTE_O_CONTABLE,
       activo: true,
       notas: notas || null,
       empresa_id: empresaId,
+      calle: calle || null,
+      num_ext: num_ext || null,
+      piso_puerta: clienteData.piso_puerta || null,
+      cod_postal: clienteData.cod_postal || codigo_postal || cp || null,
+      municipio: clienteData.municipio || ciudad || null,
+      provincia: clienteData.provincia || null,
+      pais_iso: clienteData.pais_iso || pais || null,
+      dir_fiscal_distinta: Boolean(clienteData.dir_fiscal_distinta),
+      fiscal_calle: clienteData.fiscal_calle || null,
+      fiscal_num_ext: clienteData.fiscal_num_ext || null,
+      fiscal_piso_puerta: clienteData.fiscal_piso_puerta || null,
+      fiscal_cod_postal: clienteData.fiscal_cod_postal || null,
+      fiscal_municipio: clienteData.fiscal_municipio || null,
+      fiscal_provincia: clienteData.fiscal_provincia || null,
+      fiscal_pais_iso: clienteData.fiscal_pais_iso || null,
+      web: clienteData.web || null,
+      contacto_telefono: clienteData.contacto_telefono || null,
+      email_facturacion: email_facturacion || null,
+      email_facturas: email_facturacion || null,
+      emails_albaranes: emails_albaranes || null,
+      iban: iban || null,
+      horario_carga: horarioCargaNorm,
+      horario_descarga: horarioDescargaNorm,
+      minimo_facturable_toneladas: numericOrNull(minimo_facturable_toneladas),
+      limite_riesgo: numericOrNull(limite_riesgo) || 0,
+      modo_facturacion: modo_facturacion || "por_viaje",
+      bloqueado: Boolean(bloqueado),
+      bloqueo_motivo: bloqueo_motivo || null,
+      pendiente_revision: Boolean(incompleto),
     }); /*
       INSERT INTO clientes (nombre,cif,direccion,cp,ciudad,pais,email,contacto,telefono,
         forma_pago,vencimiento,tipo_iva,iva_regimen,tipo_irpf,precio_tn_km,notas,empresa_id,
@@ -880,21 +917,7 @@ router.post("/", GERENTE_O_CONTABLE,
        modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null]
     ); */
     createdId = created?.id || null;
-    const saved = createdId ? await persistClienteExtendedFields(createdId, empresaId, {
-      ...clienteData,
-      email_facturacion: email_facturacion || null,
-      emails_albaranes: emails_albaranes || null,
-      iban: iban || null,
-      horario_carga: horarioCargaNorm,
-      horario_descarga: horarioDescargaNorm,
-      minimo_facturable_toneladas: numericOrNull(minimo_facturable_toneladas),
-      limite_riesgo: numericOrNull(limite_riesgo) || 0,
-      modo_facturacion: modo_facturacion || "por_viaje",
-      bloqueado: Boolean(bloqueado),
-      bloqueo_motivo: bloqueo_motivo || null,
-      pendiente_revision: Boolean(incompleto),
-    }) : null;
-    res.status(201).json(saved || created);
+    res.status(201).json(created);
     } catch (e) {
       if (createdId) await db.query("DELETE FROM clientes WHERE id=$1", [createdId]).catch(() => {});
       res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo guardar el cliente", request_id: req.id });

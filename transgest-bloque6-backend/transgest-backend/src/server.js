@@ -464,6 +464,27 @@ async function applyMigrations() {
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS num_ext VARCHAR(30)").catch(() => {});
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS codigo_postal VARCHAR(20)").catch(() => {});
     await db.query("CREATE INDEX IF NOT EXISTS idx_clientes_pendiente ON clientes(empresa_id, pendiente_revision) WHERE pendiente_revision=true").catch(() => {});
+    await db.query("CREATE INDEX IF NOT EXISTS idx_clientes_empresa_cif_norm ON clientes(empresa_id, UPPER(TRIM(COALESCE(cif,'')))) WHERE COALESCE(activo,true)=true AND NULLIF(TRIM(COALESCE(cif,'')),'') IS NOT NULL").catch(() => {});
+    await db.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+            FROM clientes
+           WHERE COALESCE(activo,true)=true
+             AND NULLIF(TRIM(COALESCE(cif,'')),'') IS NOT NULL
+             AND UPPER(TRIM(COALESCE(cif,''))) NOT LIKE 'CLI-%'
+           GROUP BY empresa_id, UPPER(TRIM(COALESCE(cif,'')))
+          HAVING COUNT(*) > 1
+        ) THEN
+          CREATE UNIQUE INDEX IF NOT EXISTS uniq_clientes_empresa_cif_activo
+            ON clientes(empresa_id, UPPER(TRIM(COALESCE(cif,''))))
+            WHERE COALESCE(activo,true)=true
+              AND NULLIF(TRIM(COALESCE(cif,'')),'') IS NOT NULL
+              AND UPPER(TRIM(COALESCE(cif,''))) NOT LIKE 'CLI-%';
+        END IF;
+      END $$;
+    `).catch(() => {});
     await db.query(`
       DO $$
       BEGIN

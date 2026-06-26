@@ -352,11 +352,11 @@ export async function cambiarPassword(password_actual, password_nuevo) {
 }
 
 // ── Clientes ──────────────────────────────────────────
-export const getClientes  = (q = "", activo = "true", page = 1, limit = 100) => apiFetch(`/clientes?q=${encodeURIComponent(q)}&activo=${activo}&page=${page}&limit=${limit}`);
+export const getClientes  = (q = "", activo = "true", page = 1, limit = 100, options = {}) => apiFetch(`/clientes?q=${encodeURIComponent(q)}&activo=${activo}&page=${page}&limit=${limit}`, options);
 export const getCliente   = (id)      => apiFetch(`/clientes/${id}`);
 export const getClienteRiesgoOperativo = (id) => apiFetch(`/clientes/${id}/riesgo-operativo`);
-export const crearCliente = (data)    => apiFetch("/clientes", { method:"POST", body:data, timeoutMs:12000 });
-export const editarCliente= (id,data) => apiFetch(`/clientes/${id}`, { method:"PUT", body:data });
+export const crearCliente = (data)    => apiFetch("/clientes", { method:"POST", body:data, timeoutMs:30000, silentSuccess:true });
+export const editarCliente= (id,data) => apiFetch(`/clientes/${id}`, { method:"PUT", body:data, timeoutMs:30000, silentSuccess:true });
 export const borrarCliente= (id)      => apiFetch(`/clientes/${id}`, { method:"DELETE" });
 export const crearPortalUsuarioCliente = (id, data={}) => apiFetch(`/clientes/${id}/portal-user`, { method:"POST", body:data });
 export const getClienteIntegracionTokens = (id) => apiFetch(`/clientes/${id}/integracion-tokens`);

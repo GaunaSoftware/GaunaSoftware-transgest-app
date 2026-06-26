@@ -58,6 +58,41 @@ function clampClienteColumnValue(column, value, meta) {
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 }
 
+function normalizeClienteCifKey(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function clienteConflictError(message) {
+  const err = new Error(message);
+  err.status = 409;
+  return err;
+}
+
+async function assertClienteCifDisponible(empresaId, cif, excludeId = null) {
+  const key = normalizeClienteCifKey(cif);
+  if (!key || key.startsWith("CLI-")) return;
+  const params = [empresaId, key];
+  let excludeSql = "";
+  if (excludeId) {
+    params.push(excludeId);
+    excludeSql = ` AND id <> $${params.length}`;
+  }
+  const { rows } = await db.query(
+    `SELECT id,nombre,cif
+       FROM clientes
+      WHERE empresa_id=$1
+        AND COALESCE(activo,true)=true
+        AND UPPER(TRIM(COALESCE(cif,'')))=$2
+        ${excludeSql}
+      ORDER BY created_at ASC NULLS LAST, nombre ASC
+      LIMIT 1`,
+    params
+  );
+  if (rows[0]) {
+    throw clienteConflictError(`Ya existe un cliente activo con el CIF ${key}: ${rows[0].nombre || "sin nombre"}. Abre esa ficha o da de baja el duplicado antes de crear otro.`);
+  }
+}
+
 async function insertClienteCompat(values = {}) {
   const meta = await getClientesColumnMeta();
   const columns = new Set(meta.keys());
@@ -542,7 +577,9 @@ function buildClienteRiesgoAvisos(row = {}) {
 // GET /clientes?q=texto&activo=true
 router.get("/", async (req, res) => {
   const { q, activo, page = 1, limit = 100 } = req.query;
-  const offset = (page - 1) * limit;
+  const pageN = Math.max(parseInt(page, 10) || 1, 1);
+  const limitN = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 250);
+  const offset = (pageN - 1) * limitN;
   const where  = ["empresa_id = $1"]; // tenant isolation
   const params = [req.empresaId||req.user.empresa_id];
   let i = 2;
@@ -553,25 +590,19 @@ router.get("/", async (req, res) => {
   }
   if (activo !== undefined) { where.push(`activo = $${i++}`); params.push(activo === "true"); }
 
-  const pageN = +page; const limitN = +limit;
-  const countParams = params.slice();
   const { rows } = await db.query(
     `SELECT * FROM clientes WHERE ${where.join(" AND ")}
       ORDER BY COALESCE(pendiente_revision,false) DESC, nombre ASC
       LIMIT $${i} OFFSET $${i+1}`,
-    [...params, limitN, offset]
+    [...params, limitN + 1, offset]
   );
-  let total = rows.length + offset;
-  try {
-    const { rows: cr } = await db.query(`SELECT COUNT(*) FROM clientes WHERE ${where.join(" AND ")}`, countParams);
-    total = parseInt(cr[0]?.count || total, 10);
-  } catch {
-    total = rows.length + offset;
-  }
+  const pageRows = rows.slice(0, limitN);
+  const hasNext = rows.length > limitN;
+  const total = offset + pageRows.length + (hasNext ? 1 : 0);
   res.json({
-    data: rows,
+    data: pageRows,
     pagination: { total, page: pageN, limit: limitN,
-      totalPages: Math.ceil(total/limitN), hasNext: pageN*limitN<total, hasPrev: pageN>1 }
+      totalPages: hasNext ? pageN + 1 : pageN, hasNext, hasPrev: pageN>1 }
   });
 });
 
@@ -866,6 +897,7 @@ router.post("/", GERENTE_O_CONTABLE,
     const cif = String(clienteData.cif || "").trim().toUpperCase() || generatedClienteCif();
     const empresaId = req.empresaId||req.user.empresa_id;
     const iva = normalizeIva(tipo_iva, iva_regimen);
+    await assertClienteCifDisponible(empresaId, cif);
     let horarioCargaNorm;
     let horarioDescargaNorm;
     try {
@@ -943,9 +975,17 @@ router.post("/", GERENTE_O_CONTABLE,
        modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null]
     ); */
     createdId = created?.id || null;
+    if (!createdId) {
+      const err = new Error("No se ha confirmado la creacion del cliente. Revisa la API antes de repetir el alta.");
+      err.status = 500;
+      throw err;
+    }
     res.status(201).json(created);
     } catch (e) {
       if (createdId) await db.query("DELETE FROM clientes WHERE id=$1", [createdId]).catch(() => {});
+      if (e.code === "23505") {
+        return res.status(409).json({ error: "Ya existe un cliente activo con ese CIF en esta empresa.", request_id: req.id });
+      }
       res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo guardar el cliente", request_id: req.id });
     }
   }
@@ -961,6 +1001,7 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
           minimo_facturable_toneladas, limite_riesgo, modo_facturacion, bloqueado, bloqueo_motivo } = clienteData;
   const empresaId = req.empresaId || req.user.empresa_id;
   const iva = normalizeIva(tipo_iva, iva_regimen);
+  await assertClienteCifDisponible(empresaId, cif, req.params.id);
   let horarioCargaNorm;
   let horarioDescargaNorm;
   try {
@@ -1016,6 +1057,9 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   const saved = await persistClienteExtendedFields(updated.id, empresaId, clienteData);
   res.json(saved || updated);
   } catch (e) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Ya existe un cliente activo con ese CIF en esta empresa.", request_id: req.id });
+    }
     res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo actualizar el cliente", request_id: req.id });
   }
 });

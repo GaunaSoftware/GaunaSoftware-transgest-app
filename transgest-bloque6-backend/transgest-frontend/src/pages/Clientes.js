@@ -469,6 +469,8 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales }) {
         horario_descarga: normalizarHorarioHabitual(form.horario_descarga),
       };
       const saved = esNuevo ? await crearCliente(payload) : await editarCliente(cliente.id, payload);
+      if (!saved?.id) throw new Error("El servidor no ha confirmado el cliente. No repitas el alta: recarga la lista y revisa la API.");
+      notify(esNuevo ? "Cliente creado correctamente." : "Cliente actualizado correctamente.", "success");
       onSaved?.(saved);
     } catch(e) { notify(e.message, "error"); }
     finally { setSaving(false); }
@@ -1513,15 +1515,27 @@ export default function Clientes() {
   const [ficha,    setFicha]      = useState(null);  // null | "nuevo" | {cliente}
   const [rutasG,   setRutasG]     = useState([]);
   const [soloPendientes, setSoloPendientes] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   const [mostrarBaja, setMostrarBaja] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const activo = mostrarBaja ? "false" : "true";
-      const c = await getClientes(q, activo);
+      let c;
+      try {
+        c = await getClientes(q, activo, 1, 100, { silentError:true, timeoutMs:60000 });
+      } catch (firstError) {
+        await new Promise(resolve => setTimeout(resolve, 700));
+        c = await getClientes(q, activo, 1, 100, { silentError:true, timeoutMs:60000 }).catch(() => {
+          throw firstError;
+        });
+      }
       setClientes(Array.isArray(c?.data)?c.data:Array.isArray(c)?c:[]);
+    } catch {
+      setLoadError("No se ha podido cargar el listado de clientes. Revisa que la API de produccion este desplegada y vuelve a intentar.");
     } finally { setLoading(false); }
 
     getRutas({ silentError:true, timeoutMs:8000 })
@@ -1587,6 +1601,12 @@ export default function Clientes() {
           <button style={{...S.btn,background:soloPendientes?"rgba(245,158,11,.20)":"rgba(245,158,11,.12)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.35)",boxShadow:"none"}} onClick={()=>setSoloPendientes(v=>!v)}>
             {soloPendientes ? "Ver todos" : "Ver pendientes"}
           </button>
+        </div>
+      )}
+
+      {loadError && (
+        <div style={{marginBottom:14,padding:"12px 14px",borderRadius:8,border:"1px solid rgba(239,68,68,.35)",background:"rgba(239,68,68,.10)",color:"#fecaca",fontWeight:800}}>
+          {loadError}
         </div>
       )}
 

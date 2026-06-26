@@ -1493,7 +1493,7 @@ const TIPOS_NEUMAT = [
   { id:"traccion",      label:"Tracción",           medidas:["295/80 R22.5","315/80 R22.5","315/60 R22.5","385/65 R22.5"] },
 ];
 const POSICIONES_TRACTOR = [
-  {id:"del_iz",  label:"Delantera Izq",  x:120, y:88,  r:17, tipo:"directriz"},
+  {id:"del_iz",  label:"Delantera Izq",  x:120, y:73,  r:17, tipo:"directriz"},
   {id:"del_der", label:"Delantera Der",  x:120, y:192, r:17, tipo:"directriz"},
   {id:"tra_iz1", label:"Trasera Izq 1",  x:238, y:88,  r:17, tipo:"traccion"},
   {id:"tra_iz2", label:"Trasera Izq 2",  x:276, y:88,  r:17, tipo:"traccion"},

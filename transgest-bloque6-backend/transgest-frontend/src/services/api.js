@@ -64,6 +64,9 @@ function friendlyApiError(message, status, requestId, path = "") {
   if (!raw || lower === "failed to fetch" || lower.includes("networkerror")) {
     return "No se pudo conectar con el servidor. Comprueba que el backend esta arrancado y vuelve a intentarlo.";
   }
+  if (lower.includes("tardado demasiado") || lower.includes("abort")) {
+    return "El servidor ha tardado demasiado en responder. Vuelve a intentarlo y, si se repite, revisa el estado de la API.";
+  }
   if (lower.includes("load failed") || lower.includes("fetch failed") || lower.includes("network request failed")) {
     return "La conexion con el servidor se ha cortado. Revisa que el backend siga activo y vuelve a intentarlo.";
   }
@@ -146,13 +149,21 @@ function applyAuthSession(data = {}) {
 
 // ── Fetch base ────────────────────────────────────────
 async function apiFetch(path, options = {}) {
-  const { silentSuccess = false, silentError = false, ...fetchOptions } = options;
+  const { silentSuccess = false, silentError = false, timeoutMs, ...fetchOptions } = options;
   const token = getToken();
   const method = String(fetchOptions.method || "GET").toUpperCase();
+  const effectiveTimeoutMs = Number(timeoutMs ?? (method === "GET" ? 30000 : 20000));
+  const timeoutController = typeof AbortController !== "undefined" && effectiveTimeoutMs > 0 && !fetchOptions.signal
+    ? new AbortController()
+    : null;
+  const timeoutId = timeoutController
+    ? setTimeout(() => timeoutController.abort(), effectiveTimeoutMs)
+    : null;
   let res;
   try {
     res = await fetch(`${BASE}/api/v1${path}`, {
       ...fetchOptions,
+      signal: timeoutController ? timeoutController.signal : fetchOptions.signal,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -161,10 +172,15 @@ async function apiFetch(path, options = {}) {
       body: fetchOptions.body ? JSON.stringify(fetchOptions.body) : undefined,
     });
   } catch (e) {
-    const message = friendlyApiError(e.message, 0, null, path);
-    rememberApiError({ status: 0, method, path, request_id: null, error: e.message || null, message });
+    const rawMessage = e?.name === "AbortError"
+      ? `La peticion ha tardado demasiado (${effectiveTimeoutMs} ms).`
+      : e.message;
+    const message = friendlyApiError(rawMessage, 0, null, path);
+    rememberApiError({ status: 0, method, path, request_id: null, error: rawMessage || null, message });
     if (!silentError) notifyError(message);
     throw new Error(message);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 
   // Token expirado → logout
@@ -339,7 +355,7 @@ export async function cambiarPassword(password_actual, password_nuevo) {
 export const getClientes  = (q = "", activo = "true", page = 1, limit = 100) => apiFetch(`/clientes?q=${encodeURIComponent(q)}&activo=${activo}&page=${page}&limit=${limit}`);
 export const getCliente   = (id)      => apiFetch(`/clientes/${id}`);
 export const getClienteRiesgoOperativo = (id) => apiFetch(`/clientes/${id}/riesgo-operativo`);
-export const crearCliente = (data)    => apiFetch("/clientes", { method:"POST", body:data });
+export const crearCliente = (data)    => apiFetch("/clientes", { method:"POST", body:data, timeoutMs:12000 });
 export const editarCliente= (id,data) => apiFetch(`/clientes/${id}`, { method:"PUT", body:data });
 export const borrarCliente= (id)      => apiFetch(`/clientes/${id}`, { method:"DELETE" });
 export const crearPortalUsuarioCliente = (id, data={}) => apiFetch(`/clientes/${id}/portal-user`, { method:"POST", body:data });

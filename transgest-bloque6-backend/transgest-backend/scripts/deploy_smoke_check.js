@@ -26,6 +26,78 @@ async function fetchText(name, path, expectedStatus = 200, origin = baseUrl) {
   }, name);
 }
 
+async function fetchJson(name, path, options = {}, expectedStatus = 200, origin = apiUrl) {
+  return withTimeout(async (signal) => {
+    const res = await fetch(`${origin}${path}`, {
+      ...options,
+      signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { raw_text: text }; }
+    if (res.status !== expectedStatus) {
+      const msg = data.error || data.message || data.mensaje || data.raw_text || "";
+      throw new Error(`${name}: esperado ${expectedStatus}, recibido ${res.status}. ${String(msg).slice(0, 180)}`);
+    }
+    console.log(`OK ${name}`);
+    return data;
+  }, name);
+}
+
+async function runClienteRoundtrip() {
+  const user = String(process.env.DEPLOY_SMOKE_USER || "").trim();
+  const password = String(process.env.DEPLOY_SMOKE_PASSWORD || "").trim();
+  if (!user || !password) {
+    console.log("SKIP cliente roundtrip: configura DEPLOY_SMOKE_USER y DEPLOY_SMOKE_PASSWORD");
+    return;
+  }
+
+  const login = await fetchJson("login smoke", "/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email: user, usuario: user, password }),
+  });
+  if (!login?.token) throw new Error("login smoke: no devuelve token");
+
+  const auth = { Authorization: `Bearer ${login.token}` };
+  const suffix = Date.now().toString(36).toUpperCase();
+  let clienteId = null;
+  try {
+    const created = await fetchJson("alta cliente smoke", "/api/v1/clientes", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        nombre: `QA Deploy Cliente ${suffix}`,
+        cif: `QA-${suffix}`,
+        calle: "Calle QA",
+        num_ext: "1",
+        cod_postal: "28001",
+        municipio: "Madrid",
+        provincia: "Madrid",
+        pais_iso: "ES",
+        email: `qa-${suffix.toLowerCase()}@example.invalid`,
+        telefono: "600000000",
+        forma_pago: "transferencia",
+        vencimiento: "30 dias fecha factura",
+      }),
+    }, 201);
+    clienteId = created?.id || null;
+    if (!clienteId) throw new Error("alta cliente smoke: falta id del cliente creado");
+  } finally {
+    if (clienteId) {
+      await fetchJson("limpieza cliente smoke", `/api/v1/clientes/${encodeURIComponent(clienteId)}`, {
+        method: "DELETE",
+        headers: auth,
+      }).catch(err => {
+        console.warn(`WARN limpieza cliente smoke: ${err.message}`);
+      });
+    }
+  }
+}
+
 async function run() {
   const health = await fetchText("health publico", "/health", 200, apiUrl);
   let healthData = null;
@@ -48,6 +120,8 @@ async function run() {
   if (!protectedApi.text.toLowerCase().includes("token")) {
     throw new Error("api protegida via proxy: no devuelve rechazo de autenticacion esperado");
   }
+
+  await runClienteRoundtrip();
 
   console.log(`DEPLOY SMOKE OK: frontend=${baseUrl} api=${apiUrl} release=${healthData.release}`);
 }

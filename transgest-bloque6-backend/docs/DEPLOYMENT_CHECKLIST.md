@@ -80,5 +80,9 @@ npm run security:check
 $env:DEPLOY_BASE_URL="https://app.gauna.es"
 $env:DEPLOY_API_URL="https://transgest-backend.onrender.com"
 $env:DEPLOY_EXPECTED_RELEASE="<sha-del-commit>"
+$env:DEPLOY_SMOKE_USER="gerente@demo.com"
+$env:DEPLOY_SMOKE_PASSWORD="demo1234"
 npm run deploy:smoke
 ```
+
+El smoke autenticado crea un cliente temporal y lo desactiva al terminar. Si el alta de clientes vuelve a quedarse bloqueada, este paso debe fallar antes de dar el despliegue por bueno.

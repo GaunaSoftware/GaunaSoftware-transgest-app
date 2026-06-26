@@ -13,6 +13,7 @@ const backupService = require("./services/backup");
 const fiscalScheduler = require("./services/fiscalScheduler");
 const billingReminders = require("./services/billingReminders");
 const { ensureTables: ensureApiKeyTables } = require("./services/apiKeys");
+const { ensureNotificacionesSchema } = require("./services/notificaciones");
 const { validateEnv } = require("./services/envValidator");
 const { authenticate, requireModulePermission, requirePlanFeature } = require("./middleware/auth");
 
@@ -1095,6 +1096,7 @@ async function startServer() {
   try {
   logger.info("🚛 TransGest API — puerto " + PORT + " — " + process.env.NODE_ENV);
   await ensureApiKeyTables().catch((e) => logger.warn("API keys: " + e.message));
+  await ensureNotificacionesSchema().catch((e) => logger.warn("Notificaciones schema: " + e.message));
   await applyMigrations();
   app.listen(PORT, () => {
     logger.info("TransGest API lista en puerto " + PORT + " - " + process.env.NODE_ENV);

@@ -290,11 +290,15 @@ function startScheduler() {
   }
 
   const backups = listBackups();
-  if (backups.length === 0) {
+  const runInitialBackup = process.env.BACKUP_RUN_INITIAL_ON_STARTUP === "true"
+    || (process.env.NODE_ENV !== "production" && process.env.BACKUP_RUN_INITIAL_ON_STARTUP !== "false");
+  if (backups.length === 0 && runInitialBackup) {
     logger.info("[Backup] No hay backups previos - ejecutando backup inicial...");
     setTimeout(() => {
       runBackup().catch(e => logger.warn("[Backup] Backup inicial fallo:", e.message));
     }, 10000);
+  } else if (backups.length === 0) {
+    logger.info("[Backup] No hay backups previos - backup inicial omitido en arranque.");
   }
 }
 

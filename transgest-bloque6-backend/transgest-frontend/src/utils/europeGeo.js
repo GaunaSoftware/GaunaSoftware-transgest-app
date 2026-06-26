@@ -88,10 +88,45 @@ export function isSpainCountry(country = "España") {
   return canonicalCountry(country) === "España";
 }
 
+const EU_CMR_COUNTRY_KEYS = new Set([
+  "espana", "spain", "es",
+  "alemania", "germany", "deutschland",
+  "austria",
+  "belgica", "belgium", "belgique",
+  "bulgaria",
+  "chipre", "cyprus",
+  "croacia", "croatia",
+  "dinamarca", "denmark",
+  "eslovaquia", "slovakia",
+  "eslovenia", "slovenia",
+  "estonia",
+  "finlandia", "finland",
+  "francia", "france",
+  "grecia", "greece",
+  "hungria", "hungary",
+  "irlanda", "ireland",
+  "italia", "italy",
+  "letonia", "latvia",
+  "lituania", "lithuania",
+  "luxemburgo", "luxembourg",
+  "malta",
+  "paises bajos", "netherlands", "holanda",
+  "polonia", "poland",
+  "portugal",
+  "republica checa", "chequia", "czech republic", "czechia",
+  "rumania", "romania",
+  "suecia", "sweden",
+]);
+
+export function isEuCmrCountry(country = "") {
+  const canonical = canonicalCountry(country) || country;
+  return EU_CMR_COUNTRY_KEYS.has(normalizeGeoText(canonical));
+}
+
 export function cmrTypeForCountries(originCountry = "España", destinationCountry = "España") {
   const origin = canonicalCountry(originCountry) || "España";
   const destination = canonicalCountry(destinationCountry) || "España";
-  return isSpainCountry(origin) && isSpainCountry(destination) ? "nacional" : "internacional";
+  return [origin, destination].some(country => !isSpainCountry(country) && isEuCmrCountry(country)) ? "internacional" : "nacional";
 }
 
 export function completeOnTab(event, options = [], currentValue = "", onComplete) {

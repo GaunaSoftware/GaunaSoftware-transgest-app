@@ -3261,7 +3261,59 @@ function cmrTipoPedido(origenPais = "España", destinoPais = "España", explicit
   if (requested === "internacional" || requested === "nacional") return requested;
   const origen = normalizePaisPedido(origenPais);
   const destino = normalizePaisPedido(destinoPais);
-  return origen === "España" && destino === "España" ? "nacional" : "internacional";
+  return shouldUseInternationalCmr(origen, destino) ? "internacional" : "nacional";
+}
+
+function normalizePaisKeyPedido(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+const EU_CMR_COUNTRY_KEYS = new Set([
+  "espana", "spain", "es",
+  "alemania", "germany", "deutschland",
+  "austria",
+  "belgica", "belgium", "belgique",
+  "bulgaria",
+  "chipre", "cyprus",
+  "croacia", "croatia",
+  "dinamarca", "denmark",
+  "eslovaquia", "slovakia",
+  "eslovenia", "slovenia",
+  "estonia",
+  "finlandia", "finland",
+  "francia", "france",
+  "grecia", "greece",
+  "hungria", "hungary",
+  "irlanda", "ireland",
+  "italia", "italy",
+  "letonia", "latvia",
+  "lituania", "lithuania",
+  "luxemburgo", "luxembourg",
+  "malta",
+  "paises bajos", "netherlands", "holanda",
+  "polonia", "poland",
+  "portugal",
+  "republica checa", "chequia", "czech republic", "czechia",
+  "rumania", "romania",
+  "suecia", "sweden",
+]);
+
+function isSpainPaisPedido(value = "") {
+  const key = normalizePaisKeyPedido(value);
+  return !key || ["espana", "spain", "es"].includes(key);
+}
+
+function isEuCmrPaisPedido(value = "") {
+  return EU_CMR_COUNTRY_KEYS.has(normalizePaisKeyPedido(value));
+}
+
+function shouldUseInternationalCmr(origenPais = "España", destinoPais = "España") {
+  return [origenPais, destinoPais].some(country => !isSpainPaisPedido(country) && isEuCmrPaisPedido(country));
 }
 
 function normalizePedidoValue(field, value) {

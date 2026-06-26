@@ -9,7 +9,7 @@ const DOC_CONTROL_DEFAULTS = {
   observaciones: "",
 };
 
-const CMR_EU_UK_COUNTRY_TERMS = [
+const CMR_EU_COUNTRY_TERMS = [
   "alemania", "austria", "belgica", "bulgaria", "chipre", "croacia", "dinamarca", "eslovaquia",
   "eslovenia", "estonia", "finlandia", "francia", "grecia", "hungria", "irlanda", "italia",
   "letonia", "lituania", "luxemburgo", "malta", "paises bajos", "polonia", "portugal",
@@ -18,9 +18,14 @@ const CMR_EU_UK_COUNTRY_TERMS = [
   "slovenia", "estonia", "finland", "france", "greece", "hungary", "ireland", "italy",
   "latvia", "lithuania", "luxembourg", "malta", "netherlands", "poland", "portugal",
   "czech republic", "romania", "sweden",
+];
+
+const CMR_UK_COUNTRY_TERMS = [
   "reino unido", "inglaterra", "escocia", "gales", "irlanda del norte",
   "united kingdom", "uk", "england", "scotland", "wales", "northern ireland", "great britain",
 ];
+
+const CMR_EU_UK_COUNTRY_TERMS = [...CMR_EU_COUNTRY_TERMS, ...CMR_UK_COUNTRY_TERMS];
 
 function normalizeDocumentoControlConfig(raw = {}) {
   return {
@@ -271,11 +276,19 @@ function isSpainLike(value = "") {
   return !norm || ["espana", "spain", "es"].includes(norm);
 }
 
+function isEuCmrCountry(value = "") {
+  return CMR_EU_COUNTRY_TERMS.includes(normalizeSearchText(value));
+}
+
+function shouldUseInternationalCmr(origenPais = "España", destinoPais = "España") {
+  return [origenPais, destinoPais].some(country => !isSpainLike(country) && isEuCmrCountry(country));
+}
+
 function documentIsInternational(documento = {}) {
   const explicit = normalizeSearchText(documento.cmr_tipo || documento.tipo_cmr || "");
   if (explicit === "internacional") return true;
   if (explicit === "nacional") return false;
-  return !isSpainLike(documento.origen?.pais || "España") || !isSpainLike(documento.destino?.pais || "España");
+  return shouldUseInternationalCmr(documento.origen?.pais || "España", documento.destino?.pais || "España");
 }
 
 function buildCodigoControl({ empresaId, pedidoId }) {
@@ -905,7 +918,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   const verificationCode = buildPublicVerificationCode({ empresaId, pedidoId: pedido?.id });
   const origenPais = pedido?.origen_pais || carga.pais || "España";
   const destinoPais = pedido?.destino_pais || descarga.pais || "España";
-  const cmrTipo = String(pedido?.cmr_tipo || "").toLowerCase() === "internacional" || !isSpainLike(origenPais) || !isSpainLike(destinoPais)
+  const cmrTipo = String(pedido?.cmr_tipo || "").toLowerCase() === "internacional" || shouldUseInternationalCmr(origenPais, destinoPais)
     ? "internacional"
     : "nacional";
   const choferNombre = [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim();

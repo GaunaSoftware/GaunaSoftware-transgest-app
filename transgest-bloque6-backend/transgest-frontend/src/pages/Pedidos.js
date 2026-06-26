@@ -6035,6 +6035,29 @@ async function guardar() {
     }
 
     const pedidoId = pedidoGuardado?.id || editando?.id;
+    const esNuevoPedido = !editando?.id;
+    if (esNuevoPedido && pedidoId) {
+      const docsPendientes = [...pendingDocs];
+      const colaboradorId = payload.colaborador_id;
+      const precioColaborador = Number(payload.precio_colaborador || 0);
+      if (docsPendientes.length) {
+        Promise.allSettled(docsPendientes.map(doc => subirPedidoDoc(pedidoId, doc)))
+          .then(results => {
+            const ok = results.filter(r => r.status === "fulfilled").length;
+            const ko = results.length - ok;
+            if (ok) notify(`${ok} documento(s) adjuntados al pedido.`, "success");
+            if (ko) notify(`${ko} documento(s) no se pudieron adjuntar. Abre el pedido y vuelve a subirlos.`, "warning");
+          });
+        setPendingDocs([]);
+      }
+      if (colaboradorId && precioColaborador) {
+        enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
+      }
+      notify("Pedido creado correctamente.", "success");
+      onSaved();
+      return;
+    }
+
     let rutaAutoId = null;
     try {
       rutaAutoId = await maybeCrearRutaClienteDesdePedido();

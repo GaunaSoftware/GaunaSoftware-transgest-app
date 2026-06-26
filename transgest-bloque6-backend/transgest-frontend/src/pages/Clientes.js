@@ -1689,7 +1689,6 @@ export default function Clientes() {
             setFicha(null);
             if (saved?.id) setClientes(prev => [saved, ...prev.filter(c => c.id !== saved.id)]);
             if (saved?.pendiente_revision) notify("Cliente creado. Queda pendiente de revision por trafico/gerencia.", "warning");
-            cargar().catch(()=>{});
           }}
         />
       )}

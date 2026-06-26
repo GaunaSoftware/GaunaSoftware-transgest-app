@@ -632,7 +632,43 @@ export default function PortalClientes() {
   };
 
   return (
-    <div style={{ fontFamily: "'DM Sans',sans-serif", minHeight: "100vh", background: "var(--bg)", paddingBottom: 40 }}>
+    <div className="tg-portal-cliente-page" style={{ fontFamily: "'DM Sans',sans-serif", minHeight: "100vh", background: "var(--bg)", paddingBottom: 40 }}>
+      <style>{`
+        .tg-portal-cliente-page, .tg-portal-cliente-page * { box-sizing:border-box; min-width:0; }
+        .tg-portal-cliente-page table { width:100%; }
+        @media (max-width: 760px) {
+          .tg-portal-cliente-page { overflow-x:hidden; }
+          .tg-portal-cliente-page > div:first-of-type { padding:14px 16px !important; }
+          .tg-portal-cliente-page > div:first-of-type > div { align-items:flex-start !important; flex-direction:column !important; }
+          .tg-portal-cliente-page > div:first-of-type > div > div:last-child { align-items:flex-start !important; width:100%; }
+          .tg-portal-cliente-page > div:nth-of-type(2) { padding:16px 14px !important; max-width:100% !important; }
+          .tg-portal-cliente-page [style*="display: flex"],
+          .tg-portal-cliente-page [style*="display:flex"] { flex-wrap:wrap; }
+          .tg-portal-cliente-page [style*="justify-content:flex-end"] { justify-content:flex-start !important; }
+          .tg-portal-cliente-page input,
+          .tg-portal-cliente-page select,
+          .tg-portal-cliente-page textarea,
+          .tg-portal-cliente-page button { max-width:100% !important; }
+          .tg-portal-cliente-page table {
+            display:block;
+            overflow-x:auto;
+            white-space:nowrap;
+            -webkit-overflow-scrolling:touch;
+          }
+          .tg-portal-cliente-page [style*="position: fixed"],
+          .tg-portal-cliente-page [style*="position:fixed"] {
+            align-items:flex-start !important;
+            padding:10px !important;
+            overflow:auto !important;
+          }
+          .tg-portal-cliente-page [style*="position: fixed"] > div,
+          .tg-portal-cliente-page [style*="position:fixed"] > div {
+            width:100% !important;
+            max-width:calc(100vw - 20px) !important;
+            max-height:calc(100dvh - 20px) !important;
+          }
+        }
+      `}</style>
       <div style={{ background: "var(--bg2)", borderBottom: "1px solid var(--border)", padding: "16px 24px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 1040, margin: "0 auto", gap: 12 }}>
           <div>

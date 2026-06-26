@@ -168,8 +168,21 @@ export default function Login() {
   }
 
   return (
-    <div style={S.bg}>
-      <div style={S.card}>
+    <>
+    <style>{`
+      .tg-login-page, .tg-login-page * { box-sizing:border-box; }
+      .tg-login-card { width:min(430px, calc(100vw - 28px)) !important; }
+      @media (max-width: 520px) {
+        .tg-login-page { align-items:flex-start !important; padding:14px !important; overflow:auto; }
+        .tg-login-card { padding:24px 18px !important; border-radius:12px !important; }
+        .tg-login-card img { max-width:min(260px, 82vw) !important; }
+        .tg-login-page [style*="position:fixed"],
+        .tg-login-page [style*="position: fixed"] { padding:10px !important; align-items:flex-start !important; overflow:auto !important; }
+        .tg-login-page form { width:100% !important; max-width:calc(100vw - 20px) !important; padding:18px !important; }
+      }
+    `}</style>
+    <div className="tg-login-page" style={S.bg}>
+      <div className="tg-login-card" style={S.card}>
         {/* Logo */}
         <div style={S.logo}>
           <div style={S.logoBox} aria-label={`${brandDisplayName} ${versionLabel}`}>
@@ -305,6 +318,7 @@ export default function Login() {
         </div>
       )}
     </div>
+    </>
   );
 }
 

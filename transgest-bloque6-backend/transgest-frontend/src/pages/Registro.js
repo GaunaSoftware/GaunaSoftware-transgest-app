@@ -67,8 +67,26 @@ export default function Registro() {
     letterSpacing:".07em", color:"#64748b", marginBottom:5, marginTop:16 };
 
   return (
-    <div style={{ minHeight:"100vh", background:"#0f1420", fontFamily:"'DM Sans',sans-serif",
+    <div className="tg-registro-page" style={{ minHeight:"100vh", background:"#0f1420", fontFamily:"'DM Sans',sans-serif",
       backgroundImage:"radial-gradient(ellipse 60% 40% at 50% -10%, rgba(59,110,245,.2) 0%, transparent 70%)" }}>
+      <style>{`
+        .tg-registro-page, .tg-registro-page * { box-sizing:border-box; }
+        @media (max-width: 900px) {
+          .tg-registro-page [style*="repeat(3,1fr)"] { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+        }
+        @media (max-width: 640px) {
+          .tg-registro-page { overflow-x:hidden; }
+          .tg-registro-page > div:first-of-type { padding:14px 16px !important; gap:12px; flex-wrap:wrap; }
+          .tg-registro-page > div:nth-of-type(2) { padding:24px 14px !important; max-width:100% !important; }
+          .tg-registro-page h1 { font-size:28px !important; line-height:1.08 !important; }
+          .tg-registro-page [style*="repeat(3,1fr)"],
+          .tg-registro-page [style*="grid-template-columns:1fr 1fr"],
+          .tg-registro-page [style*="grid-template-columns: 1fr 1fr"] { grid-template-columns:1fr !important; }
+          .tg-registro-page [style*="padding:36"],
+          .tg-registro-page [style*="padding: 36"] { padding:22px 18px !important; }
+          .tg-registro-page button { max-width:100%; white-space:normal; }
+        }
+      `}</style>
 
       {/* Nav */}
       <div style={{ padding:"16px 32px", display:"flex", alignItems:"center", justifyContent:"space-between",

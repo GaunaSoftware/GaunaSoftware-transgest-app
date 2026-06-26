@@ -65,7 +65,14 @@ export default function Invitacion() {
   };
 
   return (
-    <div style={{minHeight:"100vh",background:"#0f1420",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",padding:20}}>
+    <div className="tg-invitacion-page" style={{minHeight:"100vh",background:"#0f1420",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif",padding:20}}>
+      <style>{`
+        .tg-invitacion-page, .tg-invitacion-page * { box-sizing:border-box; }
+        @media (max-width: 520px) {
+          .tg-invitacion-page { align-items:flex-start !important; padding:14px !important; overflow:auto; }
+          .tg-invitacion-page > div { width:100% !important; padding:24px 18px !important; }
+        }
+      `}</style>
       <div style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:8,padding:34,width:"min(430px,96vw)",color:"#e2e8f0"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:24,marginBottom:6}}>TransGest</div>
         <div style={{fontSize:13,color:"#64748b",marginBottom:22}}>Crear contrasena de acceso</div>

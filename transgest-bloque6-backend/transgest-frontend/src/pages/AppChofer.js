@@ -2534,7 +2534,32 @@ export default function AppChofer(){
 
 
   return(
-    <div style={{fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"var(--bg)",maxWidth:480,margin:"0 auto",padding:"0 0 80px 0"}}>
+    <>
+    <style>{`
+      .tg-app-chofer-page, .tg-app-chofer-page * { box-sizing:border-box; min-width:0; }
+      .tg-app-chofer-page { width:min(480px, 100vw); }
+      .tg-app-chofer-page img, .tg-app-chofer-page video, .tg-app-chofer-page canvas, .tg-app-chofer-page svg { max-width:100%; }
+      @media (max-width: 380px) {
+        .tg-app-chofer-page [style*="grid-template-columns:1fr 1fr"],
+        .tg-app-chofer-page [style*="grid-template-columns: 1fr 1fr"],
+        .tg-app-chofer-page [style*="grid-template-columns:1fr 1fr 1fr"],
+        .tg-app-chofer-page [style*="grid-template-columns: 1fr 1fr 1fr"] {
+          grid-template-columns:1fr !important;
+        }
+        .tg-app-chofer-page [style*="position: fixed"],
+        .tg-app-chofer-page [style*="position:fixed"] {
+          align-items:flex-start !important;
+          padding:10px !important;
+          overflow:auto !important;
+        }
+        .tg-app-chofer-page [style*="position: fixed"] > div,
+        .tg-app-chofer-page [style*="position:fixed"] > div {
+          width:100% !important;
+          max-width:calc(100vw - 20px) !important;
+        }
+      }
+    `}</style>
+    <div className="tg-app-chofer-page" style={{fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"var(--bg)",maxWidth:480,margin:"0 auto",padding:"0 0 80px 0"}}>
 
       {/* Header fijo movil */}
       <div style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)",padding:"14px 16px",position:"sticky",top:0,zIndex:50}}>
@@ -2753,5 +2778,6 @@ export default function AppChofer(){
       </div>
     )}
     </div>
+    </>
   );
 }

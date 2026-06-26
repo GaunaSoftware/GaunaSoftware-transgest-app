@@ -306,13 +306,39 @@ async function applyMigrations() {
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(() => {});
     await db.query("CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo = true").catch(() => {});
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
+    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS tipo VARCHAR(60)").catch(() => {});
+    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS tipo_doc VARCHAR(60)").catch(() => {});
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_url TEXT").catch(() => {});
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_nombre VARCHAR(200)").catch(() => {});
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_size_kb INTEGER").catch(() => {});
     await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
+    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS tipo VARCHAR(60)").catch(() => {});
+    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS tipo_doc VARCHAR(60)").catch(() => {});
     await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_url TEXT").catch(() => {});
     await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_nombre VARCHAR(200)").catch(() => {});
     await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_size_kb INTEGER").catch(() => {});
+    await db.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='docs_vehiculos' AND column_name='tipo' AND data_type IN ('character varying','text')
+        ) THEN
+          UPDATE docs_vehiculos SET tipo=tipo_doc::text WHERE tipo IS NULL AND tipo_doc IS NOT NULL;
+        END IF;
+      END $$;
+    `).catch(() => {});
+    await db.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='docs_choferes' AND column_name='tipo' AND data_type IN ('character varying','text')
+        ) THEN
+          UPDATE docs_choferes SET tipo=tipo_doc::text WHERE tipo IS NULL AND tipo_doc IS NOT NULL;
+        END IF;
+      END $$;
+    `).catch(() => {});
     await db.query("UPDATE docs_vehiculos d SET empresa_id=v.empresa_id FROM vehiculos v WHERE d.vehiculo_id=v.id AND d.empresa_id IS NULL").catch(() => {});
     await db.query("UPDATE docs_choferes d SET empresa_id=c.empresa_id FROM choferes c WHERE d.chofer_id=c.id AND d.empresa_id IS NULL").catch(() => {});
     const idxs = [
@@ -433,17 +459,27 @@ async function applyMigrations() {
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT").catch(() => {});
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT").catch(() => {});
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN cif TYPE VARCHAR(60)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN cp TYPE VARCHAR(20)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN telefono TYPE VARCHAR(80)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN forma_pago TYPE VARCHAR(80)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN vencimiento TYPE VARCHAR(80)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN num_ext TYPE VARCHAR(30)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN cod_postal TYPE VARCHAR(20)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN contacto_telefono TYPE VARCHAR(80)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN fiscal_num_ext TYPE VARCHAR(30)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN fiscal_cod_postal TYPE VARCHAR(20)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN modo_facturacion TYPE VARCHAR(80)").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pendiente_revision BOOLEAN DEFAULT false").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS calle VARCHAR(200)").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS num_ext VARCHAR(30)").catch(() => {});
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS codigo_postal VARCHAR(20)").catch(() => {});
+    await db.query("CREATE INDEX IF NOT EXISTS idx_clientes_pendiente ON clientes(empresa_id, pendiente_revision) WHERE pendiente_revision=true").catch(() => {});
+    await db.query(`
+      DO $$
+      BEGIN
+        BEGIN ALTER TABLE clientes ALTER COLUMN cif TYPE VARCHAR(60); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN cp TYPE VARCHAR(20); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN telefono TYPE VARCHAR(80); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN forma_pago TYPE VARCHAR(80); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN vencimiento TYPE VARCHAR(80); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN num_ext TYPE VARCHAR(30); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN cod_postal TYPE VARCHAR(20); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN contacto_telefono TYPE VARCHAR(80); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN fiscal_num_ext TYPE VARCHAR(30); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN fiscal_cod_postal TYPE VARCHAR(20); EXCEPTION WHEN others THEN NULL; END;
+        BEGIN ALTER TABLE clientes ALTER COLUMN modo_facturacion TYPE VARCHAR(80); EXCEPTION WHEN others THEN NULL; END;
+      END $$;
+    `).catch(() => {});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_provincia VARCHAR(120)").catch(() => {});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
@@ -560,8 +596,24 @@ async function applyMigrations() {
     `).catch(() => {});
     await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_saas_empresa_created ON audit_log_saas(empresa_id, created_at DESC)`).catch(() => {});
     await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_saas_actor_created ON audit_log_saas(actor_id, created_at DESC)`).catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        empresa_id UUID REFERENCES empresas(id) ON DELETE SET NULL,
+        tabla VARCHAR(50) NOT NULL,
+        registro_id UUID NOT NULL,
+        campo VARCHAR(50),
+        valor_antes TEXT,
+        valor_nuevo TEXT,
+        usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+        ip INET,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `).catch(() => {});
     await db.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS empresa_id UUID`).catch(() => {});
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_registro ON audit_log(tabla, registro_id)`).catch(() => {});
     await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_empresa_registro ON audit_log(empresa_id, tabla, registro_id)`).catch(() => {});
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_fecha ON audit_log(created_at DESC)`).catch(() => {});
     await db.query(`
       CREATE TABLE IF NOT EXISTS perfiles_usuario (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -123,9 +123,9 @@ export default function Login() {
         }
       } catch {}
     } catch (err) {
-      const apiError = typeof window !== "undefined" ? window.__TMS_LAST_API_ERROR : null;
-      const hint = apiError?.request_id ? ` Codigo: ${apiError.request_id}.` : "";
-      const msg = (err.message || "Credenciales incorrectas") + hint;
+      const msg = String(err.message || "Credenciales incorrectas").toLowerCase().includes("credenciales incorrectas")
+        ? "Credenciales incorrectas"
+        : (err.message || "Credenciales incorrectas");
       setError(msg);
       if (String(err.message || "").toLowerCase().includes("credenciales incorrectas")) {
         await confirmDialog({

@@ -88,6 +88,7 @@ function friendlyApiError(message, status, requestId, path = "") {
   if (lower.includes("jwt") || (lower.includes("token") && lower.includes("expired"))) {
     return "Tu sesion ha caducado. Vuelve a iniciar sesion.";
   }
+  if (status === 401 && path.startsWith("/auth/login")) return "Credenciales incorrectas";
   if (status === 403) return "No tienes permisos para realizar esta accion.";
   if (status === 404) return "No se encontro el registro solicitado.";
   if (status === 409) return raw || "No se pudo guardar porque hay un conflicto con datos ya existentes.";

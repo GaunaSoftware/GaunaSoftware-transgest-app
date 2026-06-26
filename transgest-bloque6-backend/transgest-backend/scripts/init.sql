@@ -38,7 +38,7 @@ CREATE TABLE clientes (
   contacto        VARCHAR(100),
   telefono        VARCHAR(30),
   forma_pago      VARCHAR(50)  DEFAULT 'Transferencia bancaria',
-  vencimiento     VARCHAR(20)  DEFAULT '30 días',
+  vencimiento     VARCHAR(80)  DEFAULT '30 días',
   tipo_iva        SMALLINT     NOT NULL DEFAULT 21,
   tipo_irpf       SMALLINT     NOT NULL DEFAULT 0,
   precio_tn_km    NUMERIC(8,4) DEFAULT 0,
@@ -184,7 +184,7 @@ CREATE TABLE facturas (
   fecha_vencimiento DATE,
   estado          estado_factura NOT NULL DEFAULT 'borrador',
   forma_pago      VARCHAR(50),
-  vencimiento     VARCHAR(20),
+  vencimiento     VARCHAR(80),
   observaciones   TEXT,
   notas_internas  TEXT,
   -- Totales calculados (desnormalizado para velocidad)

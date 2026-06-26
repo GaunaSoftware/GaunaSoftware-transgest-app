@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS clientes (
   -- Facturación
   forma_pago          VARCHAR(50)  DEFAULT 'Transferencia bancaria',
   dias_pago           INTEGER      DEFAULT 30,
-  vencimiento         VARCHAR(20)  DEFAULT '30 días',
+  vencimiento         VARCHAR(80)  DEFAULT '30 días',
   tipo_iva            SMALLINT     NOT NULL DEFAULT 21,
   tipo_irpf           SMALLINT     NOT NULL DEFAULT 0,
   iban                VARCHAR(34),

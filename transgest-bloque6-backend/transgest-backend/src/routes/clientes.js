@@ -553,13 +553,21 @@ router.get("/", async (req, res) => {
   }
   if (activo !== undefined) { where.push(`activo = $${i++}`); params.push(activo === "true"); }
 
-  const countParams = params.slice(); // params without limit/offset
-  const [{ rows }, { rows: cr }] = await Promise.all([
-    db.query(`SELECT * FROM clientes WHERE ${where.join(" AND ")} ORDER BY nombre ASC LIMIT $${i} OFFSET $${i+1}`, [...params, limit, offset]),
-    db.query(`SELECT COUNT(*) FROM clientes WHERE ${where.join(" AND ")}`, countParams),
-  ]);
-  const total = parseInt(cr[0].count);
   const pageN = +page; const limitN = +limit;
+  const countParams = params.slice();
+  const { rows } = await db.query(
+    `SELECT * FROM clientes WHERE ${where.join(" AND ")}
+      ORDER BY COALESCE(pendiente_revision,false) DESC, nombre ASC
+      LIMIT $${i} OFFSET $${i+1}`,
+    [...params, limitN, offset]
+  );
+  let total = rows.length + offset;
+  try {
+    const { rows: cr } = await db.query(`SELECT COUNT(*) FROM clientes WHERE ${where.join(" AND ")}`, countParams);
+    total = parseInt(cr[0]?.count || total, 10);
+  } catch {
+    total = rows.length + offset;
+  }
   res.json({
     data: rows,
     pagination: { total, page: pageN, limit: limitN,

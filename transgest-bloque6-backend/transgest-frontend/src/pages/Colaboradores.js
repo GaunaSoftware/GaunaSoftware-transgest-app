@@ -1228,8 +1228,8 @@ function ModalColaborador({ editando, onClose, onSaved }) {
     if (!form.nombre.trim()) { notify("El nombre es obligatorio", "warning"); return; }
     setSaving(true);
     try {
-      if (editando) await editarColaborador(editando.id, form);
-      else          await crearColaborador(form);
+      const saved = editando ? await editarColaborador(editando.id, form) : await crearColaborador(form);
+      if (saved?.pendiente_revision) notify("Colaborador guardado. Queda pendiente de revision por trafico/gerencia.", "warning");
       onSaved();
     } catch(e) { notify(e.message, "error"); }
     finally { setSaving(false); }
@@ -1439,6 +1439,18 @@ export default function Colaboradores() {
           {canEdit && <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={()=>{setEditando(null);setModal(true);}}>+ Nuevo colaborador</button>}
         </div>
       </div>
+
+      {pendientesRevision.length > 0 && (
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:14,padding:"12px 14px",borderRadius:8,border:"1px solid rgba(245,158,11,.28)",background:"rgba(245,158,11,.10)",color:"#f59e0b"}}>
+          <div>
+            <div style={{fontWeight:900,fontSize:13}}>Hay {pendientesRevision.length} colaborador{pendientesRevision.length!==1?"es":""} pendiente{pendientesRevision.length!==1?"s":""} de revisar</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Revisa datos fiscales, contacto, forma de pago, vehiculos y documentacion antes de asignarle viajes.</div>
+          </div>
+          <button style={{...S.btn,background:soloPendientes?"rgba(245,158,11,.20)":"rgba(245,158,11,.12)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.35)"}} onClick={()=>setSoloPendientes(v=>!v)}>
+            {soloPendientes ? "Ver todos" : "Ver pendientes"}
+          </button>
+        </div>
+      )}
 
       <div style={S.card}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>

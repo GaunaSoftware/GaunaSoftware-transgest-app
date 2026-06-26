@@ -1512,6 +1512,7 @@ export default function Clientes() {
   const [q,        setQ]          = useState("");
   const [ficha,    setFicha]      = useState(null);  // null | "nuevo" | {cliente}
   const [rutasG,   setRutasG]     = useState([]);
+  const [soloPendientes, setSoloPendientes] = useState(false);
 
   const [mostrarBaja, setMostrarBaja] = useState(false);
 
@@ -1542,10 +1543,12 @@ export default function Clientes() {
     catch(e) { notify(e.message, "error"); }
   }
 
+  const clientesPendientes = clientes.filter(c=>c.pendiente_revision);
+  const clientesVisibles = soloPendientes ? clientesPendientes : clientes;
   const resumenClientes = {
     total: clientes.length,
     bloqueados: clientes.filter(c=>c.bloqueado).length,
-    revisar: clientes.filter(c=>c.pendiente_revision).length,
+    revisar: clientesPendientes.length,
     conRiesgo: clientes.filter(c=>Number(c.limite_riesgo || 0) > 0).length,
     conEmailFacturacion: clientes.filter(c=>c.email_facturacion || c.email).length,
     rutas: rutasG.length,
@@ -1575,6 +1578,18 @@ export default function Clientes() {
         </span>
       </div>
 
+      {clientesPendientes.length > 0 && (
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:14,padding:"12px 14px",borderRadius:8,border:"1px solid rgba(245,158,11,.28)",background:"rgba(245,158,11,.10)",color:"#f59e0b"}}>
+          <div>
+            <div style={{fontWeight:900,fontSize:13}}>Hay {clientesPendientes.length} cliente{clientesPendientes.length!==1?"s":""} pendiente{clientesPendientes.length!==1?"s":""} de revisar</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Revisa datos fiscales, contacto, forma de pago, direcciones y tarifas antes de usarlo de forma operativa.</div>
+          </div>
+          <button style={{...S.btn,background:soloPendientes?"rgba(245,158,11,.20)":"rgba(245,158,11,.12)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.35)",boxShadow:"none"}} onClick={()=>setSoloPendientes(v=>!v)}>
+            {soloPendientes ? "Ver todos" : "Ver pendientes"}
+          </button>
+        </div>
+      )}
+
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:14}}>
         {[
           ["Clientes activos", resumenClientes.total, "var(--text)", "Listado visible"],
@@ -1599,10 +1614,10 @@ export default function Clientes() {
           </tr></thead>
           <tbody>
             {loading ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
-            : clientes.length===0 ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>
+            : clientesVisibles.length===0 ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>
                 Sin clientes. {canEdit&&"Crea el primero con el botón de arriba."}
               </td></tr>
-            : clientes.map(c=>(
+            : clientesVisibles.map(c=>(
               <tr key={c.id}
                 style={{
                   cursor:"pointer",
@@ -1670,7 +1685,12 @@ export default function Clientes() {
           cliente={ficha==="nuevo" ? null : ficha}
           rutasGlobales={rutasG}
           onClose={()=>setFicha(null)}
-          onSaved={(saved)=>{ setFicha(null); if (saved?.id) setClientes(prev => [saved, ...prev.filter(c => c.id !== saved.id)]); cargar().catch(()=>{}); }}
+          onSaved={(saved)=>{
+            setFicha(null);
+            if (saved?.id) setClientes(prev => [saved, ...prev.filter(c => c.id !== saved.id)]);
+            if (saved?.pendiente_revision) notify("Cliente creado. Queda pendiente de revision por trafico/gerencia.", "warning");
+            cargar().catch(()=>{});
+          }}
         />
       )}
     </div>

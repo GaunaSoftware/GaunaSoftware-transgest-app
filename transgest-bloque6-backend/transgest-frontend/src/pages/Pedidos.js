@@ -8147,6 +8147,7 @@ export default function Pedidos() {
 
   const cargar = useCallback(async () => {
     setLoading(true);
+    let listadoCargado = false;
     try {
       const params = {};
       if (filtroEst === "activos") {
@@ -8161,15 +8162,7 @@ export default function Pedidos() {
       if (!busquedaHistorica && aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
       params.page  = page;
       params.limit = PAGE_SIZE;
-        const [p, c, v, ch, r, col, cfgEmpresa] = await Promise.all([
-          getPedidosResumenLista(params, { timeoutMs: 45000, silentError: true }),
-          getClientes(),
-          getVehiculos(),
-          getChoferes(),
-          getRutas(),
-          getColaboradores().catch(()=>[]),
-          getEmpresaConfig().catch(()=>({})),
-        ]);
+      const p = await getPedidosResumenLista(params, { timeoutMs: 45000, silentError: true });
       // Handle paginated response {data, pagination} or legacy array
       let pedidosData = Array.isArray(p) ? p : (Array.isArray(p?.data) ? p.data : []);
       // Client-side filter for "activos" (until backend supports multi-estado ANY)
@@ -8184,6 +8177,24 @@ export default function Pedidos() {
         setTotalPages(1);
         setTotalCount(pedidosData.length);
       }
+      listadoCargado = true;
+      setLoading(false);
+
+      Promise.allSettled([
+        getClientes(),
+        getVehiculos(),
+        getChoferes(),
+        getRutas(),
+        getColaboradores(),
+        getEmpresaConfig(),
+      ]).then(async (results) => {
+        const valueAt = (idx, fallback) => results[idx]?.status === "fulfilled" ? results[idx].value : fallback;
+        const c = valueAt(0, []);
+        const v = valueAt(1, []);
+        const ch = valueAt(2, []);
+        const r = valueAt(3, []);
+        const col = valueAt(4, []);
+        const cfgEmpresa = valueAt(5, {});
         setClientes(Array.isArray(c?.data) ? c.data : Array.isArray(c) ? c : []);
         setVehiculos(Array.isArray(v) ? v : []);
         setChoferes(Array.isArray(ch) ? ch : []);
@@ -8207,8 +8218,9 @@ export default function Pedidos() {
             }
           } catch {}
         }
+      }).catch((e) => { console.error(e); });
       } catch(e) { console.error(e); }
-    finally { setLoading(false); }
+    finally { if (!listadoCargado) setLoading(false); }
   }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page]);
 
   useEffect(() => { cargar(); }, [cargar]);

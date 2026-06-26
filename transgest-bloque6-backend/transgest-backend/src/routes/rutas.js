@@ -133,26 +133,59 @@ async function assertClienteEmpresa(clienteId, empresaId) {
   return rows[0] || null;
 }
 
-// Auto-migrate: add columns if missing
+let rutasSchemaReady = null;
+
+function ensureRutasSchema() {
+  if (!rutasSchemaReady) {
+    rutasSchemaReady = (async () => {
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS activa BOOLEAN DEFAULT true");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tipo_vehiculo VARCHAR(50) DEFAULT 'cualquiera'");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS pct_subida NUMERIC DEFAULT 0");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30) DEFAULT 'viaje'");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS precio_base NUMERIC DEFAULT 0");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0");
+      await db.query("UPDATE rutas SET activa=true WHERE activa IS NULL");
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS ruta_precios_cliente (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          ruta_id UUID NOT NULL REFERENCES rutas(id) ON DELETE CASCADE,
+          cliente_id UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+          precio NUMERIC DEFAULT 0,
+          tarifa_tipo VARCHAR(30),
+          minimo_facturable NUMERIC,
+          minimo_unidades NUMERIC,
+          recargo_combustible_pct NUMERIC DEFAULT 0,
+          iva_pct NUMERIC DEFAULT 21,
+          notas TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (ruta_id, cliente_id)
+        )
+      `);
+      await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30)");
+      await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC");
+      await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC");
+      await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0");
+      await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS iva_pct NUMERIC DEFAULT 21");
+      await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT");
+      await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS minimo_facturable_toneladas NUMERIC");
+    })().catch((err) => {
+      rutasSchemaReady = null;
+      throw err;
+    });
+  }
+  return rutasSchemaReady;
+}
+
 router.use(async (req, res, next) => {
   try {
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tipo_vehiculo VARCHAR(50) DEFAULT 'cualquiera'");
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS pct_subida NUMERIC DEFAULT 0");
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL");
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30) DEFAULT 'viaje'");
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS precio_base NUMERIC DEFAULT 0");
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC");
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC");
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30)");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS iva_pct NUMERIC DEFAULT 21");
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS minimo_facturable_toneladas NUMERIC").catch(() => {});
-  } catch(e) {}
-  next();
+    await ensureRutasSchema();
+    next();
+  } catch (e) {
+    next(e);
+  }
 });
 
 router.get("/", cacheMiddleware(300), async (req, res) => {

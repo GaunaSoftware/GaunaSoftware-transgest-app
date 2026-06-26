@@ -304,9 +304,39 @@ async function applyMigrations() {
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS notas TEXT").catch(() => {});
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS peajes NUMERIC DEFAULT 0").catch(() => {});
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tiempo_h NUMERIC").catch(() => {});
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS activa BOOLEAN DEFAULT true").catch(() => {});
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tipo_vehiculo VARCHAR(50) DEFAULT 'cualquiera'").catch(() => {});
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS pct_subida NUMERIC DEFAULT 0").catch(() => {});
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(() => {});
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30) DEFAULT 'viaje'").catch(() => {});
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS precio_base NUMERIC DEFAULT 0").catch(() => {});
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC").catch(() => {});
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC").catch(() => {});
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0").catch(() => {});
+    await db.query("UPDATE rutas SET activa=true WHERE activa IS NULL").catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ruta_precios_cliente (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        ruta_id UUID NOT NULL REFERENCES rutas(id) ON DELETE CASCADE,
+        cliente_id UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+        precio NUMERIC DEFAULT 0,
+        tarifa_tipo VARCHAR(30),
+        minimo_facturable NUMERIC,
+        minimo_unidades NUMERIC,
+        recargo_combustible_pct NUMERIC DEFAULT 0,
+        iva_pct NUMERIC DEFAULT 21,
+        notas TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (ruta_id, cliente_id)
+      )
+    `).catch(() => {});
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30)").catch(() => {});
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC").catch(() => {});
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC").catch(() => {});
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0").catch(() => {});
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS iva_pct NUMERIC DEFAULT 21").catch(() => {});
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT").catch(() => {});
+    await db.query("CREATE INDEX IF NOT EXISTS idx_ruta_precios_cliente_cliente ON ruta_precios_cliente(cliente_id)").catch(() => {});
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(() => {});
     await db.query("CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo = true").catch(() => {});
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
@@ -368,6 +398,10 @@ async function applyMigrations() {
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_ultimo_envio_at TIMESTAMPTZ").catch(() => {});
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS aviso_cobro_dias INTEGER NOT NULL DEFAULT 7").catch(() => {});
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)").catch(() => {});
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS vencimiento VARCHAR(80)").catch(() => {});
+    await db.query("ALTER TABLE facturas ALTER COLUMN vencimiento TYPE VARCHAR(80) USING vencimiento::text").catch(() => {});
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE").catch(() => {});
+    await db.query("UPDATE facturas SET vencimiento=fecha_vencimiento::text WHERE vencimiento IS NULL AND fecha_vencimiento IS NOT NULL").catch(() => {});
     await db.query("CREATE INDEX IF NOT EXISTS idx_facturas_revision_cobro ON facturas(empresa_id, revision_cobro_at) WHERE estado <> 'cobrada'").catch(() => {});
     await db.query(`
       CREATE TABLE IF NOT EXISTS factura_registros_fiscales (
@@ -438,6 +472,9 @@ async function applyMigrations() {
     await db.query("UPDATE empresas SET max_vehiculos=0, max_usuarios=0 WHERE max_vehiculos<>0 OR max_usuarios<>0").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS fecha_vencimiento TIMESTAMPTZ").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS configuracion JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_trafico JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_alertas JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(120)").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(120)").catch(() => {});
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_price_id VARCHAR(120)").catch(() => {});

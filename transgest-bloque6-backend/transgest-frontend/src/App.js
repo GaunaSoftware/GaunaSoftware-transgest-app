@@ -1200,11 +1200,7 @@ function AppInner() {
     }
     const puedeVerBadgeTaller = ["gerente","contable","responsable_taller","trafico"].includes(user?.rol);
     const puedeVerAlertasVehiculos = ["gerente","trafico","responsable_taller","contable"].includes(user?.rol);
-    if (puedeVerBadgeTaller) calcTallerBadge();
     calcNotificacionesBadge();
-    calcSolicitudesBadge();
-    calcColaboradoresBadge();
-    calcAvisosOperativosColaboradores();
     const notifRefresh = () => calcNotificacionesBadge();
     const solicitudesRefresh = () => calcSolicitudesBadge();
     const colaboradoresRefresh = () => calcColaboradoresBadge();
@@ -1215,6 +1211,13 @@ function AppInner() {
     window.addEventListener("tms:agenda-refresh", avisosOperativosRefresh);
     window.addEventListener("tms:pedidos-changed", avisosOperativosRefresh);
     const tallerIv = puedeVerBadgeTaller ? setInterval(calcTallerBadge, 30000) : null;
+
+    const earlyBadgeTimer = setTimeout(() => {
+      if (puedeVerBadgeTaller) calcTallerBadge();
+      calcSolicitudesBadge();
+      calcColaboradoresBadge();
+      calcAvisosOperativosColaboradores();
+    }, 6000);
 
     // Delay non-critical badge requests so they don't block page render
     const badgeTimer = setTimeout(() => {
@@ -1243,7 +1246,7 @@ function AppInner() {
       calcSolicitudesBadge();
       calcColaboradoresBadge();
       calcAvisosOperativosColaboradores();
-    }, 3000); // 3s delay Ã¢â‚¬â€ page renders instantly, badges appear after
+    }, 12000); // 12s delay: avoid saturating small production instances on first paint
 
     // Refresh badges every 5 minutes
     const refreshIv = setInterval(() => {
@@ -1265,6 +1268,7 @@ function AppInner() {
     }, 300000); // 5 min refresh
 
     return () => {
+      clearTimeout(earlyBadgeTimer);
       clearTimeout(badgeTimer);
       window.removeEventListener("tms:notificaciones-refresh", notifRefresh);
       window.removeEventListener("tms:solicitudes-refresh", solicitudesRefresh);

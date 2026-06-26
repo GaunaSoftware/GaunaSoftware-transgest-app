@@ -649,11 +649,14 @@ router.get("/:id/riesgo-operativo", cacheMiddleware(30), async (req, res) => {
         FROM clientes c
         LEFT JOIN facturas f ON f.cliente_id = c.id AND f.empresa_id = c.empresa_id
         LEFT JOIN LATERAL (
-          SELECT CASE
-            WHEN f.vencimiento IS NULL THEN NULL
-            WHEN f.vencimiento::text ~ '^\\d{4}-\\d{2}-\\d{2}' THEN f.vencimiento::date
-            ELSE NULL
-          END AS vencimiento_date
+          SELECT COALESCE(
+            f.fecha_vencimiento,
+            CASE
+              WHEN f.vencimiento IS NULL THEN NULL
+              WHEN f.vencimiento::text ~ '^\\d{4}-\\d{2}-\\d{2}' THEN f.vencimiento::date
+              ELSE NULL
+            END
+          ) AS vencimiento_date
         ) fv ON true
         LEFT JOIN LATERAL (
           SELECT COUNT(*)::int AS pedidos_confirmados_pendientes,

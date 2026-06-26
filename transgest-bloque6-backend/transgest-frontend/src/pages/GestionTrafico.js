@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, getPedidos, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden } from "../services/api";
+import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
@@ -2354,8 +2354,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       const desdeCarga = addDaysLocal(semana[0], -45).toISOString().slice(0,10);
       const hastaCarga = addDaysLocal(semana[6], 75).toISOString().slice(0,10);
       const [p, pg, v, c, r, cfgEmpresa, notifs] = await Promise.all([
-        getPedidos({ desde: desdeCarga, hasta: hastaCarga, limit: 1000 }, { timeoutMs: 45000, silentError: true }).catch(() => []),
-        getPedidos({
+        getPedidosResumenLista({ desde: desdeCarga, hasta: hastaCarga, limit: 1000 }, { timeoutMs: 45000, silentError: true }).catch(() => []),
+        getPedidosResumenLista({
           tipo_carga: "grupaje",
           estado: "pendiente,confirmado,en_curso,descarga,incidencia",
           facturado: "false",

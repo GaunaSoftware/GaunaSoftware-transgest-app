@@ -3,7 +3,7 @@ import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia } from "..
 import { getLogoDataUrl } from "../services/logoHelper";
 import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { getPedidos, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
+import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
@@ -8162,7 +8162,7 @@ export default function Pedidos() {
       params.page  = page;
       params.limit = PAGE_SIZE;
         const [p, c, v, ch, r, col, cfgEmpresa] = await Promise.all([
-          getPedidos(params, { timeoutMs: 45000, silentError: true }),
+          getPedidosResumenLista(params, { timeoutMs: 45000, silentError: true }),
           getClientes(),
           getVehiculos(),
           getChoferes(),
@@ -9073,9 +9073,9 @@ export default function Pedidos() {
         {canEdit && <button style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#008b82",border:"1px solid rgba(16,185,129,.24)"}} onClick={()=>setQuickCreando(true)}>+ Pedido rapido</button>}
         {canEdit && aiDisponible && <button style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#6d5dfc",border:"1px solid rgba(139,92,246,.22)"}} onClick={()=>setVistaPedidos("ia")}>IA: email / PDF</button>}
         <button onClick={aplicarSemanaActual}
-          title={filtroSemanaActualActivo ? "Volver a todos los activos" : "Mostrar solo la semana actual"}
-          style={{...S.btn,background:filtroSemanaActualActivo?"#008b82":"#fff",color:filtroSemanaActualActivo?"#fff":"#475569",border:filtroSemanaActualActivo?"1px solid #008b82":"1px solid #dbe5ec"}}>
-          {filtroSemanaActualActivo ? "Todos activos" : "Semana actual"}
+          title={filtroSemanaActualActivo ? "Quitar el filtro de semana" : "Mostrar solo la semana actual"}
+          style={{...S.btn,background:filtroSemanaActualActivo?"rgba(245,158,11,.12)":"#fff",color:filtroSemanaActualActivo?"#f59e0b":"#475569",border:filtroSemanaActualActivo?"1px solid rgba(245,158,11,.26)":"1px solid #dbe5ec"}}>
+          {filtroSemanaActualActivo ? "Quitar semana" : "Semana actual"}
         </button>
         <input type="date" value={filtroDesde} onChange={e=>{setFiltroFechasCustom(true);setFiltroDesde(e.target.value);}}
           style={{...S.input,width:132}} title="Desde"/>

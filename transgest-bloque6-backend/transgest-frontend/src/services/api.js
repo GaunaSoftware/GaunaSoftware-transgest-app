@@ -366,6 +366,16 @@ export const revocarClienteIntegracionToken = (id, tokenId) => apiFetch(`/client
 
 // ── Pedidos ───────────────────────────────────────────
 export const getPedidos     = (params={}, options = {}) => apiFetch(`/pedidos?${new URLSearchParams(params)}`, options);
+export async function getPedidosResumenLista(params = {}, options = {}) {
+  try {
+    return await apiFetch(`/pedidos/resumen-lista?${new URLSearchParams(params)}`, options);
+  } catch (error) {
+    if (error?.status === 404) {
+      return getPedidos(params, options);
+    }
+    throw error;
+  }
+}
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
 export const getPedidoIdaRetorno = (id)   => apiFetch(`/pedidos/${id}/ida-retorno`);
 export const enlazarPedidoRetorno = (id, data) => apiFetch(`/pedidos/${id}/ida-retorno`, { method:"POST", body:data });

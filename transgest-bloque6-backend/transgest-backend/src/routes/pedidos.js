@@ -4912,6 +4912,160 @@ router.get("/", async (req, res) => {
   });
 });
 
+// GET /pedidos/resumen-lista - listado operativo ligero para pantallas de trafico
+router.get("/resumen-lista", async (req, res) => {
+  try {
+    const { estado, cliente_id, chofer_id, desde, hasta, facturado, pendiente_completar, tipo_carga, q, page = 1, limit = 100 } = req.query;
+    const pageN = Math.max(Number(page) || 1, 1);
+    const limitN = Math.min(Math.max(Number(limit) || 100, 1), 1000);
+    const offset = (pageN - 1) * limitN;
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const where = ["p.empresa_id = $1"];
+    const params = [empresaId];
+    let i = 2;
+
+    if (estado) {
+      const estados = String(estado).split(",").map(s => s.trim()).filter(Boolean);
+      if (estados.length === 1) {
+        where.push(`p.estado::text = $${i++}`);
+        params.push(estados[0]);
+      } else if (estados.length > 1) {
+        where.push(`p.estado::text = ANY($${i++}::text[])`);
+        params.push(estados);
+      }
+    }
+    if (cliente_id) { where.push(`p.cliente_id = $${i++}`); params.push(cliente_id); }
+    if (req.user?.rol === "chofer") {
+      const access = await getChoferAccessForUser(req.user, empresaId);
+      if (!access.choferIds.length && !access.vehiculoIds.length) {
+        return res.json({ data: [], pagination: { total: 0, page: pageN, limit: limitN, totalPages: 0, hasNext: false, hasPrev: pageN > 1 } });
+      }
+      const ownClauses = [];
+      if (access.choferIds.length) {
+        ownClauses.push(`(p.chofer_id = ANY($${i}::uuid[]) OR p.chofer2_id = ANY($${i}::uuid[]))`);
+        params.push(access.choferIds);
+        i++;
+      }
+      if (access.vehiculoIds.length) {
+        ownClauses.push(`p.vehiculo_id = ANY($${i++}::uuid[])`);
+        params.push(access.vehiculoIds);
+      }
+      where.push(`(${ownClauses.join(" OR ")})`);
+    } else if (chofer_id) {
+      where.push(`(p.chofer_id = $${i} OR p.chofer2_id = $${i++})`);
+      params.push(chofer_id);
+    }
+    if (req.user?.rol === "trafico" && !traficoConfigIsOpen(req.user.trafico_config)) {
+      const scope = normalizeTraficoConfig(req.user.trafico_config);
+      if (scope.vehiculo_ids.length) {
+        where.push(`p.vehiculo_id = ANY($${i++}::uuid[])`);
+        params.push(scope.vehiculo_ids);
+      }
+      if (scope.tipos_viaje.length && scope.tipos_viaje.length < 3) {
+        where.push(`COALESCE(p.tipo_viaje,'normal') = ANY($${i++}::text[])`);
+        params.push(scope.tipos_viaje);
+      }
+    }
+    if (desde) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido) >= $${i++}`); params.push(desde); }
+    if (hasta) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido) <= $${i++}`); params.push(hasta); }
+    if (pendiente_completar === "true") where.push("p.pendiente_completar IS TRUE");
+    if (pendiente_completar === "false") where.push("COALESCE(p.pendiente_completar,false) IS FALSE");
+    if (tipo_carga) { where.push(`COALESCE(p.tipo_carga,'') = $${i++}`); params.push(tipo_carga); }
+    if (facturado === "false") where.push("(p.factura_id IS NULL OR f.estado='borrador')");
+    if (facturado === "true") where.push("p.factura_id IS NOT NULL AND COALESCE(f.estado,'')<>'borrador'");
+    if (q) {
+      params.push(`%${String(q).trim().toLowerCase()}%`);
+      where.push(`(
+        LOWER(COALESCE(p.numero,'')) LIKE $${i}
+        OR LOWER(COALESCE(p.origen,'')) LIKE $${i}
+        OR LOWER(COALESCE(p.destino,'')) LIKE $${i}
+        OR LOWER(COALESCE(p.referencia_cliente,'')) LIKE $${i}
+        OR EXISTS (
+          SELECT 1 FROM clientes c2
+          WHERE c2.id=p.cliente_id AND c2.empresa_id=p.empresa_id AND LOWER(COALESCE(c2.nombre,'')) LIKE $${i}
+        )
+        OR EXISTS (
+          SELECT 1 FROM colaboradores co2
+          WHERE co2.id=p.colaborador_id AND co2.empresa_id=p.empresa_id AND LOWER(COALESCE(co2.nombre,'')) LIKE $${i}
+        )
+      )`);
+      i++;
+    }
+
+    const { rows } = await queryWithColaboradorFallback(`
+      SELECT p.id, p.numero, p.empresa_id, p.cliente_id, p.colaborador_id,
+             p.vehiculo_id, p.chofer_id, p.chofer2_id, p.remolque_id,
+             p.fecha_pedido, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
+             p.hora_carga, p.hora_descarga, p.origen, p.destino, p.referencia_cliente,
+             p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
+             p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,
+             p.tipo_carga, p.tipo_viaje, p.factura_id,
+             c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
+             co.nombre AS colaborador_nombre, co.telefono AS colaborador_telefono, co.email AS colaborador_email,
+             ch.nombre AS chofer_nombre,
+             v.matricula AS vehiculo_matricula,
+             r.matricula AS remolque_matricula,
+             f.estado AS factura_estado,
+             f.numero AS factura_numero,
+             0::int AS documentos_count,
+             0::int AS albaranes_count
+        FROM pedidos p
+        LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
+        LEFT JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
+        LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+        LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
+        LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
+       WHERE ${where.join(" AND ")}
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido) DESC, p.created_at DESC
+       LIMIT $${i++} OFFSET $${i++}
+    `, `
+      SELECT p.id, p.numero, p.empresa_id, p.cliente_id, p.colaborador_id,
+             p.vehiculo_id, p.chofer_id, p.chofer2_id, p.remolque_id,
+             p.fecha_pedido, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
+             p.hora_carga, p.hora_descarga, p.origen, p.destino, p.referencia_cliente,
+             p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
+             p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,
+             p.tipo_carga, p.tipo_viaje, p.factura_id,
+             c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
+             NULL AS colaborador_nombre, NULL AS colaborador_telefono, NULL AS colaborador_email,
+             ch.nombre AS chofer_nombre,
+             v.matricula AS vehiculo_matricula,
+             r.matricula AS remolque_matricula,
+             f.estado AS factura_estado,
+             f.numero AS factura_numero,
+             0::int AS documentos_count,
+             0::int AS albaranes_count
+        FROM pedidos p
+        LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
+        LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+        LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
+        LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
+       WHERE ${where.join(" AND ")}
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido) DESC, p.created_at DESC
+       LIMIT $${i - 2} OFFSET $${i - 1}
+    `, [...params, limitN, offset]);
+
+    const totalAproximado = offset + rows.length + (rows.length === limitN ? 1 : 0);
+    res.json({
+      data: rows,
+      pagination: {
+        total: totalAproximado,
+        page: pageN,
+        limit: limitN,
+        totalPages: rows.length === limitN ? pageN + 1 : pageN,
+        hasNext: rows.length === limitN,
+        hasPrev: pageN > 1,
+        approximate: true,
+      },
+    });
+  } catch (e) {
+    logger.error("Error en resumen-lista de pedidos:", e.message);
+    res.status(500).json({ error: e.message || "No se pudo cargar el resumen de pedidos" });
+  }
+});
+
 // GET /pedidos/:id
 router.post("/:id/colaborador/notificar", GERENTE_O_TRAFICO, async (req, res) => {
   try {

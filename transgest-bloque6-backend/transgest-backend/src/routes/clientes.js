@@ -23,32 +23,47 @@ const CLIENTES_CREATE_BASE_COLUMNS = new Set([
   "bloqueado", "bloqueo_motivo", "pendiente_revision",
 ]);
 
-let clientesColumnsCache = null;
-async function getClientesColumns() {
-  if (clientesColumnsCache) return clientesColumnsCache;
+let clientesColumnMetaCache = null;
+async function getClientesColumnMeta() {
+  if (clientesColumnMetaCache) return clientesColumnMetaCache;
   try {
     const { rows } = await db.query(
-      "SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='clientes'"
+      "SELECT column_name, character_maximum_length FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='clientes'"
     );
-    clientesColumnsCache = new Set(rows.map(r => r.column_name));
+    clientesColumnMetaCache = new Map(rows.map(r => [
+      r.column_name,
+      { maxLength: r.character_maximum_length ? Number(r.character_maximum_length) : null },
+    ]));
   } catch {
-    clientesColumnsCache = new Set([
+    clientesColumnMetaCache = new Map([
       "id", "empresa_id", "nombre", "cif", "direccion", "cp", "ciudad", "pais",
       "email", "contacto", "telefono", "forma_pago", "vencimiento", "tipo_iva",
       "tipo_irpf", "precio_tn_km", "notas", "activo", "created_at",
-    ]);
+    ].map(column => [column, { maxLength: null }]));
   }
-  return clientesColumnsCache;
+  return clientesColumnMetaCache;
+}
+
+async function getClientesColumns() {
+  return new Set((await getClientesColumnMeta()).keys());
 }
 
 function clienteColumnEntries(values = {}) {
   return Object.entries(values).filter(([, value]) => value !== undefined);
 }
 
+function clampClienteColumnValue(column, value, meta) {
+  const maxLength = meta.get(column)?.maxLength || null;
+  if (!maxLength || typeof value !== "string") return value;
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
 async function insertClienteCompat(values = {}) {
-  const columns = await getClientesColumns();
+  const meta = await getClientesColumnMeta();
+  const columns = new Set(meta.keys());
   const entries = clienteColumnEntries(values)
-    .filter(([column]) => CLIENTES_CREATE_BASE_COLUMNS.has(column) && columns.has(column));
+    .filter(([column]) => CLIENTES_CREATE_BASE_COLUMNS.has(column) && columns.has(column))
+    .map(([column, value]) => [column, clampClienteColumnValue(column, value, meta)]);
   const names = entries.map(([column]) => column);
   const params = entries.map(([, value]) => value);
   const placeholders = params.map((_, idx) => `$${idx + 1}`);
@@ -60,8 +75,11 @@ async function insertClienteCompat(values = {}) {
 }
 
 async function updateClienteCompat(clienteId, empresaId, values = {}) {
-  const columns = await getClientesColumns();
-  const entries = clienteColumnEntries(values).filter(([column]) => columns.has(column));
+  const meta = await getClientesColumnMeta();
+  const columns = new Set(meta.keys());
+  const entries = clienteColumnEntries(values)
+    .filter(([column]) => columns.has(column))
+    .map(([column, value]) => [column, clampClienteColumnValue(column, value, meta)]);
   if (!entries.length) {
     const { rows } = await db.query("SELECT * FROM clientes WHERE id=$1 AND empresa_id=$2", [clienteId, empresaId]);
     return rows[0] || null;

@@ -126,37 +126,37 @@ CREATE TABLE IF NOT EXISTS clientes (
   id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   empresa_id          UUID         REFERENCES empresas(id) ON DELETE CASCADE,
   nombre              VARCHAR(200) NOT NULL,
-  cif                 VARCHAR(20),
+  cif                 VARCHAR(60),
   -- Contacto
   email               VARCHAR(150),
-  telefono            VARCHAR(30),
+  telefono            VARCHAR(80),
   web                 VARCHAR(150),
   contacto            VARCHAR(100),  -- nombre persona contacto (legacy)
   contacto_nombre     VARCHAR(100),
-  contacto_telefono   VARCHAR(30),
+  contacto_telefono   VARCHAR(80),
   -- Dirección social desglosada
   direccion           VARCHAR(300),  -- campo legacy (texto libre)
   calle               VARCHAR(200),
-  num_ext             VARCHAR(10),
+  num_ext             VARCHAR(30),
   piso_puerta         VARCHAR(20),
-  cod_postal          VARCHAR(10),
+  cod_postal          VARCHAR(20),
   municipio           VARCHAR(100),
   provincia           VARCHAR(100),
   pais_iso            VARCHAR(3)   DEFAULT 'ES',
-  cp                  VARCHAR(10),   -- legacy
+  cp                  VARCHAR(20),   -- legacy
   ciudad              VARCHAR(100),  -- legacy
   pais                VARCHAR(100)   DEFAULT 'España',
   -- Dirección fiscal (si es distinta)
   dir_fiscal_distinta BOOLEAN DEFAULT false,
   fiscal_calle        VARCHAR(200),
-  fiscal_num_ext      VARCHAR(10),
+  fiscal_num_ext      VARCHAR(30),
   fiscal_piso_puerta  VARCHAR(20),
-  fiscal_cod_postal   VARCHAR(10),
+  fiscal_cod_postal   VARCHAR(20),
   fiscal_municipio    VARCHAR(100),
   fiscal_provincia    VARCHAR(100),
   fiscal_pais_iso     VARCHAR(3) DEFAULT 'ES',
   -- Facturación
-  forma_pago          VARCHAR(50)  DEFAULT 'Transferencia bancaria',
+  forma_pago          VARCHAR(80)  DEFAULT 'Transferencia bancaria',
   dias_pago           INTEGER      DEFAULT 30,
   vencimiento         VARCHAR(80)  DEFAULT '30 días',
   tipo_iva            SMALLINT     NOT NULL DEFAULT 21,
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS clientes (
   iban                VARCHAR(34),
   email_facturas      VARCHAR(150),
   dir_envio_facturas  VARCHAR(300),
-  modo_facturacion    VARCHAR(30)  DEFAULT 'por_viaje',
+  modo_facturacion    VARCHAR(80)  DEFAULT 'por_viaje',
   limite_riesgo       NUMERIC(10,2) DEFAULT 0,
   -- Tarifas
   precio_tn_km        NUMERIC(8,4) DEFAULT 0,

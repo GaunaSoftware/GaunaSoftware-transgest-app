@@ -415,8 +415,8 @@ export const getAiInboxStatus = () =>
   apiFetch("/pedidos/ai-inbox/status", { silentSuccess:true });
 export const getPlanificacionCargaIA = (id) =>
   apiFetch(`/pedidos/${id}/planificacion-ia`, { silentSuccess:true });
-export const crearPedido    = (data)      => apiFetch("/pedidos", { method:"POST", body:data });
-export const crearPedidoChofer = (data)   => apiFetch("/pedidos/chofer", { method:"POST", body:data });
+export const crearPedido    = (data)      => apiFetch("/pedidos", { method:"POST", body:data, timeoutMs:60000 });
+export const crearPedidoChofer = (data)   => apiFetch("/pedidos/chofer", { method:"POST", body:data, timeoutMs:60000 });
 export const getChoferClientes = (q = "") => apiFetch(`/pedidos/chofer/clientes${q ? `?q=${encodeURIComponent(q)}` : ""}`);
 export const getChoferClienteRutas = (clienteId) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/rutas`);
 export const crearChoferRuta = (data) => apiFetch("/pedidos/chofer/rutas", { method:"POST", body:data });
@@ -430,7 +430,7 @@ export const getWorkflowColaboradorPreview = (id) =>
 
 // ── Optimizacion de rutas ─────────────────────────────
 export const getRouteProviders = () => apiFetch("/route-optimizer/providers");
-export const optimizarRuta = (data) => apiFetch("/route-optimizer/optimize", { method:"POST", body:data });
+export const optimizarRuta = (data) => apiFetch("/route-optimizer/optimize", { method:"POST", body:data, timeoutMs:60000 });
 export const getRutaOptimizadaPedido = (pedidoId) => apiFetch(`/route-optimizer/pedido/${pedidoId}/latest`);
 export const getRutaEnviosPedido = (pedidoId) => apiFetch(`/route-optimizer/pedido/${pedidoId}/dispatches`);
 export const enviarRutaOptimizada = (pedidoId, data) => apiFetch(`/route-optimizer/pedido/${pedidoId}/send`, { method:"POST", body:data });

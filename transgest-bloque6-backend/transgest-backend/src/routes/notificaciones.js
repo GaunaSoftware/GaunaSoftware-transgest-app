@@ -236,7 +236,7 @@ async function listarAvisosColaboradores(req) {
             pay.documentacion_recibida, pay.factura_nombre, pay.factura_data,
             COALESCE(docs.albaranes_count,0)::int AS albaranes_count
        FROM pedidos p
-       JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
+       JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id AND COALESCE(co.activo,true)=true
        LEFT JOIN pedido_colaborador_pagos pay ON pay.pedido_id=p.id AND pay.empresa_id=p.empresa_id
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int AS albaranes_count

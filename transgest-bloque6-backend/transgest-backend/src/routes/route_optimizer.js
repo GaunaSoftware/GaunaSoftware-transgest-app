@@ -154,7 +154,45 @@ function routePage(title, body) {
   </style></head><body><main><div class="box">${body}</div></main></body></html>`;
 }
 
+let routeOptimizationSchemaPromise = null;
+async function ensureRouteOptimizationSchema() {
+  if (!routeOptimizationSchemaPromise) {
+    routeOptimizationSchemaPromise = (async () => {
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS route_optimizations (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          pedido_id UUID NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+          provider VARCHAR(40) NOT NULL DEFAULT 'local',
+          provider_label VARCHAR(120),
+          preference VARCHAR(40) NOT NULL DEFAULT 'camion',
+          truck_aware BOOLEAN NOT NULL DEFAULT false,
+          distance_km NUMERIC(10,2),
+          duration_min INTEGER,
+          maps_url TEXT,
+          stops JSONB NOT NULL DEFAULT '[]'::jsonb,
+          truck JSONB NOT NULL DEFAULT '{}'::jsonb,
+          waypoint_coordinates JSONB NOT NULL DEFAULT '[]'::jsonb,
+          geometry JSONB,
+          steps JSONB NOT NULL DEFAULT '[]'::jsonb,
+          warning TEXT,
+          created_by UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await db.query("CREATE INDEX IF NOT EXISTS idx_route_optimizations_pedido ON route_optimizations(pedido_id, created_at DESC)");
+      await db.query("CREATE INDEX IF NOT EXISTS idx_route_optimizations_empresa ON route_optimizations(empresa_id, created_at DESC)");
+      await db.query("ALTER TABLE route_optimizations ADD COLUMN IF NOT EXISTS waypoint_coordinates JSONB NOT NULL DEFAULT '[]'::jsonb");
+    })().catch(err => {
+      routeOptimizationSchemaPromise = null;
+      throw err;
+    });
+  }
+  return routeOptimizationSchemaPromise;
+}
+
 async function ensureDispatchSchema() {
+  await ensureRouteOptimizationSchema();
   await db.query(`
     CREATE TABLE IF NOT EXISTS route_dispatches (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -502,6 +540,7 @@ router.get("/pedido/:pedidoId/latest", async (req, res, next) => {
   try {
     const empresaId = req.user?.empresa_id;
     if (!empresaId) return res.status(400).json({ error: "Empresa no encontrada en sesion." });
+    await ensureRouteOptimizationSchema();
     const { rows } = await db.query(
       `SELECT *
        FROM route_optimizations
@@ -776,36 +815,42 @@ router.post("/optimize", async (req, res, next) => {
     };
 
     if (req.body?.pedido_id) {
-      const check = await db.query(
-        "SELECT id FROM pedidos WHERE id=$1 AND empresa_id=$2 LIMIT 1",
-        [req.body.pedido_id, empresaId]
-      );
-      if (!check.rows[0]) return res.status(404).json({ error: "Pedido no encontrado para esta empresa." });
-      const saved = await db.query(
-        `INSERT INTO route_optimizations
-          (empresa_id,pedido_id,provider,provider_label,preference,truck_aware,distance_km,duration_min,maps_url,stops,truck,waypoint_coordinates,geometry,steps,warning,created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15,$16)
-         RETURNING id, created_at`,
-        [
-          empresaId,
-          req.body.pedido_id,
-          payload.provider,
-          payload.provider_label,
-          payload.preference,
-          !!payload.truck_aware,
-          payload.distance_km,
-          payload.duration_min,
-          payload.maps_url,
-          JSON.stringify(payload.stops || []),
-          JSON.stringify(payload.truck || {}),
-          JSON.stringify(payload.waypoint_coordinates || []),
-          JSON.stringify(payload.geometry || null),
-          JSON.stringify(payload.steps || []),
-          payload.warning,
-          req.user?.id || null,
-        ]
-      );
-      payload.saved = { id: saved.rows[0].id, created_at: saved.rows[0].created_at };
+      try {
+        await ensureRouteOptimizationSchema();
+        const check = await db.query(
+          "SELECT id FROM pedidos WHERE id=$1 AND empresa_id=$2 LIMIT 1",
+          [req.body.pedido_id, empresaId]
+        );
+        if (!check.rows[0]) return res.status(404).json({ error: "Pedido no encontrado para esta empresa." });
+        const saved = await db.query(
+          `INSERT INTO route_optimizations
+            (empresa_id,pedido_id,provider,provider_label,preference,truck_aware,distance_km,duration_min,maps_url,stops,truck,waypoint_coordinates,geometry,steps,warning,created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15,$16)
+           RETURNING id, created_at`,
+          [
+            empresaId,
+            req.body.pedido_id,
+            payload.provider,
+            payload.provider_label,
+            payload.preference,
+            !!payload.truck_aware,
+            payload.distance_km,
+            payload.duration_min,
+            payload.maps_url,
+            JSON.stringify(payload.stops || []),
+            JSON.stringify(payload.truck || {}),
+            JSON.stringify(payload.waypoint_coordinates || []),
+            JSON.stringify(payload.geometry || null),
+            JSON.stringify(payload.steps || []),
+            payload.warning,
+            req.user?.id || null,
+          ]
+        );
+        payload.saved = { id: saved.rows[0].id, created_at: saved.rows[0].created_at };
+      } catch (saveError) {
+        console.warn("[route_optimizer] ruta calculada sin guardar historico:", saveError.message);
+        payload.warning = `${payload.warning ? `${payload.warning} ` : ""}Ruta calculada, pero no se pudo guardar el historico automaticamente.`;
+      }
     }
 
     res.json(payload);

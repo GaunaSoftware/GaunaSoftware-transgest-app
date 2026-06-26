@@ -6861,6 +6861,8 @@ router.post("/", GERENTE_O_TRAFICO,
       return res.status(validationErr.status || 400).json({ error: validationErr.message });
     }
 
+    let pedidoCreado = null;
+    let remolqueMatCreado = null;
     await db.transaction(async (client) => {
       await assertClienteAdmiteNuevoPedido(client, req, cliente_id, importeInicial);
       // Resolver el remolque efectivo para este pedido
@@ -7088,16 +7090,6 @@ router.post("/", GERENTE_O_TRAFICO,
           [pedido.id, e.tipo||"otro", e.concepto, normalizePedidoValue("importe", e.importe) || 0]
         );
       }
-      if (festivoAviso) {
-        await notificarGerenciaPedido(
-          empresaId,
-          "pedido_destino_festivo",
-          "Pedido enviado a zona en festivo",
-          `El pedido ${pedido.numero || pedido.id} se ha confirmado para ${festivoAviso.ccaa_label} en festivo (${festivoAviso.festivo_nombre}).`,
-          { ...festivoAviso, pedido_id: pedido.id, pedido_numero: pedido.numero, dedupe_key: `festivo:${pedido.id}:${festivoAviso.fecha}:${festivoAviso.ccaa}` },
-          req.user?.id || null
-        );
-      }
       if (req.body?.ai_metadata && typeof req.body.ai_metadata === "object") {
         const aiMeta = req.body.ai_metadata;
         await logPedidoEvento(pedido.id, empresaId, "pedido.creado_bandeja_ia", {
@@ -7112,11 +7104,24 @@ router.post("/", GERENTE_O_TRAFICO,
           visual_ok: Boolean(aiMeta.visual_ok),
         }, req.user?.rol || "usuario", req.user?.id || null, client);
       }
-      await notificarPlanificacionIdaRetorno(pedido, empresaId, req.user?.id || null)
-        .catch(e => logger.warn("No se pudo notificar planificacion ida-retorno:", e.message));
-
-      res.status(201).json({...pedido, remolque_matricula: remolque_mat});
+      pedidoCreado = pedido;
+      remolqueMatCreado = remolque_mat;
     });
+    res.status(201).json({...pedidoCreado, remolque_matricula: remolqueMatCreado});
+    if (pedidoCreado && festivoAviso) {
+      notificarGerenciaPedido(
+        empresaId,
+        "pedido_destino_festivo",
+        "Pedido enviado a zona en festivo",
+        `El pedido ${pedidoCreado.numero || pedidoCreado.id} se ha confirmado para ${festivoAviso.ccaa_label} en festivo (${festivoAviso.festivo_nombre}).`,
+        { ...festivoAviso, pedido_id: pedidoCreado.id, pedido_numero: pedidoCreado.numero, dedupe_key: `festivo:${pedidoCreado.id}:${festivoAviso.fecha}:${festivoAviso.ccaa}` },
+        req.user?.id || null
+      ).catch(e => logger.warn("No se pudo notificar destino festivo:", e.message));
+    }
+    if (pedidoCreado) {
+      notificarPlanificacionIdaRetorno(pedidoCreado, empresaId, req.user?.id || null)
+        .catch(e => logger.warn("No se pudo notificar planificacion ida-retorno:", e.message));
+    }
     } catch (e) {
       if (e.code === "22001") {
         return res.status(400).json({ error: "Alguno de los textos del pedido supera la longitud permitida. Revisa ventanas horarias, matriculas o referencias." });
@@ -7145,10 +7150,11 @@ router.post("/", GERENTE_O_TRAFICO,
 // PATCH /pedidos/:id/estado
 router.patch("/:id/estado",
   body("estado").isIn(["pendiente","confirmado","en_curso","descarga","entregado","cancelado","incidencia"]),
-  async (req, res) => {
+  async (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
+    try {
     const { estado } = req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows } = await db.query("SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);
@@ -7187,12 +7193,12 @@ router.patch("/:id/estado",
       await db.query(
         `UPDATE pedidos
          SET estado=$1,
-             motivo_cancelacion=$2,
+             motivo_cancelacion=$2::text,
              cancelado_at=NOW(),
              cancelado_by=$3,
              notas=CASE
-               WHEN NULLIF($2,'') IS NULL THEN notas
-               ELSE TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $4))
+               WHEN NULLIF($2::text,'') IS NULL THEN notas
+               ELSE TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $4::text))
              END
          WHERE id=$5 AND empresa_id=$6`,
         [estado, motivoCancelacion || null, req.user?.id || null, `CANCELACION: ${motivoCancelacion}`, req.params.id, empresaId]
@@ -7244,6 +7250,9 @@ router.patch("/:id/estado",
     }
 
     res.json({ ok: true, estado, facturacion_auto: estado === "entregado" });
+    } catch (e) {
+      next(e);
+    }
   }
 );
 

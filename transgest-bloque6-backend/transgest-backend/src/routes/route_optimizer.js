@@ -2,6 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 const db = require("../services/db");
 const { enviarEmail } = require("../services/email");
+const { crearNotificacion } = require("../services/notificaciones");
 const { resolveApiKey, publicStatusForProvider, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
 
 const router = express.Router();
@@ -540,17 +541,28 @@ router.post("/pedido/:pedidoId/send", async (req, res, next) => {
     await ensureDispatchSchema();
     const empresaId = req.user?.empresa_id;
     if (!empresaId) return res.status(400).json({ error: "Empresa no encontrada en sesion." });
-    const recipientType = ["chofer", "colaborador"].includes(String(req.body?.recipient_type || "").toLowerCase())
+    const recipientType = ["chofer", "chofer_app", "colaborador"].includes(String(req.body?.recipient_type || "").toLowerCase())
       ? String(req.body.recipient_type).toLowerCase()
       : "chofer";
 
     const { rows } = await db.query(
       `SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.empresa_id,
               co.nombre AS colaborador_nombre, co.email AS colaborador_email,
-              ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.email AS chofer_email
+              ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.email AS chofer_email,
+              chu.id AS chofer_user_id, chu.email AS chofer_user_email, chu.nombre AS chofer_user_nombre
        FROM pedidos p
        LEFT JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
        LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+       LEFT JOIN LATERAL (
+         SELECT u.id, u.email, u.nombre
+           FROM usuarios u
+          WHERE u.empresa_id=p.empresa_id
+            AND u.chofer_id=p.chofer_id
+            AND u.rol::text='chofer'
+            AND u.activo=true
+          ORDER BY u.ultimo_acceso DESC NULLS LAST, u.created_at DESC NULLS LAST
+          LIMIT 1
+       ) chu ON true
        WHERE p.id=$1 AND p.empresa_id=$2
        LIMIT 1`,
       [req.params.pedidoId, empresaId]
@@ -570,11 +582,21 @@ router.post("/pedido/:pedidoId/send", async (req, res, next) => {
     const routeUrl = cleanAddress(req.body?.route_url || route?.maps_url || "");
     if (!routeUrl) return res.status(400).json({ error: "Calcula o genera una ruta antes de enviarla." });
 
-    const fallbackEmail = recipientType === "chofer" ? pedido.chofer_email : pedido.colaborador_email;
+    if (recipientType === "chofer_app" && !pedido.chofer_user_id) {
+      return res.status(400).json({ error: "El chofer no tiene un usuario de app activo vinculado. Vincula la ficha de chofer con un usuario de rol chofer o envia la ruta por email." });
+    }
+
+    const fallbackEmail = recipientType === "chofer_app"
+      ? (pedido.chofer_user_email || pedido.chofer_email || `app:${pedido.chofer_user_id}`)
+      : recipientType === "chofer"
+        ? pedido.chofer_email
+        : pedido.colaborador_email;
     const recipientEmail = cleanAddress(req.body?.email || fallbackEmail);
-    if (!recipientEmail) return res.status(400).json({ error: recipientType === "chofer" ? "El chofer no tiene email registrado." : "El colaborador no tiene email registrado." });
+    if (!recipientEmail) return res.status(400).json({ error: recipientType === "colaborador" ? "El colaborador no tiene email registrado." : "El chofer no tiene email registrado." });
     const recipientName = cleanAddress(req.body?.name || (recipientType === "chofer"
       ? [pedido.chofer_nombre, pedido.chofer_apellidos].filter(Boolean).join(" ")
+      : recipientType === "chofer_app"
+        ? (pedido.chofer_user_nombre || [pedido.chofer_nombre, pedido.chofer_apellidos].filter(Boolean).join(" "))
       : pedido.colaborador_nombre));
 
     const token = crypto.randomBytes(32).toString("hex");
@@ -607,21 +629,43 @@ router.post("/pedido/:pedidoId/send", async (req, res, next) => {
       ]
     );
 
-    await enviarEmail({
-      trigger: `ruta_${recipientType}`,
-      destinatario: recipientEmail,
-      plantilla: "ruta_recomendada",
-      empresa_id: empresaId,
-      datos: {
-        numero: pedido.numero || "",
-        preferencia: payload.preference,
-        km: payload.distance_km ? `${Number(payload.distance_km).toLocaleString("es-ES")} km` : "",
-        tiempo: payload.duration_label || "",
-        url: publicUrl,
-      },
-    });
+    if (recipientType === "chofer_app") {
+      await crearNotificacion({
+        empresa_id: empresaId,
+        usuario_id: pedido.chofer_user_id,
+        tipo: "ruta_chofer_app",
+        titulo: `Ruta enviada ${pedido.numero || ""}`.trim(),
+        mensaje: `Trafico ha enviado la ruta recomendada del viaje ${pedido.numero || ""}.`,
+        data: {
+          pedido_id: pedido.id,
+          pedido_numero: pedido.numero || "",
+          route_dispatch_id: saved.rows[0]?.id || null,
+          route_url: publicUrl,
+          maps_url: routeUrl,
+          preference: payload.preference,
+          distance_km: payload.distance_km || null,
+          duration_label: payload.duration_label || "",
+          dedupe_key: `ruta_chofer_app:${pedido.id}:${saved.rows[0]?.id || ""}`,
+        },
+        created_by: req.user?.id || null,
+      });
+    } else {
+      await enviarEmail({
+        trigger: `ruta_${recipientType}`,
+        destinatario: recipientEmail,
+        plantilla: "ruta_recomendada",
+        empresa_id: empresaId,
+        datos: {
+          numero: pedido.numero || "",
+          preferencia: payload.preference,
+          km: payload.distance_km ? `${Number(payload.distance_km).toLocaleString("es-ES")} km` : "",
+          tiempo: payload.duration_label || "",
+          url: publicUrl,
+        },
+      });
+    }
 
-    res.json({ ok: true, dispatch: saved.rows[0], public_url: publicUrl });
+    res.json({ ok: true, dispatch: saved.rows[0], public_url: publicUrl, app_notification: recipientType === "chofer_app" });
   } catch (e) {
     next(e);
   }

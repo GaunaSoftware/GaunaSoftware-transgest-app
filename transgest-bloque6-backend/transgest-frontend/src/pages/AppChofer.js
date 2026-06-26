@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp } from "../services/api";
+import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -209,6 +209,92 @@ function cargarImagen(dataUrl) {
   });
 }
 
+function detectarRectanguloPapel(canvas) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return { x: 0, y: 0, w: canvas.width, h: canvas.height, detected: false };
+  const { width: w, height: h } = canvas;
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const lumaAt = (x, y) => {
+    const i = (Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x))) * 4;
+    return data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+  };
+  const corner = Math.max(8, Math.round(Math.min(w, h) * 0.04));
+  const bgSamples = [];
+  for (let y = 0; y < corner; y += 3) {
+    for (let x = 0; x < corner; x += 3) {
+      bgSamples.push(lumaAt(x, y), lumaAt(w - 1 - x, y), lumaAt(x, h - 1 - y), lumaAt(w - 1 - x, h - 1 - y));
+    }
+  }
+  const bg = bgSamples.reduce((sum, v) => sum + v, 0) / Math.max(1, bgSamples.length);
+  const step = Math.max(3, Math.round(Math.min(w, h) / 260));
+  const margin = Math.max(step * 2, Math.round(Math.min(w, h) * 0.02));
+  let minX = w, minY = h, maxX = 0, maxY = 0, hits = 0;
+  for (let y = margin; y < h - margin; y += step) {
+    for (let x = margin; x < w - margin; x += step) {
+      const i = (y * w + x) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const sat = max - min;
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
+      const edge = Math.max(Math.abs(lum - lumaAt(x + step, y)), Math.abs(lum - lumaAt(x, y + step)));
+      const looksPaper = (lum > 145 && sat < 70 && Math.abs(lum - bg) > 10) || (lum > 178 && sat < 92) || edge > 42;
+      if (!looksPaper) continue;
+      hits += 1;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const hitRatio = hits / Math.max(1, ((w - margin * 2) / step) * ((h - margin * 2) / step));
+  if (!hits || hitRatio < 0.015) return { x: 0, y: 0, w, h, detected: false };
+  const pad = Math.round(Math.min(w, h) * 0.025);
+  minX = Math.max(0, minX - pad);
+  minY = Math.max(0, minY - pad);
+  maxX = Math.min(w, maxX + pad);
+  maxY = Math.min(h, maxY + pad);
+  const bw = Math.max(1, maxX - minX);
+  const bh = Math.max(1, maxY - minY);
+  const areaRatio = (bw * bh) / Math.max(1, w * h);
+  if (areaRatio < 0.18 || areaRatio > 0.985) return { x: 0, y: 0, w, h, detected: areaRatio > 0.72 };
+  return { x: minX, y: minY, w: bw, h: bh, detected: true };
+}
+
+function recortarCanvas(canvas, rect) {
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(rect.w));
+  out.height = Math.max(1, Math.round(rect.h));
+  const ctx = out.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(canvas, rect.x, rect.y, rect.w, rect.h, 0, 0, out.width, out.height);
+  return out;
+}
+
+function limpiarCanvasComoEscaner(canvas) {
+  const out = document.createElement("canvas");
+  out.width = canvas.width;
+  out.height = canvas.height;
+  const ctx = out.getContext("2d", { willReadFrequently: true });
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(canvas, 0, 0);
+  const img = ctx.getImageData(0, 0, out.width, out.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const gray = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    const normalized = gray > 218 ? 255 : gray < 72 ? 0 : Math.round(((gray - 72) / 146) * 255);
+    const scan = gray < 160 ? Math.max(0, normalized - 22) : Math.min(255, normalized + 18);
+    d[i] = scan;
+    d[i + 1] = scan;
+    d[i + 2] = scan;
+    d[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return out;
+}
+
 async function prepararArchivoEscaner(file) {
   const dataUrl = await leerArchivoComoDataUrl(file);
   if (!file.type?.startsWith("image/")) {
@@ -229,14 +315,20 @@ async function prepararArchivoEscaner(file) {
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.filter = "contrast(1.18) brightness(1.06) saturate(0.15)";
+  ctx.filter = "contrast(1.05) brightness(1.02)";
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  const out = canvas.toDataURL("image/jpeg", 0.84);
+  ctx.filter = "none";
+  const rect = detectarRectanguloPapel(canvas);
+  const recortado = recortarCanvas(canvas, rect);
+  const escaneado = limpiarCanvasComoEscaner(recortado);
+  const out = escaneado.toDataURL("image/jpeg", 0.88);
   return {
     preview: out,
     base64: out.split(",")[1] || "",
     mime: "image/jpeg",
     sizeKb: Math.max(1, Math.round((out.length * 0.75) / 1024)),
+    scan_detected: rect.detected,
+    scan_crop: { x: rect.x, y: rect.y, w: rect.w, h: rect.h },
   };
 }
 
@@ -2250,6 +2342,7 @@ export default function AppChofer(){
   const [offlineQueue,   setOfflineQueue]   = useState(() => leerOfflineQueue());
   const [jornadaInfo, setJornadaInfo] = useState(null);
   const [expandedPedidoId, setExpandedPedidoId] = useState(null);
+  const [routeNotifications, setRouteNotifications] = useState([]);
 
   const hoy = new Date().toISOString().slice(0,10);
   const lunesStr = (() => { const d=new Date(); d.setDate(d.getDate()-(d.getDay()||7)+1); return d.toISOString().slice(0,10); })();
@@ -2262,6 +2355,10 @@ export default function AppChofer(){
       setPedidos(arr);
       const jornada = await getChoferJornadaApp().catch(() => null);
       setJornadaInfo(jornada);
+      const avisos = await getNotificaciones(20).catch(() => ({ data: [] }));
+      setRouteNotifications((Array.isArray(avisos?.data) ? avisos.data : [])
+        .filter(n => String(n.tipo || "") === "ruta_chofer_app")
+        .slice(0, 3));
       if (isLitePlan) {
         setSolicitudesChofer([]);
         setVacacionesChofer([]);
@@ -2396,6 +2493,11 @@ export default function AppChofer(){
     }
   }
 
+  async function marcarRutaNotificacionLeida(id) {
+    try { await marcarNotificacionLeida(id); } catch {}
+    setRouteNotifications(prev => prev.filter(n => String(n.id) !== String(id)));
+  }
+
   function syncOfflineQueue() {
     const q = leerOfflineQueue();
     if (!q.length) return;
@@ -2471,6 +2573,30 @@ export default function AppChofer(){
           <span>Offline</span>
           <span>Sin conexion - los cambios se sincronizaran cuando vuelvas a conectarte
             {offlineQueue.length>0?` (${offlineQueue.length} pendiente${offlineQueue.length>1?"s":""})`:""}</span>
+        </div>
+      )}
+
+      {routeNotifications.length > 0 && (
+        <div style={{padding:"10px 14px",display:"grid",gap:8}}>
+          {routeNotifications.map(n => {
+            const rutaUrl = n?.data?.route_url || n?.data?.maps_url || "";
+            return (
+              <div key={n.id} style={{background:"rgba(20,184,166,.10)",border:"1px solid rgba(20,184,166,.28)",borderRadius:10,padding:"10px 12px"}}>
+                <div style={{fontSize:12,fontWeight:900,color:"#2dd4bf"}}>{n.titulo || "Ruta enviada"}</div>
+                <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.4,marginTop:3}}>{n.mensaje || "Tienes una ruta recomendada pendiente de revisar."}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,marginTop:9}}>
+                  <button onClick={()=>rutaUrl && window.open(rutaUrl, "_blank", "noopener,noreferrer")} disabled={!rutaUrl}
+                    style={{padding:"9px 10px",borderRadius:8,border:"1px solid rgba(20,184,166,.36)",background:rutaUrl ? "#0f766e" : "var(--border2)",color:"#fff",fontSize:12,fontWeight:900,cursor:rutaUrl?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
+                    Abrir ruta
+                  </button>
+                  <button onClick={()=>marcarRutaNotificacionLeida(n.id)}
+                    style={{padding:"9px 10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text3)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    Leida
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

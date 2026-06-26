@@ -9,6 +9,19 @@ const DOC_CONTROL_DEFAULTS = {
   observaciones: "",
 };
 
+const CMR_EU_UK_COUNTRY_TERMS = [
+  "alemania", "austria", "belgica", "bulgaria", "chipre", "croacia", "dinamarca", "eslovaquia",
+  "eslovenia", "estonia", "finlandia", "francia", "grecia", "hungria", "irlanda", "italia",
+  "letonia", "lituania", "luxemburgo", "malta", "paises bajos", "polonia", "portugal",
+  "republica checa", "rumania", "suecia",
+  "germany", "austria", "belgium", "bulgaria", "cyprus", "croatia", "denmark", "slovakia",
+  "slovenia", "estonia", "finland", "france", "greece", "hungary", "ireland", "italy",
+  "latvia", "lithuania", "luxembourg", "malta", "netherlands", "poland", "portugal",
+  "czech republic", "romania", "sweden",
+  "reino unido", "inglaterra", "escocia", "gales", "irlanda del norte",
+  "united kingdom", "uk", "england", "scotland", "wales", "northern ireland", "great britain",
+];
+
 function normalizeDocumentoControlConfig(raw = {}) {
   return {
     ...DOC_CONTROL_DEFAULTS,
@@ -136,7 +149,7 @@ function detectWasteSignals(pedido = {}) {
     "codigo ler",
   ];
   const detectedTerms = terms.filter(term => text.includes(term));
-  const crossBorderHints = ["francia", "portugal", "alemania", "italia", "belgica", "paises bajos", "netherlands", "france", "germany", "italy"].filter(term => text.includes(term));
+  const crossBorderHints = CMR_EU_UK_COUNTRY_TERMS.filter(term => text.includes(term));
   return {
     detected: detectedTerms.length > 0,
     detected_terms: detectedTerms,
@@ -197,18 +210,10 @@ function detectTransportComplianceSignals(pedido = {}) {
     "pamplona",
   ]);
   const internationalTerms = detectTerms(text, [
-    "francia",
-    "portugal",
-    "alemania",
-    "italia",
-    "belgica",
-    "paises bajos",
-    "netherlands",
-    "france",
-    "germany",
-    "italy",
+    ...CMR_EU_UK_COUNTRY_TERMS,
     "andorra",
     "marruecos",
+    "morocco",
   ]);
   const cabotageTerms = detectTerms(text, [
     "cabotaje",
@@ -426,6 +431,7 @@ function buildEcmrConsignmentNote(documento = {}) {
     legal_basis: internacional ? {
       convention: "CMR 1956",
       electronic_protocol: "Protocolo adicional e-CMR 2008",
+      operational_scope: "Union Europea y Reino Unido/Inglaterra",
       minimum_controls: [
         "Identificacion de remitente, transportista y destinatario",
         "Lugar y fecha de toma de cargo y entrega",

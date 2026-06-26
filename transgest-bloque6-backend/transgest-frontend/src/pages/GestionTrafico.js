@@ -1487,7 +1487,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
                     Reasignar
                   </button>
                 )}
-                {(focusActionKey === "notificar_cliente" || ["incidencia_pedido","retraso"].includes(String(focusContext.type || ""))) && <button onClick={avisarClienteDesdeControlTower} disabled={avisandoCliente} style={{padding:"5px 10px",borderRadius:7,border:"1px solid rgba(245,158,11,.34)",background:"rgba(245,158,11,.12)",color:"#f59e0b",fontWeight:800,fontSize:11,cursor:avisandoCliente?"wait":"pointer",opacity:avisandoCliente ? .6 : 1}}>
+                {(["notificar_cliente","avisar_cliente"].includes(focusActionKey) || ["incidencia_pedido","retraso","espera_carga","espera_descarga"].includes(String(focusContext.type || ""))) && <button onClick={avisarClienteDesdeControlTower} disabled={avisandoCliente} style={{padding:"5px 10px",borderRadius:7,border:"1px solid rgba(245,158,11,.34)",background:"rgba(245,158,11,.12)",color:"#f59e0b",fontWeight:800,fontSize:11,cursor:avisandoCliente?"wait":"pointer",opacity:avisandoCliente ? .6 : 1}}>
                   {avisandoCliente ? "Enviando..." : "Notificar cliente"}
                 </button>}
                 {(["pod_pendiente","facturacion_inconsistente"].includes(String(focusContext.type || "")) || focusActionKey === "pedir_albaran") && (
@@ -1957,12 +1957,13 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
     }
   }
 
-  async function enviarMail(tipo) {
+  async function enviarRuta(tipo) {
     if (!planUrl) return notify("No hay direcciones suficientes para enviar ruta.", "warning");
+    const esAppChofer = tipo === "chofer_app";
     const destinatario = tipo === "chofer"
       ? (chofer?.email || chofer?.correo || selected?.chofer_email || "")
       : (selected?.colaborador_email || "");
-    if (!destinatario) {
+    if (!esAppChofer && !destinatario) {
       notify(tipo === "chofer" ? "El chofer no tiene email registrado." : "El colaborador no tiene email registrado.", "warning");
       return;
     }
@@ -1970,7 +1971,8 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
     try {
       const res = await enviarRutaOptimizada(selected.id, {
         recipient_type: tipo,
-        email: destinatario,
+        email: esAppChofer ? "" : destinatario,
+        name: esAppChofer ? (chofer ? `${chofer.nombre || ""} ${chofer.apellidos || ""}`.trim() : selected?.chofer_nombre || "") : "",
         route_url: planUrl,
         preference: preferencia,
         distance_km: planKm || null,
@@ -1979,7 +1981,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
         provider_label: providerLabel,
       });
       cargarEnvios();
-      notify(res?.public_url ? "Ruta enviada y trazabilidad registrada." : "Ruta registrada.", "success");
+      notify(res?.app_notification ? "Ruta enviada a la app del chofer y trazabilidad registrada." : res?.public_url ? "Ruta enviada y trazabilidad registrada." : "Ruta registrada.", "success");
       if (res?.public_url) {
         try { await navigator.clipboard.writeText(res.public_url); } catch {}
       }
@@ -2151,8 +2153,11 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                 </div>
                 {puedeEnviarRuta && (
                   <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>
-                    <button style={btn} onClick={()=>enviarMail("chofer")} disabled={sendLoading==="chofer"}>{sendLoading==="chofer" ? "Enviando..." : "Enviar al chofer"}</button>
-                    <button style={btn} onClick={()=>enviarMail("colaborador")} disabled={sendLoading==="colaborador"}>{sendLoading==="colaborador" ? "Enviando..." : "Enviar al colaborador"}</button>
+                    <button style={{...btn,borderColor:"rgba(20,184,166,.35)",background:"rgba(20,184,166,.10)",color:"#14b8a6"}} onClick={()=>enviarRuta("chofer_app")} disabled={sendLoading==="chofer_app" || !selected?.chofer_id}>
+                      {sendLoading==="chofer_app" ? "Enviando..." : selected?.chofer_id ? "Enviar a app del chofer" : "Asigna chofer para enviar a app"}
+                    </button>
+                    <button style={btn} onClick={()=>enviarRuta("chofer")} disabled={sendLoading==="chofer"}>{sendLoading==="chofer" ? "Enviando..." : "Enviar por email al chofer"}</button>
+                    <button style={btn} onClick={()=>enviarRuta("colaborador")} disabled={sendLoading==="colaborador"}>{sendLoading==="colaborador" ? "Enviando..." : "Enviar al colaborador"}</button>
                   </div>
                 )}
                 <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:12,marginBottom:10}}>

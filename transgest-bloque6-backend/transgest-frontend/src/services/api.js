@@ -506,7 +506,7 @@ export const borrarFactura  = (id)        => apiFetch(`/facturas/${id}`, { metho
 
 // ── Rutas ─────────────────────────────────────────────
 export const getChoferHistorialVehiculos = (cid) => apiFetch(`/pedidos/chofer/${cid}/historial-vehiculos`);
-export const getRutas       = ()          => apiFetch("/rutas");
+export const getRutas       = (options = {}) => apiFetch("/rutas", options);
 export const getRutaPrecios   = (id)        => apiFetch(`/rutas/${id}/precios`);
 export const editarRutaPrecios= (id,data)    => apiFetch(`/rutas/${id}/precios`, { method:"PUT", body:data });
 export const crearRuta      = (data)      => apiFetch("/rutas", { method:"POST", body:data });

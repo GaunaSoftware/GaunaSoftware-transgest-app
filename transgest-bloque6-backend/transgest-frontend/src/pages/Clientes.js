@@ -1519,10 +1519,13 @@ export default function Clientes() {
     setLoading(true);
     try {
       const activo = mostrarBaja ? "false" : "true";
-      const [c, r] = await Promise.all([getClientes(q, activo), getRutas().catch(()=>[])]);
+      const c = await getClientes(q, activo);
       setClientes(Array.isArray(c?.data)?c.data:Array.isArray(c)?c:[]);
-      setRutasG(Array.isArray(r)?r:[]);
     } finally { setLoading(false); }
+
+    getRutas({ silentError:true, timeoutMs:8000 })
+      .then(r => setRutasG(Array.isArray(r)?r:[]))
+      .catch(() => setRutasG([]));
   }, [q, mostrarBaja]);
 
   useEffect(() => { cargar(); }, [cargar]);

@@ -12,6 +12,14 @@ function validateEnv() {
   if (hasPlaceholder(process.env.JWT_SECRET) || String(process.env.JWT_SECRET || "").length < 32) {
     critical.push("JWT_SECRET debe ser una clave larga y aleatoria.");
   }
+  if (isProd) {
+    if (!process.env.USER_JWT_SECRET) warnings.push("USER_JWT_SECRET no esta definido; los tokens de usuario caen a JWT_SECRET.");
+    if (!process.env.SUPERADMIN_JWT_SECRET) warnings.push("SUPERADMIN_JWT_SECRET no esta definido; superadmin cae a JWT_SECRET.");
+    if (!process.env.ACCOUNTING_SSO_JWT_SECRET) warnings.push("ACCOUNTING_SSO_JWT_SECRET no esta definido; SSO contable cae a JWT_SECRET.");
+    if (process.env.USER_JWT_SECRET && process.env.SUPERADMIN_JWT_SECRET && process.env.USER_JWT_SECRET === process.env.SUPERADMIN_JWT_SECRET) {
+      warnings.push("USER_JWT_SECRET y SUPERADMIN_JWT_SECRET deben ser distintos.");
+    }
+  }
   if (hasPlaceholder(process.env.DB_PASSWORD) || String(process.env.DB_PASSWORD || "").length < 20) {
     const message = "DB_PASSWORD debe ser una clave real de al menos 20 caracteres.";
     if (isProd) critical.push(message);

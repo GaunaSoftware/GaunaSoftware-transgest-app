@@ -62,7 +62,9 @@ const CSS = `
   .tg-sidebar-backdrop { display:none; }
   .tg-main { margin-left:252px; width:calc(100% - 252px); display:flex; flex-direction:column; height:100vh; overflow:hidden; background:var(--bg); }
   .tg-main.sidebar-collapsed { margin-left:76px; width:calc(100% - 76px); }
-  .tg-content { flex:1; overflow-y:auto; background:radial-gradient(circle at 14% 0%, rgba(20,184,166,.10), transparent 28%), linear-gradient(180deg,var(--bg),var(--bg3)); display:flex; flex-direction:column; }
+  .tg-content { flex:1; overflow-y:auto; overflow-x:hidden; background:radial-gradient(circle at 14% 0%, rgba(20,184,166,.10), transparent 28%), linear-gradient(180deg,var(--bg),var(--bg3)); display:flex; flex-direction:column; overscroll-behavior:contain; }
+  .tg-content * { box-sizing:border-box; }
+  .tg-content img, .tg-content svg, .tg-content canvas { max-width:100%; }
   .tg-content::-webkit-scrollbar { width:5px; }
   .tg-content::-webkit-scrollbar-track { background:transparent; }
   .tg-content::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
@@ -83,10 +85,6 @@ const CSS = `
     .tg-content * {
       box-sizing:border-box;
       min-width:0;
-    }
-    .tg-content [style*="display: grid"],
-    .tg-content [style*="display:grid"] {
-      grid-template-columns:repeat(auto-fit, minmax(min(230px, 100%), 1fr)) !important;
     }
     .tg-content [style*="display: flex"],
     .tg-content [style*="display:flex"] {
@@ -153,10 +151,6 @@ const CSS = `
       width:100% !important;
       max-width:100vw !important;
     }
-    .tg-content [style*="display: grid"],
-    .tg-content [style*="display:grid"] {
-      grid-template-columns:1fr !important;
-    }
     .tg-content [style*="display: flex"],
     .tg-content [style*="display:flex"] {
       max-width:100%;
@@ -192,6 +186,46 @@ const CSS = `
     .tg-content td {
       white-space:nowrap;
     }
+  }
+  @media (max-width: 860px) {
+    .tg-agenda-page { padding:16px !important; }
+    .tg-agenda-shell { grid-template-columns:1fr !important; }
+    .tg-agenda-filters { display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px !important; align-items:stretch !important; }
+    .tg-agenda-filters > input,
+    .tg-agenda-filters > select,
+    .tg-agenda-filters > button,
+    .tg-agenda-filters > label { width:100% !important; margin-left:0 !important; }
+    .tg-agenda-calendar-head,
+    .tg-agenda-calendar-grid { grid-template-columns:repeat(7,minmax(34px,1fr)) !important; gap:5px !important; }
+    .tg-agenda-day { min-height:64px !important; padding:7px !important; }
+    .tg-agenda-day-events { display:none !important; }
+    .tg-agenda-detail { grid-template-columns:1fr !important; }
+  }
+  @media (max-width: 560px) {
+    .tg-agenda-page { padding:14px 12px !important; }
+    .tg-agenda-filters { grid-template-columns:1fr !important; }
+    .tg-agenda-calendar-head,
+    .tg-agenda-calendar-grid { gap:3px !important; }
+    .tg-agenda-calendar-head > div { font-size:9px !important; letter-spacing:0 !important; }
+    .tg-agenda-day { min-height:48px !important; padding:5px !important; border-radius:8px !important; }
+    .tg-agenda-day-count { font-size:9px !important; padding:1px 5px !important; }
+    .tg-agenda-title { font-size:20px !important; line-height:1.1 !important; }
+  }
+  @media (max-width: 900px) {
+    .tg-traffic-page { height:auto !important; min-height:calc(100dvh - 54px); overflow:visible !important; }
+    .tg-traffic-tabs,
+    .tg-traffic-legend,
+    .tg-traffic-weeknav { overflow-x:auto; overflow-y:hidden; flex-wrap:nowrap !important; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+    .tg-traffic-tabs > *,
+    .tg-traffic-legend > *,
+    .tg-traffic-weeknav > * { flex:0 0 auto; }
+    .tg-traffic-summary { grid-template-columns:repeat(2,minmax(142px,1fr)) !important; overflow-x:auto; }
+    .tg-traffic-filters { display:grid !important; grid-template-columns:1fr !important; }
+    .tg-traffic-filters input,
+    .tg-traffic-filters select,
+    .tg-traffic-filters button { width:100% !important; min-width:0 !important; }
+    .tg-traffic-board { flex:0 0 auto !important; min-height:420px; max-height:calc(100dvh - 260px); overflow:auto !important; -webkit-overflow-scrolling:touch; }
+    .tg-traffic-board table { display:table !important; width:max-content !important; min-width:1266px !important; max-width:none !important; }
   }
 `;
 

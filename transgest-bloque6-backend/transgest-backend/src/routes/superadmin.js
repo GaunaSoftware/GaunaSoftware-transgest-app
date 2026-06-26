@@ -32,6 +32,7 @@ const { processPendingFiscalQueue } = require("../services/fiscalProcessor");
 const { getVerifactiRecordStatus } = require("../services/fiscalProviderVerifacti");
 const { markQueueAccepted, markQueuePending, markQueueError, logFiscalEvent } = require("../services/fiscalQueueState");
 const { CCAA, buildCalendarResponse, fallbackSpanishHolidays, fetchSpainHolidays, normalizeCcaa, normalizeYear } = require("../services/calendarioLaboral");
+const { userJwtSecret, superadminJwtSecret } = require("../services/jwtSecrets");
 const {
   ACCOUNTING_MAPPING_ITEM_LABELS,
   buildAccountingIntegrationsGovernance,
@@ -432,14 +433,16 @@ async function buildIntegracionesSalud() {
     integrationCheck({
       key: "secrets",
       area: "Seguridad",
-      label: "Cifrado de claves",
-      ok: String(process.env.JWT_SECRET || "").length >= 32,
+      label: "Claves y tokens",
+      ok: String(process.env.JWT_SECRET || "").length >= 32 && String(process.env.SUPERADMIN_JWT_SECRET || process.env.JWT_SECRET || "").length >= 32,
       warnings: [
         !process.env.API_KEYS_ENCRYPTION_SECRET ? "API_KEYS_ENCRYPTION_SECRET no esta definido; el cifrado cae a JWT_SECRET." : "",
+        !process.env.USER_JWT_SECRET ? "USER_JWT_SECRET no esta definido; usuarios caen a JWT_SECRET." : "",
+        !process.env.SUPERADMIN_JWT_SECRET ? "SUPERADMIN_JWT_SECRET no esta definido; superadmin cae a JWT_SECRET." : "",
         process.env.NODE_ENV === "production" && !process.env.CORS_ORIGINS ? "CORS_ORIGINS no esta fijado explicitamente en produccion." : "",
       ],
-      detail: "Las claves se guardan cifradas y el navegador recibe solo mascaras/estado.",
-      action: "Usar JWT_SECRET y API_KEYS_ENCRYPTION_SECRET largos y distintos en produccion.",
+      detail: "Usuarios, superadmin y SSO contable pueden usar secretos JWT separados; el navegador recibe solo mascaras/estado.",
+      action: "Configurar USER_JWT_SECRET, SUPERADMIN_JWT_SECRET, ACCOUNTING_SSO_JWT_SECRET y API_KEYS_ENCRYPTION_SECRET largos y distintos en produccion.",
     }),
   ];
 
@@ -749,7 +752,7 @@ function superAuth(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) return res.status(401).json({ error: "No autorizado" });
   try {
-    const payload = jwt.verify(header.split(" ")[1], process.env.JWT_SECRET);
+    const payload = jwt.verify(header.split(" ")[1], superadminJwtSecret());
     if (!payload.superadmin) return res.status(403).json({ error: "Acceso denegado" });
     req.superadmin = payload;
     next();
@@ -786,7 +789,7 @@ router.post("/login", async (req, res) => {
     if (!rows[0]) return res.status(401).json({ error: "Credenciales incorrectas" });
     const valid = await bcrypt.compare(password, rows[0].password_hash);
     if (!valid) return res.status(401).json({ error: "Credenciales incorrectas" });
-    const token = jwt.sign({ superadmin: true, id: rows[0].id, email, rol: rows[0].rol || "superadmin" }, process.env.JWT_SECRET, { expiresIn: "4h" });
+    const token = jwt.sign({ superadmin: true, id: rows[0].id, email, rol: rows[0].rol || "superadmin" }, superadminJwtSecret(), { expiresIn: "4h" });
     res.json({ token, nombre: rows[0].nombre, rol: rows[0].rol || "superadmin" });
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
@@ -1726,7 +1729,7 @@ router.post("/empresas/:id/impersonar", superAuth, async (req, res) => {
       superadmin_impersonation: true,
       impersonado_por: req.superadmin.email,
     },
-    process.env.JWT_SECRET,
+    userJwtSecret(),
     { expiresIn: "2h" }
   );
 

@@ -6,6 +6,7 @@ const { body, validationResult } = require("express-validator");
 const db       = require("../services/db");
 const logger   = require("../services/logger");
 const stripe   = require("../services/stripe");
+const { userJwtSecret } = require("../services/jwtSecrets");
 const { authenticate, getSubscriptionState, normalizePermissionsForRole } = require("../middleware/auth");
 
 const router = express.Router();
@@ -72,7 +73,7 @@ function isDemoEmpresa(row = {}) {
 function signUserToken(user = {}) {
   return jwt.sign(
     { sub: user.id, rol: user.rol, empresa_id: user.empresa_id, plan: user.plan },
-    process.env.JWT_SECRET,
+    userJwtSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || "8h" }
   );
 }
@@ -430,7 +431,7 @@ router.post("/billing/checkout", async (req, res) => {
 
   let payload;
   try {
-    payload = jwt.verify(header.split(" ")[1], process.env.JWT_SECRET);
+    payload = jwt.verify(header.split(" ")[1], userJwtSecret());
   } catch {
     return res.status(401).json({ error: "Token invalido" });
   }

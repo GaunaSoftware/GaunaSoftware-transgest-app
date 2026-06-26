@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
 const S = {
-  page: { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },
+  page: { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif", minWidth:0, overflowX:"hidden" },
   title: { fontFamily:"'Syne',sans-serif", fontSize:22, fontWeight:900, color:"var(--text)" },
   sub: { marginTop:4, fontSize:12, color:"var(--text4)", marginBottom:18 },
   card: { background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, padding:16 },
@@ -424,8 +424,8 @@ export default function Agenda() {
   }
 
   return (
-    <div style={S.page}>
-      <div style={S.title}>Agenda y tareas</div>
+    <div className="tg-agenda-page" style={S.page}>
+      <div className="tg-agenda-title" style={S.title}>Agenda y tareas</div>
       <div style={S.sub}>Calendario operativo para usuarios, recordatorios y seguimiento interno del día a día.</div>
 
       {esGerente && (
@@ -445,7 +445,7 @@ export default function Agenda() {
         <AvisosIgnoradosTab mes={mes} setMes={setMes} />
       ) : (
         <>
-      <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center", marginBottom:16 }}>
+      <div className="tg-agenda-filters" style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center", marginBottom:16 }}>
         <input type="month" value={mes} onChange={e=>setMes(e.target.value)} style={{ ...S.input, width:160 }} />
         <select value={estado} onChange={e=>setEstado(e.target.value)} style={{ ...S.input, width:170 }}>
           <option value="todas">Todos los estados</option>
@@ -468,15 +468,15 @@ export default function Agenda() {
         </button>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1.4fr) minmax(320px,.9fr)", gap:16 }}>
+      <div className="tg-agenda-shell" style={{ display:"grid", gridTemplateColumns:"minmax(0,1.4fr) minmax(320px,.9fr)", gap:16 }}>
         <div style={S.card}>
           <div style={{ fontFamily:"'Syne',sans-serif", fontSize:17, fontWeight:800, color:"var(--text)", marginBottom:12 }}>
             {MONTH_NAMES[currentMonth.getMonth()]} {currentMonth.getFullYear()}
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8, marginBottom:8 }}>
+          <div className="tg-agenda-calendar-head" style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8, marginBottom:8 }}>
             {DAY_NAMES.map(label => <div key={label} style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:".08em", color:"var(--text5)", textAlign:"center" }}>{label}</div>)}
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8 }}>
+          <div className="tg-agenda-calendar-grid" style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:8 }}>
             {calendarDays.map(day => {
               const key = dayKey(day);
               const items = eventosPorDia.get(key) || [];
@@ -484,6 +484,7 @@ export default function Agenda() {
               const active = key === selectedDay;
               return (
                 <button
+                  className="tg-agenda-day"
                   key={key}
                   onClick={()=>setSelectedDay(key)}
                   style={{
@@ -500,9 +501,9 @@ export default function Agenda() {
                 >
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
                     <span style={{ fontSize:13, fontWeight:800 }}>{day.getDate()}</span>
-                    {items.length > 0 && <span style={{ fontSize:10, padding:"2px 7px", borderRadius:999, background:"rgba(16,185,129,.14)", color:"var(--green)", fontWeight:800 }}>{items.length}</span>}
+                    {items.length > 0 && <span className="tg-agenda-day-count" style={{ fontSize:10, padding:"2px 7px", borderRadius:999, background:"rgba(16,185,129,.14)", color:"var(--green)", fontWeight:800 }}>{items.length}</span>}
                   </div>
-                  <div style={{ display:"grid", gap:4 }}>
+                  <div className="tg-agenda-day-events" style={{ display:"grid", gap:4 }}>
                     {items.slice(0, 3).map(ev => (
                       <div key={ev.id} style={{ fontSize:10, lineHeight:1.35, padding:"4px 6px", borderRadius:6, background: PRIORITY[ev.prioridad || "media"]?.bg, color: PRIORITY[ev.prioridad || "media"]?.color, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                         {ev.titulo}
@@ -516,7 +517,7 @@ export default function Agenda() {
           </div>
         </div>
 
-        <div style={{ display:"grid", gap:16 }}>
+        <div className="tg-agenda-detail" style={{ display:"grid", gap:16 }}>
           <div style={S.card}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
               <div style={{ fontFamily:"'Syne',sans-serif", fontSize:16, fontWeight:800, color:"var(--text)" }}>

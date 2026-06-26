@@ -4002,10 +4002,10 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   }, []);
 
   return (
-    <div style={{ fontFamily:"'DM Sans',sans-serif", height:"100%", display:"flex", flexDirection:"column", overflow:"hidden", background:"var(--bg)" }}>
+    <div className="tg-traffic-page" style={{ fontFamily:"'DM Sans',sans-serif", height:"100%", display:"flex", flexDirection:"column", overflow:"hidden", background:"var(--bg)" }}>
 
       {/* â”€â”€ Vista tabs â”€â”€ */}
-      {!esModoChoferOptimizacion && <div style={{padding:"6px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
+      {!esModoChoferOptimizacion && <div className="tg-traffic-tabs" style={{padding:"6px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
         {[["cuadrante","Cuadrante semanal"],["grupajes","Grupajes en cascada"],["optimizacion","Optimizacion de rutas"]].map(([v,lbl])=>(
           <button key={v} onClick={()=>setVistaMain(v)}
             style={{padding:"5px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",
@@ -4035,7 +4035,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       </div>}
 
       {/* â”€â”€ Leyenda de estados â”€â”€ */}
-      {!esModoChoferOptimizacion && <div style={{
+      {!esModoChoferOptimizacion && <div className="tg-traffic-legend" style={{
         padding:"8px 16px", borderBottom:"1px solid var(--border)",
         background:"var(--bg2)", flexShrink:0,
         display:"flex", alignItems:"center", gap:6, flexWrap:"wrap",
@@ -4116,7 +4116,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         </span>
       </div>}
       {!esModoChoferOptimizacion && vistaMain==="cuadrante" && (
-        <div style={{
+        <div className="tg-traffic-summary" style={{
           padding:"8px 16px",
           borderBottom:"1px solid var(--border)",
           background:"var(--bg2)",
@@ -4527,7 +4527,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
 
       {!esModoChoferOptimizacion && vistaMain==="cuadrante" && (
         <>
-          <div style={{padding:"8px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          <div className="tg-traffic-filters" style={{padding:"8px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
             <input
               value={searchTrafico}
               onChange={e => setSearchTrafico(e.target.value)}
@@ -4621,7 +4621,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         </>
       )}
 
-      <div style={{
+      <div className="tg-traffic-weeknav" style={{
         padding:"7px 16px", borderBottom:"1px solid var(--border)",
         background:"var(--bg3)", flexShrink:0,
         display:"flex", alignItems:"center", gap:8,
@@ -4657,7 +4657,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       )}
 
       {/* â”€â”€ Grid principal â”€â”€ */}
-      <div style={{ flex:1, overflowY:"auto", overflowX:"auto", display:vistaMain==="cuadrante"?"block":"none" }}>
+      <div className="tg-traffic-board" style={{ flex:1, overflowY:"auto", overflowX:"auto", display:vistaMain==="cuadrante"?"block":"none" }}>
         <table style={{ borderCollapse:"collapse", tableLayout:"fixed", minWidth: COL_VEH + COL_DAY*7 }}>
           <colgroup>
             <col style={{ width:COL_VEH }}/>

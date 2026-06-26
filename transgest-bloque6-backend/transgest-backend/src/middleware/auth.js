@@ -2,6 +2,7 @@ const jwt    = require("jsonwebtoken");
 const crypto = require("crypto");
 const db     = require("../services/db");
 const logger = require("../services/logger");
+const { userJwtSecret } = require("../services/jwtSecrets");
 
 const GRACE_DAYS = 7;
 
@@ -437,7 +438,7 @@ async function authenticate(req, res, next) {
       return next();
     }
 
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(token, userJwtSecret());
 
     const { rows } = await db.query(
       `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id,

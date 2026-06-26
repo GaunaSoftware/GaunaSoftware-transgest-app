@@ -179,12 +179,18 @@ const authLimiter = rateLimit({
   standardHeaders: true, legacyHeaders: false,
   message: { error: "Demasiados intentos. Espera 15 minutos antes de volver a probar." },
 });
+const superadminAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 8,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: "Demasiados intentos de superadmin. Espera 15 minutos antes de volver a probar." },
+});
 const publicWorkflowLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 120,
   standardHeaders: true, legacyHeaders: false,
 });
 app.use("/api/v1/auth/login",    authLimiter);
 app.use("/api/v1/auth/register", authLimiter);
+app.use("/api/v1/superadmin/login", superadminAuthLimiter);
 app.use("/api/v1/pedidos/colaborador", publicWorkflowLimiter);
 app.use("/api/v1/gps/webhook", publicWorkflowLimiter);
 app.use("/api/v1/fiscal/webhook", publicWorkflowLimiter);

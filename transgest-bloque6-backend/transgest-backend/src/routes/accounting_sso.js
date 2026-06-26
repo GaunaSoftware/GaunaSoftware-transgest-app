@@ -2,6 +2,7 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const db = require("../services/db");
 const { authenticate, requireModulePermission } = require("../middleware/auth");
+const { accountingSsoJwtSecret } = require("../services/jwtSecrets");
 
 const router = express.Router();
 
@@ -36,7 +37,7 @@ async function launchToken(req, res) {
       empresa_cif: empresa.cif || null,
       source: "transgest",
     },
-    process.env.ACCOUNTING_SSO_JWT_SECRET || process.env.JWT_SECRET,
+    accountingSsoJwtSecret(),
     { expiresIn: process.env.ACCOUNTING_SSO_EXPIRES_IN || "2m" }
   );
 

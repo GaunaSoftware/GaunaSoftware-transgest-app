@@ -509,7 +509,7 @@ export default function HojasRuta(){
   const TABS=[["hoja","Hoja de ruta"],["gasoil","Gasoil"],["noches","Noches"],["chofer_cfg","Chofer / Nomina"]];
 
   return(
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",alignItems:"center",gap:18,marginBottom:24,flexWrap:"wrap"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:34,fontWeight:900,color:"var(--text)",marginRight:8}}>Hojas de Ruta</div>
         <select value={vehiculoSel} onChange={e=>setVehiculoSel(e.target.value)} style={{...S.inp,width:"auto",minWidth:290,fontWeight:800}}>

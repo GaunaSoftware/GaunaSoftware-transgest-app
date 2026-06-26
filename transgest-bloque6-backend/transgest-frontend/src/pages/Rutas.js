@@ -304,7 +304,7 @@ export default function Rutas(){
   },[rutas,filtroCliente,filtroTexto,filtroTipo,filtroTarifa,soloMargenNegativo,clientes]);
 
   return(
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{marginBottom:20}}>
         <div>
           <div style={S.title}>Rutas y tarifas</div>
@@ -312,7 +312,7 @@ export default function Rutas(){
             Configura rutas por cliente, minimos facturables, recargo de combustible y compatibilidad por tipo de remolque. En Pedidos solo aparecen las rutas del cliente seleccionado.
           </div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"minmax(220px, 1.6fr) minmax(160px, .85fr) minmax(160px, .85fr) minmax(150px, .75fr) auto minmax(250px, 1.2fr) auto",gap:14,alignItems:"center",marginTop:26}}>
+        <div className="tg-rutas-filters" style={{display:"grid",gridTemplateColumns:"minmax(220px, 1.6fr) minmax(160px, .85fr) minmax(160px, .85fr) minmax(150px, .75fr) auto minmax(250px, 1.2fr) auto",gap:14,alignItems:"center",marginTop:26}}>
           <select value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)}
             style={{...S.inp}}>
             <option value="todos">Todos los clientes</option>

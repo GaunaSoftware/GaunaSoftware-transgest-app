@@ -424,7 +424,7 @@ export default function PlanDiario() {
   const tomorrow = addDays(today, 1);
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"flex-start", marginBottom:10 }}>
         <div>
           <div style={S.title}>Plan diario</div>

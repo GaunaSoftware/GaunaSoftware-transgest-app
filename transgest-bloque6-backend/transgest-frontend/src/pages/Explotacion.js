@@ -180,7 +180,7 @@ export default function Explotacion() {
   const vehiculoDetalle = selVehiculo ? analisis.find(a=>a.vehiculo.id===selVehiculo) : null;
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={S.title}>Explotación</div>
       <div style={S.sub}>Rentabilidad por vehículo - Km en vacío - Costes de taller</div>
 

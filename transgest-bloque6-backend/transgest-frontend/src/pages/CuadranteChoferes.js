@@ -395,7 +395,7 @@ export default function CuadranteChoferes() {
   const pendientesVacaciones = vacaciones.filter(v => ["pendiente","aprobada_pendiente_firma"].includes(v.estado));
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={S.title}>Estado de Chóferes</div>
       <div style={S.sub}>Cuadrante - Disponibilidad, rutas activas y avisos de ausencias</div>
 

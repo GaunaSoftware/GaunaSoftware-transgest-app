@@ -2623,7 +2623,7 @@ export default function Taller() {
   }, 0);
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={S.title}>Taller</div>
       <div style={S.sub}>Intervenciones, reparaciones y stock de piezas y repuestos</div>
 

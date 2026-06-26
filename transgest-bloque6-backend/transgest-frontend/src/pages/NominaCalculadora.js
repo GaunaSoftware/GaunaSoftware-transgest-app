@@ -532,7 +532,7 @@ export default function NominaCalculadora() {
   }
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:900,color:"var(--text)"}}>Calculadora de nominas</div>
         <div style={{fontSize:12,color:"var(--text4)",marginLeft:4}}>Conforme ET, SS y IRPF España 2024/2025</div>

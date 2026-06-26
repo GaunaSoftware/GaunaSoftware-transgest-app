@@ -540,7 +540,7 @@ export default function Dashboard() {
   const renderTowerItem = () => null;
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:26, flexWrap:"wrap", gap:16 }}>
         <div>

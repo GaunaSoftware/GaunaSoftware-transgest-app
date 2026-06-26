@@ -1398,7 +1398,7 @@ export default function Colaboradores() {
   if (detalle) {
     const colaboradorActual = colaboradores.find(c=>c.id===detalle.id) || detalle;
     return (
-      <div style={S.page}>
+      <div className="tg-responsive-page" style={S.page}>
         <DetalleColaborador
           colaborador={colaboradorActual}
           canEdit={canEdit}
@@ -1412,7 +1412,7 @@ export default function Colaboradores() {
   }
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
           <div style={{...S.title,marginBottom:0}}>Colaboradores</div>

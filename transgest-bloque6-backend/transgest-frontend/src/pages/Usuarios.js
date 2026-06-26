@@ -311,7 +311,7 @@ export default function Usuarios() {
   }
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={S.title}>Usuarios y roles</div>
       <div style={{marginBottom:16}}>
         <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={abrirNuevo}>+ Nuevo usuario</button>

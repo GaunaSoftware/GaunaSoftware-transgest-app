@@ -709,7 +709,7 @@ export default function Empresa() {
   }
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
         <div style={S.title}>Mi Empresa</div>
         {/* Logo preview en cabecera */}

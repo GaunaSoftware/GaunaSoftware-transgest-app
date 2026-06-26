@@ -227,6 +227,140 @@ const CSS = `
     .tg-traffic-board { flex:0 0 auto !important; min-height:420px; max-height:calc(100dvh - 260px); overflow:auto !important; -webkit-overflow-scrolling:touch; }
     .tg-traffic-board table { display:table !important; width:max-content !important; min-width:1266px !important; max-width:none !important; }
   }
+  .tg-responsive-page { width:100%; max-width:100%; min-width:0; overflow-x:hidden; }
+  .tg-responsive-page > * { min-width:0; }
+  .tg-responsive-scroll { overflow:auto; -webkit-overflow-scrolling:touch; }
+  .tg-modal-backdrop { overscroll-behavior:contain; }
+  .tg-control-map-card { max-width:calc(100% - 28px); }
+  @media (max-width: 1100px) {
+    .tg-responsive-page [style*="grid-template-columns: repeat(4"],
+    .tg-responsive-page [style*="grid-template-columns:repeat(4"] {
+      grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    }
+    .tg-responsive-page [style*="grid-template-columns: repeat(3"],
+    .tg-responsive-page [style*="grid-template-columns:repeat(3"] {
+      grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    }
+  }
+  @media (max-width: 820px) {
+    .tg-responsive-page {
+      padding:16px !important;
+      min-height:auto !important;
+    }
+    .tg-responsive-page h1,
+    .tg-responsive-page [style*="font-size: 42"],
+    .tg-responsive-page [style*="fontSize:42"] {
+      font-size:clamp(24px, 9vw, 34px) !important;
+      line-height:1.08 !important;
+    }
+    .tg-responsive-page [style*="grid-template-columns: 1fr 1fr"],
+    .tg-responsive-page [style*="grid-template-columns:1fr 1fr"],
+    .tg-responsive-page [style*="grid-template-columns: repeat(2"],
+    .tg-responsive-page [style*="grid-template-columns:repeat(2"],
+    .tg-responsive-page [style*="grid-template-columns: repeat(3"],
+    .tg-responsive-page [style*="grid-template-columns:repeat(3"],
+    .tg-responsive-page [style*="grid-template-columns: repeat(4"],
+    .tg-responsive-page [style*="grid-template-columns:repeat(4"],
+    .tg-responsive-page [style*="grid-template-columns: minmax(0,1fr) 360px"],
+    .tg-responsive-page [style*="grid-template-columns: minmax(0, 1fr) 360px"],
+    .tg-responsive-page [style*="grid-template-columns: minmax(0px, 1fr) 360px"] {
+      grid-template-columns:1fr !important;
+    }
+    .tg-responsive-page [style*="display: flex"],
+    .tg-responsive-page [style*="display:flex"] {
+      flex-wrap:wrap;
+    }
+    .tg-responsive-page input,
+    .tg-responsive-page select,
+    .tg-responsive-page textarea,
+    .tg-responsive-page button {
+      max-width:100% !important;
+    }
+    .tg-responsive-page table {
+      display:block !important;
+      width:100% !important;
+      max-width:100% !important;
+      min-width:0 !important;
+      overflow-x:auto;
+      white-space:nowrap;
+    }
+    .tg-responsive-page table > thead,
+    .tg-responsive-page table > tbody,
+    .tg-responsive-page table > tfoot {
+      display:table;
+      width:100%;
+      min-width:760px;
+    }
+    .tg-responsive-page [style*="overflow-x: auto"],
+    .tg-responsive-page [style*="overflowX:auto"] {
+      -webkit-overflow-scrolling:touch;
+    }
+    .tg-modal-backdrop {
+      align-items:flex-start !important;
+      justify-content:center !important;
+      padding:10px !important;
+      overflow:auto !important;
+    }
+    .tg-modal-shell {
+      width:100% !important;
+      max-width:calc(100vw - 20px) !important;
+      max-height:calc(100dvh - 20px) !important;
+      padding:18px !important;
+    }
+    .tg-responsive-page [style*="position: fixed"][style*="inset: 0"] {
+      align-items:flex-start !important;
+      justify-content:center !important;
+      padding:10px !important;
+      overflow:auto !important;
+    }
+    .tg-responsive-page [style*="position: fixed"][style*="inset: 0"] > div {
+      width:100% !important;
+      max-width:calc(100vw - 20px) !important;
+      max-height:calc(100dvh - 20px) !important;
+      overflow:auto !important;
+    }
+    .tg-rutas-filters {
+      grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    }
+  }
+  @media (max-width: 560px) {
+    .tg-responsive-page {
+      padding:14px 12px !important;
+    }
+    .tg-responsive-page [style*="gap: 18"],
+    .tg-responsive-page [style*="gap:18"],
+    .tg-responsive-page [style*="gap: 20"],
+    .tg-responsive-page [style*="gap:20"],
+    .tg-responsive-page [style*="gap: 24"],
+    .tg-responsive-page [style*="gap:24"] {
+      gap:10px !important;
+    }
+    .tg-responsive-page table {
+      min-width:0 !important;
+    }
+    .tg-responsive-page table > thead,
+    .tg-responsive-page table > tbody,
+    .tg-responsive-page table > tfoot {
+      min-width:680px;
+    }
+    .tg-control-map-card {
+      left:10px !important;
+      right:10px !important;
+      bottom:10px !important;
+      width:auto !important;
+      max-width:none !important;
+    }
+    .tg-modal-shell {
+      padding:14px !important;
+    }
+    .tg-rutas-filters {
+      grid-template-columns:1fr !important;
+    }
+    .tg-rutas-filters > * {
+      width:100% !important;
+      min-width:0 !important;
+    }
+  }
 `;
 
 function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendientes = 0, tallerPendientes = 0, vehiculoAlertas = 0, solicitudesPendientes = 0, excepcionesPendientes = 0, colaboradoresPendientes = 0 }) {

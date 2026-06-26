@@ -171,7 +171,7 @@ export default function GastosEstructura(){
   });
 
   return(
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={S.title}>Gastos de Estructura</div>
 
       {/* Controls */}

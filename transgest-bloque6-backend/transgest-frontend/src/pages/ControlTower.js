@@ -667,7 +667,7 @@ function RouteMapPanelLegacy({ item }) {
         <span style={{position:"absolute",right:56,bottom:14,fontSize:9,color:"rgba(15,23,42,.55)",background:"rgba(255,255,255,.78)",border:"1px solid rgba(148,163,184,.24)",borderRadius:6,padding:"3px 6px"}}>
           © OpenStreetMap
         </span>
-        <div style={{position:"absolute",left:14,bottom:14,width:220,background:"rgba(255,255,255,.88)",color:"#0f172a",border:"1px solid rgba(148,163,184,.28)",borderRadius:10,padding:"10px 12px",boxShadow:"0 10px 30px rgba(15,23,42,.10)"}}>
+        <div className="tg-control-map-card" style={{position:"absolute",left:14,bottom:14,width:220,background:"rgba(255,255,255,.88)",color:"#0f172a",border:"1px solid rgba(148,163,184,.28)",borderRadius:10,padding:"10px 12px",boxShadow:"0 10px 30px rgba(15,23,42,.10)"}}>
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"#0f766e",marginBottom:5}}>{hasGps ? "Ubicacion actual" : "Ruta"}</div>
           <div style={{fontSize:12,fontWeight:900,lineHeight:1.35}}>{route.origen || "Origen"} -> {route.destino || "Destino"}</div>
           <div style={{fontSize:11,color:"#64748b",marginTop:5}}>{hasGps ? "Mostrando posicion GPS recibida." : `Sin GPS reciente: ${routeLabel.toLowerCase()}.`}</div>
@@ -935,7 +935,7 @@ function RouteMapPanelReal({ item, trips = [], onSelectTrip, onOpenDetail, mapLa
         <span style={{position:"absolute",right:56,bottom:14,fontSize:9,color:"rgba(15,23,42,.62)",background:"rgba(255,255,255,.86)",border:"1px solid rgba(148,163,184,.24)",borderRadius:6,padding:"3px 6px",zIndex:6}}>
           Datos mapa: {activeLayer.attribution}
         </span>
-        <div style={{position:"absolute",left:14,bottom:14,width:250,background:"rgba(255,255,255,.92)",color:"#0f172a",border:"1px solid rgba(148,163,184,.28)",borderRadius:10,padding:"10px 12px",boxShadow:"0 10px 30px rgba(15,23,42,.10)",zIndex:6}}>
+        <div className="tg-control-map-card" style={{position:"absolute",left:14,bottom:14,width:250,background:"rgba(255,255,255,.92)",color:"#0f172a",border:"1px solid rgba(148,163,184,.28)",borderRadius:10,padding:"10px 12px",boxShadow:"0 10px 30px rgba(15,23,42,.10)",zIndex:6}}>
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"#0f766e",marginBottom:5}}>{hasGps ? "Ubicacion actual" : "Ruta"}</div>
           <div style={{fontSize:12,fontWeight:900,lineHeight:1.35}}>{route.origen || "Origen"} -> {route.destino || "Destino"}</div>
           <div style={{fontSize:11,color:"#64748b",marginTop:5}}>{hasGps ? "Mostrando posicion GPS recibida." : `Sin GPS reciente: ${routeLabel.toLowerCase()}.`}</div>
@@ -1158,7 +1158,7 @@ export default function ControlTower() {
   }, [visible]);
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page tg-controltower-page" style={S.page}>
       <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:18}}>
         <div>
           <div style={S.title}>Control Tower</div>

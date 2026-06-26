@@ -624,7 +624,7 @@ export default function Informes() {
   const objActual = period==="30d"||period==="7d" ? objetivos.facturacion_mes||0 : period==="365d" ? objetivos.facturacion_anual||0 : 0;
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       {/* Header + period */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, flexWrap:"wrap", gap:10 }}>
         <div style={S.title}>Informes de gerencia</div>

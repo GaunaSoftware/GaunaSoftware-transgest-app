@@ -1630,7 +1630,7 @@ export default function Vehiculos() {
   const vehiculosActivos = vehiculos.filter(v => v.activo !== false && v.estado !== "baja");
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18, flexWrap:"wrap" }}>
         <div style={S.title}>Vehículos</div>
 

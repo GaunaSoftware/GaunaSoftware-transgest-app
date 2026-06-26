@@ -981,7 +981,7 @@ export default function Choferes() {
   }
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
         <div style={S.title}>Chóferes</div>
         <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>

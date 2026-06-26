@@ -159,7 +159,7 @@ export default function Actividad() {
   }
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16,marginBottom:16,flexWrap:"wrap"}}>
         <div style={{minWidth:0,flex:"1 1 360px"}}>
           <div style={S.title}>Trazabilidad</div>

@@ -408,7 +408,7 @@ Responde SOLO con el JSON, sin texto adicional.`;
   ];
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={S.title}>Gestión de documentos</div>
 
       {/* Alertas críticas en cabecera */}

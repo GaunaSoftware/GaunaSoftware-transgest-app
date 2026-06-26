@@ -1581,7 +1581,7 @@ export default function Clientes() {
   };
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:18}}>
         <div style={S.title}>Clientes</div>
         <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:"var(--text3)",cursor:"pointer",userSelect:"none",fontWeight:700}}>

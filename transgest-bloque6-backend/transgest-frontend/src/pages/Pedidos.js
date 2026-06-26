@@ -8961,7 +8961,7 @@ export default function Pedidos() {
 
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={S.title}>Pedidos / Tráfico</div>
       <div style={{display:"flex",gap:8,margin:"-4px 0 24px",flexWrap:"wrap"}}>
         {[

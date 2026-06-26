@@ -83,7 +83,7 @@ export default function Grupajes() {
   }
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
           <div style={S.title}>🔗 Grupajes</div>

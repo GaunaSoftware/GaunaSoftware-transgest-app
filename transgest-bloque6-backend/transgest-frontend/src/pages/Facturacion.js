@@ -2701,7 +2701,7 @@ export default function Facturacion() {
   ];
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",marginBottom:24}}>
         <div style={{display:"flex",gap:18,alignItems:"flex-start"}}>
           <div style={{width:46,height:46,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"rgba(20,184,166,.10)",border:"1px solid rgba(20,184,166,.20)",color:"var(--accent-xl)",flexShrink:0}}>

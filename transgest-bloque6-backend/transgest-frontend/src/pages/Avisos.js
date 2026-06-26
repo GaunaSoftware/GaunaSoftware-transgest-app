@@ -301,7 +301,7 @@ export default function Avisos() {
   const filtrosDocumentos = [["todos","Todos"],["criticos","Criticos y caducados"],["incompletos","Incompletos"],["duplicados","Con historial"],["vehiculos","Vehiculos"],["choferes","Choferes"]];
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
         <div style={S.title}>Avisos y vencimientos</div>
       </div>

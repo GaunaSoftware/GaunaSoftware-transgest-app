@@ -339,7 +339,7 @@ export default function CuadranteVehiculos() {
   }
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={S.title}>Estado de Vehículos</div>
       <div style={S.sub}>Cuadrante - Estado actual, documentación y alertas de vencimiento</div>
 

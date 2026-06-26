@@ -424,7 +424,7 @@ export default function Agenda() {
   }
 
   return (
-    <div className="tg-agenda-page" style={S.page}>
+    <div className="tg-agenda-page tg-responsive-page" style={S.page}>
       <div className="tg-agenda-title" style={S.title}>Agenda y tareas</div>
       <div style={S.sub}>Calendario operativo para usuarios, recordatorios y seguimiento interno del día a día.</div>
 

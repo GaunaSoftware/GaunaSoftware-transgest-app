@@ -290,7 +290,7 @@ export default function Excepciones() {
   };
 
   return (
-    <div style={S.page}>
+    <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16,marginBottom:16}}>
         <div>
           <div style={S.title}>Bandeja de Excepciones</div>

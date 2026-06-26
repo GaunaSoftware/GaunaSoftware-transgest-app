@@ -7936,6 +7936,7 @@ export default function Pedidos() {
   const [choferes,   setChoferes]   = useState([]);
   const [rutas,      setRutas]      = useState([]);
   const [loading,    setLoading]    = useState(true);
+  const [loadError,  setLoadError]  = useState("");
   const _rangoSemanaActual = currentWeekRangeLocal();
   const [filtroEst,  setFiltroEst]  = useState(() => focusPedido?.pedido_id ? "todos" : "activos");
   const [filtroMes,  setFiltroMes]  = useState("");
@@ -8151,6 +8152,7 @@ export default function Pedidos() {
 
   const cargar = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     let listadoCargado = false;
     try {
       const params = {};
@@ -8223,7 +8225,10 @@ export default function Pedidos() {
           } catch {}
         }
       }).catch((e) => { console.error(e); });
-      } catch(e) { console.error(e); }
+      } catch(e) {
+        console.error(e);
+        setLoadError(e.message || "No se pudieron cargar los viajes.");
+      }
     finally { if (!listadoCargado) setLoading(false); }
   }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page]);
 
@@ -9268,10 +9273,25 @@ export default function Pedidos() {
           </tr></thead>
           <tbody>
             {loading ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
+            : loadError ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",padding:26}}>
+              <div style={{display:"grid",justifyItems:"center",gap:9}}>
+                <div style={{fontSize:13,fontWeight:900,color:"#ef4444"}}>No se pudieron cargar los viajes.</div>
+                <div style={{fontSize:12,color:"var(--text4)",maxWidth:520,lineHeight:1.45}}>
+                  La lista no esta vacia necesariamente: la API no ha respondido correctamente. Reintenta y, si se repite, revisa el estado del servidor.
+                </div>
+                <button
+                  type="button"
+                  onClick={cargar}
+                  style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.25)",padding:"7px 12px",fontSize:12}}
+                >
+                  Reintentar
+                </button>
+              </div>
+            </td></tr>
             : pedidosVisibles.length===0 ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)",padding:26}}>
               {soloCriticos ? "No hay pedidos criticos con los filtros actuales." : (
                 <div style={{display:"grid",justifyItems:"center",gap:8}}>
-                  <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>La IA no puede planificar cargas porque no hay viajes disponibles.</div>
+                  <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>No hay viajes disponibles con los filtros actuales.</div>
                   <div style={{fontSize:12,color:"var(--text4)"}}>Quieres crear un nuevo viaje?</div>
                   {canEdit && (
                     <button

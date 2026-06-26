@@ -282,14 +282,27 @@ async function sendMetaCloudMessage({ cfg, phone, templateName, message, pedido 
         type: "text",
         text: { preview_url: false, body: message },
       };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${cfg.access_token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  const controller = new AbortController();
+  const timeoutMs = Number(process.env.WHATSAPP_TIMEOUT_MS || 10000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${cfg.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    const err = new Error(e.name === "AbortError" ? "Meta WhatsApp no respondio a tiempo" : e.message);
+    err.code = e.name === "AbortError" ? "whatsapp_timeout" : "whatsapp_request_error";
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data?.error?.message || `Meta WhatsApp respondio HTTP ${res.status}`);

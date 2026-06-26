@@ -94,7 +94,14 @@ app.use(cors({
   credentials: true,
 }));
 app.use("/api/v1/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookRoutes);
-app.use(express.json({ limit: process.env.REQUEST_BODY_LIMIT || "8mb" }));
+app.use(express.json({
+  limit: process.env.REQUEST_BODY_LIMIT || "8mb",
+  verify: (req, _res, buf) => {
+    if (req.originalUrl && req.originalUrl.startsWith("/api/v1/whatsapp/webhook")) {
+      req.rawBody = Buffer.from(buf);
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: process.env.REQUEST_BODY_LIMIT || "8mb" }));
 if (process.env.NODE_ENV !== "test") {
   app.use(morgan("combined", { stream: { write: msg => logger.info(msg.trim()) } }));
@@ -725,10 +732,13 @@ async function applyMigrations() {
         fecha_emision DATE NOT NULL DEFAULT CURRENT_DATE,
         fecha_vencimiento DATE,
         fecha_pago DATE,
+        stripe_invoice_id VARCHAR(120),
         notas TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `).catch(() => {});
+    await db.query("ALTER TABLE facturas_suscripcion ADD COLUMN IF NOT EXISTS stripe_invoice_id VARCHAR(120)").catch(() => {});
+    await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_facturas_suscripcion_stripe_invoice ON facturas_suscripcion(stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL").catch(() => {});
     await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS notas_operacion TEXT").catch(() => {});
     await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS ubicacion_actual VARCHAR(255)").catch(() => {});
     await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS ubicacion_fuente VARCHAR(40) DEFAULT 'manual'").catch(() => {});

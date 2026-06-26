@@ -2,6 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 const db = require("../services/db");
 const { authenticate, SOLO_GERENTE, GERENTE_O_TRAFICO } = require("../middleware/auth");
+const { decryptSecret } = require("../services/apiKeys");
 const {
   ensureWhatsappTables,
   getEmpresaWhatsappConfig,
@@ -17,15 +18,18 @@ const router = express.Router();
 const EID = req => req.empresaId || req.user?.empresa_id;
 
 function verifyMetaSignature(req, appSecret) {
-  if (!appSecret) return { checked: false, ok: true };
+  if (!appSecret) return { checked: false, ok: process.env.NODE_ENV !== "production" };
   const signature = String(req.get("x-hub-signature-256") || "");
   if (!signature.startsWith("sha256=")) return { checked: true, ok: false };
-  const raw = JSON.stringify(req.body || {});
+  const raw = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
   const expected = "sha256=" + crypto.createHmac("sha256", appSecret).update(raw).digest("hex");
   try {
+    const signatureBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expected);
+    if (signatureBuffer.length !== expectedBuffer.length) return { checked: true, ok: false };
     return {
       checked: true,
-      ok: crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected)),
+      ok: crypto.timingSafeEqual(signatureBuffer, expectedBuffer),
     };
   } catch {
     return { checked: true, ok: false };
@@ -67,6 +71,9 @@ router.post("/webhook", async (req, res) => {
         );
         const cfg = cfgRows.rows[0];
         if (!cfg) continue;
+        const appSecret = decryptSecret(cfg.app_secret_encrypted || "");
+        const signature = verifyMetaSignature(req, appSecret);
+        if (!signature.ok) return res.sendStatus(403);
         const statuses = Array.isArray(value.statuses) ? value.statuses : [];
         const messages = Array.isArray(value.messages) ? value.messages : [];
         for (const status of statuses) {

@@ -97,6 +97,7 @@ async function requestVerifacti(config, path, options = {}) {
     method: options.method || "GET",
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(Number(process.env.VERIFACTI_TIMEOUT_MS || 10000)),
   });
   return parseResponse(res);
 }

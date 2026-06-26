@@ -44,8 +44,7 @@ function etiquetaAccion(accion) {
   return raw.split(" ")[0] || "Actividad";
 }
 
-function metodoColor(accion) {
-  const method = String(accion || "").split(" ")[0];
+function metodoColor(method) {
   if (method === "POST") return "var(--green)";
   if (method === "PUT" || method === "PATCH") return "#f59e0b";
   if (method === "DELETE") return "#ef4444";
@@ -72,15 +71,16 @@ function accionVisible(item = {}) {
   const path = item.path || String(item.accion || "").replace(method, "").trim();
   const modulo = item.modulo || etiquetaAccion(item.accion);
   const verb = method === "POST" ? "Alta" : method === "PUT" ? "Edicion" : method === "PATCH" ? "Cambio" : method === "DELETE" ? "Baja" : "Accion";
-  const id = item.detalle?.params?.id || item.detalle?.body?.id || "";
-  if (path.includes("/pedidos")) return `${verb} en pedidos${id ? ` (${id})` : ""}`;
-  if (path.includes("/facturas")) return `${verb} en facturacion${id ? ` (${id})` : ""}`;
-  if (path.includes("/clientes")) return `${verb} en clientes${id ? ` (${id})` : ""}`;
-  if (path.includes("/vehiculos")) return `${verb} en vehiculos${id ? ` (${id})` : ""}`;
-  if (path.includes("/choferes")) return `${verb} en choferes${id ? ` (${id})` : ""}`;
-  if (path.includes("/colaboradores")) return `${verb} en colaboradores${id ? ` (${id})` : ""}`;
-  if (path.includes("/taller")) return `${verb} en taller${id ? ` (${id})` : ""}`;
-  if (path.includes("/palets")) return `${verb} en almacen${id ? ` (${id})` : ""}`;
+  const body = item.detalle?.body && typeof item.detalle.body === "object" ? item.detalle.body : {};
+  const ref = body.numero || body.referencia || body.referencia_cliente || body.nombre || body.razon_social || body.email || "";
+  if (path.includes("/pedidos")) return `${verb} de pedido${ref ? ` ${ref}` : ""}`;
+  if (path.includes("/facturas")) return `${verb} de factura${ref ? ` ${ref}` : ""}`;
+  if (path.includes("/clientes")) return `${verb} de cliente${ref ? ` ${ref}` : ""}`;
+  if (path.includes("/vehiculos")) return `${verb} de vehiculo${ref ? ` ${ref}` : ""}`;
+  if (path.includes("/choferes")) return `${verb} de chofer${ref ? ` ${ref}` : ""}`;
+  if (path.includes("/colaboradores")) return `${verb} de colaborador${ref ? ` ${ref}` : ""}`;
+  if (path.includes("/taller")) return `${verb} en taller${ref ? ` ${ref}` : ""}`;
+  if (path.includes("/palets")) return `${verb} en almacen${ref ? ` ${ref}` : ""}`;
   return `${verb} en ${modulo}`;
 }
 
@@ -109,8 +109,6 @@ export default function Actividad() {
     accion:"",
     actor:"",
     modulo:"",
-    metodo:"",
-    status:"",
     criticidad:"",
     desde:"",
     hasta:"",
@@ -141,15 +139,14 @@ export default function Actividad() {
   const f = key => e => setFiltros(prev => ({ ...prev, [key]: e.target.value }));
 
   function exportarCsv() {
-    const header = ["fecha", "usuario", "tipo", "accion", "estado", "ip", "request_id"];
+    const header = ["fecha", "usuario", "accion", "modulo", "criticidad", "detalle"];
     const rows = items.map(item => [
       item.created_at ? new Date(item.created_at).toLocaleString("es-ES") : "",
       item.actor_email || "",
-      item.actor_tipo || "",
-      item.accion || "",
-      parseStatus(item) || "",
-      item.ip || "",
-      item.detalle?.request_id || "",
+      accionVisible(item),
+      item.modulo || etiquetaAccion(item.accion),
+      item.criticidad || "baja",
+      detalleVisible(item),
     ]);
     const csv = [header, ...rows].map(row => row.map(csvCell).join(";")).join("\n");
     const blob = new Blob([csv], { type:"text/csv;charset=utf-8" });
@@ -165,8 +162,8 @@ export default function Actividad() {
     <div style={S.page}>
       <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16,marginBottom:16,flexWrap:"wrap"}}>
         <div style={{minWidth:0,flex:"1 1 360px"}}>
-          <div style={S.title}>Registro de actividad</div>
-          <div style={S.sub}>Trazabilidad interna visible solo para gerencia: cambios, altas, bajas, aprobaciones y errores relevantes. No se muestran inicios de sesion ni consultas tecnicas.</div>
+          <div style={S.title}>Trazabilidad</div>
+          <div style={S.sub}>Vista de negocio para gerencia: quien cambio que, cuando y en que area. No se muestran IP, rutas tecnicas ni codigos internos.</div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button onClick={exportarCsv} disabled={!items.length} style={{...S.btn,background:"rgba(59,130,246,.12)",borderColor:"rgba(59,130,246,.3)",color:"var(--accent-xl)",opacity:items.length?1:.55}}>
@@ -181,7 +178,7 @@ export default function Actividad() {
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:14}}>
         {[
           ["Registros", totales.registros || items.length || 0, "var(--text)"],
-          ["Errores", totales.errores || 0, Number(totales.errores || 0) ? "#ef4444" : "var(--green)"],
+          ["Incidencias", totales.errores || 0, Number(totales.errores || 0) ? "#ef4444" : "var(--green)"],
           ["Usuarios", totales.usuarios || 0, "var(--accent-xl)"],
           ["Criticos/altos", totales.altas || 0, Number(totales.altas || 0) ? "#f59e0b" : "var(--green)"],
         ].map(([label, value, color]) => (
@@ -218,24 +215,6 @@ export default function Actividad() {
           </select>
         </div>
         <div>
-          <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Metodo</div>
-          <select value={filtros.metodo} onChange={f("metodo")} style={{...S.inp,width:"100%"}}>
-            <option value="">Todos</option>
-            {["POST","PUT","PATCH","DELETE"].map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-        <div>
-          <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Resultado</div>
-          <select value={filtros.status} onChange={f("status")} style={{...S.inp,width:"100%"}}>
-            <option value="">Todos</option>
-            <option value="ok">Correctos</option>
-            <option value="error">Errores</option>
-            <option value="401">401</option>
-            <option value="403">403</option>
-            <option value="500">500</option>
-          </select>
-        </div>
-        <div>
           <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4}}>Criticidad</div>
           <select value={filtros.criticidad} onChange={f("criticidad")} style={{...S.inp,width:"100%"}}>
             <option value="">Todas</option>
@@ -267,6 +246,7 @@ export default function Actividad() {
             const color = metodoColor(method);
             const status = item.status || parseStatus(item);
             const cColor = criticidadColor(item.criticidad);
+            const estadoNegocio = status >= 400 ? "requiere revision" : "cambio registrado";
             return (
               <div key={item.id} style={{...S.card,display:"grid",gridTemplateColumns:"minmax(92px,.35fr) minmax(220px,1fr) minmax(150px,.45fr)",gap:12,alignItems:"center",borderColor:status >= 400 ? "rgba(239,68,68,.45)" : "var(--border)",overflow:"hidden"}}>
                 <div style={{minWidth:0}}>
@@ -280,7 +260,7 @@ export default function Actividad() {
                 <div style={{minWidth:0,overflow:"hidden"}}>
                   <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:3,overflowWrap:"anywhere",lineHeight:1.35}}>{accionVisible(item)}</div>
                   <div style={{fontSize:12,color:"var(--text4)",overflowWrap:"anywhere",lineHeight:1.35}}>
-                    {item.actor_email || "usuario"} - {status ? `estado ${status}` : "accion registrada"}
+                    {item.actor_email || "usuario"} - {estadoNegocio}
                   </div>
                   {detalleVisible(item) && (
                     <div style={{fontSize:11,color:"var(--text5)",marginTop:4,overflowWrap:"anywhere"}}>{detalleVisible(item)}</div>
@@ -293,7 +273,7 @@ export default function Actividad() {
                   <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--text3)",overflowWrap:"anywhere"}}>
                     {item.created_at ? new Date(item.created_at).toLocaleString("es-ES") : ""}
                   </div>
-                  <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{item.actor_tipo}</div>
+                  <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{status >= 400 ? "Revisar" : "Completado"}</div>
                 </div>
               </div>
             );

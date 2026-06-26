@@ -150,9 +150,17 @@ async function fetchSpainHolidays(year, ccaa) {
       holidays: fallbackSpanishHolidays(year),
     };
   }
-  const response = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/ES`, {
-    headers: { accept: "application/json" },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(process.env.HOLIDAY_API_TIMEOUT_MS || 8000));
+  let response;
+  try {
+    response = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/ES`, {
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!response.ok) throw new Error(`Public holiday API ${response.status}`);
   const data = await response.json();
   const holidays = (Array.isArray(data) ? data : [])

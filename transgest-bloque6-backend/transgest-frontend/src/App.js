@@ -267,54 +267,50 @@ function filtrarModulosPorPermisos(modulos, permisos, rol) {
 }
 
 const MODULOS_GERENTE = [
-  { titulo:"Principal", items:[
+  { titulo:"Trabajo diario", items:[
     { id:"dashboard", icon:IC.dashboard, label:"Dashboard" },
     { id:"agenda", icon:IC.agenda, label:"Agenda" },
-  ]},
-  { titulo:"Operaciones", items:[
-    { id:"gestion_trafico", icon:IC.rutas, label:"Gestión de tráfico" },
-    { id:"control_tower", icon:IC.tower, label:"Control Tower" },
-    { id:"cuadrante_grupo", icon:IC.cuadrante, label:"Cuadrante", children:[
+    { id:"operativa_diaria", icon:IC.rutas, label:"Operativa diaria", children:[
+      { id:"gestion_trafico", label:"Mesa de trafico" },
+      { id:"control_tower", label:"Control Tower" },
+      { id:"pedidos", label:"Pedidos / Trafico" },
       { id:"plan_diario", label:"Plan diario" },
-      { id:"cuadrante_semana", label:"Resumen semanal" },
-      { id:"cuadrante_vehiculos", label:"Estado vehiculos" },
-      { id:"cuadrante_choferes", label:"Estado choferes" },
+      { id:"cuadrante_semana", label:"Cuadrante semanal" },
     ]},
-    { id:"pedidos", icon:IC.pedidos, label:"Pedidos / Tráfico" },
+    { id:"clientes", icon:IC.clientes, label:"Clientes" },
+    { id:"facturacion_grupo", icon:IC.facturacion, label:"Facturacion", children:[
+      { id:"facturacion", label:"Gestion financiera" },
+      { id:"contabilidad", label:"Contabilidad" },
+    ]},
+  ]},
+  { titulo:"Herramientas", items:[
     { id:"solicitudes", icon:IC.docs, label:"Solicitudes clientes" },
-    { id:"palets", icon:IC.almacen, label:"Gestión de almacén" },
+    { id:"palets", icon:IC.almacen, label:"Gestion de almacen" },
     { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
     { id:"rutas", icon:IC.rutas, label:"Rutas y Tarifas" },
-    { id:"clientes", icon:IC.clientes, label:"Clientes" },
     { id:"colaboradores", icon:IC.colabor, label:"Colaboradores" },
   ]},
   { titulo:"Flota", items:[
-    { id:"vehiculos", icon:IC.vehiculos, label:"Vehículos" },
-    { id:"choferes", icon:IC.choferes, label:"Chóferes" },
+    { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos" },
+    { id:"choferes", icon:IC.choferes, label:"Choferes" },
     { id:"taller", icon:IC.taller, label:"Taller" },
     { id:"explotacion", icon:IC.explotacion, label:"Explotacion" },
   ]},
-  { titulo:"Finanzas", items:[
-    { id:"facturacion_grupo", icon:IC.facturacion, label:"Facturación", children:[
-      { id:"facturacion", label:"Gestión financiera" },
-      { id:"contabilidad", label:"Contabilidad" },
-    ]},
+  { titulo:"Administracion", items:[
     { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
-    { id:"nominas", icon:IC.nominas, label:"Nóminas" },
+    { id:"nominas", icon:IC.nominas, label:"Nominas" },
     { id:"gastos_estructura", icon:IC.contabilidad, label:"Gastos de estructura" },
     { id:"informes_grupo", icon:IC.rendimiento, label:"Rendimiento", children:[
       { id:"excepciones", label:"Excepciones operativas" },
-      { id:"informes", label:"Informes de gestión" },
+      { id:"informes", label:"Informes de gestion" },
     ]},
-  ]},
-  { titulo:"Gestión", items:[
     { id:"control_horario", icon:IC.agenda, label:"Control horario" },
     { id:"documentos", icon:IC.docs, label:"Documentos" },
     { id:"avisos", icon:IC.avisos, label:"Avisos" },
     { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
     { id:"usuarios", icon:IC.usuarios, label:"Usuarios y roles" },
-    { id:"actividad", icon:IC.actividad, label:"Registro de actividad" },
-    { id:"importacion", icon:IC.importacion, label:"Importación" },
+    { id:"actividad", icon:IC.actividad, label:"Trazabilidad" },
+    { id:"importacion", icon:IC.importacion, label:"Importacion" },
   ]},
 ];
 
@@ -352,30 +348,32 @@ const MODULOS_RESPONSABLE_TALLER = [
 ];
 
 const MODULOS_TRAFICO = [
-  { titulo:"Principal", items:[
+  { titulo:"Trabajo diario", items:[
     { id:"dashboard", icon:IC.dashboard, label:"Dashboard" },
-  ]},
-  { titulo:"Operaciones", items:[
     { id:"agenda", icon:IC.agenda, label:"Agenda" },
-    { id:"plan_diario", icon:IC.cuadrante, label:"Plan diario" },
-    { id:"gestion_trafico", icon:IC.rutas, label:"Gestión de tráfico" },
-    { id:"control_tower", icon:IC.tower, label:"Control Tower" },
-    { id:"pedidos", icon:IC.pedidos, label:"Pedidos / Tráfico" },
+    { id:"operativa_diaria", icon:IC.rutas, label:"Operativa diaria", children:[
+      { id:"gestion_trafico", label:"Mesa de trafico" },
+      { id:"control_tower", label:"Control Tower" },
+      { id:"pedidos", label:"Pedidos / Trafico" },
+      { id:"plan_diario", label:"Plan diario" },
+    ]},
+    { id:"clientes", icon:IC.clientes, label:"Clientes" },
+  ]},
+  { titulo:"Herramientas", items:[
     { id:"solicitudes", icon:IC.docs, label:"Solicitudes clientes" },
     { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
     { id:"rutas", icon:IC.rutas, label:"Rutas y Tarifas" },
-    { id:"clientes", icon:IC.clientes, label:"Clientes" },
     { id:"colaboradores", icon:IC.colabor, label:"Colaboradores" },
   ]},
   { titulo:"Flota", items:[
-    { id:"vehiculos", icon:IC.vehiculos, label:"Vehículos" },
-    { id:"choferes", icon:IC.choferes, label:"Chóferes" },
+    { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos" },
+    { id:"choferes", icon:IC.choferes, label:"Choferes" },
     { id:"taller", icon:IC.taller, label:"Taller" },
     { id:"explotacion", icon:IC.explotacion, label:"Explotacion" },
     { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
     { id:"control_horario", icon:IC.agenda, label:"Control horario" },
   ]},
-  { titulo:"Gestión", items:[
+  { titulo:"Gestion", items:[
     { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
     { id:"documentos", icon:IC.docs, label:"Documentos" },
     { id:"avisos", icon:IC.avisos, label:"Avisos" },
@@ -423,7 +421,7 @@ function VISTA_DEFAULT(rol) {
   if (rol === "chofer")  return "app_chofer";
   if (rol === "cliente" || rol === "cliente_portal") return "portal_cliente";
   if (rol === "gerente" || rol === "contable") return "dashboard";
-  return "pedidos";
+  return "gestion_trafico";
 }
 
 // Mapa de ID de mÃƒÂ³dulo Ã¢â€ â€™ componente React

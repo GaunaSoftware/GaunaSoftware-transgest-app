@@ -15,21 +15,27 @@ function verifySignature(raw, header) {
   if (!secret) return process.env.NODE_ENV !== "production";
   if (!header) return false;
 
-  const parts = Object.fromEntries(
-    header.split(",").map((part) => {
-      const [k, v] = part.split("=");
-      return [k, v];
-    })
-  );
-  if (!parts.t || !parts.v1) return false;
+  const parts = header.split(",").reduce((acc, part) => {
+    const [k, v] = part.split("=");
+    if (!k || !v) return acc;
+    if (k === "v1") acc.v1.push(v);
+    else acc[k] = v;
+    return acc;
+  }, { v1: [] });
+  if (!parts.t || !parts.v1.length) return false;
+  const timestamp = Number(parts.t);
+  const tolerance = Number(process.env.STRIPE_WEBHOOK_TOLERANCE_SEC || 300);
+  if (!Number.isFinite(timestamp) || Math.abs(Math.floor(Date.now() / 1000) - timestamp) > tolerance) return false;
 
   const payload = `${parts.t}.${Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw)}`;
   const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
-  try {
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1));
-  } catch {
-    return false;
-  }
+  return parts.v1.some(sig => {
+    try {
+      return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"));
+    } catch {
+      return false;
+    }
+  });
 }
 
 async function nextNumeroFactura() {
@@ -53,6 +59,13 @@ async function empresaFromStripeObject(obj) {
 }
 
 async function registrarFacturaSuscripcion(empresa, invoice) {
+  if (invoice.id) {
+    const existing = await db.query(
+      "SELECT id FROM facturas_suscripcion WHERE stripe_invoice_id=$1 LIMIT 1",
+      [invoice.id]
+    ).catch(() => ({ rows: [] }));
+    if (existing.rows[0]) return;
+  }
   const total = Number(invoice.amount_paid || invoice.total || 0) / 100;
   const line = invoice.lines?.data?.[0];
   const desde = line?.period?.start ? new Date(line.period.start * 1000) : new Date();
@@ -61,8 +74,8 @@ async function registrarFacturaSuscripcion(empresa, invoice) {
 
   await db.query(`
     INSERT INTO facturas_suscripcion
-      (empresa_id, numero, concepto, plan, periodo_desde, periodo_hasta, importe, estado, fecha_vencimiento, fecha_pago, notas)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,'pagada',$6,CURRENT_DATE,$8)
+      (empresa_id, numero, concepto, plan, periodo_desde, periodo_hasta, importe, estado, fecha_vencimiento, fecha_pago, stripe_invoice_id, notas)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,'pagada',$6,CURRENT_DATE,$8,$9)
     ON CONFLICT DO NOTHING
   `, [
     empresa.id,
@@ -72,6 +85,7 @@ async function registrarFacturaSuscripcion(empresa, invoice) {
     desde,
     hasta,
     total,
+    invoice.id || null,
     invoice.id ? `Stripe invoice ${invoice.id}` : null,
   ]);
 }

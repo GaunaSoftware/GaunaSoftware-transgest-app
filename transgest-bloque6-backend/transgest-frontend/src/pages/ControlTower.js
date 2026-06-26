@@ -1066,6 +1066,7 @@ export default function ControlTower() {
   const [tab, setTab] = useState("todas");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [statusPicker, setStatusPicker] = useState(null);
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [detailTrip, setDetailTrip] = useState(null);
@@ -1074,9 +1075,10 @@ export default function ControlTower() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setLoadError("");
     getControlTower(period)
       .then(d => { if (alive) setData(d && typeof d === "object" ? d : null); })
-      .catch(() => { if (alive) setData(null); })
+      .catch((e) => { if (alive) { setData(null); setLoadError(e.message || "No se pudo cargar Control Tower."); } })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [period]);
@@ -1277,6 +1279,16 @@ export default function ControlTower() {
 
       {loading ? (
         <div style={{color:"var(--text4)",padding:40,textAlign:"center"}}>Cargando Control Tower...</div>
+      ) : loadError ? (
+        <div style={{...S.card,borderColor:"rgba(239,68,68,.32)",background:"rgba(239,68,68,.06)"}}>
+          <div style={{fontSize:14,color:"#ef4444",fontWeight:900,marginBottom:6}}>No se pudo cargar Control Tower</div>
+          <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:12}}>
+            No se han perdido los viajes: la consulta al servidor ha fallado o ha tardado demasiado.
+          </div>
+          <button onClick={() => { setLoading(true); setLoadError(""); getControlTower(period).then(d => setData(d && typeof d === "object" ? d : null)).catch(e => setLoadError(e.message || "No se pudo cargar Control Tower.")).finally(() => setLoading(false)); }} style={{border:"1px solid rgba(239,68,68,.25)",background:"rgba(239,68,68,.10)",color:"#ef4444",borderRadius:7,padding:"7px 10px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            Reintentar
+          </button>
+        </div>
       ) : visible.length === 0 ? (
         <div style={S.card}>
           <div style={{fontSize:14,color:"var(--green)",fontWeight:900,marginBottom:6}}>Sin señales activas en esta vista</div>

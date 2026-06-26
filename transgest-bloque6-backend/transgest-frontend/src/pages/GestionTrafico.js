@@ -2322,6 +2322,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   const [rutas, setRutas] = useState([]);
   const [incidenciasViaje, setIncidenciasViaje] = useState([]);
   const [loading,   setLoading]   = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [editViaje, setEditViaje] = useState(null);
   const [addTripCell, setAddTripCell] = useState(null);
   const [addTripExistingId, setAddTripExistingId] = useState("");
@@ -2363,6 +2364,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   const today = new Date().toISOString().slice(0,10);
   const cargar = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const semana = getWeekDays(anchor);
       const desde = semana[0].toISOString().slice(0,10);
@@ -2370,13 +2372,13 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       const desdeCarga = addDaysLocal(semana[0], -45).toISOString().slice(0,10);
       const hastaCarga = addDaysLocal(semana[6], 75).toISOString().slice(0,10);
       const [p, pg, v, c, r, cfgEmpresa, notifs] = await Promise.all([
-        getPedidosResumenLista({ desde: desdeCarga, hasta: hastaCarga, limit: 1000 }, { timeoutMs: 45000, silentError: true }).catch(() => []),
+        getPedidosResumenLista({ desde: desdeCarga, hasta: hastaCarga, limit: 1000 }, { timeoutMs: 45000, silentError: true }),
         getPedidosResumenLista({
           tipo_carga: "grupaje",
           estado: "pendiente,confirmado,en_curso,descarga,incidencia",
           facturado: "false",
           limit: 1000,
-        }, { timeoutMs: 45000, silentError: true }).catch(() => []),
+        }, { timeoutMs: 45000, silentError: true }),
         getVehiculos().catch(() => []),
         getChoferes().catch(() => []),
         getRutas().catch(() => []),
@@ -2408,6 +2410,11 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         !n?.leida &&
         ["chofer_paralizacion", "chofer_descanso_incorrecto", "chofer_descanso_excedido", "chofer_pausa_obligatoria"].includes(String(n?.tipo || ""))
       ));
+    } catch (e) {
+      console.error(e);
+      setLoadError(e.message || "No se pudieron cargar los viajes de trafico.");
+      setPedidos([]);
+      setPedidosGrupajeActivos([]);
     } finally { setLoading(false); }
   }, [anchor]);
 
@@ -4636,6 +4643,18 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         </span>
         {loading && <span style={{ fontSize:11, color:"var(--text5)", marginLeft:8 }}>Actualizando...</span>}
       </div>
+
+      {loadError && (
+        <div style={{margin:"10px 16px 0",border:"1px solid rgba(239,68,68,.28)",background:"rgba(239,68,68,.08)",borderRadius:9,padding:"10px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:900,color:"#ef4444"}}>No se pudieron cargar los viajes.</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>La vista de trafico puede estar incompleta. Reintenta antes de asumir que no hay pedidos.</div>
+          </div>
+          <button onClick={cargar} style={{padding:"7px 12px",borderRadius:7,border:"1px solid rgba(239,68,68,.25)",background:"rgba(239,68,68,.10)",color:"#ef4444",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            Reintentar
+          </button>
+        </div>
+      )}
 
       {/* â”€â”€ Grid principal â”€â”€ */}
       <div style={{ flex:1, overflowY:"auto", overflowX:"auto", display:vistaMain==="cuadrante"?"block":"none" }}>

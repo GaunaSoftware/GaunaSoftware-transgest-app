@@ -36,14 +36,27 @@ async function request(path, params = {}) {
     body.append(key, String(value));
   });
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: "Basic " + Buffer.from(`${process.env.STRIPE_SECRET_KEY}:`).toString("base64"),
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body,
-  });
+  const controller = new AbortController();
+  const timeoutMs = Number(process.env.STRIPE_TIMEOUT_MS || 10000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: "Basic " + Buffer.from(`${process.env.STRIPE_SECRET_KEY}:`).toString("base64"),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    const err = new Error(e.name === "AbortError" ? "Stripe no respondio a tiempo" : e.message);
+    err.code = e.name === "AbortError" ? "stripe_timeout" : "stripe_request_error";
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.error?.message || `Stripe error ${res.status}`);

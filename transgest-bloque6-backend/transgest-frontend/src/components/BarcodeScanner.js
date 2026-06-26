@@ -132,8 +132,26 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
   }
 
   return (
-    <div style={box} onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={card}>
+    <div className="tg-barcode-scanner" style={box} onClick={e => e.target === e.currentTarget && onClose()}>
+      <style>{`
+        .tg-barcode-scanner, .tg-barcode-scanner * { box-sizing:border-box; }
+        @media (max-width: 520px) {
+          .tg-barcode-scanner {
+            align-items:flex-start !important;
+            padding:10px !important;
+            overflow:auto !important;
+          }
+          .tg-barcode-card {
+            width:100% !important;
+            max-width:calc(100vw - 20px) !important;
+            padding:14px !important;
+          }
+          .tg-barcode-actions {
+            grid-template-columns:1fr !important;
+          }
+        }
+      `}</style>
+      <div className="tg-barcode-card" style={card}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",marginBottom:12}}>
           <div>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800}}>{title}</div>
@@ -174,7 +192,7 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
           <div style={{fontSize:12,color:"var(--text5)",marginBottom:10}}>{status}</div>
         )}
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8}}>
+        <div className="tg-barcode-actions" style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8}}>
           <input
             style={input}
             value={manual}

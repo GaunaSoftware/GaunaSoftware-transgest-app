@@ -251,8 +251,29 @@ export default function OnboardingWizard({ user, visibleModules, storageKey, onC
   };
 
   return (
-    <div style={S.overlay}>
-      <div style={S.card}>
+    <div className="tg-onboarding-overlay" style={S.overlay}>
+      <style>{`
+        @media (max-width: 520px) {
+          .tg-onboarding-overlay {
+            align-items:flex-start !important;
+            justify-content:center !important;
+            padding:12px !important;
+            overflow:auto !important;
+          }
+          .tg-onboarding-card {
+            width:100% !important;
+            max-width:calc(100vw - 24px) !important;
+            padding:22px 18px !important;
+            max-height:calc(100dvh - 24px) !important;
+            overflow:auto !important;
+          }
+          .tg-onboarding-card [style*="position: absolute"] {
+            top:14px !important;
+            right:16px !important;
+          }
+        }
+      `}</style>
+      <div className="tg-onboarding-card" style={S.card}>
         <div style={S.count}>{paso + 1}/{pasos.length}</div>
         <div style={S.progress}><div style={S.progressBar}/></div>
         <div style={S.label}>{p.step}</div>

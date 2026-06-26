@@ -130,7 +130,14 @@ function LoginSA({ onLogin }){
   const inp={width:"100%",background:"#1a2035",border:"1px solid #28344f",color:"#e2e8f0",padding:"11px 14px",borderRadius:9,fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box"};
   const lbl={display:"block",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",marginBottom:5,marginTop:14};
   return(
-    <div style={{minHeight:"100vh",background:"#0f1420",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif"}}>
+    <div className="tg-superadmin-login" style={{minHeight:"100vh",background:"#0f1420",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif"}}>
+      <style>{`
+        .tg-superadmin-login, .tg-superadmin-login * { box-sizing:border-box; }
+        @media (max-width: 520px) {
+          .tg-superadmin-login { align-items:flex-start !important; padding:14px !important; overflow:auto; }
+          .tg-superadmin-login > div { width:100% !important; padding:24px 18px !important; }
+        }
+      `}</style>
       <div style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:16,padding:36,width:380}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:22,color:"#e2e8f0",textAlign:"center",marginBottom:6}}>TransGestAdmin</div>
         <div style={{textAlign:"center",fontSize:13,color:"#64748b",marginBottom:24}}>Panel de administracion</div>
@@ -2884,7 +2891,58 @@ export default function SuperAdmin(){
   if(!loggedIn) return <LoginSA onLogin={()=>setLoggedIn(true)}/>;
 
   return(
-    <div style={{minHeight:"100vh",background:"#0f1420",fontFamily:"'DM Sans',sans-serif",color:"#e2e8f0"}}>
+    <div className="tg-superadmin-page" style={{minHeight:"100vh",background:"#0f1420",fontFamily:"'DM Sans',sans-serif",color:"#e2e8f0"}}>
+      <style>{`
+        .tg-superadmin-page, .tg-superadmin-page * { box-sizing:border-box; min-width:0; }
+        .tg-superadmin-page table { width:100%; }
+        .tg-superadmin-page [style*="overflow-x:auto"],
+        .tg-superadmin-page [style*="overflow-x: auto"] { -webkit-overflow-scrolling:touch; }
+        @media (max-width: 900px) {
+          .tg-superadmin-page > div:first-of-type { align-items:flex-start !important; padding:14px 16px !important; }
+          .tg-superadmin-page > div:first-of-type > div:last-child { width:100%; justify-content:flex-start !important; flex-wrap:wrap; }
+          .tg-superadmin-page > div:nth-of-type(2) { overflow-x:auto; padding:0 14px !important; -webkit-overflow-scrolling:touch; }
+          .tg-superadmin-page > div:nth-of-type(2) > button { flex:0 0 auto; }
+          .tg-superadmin-page > div:nth-of-type(3) { padding:18px 14px !important; max-width:100% !important; }
+          .tg-superadmin-page [style*="grid-template-columns:1fr 1fr"],
+          .tg-superadmin-page [style*="grid-template-columns: 1fr 1fr"],
+          .tg-superadmin-page [style*="grid-template-columns:1.2fr"],
+          .tg-superadmin-page [style*="grid-template-columns:minmax"],
+          .tg-superadmin-page [style*="grid-template-columns: minmax"],
+          .tg-superadmin-page [style*="grid-template-columns:1fr auto"],
+          .tg-superadmin-page [style*="grid-template-columns: 1fr auto"] {
+            grid-template-columns:1fr !important;
+          }
+          .tg-superadmin-page [style*="position:fixed"],
+          .tg-superadmin-page [style*="position: fixed"] {
+            align-items:flex-start !important;
+            justify-content:center !important;
+            padding:10px !important;
+            overflow:auto !important;
+          }
+          .tg-superadmin-page [style*="position:fixed"] > div,
+          .tg-superadmin-page [style*="position: fixed"] > div,
+          .tg-superadmin-page [style*="position:fixed"] > form,
+          .tg-superadmin-page [style*="position: fixed"] > form {
+            width:100% !important;
+            max-width:calc(100vw - 20px) !important;
+            max-height:calc(100dvh - 20px) !important;
+            overflow:auto !important;
+          }
+        }
+        @media (max-width: 560px) {
+          .tg-superadmin-page [style*="display:flex"],
+          .tg-superadmin-page [style*="display: flex"] { flex-wrap:wrap; }
+          .tg-superadmin-page input,
+          .tg-superadmin-page select,
+          .tg-superadmin-page textarea,
+          .tg-superadmin-page button { max-width:100% !important; }
+          .tg-superadmin-page table {
+            display:block;
+            overflow-x:auto;
+            white-space:nowrap;
+          }
+        }
+      `}</style>
       {/* Header */}
       <div style={{background:"#141c2e",borderBottom:"1px solid #1c2740",padding:"14px 28px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
         <div>

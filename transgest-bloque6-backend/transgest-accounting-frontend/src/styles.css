@@ -612,3 +612,35 @@ dd { margin: 0; word-break: break-word; }
   .statement-totals > div { border-left: 0; border-top: 1px solid var(--line); }
   .statement-totals > div:first-child { border-top: 0; }
 }
+
+@media (max-width: 560px) {
+  body { overflow-x: hidden; }
+  .center { align-items: flex-start; padding: 14px; }
+  .login-panel { width: 100%; padding: 22px 18px; }
+  .login-panel h1 { font-size: 24px; line-height: 1.12; }
+  .app-shell { min-width: 0; }
+  .sidebar { padding: 12px; }
+  .brand { align-items: flex-start; }
+  nav { grid-template-columns: 1fr; }
+  .content { padding: 12px; }
+  .topbar h1 { font-size: 22px; line-height: 1.12; }
+  .top-actions { flex-direction: column; }
+  .top-actions select, .top-actions button, .top-actions .back-link { width: 100%; justify-content: center; }
+  .panel { padding: 14px; }
+  .metric-strip { grid-template-columns: 1fr; }
+  .metric-strip > div { border-left: 0; border-top: 1px solid var(--line); }
+  .metric-strip > div:first-child { border-top: 0; }
+  .readiness-list button, .alert-list button, .priority-list button, .work-list > button {
+    grid-template-columns: 1fr;
+  }
+  .readiness-list button small, .work-list > button small { grid-column: auto; }
+  .list-item, .period-item, .panel-heading, .bank-suggestion-heading, .source-links-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .period-actions, .period-action-buttons, .ledger-actions { width: 100%; justify-content: flex-start; }
+  .period-action-buttons button { flex: 1 1 120px; }
+  .table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .row.head { display: none; }
+  .row { min-width: 0; }
+}

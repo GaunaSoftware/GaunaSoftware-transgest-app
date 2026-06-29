@@ -23,6 +23,11 @@ function rangoPeriodo(period) {
   const today = new Date();
   const hasta = today.toISOString().slice(0, 10);
   if (period === "all") return { desde: "1970-01-01", hasta };
+  if (period === "hoy") return { desde: hasta, hasta };
+  if (period === "mes") {
+    const desdeMes = new Date(today.getFullYear(), today.getMonth(), 1);
+    return { desde: desdeMes.toISOString().slice(0, 10), hasta };
+  }
   const dias = { "7d": 7, "30d": 30, "90d": 90, "180d": 180, "365d": 365 }[period] || 30;
   const desde = new Date(today);
   desde.setDate(desde.getDate() - dias);
@@ -3021,6 +3026,8 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
           COUNT(*) FILTER (WHERE p.estado::text NOT IN ('cancelado','entregado','facturado') AND p.factura_id IS NULL)::int AS activos,
           COUNT(*) FILTER (WHERE p.fecha_carga::date=CURRENT_DATE AND p.factura_id IS NULL)::int AS cargas_hoy,
           COUNT(*) FILTER (WHERE COALESCE(p.fecha_descarga::date,p.fecha_entrega::date)=CURRENT_DATE AND p.factura_id IS NULL)::int AS descargas_hoy,
+          COUNT(*) FILTER (WHERE p.fecha_carga::date BETWEEN $2::date AND $3::date AND p.factura_id IS NULL)::int AS cargas_periodo,
+          COUNT(*) FILTER (WHERE COALESCE(p.fecha_descarga::date,p.fecha_entrega::date) BETWEEN $2::date AND $3::date AND p.factura_id IS NULL)::int AS descargas_periodo,
           COUNT(*) FILTER (WHERE p.estado::text='incidencia' AND p.factura_id IS NULL)::int AS incidencias,
           COUNT(*) FILTER (
             WHERE p.estado::text NOT IN ('cancelado','entregado','facturado')
@@ -3030,7 +3037,7 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
         FROM pedidos p
         LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
         WHERE p.empresa_id=$1
-      `, [empresaId])),
+      `, [empresaId, desde, hasta])),
       safeRows(db.query(`
         SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga, p.estado::text AS estado,
                c.nombre AS cliente_nombre,
@@ -3274,6 +3281,12 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
         SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga,
                p.origen_pais, p.origen_provincia, p.destino_pais, p.destino_provincia,
                p.puntos_carga, p.puntos_descarga, p.cmr_tipo,
+               COALESCE(NULLIF(p.importe,0), NULLIF(p.precio_cliente_col,0), NULLIF(p.precio_unitario,0), 0)
+                 + COALESCE(p.importe_paralizacion,0) AS ingreso,
+               CASE
+                 WHEN p.colaborador_id IS NOT NULL THEN COALESCE(p.precio_colaborador,0)
+                 ELSE COALESCE(p.coste_gasoil,0)+COALESCE(p.coste_peajes,0)+COALESCE(p.coste_dietas,0)+COALESCE(p.coste_otros,0)
+               END AS coste,
                p.estado::text AS estado,
                c.nombre AS cliente_nombre,
                v.matricula AS vehiculo_matricula,
@@ -3539,6 +3552,9 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
     const viajesPorEstado = (viajesFlujo || []).reduce((acc, p) => {
       const key = String(p.estado || "pendiente").toLowerCase() || "pendiente";
       if (!acc[key]) acc[key] = [];
+      const ingreso = round2(p.ingreso);
+      const coste = round2(p.coste);
+      const margen = round2(ingreso - coste);
       acc[key].push({
         id: p.id,
         numero: p.numero,
@@ -3562,6 +3578,10 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
         ubicacion_ts: p.ubicacion_ts,
         chofer_nombre: [p.chofer_nombre, p.chofer_apellidos].filter(Boolean).join(" ").trim(),
         colaborador_nombre: p.colaborador_nombre,
+        ingreso,
+        coste,
+        margen,
+        margen_pct: ingreso > 0 ? round2((margen / ingreso) * 100) : null,
       });
       return acc;
     }, {});
@@ -3591,6 +3611,12 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       impact: item.description,
       recommended_action: item.next_actions?.[0]?.label || item.action || "Abrir",
       view: item.next_actions?.[0]?.view || item.view || "gestion_trafico",
+      entity_id: item.entity_id || null,
+      type: item.type || "",
+      action: item.action || "",
+      action_key: item.next_actions?.[0]?.key || "",
+      description: item.description || "",
+      next_actions: item.next_actions || [],
     }));
     const eventos = (eventosRecientes || []).map(ev => ({
       id: ev.id,
@@ -3613,6 +3639,8 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
         activos: Number(k.activos || 0),
         cargas_hoy: Number(k.cargas_hoy || 0),
         descargas_hoy: Number(k.descargas_hoy || 0),
+        cargas_periodo: Number(k.cargas_periodo || 0),
+        descargas_periodo: Number(k.descargas_periodo || 0),
         incidencias: Number(k.incidencias || 0),
         retrasados: Number(k.retrasados || 0),
       },

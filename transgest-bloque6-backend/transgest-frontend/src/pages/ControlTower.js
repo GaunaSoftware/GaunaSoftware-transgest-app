@@ -18,10 +18,21 @@ const SEV = {
   info: { label:"Info", color:"var(--accent-xl)", bg:"rgba(20,184,166,.09)", border:"rgba(20,184,166,.28)" },
 };
 
-const PERIODS = { "7d":"7 días", mes:"Este mes", "30d":"30 días" };
+const PERIODS = { hoy:"Hoy", "7d":"Proximos 7 dias", mes:"Este mes" };
 
 function navegar(view) {
   window.dispatchEvent(new CustomEvent("tms:navegar", { detail: view }));
+}
+
+function fmtMoney(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`;
+}
+
+function hasMoney(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && Math.abs(n) > 0;
 }
 
 function abrirItem(item) {
@@ -89,6 +100,23 @@ function abrirAccion(item, action) {
     return;
   }
   navegar(targetView);
+}
+
+function abrirViajeEnTrafico(trip, extra = {}) {
+  if (!trip) return;
+  const route = trip.route || parseRouteFromItem(trip || {});
+  setRuntimeFocus("tms_trafico_focus", {
+    pedido_id: trip.entity_id || trip.id || trip.pedido_id || "",
+    source: "control_tower",
+    action: extra.action || "Abrir viaje",
+    action_key: extra.action_key || "",
+    type: trip.type || extra.type || "viaje",
+    area: trip.area || "Trafico",
+    severity: trip.severity || "",
+    title: trip.title || `Viaje ${trip.numero || trip.pedido_numero || ""}`.trim(),
+    description: trip.description || `${trip.cliente_nombre || "Cliente"} - ${route.origen || trip.origen || "-"} -> ${route.destino || trip.destino || "-"}`,
+  });
+  navegar("gestion_trafico");
 }
 
 function TowerItem({ item }) {
@@ -710,6 +738,9 @@ function ControlTowerTripDetail({ item, onClose, onOpenTraffic }) {
   const originGeo = inferPlaceGeo(route.origen, normalized?.origen_provincia, normalized?.origen_pais);
   const destinationGeo = inferPlaceGeo(route.destino, normalized?.destino_provincia, normalized?.destino_pais);
   if (!item) return null;
+  const marginKnown = hasMoney(normalized.ingreso) || hasMoney(normalized.coste);
+  const margen = Number(normalized.margen || 0);
+  const margenPct = normalized.margen_pct == null ? null : Number(normalized.margen_pct);
   const facts = [
     ["Cliente", normalized.cliente_nombre || normalized.cliente || "-"],
     ["Origen", [route.origen, originGeo?.provincia || normalized.origen_provincia].filter(Boolean).join(" · ") || "-"],
@@ -742,6 +773,24 @@ function ControlTowerTripDetail({ item, onClose, onOpenTraffic }) {
             </div>
           ))}
         </div>
+        {marginKnown && (
+          <div style={{marginTop:12,border:`1px solid ${margen < 0 ? "rgba(239,68,68,.35)" : "rgba(20,184,166,.28)"}`,background:margen < 0 ? "rgba(239,68,68,.08)" : "rgba(20,184,166,.10)",borderRadius:10,padding:"10px 12px"}}>
+            <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:margen < 0 ? "#ef4444" : "var(--accent-xl)",marginBottom:8}}>Rentabilidad del viaje</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
+              {[
+                ["Ingreso", fmtMoney(normalized.ingreso)],
+                ["Coste", fmtMoney(normalized.coste)],
+                ["Margen", fmtMoney(margen)],
+                ["Margen %", margenPct == null || !Number.isFinite(margenPct) ? "-" : `${margenPct.toFixed(1)}%`],
+              ].map(([label, value]) => (
+                <div key={label} style={{border:"1px solid var(--border)",background:"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
+                  <div style={{fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>{label}</div>
+                  <div style={{fontSize:13,fontWeight:900,color:label === "Margen" && margen < 0 ? "#ef4444" : "var(--text)",marginTop:3}}>{value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {(!normalized.destino_provincia && destinationGeo?.provincia) || (!normalized.origen_provincia && originGeo?.provincia) ? (
           <div style={{marginTop:12,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.10)",borderRadius:10,padding:"10px 12px",fontSize:12,color:"var(--text2)",lineHeight:1.45}}>
             Geografia detectada: {[originGeo && `${route.origen}: ${originGeo.provincia}`, destinationGeo && `${route.destino}: ${destinationGeo.provincia}`].filter(Boolean).join(" · ")}.
@@ -983,7 +1032,7 @@ function RouteMapPanelReal({ item, trips = [], onSelectTrip, onOpenDetail, mapLa
   );
 }
 
-function DecisionsPanel({ decisiones = [] }) {
+function DecisionsPanel({ decisiones = [], onOpenDecision }) {
   const rows = Array.isArray(decisiones) ? decisiones.slice(0, 5) : [];
   return (
     <div style={S.card}>
@@ -995,7 +1044,7 @@ function DecisionsPanel({ decisiones = [] }) {
           {rows.map((d, idx) => {
             const sev = SEV[d.severity] || SEV.info;
             return (
-              <button key={d.id || idx} onClick={()=>navegar(d.view || "gestion_trafico")}
+              <button key={d.id || idx} onClick={()=>onOpenDecision ? onOpenDecision(d) : navegar(d.view || "gestion_trafico")}
                 style={{textAlign:"left",border:`1px solid ${sev.border}`,background:sev.bg,borderRadius:8,padding:"9px 11px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
                   <span style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{d.title}</span>
@@ -1118,14 +1167,15 @@ export default function ControlTower() {
   }
 
   function seleccionarViajeFlujo(trip) {
-    setSelectedTrip({
+    const focusedTrip = {
       ...trip,
       title: `Viaje ${trip.numero || ""}`,
       entity_id: trip.id,
       view: "pedidos",
       description: `${trip.cliente_nombre || "Cliente"} - ${trip.origen || "-"} > ${trip.destino || "-"}`,
-    });
+    };
     setStatusPicker(null);
+    abrirViajeEnTrafico(focusedTrip, { action: "Abrir desde visibilidad", action_key: "abrir_viaje" });
   }
   function seleccionarViajeMapa(trip) {
     const route = trip?.route || parseRouteFromItem(trip || {});
@@ -1177,8 +1227,8 @@ export default function ControlTower() {
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
           {[
             ["Activos", kpis.activos, "var(--accent-xl)"],
-            ["Cargas hoy", kpis.cargas_hoy, "#f59e0b"],
-            ["Descargas hoy", kpis.descargas_hoy, "var(--green)"],
+            ["Cargas periodo", kpis.cargas_periodo ?? kpis.cargas_hoy, "#f59e0b"],
+            ["Descargas periodo", kpis.descargas_periodo ?? kpis.descargas_hoy, "var(--green)"],
             ["Criticas", resumen.critica, "#ef4444"],
             ["Altas", resumen.alta, "#f97316"],
           ].map(([label,value,color])=>(
@@ -1199,7 +1249,7 @@ export default function ControlTower() {
             <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
               <div>
                 <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:900,color:"var(--text)"}}>{statusPicker.label}</div>
-                <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Selecciona un viaje para cargar su ruta en el mapa.</div>
+                <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Selecciona un viaje para abrirlo en Mesa de trafico con este filtro.</div>
               </div>
               <button onClick={() => setStatusPicker(null)} style={{border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",borderRadius:8,width:34,height:34,fontSize:18,fontWeight:900,cursor:"pointer"}}>x</button>
             </div>
@@ -1251,7 +1301,13 @@ export default function ControlTower() {
             </div>
           </div>
           <div style={{display:"grid",gap:12}}>
-            <DecisionsPanel decisiones={decisiones} />
+            <DecisionsPanel decisiones={decisiones} onOpenDecision={(d) => {
+              if (d?.entity_id && (d.view === "gestion_trafico" || d.view === "pedidos")) {
+                abrirViajeEnTrafico(d, { action: d.recommended_action || d.action || "Abrir decision", action_key: d.action_key || "" });
+              } else {
+                navegar(d.view || "gestion_trafico");
+              }
+            }} />
             <EventsPanel eventos={eventos} />
           </div>
         </div>

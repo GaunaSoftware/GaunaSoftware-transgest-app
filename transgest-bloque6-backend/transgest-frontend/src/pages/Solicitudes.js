@@ -99,7 +99,7 @@ function buildSolicitudesAdminReportHtml({ solicitudes = [], resumen = {}, filtr
 <html lang="es">
 <head>
   <meta charset="utf-8"/>
-  <title>Informe de solicitudes de clientes</title>
+  <title>Informe de Peticiones de viaje</title>
   <style>
     body{font-family:Arial,sans-serif;margin:28px;color:#172033}
     h1{margin:0 0 6px;font-size:24px}
@@ -118,7 +118,7 @@ function buildSolicitudesAdminReportHtml({ solicitudes = [], resumen = {}, filtr
   </style>
 </head>
 <body>
-  <h1>Informe de solicitudes de clientes</h1>
+  <h1>Informe de Peticiones de viaje</h1>
   <div class="sub">Generado el ${escapeHtml(generated)}. Filtros: estado ${escapeHtml(filtros.estado || "todos")}, busqueda ${escapeHtml(filtros.q || "-")}, orden ${escapeHtml(filtros.orden || "-")}.</div>
   <div class="grid">
     <div class="box"><div class="metric">${escapeHtml(solicitudes.length)}</div><div class="muted">En informe</div></div>
@@ -418,7 +418,7 @@ export default function Solicitudes() {
     card: { background: "rgba(255,255,255,.94)", border: "1px solid #dbe5ec", borderRadius: 12, padding: "16px 18px", marginBottom: 14, boxShadow:"0 14px 32px rgba(15,23,42,.05)" },
     btn: { padding: "10px 15px", borderRadius: 8, border: "1px solid #cfdbe5", background: "#fff", color: "#0f172a", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:7, boxShadow:"0 8px 18px rgba(15,23,42,.04)" },
     input: { background: "#fff", border: "1px solid #cfdbe5", color: "#0f172a", padding: "12px 14px", borderRadius: 8, fontSize: 13, outline: "none", boxShadow:"0 6px 14px rgba(15,23,42,.03)" },
-    kpi: { background: "rgba(255,255,255,.95)", border: "1px solid #dbe5ec", borderRadius: 12, padding: "24px 28px", minHeight: 104, boxShadow:"0 16px 34px rgba(15,23,42,.06)" },
+    kpi: { background: "rgba(255,255,255,.95)", border: "1px solid #dbe5ec", borderRadius: 12, padding: "18px 20px", minHeight: 112, boxShadow:"0 16px 34px rgba(15,23,42,.06)" },
   };
 
   return (
@@ -426,17 +426,17 @@ export default function Solicitudes() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 28 }}>
         <div>
           <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 32, fontWeight: 900, color: "#0f172a", letterSpacing:"-.02em" }}>
-            Solicitudes de clientes
+            Peticiones de viaje
             {pendientes > 0 && <span style={{ marginLeft: 10, padding: "3px 10px", borderRadius: 20, background: "rgba(249,115,22,.15)", color: "#f97316", fontSize: 14 }}>{pendientes}</span>}
           </div>
           <div style={{ fontSize: 14, color: "#64748b", marginTop: 8 }}>
-            Cada solicitud pertenece solo a la empresa y al cliente que la ha creado.
+            Bandeja de peticiones de clientes y proveedores asociadas a viajes.
           </div>
         </div>
         <button onClick={cargar} style={{...S.btn,color:"#0f766e"}}>Actualizar</button>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))", gap:16, marginBottom:28 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:16, marginBottom:28 }}>
         {[
           ["Pendientes", "pendiente", resumen.pendientes, "#f97316"],
           ["Revisadas", "revisada", resumen.revisadas, "#3b82f6"],
@@ -450,11 +450,11 @@ export default function Solicitudes() {
               if (valueEstado === "vencidas") { setSoloVencidas(v => !v); setEstado(""); }
               else { setEstado(valueEstado); setSoloVencidas(false); }
             }}
-            style={{ ...S.kpi, textAlign:"left", cursor:"pointer", borderColor: (valueEstado === "papelera" ? enPapelera : valueEstado === "vencidas" ? soloVencidas : !enPapelera && estado === valueEstado) ? color : "#dbe5ec", display:"flex", alignItems:"center", gap:18 }}>
-            <div style={{width:48,height:48,borderRadius:14,display:"grid",placeItems:"center",background:`${color}12`,color,fontSize:24,fontWeight:900}}>□</div>
-            <div>
+            style={{ ...S.kpi, textAlign:"left", cursor:"pointer", borderColor: (valueEstado === "papelera" ? enPapelera : valueEstado === "vencidas" ? soloVencidas : !enPapelera && estado === valueEstado) ? color : "#dbe5ec", display:"grid", gridTemplateColumns:"54px 1fr", alignItems:"center", gap:14 }}>
+            <div style={{width:46,height:46,borderRadius:14,display:"grid",placeItems:"center",background:`${color}12`,color,fontSize:20,fontWeight:900}}>!</div>
+            <div style={{minWidth:0}}>
               <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:26, fontWeight:900, color, lineHeight:1 }}>{value}</div>
-              <div style={{ fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:".07em", fontWeight:900, marginTop:9 }}>{label}</div>
+              <div style={{ fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:".07em", fontWeight:900, marginTop:9, lineHeight:1.25, overflowWrap:"anywhere" }}>{label}</div>
             </div>
           </button>
         ))}

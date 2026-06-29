@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const db = require("../services/db");
 const { enviarEmail } = require("../services/email");
 const { crearNotificacion } = require("../services/notificaciones");
-const { resolveApiKey, publicStatusForProvider, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
+const { resolveApiKey, getCompanyApiConfig, publicStatusForProvider, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
 
 const router = express.Router();
 
@@ -39,12 +39,19 @@ const PROVIDERS = {
 async function configuredProvider(empresaId) {
   const preferred = String(process.env.ROUTING_PROVIDER || "").trim().toLowerCase();
   if (preferred && preferred !== "local" && PROVIDERS[preferred]) {
-    const keyInfo = await resolveApiKey(empresaId, preferred);
+    const keyInfo = await resolveRoutingApiKey(empresaId, preferred);
     if (keyInfo.key) return preferred;
   }
-  if ((await resolveApiKey(empresaId, "here")).key) return "here";
-  if ((await resolveApiKey(empresaId, "ors")).key) return "ors";
+  if ((await resolveRoutingApiKey(empresaId, "here")).key) return "here";
+  if ((await resolveRoutingApiKey(empresaId, "ors")).key) return "ors";
   return "local";
+}
+
+async function resolveRoutingApiKey(empresaId, provider) {
+  if (!empresaId || !provider || provider === "local") return { key: "", source: "local" };
+  const companyConfig = await getCompanyApiConfig(empresaId, provider);
+  if (!companyConfig) return { key: "", source: "company_required" };
+  return resolveApiKey(empresaId, provider);
 }
 
 function cleanAddress(value) {
@@ -490,11 +497,11 @@ async function routeHere(stops, preference, truck, apiKey) {
     return: "summary,polyline,actions",
   });
   coordinates.slice(1, -1).forEach(c => params.append("via", `${c[1]},${c[0]}`));
-  params.set("vehicle[height]", String(Math.round(Number(truck.height_m || DEFAULT_TRUCK.height_m) * 100)));
-  params.set("vehicle[width]", String(Math.round(Number(truck.width_m || DEFAULT_TRUCK.width_m) * 100)));
-  params.set("vehicle[length]", String(Math.round(Number(truck.length_m || DEFAULT_TRUCK.length_m) * 100)));
-  params.set("vehicle[grossWeight]", String(Math.round(Number(truck.weight_t || DEFAULT_TRUCK.weight_t) * 1000)));
-  params.set("vehicle[weightPerAxle]", String(Math.round(Number(truck.axleload_t || DEFAULT_TRUCK.axleload_t) * 1000)));
+  params.set("truck[height]", String(Math.round(Number(truck.height_m || DEFAULT_TRUCK.height_m) * 100)));
+  params.set("truck[width]", String(Math.round(Number(truck.width_m || DEFAULT_TRUCK.width_m) * 100)));
+  params.set("truck[length]", String(Math.round(Number(truck.length_m || DEFAULT_TRUCK.length_m) * 100)));
+  params.set("truck[grossWeight]", String(Math.round(Number(truck.weight_t || DEFAULT_TRUCK.weight_t) * 1000)));
+  params.set("truck[weightPerAxle]", String(Math.round(Number(truck.axleload_t || DEFAULT_TRUCK.axleload_t) * 1000)));
   const data = await fetchJson(`https://router.hereapi.com/v8/routes?${params.toString()}`);
   const sections = data?.routes?.[0]?.sections || [];
   const distance = sections.reduce((sum, s) => sum + Number(s.summary?.length || 0), 0);
@@ -528,12 +535,17 @@ router.get("/providers", async (req, res, next) => {
   const active = await configuredProvider(req.user?.empresa_id);
   const hereStatus = await publicStatusForProvider("here", req.user?.empresa_id);
   const orsStatus = await publicStatusForProvider("ors", req.user?.empresa_id);
+  const hereKey = await resolveRoutingApiKey(req.user?.empresa_id, "here");
+  const orsKey = await resolveRoutingApiKey(req.user?.empresa_id, "ors");
   res.json({
     active,
     providers: Object.fromEntries(Object.entries(PROVIDERS).map(([key, meta]) => [key, {
       ...meta,
-      configured: key === "local" || (key === "ors" && (orsStatus.company_configured || orsStatus.global_configured)) || (key === "here" && (hereStatus.company_configured || hereStatus.global_configured)),
+      configured: key === "local" || (key === "ors" && !!orsKey.key) || (key === "here" && !!hereKey.key),
+      key_source: key === "local" ? "local" : key === "ors" ? orsKey.source : key === "here" ? hereKey.source : "none",
+      requires_company_config: key !== "local",
     }])),
+    status: { here: hereStatus, ors: orsStatus },
   });
   } catch (e) { next(e); }
 });
@@ -783,7 +795,14 @@ router.post("/optimize", async (req, res, next) => {
 
     const requestedProvider = String(req.body?.provider || await configuredProvider(empresaId)).toLowerCase();
     const provider = PROVIDERS[requestedProvider] ? requestedProvider : await configuredProvider(empresaId);
-    const keyInfo = provider === "local" ? { key:"", source:"local" } : await resolveApiKey(empresaId, provider);
+    const keyInfo = provider === "local" ? { key:"", source:"local" } : await resolveRoutingApiKey(empresaId, provider);
+    if (provider !== "local" && !keyInfo.key) {
+      return res.status(400).json({
+        error: `Configura la API ${PROVIDERS[provider]?.label || provider} en la empresa antes de calcular rutas reales.`,
+        provider,
+        key_source: keyInfo.source,
+      });
+    }
     if (provider !== "local") await assertApiUsageAllowed(empresaId, provider);
     const truck = { ...DEFAULT_TRUCK, ...(req.body?.truck || {}) };
     let result;

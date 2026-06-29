@@ -326,6 +326,8 @@ function buildSolicitudAcuseHtml({ solicitud = {}, eventos = [], empresa = {}, u
 export default function PortalClientes() {
   const { user } = useAuth();
   const empresa = useEmpresaPerfil();
+  const isProviderPortal = String(user?.rol || "").toLowerCase().includes("colaborador") || String(user?.rol || "").toLowerCase().includes("proveedor") || !!user?.colaborador_id;
+  const portalName = isProviderPortal ? "Peticiones viajes" : "Portal cliente";
   const [pedidos, setPedidos] = useState([]);
   const [facturas, setFacturas] = useState([]);
   const [solicitudes, setSolicitudes] = useState([]);
@@ -673,7 +675,7 @@ export default function PortalClientes() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 1040, margin: "0 auto", gap: 12 }}>
           <div>
             <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 900, fontSize: 22, color: "var(--text)" }}>
-              {empresa.razon_social || "Portal cliente"}
+              {empresa.razon_social || portalName}
             </div>
             <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>
               Bienvenido, <strong>{user?.nombre || user?.username}</strong>
@@ -708,7 +710,7 @@ export default function PortalClientes() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10, marginBottom: 18 }}>
           {[
             ["Viajes activos", resumenPortal.pedidos?.activos || 0, "#3b82f6"],
-            ["Solicitudes abiertas", resumenPortal.solicitudes?.abiertas || 0, "#f97316"],
+            [isProviderPortal ? "Peticiones abiertas" : "Solicitudes abiertas", resumenPortal.solicitudes?.abiertas || 0, "#f97316"],
             ["Facturado", `${fmt2(resumenPortal.facturas?.total_facturado)} EUR`, "#10b981"],
             ["Pendiente pago", `${fmt2(resumenPortal.facturas?.total_pendiente)} EUR`, "#f97316"],
             ["Albaranes disponibles", `${resumenPortal.documentos?.con_albaran || 0}/${resumenPortal.documentos?.viajes || 0}`, "#3b82f6"],
@@ -724,7 +726,7 @@ export default function PortalClientes() {
           <input
             value={q}
             onChange={e => setQ(e.target.value)}
-            placeholder="Buscar viajes, facturas, solicitudes, referencias..."
+            placeholder={isProviderPortal ? "Buscar viajes, facturas, peticiones, matriculas..." : "Buscar viajes, facturas, solicitudes, referencias..."}
             style={{ background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)", borderRadius:8, padding:"10px 12px", outline:"none", fontFamily:"'DM Sans',sans-serif", fontSize:13, minWidth:0 }}
           />
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"flex-end" }}>
@@ -765,11 +767,11 @@ export default function PortalClientes() {
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid var(--border)", marginBottom: 16 }}>
           {[
             ["seguimiento", "Seguimiento"],
-            ["nuevo", "Solicitar servicio"],
+            ["nuevo", isProviderPortal ? "Nueva peticion" : "Solicitar servicio"],
             ["albaranes", "Albaranes"],
             ["facturas", "Facturas"],
             ["cuenta", "Estado de cuenta"],
-            ["solicitudes", "Mis solicitudes"],
+            ["solicitudes", isProviderPortal ? "Peticiones viajes" : "Mis solicitudes"],
           ].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
               style={{ padding: "9px 15px", border: "none", borderBottom: `2px solid ${tab === id ? "var(--accent)" : "transparent"}`, background: "transparent", color: tab === id ? "var(--accent)" : "var(--text4)", fontWeight: 800, cursor: "pointer" }}>

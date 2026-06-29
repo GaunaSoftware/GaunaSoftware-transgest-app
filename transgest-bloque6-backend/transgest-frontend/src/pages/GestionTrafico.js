@@ -1278,6 +1278,10 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
   }, [validationIssues]);
   const isControlTowerFocus = focusContext?.source === "control_tower" && String(focusContext?.pedido_id || "") === String(pedido?.id);
   const focusActionKey = String(focusContext?.action_key || "");
+  const finanzasModal = useMemo(
+    () => getPedidoFinancialSnapshot({ ...pedido, ...form }),
+    [pedido, form]
+  );
 
   function focusModalField(ref) {
     ref?.current?.focus?.();
@@ -1593,6 +1597,25 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
             x
           </button>
         </div>
+
+        {!finanzasModal.sinPrecio && (
+          <div style={{background:finanzasModal.margen < 0 ? "rgba(239,68,68,.08)" : "rgba(20,184,166,.08)",border:`1px solid ${finanzasModal.margen < 0 ? "rgba(239,68,68,.28)" : "rgba(20,184,166,.24)"}`,borderRadius:10,padding:"10px 12px",marginBottom:14}}>
+            <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:finanzasModal.margen < 0 ? "#ef4444" : "var(--accent-xl)",marginBottom:8}}>Rentabilidad</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
+              {[
+                ["Ingreso", fmtEur(finanzasModal.ingreso)],
+                ["Costes", fmtEur(finanzasModal.costes)],
+                ["Margen", fmtEur(finanzasModal.margen)],
+                ["Margen %", `${finanzasModal.pct.toFixed(1)}%`],
+              ].map(([label, value]) => (
+                <div key={label} style={{border:"1px solid var(--border)",background:"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
+                  <div style={{fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>{label}</div>
+                  <div style={{fontSize:13,fontWeight:900,color:label === "Margen" && finanzasModal.margen < 0 ? "#ef4444" : "var(--text)",marginTop:3}}>{value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {pedido.pendiente_completar && (
           <div style={{background:"rgba(251,191,36,.1)",border:"1px solid rgba(251,191,36,.28)",borderRadius:8,padding:"8px 12px",marginBottom:12,color:"#fbbf24",fontSize:12,fontWeight:700}}>
@@ -2236,6 +2259,51 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
   );
 }
 
+function routeLonLatToWorld({ lon, lat }, zoom) {
+  const scale = 256 * Math.pow(2, zoom);
+  const x = ((Number(lon) + 180) / 360) * scale;
+  const sin = Math.sin((Number(lat) * Math.PI) / 180);
+  const y = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale;
+  return { x, y };
+}
+
+function buildEmbeddedRouteMap(points, width = 720, height = 310) {
+  const valid = points.filter(p => Number.isFinite(Number(p.lon)) && Number.isFinite(Number(p.lat)));
+  if (valid.length < 2) return null;
+  const minLon = Math.min(...valid.map(p => Number(p.lon)));
+  const maxLon = Math.max(...valid.map(p => Number(p.lon)));
+  const minLat = Math.min(...valid.map(p => Number(p.lat)));
+  const maxLat = Math.max(...valid.map(p => Number(p.lat)));
+  const span = Math.max(maxLon - minLon, maxLat - minLat);
+  const zoom = span > 12 ? 5 : span > 6 ? 6 : span > 3 ? 7 : span > 1.4 ? 8 : 9;
+  const center = { lon:(minLon + maxLon) / 2, lat:(minLat + maxLat) / 2 };
+  const centerWorld = routeLonLatToWorld(center, zoom);
+  const topLeft = { x:centerWorld.x - width / 2, y:centerWorld.y - height / 2 };
+  const minTileX = Math.floor(topLeft.x / 256);
+  const maxTileX = Math.floor((topLeft.x + width) / 256);
+  const minTileY = Math.floor(topLeft.y / 256);
+  const maxTileY = Math.floor((topLeft.y + height) / 256);
+  const tiles = [];
+  const maxTile = Math.pow(2, zoom);
+  for (let tx = minTileX; tx <= maxTileX; tx += 1) {
+    for (let ty = minTileY; ty <= maxTileY; ty += 1) {
+      if (ty < 0 || ty >= maxTile) continue;
+      const wrappedX = ((tx % maxTile) + maxTile) % maxTile;
+      tiles.push({
+        key: `${zoom}-${tx}-${ty}`,
+        left: Math.round(tx * 256 - topLeft.x),
+        top: Math.round(ty * 256 - topLeft.y),
+        url: `https://a.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${wrappedX}/${ty}.png`,
+      });
+    }
+  }
+  const projected = valid.map(p => {
+    const world = routeLonLatToWorld(p, zoom);
+    return { ...p, x: world.x - topLeft.x, y: world.y - topLeft.y };
+  });
+  return { tiles, projected, width, height };
+}
+
 function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
   const stops = remotePlan?.stops?.length ? remotePlan.stops : plan?.stops || [];
   const coords = Array.isArray(remotePlan?.waypoint_coordinates) ? remotePlan.waypoint_coordinates : [];
@@ -2261,11 +2329,8 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
   });
   const svgPts = points.map(xy);
   const path = svgPts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-  const osmBbox = [minLon - .08, minLat - .08, maxLon + .08, maxLat + .08].map(n => Number(n).toFixed(6)).join(",");
-  const osmMarker = `${points[0]?.lat?.toFixed?.(6) || points[0]?.lat},${points[0]?.lon?.toFixed?.(6) || points[0]?.lon}`;
-  const osmUrl = hasCoords
-    ? `https://www.openstreetmap.org/export/embed.html?bbox=${osmBbox}&layer=mapnik&marker=${encodeURIComponent(osmMarker)}`
-    : "";
+  const embeddedMap = hasCoords ? buildEmbeddedRouteMap(points, w, h) : null;
+  const embeddedPath = embeddedMap?.projected?.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ") || "";
 
   return (
     <div style={{background:"linear-gradient(180deg,var(--bg3),var(--bg2))",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:14}}>
@@ -2279,7 +2344,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
         <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
           <button onClick={()=>onPreferencia("rapida")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa rapida</button>
           <button onClick={()=>onPreferencia("eficiente")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa eficiente</button>
-          <button onClick={()=>planUrl && window.open(planUrl,"_blank","noopener,noreferrer")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.1)",color:"#14b8a6",fontSize:11,fontWeight:900,cursor:"pointer"}}>Mapa real</button>
+          <button disabled={!hasCoords} style={{padding:"5px 9px",borderRadius:6,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.1)",color:"#14b8a6",fontSize:11,fontWeight:900,cursor:hasCoords?"default":"not-allowed",opacity:hasCoords?1:.55}}>Mapa real</button>
         </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:hasCoords ? "1fr 1fr" : "1fr",gap:10}}>
@@ -2297,8 +2362,25 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
             ))}
           </svg>
         </div>
-        {hasCoords && (
-          <iframe title="Mapa OSM" src={osmUrl} style={{width:"100%",minHeight:310,border:"1px solid var(--border)",borderRadius:8,background:"var(--bg3)"}} />
+        {embeddedMap && (
+          <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"var(--bg3)"}}>
+            {embeddedMap.tiles.map(tile => (
+              <img key={tile.key} src={tile.url} alt="" draggable="false" style={{position:"absolute",left:tile.left,top:tile.top,width:256,height:256,userSelect:"none",pointerEvents:"none"}} />
+            ))}
+            <svg viewBox={`0 0 ${w} ${h}`} style={{position:"absolute",inset:0,width:"100%",height:"100%"}}>
+              <path d={embeddedPath} fill="none" stroke="rgba(15,118,110,.22)" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d={embeddedPath} fill="none" stroke="#0f766e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+              {embeddedMap.projected.map((p, idx) => (
+                <g key={idx}>
+                  <circle cx={p.x} cy={p.y} r="13" fill={idx===0?"#0f766e":idx===embeddedMap.projected.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
+                  <text x={p.x} y={p.y+4} textAnchor="middle" fontSize="11" fontWeight="900" fill="#fff">{idx+1}</text>
+                </g>
+              ))}
+            </svg>
+            <div style={{position:"absolute",right:8,bottom:8,background:"rgba(255,255,255,.86)",border:"1px solid rgba(148,163,184,.5)",borderRadius:6,padding:"3px 6px",fontSize:10,color:"#334155"}}>
+              Carto / OpenStreetMap
+            </div>
+          </div>
         )}
       </div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>

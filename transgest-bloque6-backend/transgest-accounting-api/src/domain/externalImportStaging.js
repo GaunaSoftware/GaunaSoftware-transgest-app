@@ -4,7 +4,7 @@ const { externalAccountingIntegrations } = require("./externalIntegrations");
 
 const IMPORT_TYPES = ["parties", "maturities", "bank_transactions", "journal_entries", "accounts", "generic"];
 const SOURCE_FORMATS = ["csv", "json", "manual"];
-const BATCH_STATUSES = ["pending_review", "approved", "rejected", "cancelled"];
+const BATCH_STATUSES = ["pending_review", "approved", "rejected", "cancelled", "applied"];
 const ROW_STATUSES = ["valid", "warning", "error"];
 const REVIEW_ACTIONS = ["approve", "reject", "cancel"];
 const MAX_ROWS = 500;
@@ -199,6 +199,14 @@ function normalizeExternalImportReviewInput(input = {}) {
   return { action, reason };
 }
 
+function normalizeExternalImportApplyInput(input = {}) {
+  const reason = String(input.reason || "Aplicacion de lote externo aprobado").trim();
+  if (reason.length < 5 || reason.length > 500) {
+    throw inputError("reason debe tener entre 5 y 500 caracteres");
+  }
+  return { reason };
+}
+
 function nextBatchStatus(currentStatus, review) {
   if (currentStatus !== "pending_review") {
     throw inputError("Solo se pueden revisar lotes pendientes", 409);
@@ -252,6 +260,7 @@ module.exports = {
   IMPORT_TYPES,
   ROW_STATUSES,
   mapPartyStagingRow,
+  normalizeExternalImportApplyInput,
   normalizeExternalImportBatchInput,
   normalizeExternalImportQuery,
   normalizeExternalImportReviewInput,

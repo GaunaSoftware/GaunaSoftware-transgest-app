@@ -55,6 +55,9 @@ const EVENT_CONTRACTS = {
   AccountingExternalImportBatchStatusChanged: {
     1: ["import_batch_id", "previous_status", "status", "action", "reason"],
   },
+  AccountingExternalImportBatchApplied: {
+    1: ["import_batch_id", "import_type", "applied_count", "skipped_count"],
+  },
   AccountingBankTransactionReconciled: {
     1: ["bank_reconciliation_id", "bank_transaction_id", "maturity_id", "amount", "reason"],
   },

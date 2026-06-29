@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  applyExternalImportBatch,
   cancelJournalEntry,
   createAccount,
   createBankAccount,
@@ -189,6 +190,7 @@ const externalImportTypeLabels = {
 
 const externalImportStatusLabels = {
   approved: "Aprobado",
+  applied: "Aplicado",
   cancelled: "Cancelado",
   pending_review: "Pendiente",
   rejected: "Rechazado",
@@ -207,7 +209,7 @@ function integrationStatusTone(status) {
 }
 
 function externalImportStatusTone(status) {
-  if (status === "approved") return "ok";
+  if (status === "approved" || status === "applied") return "ok";
   if (status === "pending_review") return "warning";
   if (status === "rejected") return "danger";
   return "neutral";
@@ -1606,6 +1608,28 @@ export default function App() {
     try {
       const result = await getExternalImportBatchPreview(batch.id);
       setExternalImportPreview(result);
+    } catch (err) {
+      setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    }
+  }
+
+  async function handleApplyExternalImportBatch(batch) {
+    setExternalImportStatus(null);
+    try {
+      const result = await applyExternalImportBatch(batch.id, {
+        reason: "Aplicacion manual aprobada desde TransGest Contabilidad",
+      });
+      setExternalImportStatus({
+        tone: result.repeated ? "warning" : "ok",
+        text: result.repeated
+          ? `Lote ya aplicado: ${result.summary.applied} tercero(s) localizados.`
+          : `Lote aplicado: ${result.summary.applied} tercero(s) creados.`,
+      });
+      setExternalImportPreview(null);
+      await Promise.all([
+        refreshExternalImportBatches(externalImportFilters),
+        refreshParties(partyFilters),
+      ]);
     } catch (err) {
       setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
     }
@@ -3960,10 +3984,14 @@ export default function App() {
                             <span>{batch.row_count} filas</span>
                             <span>{batch.error_count} errores</span>
                             <span>{batch.warning_count} avisos</span>
+                            {batch.status === "applied" && <span>{batch.applied_count || 0} aplicadas</span>}
                           </div>
                           <StatusBadge tone={externalImportStatusTone(batch.status)} text={externalImportStatusLabels[batch.status] || batch.status} />
                           <div className="external-import-actions">
                             <button type="button" className="secondary" onClick={() => handleExternalImportPreview(batch)}>Previsualizar</button>
+                            {canWriteExternalImports && canWriteParties && batch.status === "approved" && (
+                              <button type="button" onClick={() => handleApplyExternalImportBatch(batch)}>Aplicar terceros</button>
+                            )}
                             {canWriteExternalImports && batch.status === "pending_review" && (
                               <>
                                 <button type="button" disabled={Number(batch.error_count) > 0} onClick={() => startExternalImportReview(batch, "approve")}>Aprobar</button>

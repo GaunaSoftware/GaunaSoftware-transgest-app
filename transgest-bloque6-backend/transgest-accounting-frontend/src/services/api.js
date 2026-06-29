@@ -135,6 +135,11 @@ export const updateExternalImportBatchStatus = (batchId, data) => apiFetch(`/ext
   body: data,
 });
 
+export const applyExternalImportBatch = (batchId, data) => apiFetch(`/external-import-batches/${batchId}/apply`, {
+  method: "POST",
+  body: data,
+});
+
 export async function selectCompany(companyId) {
   const data = await apiFetch("/companies/select", {
     method: "POST",

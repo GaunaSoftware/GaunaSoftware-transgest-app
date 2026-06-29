@@ -4,6 +4,7 @@ const {
   normalizeExternalImportBatchInput,
   normalizeExternalImportQuery,
   normalizeExternalImportReviewInput,
+  normalizeExternalImportApplyInput,
   nextBatchStatus,
   mapPartyStagingRow,
   parseGenericCsv,
@@ -60,6 +61,14 @@ test("consulta y revision de lotes limitan filtros y transiciones", () => {
   assert.equal(nextBatchStatus("pending_review", { action: "approve" }), "approved");
   assert.equal(nextBatchStatus("pending_review", { action: "cancel" }), "cancelled");
   assert.throws(() => nextBatchStatus("approved", { action: "reject" }), /Solo se pueden revisar lotes pendientes/);
+});
+
+test("normalizeExternalImportApplyInput exige motivo operativo", () => {
+  assert.deepEqual(normalizeExternalImportApplyInput({}), { reason: "Aplicacion de lote externo aprobado" });
+  assert.deepEqual(normalizeExternalImportApplyInput({ reason: "Aplicacion revisada por administracion" }), {
+    reason: "Aplicacion revisada por administracion",
+  });
+  assert.throws(() => normalizeExternalImportApplyInput({ reason: "bad" }), /reason/);
 });
 
 test("mapPartyStagingRow mapea alias habituales y detecta errores", () => {

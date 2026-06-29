@@ -34,6 +34,8 @@ const bankStatementImportsUpSql = fs.readFileSync(path.join(migrationsDir, "014_
 const bankStatementImportsDownSql = fs.readFileSync(path.join(migrationsDir, "014_bank_statement_imports.down.sql"), "utf8");
 const externalImportStagingUpSql = fs.readFileSync(path.join(migrationsDir, "015_external_import_staging.up.sql"), "utf8");
 const externalImportStagingDownSql = fs.readFileSync(path.join(migrationsDir, "015_external_import_staging.down.sql"), "utf8");
+const externalImportApplyPartiesUpSql = fs.readFileSync(path.join(migrationsDir, "016_external_import_apply_parties.up.sql"), "utf8");
+const externalImportApplyPartiesDownSql = fs.readFileSync(path.join(migrationsDir, "016_external_import_apply_parties.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -208,4 +210,15 @@ test("migracion de staging externo crea lotes y filas sin aplicar datos", () => 
   assert.match(externalImportStagingDownSql, /RAISE EXCEPTION/i);
   assert.match(externalImportStagingDownSql, /DROP TABLE IF EXISTS accounting\.external_import_rows/i);
   assert.match(externalImportStagingDownSql, /DROP TABLE IF EXISTS accounting\.external_import_batches/i);
+});
+
+test("migracion de aplicacion de importacion externa amplia estados con rollback protegido", () => {
+  assert.match(externalImportApplyPartiesUpSql, /ADD COLUMN IF NOT EXISTS applied_by UUID REFERENCES accounting\.accounting_users\(id\) ON DELETE SET NULL/i);
+  assert.match(externalImportApplyPartiesUpSql, /ADD COLUMN IF NOT EXISTS applied_at TIMESTAMPTZ/i);
+  assert.match(externalImportApplyPartiesUpSql, /ADD COLUMN IF NOT EXISTS applied_count INTEGER NOT NULL DEFAULT 0/i);
+  assert.match(externalImportApplyPartiesUpSql, /status IN \('pending_review', 'approved', 'rejected', 'cancelled', 'applied'\)/i);
+  assert.match(externalImportApplyPartiesUpSql, /idx_external_import_batches_applied/i);
+  assert.match(externalImportApplyPartiesDownSql, /WHERE status = 'applied'/i);
+  assert.match(externalImportApplyPartiesDownSql, /RAISE EXCEPTION/i);
+  assert.match(externalImportApplyPartiesDownSql, /DROP COLUMN IF EXISTS applied_by/i);
 });

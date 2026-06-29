@@ -194,6 +194,12 @@ test("contratos de staging externo exigen lote y revision", () => {
     action: "approve",
     reason: "Validado por administracion",
   }));
+  assert.doesNotThrow(() => validateEventContract("AccountingExternalImportBatchApplied", 1, {
+    import_batch_id: "batch-id",
+    import_type: "parties",
+    applied_count: 5,
+    skipped_count: 0,
+  }));
   assert.throws(() => validateEventContract("AccountingExternalImportBatchStaged", 1, {
     import_batch_id: "batch-id",
   }), /Payload incompleto/);

@@ -548,6 +548,8 @@ export const getChoferes    = (activo = "true") => apiFetch(`/choferes?activo=${
 export const crearChofer    = (data)      => apiFetch("/choferes", { method:"POST", body:data });
 export const editarChofer   = (id,data)   => apiFetch(`/choferes/${id}`, { method:"PUT", body:data });
 export const getChoferJornadaApp = () => apiFetch("/choferes/app/jornada");
+export const getChoferConjuntoApp = () => apiFetch("/choferes/app/conjunto");
+export const cambiarChoferConjuntoApp = (data) => apiFetch("/choferes/app/conjunto", { method:"POST", body:data, silentSuccess:true });
 export const iniciarChoferJornada = (data) => apiFetch("/choferes/app/jornada/iniciar", { method:"POST", body:data, silentSuccess:true });
 export const cambiarChoferJornadaActividad = (data) => apiFetch("/choferes/app/jornada/actividad", { method:"POST", body:data, silentSuccess:true });
 export const cerrarChoferJornada = (data) => apiFetch("/choferes/app/jornada/cerrar", { method:"POST", body:data, silentSuccess:true });

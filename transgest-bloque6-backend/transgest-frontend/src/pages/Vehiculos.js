@@ -141,6 +141,29 @@ function esVehiculoConGpsHabitual(v, todos = []) {
     !remolquesAsignados.has(String(v?.id || ""));
 }
 
+function esRemolqueVehiculo(v, todos = []) {
+  const clase = String(v?.clase || v?.tipo || "").toLowerCase();
+  const mat = String(v?.matricula || "").toUpperCase();
+  return clase.includes("remolque") ||
+    clase.includes("semirremolque") ||
+    clase.includes("dolly") ||
+    mat.startsWith("R-") ||
+    mat.endsWith("-R") ||
+    (todos || []).some(t => String(t?.remolque_id || "") === String(v?.id || ""));
+}
+
+function facturacionMediaDia(v) {
+  const n = Number(v?.facturacion_media_dia ?? v?.media_facturacion_dia ?? 0);
+  return Number.isFinite(n) && n > 0 ? n : 500;
+}
+
+function diasDesde(fecha) {
+  if (!fecha) return 0;
+  const t = new Date(fecha).getTime();
+  if (!Number.isFinite(t)) return 0;
+  return Math.max(1, Math.ceil((Date.now() - t) / 86400000));
+}
+
 function fmt2(n) { return Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
 function readGpsFocus() {
@@ -857,6 +880,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
     fecha_compra:"", valor_compra:"", financiacion:"",
     concesionario:"", numero_pedido_compra:"",
     fecha_venta:"", valor_venta:"", comprador:"",
+    facturacion_media_dia:500,
     // Documentacion
     fecha_matriculacion:"", fecha_itv:"", fecha_seguro:"",
     compania_seguro:"", numero_poliza:"",
@@ -1299,6 +1323,13 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                   <label style={S.lbl}>Forma de pago / financiacion</label>
                   <input style={S.inp} value={form.financiacion||""} onChange={f("financiacion")} placeholder="Leasing 5 anos, compra directa, renting..."/>
                 </div>
+                <div>
+                  <label style={S.lbl}>Facturacion media diaria estimada (EUR)</label>
+                  <input type="number" min="0" step="0.01" style={S.inp} value={form.facturacion_media_dia||""} onChange={f("facturacion_media_dia")} placeholder="500"/>
+                  <div style={{fontSize:11,color:"var(--text5)",marginTop:5}}>
+                    Se usa para calcular lo dejado de ganar cuando la tractora esta parada o en taller.
+                  </div>
+                </div>
               </div>
 
               <div style={S.sec}>Venta (si procede)</div>
@@ -1605,19 +1636,11 @@ export default function Vehiculos() {
     if (!v.activo || v.estado === "baja") return false;
     // Filtro por tipo de vehiculo
     if (filtroTipo === "tractoras") {
-      const mat = (v.matricula||"").toUpperCase();
-      const clase = (v.clase||v.tipo||"").toLowerCase();
-      const isRemolque = clase.includes("remolque")||clase.includes("semirremolque")||
-                         clase.includes("dolly")||vehiculos.some(t=>t.remolque_id===v.id)||
-                         mat.startsWith("R-")||mat.endsWith("-R");
+      const isRemolque = esRemolqueVehiculo(v, vehiculos);
       if (isRemolque) return false;
     }
     else if (filtroTipo === "remolques") {
-      const mat = (v.matricula||"").toUpperCase();
-      const clase = (v.clase||v.tipo||"").toLowerCase();
-      const isRemolque = clase.includes("remolque")||clase.includes("semirremolque")||
-                         clase.includes("dolly")||vehiculos.some(t=>t.remolque_id===v.id)||
-                         mat.startsWith("R-")||mat.endsWith("-R");
+      const isRemolque = esRemolqueVehiculo(v, vehiculos);
       if (!isRemolque) return false;
     }
     // Subfiltro por estado (solo cuando no es "baja")
@@ -1628,6 +1651,23 @@ export default function Vehiculos() {
   // Clase legible corta
   const claseCorta = c => c?.replace("Remolque - ","").replace("Semirremolque","Semi") || "-";
   const vehiculosActivos = vehiculos.filter(v => v.activo !== false && v.estado !== "baja");
+  const tractorasActivas = vehiculosActivos.filter(v => !esRemolqueVehiculo(v, vehiculos));
+  const remolquesActivos = vehiculosActivos.filter(v => esRemolqueVehiculo(v, vehiculos));
+  const tractorasSinChofer = tractorasActivas.filter(v => !v.chofer_id && !choferes.some(ch => String(ch.vehiculo_id || "") === String(v.id)));
+  const remolquesSinTractora = remolquesActivos.filter(v => !v.tractora_id && !vehiculosActivos.some(t => String(t.remolque_id || "") === String(v.id)));
+  const inmovilizadas = tractorasActivas.filter(v => ["taller","inactivo"].includes(String(v.estado || "")));
+  const tallerActual = tractorasActivas.filter(v => String(v.estado || "") === "taller");
+  const perdidaTaller = tallerActual.reduce((sum, v) => sum + facturacionMediaDia(v) * diasDesde(v.taller_entrada_at || v.estado_aux_updated_at), 0);
+  const perdidaSinChoferDia = tractorasSinChofer.reduce((sum, v) => sum + facturacionMediaDia(v), 0);
+  const perdidaInmovilizadaDia = inmovilizadas.reduce((sum, v) => sum + facturacionMediaDia(v), 0);
+  const kpisFlota = [
+    ["Tractoras", tractorasActivas.length, "Cabezas tractoras activas", "var(--accent)"],
+    ["Remolques", remolquesActivos.length, "Semis/remolques activos", "#8b5cf6"],
+    ["Tractoras sin chofer", tractorasSinChofer.length, `${fmt2(perdidaSinChoferDia)} EUR/dia estimado`, tractorasSinChofer.length ? "#ef4444" : "#10b981"],
+    ["Remolques libres", remolquesSinTractora.length, "A espera de conjunto", remolquesSinTractora.length ? "#f59e0b" : "#10b981"],
+    ["En taller", tallerActual.length, `${fmt2(perdidaTaller)} EUR acumulado estimado`, tallerActual.length ? "#f97316" : "#10b981"],
+    ["Paradas", inmovilizadas.length, `${fmt2(perdidaInmovilizadaDia)} EUR/dia estimado`, inmovilizadas.length ? "#ef4444" : "#10b981"],
+  ];
 
   return (
     <div className="tg-responsive-page" style={S.page}>
@@ -1694,6 +1734,16 @@ export default function Vehiculos() {
         )}
       </div>
 
+      <div className="tg-vehiculos-kpis" style={{display:"grid",gridTemplateColumns:"repeat(6,minmax(0,1fr))",gap:10,marginBottom:14}}>
+        {kpisFlota.map(([label, value, detail, color]) => (
+          <div key={label} style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:10,padding:"12px 14px",minHeight:78}}>
+            <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>{label}</div>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:22,fontWeight:900,color,marginTop:7}}>{value}</div>
+            <div style={{fontSize:11,color:"var(--text4)",marginTop:3,lineHeight:1.3}}>{detail}</div>
+          </div>
+        ))}
+      </div>
+
         <GpsMappingPanel
           vehiculos={vehiculosActivos}
           providers={gpsProviders}
@@ -1725,7 +1775,7 @@ export default function Vehiculos() {
         : (
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(286px,1fr))", gap:14 }}>
             {filtrados.map(v => {
-              const esRemolque = v.clase?.includes("Remolque") || v.clase?.includes("Semi");
+              const esRemolque = esRemolqueVehiculo(v, vehiculos);
               return (
                 <div key={v.id} id={`vehiculo-card-${v.id}`} style={{
                                           background:String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.10)" : "rgba(255,255,255,.96)",
@@ -1754,8 +1804,33 @@ export default function Vehiculos() {
                     <span style={{ background:"#f1f5f9", padding:"3px 9px", borderRadius:10, border:"1px solid #e2e8f0" }}>
                       {claseCorta(v.clase)}
                     </span>
+                    <span style={{ background:esRemolque?"rgba(139,92,246,.10)":"rgba(20,184,166,.10)", color:esRemolque?"#8b5cf6":"#0f766e", padding:"3px 9px", borderRadius:10, border:`1px solid ${esRemolque?"rgba(139,92,246,.25)":"rgba(20,184,166,.25)"}`, fontWeight:800 }}>
+                      {esRemolque ? "Remolque" : "Tractora"}
+                    </span>
                     {v.combustible && <span style={{ color:"var(--text5)" }}>{v.combustible}</span>}
                     {v.potencia_cv && <span style={{ color:"var(--text5)" }}>{v.potencia_cv} CV</span>}
+                  </div>
+
+                  <div style={{marginBottom:8,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    {!esRemolque ? (
+                      <>
+                        <div style={{background:v.chofer_id || v.chofer_nombre ? "rgba(16,185,129,.08)" : "rgba(239,68,68,.08)",border:`1px solid ${v.chofer_id || v.chofer_nombre ? "rgba(16,185,129,.22)" : "rgba(239,68,68,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
+                          <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Chofer</div>
+                          <div style={{fontSize:12,fontWeight:800,color:v.chofer_id || v.chofer_nombre ? "var(--text)" : "#ef4444"}}>{v.chofer_nombre || "Sin asignar"}</div>
+                        </div>
+                        <div style={{background:v.remolque_id ? "rgba(139,92,246,.08)" : "rgba(245,158,11,.08)",border:`1px solid ${v.remolque_id ? "rgba(139,92,246,.22)" : "rgba(245,158,11,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
+                          <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Remolque</div>
+                          <div style={{fontSize:12,fontWeight:800,color:v.remolque_id ? "var(--text)" : "#f59e0b"}}>{v.remolque_matricula || "Sin remolque"}</div>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{gridColumn:"1/-1",background:v.tractora_id ? "rgba(20,184,166,.08)" : "rgba(245,158,11,.08)",border:`1px solid ${v.tractora_id ? "rgba(20,184,166,.22)" : "rgba(245,158,11,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
+                        <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Asignacion del remolque</div>
+                        <div style={{fontSize:12,fontWeight:800,color:v.tractora_id ? "var(--text)" : "#f59e0b"}}>
+                          {v.tractora_matricula ? `${v.tractora_matricula}${v.tractora_chofer_nombre ? ` · ${v.tractora_chofer_nombre}` : ""}` : "Libre / a espera de tractora"}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div style={{marginBottom:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:7,padding:"8px 10px"}}>

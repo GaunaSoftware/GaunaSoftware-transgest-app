@@ -499,6 +499,7 @@ const VEHICULO_EXT_FIELDS = [
   "fecha_compra", "valor_compra", "financiacion", "concesionario", "numero_pedido_compra",
   "fecha_venta", "valor_venta", "comprador",
   "compania_seguro", "numero_poliza",
+  "facturacion_media_dia",
   "taller_entrada_at", "estado_aux", "estado_aux_updated_at",
 ];
 
@@ -620,10 +621,14 @@ r1.get("/", async (req, res) => {
   const { activo } = req.query;
   let q = `SELECT v.*,
              r.matricula AS remolque_matricula, r.marca AS remolque_marca, r.modelo AS remolque_modelo,
-             CONCAT(ch.nombre, CASE WHEN ch.apellidos IS NOT NULL AND ch.apellidos != '' THEN ' ' || ch.apellidos ELSE '' END) AS chofer_nombre
+             t.id AS tractora_id, t.matricula AS tractora_matricula,
+             CONCAT(ch.nombre, CASE WHEN ch.apellidos IS NOT NULL AND ch.apellidos != '' THEN ' ' || ch.apellidos ELSE '' END) AS chofer_nombre,
+             CONCAT(cht.nombre, CASE WHEN cht.apellidos IS NOT NULL AND cht.apellidos != '' THEN ' ' || cht.apellidos ELSE '' END) AS tractora_chofer_nombre
            FROM vehiculos v
            LEFT JOIN vehiculos r ON r.id = v.remolque_id
+           LEFT JOIN vehiculos t ON t.remolque_id = v.id AND t.empresa_id = v.empresa_id AND t.activo=true
            LEFT JOIN choferes ch ON ch.id = v.chofer_id
+           LEFT JOIN choferes cht ON cht.id = t.chofer_id
            WHERE 1=1`;
   const params = [];
   if (empresaId) { q += " AND v.empresa_id=$" + (params.length + 1); params.push(empresaId); }

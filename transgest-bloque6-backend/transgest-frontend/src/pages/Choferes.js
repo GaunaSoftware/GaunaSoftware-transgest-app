@@ -568,7 +568,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("choferes");
   const [tab,    setTab]    = useState("datos");
-  const [form,   setForm]   = useState(editando ? { ...editando } : {
+  const [form,   setForm]   = useState(editando ? { ...editando, remolque_id: editando.remolque_id || editando.vehiculo_remolque_id || "" } : {
     activo:true, nombre:"", apellidos:"", dni:"", telefono:"", email:"",
     direccion:"", poblacion:"", cp:"", provincia:"", pais:"España",
     fecha_alta: new Date().toISOString().slice(0,10), fecha_baja:"", motivo_baja:"",
@@ -583,6 +583,13 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
     notas:"",
   });
   const [saving, setSaving] = useState(false);
+  const esRemolque = v => {
+    const clase = String(v?.clase || v?.tipo || "").toLowerCase();
+    const mat = String(v?.matricula || "").toUpperCase();
+    return clase.includes("remolque") || clase.includes("semirremolque") || clase.includes("dolly") || mat.startsWith("R-") || mat.endsWith("-R") || vehiculos.some(t => String(t.remolque_id || "") === String(v?.id || ""));
+  };
+  const tractoras = vehiculos.filter(v => !esRemolque(v) && v.activo !== false && v.estado !== "baja");
+  const remolques = vehiculos.filter(v => esRemolque(v) && v.activo !== false && v.estado !== "baja");
 
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value }));
   const onActivoChange = e => {
@@ -736,10 +743,17 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
                   <input type="email" style={S.inp} value={form.email||""} onChange={f("email")} placeholder="chofer@email.com"/>
                 </div>
                 <div>
-                  <label style={S.lbl}>Vehículo asignado</label>
-                  <select value={form.vehiculo_id||""} onChange={f("vehiculo_id")} style={S.sel}>
+                  <label style={S.lbl}>Tractora asignada</label>
+                  <select value={form.vehiculo_id||""} onChange={e => setForm(p => ({ ...p, vehiculo_id:e.target.value, remolque_id:e.target.value ? p.remolque_id : "" }))} style={S.sel}>
                     <option value="">Sin asignar</option>
-                    {vehiculos.map(v => <option key={v.id} value={v.id}>{v.matricula} - {v.marca||""} {v.modelo||""}</option>)}
+                    {tractoras.map(v => <option key={v.id} value={v.id}>{v.matricula} - {v.marca||""} {v.modelo||""}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={S.lbl}>Remolque del conjunto</label>
+                  <select value={form.remolque_id||""} onChange={f("remolque_id")} style={S.sel} disabled={!form.vehiculo_id}>
+                    <option value="">Sin remolque</option>
+                    {remolques.map(v => <option key={v.id} value={v.id}>{v.matricula} - {v.clase||""}</option>)}
                   </select>
                 </div>
               </div>

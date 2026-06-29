@@ -104,10 +104,12 @@ async function resolveChoferApp(req) {
   if (!clauses.length) return null;
   const { rows } = await db.query(
     `SELECT ch.*, v.matricula AS vehiculo_matricula, v.km_actuales,
+            v.remolque_id AS vehiculo_remolque_id, r.matricula AS remolque_matricula,
             v.gps_provider, v.gps_external_id, v.gps_lat, v.gps_lng,
             v.ubicacion_actual, v.ubicacion_ts
        FROM choferes ch
        LEFT JOIN vehiculos v ON v.id=ch.vehiculo_id AND v.empresa_id=ch.empresa_id
+       LEFT JOIN vehiculos r ON r.id=v.remolque_id AND r.empresa_id=v.empresa_id
       WHERE ch.empresa_id=$1 AND (${clauses.join(" OR ")})
       ORDER BY ch.nombre
       LIMIT 1`,
@@ -349,6 +351,138 @@ async function notifyVacacionesGerenciaTrafico(empresaId, solicitud, chofer, act
   }).catch(() => null)));
 }
 
+async function notifyAsignacionConjunto(empresaId, tipo, titulo, mensaje, data = {}, actorId = null) {
+  if (!empresaId) return;
+  const { rows } = await db.query(
+    "SELECT id FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('gerente','trafico')",
+    [empresaId]
+  ).catch(() => ({ rows: [] }));
+  await Promise.all(rows.map(u => crearNotificacion({
+    empresa_id: empresaId,
+    usuario_id: u.id,
+    tipo,
+    titulo,
+    mensaje,
+    data,
+    created_by: actorId,
+  }).catch(() => null)));
+}
+
+async function setChoferConjunto({ empresaId, choferId, vehiculoId = null, remolqueId = null, actorId = null, notify = false }) {
+  if (!empresaId || !choferId) return null;
+  const chRes = await db.query(
+    "SELECT id, nombre, apellidos, vehiculo_id, activo FROM choferes WHERE id=$1 AND empresa_id=$2 LIMIT 1",
+    [choferId, empresaId]
+  );
+  const chofer = chRes.rows[0];
+  if (!chofer) {
+    const err = new Error("Chofer no encontrado");
+    err.status = 404;
+    throw err;
+  }
+
+  const nextVehiculoId = vehiculoId || null;
+  const nextRemolqueId = remolqueId || null;
+  let vehiculo = null;
+  let remolque = null;
+  if (nextVehiculoId) {
+    const { rows } = await db.query(
+      `SELECT v.*, ch.id AS asignado_chofer_id
+         FROM vehiculos v
+         LEFT JOIN choferes ch ON ch.vehiculo_id=v.id AND ch.empresa_id=v.empresa_id AND ch.id<>$3 AND ch.activo=true
+        WHERE v.id=$1 AND v.empresa_id=$2 AND v.activo IS DISTINCT FROM false AND v.estado IS DISTINCT FROM 'baja'
+        LIMIT 1`,
+      [nextVehiculoId, empresaId, choferId]
+    );
+    vehiculo = rows[0];
+    if (!vehiculo) {
+      const err = new Error("La tractora seleccionada no existe o esta de baja.");
+      err.status = 404;
+      throw err;
+    }
+    if (vehiculo.asignado_chofer_id || (vehiculo.chofer_id && String(vehiculo.chofer_id) !== String(choferId))) {
+      const err = new Error("La tractora ya esta asignada a otro chofer. Cambiala desde Trafico para mover el conjunto.");
+      err.status = 409;
+      throw err;
+    }
+  }
+  if (nextRemolqueId) {
+    if (!nextVehiculoId) {
+      const err = new Error("Para asignar remolque primero selecciona una tractora.");
+      err.status = 400;
+      throw err;
+    }
+    const { rows } = await db.query(
+      `SELECT r.*, t.id AS tractora_asignada_id, t.matricula AS tractora_asignada_matricula
+         FROM vehiculos r
+         LEFT JOIN vehiculos t ON t.remolque_id=r.id AND t.empresa_id=r.empresa_id AND t.id<>$3 AND t.activo=true
+        WHERE r.id=$1 AND r.empresa_id=$2 AND r.activo IS DISTINCT FROM false AND r.estado IS DISTINCT FROM 'baja'
+        LIMIT 1`,
+      [nextRemolqueId, empresaId, nextVehiculoId]
+    );
+    remolque = rows[0];
+    if (!remolque) {
+      const err = new Error("El remolque seleccionado no existe o esta de baja.");
+      err.status = 404;
+      throw err;
+    }
+    if (remolque.tractora_asignada_id) {
+      const err = new Error(`El remolque ya esta asignado a la tractora ${remolque.tractora_asignada_matricula}. Cambialo desde Trafico para moverlo.`);
+      err.status = 409;
+      throw err;
+    }
+  }
+
+  await db.transaction(async client => {
+    await client.query("UPDATE vehiculos SET chofer_id=NULL WHERE empresa_id=$1 AND chofer_id=$2", [empresaId, choferId]);
+    if (chofer.vehiculo_id && (!nextVehiculoId || String(chofer.vehiculo_id) !== String(nextVehiculoId))) {
+      await client.query(
+        "UPDATE vehiculos SET chofer_id=NULL WHERE empresa_id=$1 AND id=$2 AND chofer_id=$3",
+        [empresaId, chofer.vehiculo_id, choferId]
+      );
+    }
+    await client.query(
+      "UPDATE choferes SET vehiculo_id=$1 WHERE empresa_id=$2 AND id=$3",
+      [nextVehiculoId, empresaId, choferId]
+    );
+    if (nextVehiculoId) {
+      await client.query(
+        "UPDATE vehiculos SET chofer_id=$1, remolque_id=$2, updated_at=NOW() WHERE empresa_id=$3 AND id=$4",
+        [choferId, nextRemolqueId, empresaId, nextVehiculoId]
+      );
+    }
+  });
+
+  if (notify) {
+    const nombre = `${chofer.nombre || ""} ${chofer.apellidos || ""}`.trim() || "Chofer";
+    const conjunto = nextVehiculoId
+      ? `${vehiculo?.matricula || "Tractora"}${remolque?.matricula ? ` + ${remolque.matricula}` : ""}`
+      : "Sin conjunto";
+    await notifyAsignacionConjunto(
+      empresaId,
+      "chofer_conjunto_actualizado",
+      "Conjunto actualizado por chofer",
+      `${nombre} ha actualizado su conjunto a ${conjunto}.`,
+      { chofer_id: choferId, vehiculo_id: nextVehiculoId, remolque_id: nextRemolqueId, dedupe_key: `conjunto:${choferId}:${nextVehiculoId || "none"}:${nextRemolqueId || "none"}` },
+      actorId
+    ).catch(() => {});
+  }
+
+  const { rows } = await db.query(
+    `SELECT ch.*, v.matricula AS vehiculo_matricula, v.km_actuales,
+            v.remolque_id AS vehiculo_remolque_id, r.matricula AS remolque_matricula,
+            v.gps_provider, v.gps_external_id, v.gps_lat, v.gps_lng,
+            v.ubicacion_actual, v.ubicacion_ts
+       FROM choferes ch
+       LEFT JOIN vehiculos v ON v.id=ch.vehiculo_id AND v.empresa_id=ch.empresa_id
+       LEFT JOIN vehiculos r ON r.id=v.remolque_id AND r.empresa_id=v.empresa_id
+      WHERE ch.id=$1 AND ch.empresa_id=$2
+      LIMIT 1`,
+    [choferId, empresaId]
+  );
+  return rows[0] || null;
+}
+
 async function syncAvisoVacacionesChofer({ empresaId, solicitud, aprobadoPor = null }) {
   if (!solicitud?.chofer_id) return null;
   const avisoId = solicitud.aviso_id || `vac-${solicitud.id}`;
@@ -385,8 +519,12 @@ router.get("/", async (req,res)=>{
              v.matricula AS vehiculo_matricula,
              v.matricula AS vehiculo_matricula_display,
              v.remolque_id AS vehiculo_remolque_id,
+             r.matricula AS remolque_matricula,
              COALESCE(ch.apellidos,'') AS apellidos
-           FROM choferes ch LEFT JOIN vehiculos v ON v.id=ch.vehiculo_id WHERE 1=1`;
+           FROM choferes ch
+           LEFT JOIN vehiculos v ON v.id=ch.vehiculo_id AND v.empresa_id=ch.empresa_id
+           LEFT JOIN vehiculos r ON r.id=v.remolque_id AND r.empresa_id=v.empresa_id
+           WHERE 1=1`;
   const params = [];
   if (empresaId) { q += " AND ch.empresa_id=$"+(params.length+1); params.push(empresaId); }
   if (activo === "false") { q += " AND ch.activo=false"; }
@@ -410,6 +548,73 @@ router.get("/app/jornada", requireChoferApp, async (req, res) => {
     [empresaId, chofer.id]
   );
   res.json({ chofer, jornada: serializeJornada(rows[0]) });
+});
+
+router.get("/app/conjunto", requireChoferApp, async (req, res) => {
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const chofer = await resolveChoferApp(req);
+  if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
+  const vehiculoId = chofer.vehiculo_id || null;
+  const remolqueId = chofer.vehiculo_remolque_id || null;
+  const { rows: tractoras } = await db.query(
+    `SELECT v.id, v.matricula, v.marca, v.modelo, v.clase, v.estado, v.remolque_id,
+            CASE WHEN ch.id IS NOT NULL AND ch.id<>$2 THEN true ELSE false END AS ocupada
+       FROM vehiculos v
+       LEFT JOIN choferes ch ON ch.vehiculo_id=v.id AND ch.empresa_id=v.empresa_id AND ch.activo=true
+      WHERE v.empresa_id=$1
+        AND v.activo IS DISTINCT FROM false
+        AND v.estado IS DISTINCT FROM 'baja'
+        AND LOWER(COALESCE(v.clase,v.tipo,'')) NOT LIKE '%remolque%'
+        AND LOWER(COALESCE(v.clase,v.tipo,'')) NOT LIKE '%semirremolque%'
+        AND LOWER(COALESCE(v.clase,v.tipo,'')) NOT LIKE '%dolly%'
+      ORDER BY ocupada ASC, v.matricula`,
+    [empresaId, chofer.id]
+  );
+  const { rows: remolques } = await db.query(
+    `SELECT r.id, r.matricula, r.marca, r.modelo, r.clase, r.estado,
+            t.id AS tractora_id, t.matricula AS tractora_matricula,
+            CASE WHEN t.id IS NOT NULL AND t.id<>$2 THEN true ELSE false END AS ocupado
+       FROM vehiculos r
+       LEFT JOIN vehiculos t ON t.remolque_id=r.id AND t.empresa_id=r.empresa_id AND t.activo=true AND ($2::uuid IS NULL OR t.id<>$2::uuid)
+      WHERE r.empresa_id=$1
+        AND r.activo IS DISTINCT FROM false
+        AND r.estado IS DISTINCT FROM 'baja'
+        AND (
+          LOWER(COALESCE(r.clase,r.tipo,'')) LIKE '%remolque%'
+          OR LOWER(COALESCE(r.clase,r.tipo,'')) LIKE '%semirremolque%'
+          OR LOWER(COALESCE(r.clase,r.tipo,'')) LIKE '%dolly%'
+          OR UPPER(COALESCE(r.matricula,'')) LIKE 'R-%'
+          OR UPPER(COALESCE(r.matricula,'')) LIKE '%-R'
+        )
+      ORDER BY ocupado ASC, r.matricula`,
+    [empresaId, vehiculoId]
+  );
+  res.json({
+    chofer,
+    conjunto: { vehiculo_id: vehiculoId, remolque_id: remolqueId },
+    tractoras,
+    remolques,
+  });
+});
+
+router.post("/app/conjunto", requireChoferApp, async (req, res) => {
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const chofer = await resolveChoferApp(req);
+  if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
+  if (chofer.activo === false || chofer.estado === "baja") return res.status(403).json({ error: "Tu ficha de chofer esta de baja." });
+  try {
+    const updated = await setChoferConjunto({
+      empresaId,
+      choferId: chofer.id,
+      vehiculoId: req.body?.vehiculo_id || null,
+      remolqueId: req.body?.remolque_id || null,
+      actorId: req.user?.id || null,
+      notify: true,
+    });
+    res.json({ chofer: updated, conjunto: { vehiculo_id: updated?.vehiculo_id || null, remolque_id: updated?.vehiculo_remolque_id || null } });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
 });
 
 router.post("/app/gps", requireChoferApp, async (req, res) => {
@@ -962,6 +1167,53 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
       ]
     );
     if(!rows[0]) return res.status(404).json({error:"No encontrado"});
+    if (!nextActivo && previous.activo !== false) {
+      await db.query(
+        "UPDATE vehiculos SET chofer_id=NULL, updated_at=NOW() WHERE empresa_id=$1 AND (chofer_id=$2 OR id=$3)",
+        [empresaId, req.params.id, previous.vehiculo_id || null]
+      ).catch(() => {});
+      if (previous.vehiculo_id) {
+        const { rows: vehRows } = await db.query(
+          `SELECT v.id, v.matricula, v.remolque_id, r.matricula AS remolque_matricula
+             FROM vehiculos v
+             LEFT JOIN vehiculos r ON r.id=v.remolque_id AND r.empresa_id=v.empresa_id
+            WHERE v.id=$1 AND v.empresa_id=$2
+            LIMIT 1`,
+          [previous.vehiculo_id, empresaId]
+        ).catch(() => ({ rows: [] }));
+        const veh = vehRows[0];
+        const nombre = `${previous.nombre || ""} ${previous.apellidos || ""}`.trim() || "Chofer";
+        if (veh) {
+          await notifyAsignacionConjunto(
+            empresaId,
+            "vehiculo_sin_chofer",
+            "Vehiculo pendiente de asignacion",
+            `${veh.matricula} se ha quedado sin chofer al dar de baja a ${nombre}.`,
+            { chofer_id: req.params.id, vehiculo_id: veh.id, remolque_id: veh.remolque_id || null, dedupe_key: `vehiculo_sin_chofer:${veh.id}` },
+            req.user?.id || null
+          ).catch(() => {});
+          if (veh.remolque_id) {
+            await notifyAsignacionConjunto(
+              empresaId,
+              "remolque_sin_chofer",
+              "Remolque en conjunto sin chofer",
+              `${veh.remolque_matricula || "Un remolque"} queda en el conjunto ${veh.matricula}, pero el conjunto no tiene chofer asignado.`,
+              { chofer_id: req.params.id, vehiculo_id: veh.id, remolque_id: veh.remolque_id, dedupe_key: `remolque_sin_chofer:${veh.remolque_id}` },
+              req.user?.id || null
+            ).catch(() => {});
+          }
+        }
+      }
+    } else if (nextActivo) {
+      await setChoferConjunto({
+        empresaId,
+        choferId: req.params.id,
+        vehiculoId: nextVehiculoId,
+        remolqueId: req.body?.remolque_id || null,
+        actorId: req.user?.id || null,
+        notify: false,
+      }).catch(() => {});
+    }
     res.json(rows[0]);
   } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });

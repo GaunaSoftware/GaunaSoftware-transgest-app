@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
+import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -1849,6 +1849,84 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
   );
 }
 
+function ConjuntoChofer({ onRefresh }) {
+  const [data, setData] = useState(null);
+  const [vehiculoId, setVehiculoId] = useState("");
+  const [remolqueId, setRemolqueId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const S = {
+    card:{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14},
+    btn:{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12},
+    input:{width:"100%",boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)",fontFamily:"'DM Sans',sans-serif"},
+    label:{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"},
+  };
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await getChoferConjuntoApp();
+      setData(res);
+      setVehiculoId(res?.conjunto?.vehiculo_id || "");
+      setRemolqueId(res?.conjunto?.remolque_id || "");
+    } catch (e) {
+      setData({ error: e.message || "No se pudo cargar el conjunto" });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const tractoras = Array.isArray(data?.tractoras) ? data.tractoras : [];
+  const remolques = Array.isArray(data?.remolques) ? data.remolques : [];
+  const tractorasVisibles = tractoras.filter(v => !v.ocupada || String(v.id) === String(data?.conjunto?.vehiculo_id || ""));
+  const remolquesVisibles = remolques.filter(r => !r.ocupado || String(r.id) === String(data?.conjunto?.remolque_id || ""));
+  async function guardar() {
+    setSaving(true);
+    try {
+      await cambiarChoferConjuntoApp({ vehiculo_id: vehiculoId || null, remolque_id: remolqueId || null });
+      notify("Conjunto actualizado. Trafico queda avisado.", "success");
+      await load();
+      await onRefresh?.();
+    } catch (e) {
+      notify(e.message || "No se pudo cambiar el conjunto", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div style={S.card}>
+      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"var(--text)"}}>Mi conjunto</div>
+      <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
+        Puedes seleccionar una tractora y remolque libres. Si necesitas mover un equipo ocupado, lo revisa trafico.
+      </div>
+      {loading ? (
+        <div style={{fontSize:12,color:"var(--text4)",marginTop:10}}>Cargando conjunto...</div>
+      ) : data?.error ? (
+        <div style={{fontSize:12,color:"#ef4444",marginTop:10}}>{data.error}</div>
+      ) : (
+        <>
+          <label style={S.label}>Tractora</label>
+          <select style={S.input} value={vehiculoId} onChange={e => { setVehiculoId(e.target.value); if (!e.target.value) setRemolqueId(""); }}>
+            <option value="">Sin tractora</option>
+            {tractorasVisibles.map(v => (
+              <option key={v.id} value={v.id}>{v.matricula} {v.marca || ""} {v.modelo || ""}</option>
+            ))}
+          </select>
+          <label style={S.label}>Remolque</label>
+          <select style={S.input} value={remolqueId} onChange={e => setRemolqueId(e.target.value)} disabled={!vehiculoId}>
+            <option value="">Sin remolque</option>
+            {remolquesVisibles.map(r => (
+              <option key={r.id} value={r.id}>{r.matricula} {r.clase || ""}</option>
+            ))}
+          </select>
+          <button disabled={saving} onClick={guardar} style={{...S.btn,width:"100%",marginTop:12,background:"var(--accent)",color:"#fff",borderColor:"var(--accent)",opacity:saving?0.65:1}}>
+            {saving ? "Guardando..." : "Actualizar conjunto"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function JornadaChofer({ jornadaInfo, onRefresh }) {
   const jornada = jornadaInfo?.jornada || null;
   const chofer = jornadaInfo?.chofer || null;
@@ -1921,10 +1999,11 @@ function JornadaChofer({ jornadaInfo, onRefresh }) {
         {chofer && (
           <div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <Mini label="Chofer" value={`${chofer.nombre || ""} ${chofer.apellidos || ""}`.trim()} />
-            <Mini label="Matricula" value={chofer.vehiculo_matricula || "Sin vehiculo"} />
+            <Mini label="Conjunto" value={`${chofer.vehiculo_matricula || "Sin tractora"}${chofer.remolque_matricula ? ` + ${chofer.remolque_matricula}` : ""}`} />
           </div>
         )}
       </div>
+      <ConjuntoChofer onRefresh={onRefresh} />
       {!jornada ? (
         <div style={S.card}>
           <label style={S.label}>Km inicio</label>

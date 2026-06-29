@@ -332,6 +332,10 @@ const CSS = `
       grid-template-columns:repeat(2,minmax(0,1fr)) !important;
       gap:10px !important;
     }
+    .tg-vehiculos-kpis {
+      grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+      gap:10px !important;
+    }
     .tg-palets-kpis > div {
       min-height:auto !important;
       align-items:flex-start !important;
@@ -387,6 +391,9 @@ const CSS = `
       min-width:0 !important;
     }
     .tg-palets-kpis {
+      grid-template-columns:1fr !important;
+    }
+    .tg-vehiculos-kpis {
       grid-template-columns:1fr !important;
     }
     .tg-palets-page [style*="font-size:34"],

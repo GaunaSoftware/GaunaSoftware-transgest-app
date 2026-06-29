@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
+import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -2343,6 +2343,7 @@ export default function AppChofer(){
   const [jornadaInfo, setJornadaInfo] = useState(null);
   const [expandedPedidoId, setExpandedPedidoId] = useState(null);
   const [routeNotifications, setRouteNotifications] = useState([]);
+  const gpsSeguimientoRef = useRef({ lastSent: 0 });
 
   const hoy = new Date().toISOString().slice(0,10);
   const lunesStr = (() => { const d=new Date(); d.setDate(d.getDate()-(d.getDay()||7)+1); return d.toISOString().slice(0,10); })();
@@ -2413,31 +2414,50 @@ export default function AppChofer(){
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  // GPS: continuous tracking while en ruta
+  const gpsJornadaId = jornadaInfo?.jornada?.id || null;
+  const gpsJornadaEstado = jornadaInfo?.jornada?.estado || "";
+  const gpsJornadaActividad = jornadaInfo?.jornada?.actividad_actual || "";
+  const gpsChoferVehiculoId = jornadaInfo?.chofer?.vehiculo_id || null;
+  const gpsChoferProvider = jornadaInfo?.chofer?.gps_provider || "";
+  const gpsChoferExternalId = jornadaInfo?.chofer?.gps_external_id || "";
+
+  // GPS app: solo con jornada abierta, sin pausa y si la empresa no usa GPS externo.
   useEffect(()=>{
-    const enRuta = pedidos.some(p=>p.estado==="en_curso");
-    if(!enRuta || !navigator.geolocation) return;
+    const actividad = String(gpsJornadaActividad || "").toLowerCase();
+    const provider = String(gpsChoferProvider || "").trim().toLowerCase();
+    const externalId = String(gpsChoferExternalId || "").trim();
+    const hasExternalGps = provider && provider !== "manual" && provider !== "app_chofer" && externalId;
+    if (!navigator.geolocation || !gpsJornadaId || gpsJornadaEstado !== "abierta" || ["pausa", "descanso", "fin"].includes(actividad) || hasExternalGps || !gpsChoferVehiculoId) {
+      gpsSeguimientoRef.current.lastSent = 0;
+      return;
+    }
+    gpsSeguimientoRef.current.lastSent = 0;
     const id = navigator.geolocation.watchPosition(
       pos => {
-        // Update position every 2 minutes to backend
         const now = Date.now();
-        if((window._lastGpsSend||0) + 120000 < now) {
-          window._lastGpsSend = now;
-          const pedidoActivo = pedidos.find(p=>p.estado==="en_curso");
-          if(pedidoActivo) {
-            actualizarGpsPedido(pedidoActivo.id, {
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              velocidad: Number.isFinite(pos.coords.speed) && pos.coords.speed >= 0 ? Number((pos.coords.speed * 3.6).toFixed(1)) : undefined,
-            }).catch(()=>{});
-          }
-        }
+        if (gpsSeguimientoRef.current.lastSent && gpsSeguimientoRef.current.lastSent + 300000 > now) return;
+        gpsSeguimientoRef.current.lastSent = now;
+        registrarGpsChoferApp({
+          vehiculo_id: gpsChoferVehiculoId,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy_m: Number.isFinite(pos.coords.accuracy) ? Number(pos.coords.accuracy.toFixed(1)) : null,
+          velocidad_kmh: Number.isFinite(pos.coords.speed) && pos.coords.speed >= 0 ? Number((pos.coords.speed * 3.6).toFixed(1)) : null,
+          recorded_at: new Date().toISOString(),
+        }).catch(()=>{});
       },
-      () => {}, // ignore errors silently
-      { enableHighAccuracy: true, maximumAge: 30000 }
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 60000, timeout: 15000 }
     );
     return () => navigator.geolocation.clearWatch(id);
-  }, [pedidos]);
+  }, [
+    gpsJornadaId,
+    gpsJornadaEstado,
+    gpsJornadaActividad,
+    gpsChoferVehiculoId,
+    gpsChoferProvider,
+    gpsChoferExternalId,
+  ]);
 
   const ORDEN_ESTADO = {en_curso:0,descarga:1,confirmado:2,pendiente:3,entregado:4,facturado:5,cancelado:6};
   const filtrados = pedidos.filter(p=>{

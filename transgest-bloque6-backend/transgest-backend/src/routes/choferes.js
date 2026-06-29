@@ -103,7 +103,9 @@ async function resolveChoferApp(req) {
   }
   if (!clauses.length) return null;
   const { rows } = await db.query(
-    `SELECT ch.*, v.matricula AS vehiculo_matricula, v.km_actuales
+    `SELECT ch.*, v.matricula AS vehiculo_matricula, v.km_actuales,
+            v.gps_provider, v.gps_external_id, v.gps_lat, v.gps_lng,
+            v.ubicacion_actual, v.ubicacion_ts
        FROM choferes ch
        LEFT JOIN vehiculos v ON v.id=ch.vehiculo_id AND v.empresa_id=ch.empresa_id
       WHERE ch.empresa_id=$1 AND (${clauses.join(" OR ")})
@@ -315,6 +317,12 @@ function requireChoferApp(req, res, next) {
   next();
 }
 
+function vehiculoTieneGpsExterno(row = {}) {
+  const provider = String(row.gps_provider || "").trim().toLowerCase();
+  const externalId = String(row.gps_external_id || "").trim();
+  return !!(provider && provider !== "manual" && provider !== "app_chofer" && externalId);
+}
+
 function calcVacationDays(inicio, fin) {
   const a = new Date(`${String(inicio || "").slice(0, 10)}T00:00:00Z`);
   const b = new Date(`${String(fin || "").slice(0, 10)}T00:00:00Z`);
@@ -402,6 +410,93 @@ router.get("/app/jornada", requireChoferApp, async (req, res) => {
     [empresaId, chofer.id]
   );
   res.json({ chofer, jornada: serializeJornada(rows[0]) });
+});
+
+router.post("/app/gps", requireChoferApp, async (req, res) => {
+  await ensureChoferJornadaSchema();
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const chofer = await resolveChoferApp(req);
+  if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
+  if (!chofer.vehiculo_id) return res.json({ ok: true, skipped: "sin_vehiculo" });
+  if (req.body?.vehiculo_id && String(req.body.vehiculo_id) !== String(chofer.vehiculo_id)) {
+    return res.status(403).json({ error: "El vehiculo no esta asignado a tu ficha de chofer" });
+  }
+  if (vehiculoTieneGpsExterno(chofer)) return res.json({ ok: true, skipped: "gps_externo_configurado" });
+
+  const lat = Number(req.body?.lat);
+  const lng = Number(req.body?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return res.status(400).json({ error: "Ubicacion GPS no valida" });
+  }
+  const velocidadKmh = req.body?.velocidad_kmh == null ? null : Number(req.body.velocidad_kmh);
+  const accuracyM = req.body?.accuracy_m == null ? null : Number(req.body.accuracy_m);
+  const recordedAt = req.body?.recorded_at ? new Date(req.body.recorded_at) : new Date();
+  const recordedIso = Number.isFinite(recordedAt.getTime()) ? recordedAt.toISOString() : new Date().toISOString();
+
+  const open = await db.query(
+    `SELECT * FROM chofer_jornadas
+      WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta'
+      ORDER BY inicio_at DESC
+      LIMIT 1`,
+    [empresaId, chofer.id]
+  );
+  const jornada = open.rows[0];
+  if (!jornada) return res.json({ ok: true, skipped: "jornada_cerrada" });
+  if (["pausa", "descanso", "fin"].includes(String(jornada.actividad_actual || "").toLowerCase())) {
+    return res.json({ ok: true, skipped: "jornada_pausada" });
+  }
+
+  const ubicacion = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  const { rows } = await db.query(
+    `UPDATE vehiculos
+        SET ubicacion_actual=$1,
+            ubicacion_fuente='app_chofer',
+            ubicacion_ts=$2::timestamptz,
+            gps_lat=$3,
+            gps_lng=$4,
+            gps_provider=CASE
+              WHEN gps_provider IS NULL OR gps_provider='' OR gps_provider='manual' THEN 'app_chofer'
+              ELSE gps_provider
+            END,
+            updated_at=NOW()
+      WHERE id=$5
+        AND empresa_id=$6
+        AND (
+          gps_provider IS NULL
+          OR gps_provider=''
+          OR gps_provider IN ('manual','app_chofer')
+          OR NULLIF(TRIM(COALESCE(gps_external_id,'')), '') IS NULL
+        )
+      RETURNING id, matricula, ubicacion_actual, ubicacion_ts, gps_lat, gps_lng, gps_provider`,
+    [ubicacion, recordedIso, lat, lng, chofer.vehiculo_id, empresaId]
+  );
+  const vehiculo = rows[0];
+  if (!vehiculo) return res.json({ ok: true, skipped: "gps_externo_configurado" });
+
+  await db.query(
+    `INSERT INTO gps_position_log
+      (empresa_id, vehiculo_id, provider, external_id, lat, lng, ubicacion, velocidad_kmh, odometro_km, raw, recorded_at)
+     VALUES ($1,$2,'app_chofer',$3,$4,$5,$6,$7,NULL,$8::jsonb,$9::timestamptz)`,
+    [
+      empresaId,
+      chofer.vehiculo_id,
+      `chofer:${chofer.id}`,
+      lat,
+      lng,
+      ubicacion,
+      Number.isFinite(velocidadKmh) ? velocidadKmh : null,
+      JSON.stringify({
+        source: "app_chofer",
+        usuario_id: req.user?.id || null,
+        chofer_id: chofer.id,
+        jornada_id: jornada.id,
+        accuracy_m: Number.isFinite(accuracyM) ? accuracyM : null,
+      }),
+      recordedIso,
+    ]
+  ).catch(() => {});
+
+  res.json({ ok: true, vehiculo });
 });
 
 router.get("/vacaciones", GERENTE_O_TRAFICO, async (req, res) => {

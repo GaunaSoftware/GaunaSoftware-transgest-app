@@ -4,16 +4,16 @@ import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
 const S={
-  page:{padding:"32px 42px",minWidth:0,minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 45%,#f7fafc 100%)"},
-  title:{fontFamily:"'Syne',sans-serif",fontSize:34,fontWeight:900,marginBottom:10,color:"#0f172a"},
-  card:{background:"rgba(255,255,255,.96)",border:"1px solid #dbe5ec",borderRadius:12,overflow:"hidden",boxShadow:"0 12px 30px rgba(15,23,42,.055)"},
-  th:{textAlign:"left",padding:"12px 16px",fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",borderBottom:"1px solid #dbe5ec",background:"#f8fbfd"},
-  td:{padding:"14px 16px",borderBottom:"1px solid #e2e8f0",fontSize:14,color:"#0f172a",verticalAlign:"middle"},
-  btn:{padding:"10px 16px",borderRadius:8,border:"1px solid #dbe5ec",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",background:"#fff",color:"#0f172a"},
-  inp:{background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:14,width:"100%",boxSizing:"border-box",outline:"none",boxShadow:"0 8px 18px rgba(15,23,42,.035)"},
+  page:{padding:"32px 42px",minWidth:0,minHeight:"100vh",background:"var(--bg)"},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:34,fontWeight:900,marginBottom:10,color:"var(--text)"},
+  card:{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",boxShadow:"var(--shadow-card)"},
+  th:{textAlign:"left",padding:"12px 16px",fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--table-head-bg)"},
+  td:{padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:14,color:"var(--text)",verticalAlign:"middle"},
+  btn:{padding:"10px 16px",borderRadius:8,border:"1px solid var(--border2)",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",background:"var(--button-bg)",color:"var(--button-text)"},
+  inp:{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--input-text)",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:14,width:"100%",boxSizing:"border-box",outline:"none",boxShadow:"var(--shadow)"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center"},
-  mbox:{background:"#fff",border:"1px solid #dbe5ec",borderRadius:12,padding:28,width:"min(600px,96vw)",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 24px 60px rgba(15,23,42,.20)"},
-  label:{display:"block",fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",marginBottom:6,marginTop:12},
+  mbox:{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:28,width:"min(600px,96vw)",maxHeight:"90vh",overflowY:"auto",boxShadow:"var(--shadow-card)"},
+  label:{display:"block",fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:6,marginTop:12},
 };
 
 const TIPOS_VEHICULO=[
@@ -331,12 +331,12 @@ export default function Rutas(){
             {TIPOS_TARIFA.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
           </select>
           <button onClick={()=>setSoloMargenNegativo(v=>!v)}
-            style={{...S.btn,background:soloMargenNegativo?"rgba(239,68,68,.10)":"#effaf8",color:soloMargenNegativo?"#ef4444":"#006f68",border:soloMargenNegativo?"1px solid rgba(239,68,68,.24)":"1px solid #c8e4e1",whiteSpace:"nowrap"}}>
+            style={{...S.btn,background:soloMargenNegativo?"rgba(239,68,68,.10)":"var(--accent-soft)",color:soloMargenNegativo?"#ef4444":"var(--accent-xl)",border:soloMargenNegativo?"1px solid rgba(239,68,68,.24)":"1px solid var(--accent-border)",whiteSpace:"nowrap"}}>
             Margen negativo
           </button>
           <input type="file" accept=".xlsx,.csv,.txt,.pdf" onChange={e=>setImportFile(e.target.files?.[0] || null)}
             style={{...S.inp}}/>
-          <button style={{...S.btn,background:"#fff",color:"#006f68",border:"1px solid #c8e4e1",opacity:importando?.7:1,whiteSpace:"nowrap"}}
+          <button style={{...S.btn,background:"var(--button-bg)",color:"var(--accent-xl)",border:"1px solid var(--accent-border)",opacity:importando?.7:1,whiteSpace:"nowrap"}}
             onClick={importarArchivo} disabled={importando}>
             {importando ? "Importando..." : "Importar rutas"}
           </button>
@@ -346,7 +346,7 @@ export default function Rutas(){
             Excel/CSV: cabeceras Origen, Destino, Tipo, Precio, Km, Minimo o formato origen;destino;precio;km;tipo_vehiculo;tarifa_tipo;minimo;recargo. Admite 22,00 EUR y columnas de cliente/CIF.
           </span>
           {canEdit&&(
-            <button style={{...S.btn,background:"linear-gradient(180deg,#008b82,#006f68)",color:"#fff",border:"1px solid #007f78",padding:"13px 22px",boxShadow:"0 12px 22px rgba(0,111,104,.18)"}} onClick={()=>abrirModal()}>
+            <button style={{...S.btn,background:"linear-gradient(180deg,var(--accent),var(--accent-xl))",color:"#fff",border:"1px solid var(--accent)",padding:"13px 22px",boxShadow:"0 12px 22px rgba(0,111,104,.18)"}} onClick={()=>abrirModal()}>
               + Nueva ruta
             </button>
           )}
@@ -380,17 +380,17 @@ export default function Rutas(){
                   onClick={()=>toggleCliente(cid)}
                   style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",
                     padding:"14px 18px",
-                    background:"linear-gradient(180deg,#f8fbfd,#fff)",
-                    borderBottom:isExpanded?"1px solid #dbe5ec":"none",
+                    background:"var(--bg3)",
+                    borderBottom:isExpanded?"1px solid var(--border)":"none",
                   }}>
                   <span style={{fontWeight:800,fontSize:14,
-                    color:"#006f68",textTransform:"uppercase",letterSpacing:".03em"}}>
+                    color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".03em"}}>
                     {grupo.nombre}
                   </span>
-                  <span style={{fontSize:12,color:"#64748b",marginLeft:4,padding:"3px 10px",borderRadius:999,background:"#fff",border:"1px solid #dbe5ec"}}>
+                  <span style={{fontSize:12,color:"var(--text4)",marginLeft:4,padding:"3px 10px",borderRadius:999,background:"var(--bg2)",border:"1px solid var(--border)"}}>
                     {grupo.rutas.length} ruta{grupo.rutas.length!==1?"s":""}
                   </span>
-                  <span style={{marginLeft:"auto",fontSize:18,color:"#0f172a",lineHeight:1}}>
+                  <span style={{marginLeft:"auto",fontSize:18,color:"var(--text)",lineHeight:1}}>
                     {isExpanded?"▲":"▼"}
                   </span>
                 </div>
@@ -410,14 +410,14 @@ export default function Rutas(){
                             <div onClick={()=>toggleVehiculo(tvKey)}
                               style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",
                                 padding:"9px 16px",background:"#f8fbfd",
-                                borderTop:tvIdx>0?"1px solid #e2e8f0":"none"}}>
-                              <span style={{fontSize:11,fontWeight:900,color:"#334155",textTransform:"uppercase",letterSpacing:".06em"}}>
+                                borderTop:tvIdx>0?"1px solid var(--border)":"none"}}>
+                              <span style={{fontSize:11,fontWeight:900,color:"var(--text2)",textTransform:"uppercase",letterSpacing:".06em"}}>
                                 Tipo {tvLabel}
                               </span>
-                              <span style={{fontSize:11,color:"#64748b"}}>
+                              <span style={{fontSize:11,color:"var(--text4)"}}>
                                 ({porVehiculo[tv].length} ruta{porVehiculo[tv].length!==1?"s":""})
                               </span>
-                              <span style={{marginLeft:"auto",fontSize:12,color:"#64748b"}}>
+                              <span style={{marginLeft:"auto",fontSize:12,color:"var(--text4)"}}>
                                 {tvExpanded?"^":"v"}
                               </span>
                             </div>
@@ -456,8 +456,8 @@ export default function Rutas(){
                                         const m = calcularMargenRuta(r);
                                         return (
                                           <div style={{display:"grid",gap:2}}>
-                                            <span style={{fontSize:11,color:"#64748b"}}>Ing. {fmt2(m.ingresoKm)}</span>
-                                            <span style={{fontSize:11,color:"#64748b"}}>Coste {fmt2(m.costeKm)}</span>
+                                            <span style={{fontSize:11,color:"var(--text4)"}}>Ing. {fmt2(m.ingresoKm)}</span>
+                                            <span style={{fontSize:11,color:"var(--text4)"}}>Coste {fmt2(m.costeKm)}</span>
                                             <span style={{fontWeight:900,color:m.margenKm>=0?"#008b82":"#ef4444"}}>Margen {fmt2(m.margenKm)}</span>
                                           </div>
                                         );
@@ -465,7 +465,7 @@ export default function Rutas(){
                                     </td>
                                     <td style={S.td}>
                                       <span style={{padding:"2px 8px",borderRadius:20,fontSize:11,
-                                        background:"rgba(20,184,166,.08)",color:"#006f68",border:"1px solid #c8e4e1"}}>
+                                        background:"var(--accent-soft)",color:"var(--accent-xl)",border:"1px solid var(--accent-border)"}}>
                                         {TIPOS_VEHICULO.find(t=>t.v===r.tipo_vehiculo)?.l||r.tipo_vehiculo||"Cualquiera"}
                                       </span>
                                     </td>
@@ -473,7 +473,7 @@ export default function Rutas(){
                                       {canEdit&&(
                                         <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap"}}>
                                           <button style={{...S.btn,background:"var(--bg3)",color:"var(--text3)",
-                                            border:"1px solid #dbe5ec",padding:"7px 13px",fontSize:13}}
+                                            border:"1px solid var(--border)",padding:"7px 13px",fontSize:13}}
                                             onClick={()=>abrirModal(r)}>
                                             Editar
                                           </button>

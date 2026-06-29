@@ -1,0 +1,58 @@
+:root {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+input,
+select,
+textarea {
+  background-color: var(--input-bg, var(--bg4));
+  color: var(--input-text, var(--text));
+  border-color: var(--input-border, var(--border2));
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--placeholder, var(--text5));
+  opacity: 1;
+}
+
+select option {
+  background-color: var(--surface, var(--bg2));
+  color: var(--text);
+}
+
+input[type="file"] {
+  color: var(--text2);
+}
+
+input[type="file"]::file-selector-button {
+  background: var(--button-bg, var(--bg3));
+  color: var(--button-text, var(--text));
+  border: 1px solid var(--border2);
+  border-radius: 7px;
+  padding: 7px 10px;
+  margin-right: 10px;
+  font-weight: 700;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:root[data-theme="dark"] input:-webkit-autofill,
+:root[data-theme="dark"] input:-webkit-autofill:hover,
+:root[data-theme="dark"] input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  box-shadow: 0 0 0 1000px var(--input-bg) inset;
+  caret-color: var(--text);
+}

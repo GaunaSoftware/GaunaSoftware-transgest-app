@@ -153,7 +153,7 @@ async function apiFetch(path, options = {}) {
   const { silentSuccess = false, silentError = false, timeoutMs, ...fetchOptions } = options;
   const token = getToken();
   const method = String(fetchOptions.method || "GET").toUpperCase();
-  const effectiveTimeoutMs = Number(timeoutMs ?? (method === "GET" ? 30000 : 20000));
+  const effectiveTimeoutMs = Number(timeoutMs ?? (method === "GET" ? 45000 : 30000));
   const timeoutController = typeof AbortController !== "undefined" && effectiveTimeoutMs > 0 && !fetchOptions.signal
     ? new AbortController()
     : null;
@@ -938,5 +938,7 @@ export async function descargarFirmaEntregaEvidenciaInforme(id) {
 }
 export const actualizarGpsPedido = (id, data) =>
   apiFetch(`/pedidos/${id}/gps`, { method: "POST", body: data });
+export const registrarGpsChoferApp = (data) =>
+  apiFetch("/choferes/app/gps", { method: "POST", body: data, timeoutMs: 15000, silentSuccess: true, silentError: true });
 
 

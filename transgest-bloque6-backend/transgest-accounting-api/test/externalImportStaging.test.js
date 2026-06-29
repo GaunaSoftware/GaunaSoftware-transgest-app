@@ -7,6 +7,7 @@ const {
   normalizeExternalImportApplyInput,
   nextBatchStatus,
   mapAccountStagingRow,
+  mapMaturityStagingRow,
   mapPartyStagingRow,
   parseGenericCsv,
 } = require("../src/domain/externalImportStaging");
@@ -119,4 +120,38 @@ test("mapAccountStagingRow mapea plan contable y detecta errores", () => {
   assert.equal(invalid.errors.some(error => error.code === "invalid_account_code"), true);
   assert.equal(invalid.errors.some(error => error.code === "missing_account_name"), true);
   assert.equal(invalid.errors.some(error => error.code === "unsupported_account_type"), true);
+});
+
+test("mapMaturityStagingRow mapea vencimientos y detecta errores", () => {
+  const mapped = mapMaturityStagingRow({
+    raw_payload: {
+      nif: "B00000000",
+      tipo: "Cobro",
+      vencimiento: "31/07/2026",
+      factura: "F-100",
+      concepto: "Servicio transporte",
+      importe: "1250,50",
+      forma_pago: "transferencia",
+    },
+  });
+  assert.deepEqual(mapped.mapped, {
+    party_id: "",
+    party_tax_id: "B00000000",
+    party_name: "",
+    direction: "receivable",
+    issue_date: null,
+    due_date: "2026-07-31",
+    document_ref: "F-100",
+    description: "Servicio transporte",
+    amount: "1250.50",
+    payment_method: "transferencia",
+    notes: "",
+  });
+  assert.equal(mapped.errors.length, 0);
+
+  const invalid = mapMaturityStagingRow({ raw_payload: { tipo: "otro", importe: "0", vencimiento: "2026-99-01" } });
+  assert.equal(invalid.errors.some(error => error.code === "missing_party_reference"), true);
+  assert.equal(invalid.errors.some(error => error.code === "unsupported_maturity_direction"), true);
+  assert.equal(invalid.errors.some(error => error.code === "invalid_due_date"), true);
+  assert.equal(invalid.errors.some(error => error.code === "invalid_amount"), true);
 });

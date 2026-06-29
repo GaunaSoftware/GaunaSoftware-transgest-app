@@ -220,15 +220,17 @@ function formatExternalImportIssue(issue) {
   if (typeof issue === "string") return issue;
   if (issue.party) return `${issue.code}: ${issue.party.legal_name || issue.party.tax_id || issue.party.id}`;
   if (issue.account) return `${issue.code}: ${issue.account.code || issue.account.name || issue.account.id}`;
+  if (issue.maturity) return `${issue.code}: ${issue.maturity.document_ref || issue.maturity.description || issue.maturity.id}`;
   return issue.message || issue.code || JSON.stringify(issue);
 }
 
 function externalImportPreviewTitle(row) {
-  return row.mapped?.legal_name || row.mapped?.name || row.mapped?.code || "Sin nombre";
+  return row.mapped?.legal_name || row.mapped?.party_name || row.mapped?.name || row.mapped?.code || row.mapped?.document_ref || "Sin nombre";
 }
 
 function externalImportPreviewSubtitle(row) {
   if (row.mapped?.code) return `${row.mapped.code} | ${row.mapped.account_type || "tipo pendiente"}`;
+  if (row.mapped?.due_date) return `${row.mapped.due_date} | ${row.mapped.amount || "sin importe"} | ${row.mapped.direction || "tipo pendiente"}`;
   return `${row.mapped?.tax_id || "Sin NIF/CIF"} | ${row.mapped?.party_type || "tipo pendiente"}`;
 }
 
@@ -1651,6 +1653,7 @@ export default function App() {
         refreshExternalImportBatches(externalImportFilters),
         refreshParties(partyFilters),
         batch.import_type === "accounts" ? refreshAccounts({ ...accountFilters, fiscal_year_id: externalImportTargetYearId }) : Promise.resolve(),
+        batch.import_type === "maturities" ? refreshMaturities(maturityFilters) : Promise.resolve(),
       ]);
     } catch (err) {
       setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
@@ -4018,9 +4021,13 @@ export default function App() {
                           <StatusBadge tone={externalImportStatusTone(batch.status)} text={externalImportStatusLabels[batch.status] || batch.status} />
                           <div className="external-import-actions">
                             <button type="button" className="secondary" onClick={() => handleExternalImportPreview(batch)}>Previsualizar</button>
-                            {canWriteExternalImports && ((batch.import_type === "parties" && canWriteParties) || (batch.import_type === "accounts" && canWriteAccounts)) && batch.status === "approved" && (
+                            {canWriteExternalImports && (
+                              (batch.import_type === "parties" && canWriteParties) ||
+                              (batch.import_type === "accounts" && canWriteAccounts) ||
+                              (batch.import_type === "maturities" && canWriteMaturities)
+                            ) && batch.status === "approved" && (
                               <button type="button" onClick={() => handleApplyExternalImportBatch(batch)}>
-                                {batch.import_type === "accounts" ? "Aplicar cuentas" : "Aplicar terceros"}
+                                {batch.import_type === "accounts" ? "Aplicar cuentas" : batch.import_type === "maturities" ? "Aplicar vencimientos" : "Aplicar terceros"}
                               </button>
                             )}
                             {canWriteExternalImports && batch.status === "pending_review" && (

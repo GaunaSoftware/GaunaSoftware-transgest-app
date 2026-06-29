@@ -10,6 +10,7 @@ const REVIEW_ACTIONS = ["approve", "reject", "cancel"];
 const MAX_ROWS = 500;
 const PARTY_TYPES = ["customer", "supplier", "customer_supplier", "employee", "tax_authority", "bank", "other"];
 const ACCOUNT_TYPES = ["asset", "liability", "equity", "income", "expense", "memorandum"];
+const MATURITY_DIRECTIONS = ["receivable", "payable"];
 
 function inputError(message, status = 400) {
   const error = new Error(message);
@@ -257,6 +258,32 @@ function normalizeBooleanLike(value, defaultValue = true) {
   return defaultValue;
 }
 
+function normalizeMaturityDirection(value) {
+  const raw = normalizeHeader(value);
+  if (["cobro", "cliente", "receivable", "debe", "venta"].includes(raw)) return "receivable";
+  if (["pago", "proveedor", "payable", "haber", "compra"].includes(raw)) return "payable";
+  return raw;
+}
+
+function normalizeDateLike(value) {
+  const raw = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const match = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (!match) return raw;
+  return `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+}
+
+function isValidIsoDate(value) {
+  const date = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+}
+
+function normalizeAmountLike(value) {
+  return String(value || "").trim().replace(",", ".");
+}
+
 function mapPartyStagingRow(row) {
   const payload = row.normalized_payload || row.raw_payload || {};
   const partyType = normalizePartyType(firstValue(payload, ["party_type", "tipo", "tipo_tercero"]));
@@ -272,6 +299,37 @@ function mapPartyStagingRow(row) {
   if (!mapped.legal_name) errors.push({ code: "missing_legal_name", message: "Falta nombre fiscal" });
   if (!PARTY_TYPES.includes(mapped.party_type)) errors.push({ code: "unsupported_party_type", message: `Tipo de tercero no soportado: ${mapped.party_type}` });
   if (!mapped.tax_id) warnings.push({ code: "missing_tax_id", message: "Sin NIF/CIF para detectar duplicados fiscales" });
+  return { mapped, errors, warnings };
+}
+
+function mapMaturityStagingRow(row) {
+  const payload = row.normalized_payload || row.raw_payload || {};
+  const direction = normalizeMaturityDirection(firstValue(payload, ["direction", "tipo", "sentido", "clase"]));
+  const amount = normalizeAmountLike(firstValue(payload, ["amount", "importe", "total"]));
+  const dueDate = normalizeDateLike(firstValue(payload, ["due_date", "vencimiento", "fecha_vencimiento"]));
+  const issueDate = normalizeDateLike(firstValue(payload, ["issue_date", "fecha_emision", "fecha_documento"]));
+  const mapped = {
+    party_id: firstValue(payload, ["party_id", "tercero_id"]),
+    party_tax_id: firstValue(payload, ["party_tax_id", "tax_id", "nif", "cif", "nif_cif"]),
+    party_name: firstValue(payload, ["party_name", "tercero", "nombre_tercero", "cliente", "proveedor"]),
+    direction,
+    issue_date: issueDate || null,
+    due_date: dueDate,
+    document_ref: firstValue(payload, ["document_ref", "documento", "factura", "referencia"]),
+    description: firstValue(payload, ["description", "descripcion", "concepto"]),
+    amount,
+    payment_method: firstValue(payload, ["payment_method", "forma_pago", "metodo_pago"]),
+    notes: firstValue(payload, ["notes", "notas", "observaciones"]),
+  };
+  const errors = [];
+  const warnings = [];
+  if (!mapped.party_id && !mapped.party_tax_id && !mapped.party_name) errors.push({ code: "missing_party_reference", message: "Falta referencia de tercero" });
+  if (mapped.party_id && !/^[0-9a-fA-F-]{36}$/.test(mapped.party_id)) errors.push({ code: "invalid_party_id", message: "party_id invalido" });
+  if (!MATURITY_DIRECTIONS.includes(mapped.direction)) errors.push({ code: "unsupported_maturity_direction", message: `Tipo de vencimiento no soportado: ${mapped.direction || "vacio"}` });
+  if (!isValidIsoDate(mapped.due_date)) errors.push({ code: "invalid_due_date", message: "Fecha de vencimiento invalida" });
+  if (mapped.issue_date && !isValidIsoDate(mapped.issue_date)) errors.push({ code: "invalid_issue_date", message: "Fecha de emision invalida" });
+  if (!/^\d{1,12}(\.\d{1,6})?$/.test(mapped.amount) || Number(mapped.amount) <= 0) errors.push({ code: "invalid_amount", message: "Importe invalido" });
+  if (!mapped.description) warnings.push({ code: "missing_description", message: "Sin descripcion; se usara la referencia o el tercero" });
   return { mapped, errors, warnings };
 }
 
@@ -299,6 +357,7 @@ module.exports = {
   IMPORT_TYPES,
   ROW_STATUSES,
   mapAccountStagingRow,
+  mapMaturityStagingRow,
   mapPartyStagingRow,
   normalizeExternalImportApplyInput,
   normalizeExternalImportBatchInput,

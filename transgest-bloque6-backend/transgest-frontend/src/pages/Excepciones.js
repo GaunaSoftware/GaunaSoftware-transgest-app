@@ -406,7 +406,7 @@ export default function Excepciones() {
           const sev = SEVERITY[item.severity] || SEVERITY.info;
           const muted = !item.workflow?.activa;
           return (
-            <div id={`excepcion-${item.id}`} key={item.id} style={{...S.card,display:"grid",gridTemplateColumns:"120px 1fr auto",gap:14,alignItems:"center",borderColor:focusId===item.id?"var(--green)":`${sev.color}55`,boxShadow:focusId===item.id?"0 0 0 2px rgba(34,211,160,.18)":undefined,opacity:muted?0.72:1}}>
+            <div id={`excepcion-${item.id}`} key={item.id} className="tg-excepcion-card" style={{...S.card,display:"grid",gridTemplateColumns:"120px 1fr auto",gap:14,alignItems:"center",borderColor:focusId===item.id?"var(--green)":`${sev.color}55`,boxShadow:focusId===item.id?"0 0 0 2px rgba(34,211,160,.18)":undefined,opacity:muted?0.72:1}}>
               <div>
                 <div style={{display:"inline-flex",padding:"3px 9px",borderRadius:20,background:`${sev.color}18`,color:sev.color,fontSize:11,fontWeight:800}}>
                   {sev.label}

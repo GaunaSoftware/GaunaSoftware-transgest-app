@@ -34,13 +34,12 @@ const Taller              = lazy(() => import("./pages/Taller"));
 const Explotacion         = lazy(() => import("./pages/Explotacion"));
 const CuadranteVehiculos  = lazy(() => import("./pages/CuadranteVehiculos"));
 const CuadranteChoferes   = lazy(() => import("./pages/CuadranteChoferes"));
-const PlanDiario          = lazy(() => import("./pages/PlanDiario"));
 const Empresa             = lazy(() => import("./pages/Empresa"));
-const CuadranteSemanal    = lazy(() => import("./pages/CuadranteSemanal"));
 const HojasRuta           = lazy(() => import("./pages/HojasRuta"));
 const GastosEstructura    = lazy(() => import("./pages/GastosEstructura"));
 const ControlHorario      = lazy(() => import("./pages/ControlHorario"));
 const GestionTrafico      = lazy(() => import("./pages/GestionTrafico"));
+const PlanificacionOperativa = lazy(() => import("./pages/PlanificacionOperativa"));
 const Nominas             = lazy(() => import("./pages/Nominas"));
 const AppChofer           = lazy(() => import("./pages/AppChofer"));
 const PortalClientes      = lazy(() => import("./pages/PortalClientes"));
@@ -275,14 +274,6 @@ const MODULOS_GERENTE = [
     { id:"control_tower", icon:IC.tower, label:"Control Tower" },
   ]},
   { titulo:"Trafico", items:[
-    { id:"planificacion_grupo", icon:IC.cuadrante, label:"Planificacion", children:[
-      { id:"plan_diario", label:"Plan diario" },
-      { id:"cuadrante_semana", label:"Cuadrante semanal" },
-      { id:"cuadrante_vehiculos", label:"Cuadrante vehiculos" },
-      { id:"cuadrante_choferes", label:"Cuadrante choferes" },
-      { id:"grupajes", label:"Grupajes" },
-      { id:"rutas_recomendadas", label:"Optimizacion de rutas" },
-    ]},
     { id:"solicitudes", icon:IC.docs, label:"Solicitudes clientes" },
     { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
     { id:"colaboradores", icon:IC.colabor, label:"Colaboradores" },
@@ -296,15 +287,12 @@ const MODULOS_GERENTE = [
   { titulo:"Flota y almacen", items:[
     { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos" },
     { id:"choferes", icon:IC.choferes, label:"Choferes" },
-    { id:"app_chofer", icon:IC.vehiculos, label:"App de choferes" },
     { id:"taller", icon:IC.taller, label:"Taller" },
     { id:"palets", icon:IC.almacen, label:"Gestion de almacen" },
-    { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
-    { id:"control_horario", icon:IC.agenda, label:"Control horario" },
   ]},
-  { titulo:"Gestion", items:[
-    { id:"facturacion_grupo", icon:IC.facturacion, label:"Facturacion y caja", children:[
-      { id:"facturacion", label:"Gestion financiera" },
+  { titulo:"Administracion y finanzas", items:[
+    { id:"facturacion_grupo", icon:IC.facturacion, label:"Facturacion y contabilidad", children:[
+      { id:"facturacion", label:"Facturacion" },
       { id:"contabilidad", label:"Contabilidad" },
       { id:"gastos_estructura", label:"Gastos de estructura" },
       { id:"nominas", label:"Nominas" },
@@ -315,6 +303,10 @@ const MODULOS_GERENTE = [
       { id:"excepciones", label:"Excepciones operativas" },
       { id:"actividad", label:"Trazabilidad" },
     ]},
+  ]},
+  { titulo:"Gestion", items:[
+    { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
+    { id:"control_horario", icon:IC.agenda, label:"Control horario" },
     { id:"documentos", icon:IC.docs, label:"Documentos" },
     { id:"avisos", icon:IC.avisos, label:"Avisos" },
     { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
@@ -365,12 +357,6 @@ const MODULOS_TRAFICO = [
     { id:"gestion_trafico", icon:IC.cuadrante, label:"Mesa de trafico" },
     { id:"control_tower", icon:IC.tower, label:"Control Tower" },
   ]},
-  { titulo:"Planificacion", items:[
-    { id:"plan_diario", icon:IC.cuadrante, label:"Plan diario" },
-    { id:"cuadrante_semana", icon:IC.cuadrante, label:"Cuadrante semanal" },
-    { id:"grupajes", icon:IC.rutas, label:"Grupajes" },
-    { id:"rutas_recomendadas", icon:IC.rutas, label:"Optimizacion de rutas" },
-  ]},
   { titulo:"Comercial y red", items:[
     { id:"clientes", icon:IC.clientes, label:"Clientes" },
     { id:"rutas", icon:IC.rutas, label:"Rutas y tarifas" },
@@ -382,13 +368,12 @@ const MODULOS_TRAFICO = [
   { titulo:"Flota y almacen", items:[
     { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos" },
     { id:"choferes", icon:IC.choferes, label:"Choferes" },
-    { id:"app_chofer", icon:IC.vehiculos, label:"App de choferes" },
     { id:"taller", icon:IC.taller, label:"Taller" },
     { id:"palets", icon:IC.almacen, label:"Gestion de almacen" },
-    { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
-    { id:"control_horario", icon:IC.agenda, label:"Control horario" },
   ]},
   { titulo:"Gestion", items:[
+    { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
+    { id:"control_horario", icon:IC.agenda, label:"Control horario" },
     { id:"documentos", icon:IC.docs, label:"Documentos" },
     { id:"avisos", icon:IC.avisos, label:"Avisos" },
     { id:"excepciones", icon:IC.rendimiento, label:"Excepciones operativas" },
@@ -462,17 +447,17 @@ const VISTAS = {
   actividad:    <Actividad />,
   usuarios:     <Usuarios />,
   taller:       <Taller />,
-  grupajes:     <GestionTrafico initialVista="grupajes" />,
+  grupajes:     <PlanificacionOperativa initialTab="grupajes" />,
   explotacion:  <Explotacion />,
-  cuadrante_semana:    <CuadranteSemanal />,
-  plan_diario:         <PlanDiario />,
+  cuadrante_semana:    <PlanificacionOperativa initialTab="cuadrante" />,
+  plan_diario:         <PlanificacionOperativa initialTab="plan_diario" />,
   cuadrante_vehiculos: <CuadranteVehiculos />,
   cuadrante_choferes:  <CuadranteChoferes />,
   empresa:             <Empresa />,
   hojas_ruta:          <HojasRuta />,
   control_horario:     <ControlHorario />,
-  gestion_trafico:     <GestionTrafico />,
-  rutas_recomendadas:  <GestionTrafico initialVista="optimizacion" />,
+  gestion_trafico:     <PlanificacionOperativa initialTab="cuadrante" />,
+  rutas_recomendadas:  <PlanificacionOperativa initialTab="optimizacion" />,
   rutas_recomendadas_chofer: <GestionTrafico initialVista="optimizacion" soloOptimizacion />,
   nominas:             <Nominas />,
   app_chofer:          <AppChofer />,

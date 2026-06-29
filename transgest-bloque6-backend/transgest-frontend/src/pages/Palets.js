@@ -1040,7 +1040,7 @@ export default function Palets(){
   };
 
   return(
-    <div style={{flex:1, padding:"30px 36px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 44%,#f7fafc 100%)"}}>
+    <div className="tg-palets-page tg-responsive-page" style={{flex:1, padding:"30px 36px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 44%,#f7fafc 100%)"}}>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:26,flexWrap:"wrap"}}>
         <div style={{width:44,height:44,borderRadius:10,border:"1px solid #dbe5ec",background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>⌂</div>
@@ -1051,7 +1051,7 @@ export default function Palets(){
       </div>
 
       {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:14,marginBottom:24}}>
+      <div className="tg-palets-kpis" style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:14,marginBottom:24}}>
         {[
           ["Stock empresa",stockEmpresa,"palets",stockEmpresa>0?"#10b981":"#f59e0b","□"],
           ["Pendientes devolucion",totalPendiente,"palets",totalPendiente>0?"#f97316":"#10b981","↶"],

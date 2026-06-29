@@ -912,6 +912,11 @@ function TripCard({
           {tipoViajeLabel(pedido.tipo_viaje)}
         </div>
       )}
+      {(pedido.grupaje_id || pedido.tipo_carga === "grupaje") && (
+        <div title="Viaje combinado en grupaje" style={{display:"inline-flex",marginBottom:3,marginLeft:(pedido.pendiente_completar || String(pedido.tipo_viaje || "normal") !== "normal") ? 4 : 0,padding:"1px 5px",borderRadius:3,background:"rgba(16,185,129,.12)",border:"1px solid rgba(16,185,129,.30)",color:"#34d399",fontSize:9,fontWeight:900}}>
+          Carga completa
+        </div>
+      )}
       {tieneConflicto && (
         <div title={conflictos.map(c => `${c.recurso}: ${c.resumen}`).join("\n")} style={{
           display:"inline-flex",
@@ -2308,7 +2313,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
   );
 }
 
-export default function GestionTrafico({ initialVista = "cuadrante", soloOptimizacion = false }) {
+export default function GestionTrafico({ initialVista = "cuadrante", soloOptimizacion = false, hideInternalTabs = false }) {
   const { puedeEditar, user } = useAuth();
   const esModoChoferOptimizacion = soloOptimizacion || user?.rol === "chofer";
 
@@ -2438,6 +2443,10 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       setVistaMain("optimizacion");
     }
   }, [esModoChoferOptimizacion, vistaMain]);
+
+  useEffect(() => {
+    if (!esModoChoferOptimizacion) setVistaMain(initialVista || "cuadrante");
+  }, [initialVista, esModoChoferOptimizacion]);
 
   // â”€â”€ Semana label â”€â”€
   useEffect(() => {
@@ -4005,8 +4014,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     <div className="tg-traffic-page" style={{ fontFamily:"'DM Sans',sans-serif", height:"100%", display:"flex", flexDirection:"column", overflow:"hidden", background:"var(--bg)" }}>
 
       {/* â”€â”€ Vista tabs â”€â”€ */}
-      {!esModoChoferOptimizacion && <div className="tg-traffic-tabs" style={{padding:"6px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
-        {[["cuadrante","Cuadrante semanal"],["grupajes","Grupajes en cascada"],["optimizacion","Optimizacion de rutas"]].map(([v,lbl])=>(
+      {!esModoChoferOptimizacion && !hideInternalTabs && <div className="tg-traffic-tabs" style={{padding:"6px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
+        {[["cuadrante","Cuadrante semanal"],["grupajes","Grupajes"],["optimizacion","Optimizacion de rutas"]].map(([v,lbl])=>(
           <button key={v} onClick={()=>setVistaMain(v)}
             style={{padding:"5px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",
               background:vistaMain===v?"var(--accent)":"var(--bg4)",color:vistaMain===v?"#fff":"var(--text4)"}}>
@@ -5316,6 +5325,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos }) {
                 </span>
                 {veh && <span style={{fontSize:12,color:"var(--accent)",fontWeight:700}}>{veh.matricula}</span>}
                 {chofer && <span style={{fontSize:12,color:"var(--text4)"}}>{chofer.nombre}</span>}
+                {esGrupoReal && <span style={{fontSize:10,fontWeight:900,color:"#34d399",border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.12)",borderRadius:999,padding:"2px 8px"}}>Carga completa</span>}
                 <span style={{fontSize:11,color:"var(--text5)",marginLeft:4}}>{peds.length} pedido{peds.length!==1?"s":""} - {Number(kgTotal).toLocaleString("es-ES")} kg - {Number(impTotal).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span>
                 <button onClick={()=>resetOrder(gid)}
                   style={{marginLeft:"auto",padding:"3px 10px",borderRadius:5,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,cursor:"pointer"}}>

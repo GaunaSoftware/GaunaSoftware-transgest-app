@@ -12,9 +12,14 @@ const ROL_COLOR = { gerente:"#0f766e", contable:"#10b981", trafico:"#f97316", vi
 const GRUPO_COLOR = {
   Principal:     "#0f766e",
   Operaciones:   "#14b8a6",
-  Flota:         "#f97316",
+  "Trabajo diario": "#14b8a6",
+  Trafico:       "#14b8a6",
+  Flota:         "#14b8a6",
+  "Flota y almacen": "#14b8a6",
   Finanzas:      "#10b981",
-  Comercial:     "#d97706",
+  Comercial:     "#14b8a6",
+  "Comercial y red": "#14b8a6",
+  "Administracion y finanzas": "#10b981",
   Gestión:       "#6b7280",
   "Gestión documental": "#6b7280",
   Administración:"#10b981",
@@ -22,7 +27,7 @@ const GRUPO_COLOR = {
 };
 
 const CSS = `
-  .tg-sidebar { width:252px; background:linear-gradient(180deg,var(--sidebar-bg),#14201d); border-right:1px solid rgba(255,255,255,.08); height:100vh; position:fixed; top:0; left:0; z-index:20; display:flex; flex-direction:column; font-family:'DM Sans',sans-serif; overflow:hidden; box-shadow:16px 0 42px rgba(0,0,0,.14); transition:width .18s ease, transform .2s ease; }
+  .tg-sidebar { width:252px; background:linear-gradient(180deg,var(--sidebar-bg),#14201d); border-right:1px solid rgba(255,255,255,.08); height:100vh; height:100dvh; position:fixed; top:0; left:0; z-index:20; display:flex; flex-direction:column; font-family:'DM Sans',sans-serif; overflow:hidden; box-shadow:16px 0 42px rgba(0,0,0,.14); transition:width .18s ease, transform .2s ease; }
   .tg-sidebar.collapsed { width:76px; }
   .tg-sidebar::before { content:""; position:absolute; inset:0 0 auto 0; height:4px; background:linear-gradient(90deg,var(--accent),var(--green),var(--orange)); pointer-events:none; }
   .tg-sidebar-scroll { flex:1; overflow-y:auto; padding:10px 0 12px; }
@@ -121,6 +126,7 @@ const CSS = `
     .tg-sidebar.collapsed .tg-sidebar-brand { padding:20px 16px 16px !important; }
     .tg-sidebar.collapsed .tg-nav-item { width:calc(100% - 20px); height:auto; margin:2px 10px; padding:9px 12px 9px 14px; justify-content:flex-start; }
     .tg-sidebar-backdrop.mobile-open { display:block; position:fixed; inset:0; z-index:70; background:rgba(6,12,10,.58); backdrop-filter:blur(2px); }
+    .tg-sidebar-scroll { padding-bottom:120px; }
     .tg-main, .tg-main.sidebar-collapsed { margin-left:0; width:100%; }
     .tg-topbar-tabs { display:none !important; }
     .tg-topbar-breadcrumb { min-width:0; }
@@ -322,6 +328,26 @@ const CSS = `
     .tg-rutas-filters {
       grid-template-columns:repeat(2,minmax(0,1fr)) !important;
     }
+    .tg-palets-kpis {
+      grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+      gap:10px !important;
+    }
+    .tg-palets-kpis > div {
+      min-height:auto !important;
+      align-items:flex-start !important;
+    }
+    .tg-excepcion-card {
+      grid-template-columns:1fr !important;
+      align-items:stretch !important;
+      gap:12px !important;
+    }
+    .tg-excepcion-card > * {
+      min-width:0 !important;
+      width:100% !important;
+    }
+    .tg-planificacion-tabs {
+      padding:8px 10px !important;
+    }
   }
   @media (max-width: 560px) {
     .tg-responsive-page {
@@ -360,6 +386,15 @@ const CSS = `
       width:100% !important;
       min-width:0 !important;
     }
+    .tg-palets-kpis {
+      grid-template-columns:1fr !important;
+    }
+    .tg-palets-page [style*="font-size:34"],
+    .tg-palets-page [style*="fontSize:34"] {
+      font-size:clamp(28px, 14vw, 42px) !important;
+      line-height:1.05 !important;
+    }
+    .tg-sidebar-scroll { padding-bottom:150px; }
   }
 `;
 

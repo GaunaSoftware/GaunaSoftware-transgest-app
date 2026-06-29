@@ -123,7 +123,16 @@ export function getExternalImportBatches(filters = {}) {
   return apiFetch(`/external-import-batches${suffix}`);
 }
 
-export const getExternalImportBatchPreview = batchId => apiFetch(`/external-import-batches/${batchId}/preview`);
+export const getExternalImportBatchPreview = (batchId, filters = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value).trim());
+    }
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/external-import-batches/${batchId}/preview${suffix}`);
+};
 
 export const createExternalImportBatch = data => apiFetch("/external-import-batches", {
   method: "POST",

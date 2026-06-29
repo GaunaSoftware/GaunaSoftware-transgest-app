@@ -6,6 +6,7 @@ const {
   normalizeExternalImportReviewInput,
   normalizeExternalImportApplyInput,
   nextBatchStatus,
+  mapAccountStagingRow,
   mapPartyStagingRow,
   parseGenericCsv,
 } = require("../src/domain/externalImportStaging");
@@ -93,4 +94,29 @@ test("mapPartyStagingRow mapea alias habituales y detecta errores", () => {
   const invalid = mapPartyStagingRow({ raw_payload: { tipo: "desconocido" } });
   assert.equal(invalid.errors.some(error => error.code === "missing_legal_name"), true);
   assert.equal(invalid.errors.some(error => error.code === "unsupported_party_type"), true);
+});
+
+test("mapAccountStagingRow mapea plan contable y detecta errores", () => {
+  const mapped = mapAccountStagingRow({
+    raw_payload: {
+      codigo: "43000001",
+      nombre: "Clientes transporte",
+      tipo: "Activo",
+      movimiento: "si",
+      notas: "Cuenta importada",
+    },
+  });
+  assert.deepEqual(mapped.mapped, {
+    code: "43000001",
+    name: "Clientes transporte",
+    account_type: "asset",
+    is_postable: true,
+    notes: "Cuenta importada",
+  });
+  assert.equal(mapped.errors.length, 0);
+
+  const invalid = mapAccountStagingRow({ raw_payload: { codigo: "43A", tipo: "desconocido" } });
+  assert.equal(invalid.errors.some(error => error.code === "invalid_account_code"), true);
+  assert.equal(invalid.errors.some(error => error.code === "missing_account_name"), true);
+  assert.equal(invalid.errors.some(error => error.code === "unsupported_account_type"), true);
 });

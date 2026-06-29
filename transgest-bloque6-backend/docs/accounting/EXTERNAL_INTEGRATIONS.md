@@ -22,6 +22,7 @@ No existe una fuente publica unica y auditada que ordene con precision los 10 pr
 - El staging inicial de entradas externas esta implementado en `/api/v1/external-import-batches`: crea lotes, guarda filas crudas/normalizadas, calcula hashes, bloquea duplicados por lote y registra auditoria/outbox. No aplica datos contables.
 - La previsualizacion inicial de staging esta implementada en `/api/v1/external-import-batches/:id/preview` para terceros: mapea alias habituales, detecta campos obligatorios pendientes y senala posibles duplicados por origen o NIF/CIF antes de aprobar el lote. No crea ni modifica terceros.
 - La aplicacion controlada de terceros esta implementada en `/api/v1/external-import-batches/:id/apply`: solo acepta lotes aprobados, revalida errores/conflictos dentro de una transaccion, crea terceros con origen trazable al lote/fila, registra auditoria y emite outbox. No crea facturas, vencimientos ni asientos.
+- La previsualizacion y aplicacion controlada de cuentas contables reutiliza el mismo endpoint con `import_type=accounts` y `fiscal_year_id` explicito. Crea cuentas solo en el ejercicio seleccionado y bloquea codigos duplicados.
 - Para programas con API, usar outbox transaccional, workers idempotentes, reintentos controlados y mapeo versionado por proveedor.
 - Para programas on-premise o cerrados, priorizar paquetes CSV/XLSX/PDF auditables y confirmados por asesoria.
 - Facturacion fiscal, VERI*FACTU, factura electronica B2B y SII siguen siendo ambitos separados. No se debe delegar emision fiscal en un conector externo sin decision expresa de arquitectura y revision legal.
@@ -78,6 +79,8 @@ El staging de entrada permite preparar CSV externos sin escribir en tablas conta
 
 La vista previa de lotes de terceros clasifica cada fila como `create`, `conflict` o `error`. Los conflictos iniciales se comprueban contra `accounting_parties` por `source_system + source_party_id` y por `tax_id`.
 
+La vista previa de lotes de cuentas exige `fiscal_year_id`. Mapea columnas habituales como `codigo`, `cuenta`, `nombre`, `tipo`, `postable` o `movimiento`, normaliza tipos contables basicos y detecta conflictos por codigo dentro del ejercicio.
+
 La aplicacion de lotes de terceros exige estado `approved`; antes de insertar vuelve a ejecutar la misma previsualizacion dentro de la transaccion. Si hay errores o conflictos, responde 409 y no escribe datos maestros. Si el lote ya esta `applied`, la llamada es idempotente y devuelve los terceros ya localizados por origen externo.
 
 Estados iniciales:
@@ -90,7 +93,8 @@ Estados iniciales:
 
 Restricciones actuales:
 
-- No crea bancos, vencimientos, cuentas, facturas ni asientos; terceros solo se crean desde el endpoint controlado de aplicacion de lotes aprobados.
+- No crea bancos, vencimientos, facturas ni asientos; terceros y cuentas solo se crean desde endpoints controlados de aplicacion de lotes aprobados.
+- Las cuentas solo se crean desde lotes `accounts` aprobados, con ejercicio destino explicito y sin crear saldos ni movimientos.
 - No valida todavia formatos concretos de Sage, a3, CONTASOL, Holded u Odoo.
 - No declara homologacion ni compatibilidad productiva con proveedores externos.
 - La aprobacion solo autoriza el siguiente paso tecnico; cada tipo de aplicacion real requiere un caso de uso especifico por tipo de importacion.

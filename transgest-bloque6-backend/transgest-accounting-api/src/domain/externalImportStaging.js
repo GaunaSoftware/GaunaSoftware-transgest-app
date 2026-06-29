@@ -9,6 +9,7 @@ const ROW_STATUSES = ["valid", "warning", "error"];
 const REVIEW_ACTIONS = ["approve", "reject", "cancel"];
 const MAX_ROWS = 500;
 const PARTY_TYPES = ["customer", "supplier", "customer_supplier", "employee", "tax_authority", "bank", "other"];
+const ACCOUNT_TYPES = ["asset", "liability", "equity", "income", "expense", "memorandum"];
 
 function inputError(message, status = 400) {
   const error = new Error(message);
@@ -237,6 +238,25 @@ function normalizePartyType(value) {
   return raw;
 }
 
+function normalizeAccountType(value) {
+  const raw = normalizeHeader(value);
+  if (["activo", "asset"].includes(raw)) return "asset";
+  if (["pasivo", "liability"].includes(raw)) return "liability";
+  if (["patrimonio", "patrimonio_neto", "equity", "net_worth"].includes(raw)) return "equity";
+  if (["ingreso", "ingresos", "income", "revenue"].includes(raw)) return "income";
+  if (["gasto", "gastos", "expense"].includes(raw)) return "expense";
+  if (["orden", "control", "memorandum"].includes(raw)) return "memorandum";
+  return raw;
+}
+
+function normalizeBooleanLike(value, defaultValue = true) {
+  if (value === undefined || value === null || String(value).trim() === "") return defaultValue;
+  const raw = normalizeHeader(value);
+  if (["true", "1", "si", "yes", "y", "postable", "movimiento"].includes(raw)) return true;
+  if (["false", "0", "no", "n", "cabecera", "grupo"].includes(raw)) return false;
+  return defaultValue;
+}
+
 function mapPartyStagingRow(row) {
   const payload = row.normalized_payload || row.raw_payload || {};
   const partyType = normalizePartyType(firstValue(payload, ["party_type", "tipo", "tipo_tercero"]));
@@ -255,10 +275,30 @@ function mapPartyStagingRow(row) {
   return { mapped, errors, warnings };
 }
 
+function mapAccountStagingRow(row) {
+  const payload = row.normalized_payload || row.raw_payload || {};
+  const accountType = normalizeAccountType(firstValue(payload, ["account_type", "tipo", "tipo_cuenta", "naturaleza"]));
+  const mapped = {
+    code: firstValue(payload, ["code", "codigo", "cuenta", "account", "account_code"]),
+    name: firstValue(payload, ["name", "nombre", "descripcion", "description"]),
+    account_type: accountType,
+    is_postable: normalizeBooleanLike(firstValue(payload, ["is_postable", "postable", "movimiento", "imputable"]), true),
+    notes: firstValue(payload, ["notes", "notas", "observaciones"]),
+  };
+  const errors = [];
+  const warnings = [];
+  if (!/^[0-9]{1,20}$/.test(mapped.code)) errors.push({ code: "invalid_account_code", message: "Codigo de cuenta invalido" });
+  if (!mapped.name) errors.push({ code: "missing_account_name", message: "Falta nombre de cuenta" });
+  if (!ACCOUNT_TYPES.includes(mapped.account_type)) errors.push({ code: "unsupported_account_type", message: `Tipo de cuenta no soportado: ${mapped.account_type || "vacio"}` });
+  if (mapped.code && mapped.code.length < 3) warnings.push({ code: "short_account_code", message: "Codigo de cuenta corto; revisar si es grupo o cuenta operativa" });
+  return { mapped, errors, warnings };
+}
+
 module.exports = {
   BATCH_STATUSES,
   IMPORT_TYPES,
   ROW_STATUSES,
+  mapAccountStagingRow,
   mapPartyStagingRow,
   normalizeExternalImportApplyInput,
   normalizeExternalImportBatchInput,

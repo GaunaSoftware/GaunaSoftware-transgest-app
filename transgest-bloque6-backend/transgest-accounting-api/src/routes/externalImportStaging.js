@@ -8,9 +8,11 @@ const {
   normalizeExternalImportQuery,
   normalizeExternalImportReviewInput,
   normalizeExternalImportApplyInput,
+  mapAccountStagingRow,
   mapPartyStagingRow,
   nextBatchStatus,
 } = require("../domain/externalImportStaging");
+const { hasPermission } = require("../domain/rbac");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
 const router = express.Router();
@@ -21,6 +23,27 @@ function q(name) {
 
 function selectedContext(req) {
   return req.accountingUser.contexts.find(c => c.company_id === req.accountingUser.selected_company_id);
+}
+
+async function assertFiscalYear(client, selected, fiscalYearId) {
+  const id = String(fiscalYearId || "").trim();
+  if (!id) {
+    const error = new Error("fiscal_year_id requerido para importar cuentas");
+    error.status = 400;
+    throw error;
+  }
+  const result = await client.query(
+    `SELECT id, year_label
+       FROM ${q("fiscal_years")}
+      WHERE id=$1 AND company_id=$2`,
+    [id, selected.company_id]
+  );
+  if (!result.rows.length) {
+    const error = new Error("Ejercicio no encontrado para la empresa seleccionada");
+    error.status = 404;
+    throw error;
+  }
+  return result.rows[0];
 }
 
 async function buildPartyImportPreview(client, selected, batch) {
@@ -102,6 +125,64 @@ async function buildPartyImportPreview(client, selected, batch) {
     },
     rows: previewRows,
   };
+}
+
+async function buildAccountImportPreview(client, selected, batch, fiscalYearId) {
+  const fiscalYear = await assertFiscalYear(client, selected, fiscalYearId);
+  const rowsResult = await client.query(
+    `SELECT id, row_number, row_hash, status, raw_payload, normalized_payload, errors, warnings
+       FROM ${q("external_import_rows")}
+      WHERE batch_id=$1 AND company_id=$2
+      ORDER BY row_number`,
+    [batch.id, selected.company_id]
+  );
+  const codes = rowsResult.rows
+    .map(row => mapAccountStagingRow(row).mapped.code)
+    .filter(Boolean);
+  const existing = codes.length ? await client.query(
+    `SELECT id, code, name, account_type
+       FROM ${q("accounts")}
+      WHERE company_id=$1 AND fiscal_year_id=$2 AND code=ANY($3::text[])`,
+    [selected.company_id, fiscalYear.id, codes]
+  ) : { rows: [] };
+  const byCode = new Map(existing.rows.map(row => [row.code, row]));
+
+  const previewRows = rowsResult.rows.map(row => {
+    const mapped = mapAccountStagingRow(row);
+    const accountConflict = mapped.mapped.code ? byCode.get(mapped.mapped.code) || null : null;
+    const conflicts = accountConflict ? [{ code: "account_code_exists", account: accountConflict }] : [];
+    const errors = [...(row.errors || []), ...mapped.errors];
+    const action = errors.length ? "error" : conflicts.length ? "conflict" : "create";
+    return {
+      row_id: row.id,
+      row_number: row.row_number,
+      row_hash: row.row_hash,
+      action,
+      mapped: mapped.mapped,
+      errors,
+      warnings: [...(row.warnings || []), ...mapped.warnings],
+      conflicts,
+    };
+  });
+
+  return {
+    batch,
+    fiscal_year: fiscalYear,
+    supported: true,
+    summary: {
+      rows: previewRows.length,
+      create: previewRows.filter(row => row.action === "create").length,
+      conflict: previewRows.filter(row => row.action === "conflict").length,
+      error: previewRows.filter(row => row.action === "error").length,
+    },
+    rows: previewRows,
+  };
+}
+
+function permissionForImportType(importType) {
+  if (importType === "parties") return "parties.write";
+  if (importType === "accounts") return "accounts.write";
+  return null;
 }
 
 router.use(authenticate);
@@ -192,7 +273,16 @@ router.get("/external-import-batches/:id/preview", requirePermission("external_i
         error.status = 404;
         throw error;
       }
-      return buildPartyImportPreview(client, selected, batchResult.rows[0]);
+      const batch = batchResult.rows[0];
+      if (batch.import_type === "parties") return buildPartyImportPreview(client, selected, batch);
+      if (batch.import_type === "accounts") return buildAccountImportPreview(client, selected, batch, req.query.fiscal_year_id);
+      return {
+        batch,
+        supported: false,
+        reason: "unsupported_import_type",
+        summary: { rows: 0, create: 0, conflict: 0, error: 0 },
+        rows: [],
+      };
     });
     res.json(result);
   } catch (error) {
@@ -325,7 +415,6 @@ router.post("/external-import-batches", requirePermission("external_imports.writ
 router.post(
   "/external-import-batches/:id/apply",
   requirePermission("external_imports.write"),
-  requirePermission("parties.write"),
   async (req, res, next) => {
     try {
       const selected = selectedContext(req);
@@ -345,20 +434,40 @@ router.post(
           throw error;
         }
         const batch = current.rows[0];
-        const preview = await buildPartyImportPreview(client, selected, batch);
+        const requiredPermission = permissionForImportType(batch.import_type);
+        if (!requiredPermission || !hasPermission(req.accountingUser, requiredPermission)) {
+          const error = new Error("Permiso contable denegado");
+          error.status = 403;
+          error.permission = requiredPermission || "unsupported_import_type";
+          throw error;
+        }
+        const preview = batch.import_type === "accounts"
+          ? await buildAccountImportPreview(client, selected, batch, req.body?.fiscal_year_id)
+          : await buildPartyImportPreview(client, selected, batch);
 
         if (batch.status === "applied") {
-          const existing = preview.rows.length ? await client.query(
-            `SELECT id, source_party_id, party_type, legal_name, tax_id
-               FROM ${q("accounting_parties")}
-              WHERE company_id=$1 AND source_system=$2 AND source_party_id=ANY($3::text[])
-              ORDER BY legal_name`,
-            [selected.company_id, batch.provider_id, preview.rows.map(row => row.row_hash)]
-          ) : { rows: [] };
+          const sourceIds = preview.rows.map(row => row.row_hash);
+          const existing = batch.import_type === "accounts"
+            ? (sourceIds.length ? await client.query(
+              `SELECT id, code, name, account_type
+                 FROM ${q("accounts")}
+                WHERE company_id=$1 AND fiscal_year_id=$2 AND notes ILIKE $3
+                ORDER BY code`,
+              [selected.company_id, preview.fiscal_year?.id || req.body?.fiscal_year_id, `%${batch.id}%`]
+            ) : { rows: [] })
+            : (sourceIds.length ? await client.query(
+              `SELECT id, source_party_id, party_type, legal_name, tax_id
+                 FROM ${q("accounting_parties")}
+                WHERE company_id=$1 AND source_system=$2 AND source_party_id=ANY($3::text[])
+                ORDER BY legal_name`,
+              [selected.company_id, batch.provider_id, sourceIds]
+            ) : { rows: [] });
           return {
             batch,
             preview,
-            parties: existing.rows,
+            records: existing.rows,
+            parties: batch.import_type === "parties" ? existing.rows : [],
+            accounts: batch.import_type === "accounts" ? existing.rows : [],
             repeated: true,
             summary: { applied: existing.rows.length, skipped: Math.max(0, preview.rows.length - existing.rows.length) },
           };
@@ -382,7 +491,68 @@ router.post(
         }
 
         const createdParties = [];
+        const createdAccounts = [];
         for (const row of preview.rows.filter(item => item.action === "create")) {
+          if (batch.import_type === "accounts") {
+            const created = await client.query(
+              `INSERT INTO ${q("accounts")}
+                 (tenant_id, company_id, fiscal_year_id, code, name, account_type,
+                  parent_account_id, is_postable, notes, created_by)
+               VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8,$9)
+               RETURNING id, tenant_id, company_id, fiscal_year_id, code, name,
+                         account_type, is_postable, is_active, notes, created_at, updated_at`,
+              [
+                selected.tenant_id,
+                selected.company_id,
+                preview.fiscal_year.id,
+                row.mapped.code,
+                row.mapped.name,
+                row.mapped.account_type,
+                row.mapped.is_postable,
+                `Importado desde lote externo ${batch.id}, fila ${row.row_number}. ${input.reason}${row.mapped.notes ? ` ${row.mapped.notes}` : ""}`,
+                req.accountingUser.id,
+              ]
+            );
+            const account = created.rows[0];
+            createdAccounts.push(account);
+            await client.query(
+              `INSERT INTO ${q("audit_log")}
+                 (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+               VALUES ($1,$2,'user',$3,'account.created_from_external_import','account',$4,$5,$6::jsonb)`,
+              [
+                selected.tenant_id,
+                selected.company_id,
+                req.accountingUser.id,
+                account.id,
+                req.id || null,
+                JSON.stringify({
+                  import_batch_id: batch.id,
+                  fiscal_year_id: account.fiscal_year_id,
+                  row_number: row.row_number,
+                  row_hash: row.row_hash,
+                  provider_id: batch.provider_id,
+                  reason: input.reason,
+                }),
+              ]
+            );
+            await enqueueOutboxEvent(client, {
+              tenant_id: selected.tenant_id,
+              company_id: selected.company_id,
+              event_type: "AccountingAccountCreated",
+              aggregate_type: "account",
+              aggregate_id: account.id,
+              payload: {
+                account_id: account.id,
+                fiscal_year_id: account.fiscal_year_id,
+                code: account.code,
+                name: account.name,
+                account_type: account.account_type,
+                is_postable: account.is_postable,
+              },
+            });
+            continue;
+          }
+
           const created = await client.query(
             `INSERT INTO ${q("accounting_parties")}
                (tenant_id, company_id, source_system, source_party_id, party_type, legal_name,
@@ -450,7 +620,7 @@ router.post(
                   updated_at=NOW()
             WHERE id=$5
             RETURNING *`,
-          [req.accountingUser.id, createdParties.length, 0, input.reason, batch.id]
+          [req.accountingUser.id, createdParties.length + createdAccounts.length, 0, input.reason, batch.id]
         );
         const appliedBatch = updated.rows[0];
 
@@ -467,7 +637,7 @@ router.post(
             JSON.stringify({
               import_type: appliedBatch.import_type,
               provider_id: appliedBatch.provider_id,
-              applied_count: createdParties.length,
+              applied_count: createdParties.length + createdAccounts.length,
               skipped_count: 0,
               reason: input.reason,
             }),
@@ -482,7 +652,7 @@ router.post(
           payload: {
             import_batch_id: appliedBatch.id,
             import_type: appliedBatch.import_type,
-            applied_count: createdParties.length,
+            applied_count: createdParties.length + createdAccounts.length,
             skipped_count: 0,
           },
         });
@@ -490,9 +660,11 @@ router.post(
         return {
           batch: appliedBatch,
           preview,
+          records: batch.import_type === "accounts" ? createdAccounts : createdParties,
           parties: createdParties,
+          accounts: createdAccounts,
           repeated: false,
-          summary: { applied: createdParties.length, skipped: 0 },
+          summary: { applied: createdParties.length + createdAccounts.length, skipped: 0 },
         };
       });
       res.status(result.repeated ? 200 : 201).json(result);

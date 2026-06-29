@@ -152,7 +152,7 @@ dd { margin: 0; word-break: break-word; }
 .external-import-create textarea { min-height: 112px; padding: 9px 10px; resize: vertical; line-height: 1.4; }
 .external-import-create .wide { grid-column: 1 / -2; }
 .external-import-create button, .external-import-filters button { height: 38px; border: 0; border-radius: 6px; padding: 0 14px; background: #7c3aed; color: #fff; font-weight: 800; cursor: pointer; white-space: nowrap; }
-.external-import-filters { display: grid; grid-template-columns: 160px minmax(180px, 1fr) 180px auto; gap: 10px; align-items: end; padding-top: 12px; border-top: 1px solid var(--line); }
+.external-import-filters { display: grid; grid-template-columns: 150px minmax(170px, 1fr) 170px 180px auto; gap: 10px; align-items: end; padding-top: 12px; border-top: 1px solid var(--line); }
 .external-import-list { display: grid; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: #fff; }
 .external-import-row { display: grid; grid-template-columns: minmax(220px, 1.4fr) minmax(190px, 1fr) 110px minmax(220px, auto); gap: 10px; align-items: center; min-height: 58px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .external-import-row:first-child { border-top: 0; }

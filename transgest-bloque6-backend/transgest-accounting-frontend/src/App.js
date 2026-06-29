@@ -219,7 +219,17 @@ function formatExternalImportIssue(issue) {
   if (!issue) return "";
   if (typeof issue === "string") return issue;
   if (issue.party) return `${issue.code}: ${issue.party.legal_name || issue.party.tax_id || issue.party.id}`;
+  if (issue.account) return `${issue.code}: ${issue.account.code || issue.account.name || issue.account.id}`;
   return issue.message || issue.code || JSON.stringify(issue);
+}
+
+function externalImportPreviewTitle(row) {
+  return row.mapped?.legal_name || row.mapped?.name || row.mapped?.code || "Sin nombre";
+}
+
+function externalImportPreviewSubtitle(row) {
+  if (row.mapped?.code) return `${row.mapped.code} | ${row.mapped.account_type || "tipo pendiente"}`;
+  return `${row.mapped?.tax_id || "Sin NIF/CIF"} | ${row.mapped?.party_type || "tipo pendiente"}`;
 }
 
 function StatusBadge({ text, tone = "neutral" }) {
@@ -603,6 +613,7 @@ export default function App() {
   const [externalImportLoading, setExternalImportLoading] = useState(false);
   const [externalImportStatus, setExternalImportStatus] = useState(null);
   const [externalImportFilters, setExternalImportFilters] = useState({ status: "", provider_id: "", import_type: "", limit: 25 });
+  const [externalImportTargetYearId, setExternalImportTargetYearId] = useState("");
   const [externalImportForm, setExternalImportForm] = useState({
     provider_id: "generic",
     import_type: "parties",
@@ -1397,6 +1408,7 @@ export default function App() {
     setLedgerFilters(prev => prev.fiscal_year_id ? prev : { ...prev, fiscal_year_id: defaultYear });
     setReportsFilters(prev => prev.fiscal_year_id ? prev : { ...prev, fiscal_year_id: defaultYear });
     setAdvisorPackageFilters(prev => prev.fiscal_year_id ? prev : { ...prev, fiscal_year_id: defaultYear });
+    setExternalImportTargetYearId(prev => prev || defaultYear);
     setJournalForm(prev => {
       if (prev.fiscal_year_id) return prev;
       const year = fiscalYears.find(item => item.id === defaultYear);
@@ -1605,8 +1617,12 @@ export default function App() {
 
   async function handleExternalImportPreview(batch) {
     setExternalImportStatus(null);
+    if (batch.import_type === "accounts" && !externalImportTargetYearId) {
+      setExternalImportStatus({ tone: "warning", text: "Selecciona un ejercicio destino para previsualizar cuentas." });
+      return;
+    }
     try {
-      const result = await getExternalImportBatchPreview(batch.id);
+      const result = await getExternalImportBatchPreview(batch.id, batch.import_type === "accounts" ? { fiscal_year_id: externalImportTargetYearId } : {});
       setExternalImportPreview(result);
     } catch (err) {
       setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
@@ -1615,20 +1631,26 @@ export default function App() {
 
   async function handleApplyExternalImportBatch(batch) {
     setExternalImportStatus(null);
+    if (batch.import_type === "accounts" && !externalImportTargetYearId) {
+      setExternalImportStatus({ tone: "warning", text: "Selecciona un ejercicio destino para aplicar cuentas." });
+      return;
+    }
     try {
       const result = await applyExternalImportBatch(batch.id, {
         reason: "Aplicacion manual aprobada desde TransGest Contabilidad",
+        ...(batch.import_type === "accounts" ? { fiscal_year_id: externalImportTargetYearId } : {}),
       });
       setExternalImportStatus({
         tone: result.repeated ? "warning" : "ok",
         text: result.repeated
-          ? `Lote ya aplicado: ${result.summary.applied} tercero(s) localizados.`
-          : `Lote aplicado: ${result.summary.applied} tercero(s) creados.`,
+          ? `Lote ya aplicado: ${result.summary.applied} registro(s) localizados.`
+          : `Lote aplicado: ${result.summary.applied} registro(s) creados.`,
       });
       setExternalImportPreview(null);
       await Promise.all([
         refreshExternalImportBatches(externalImportFilters),
         refreshParties(partyFilters),
+        batch.import_type === "accounts" ? refreshAccounts({ ...accountFilters, fiscal_year_id: externalImportTargetYearId }) : Promise.resolve(),
       ]);
     } catch (err) {
       setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
@@ -3969,6 +3991,13 @@ export default function App() {
                         {Object.entries(externalImportTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                       </select>
                     </label>
+                    <label>
+                      <span>Ejercicio destino</span>
+                      <select value={externalImportTargetYearId} onChange={e => setExternalImportTargetYearId(e.target.value)}>
+                        <option value="">Selecciona ejercicio</option>
+                        {fiscalYears.map(year => <option key={year.id} value={year.id}>{year.year_label}</option>)}
+                      </select>
+                    </label>
                     <button type="submit">Filtrar lotes</button>
                   </form>
                   {externalImportStatus && <div className="form-status"><StatusBadge tone={externalImportStatus.tone} text={externalImportStatus.text} /></div>}
@@ -3989,8 +4018,10 @@ export default function App() {
                           <StatusBadge tone={externalImportStatusTone(batch.status)} text={externalImportStatusLabels[batch.status] || batch.status} />
                           <div className="external-import-actions">
                             <button type="button" className="secondary" onClick={() => handleExternalImportPreview(batch)}>Previsualizar</button>
-                            {canWriteExternalImports && canWriteParties && batch.status === "approved" && (
-                              <button type="button" onClick={() => handleApplyExternalImportBatch(batch)}>Aplicar terceros</button>
+                            {canWriteExternalImports && ((batch.import_type === "parties" && canWriteParties) || (batch.import_type === "accounts" && canWriteAccounts)) && batch.status === "approved" && (
+                              <button type="button" onClick={() => handleApplyExternalImportBatch(batch)}>
+                                {batch.import_type === "accounts" ? "Aplicar cuentas" : "Aplicar terceros"}
+                              </button>
                             )}
                             {canWriteExternalImports && batch.status === "pending_review" && (
                               <>
@@ -4031,8 +4062,8 @@ export default function App() {
                             {externalImportPreview.rows.slice(0, 30).map(row => (
                               <div className="external-import-preview-row" key={row.row_id}>
                                 <div>
-                                  <strong>{row.mapped.legal_name || "Sin nombre fiscal"}</strong>
-                                  <small>{row.mapped.tax_id || "Sin NIF/CIF"} | {row.mapped.party_type || "tipo pendiente"}</small>
+                                  <strong>{externalImportPreviewTitle(row)}</strong>
+                                  <small>{externalImportPreviewSubtitle(row)}</small>
                                 </div>
                                 <StatusBadge
                                   tone={row.action === "create" ? "ok" : row.action === "conflict" ? "warning" : "danger"}

@@ -33,14 +33,41 @@ function salidaPaletsConfirmada(m){
   return String(m.estado_salida || "confirmada").toLowerCase() === "confirmada";
 }
 
+function esRectificativaDevolucion(m){
+  return String(m?.tipo || "").toLowerCase() === "rectificativa_devolucion";
+}
+
+function signoPaletsMovimiento(m){
+  if (m.tipo === "devolucion") return salidaPaletsConfirmada(m) ? -1 : 0;
+  if (m.tipo === "salida_stock") return -1;
+  return 1;
+}
+
 function getStockEmpresa(movimientos){
   return movimientos.reduce((s,m)=>{
     if(m.tipo==="entrega") return s+Number(m.cantidad||0);
+    if(m.tipo==="rectificativa_devolucion") return s+Number(m.cantidad||0);
     if(m.tipo==="devolucion") return salidaPaletsConfirmada(m) ? s-Number(m.cantidad||0) : s;
     if(m.tipo==="entrada_stock") return s+Number(m.cantidad||0);
     if(m.tipo==="salida_stock") return s-Number(m.cantidad||0);
     return s;
   },0);
+}
+
+function direccionCliente(cliente){
+  const parts = [
+    cliente?.direccion,
+    cliente?.direccion_completa,
+    cliente?.domicilio,
+    cliente?.codigo_postal,
+    cliente?.poblacion,
+    cliente?.provincia,
+    cliente?.pais,
+  ]
+    .filter(Boolean)
+    .map(v => String(v).trim())
+    .filter(Boolean);
+  return [...new Set(parts)].join(", ");
 }
 
 // Modal movimiento
@@ -83,7 +110,7 @@ function buildAlertasAntiguedadPalets(movimientos, clientes, cfgPalets){
   const alertas = [];
   byCliente.forEach((items, clienteId) => {
     const entradas = items
-      .filter(m => m.tipo === "entrega")
+      .filter(m => m.tipo === "entrega" || esRectificativaDevolucion(m))
       .map(m => ({ ...m, restante: Number(m.cantidad || 0) }))
       .filter(m => m.restante > 0)
       .sort((a,b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
@@ -158,7 +185,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
 
   async function guardar(){
     if(!form.cantidad||Number(form.cantidad)<=0){notify("Indica la cantidad de palets", "warning");return;}
-    if((form.tipo==="entrega"||form.tipo==="devolucion")&&!form.propietario_cliente_id&&!form.cliente_id){notify("Selecciona el propietario de los palets", "warning");return;}
+    if((form.tipo==="entrega"||form.tipo==="devolucion"||form.tipo==="rectificativa_devolucion")&&!form.propietario_cliente_id&&!form.cliente_id){notify("Selecciona el propietario de los palets", "warning");return;}
     if(form.tipo==="devolucion"&&!form.num_albaran){notify("El numero de albaran es obligatorio para devoluciones", "warning");return;}
     if (editando) {
       const ok = await confirmDialog({
@@ -221,22 +248,24 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
   const TIPOS=[
     {v:"entrega",    l:"Entrega al cliente (salen de empresa)"},
     {v:"devolucion", l:"Devolucion del cliente (entran a empresa)"},
+    {v:"rectificativa_devolucion", l:"Rectificativa de devolucion"},
     {v:"entrada_stock",l:"Entrada a stock (compra, etc.)"},
     {v:"salida_stock",l:"Salida de stock (baja, perdida)"},
   ];
   const TIPO_FORM_LABEL = {
     entrega: "Entrada de palets del cliente/obra (entran a empresa)",
     devolucion: "Devolucion al cliente/propietario (salen de empresa)",
+    rectificativa_devolucion: "Rectificativa de devolucion (vuelven palets al stock)",
     entrada_stock: "Entrada a stock (compra, etc.)",
     salida_stock: "Salida de stock (baja, perdida)",
   };
-  const esCliente=form.tipo==="entrega"||form.tipo==="devolucion";
+  const esCliente=form.tipo==="entrega"||form.tipo==="devolucion"||form.tipo==="rectificativa_devolucion";
   const totalImporte=form.tipo==="devolucion"?Number(form.cantidad||0)*Number(form.precio_unitario||0):0;
   const lotesDisponibles = (() => {
     const propietarioId = form.propietario_cliente_id || form.cliente_id || "";
     if (form.tipo !== "devolucion" || !propietarioId) return [];
     const entradas = movimientos
-      .filter(m => m.tipo === "entrega" && String(m.propietario_cliente_id || m.cliente_id || "") === String(propietarioId))
+      .filter(m => (m.tipo === "entrega" || esRectificativaDevolucion(m)) && String(m.propietario_cliente_id || m.cliente_id || "") === String(propietarioId))
       .map(m => ({ ...m, restante: Number(m.cantidad || 0) }))
       .filter(m => m.restante > 0)
       .sort((a,b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
@@ -254,6 +283,9 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
 
   function imprimirAlbaran() {
     const cliente = clientes.find(cl=>cl.id===form.cliente_id);
+    const obra = clientes.find(cl=>cl.id===form.cliente_movimiento_id);
+    const obraNombre = obra?.nombre || form.pedido_ref || "";
+    const direccionDevolucion = direccionCliente(obra) || direccionCliente(cliente);
     const fecha   = new Date(form.fecha+"T12:00:00").toLocaleDateString("es-ES");
     const win = window.open("","_blank","width=800,height=600");
     win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
@@ -293,15 +325,19 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
 <div class="grid2">
   <div class="box">
     <div class="box-title">Cliente / Remitente</div>
-    <div class="box-val">${cliente?.nombre||"-"}</div>
-    ${cliente?.cif?`<div style="font-size:11px;color:#555;">CIF: ${cliente.cif}</div>`:""}
-    ${cliente?.telefono?`<div style="font-size:11px;color:#555;">Tel: ${cliente.telefono}</div>`:""}
+    <div class="box-val">${escHtml(cliente?.nombre||"-")}</div>
+    ${cliente?.cif?`<div style="font-size:11px;color:#555;">CIF: ${escHtml(cliente.cif)}</div>`:""}
+    ${cliente?.telefono?`<div style="font-size:11px;color:#555;">Tel: ${escHtml(cliente.telefono)}</div>`:""}
+    ${direccionCliente(cliente)?`<div style="font-size:11px;color:#555;margin-top:4px;">${escHtml(direccionCliente(cliente))}</div>`:""}
   </div>
   <div class="box">
-    <div class="box-title">Datos del documento</div>
+    <div class="box-title">Obra / destino de devolucion</div>
+    <div class="box-val">${escHtml(obraNombre || "-")}</div>
+    ${direccionDevolucion?`<div style="font-size:11px;color:#555;margin-top:4px;">Direccion devolucion: <b>${escHtml(direccionDevolucion)}</b></div>`:""}
+    <div class="box-title" style="margin-top:10px;">Datos del documento</div>
     <div style="font-size:11px;color:#555;margin-bottom:3px;">Fecha: <b>${fecha}</b></div>
-    ${form.pedido_ref?`<div style="font-size:11px;color:#555;">Ref. pedido: <b>${form.pedido_ref}</b></div>`:""}
-    ${form.notas?`<div style="font-size:11px;color:#555;margin-top:4px;">${form.notas}</div>`:""}
+    ${form.pedido_ref?`<div style="font-size:11px;color:#555;">Ref. pedido: <b>${escHtml(form.pedido_ref)}</b></div>`:""}
+    ${form.notas?`<div style="font-size:11px;color:#555;margin-top:4px;">${escHtml(form.notas)}</div>`:""}
   </div>
 </div>
 
@@ -466,17 +502,19 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
 // 
 
 // Generar albaran desde historial
-function generarHtmlAlbaran(mv, cliente, empresa) {
+function generarHtmlAlbaran(mv, cliente, empresa, obraCliente) {
   const fecha = new Date((mv.fecha||"")+"T12:00:00").toLocaleDateString("es-ES");
   const empNombre = empresa?.razon_social || empresa?.nombre || "TransGest TMS";
   const empCif    = empresa?.cif || "";
   const empDir    = empresa?.domicilio || empresa?.direccion || "";
   const empTel    = empresa?.telefono || "";
+  const obraNombre = obraCliente?.nombre || mv.obra_nombre || mv.cliente_movimiento_nombre || mv.pedido_ref || "";
+  const direccionDevolucion = direccionCliente(obraCliente) || direccionCliente(cliente);
   return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>Albaran ${mv.num_albaran||"HISTORICO"}</title>
 <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:30px;}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid #1a3a6e;}.doc-num{font-size:22px;font-weight:700;color:#1a3a6e;text-align:right;}.doc-label{font-size:10px;color:#666;letter-spacing:1px;text-transform:uppercase;text-align:right;}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}.box{border:1px solid #ddd;border-radius:4px;padding:12px;}.box-title{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}.box-val{font-size:13px;font-weight:600;}table{width:100%;border-collapse:collapse;margin:16px 0;}th{background:#1a3a6e;color:#fff;padding:8px 10px;text-align:left;font-size:11px;}td{padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;}.total-row{background:#f5f5f5;font-weight:700;font-size:14px;}.firma{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:30px;}.firma-box{border:1px solid #ddd;border-radius:4px;padding:10px;min-height:70px;}.firma-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}.firma-line{margin-top:50px;border-top:1px solid #999;font-size:9px;color:#666;padding-top:3px;}@media print{@page{margin:1cm}body{padding:0}}</style></head><body>
-<div class="header"><div><div style="font-size:18px;font-weight:700;color:#1a3a6e;">${empNombre}</div>${empCif?`<div style="color:#555;font-size:11px;">CIF: ${empCif}</div>`:""} ${empDir?`<div style="color:#555;font-size:11px;">${empDir}</div>`:""} ${empTel?`<div style="color:#555;font-size:11px;">Tel: ${empTel}</div>`:""}<div style="color:#555;font-size:11px;margin-top:4px;">Gestion de Almacen - Palets</div></div><div><div class="doc-label">Albaran de devolucion</div><div class="doc-num">${mv.num_albaran||"HISTORICO"}</div><div style="font-size:10px;color:#555;text-align:right;margin-top:4px;">${fecha}</div></div></div>
-<div class="grid2"><div class="box"><div class="box-title">Cliente</div><div class="box-val">${cliente?.nombre||"-"}</div>${cliente?.cif?`<div style="font-size:11px;color:#555;">CIF: ${cliente.cif}</div>`:""}</div><div class="box"><div class="box-title">Documento</div><div style="font-size:11px;color:#555;">Fecha: <b>${fecha}</b></div>${mv.pedido_ref?`<div style="font-size:11px;color:#555;">Ref: <b>${mv.pedido_ref}</b></div>`:""} ${mv.notas?`<div style="font-size:11px;color:#555;">${mv.notas}</div>`:""}</div></div>
+<div class="header"><div><div style="font-size:18px;font-weight:700;color:#1a3a6e;">${escHtml(empNombre)}</div>${empCif?`<div style="color:#555;font-size:11px;">CIF: ${escHtml(empCif)}</div>`:""} ${empDir?`<div style="color:#555;font-size:11px;">${escHtml(empDir)}</div>`:""} ${empTel?`<div style="color:#555;font-size:11px;">Tel: ${escHtml(empTel)}</div>`:""}<div style="color:#555;font-size:11px;margin-top:4px;">Gestion de Almacen - Palets</div></div><div><div class="doc-label">Albaran de devolucion</div><div class="doc-num">${escHtml(mv.num_albaran||"HISTORICO")}</div><div style="font-size:10px;color:#555;text-align:right;margin-top:4px;">${fecha}</div></div></div>
+<div class="grid2"><div class="box"><div class="box-title">Cliente</div><div class="box-val">${escHtml(cliente?.nombre||"-")}</div>${cliente?.cif?`<div style="font-size:11px;color:#555;">CIF: ${escHtml(cliente.cif)}</div>`:""}${direccionCliente(cliente)?`<div style="font-size:11px;color:#555;margin-top:4px;">${escHtml(direccionCliente(cliente))}</div>`:""}</div><div class="box"><div class="box-title">Obra / destino de devolucion</div><div class="box-val">${escHtml(obraNombre || "-")}</div>${direccionDevolucion?`<div style="font-size:11px;color:#555;margin-top:4px;">Direccion devolucion: <b>${escHtml(direccionDevolucion)}</b></div>`:""}<div class="box-title" style="margin-top:10px;">Documento</div><div style="font-size:11px;color:#555;">Fecha: <b>${fecha}</b></div>${mv.pedido_ref?`<div style="font-size:11px;color:#555;">Ref: <b>${escHtml(mv.pedido_ref)}</b></div>`:""} ${mv.notas?`<div style="font-size:11px;color:#555;">${escHtml(mv.notas)}</div>`:""}</div></div>
 <table><thead><tr><th>Descripcion</th><th style="text-align:right;">Cantidad</th></tr></thead><tbody><tr><td>Devolucion de palets europeos</td><td style="text-align:right;font-weight:600;">${mv.cantidad} uds</td></tr></tbody></table>
 <div class="firma"><div class="firma-box"><div class="firma-label">Firma cliente</div><div class="firma-line">Nombre y DNI</div></div><div class="firma-box"><div class="firma-label">Sello almacen</div><div class="firma-line">Fecha y firma</div></div></div>
 </body></html>`;
@@ -513,10 +551,12 @@ function generarHtmlDevClienteInforme({ grupos, movimientos, empresa, filtroNomb
             const pendiente = m.tipo === "devolucion" && !salidaPaletsConfirmada(m);
             const importe = m.tipo === "devolucion" ? Number(m.cantidad || 0) * Number(m.precio_unitario || 0) : 0;
             const estado = pendiente ? "Preparada" : m.factura_id ? "Facturada" : "Registrada";
-            const signo = m.tipo === "devolucion" && !pendiente ? "-" : "+";
+            const signoMov = signoPaletsMovimiento(m);
+            const signo = signoMov > 0 ? "+" : signoMov < 0 ? "-" : "";
+            const tipoInforme = m.tipo === "devolucion" ? "Devolucion" : esRectificativaDevolucion(m) ? "Rectificativa" : "Entrada";
             return `<tr>
               <td>${escHtml(String(m.fecha || "-").slice(0,10))}</td>
-              <td>${escHtml(m.tipo === "devolucion" ? "Devolucion" : "Entrada")}</td>
+              <td>${escHtml(tipoInforme)}</td>
               <td class="num">${signo}${fmtN(m.cantidad)}</td>
               <td>${escHtml(m.obra_nombre || m.cliente_movimiento_nombre || m.notas || "-")}</td>
               <td>${escHtml(m.num_albaran || "-")}</td>
@@ -581,7 +621,7 @@ export default function Palets(){
       cliente_movimiento_id: m.cliente_movimiento_id || "",
       cliente_id: m.propietario_cliente_id || m.cliente_id || "",
       cliente_nombre: m.propietario_nombre || m.cliente_nombre || "",
-      obra_nombre: m.cliente_movimiento_nombre || m.pedido_ref || m.notas || "",
+      obra_nombre: m.obra_nombre || m.cliente_movimiento_nombre || m.pedido_ref || m.notas || "",
       cantidad: Number(m.cantidad || 0),
       precio_unitario: Number(m.precio_unitario || 0),
       estado_salida: m.estado_salida || (m.tipo === "devolucion" ? "confirmada" : "confirmada"),
@@ -773,6 +813,65 @@ export default function Palets(){
     }
   }
 
+  async function rectificarDevolucion(mv){
+    if (mv.tipo !== "devolucion" || !salidaPaletsConfirmada(mv)) {
+      notify("Solo se pueden rectificar devoluciones ya confirmadas.", "warning");
+      return;
+    }
+    const yaRectificado = movimientos
+      .filter(m => esRectificativaDevolucion(m) && String(m.notas || "").includes(String(mv.id || "")))
+      .reduce((s,m) => s + Number(m.cantidad || 0), 0);
+    const maximo = Math.max(0, Number(mv.cantidad || 0) - yaRectificado);
+    if (maximo <= 0) {
+      notify("Esta devolucion ya esta rectificada por completo.", "warning");
+      return;
+    }
+    const respuesta = await promptDialog({
+      title: "Rectificar devolucion de palets",
+      message: `Indica cuantos palets vuelven al stock. Maximo disponible: ${fmtN(maximo)}.`,
+      placeholder: `Max. ${fmtN(maximo)}`,
+      defaultValue: String(maximo),
+      inputType: "number",
+      confirmText: "Rectificar",
+      tone: "warning",
+    });
+    if (respuesta === null) return;
+    const cantidad = Math.trunc(Number(respuesta));
+    if (!cantidad || cantidad <= 0) {
+      notify("Indica una cantidad valida de palets a rectificar.", "warning");
+      return;
+    }
+    if (cantidad > maximo) {
+      notify(`No puedes rectificar mas de ${fmtN(maximo)} palets en esta devolucion.`, "warning");
+      return;
+    }
+    const ok = await confirmDialog({
+      title: "Confirmar rectificativa",
+      message: `Se devolveran ${fmtN(cantidad)} palets al stock manteniendo la devolucion original en el historial.`,
+      confirmText: "Crear rectificativa",
+      tone: "warning",
+    });
+    if (!ok) return;
+    try {
+      await crearPaletMovimiento({
+        tipo: "rectificativa_devolucion",
+        cantidad,
+        precio_unitario: 0,
+        cliente_movimiento_id: mv.cliente_movimiento_id || null,
+        propietario_cliente_id: mv.propietario_cliente_id || mv.cliente_id || null,
+        fecha: new Date().toISOString().slice(0,10),
+        pedido_ref: `Rectifica ${mv.num_albaran || mv.pedido_ref || String(mv.id || "").slice(0,8)}`,
+        num_albaran: mv.num_albaran || "",
+        notas: `Rectificativa de devolucion original ${mv.id || "-"}${mv.obra_nombre ? " | Obra: "+mv.obra_nombre : ""}${mv.notas ? " | "+mv.notas : ""}`,
+        estado_salida: "confirmada",
+      });
+      await cargarMovimientos();
+      notify("Rectificativa creada. Los palets vuelven a contar en stock.", "success");
+    } catch (e) {
+      notify("No se pudo crear la rectificativa: " + e.message, "error");
+    }
+  }
+
   function recargar(){ cargarMovimientos(); setModal(false); setMovimientoEditando(null); }
 
   function abrirNuevaDevolucion(cliente){
@@ -812,10 +911,12 @@ export default function Palets(){
     );
     const stock=mvsCli.reduce((s,m)=>{
       if(m.tipo==="entrega") return s+Number(m.cantidad||0);
+      if(esRectificativaDevolucion(m)) return s+Number(m.cantidad||0);
       if(m.tipo==="devolucion") return salidaPaletsConfirmada(m) ? s-Number(m.cantidad||0) : s;
       return s;
     },0);
-    const entregas=mvsCli.filter(m=>m.tipo==="entrega").reduce((s,m)=>s+Number(m.cantidad||0),0);
+    const entregas=mvsCli.filter(m=>m.tipo==="entrega" || esRectificativaDevolucion(m)).reduce((s,m)=>s+Number(m.cantidad||0),0);
+    const rectificadas=mvsCli.filter(esRectificativaDevolucion).reduce((s,m)=>s+Number(m.cantidad||0),0);
     const devolucionesConfirmadas = mvsCli.filter(m=>m.tipo==="devolucion" && salidaPaletsConfirmada(m));
     const devolucionesPendientesSalida = mvsCli.filter(m=>m.tipo==="devolucion" && !salidaPaletsConfirmada(m));
     const devoluciones=devolucionesConfirmadas.reduce((s,m)=>s+Number(m.cantidad||0),0);
@@ -835,7 +936,7 @@ export default function Palets(){
       acc[key].movimientos.push(m);
       return acc;
     },{}));
-    return{...c,stock,entregas,devoluciones,pendientesSalida,importeDevoluciones,devolucionesDetalle,pendientesSalidaDetalle};
+    return{...c,stock,entregas,rectificadas,devoluciones,pendientesSalida,importeDevoluciones,devolucionesDetalle,pendientesSalidaDetalle};
   }).filter(c=>c.entregas>0||c.devoluciones>0||c.stock!==0||c.pendientesSalida>0);
 
   const totalPendiente=clientesConPalets.reduce((s,c)=>s+Math.max(0,c.entregas-c.devoluciones),0);
@@ -866,7 +967,7 @@ export default function Palets(){
   }
 
   const movimientosCliente = movimientos
-    .filter(m => ["entrega", "devolucion"].includes(m.tipo))
+    .filter(m => ["entrega", "devolucion", "rectificativa_devolucion"].includes(m.tipo))
     .filter(m => filtroCliente === "todos" || clienteIdMovimiento(m) === filtroCliente)
     .filter(m => !devDesde || String(m.fecha || "").slice(0,10) >= devDesde)
     .filter(m => !devHasta || String(m.fecha || "").slice(0,10) <= devHasta)
@@ -886,7 +987,7 @@ export default function Palets(){
         movimientos: [],
       };
     }
-    if (m.tipo === "entrega") acc[key].entradas += Number(m.cantidad || 0);
+    if (m.tipo === "entrega" || esRectificativaDevolucion(m)) acc[key].entradas += Number(m.cantidad || 0);
     if (m.tipo === "devolucion" && salidaPaletsConfirmada(m)) {
       acc[key].devoluciones += Number(m.cantidad || 0);
       acc[key].importe += Number(m.cantidad || 0) * Number(m.precio_unitario || 0);
@@ -920,9 +1021,9 @@ export default function Palets(){
     setTimeout(() => win.print(), 500);
   }
 
-  const TIPO_COLOR={entrega:"#f97316",devolucion:"#10b981",entrada_stock:"#3b82f6",salida_stock:"#ef4444"};
-  const TIPO_LABEL={entrega:"Entrada cliente/obra",devolucion:"Devolucion propietario",entrada_stock:"Entrada stock",salida_stock:"Salida stock"};
-  const TIPO_ICON={entrega:"ENT",devolucion:"DEV",entrada_stock:"ALT",salida_stock:"SAL"};
+  const TIPO_COLOR={entrega:"#f97316",devolucion:"#10b981",rectificativa_devolucion:"#8b5cf6",entrada_stock:"#3b82f6",salida_stock:"#ef4444"};
+  const TIPO_LABEL={entrega:"Entrada cliente/obra",devolucion:"Devolucion propietario",rectificativa_devolucion:"Rectificativa devolucion",entrada_stock:"Entrada stock",salida_stock:"Salida stock"};
+  const TIPO_ICON={entrega:"ENT",devolucion:"DEV",rectificativa_devolucion:"REC",entrada_stock:"ALT",salida_stock:"SAL"};
 
   const S={
     card:{background:"rgba(255,255,255,.96)",border:"1px solid #dbe5ec",borderRadius:12,padding:"18px 20px",marginBottom:16,boxShadow:"0 12px 30px rgba(15,23,42,.055)"},
@@ -1195,6 +1296,7 @@ export default function Palets(){
                           const importe=m.tipo==="devolucion"?Number(m.cantidad||0)*Number(m.precio_unitario||0):0;
                           const salidaPendiente=m.tipo==="devolucion"&&!salidaPaletsConfirmada(m);
                           const puedeFacturarDevolucion = m.tipo==="devolucion" && !salidaPendiente && !m.factura_id && Number(m.precio_unitario||0)>0;
+                          const puedeRectificarDevolucion = m.tipo==="devolucion" && !salidaPendiente;
                           return (
                             <tr key={m.id} style={{background:salidaPendiente?"rgba(245,158,11,.05)":"transparent"}}>
                               <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11}}>{formatDateEs(m.fecha)}</td>
@@ -1205,7 +1307,7 @@ export default function Palets(){
                                 </span>
                               </td>
                               <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:TIPO_COLOR[m.tipo]}}>
-                                {m.tipo==="devolucion"?(salidaPendiente?"":"-"):"+"}{fmtN(m.cantidad)}
+                                {signoPaletsMovimiento(m) > 0 ? "+" : signoPaletsMovimiento(m) < 0 ? "-" : ""}{fmtN(m.cantidad)}
                               </td>
                               <td style={{...S.td,fontSize:11,color:"var(--text4)"}}>{m.obra_nombre || m.cliente_movimiento_nombre || m.notas || "-"}</td>
                               <td style={{...S.td,fontSize:11,color:"var(--text4)"}}>{m.num_albaran || "-"}</td>
@@ -1222,7 +1324,7 @@ export default function Palets(){
                               </td>
                               <td style={S.td}>
                                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                                  {!m.factura_id&&(
+                                  {!m.factura_id && (m.tipo!=="devolucion" || salidaPendiente)&&(
                                     <button onClick={()=>{setMovimientoEditando(m);setModal(true);}} style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(59,130,246,.30)",background:"rgba(59,130,246,.08)",color:"#60a5fa",cursor:"pointer",whiteSpace:"nowrap"}}>
                                       Editar
                                     </button>
@@ -1237,11 +1339,16 @@ export default function Palets(){
                                       Eliminar
                                     </button>
                                   )}
+                                  {puedeRectificarDevolucion&&(
+                                    <button onClick={()=>rectificarDevolucion(m)} style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(139,92,246,.35)",background:"rgba(139,92,246,.08)",color:"#8b5cf6",cursor:"pointer",whiteSpace:"nowrap"}}>
+                                      Rectificar
+                                    </button>
+                                  )}
                                   {(m.tipo==="devolucion"||m.tipo==="entrega")&&m.num_albaran&&(
                                     <button
                                       onClick={()=>{
                                         const win=window.open("","_blank","width=800,height=600");
-                                        win.document.write(generarHtmlAlbaran(m,clientes.find(c=>c.id===clienteIdMovimiento(m)),empresa));
+                                        win.document.write(generarHtmlAlbaran(m,clientes.find(c=>c.id===clienteIdMovimiento(m)),empresa,clientes.find(c=>c.id===m.cliente_movimiento_id)));
                                         win.document.close();
                                         win.focus();
                                         setTimeout(()=>win.print(),400);
@@ -1303,7 +1410,8 @@ export default function Palets(){
                   const importe=m.tipo==="devolucion"?Number(m.cantidad||0)*Number(m.precio_unitario||0):0;
                   const salidaPendiente=m.tipo==="devolucion"&&!salidaPaletsConfirmada(m);
                   const puedeFacturarDevolucion = m.tipo==="devolucion" && !salidaPendiente && !m.factura_id && Number(m.precio_unitario||0)>0;
-                  const movimientoEditable = !m.factura_id;
+                  const puedeRectificarDevolucion = m.tipo==="devolucion" && !salidaPendiente;
+                  const movimientoEditable = !m.factura_id && (m.tipo!=="devolucion" || salidaPendiente);
                   return(
                     <tr key={m.id} style={{background:salidaPendiente?"rgba(245,158,11,.05)":"transparent"}}>
                       <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11}}>{formatDateEs(m.fecha)}</td>
@@ -1340,7 +1448,7 @@ export default function Palets(){
                       <td style={S.td}>{cli?.nombre||"-"}</td>
                       <td style={{...S.td,fontSize:11,color:"var(--text4)"}}>{m.obra_nombre || m.cliente_movimiento_nombre || "-"}</td>
                       <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:TIPO_COLOR[m.tipo]}}>
-                        {m.tipo==="devolucion"?(salidaPendiente?"":"-"):(m.tipo==="salida_stock"?"-":"+")}
+                        {signoPaletsMovimiento(m) > 0 ? "+" : signoPaletsMovimiento(m) < 0 ? "-" : ""}
                         {fmtN(m.cantidad)}
                       </td>
                       <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"#10b981"}}>{importe>0?fmt2(importe)+" EUR":"-"}</td>
@@ -1367,7 +1475,7 @@ export default function Palets(){
                             <button
                               onClick={()=>{
                                 const win=window.open("","_blank","width=800,height=600");
-                                win.document.write(generarHtmlAlbaran(m,clientes.find(c=>c.id===clienteIdMovimiento(m)),empresa));
+                                win.document.write(generarHtmlAlbaran(m,clientes.find(c=>c.id===clienteIdMovimiento(m)),empresa,clientes.find(c=>c.id===m.cliente_movimiento_id)));
                                 win.document.close();
                                 win.focus();
                                 setTimeout(()=>win.print(),400);
@@ -1375,6 +1483,13 @@ export default function Palets(){
                               style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid var(--border2)",
                                 background:"var(--bg3)",color:"var(--text3)",cursor:"pointer",whiteSpace:"nowrap"}}>
                               Albaran
+                            </button>
+                          )}
+                          {puedeRectificarDevolucion&&(
+                            <button
+                              onClick={()=>rectificarDevolucion(m)}
+                              style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(139,92,246,.35)",background:"rgba(139,92,246,.08)",color:"#8b5cf6",cursor:"pointer",whiteSpace:"nowrap"}}>
+                              Rectificar
                             </button>
                           )}
                           {puedeFacturarDevolucion&&(

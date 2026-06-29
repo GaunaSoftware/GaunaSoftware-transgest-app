@@ -39,7 +39,7 @@ function httpError(status, message) {
 }
 
 function isPaletClienteTipo(tipo) {
-  return ["entrega", "devolucion"].includes(String(tipo || "").toLowerCase());
+  return ["entrega", "devolucion", "rectificativa_devolucion"].includes(String(tipo || "").toLowerCase());
 }
 
 function isPaletDevolucion(tipo) {

@@ -499,7 +499,6 @@ const VEHICULO_EXT_FIELDS = [
   "fecha_compra", "valor_compra", "financiacion", "concesionario", "numero_pedido_compra",
   "fecha_venta", "valor_venta", "comprador",
   "compania_seguro", "numero_poliza",
-  "facturacion_media_dia",
   "taller_entrada_at", "estado_aux", "estado_aux_updated_at",
 ];
 

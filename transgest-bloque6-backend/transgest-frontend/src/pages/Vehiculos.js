@@ -4,14 +4,38 @@ import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
 
-// Compatibilidad legacy: si un navegador aun conserva campos extendidos viejos en local,
-// se leen como fallback visual, pero ya no se escriben ahi.
-// Compute daily average invoiced (last 90 days)
-function mediaFacturacionDiaria(vehiculoId, facturas, pedidos){
-  const hace90 = new Date(); hace90.setDate(hace90.getDate()-90);
-  const pedVeh = pedidos.filter(p=>p.vehiculo_id===vehiculoId&&new Date(p.fecha_carga||p.fecha_pedido||0)>=hace90&&p.estado!=="cancelado");
-  const total  = pedVeh.reduce((s,p)=>s+Number(p.importe||0),0);
-  return total / 90;
+function importeRealPedido(pedido = {}) {
+  const importe = Number(pedido.importe ?? pedido.precio_cliente_col ?? pedido.precio_unitario ?? 0);
+  return Number.isFinite(importe) && importe > 0 ? importe : 0;
+}
+
+function fechaOperativaPedido(pedido = {}) {
+  const raw = pedido.fecha_carga || pedido.fecha_descarga || pedido.fecha_entrega || pedido.fecha_pedido || pedido.created_at;
+  const date = raw ? new Date(raw) : null;
+  return date && Number.isFinite(date.getTime()) ? date : null;
+}
+
+function mediaFacturacionDiariaReal(vehiculoId, pedidos = [], ventanaDias = 90) {
+  if (!vehiculoId) return null;
+  const desde = new Date();
+  desde.setDate(desde.getDate() - ventanaDias);
+  const estadosExcluidos = new Set(["cancelado", "anulado", "borrador"]);
+  const diasConFacturacion = new Set();
+  let total = 0;
+
+  for (const pedido of Array.isArray(pedidos) ? pedidos : []) {
+    if (String(pedido?.vehiculo_id || "") !== String(vehiculoId)) continue;
+    if (estadosExcluidos.has(String(pedido?.estado || "").toLowerCase())) continue;
+    const fecha = fechaOperativaPedido(pedido);
+    if (!fecha || fecha < desde) continue;
+    const importe = importeRealPedido(pedido);
+    if (!importe) continue;
+    total += importe;
+    diasConFacturacion.add(fecha.toISOString().slice(0, 10));
+  }
+
+  if (!total || !diasConFacturacion.size) return null;
+  return total / diasConFacturacion.size;
 }
 const EC = { disponible:"var(--green)", en_ruta:"var(--accent-l)", taller:"#f97316", baja:"var(--red)", inactivo:"var(--text4)" };
 
@@ -150,11 +174,6 @@ function esRemolqueVehiculo(v, todos = []) {
     mat.startsWith("R-") ||
     mat.endsWith("-R") ||
     (todos || []).some(t => String(t?.remolque_id || "") === String(v?.id || ""));
-}
-
-function facturacionMediaDia(v) {
-  const n = Number(v?.facturacion_media_dia ?? v?.media_facturacion_dia ?? 0);
-  return Number.isFinite(n) && n > 0 ? n : 500;
 }
 
 function diasDesde(fecha) {
@@ -880,7 +899,6 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
     fecha_compra:"", valor_compra:"", financiacion:"",
     concesionario:"", numero_pedido_compra:"",
     fecha_venta:"", valor_venta:"", comprador:"",
-    facturacion_media_dia:500,
     // Documentacion
     fecha_matriculacion:"", fecha_itv:"", fecha_seguro:"",
     compania_seguro:"", numero_poliza:"",
@@ -1323,13 +1341,6 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                   <label style={S.lbl}>Forma de pago / financiacion</label>
                   <input style={S.inp} value={form.financiacion||""} onChange={f("financiacion")} placeholder="Leasing 5 anos, compra directa, renting..."/>
                 </div>
-                <div>
-                  <label style={S.lbl}>Facturacion media diaria estimada (EUR)</label>
-                  <input type="number" min="0" step="0.01" style={S.inp} value={form.facturacion_media_dia||""} onChange={f("facturacion_media_dia")} placeholder="500"/>
-                  <div style={{fontSize:11,color:"var(--text5)",marginTop:5}}>
-                    Se usa para calcular lo dejado de ganar cuando la tractora esta parada o en taller.
-                  </div>
-                </div>
               </div>
 
               <div style={S.sec}>Venta (si procede)</div>
@@ -1561,7 +1572,7 @@ export default function Vehiculos() {
         // Full load: vehicles + pedidos + choferes desde backend
         const [d, p, ch] = await Promise.all([
           getVehiculos(),
-          _t(getPedidos({estado:'en_curso,confirmado,pendiente',limit:200}).catch(()=>[])),
+          _t(getPedidos({desde:new Date(Date.now() - 90*86400000).toISOString().slice(0,10),limit:1000}).catch(()=>[])),
           getChoferes().catch(()=>[]),
         ]);
         const pArr  = Array.isArray(p)?p:(Array.isArray(p?.data)?p.data:[]);
@@ -1657,16 +1668,33 @@ export default function Vehiculos() {
   const remolquesSinTractora = remolquesActivos.filter(v => !v.tractora_id && !vehiculosActivos.some(t => String(t.remolque_id || "") === String(v.id)));
   const inmovilizadas = tractorasActivas.filter(v => ["taller","inactivo"].includes(String(v.estado || "")));
   const tallerActual = tractorasActivas.filter(v => String(v.estado || "") === "taller");
-  const perdidaTaller = tallerActual.reduce((sum, v) => sum + facturacionMediaDia(v) * diasDesde(v.taller_entrada_at || v.estado_aux_updated_at), 0);
-  const perdidaSinChoferDia = tractorasSinChofer.reduce((sum, v) => sum + facturacionMediaDia(v), 0);
-  const perdidaInmovilizadaDia = inmovilizadas.reduce((sum, v) => sum + facturacionMediaDia(v), 0);
+  const impactoDiaReal = (lista = []) => lista.reduce((acc, v) => {
+    const media = mediaFacturacionDiariaReal(v.id, pedidos);
+    if (media == null) return acc;
+    return { total: acc.total + media, conDatos: acc.conDatos + 1 };
+  }, { total: 0, conDatos: 0 });
+  const impactoAcumuladoReal = (lista = []) => lista.reduce((acc, v) => {
+    const media = mediaFacturacionDiariaReal(v.id, pedidos);
+    if (media == null) return acc;
+    const dias = diasDesde(v.taller_entrada_at || v.estado_aux_updated_at);
+    return { total: acc.total + (media * dias), conDatos: acc.conDatos + 1 };
+  }, { total: 0, conDatos: 0 });
+  const impactoSinChofer = impactoDiaReal(tractorasSinChofer);
+  const impactoTaller = impactoAcumuladoReal(tallerActual);
+  const impactoParadas = impactoDiaReal(inmovilizadas);
+  const detalleDiaReal = (impacto) => impacto.conDatos
+    ? `${fmt2(impacto.total)} EUR/dia segun historico real`
+    : "Sin historico real con importe";
+  const detalleAcumuladoReal = (impacto) => impacto.conDatos
+    ? `${fmt2(impacto.total)} EUR acumulado segun historico real`
+    : "Sin historico real con importe";
   const kpisFlota = [
     ["Tractoras", tractorasActivas.length, "Cabezas tractoras activas", "var(--accent)"],
     ["Remolques", remolquesActivos.length, "Semis/remolques activos", "#8b5cf6"],
-    ["Tractoras sin chofer", tractorasSinChofer.length, `${fmt2(perdidaSinChoferDia)} EUR/dia estimado`, tractorasSinChofer.length ? "#ef4444" : "#10b981"],
+    ["Tractoras sin chofer", tractorasSinChofer.length, detalleDiaReal(impactoSinChofer), tractorasSinChofer.length ? "#ef4444" : "#10b981"],
     ["Remolques libres", remolquesSinTractora.length, "A espera de conjunto", remolquesSinTractora.length ? "#f59e0b" : "#10b981"],
-    ["En taller", tallerActual.length, `${fmt2(perdidaTaller)} EUR acumulado estimado`, tallerActual.length ? "#f97316" : "#10b981"],
-    ["Paradas", inmovilizadas.length, `${fmt2(perdidaInmovilizadaDia)} EUR/dia estimado`, inmovilizadas.length ? "#ef4444" : "#10b981"],
+    ["En taller", tallerActual.length, detalleAcumuladoReal(impactoTaller), tallerActual.length ? "#f97316" : "#10b981"],
+    ["Paradas", inmovilizadas.length, detalleDiaReal(impactoParadas), inmovilizadas.length ? "#ef4444" : "#10b981"],
   ];
 
   return (
@@ -1871,11 +1899,14 @@ export default function Vehiculos() {
                     const entrada = v.taller_entrada_at || null;
                     if (!entrada) return null;
                     const dias = Math.ceil((new Date()-new Date(entrada))/86400000);
-                    const media = mediaFacturacionDiaria(v.id,[],pedidos||[]);
-                    const perdidas = dias*media;
+                    const media = mediaFacturacionDiariaReal(v.id,pedidos||[]);
+                    const impacto = media == null ? null : dias*media;
                     return (
                       <div style={{ gridColumn:"1/-1", marginTop:6, padding:"6px 10px", background:"rgba(239,68,68,.08)", border:"1px solid rgba(239,68,68,.2)", borderRadius:6 }}>
-                        <div style={{ fontSize:10, fontWeight:700, color:"var(--red)" }}>EN TALLER - {dias} dia{dias!==1?"s":""}  -  Perdidas est.: {Number(perdidas).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</div>
+                        <div style={{ fontSize:10, fontWeight:700, color:"var(--red)" }}>
+                          EN TALLER - {dias} dia{dias!==1?"s":""}
+                          {impacto != null ? ` - Impacto segun historico real: ${Number(impacto).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR` : " - Sin historico real con importe"}
+                        </div>
                       </div>
                     );
                   })()}

@@ -270,47 +270,57 @@ const MODULOS_GERENTE = [
   { titulo:"Trabajo diario", items:[
     { id:"dashboard", icon:IC.dashboard, label:"Dashboard" },
     { id:"agenda", icon:IC.agenda, label:"Agenda" },
-    { id:"operativa_diaria", icon:IC.rutas, label:"Operativa diaria", children:[
-      { id:"gestion_trafico", label:"Mesa de trafico" },
-      { id:"control_tower", label:"Control Tower" },
-      { id:"pedidos", label:"Pedidos / Trafico" },
+    { id:"pedidos", icon:IC.pedidos, label:"Pedidos / Trafico" },
+    { id:"gestion_trafico", icon:IC.cuadrante, label:"Mesa de trafico" },
+    { id:"control_tower", icon:IC.tower, label:"Control Tower" },
+  ]},
+  { titulo:"Trafico", items:[
+    { id:"planificacion_grupo", icon:IC.cuadrante, label:"Planificacion", children:[
       { id:"plan_diario", label:"Plan diario" },
       { id:"cuadrante_semana", label:"Cuadrante semanal" },
+      { id:"cuadrante_vehiculos", label:"Cuadrante vehiculos" },
+      { id:"cuadrante_choferes", label:"Cuadrante choferes" },
+      { id:"grupajes", label:"Grupajes" },
+      { id:"rutas_recomendadas", label:"Optimizacion de rutas" },
     ]},
-    { id:"clientes", icon:IC.clientes, label:"Clientes" },
-    { id:"facturacion_grupo", icon:IC.facturacion, label:"Facturacion", children:[
-      { id:"facturacion", label:"Gestion financiera" },
-      { id:"contabilidad", label:"Contabilidad" },
-    ]},
-  ]},
-  { titulo:"Herramientas", items:[
     { id:"solicitudes", icon:IC.docs, label:"Solicitudes clientes" },
-    { id:"palets", icon:IC.almacen, label:"Gestion de almacen" },
     { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
-    { id:"rutas", icon:IC.rutas, label:"Rutas y Tarifas" },
     { id:"colaboradores", icon:IC.colabor, label:"Colaboradores" },
   ]},
-  { titulo:"Flota", items:[
+  { titulo:"Comercial", items:[
+    { id:"clientes", icon:IC.clientes, label:"Clientes" },
+    { id:"rutas", icon:IC.rutas, label:"Rutas y tarifas" },
+    { id:"tarifas", icon:IC.facturacion, label:"Tarifas" },
+    { id:"objetivos", icon:IC.rendimiento, label:"Objetivos" },
+  ]},
+  { titulo:"Flota y almacen", items:[
     { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos" },
     { id:"choferes", icon:IC.choferes, label:"Choferes" },
+    { id:"app_chofer", icon:IC.vehiculos, label:"App de choferes" },
     { id:"taller", icon:IC.taller, label:"Taller" },
-    { id:"explotacion", icon:IC.explotacion, label:"Explotacion" },
-  ]},
-  { titulo:"Administracion", items:[
+    { id:"palets", icon:IC.almacen, label:"Gestion de almacen" },
     { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
-    { id:"nominas", icon:IC.nominas, label:"Nominas" },
-    { id:"gastos_estructura", icon:IC.contabilidad, label:"Gastos de estructura" },
-    { id:"informes_grupo", icon:IC.rendimiento, label:"Rendimiento", children:[
-      { id:"excepciones", label:"Excepciones operativas" },
-      { id:"informes", label:"Informes de gestion" },
-    ]},
     { id:"control_horario", icon:IC.agenda, label:"Control horario" },
+  ]},
+  { titulo:"Gestion", items:[
+    { id:"facturacion_grupo", icon:IC.facturacion, label:"Facturacion y caja", children:[
+      { id:"facturacion", label:"Gestion financiera" },
+      { id:"contabilidad", label:"Contabilidad" },
+      { id:"gastos_estructura", label:"Gastos de estructura" },
+      { id:"nominas", label:"Nominas" },
+    ]},
+    { id:"informes_grupo", icon:IC.rendimiento, label:"Analisis y trazabilidad", children:[
+      { id:"explotacion", label:"Explotacion" },
+      { id:"informes", label:"Informes de gestion" },
+      { id:"excepciones", label:"Excepciones operativas" },
+      { id:"actividad", label:"Trazabilidad" },
+    ]},
     { id:"documentos", icon:IC.docs, label:"Documentos" },
     { id:"avisos", icon:IC.avisos, label:"Avisos" },
     { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
     { id:"usuarios", icon:IC.usuarios, label:"Usuarios y roles" },
-    { id:"actividad", icon:IC.actividad, label:"Trazabilidad" },
     { id:"importacion", icon:IC.importacion, label:"Importacion" },
+    { id:"mi_cuenta", icon:IC.usuarios, label:"Mi cuenta" },
   ]},
 ];
 
@@ -351,32 +361,39 @@ const MODULOS_TRAFICO = [
   { titulo:"Trabajo diario", items:[
     { id:"dashboard", icon:IC.dashboard, label:"Dashboard" },
     { id:"agenda", icon:IC.agenda, label:"Agenda" },
-    { id:"operativa_diaria", icon:IC.rutas, label:"Operativa diaria", children:[
-      { id:"gestion_trafico", label:"Mesa de trafico" },
-      { id:"control_tower", label:"Control Tower" },
-      { id:"pedidos", label:"Pedidos / Trafico" },
-      { id:"plan_diario", label:"Plan diario" },
-    ]},
-    { id:"clientes", icon:IC.clientes, label:"Clientes" },
+    { id:"pedidos", icon:IC.pedidos, label:"Pedidos / Trafico" },
+    { id:"gestion_trafico", icon:IC.cuadrante, label:"Mesa de trafico" },
+    { id:"control_tower", icon:IC.tower, label:"Control Tower" },
   ]},
-  { titulo:"Herramientas", items:[
+  { titulo:"Planificacion", items:[
+    { id:"plan_diario", icon:IC.cuadrante, label:"Plan diario" },
+    { id:"cuadrante_semana", icon:IC.cuadrante, label:"Cuadrante semanal" },
+    { id:"grupajes", icon:IC.rutas, label:"Grupajes" },
+    { id:"rutas_recomendadas", icon:IC.rutas, label:"Optimizacion de rutas" },
+  ]},
+  { titulo:"Comercial y red", items:[
+    { id:"clientes", icon:IC.clientes, label:"Clientes" },
+    { id:"rutas", icon:IC.rutas, label:"Rutas y tarifas" },
+    { id:"tarifas", icon:IC.facturacion, label:"Tarifas" },
     { id:"solicitudes", icon:IC.docs, label:"Solicitudes clientes" },
     { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
-    { id:"rutas", icon:IC.rutas, label:"Rutas y Tarifas" },
     { id:"colaboradores", icon:IC.colabor, label:"Colaboradores" },
   ]},
-  { titulo:"Flota", items:[
+  { titulo:"Flota y almacen", items:[
     { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos" },
     { id:"choferes", icon:IC.choferes, label:"Choferes" },
+    { id:"app_chofer", icon:IC.vehiculos, label:"App de choferes" },
     { id:"taller", icon:IC.taller, label:"Taller" },
-    { id:"explotacion", icon:IC.explotacion, label:"Explotacion" },
+    { id:"palets", icon:IC.almacen, label:"Gestion de almacen" },
     { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
     { id:"control_horario", icon:IC.agenda, label:"Control horario" },
   ]},
   { titulo:"Gestion", items:[
-    { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
     { id:"documentos", icon:IC.docs, label:"Documentos" },
     { id:"avisos", icon:IC.avisos, label:"Avisos" },
+    { id:"excepciones", icon:IC.rendimiento, label:"Excepciones operativas" },
+    { id:"actividad", icon:IC.actividad, label:"Trazabilidad" },
+    { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
   ]},
 ];
 

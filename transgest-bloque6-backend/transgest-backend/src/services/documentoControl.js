@@ -1546,6 +1546,290 @@ async function generateDocumentoControlPdf({
   };
 }
 
+function cmrText(value, fallback = "-") {
+  const raw = String(value ?? "").trim();
+  return raw || fallback;
+}
+
+function cmrDate(value) {
+  if (!value) return "-";
+  const date = new Date(String(value).includes("T") ? value : `${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? cmrText(value) : date.toLocaleDateString("es-ES");
+}
+
+function cmrPartyLines(party = {}) {
+  return [
+    cmrText(party.nombre),
+    [party.nif, party.domicilio].filter(Boolean).join(" | "),
+    [party.contacto, party.email, party.telefono].filter(Boolean).join(" | "),
+  ].filter(Boolean);
+}
+
+function cmrAddressLines(stop = {}) {
+  return [
+    cmrText(stop.nombre || stop.direccion),
+    [stop.direccion, stop.provincia, stop.pais].filter(Boolean).join(", "),
+  ].filter(Boolean);
+}
+
+function cmrSignatureHtml(label, firma = {}, extra = "") {
+  const signedAt = firma?.fecha ? new Date(firma.fecha).toLocaleString("es-ES") : "";
+  return `<div class="cmr-sign">
+    <div class="cmr-num">${escapeHtml(label)}</div>
+    <div class="cmr-sign-extra">${escapeHtml(extra || "Nombre, firma y sello")}</div>
+    ${firma?.imagen ? `<img src="${escapeHtml(firma.imagen)}" alt="${escapeHtml(label)}">` : `<div class="cmr-sign-line"></div>`}
+    <div class="cmr-small">${escapeHtml(firma?.nombre || "Pendiente")}${signedAt ? ` - ${escapeHtml(signedAt)}` : ""}</div>
+    ${firma?.hash ? `<div class="cmr-hash">SHA-256 ${escapeHtml(firma.hash)}</div>` : ""}
+  </div>`;
+}
+
+async function buildDocumentoControlCmrHtml({
+  documento,
+  empresaNombre = "TransGest TMS",
+  generatedAt = new Date().toISOString(),
+  autoPrint = false,
+  publicView = false,
+}) {
+  const doc = documento || {};
+  const qrUrl = doc.qr_url || doc.soporte_url || doc.verificacion?.url_segura || "";
+  const qrDataUrl = qrUrl ? await buildDocumentoControlQrDataUrl({ ...doc, qr_url: qrUrl }).catch(() => "") : "";
+  const internacional = documentIsInternational(doc);
+  const title = internacional
+    ? "Carta de porte electronica CMR / Electronic consignment note"
+    : "Documento de Control Digital - formato carta de porte";
+  const firmas = doc.firmas || {};
+  const cargaFecha = `${cmrDate(doc.horarios?.fecha_carga)} ${cmrText(doc.horarios?.hora_carga || doc.horarios?.ventana_carga, "")}`.trim();
+  const descargaFecha = `${cmrDate(doc.horarios?.fecha_descarga)} ${cmrText(doc.horarios?.hora_descarga || doc.horarios?.ventana_descarga, "")}`.trim();
+  const peso = doc.mercancia?.peso_kg ? `${Number(doc.mercancia.peso_kg).toLocaleString("es-ES")} kg` : "-";
+  const volumen = doc.mercancia?.volumen ? `${cmrText(doc.mercancia.volumen)} m3` : "-";
+  const controls = `<div class="no-print cmr-actions"><button onclick="window.print()">Imprimir</button>${qrUrl ? `<button onclick="navigator.clipboard && navigator.clipboard.writeText(${JSON.stringify(qrUrl)})">Copiar enlace QR</button>` : ""}</div>`;
+  const printScript = autoPrint ? `<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250));</script>` : "";
+  const privateNotes = publicView ? "" : `<section class="cmr-box cmr-wide"><h2>Condiciones documentadas / Documented terms</h2>
+    <p><strong>Pago:</strong> ${escapeHtml(doc.condiciones?.forma_pago || "-")}</p>
+    ${doc.condiciones?.revision_combustible ? `<p>${escapeHtml(doc.condiciones.revision_combustible)}</p>` : ""}
+    <p><strong>Estado interoperabilidad:</strong> ${escapeHtml(buildEcmrConsignmentNote(doc).status || "-")}</p>
+  </section>`;
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${escapeHtml(title)} ${escapeHtml(doc.referencia_pedido || "")}</title>
+  <style>
+    *{box-sizing:border-box} body{margin:0;background:#eef2f7;color:#0f172a;font-family:Arial,Helvetica,sans-serif}
+    .cmr-actions{max-width:960px;margin:16px auto;display:flex;gap:8px;justify-content:flex-end}
+    .cmr-actions button{border:1px solid #2563eb;background:#fff;color:#1d4ed8;border-radius:6px;padding:8px 12px;font-weight:700;cursor:pointer}
+    .cmr-sheet{max-width:960px;margin:0 auto 28px;background:#fff;border:2px solid #111827;padding:14px}
+    .cmr-head{display:grid;grid-template-columns:1.1fr 1.3fr 140px;gap:10px;border-bottom:2px solid #111827;padding-bottom:10px}
+    .cmr-brand{display:flex;gap:10px;align-items:flex-start}.cmr-logo{width:58px;height:58px;object-fit:contain;border:1px solid #94a3b8;padding:4px}
+    h1{font-size:18px;margin:0 0 4px;line-height:1.2}.cmr-sub{font-size:10px;color:#475569;line-height:1.35}.cmr-code{font-size:13px;font-weight:800;text-align:right}
+    .cmr-qr{width:124px;height:124px;object-fit:contain;border:1px solid #111827;padding:5px}.cmr-qr-empty{height:124px;border:1px dashed #64748b;display:grid;place-items:center;font-size:11px}
+    .cmr-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border-left:1px solid #111827;border-top:1px solid #111827;margin-top:10px}
+    .cmr-box{min-height:84px;border-right:1px solid #111827;border-bottom:1px solid #111827;padding:8px 9px;break-inside:avoid}
+    .cmr-wide{grid-column:1/-1}.cmr-box h2{font-size:11px;margin:0 0 6px;text-transform:uppercase;letter-spacing:.02em}.cmr-box p{font-size:12px;margin:2px 0;line-height:1.35}
+    .cmr-num{font-size:10px;font-weight:800;color:#0f766e;text-transform:uppercase;margin-bottom:5px}.cmr-small{font-size:10px;color:#475569;line-height:1.35}.cmr-link{word-break:break-all}
+    .cmr-goods{width:100%;border-collapse:collapse;margin-top:10px;border:1px solid #111827}.cmr-goods th,.cmr-goods td{border:1px solid #111827;padding:7px;font-size:11px;text-align:left;vertical-align:top}.cmr-goods th{font-size:10px;text-transform:uppercase;background:#f8fafc}
+    .cmr-signatures{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-left:1px solid #111827;border-top:1px solid #111827;margin-top:10px}
+    .cmr-sign{min-height:128px;border-right:1px solid #111827;border-bottom:1px solid #111827;padding:8px}.cmr-sign-extra{font-size:11px;min-height:26px}.cmr-sign-line{border-top:1px solid #111827;margin:48px 8px 8px}.cmr-sign img{display:block;max-width:100%;height:48px;object-fit:contain;margin:8px 0}.cmr-hash{font-size:8px;word-break:break-all;color:#64748b}
+    @media print{body{background:#fff}.no-print{display:none!important}.cmr-sheet{margin:0;max-width:none;border:2px solid #111827;page-break-after:auto}.cmr-box{min-height:76px}}
+  </style></head><body>${controls}<main class="cmr-sheet">
+    <header class="cmr-head">
+      <div class="cmr-brand">${doc.empresa?.logo_url ? `<img class="cmr-logo" src="${escapeHtml(doc.empresa.logo_url)}" alt="Logo empresa">` : ""}<div><h1>${escapeHtml(title)}</h1><div class="cmr-sub">TransGest DCD/eCMR ready - ${escapeHtml(empresaNombre || doc.empresa?.nombre || "Empresa transportista")}</div></div></div>
+      <div class="cmr-sub">Este soporte permite verificar el documento alojado por empresa mediante QR o codigo de control. Para transporte internacional UE/Reino Unido se usa perfil CMR/eCMR preparatorio.</div>
+      <div><div class="cmr-code">No. ${escapeHtml(doc.referencia_pedido || doc.codigo_control || "-")}</div>${qrDataUrl ? `<img class="cmr-qr" src="${escapeHtml(qrDataUrl)}" alt="QR documento">` : `<div class="cmr-qr-empty">QR pendiente</div>`}</div>
+    </header>
+    <section class="cmr-grid">
+      <div class="cmr-box"><div class="cmr-num">1 Remitente / Sender</div>${cmrPartyLines(doc.cargador_contractual).map(line => `<p>${escapeHtml(line)}</p>`).join("")}</div>
+      <div class="cmr-box"><div class="cmr-num">16 Transportista / Carrier</div>${cmrPartyLines(doc.transportista_efectivo).map(line => `<p>${escapeHtml(line)}</p>`).join("")}</div>
+      <div class="cmr-box"><div class="cmr-num">2 Destinatario / Consignee</div>${cmrAddressLines(doc.destino).map(line => `<p>${escapeHtml(line)}</p>`).join("")}</div>
+      <div class="cmr-box"><div class="cmr-num">17 Transportistas sucesivos / Successive carriers</div><p>${escapeHtml(doc.colaborador?.nombre || doc.transportista_efectivo?.nombre || "-")}</p></div>
+      <div class="cmr-box"><div class="cmr-num">3 Lugar de entrega / Place of delivery</div>${cmrAddressLines(doc.destino).map(line => `<p>${escapeHtml(line)}</p>`).join("")}<p class="cmr-small">Previsto: ${escapeHtml(descargaFecha)}</p></div>
+      <div class="cmr-box"><div class="cmr-num">18 Reservas y observaciones / Reservations</div><p>${escapeHtml(doc.observaciones || "-")}</p></div>
+      <div class="cmr-box"><div class="cmr-num">4 Lugar y fecha de carga / Place and date of taking over</div>${cmrAddressLines(doc.origen).map(line => `<p>${escapeHtml(line)}</p>`).join("")}<p class="cmr-small">Previsto: ${escapeHtml(cargaFecha)}</p></div>
+      <div class="cmr-box"><div class="cmr-num">19 Acuerdos especiales / Special agreements</div><p>Pago: ${escapeHtml(doc.condiciones?.forma_pago || "-")}</p></div>
+      <div class="cmr-box"><div class="cmr-num">5 Documentos anexos / Documents attached</div><p>DCD/eCMR TransGest, albaranes/POD si se adjuntan al viaje.</p></div>
+      <div class="cmr-box"><div class="cmr-num">21 Establecido en / Established in</div><p>${escapeHtml(doc.origen?.provincia || doc.origen?.pais || "Espana")} - ${escapeHtml(cmrDate(generatedAt))}</p><p class="cmr-small">Control: ${escapeHtml(doc.codigo_control || "-")}</p></div>
+    </section>
+    <table class="cmr-goods">
+      <thead><tr><th>6 Marcas y numeros</th><th>7 Cantidad</th><th>8 Embalaje</th><th>9 Naturaleza mercancia</th><th>11 Peso bruto</th><th>12 Volumen</th></tr></thead>
+      <tbody><tr><td>${escapeHtml(doc.referencia_pedido || "-")}</td><td>${escapeHtml(doc.mercancia?.bultos || "-")}</td><td>${escapeHtml(doc.mercancia?.embalaje || "-")}</td><td>${escapeHtml(doc.mercancia?.descripcion || "-")}</td><td>${escapeHtml(peso)}</td><td>${escapeHtml(volumen)}</td></tr></tbody>
+    </table>
+    <section class="cmr-grid">
+      <div class="cmr-box"><div class="cmr-num">15 Reembolso / Cash on delivery</div><p>${escapeHtml(doc.condiciones?.forma_pago || "-")}</p></div>
+      <div class="cmr-box"><div class="cmr-num">Vehiculo y chofer / Vehicle and driver</div><p>Tractora: ${escapeHtml(doc.vehiculo?.tractora || "-")} | Remolque: ${escapeHtml(doc.vehiculo?.remolque || "-")}</p><p>Chofer: ${escapeHtml([doc.chofer?.nombre, doc.chofer?.dni, doc.chofer?.telefono].filter(Boolean).join(" | ") || "-")}</p></div>
+      <div class="cmr-box cmr-wide"><div class="cmr-num">QR y verificacion / Verification</div><p class="cmr-link">${escapeHtml(qrUrl || "Sin enlace publico configurado")}</p><p class="cmr-small">Codigo de verificacion: ${escapeHtml(doc.verificacion?.codigo_verificacion || "-")}</p></div>
+    </section>
+    <section class="cmr-signatures">
+      ${cmrSignatureHtml("22 Firma remitente / Sender signature", firmas.cargador, doc.cargador_contractual?.nombre || "")}
+      ${cmrSignatureHtml("23 Firma transportista / Carrier signature", firmas.chofer, [doc.chofer?.nombre, doc.chofer?.dni].filter(Boolean).join(" | "))}
+      ${cmrSignatureHtml("24 Firma destinatario / Consignee signature", firmas.destinatario, doc.destino?.destinatario || doc.destino?.nombre || "")}
+    </section>
+    ${privateNotes}
+    <p class="cmr-small" style="margin-top:10px">Generado: ${escapeHtml(new Date(generatedAt).toLocaleString("es-ES"))}. Hash y trazabilidad se conservan en el repositorio DCD de la empresa.</p>
+  </main>${printScript}</body></html>`;
+}
+
+async function generateDocumentoControlCmrPdf({
+  documento,
+  empresaNombre = "TransGest TMS",
+  generatedAt = new Date().toISOString(),
+  publicView = false,
+}) {
+  const PDFDocument = require("pdfkit");
+  const QRCode = require("qrcode");
+  const docData = documento || {};
+  const createdAt = new Date(generatedAt);
+  const qrUrl = docData.qr_url || docData.soporte_url || docData.verificacion?.url_segura || "";
+  const qrDataUrl = qrUrl ? await QRCode.toDataURL(qrUrl, { errorCorrectionLevel: "M", margin: 1, width: 220 }) : "";
+  const dataUrlBuffer = (value = "") => {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const base64 = raw.startsWith("data:") ? raw.split(",")[1] : raw;
+    try { return Buffer.from(base64 || "", "base64"); } catch { return null; }
+  };
+  const qrBuffer = dataUrlBuffer(qrDataUrl);
+  const logoBuffer = dataUrlBuffer(docData.empresa?.logo_url);
+  const pdf = new PDFDocument({
+    size: "A4",
+    margin: 22,
+    info: {
+      Title: `CMR-DCD ${docData.referencia_pedido || docData.codigo_control || ""}`.trim(),
+      Author: empresaNombre || "TransGest TMS",
+      Subject: "Carta de porte electronica / Documento de Control Digital",
+      Keywords: "CMR,eCMR,DCD,DeCA,TransGest,QR",
+      Creator: "TransGest",
+      Producer: "TransGest PDF service",
+      CreationDate: createdAt,
+      ModDate: createdAt,
+    },
+  });
+  const chunks = [];
+  pdf.on("data", chunk => chunks.push(chunk));
+  const done = new Promise((resolve, reject) => {
+    pdf.on("end", () => resolve(Buffer.concat(chunks)));
+    pdf.on("error", reject);
+  });
+  const pageW = pdf.page.width;
+  const left = 28;
+  const right = pageW - 28;
+  const colW = (right - left) / 2;
+  const title = documentIsInternational(docData)
+    ? "Carta de porte electronica CMR / Electronic consignment note"
+    : "Documento de Control Digital - formato carta de porte";
+  const drawRect = (x, y, w, h) => pdf.rect(x, y, w, h).strokeColor("#111827").lineWidth(0.7).stroke();
+  const put = (textValue, x, y, w, opts = {}) => {
+    pdf.font(opts.bold ? "Helvetica-Bold" : "Helvetica").fontSize(opts.size || 8).fillColor(opts.color || "#111827")
+      .text(cmrText(textValue, opts.fallback || ""), x, y, { width: w, lineGap: opts.lineGap ?? 1, height: opts.height });
+  };
+  const box = (num, label, lines, x, y, w, h) => {
+    drawRect(x, y, w, h);
+    put(`${num} ${label}`, x + 5, y + 5, w - 10, { bold: true, size: 7, color: "#0f766e" });
+    const arr = Array.isArray(lines) ? lines : [lines];
+    put(arr.filter(Boolean).join("\n"), x + 5, y + 18, w - 10, { size: 7.5, height: h - 22 });
+  };
+  const signature = (num, label, firma = {}, extra = "", x, y, w, h) => {
+    drawRect(x, y, w, h);
+    put(`${num} ${label}`, x + 5, y + 5, w - 10, { bold: true, size: 7, color: "#0f766e" });
+    put(extra || "Nombre, firma y sello", x + 5, y + 18, w - 10, { size: 7, color: "#475569", height: 18 });
+    const img = dataUrlBuffer(firma?.imagen);
+    if (img) {
+      try { pdf.image(img, x + 8, y + 40, { fit: [w - 16, 34] }); } catch {}
+    } else {
+      pdf.moveTo(x + 10, y + 70).lineTo(x + w - 10, y + 70).strokeColor("#111827").lineWidth(0.6).stroke();
+    }
+    put(`${firma?.nombre || "Pendiente"}${firma?.fecha ? ` - ${new Date(firma.fecha).toLocaleString("es-ES")}` : ""}`, x + 5, y + h - 22, w - 10, { size: 6.5 });
+    if (firma?.hash) put(`SHA-256 ${firma.hash}`, x + 5, y + h - 12, w - 10, { size: 5, color: "#64748b" });
+  };
+
+  drawRect(left, 26, right - left, 82);
+  if (logoBuffer) {
+    try { pdf.image(logoBuffer, left + 8, 34, { fit: [48, 48] }); } catch {}
+  }
+  put(title, left + (logoBuffer ? 64 : 8), 34, 300, { bold: true, size: 12 });
+  put(`${empresaNombre || docData.empresa?.nombre || "TransGest"}\nGenerado: ${createdAt.toLocaleString("es-ES")}`, left + (logoBuffer ? 64 : 8), 68, 300, { size: 7, color: "#475569" });
+  put(`No. ${docData.referencia_pedido || docData.codigo_control || "-"}\nControl: ${docData.codigo_control || "-"}`, right - 194, 34, 110, { bold: true, size: 8 });
+  if (qrBuffer) pdf.image(qrBuffer, right - 76, 32, { width: 66, height: 66 });
+  else drawRect(right - 76, 32, 66, 66);
+
+  let y = 114;
+  const rowH = 58;
+  box("1", "Remitente / Sender", cmrPartyLines(docData.cargador_contractual), left, y, colW, rowH);
+  box("16", "Transportista / Carrier", cmrPartyLines(docData.transportista_efectivo), left + colW, y, colW, rowH);
+  y += rowH;
+  box("2", "Destinatario / Consignee", cmrAddressLines(docData.destino), left, y, colW, rowH);
+  box("17", "Transportistas sucesivos / Successive carriers", docData.colaborador?.nombre || docData.transportista_efectivo?.nombre || "-", left + colW, y, colW, rowH);
+  y += rowH;
+  box("3", "Lugar de entrega / Place of delivery", [...cmrAddressLines(docData.destino), `Previsto: ${cmrDate(docData.horarios?.fecha_descarga)} ${docData.horarios?.hora_descarga || docData.horarios?.ventana_descarga || ""}`], left, y, colW, rowH);
+  box("18", "Reservas y observaciones / Reservations", docData.observaciones || "-", left + colW, y, colW, rowH);
+  y += rowH;
+  box("4", "Lugar y fecha de carga / Place and date of taking over", [...cmrAddressLines(docData.origen), `Previsto: ${cmrDate(docData.horarios?.fecha_carga)} ${docData.horarios?.hora_carga || docData.horarios?.ventana_carga || ""}`], left, y, colW, rowH);
+  box("19", "Acuerdos especiales / Special agreements", `Pago: ${docData.condiciones?.forma_pago || "-"}`, left + colW, y, colW, rowH);
+  y += rowH;
+  box("5", "Documentos anexos / Documents attached", "DCD/eCMR TransGest, albaranes/POD/CMR si se adjuntan al viaje.", left, y, colW, 46);
+  box("21", "Establecido en / Established in", `${docData.origen?.provincia || docData.origen?.pais || "Espana"} - ${cmrDate(generatedAt)}`, left + colW, y, colW, 46);
+  y += 56;
+
+  const goodsH = 64;
+  const goodsCols = [82, 62, 72, 168, 70, 57];
+  let x = left;
+  ["6 Marcas y numeros", "7 Cantidad", "8 Embalaje", "9 Naturaleza mercancia", "11 Peso bruto", "12 Volumen"].forEach((h, idx) => {
+    const w = goodsCols[idx];
+    drawRect(x, y, w, goodsH);
+    put(h, x + 4, y + 5, w - 8, { bold: true, size: 6.5, color: "#0f766e" });
+    const value = [
+      docData.referencia_pedido || "-",
+      docData.mercancia?.bultos || "-",
+      docData.mercancia?.embalaje || "-",
+      docData.mercancia?.descripcion || "-",
+      docData.mercancia?.peso_kg ? `${Number(docData.mercancia.peso_kg).toLocaleString("es-ES")} kg` : "-",
+      docData.mercancia?.volumen || "-",
+    ][idx];
+    put(value, x + 4, y + 28, w - 8, { size: 7.5, height: 28 });
+    x += w;
+  });
+  y += goodsH;
+
+  box("15", "Reembolso / Cash on delivery", docData.condiciones?.forma_pago || "-", left, y, colW, 48);
+  box("", "Vehiculo y chofer / Vehicle and driver", [
+    `Tractora: ${docData.vehiculo?.tractora || "-"} | Remolque: ${docData.vehiculo?.remolque || "-"}`,
+    `Chofer: ${[docData.chofer?.nombre, docData.chofer?.dni, docData.chofer?.telefono].filter(Boolean).join(" | ") || "-"}`,
+  ], left + colW, y, colW, 48);
+  y += 48;
+  box("", "QR y verificacion / Verification", [`URL: ${qrUrl || "Sin enlace publico configurado"}`, `Codigo: ${docData.verificacion?.codigo_verificacion || "-"}`], left, y, right - left, 46);
+  y += 56;
+
+  const sigW = (right - left) / 3;
+  const firmas = docData.firmas || {};
+  signature("22", "Firma remitente / Sender signature", firmas.cargador, docData.cargador_contractual?.nombre || "", left, y, sigW, 96);
+  signature("23", "Firma transportista / Carrier signature", firmas.chofer, [docData.chofer?.nombre, docData.chofer?.dni].filter(Boolean).join(" | "), left + sigW, y, sigW, 96);
+  signature("24", "Firma destinatario / Consignee signature", firmas.destinatario, docData.destino?.destinatario || docData.destino?.nombre || "", left + sigW * 2, y, sigW, 96);
+  y += 106;
+
+  if (!publicView) {
+    box("", "Condiciones documentadas / Documented terms", [
+      `Pago: ${docData.condiciones?.forma_pago || "-"}`,
+      docData.condiciones?.revision_combustible || "",
+      `Estado interoperabilidad: ${buildEcmrConsignmentNote(docData).status || "-"}`,
+    ], left, y, right - left, 48);
+  }
+  put("Documento generado por TransGest. El QR abre el soporte alojado por empresa; la trazabilidad y los hashes se conservan en el repositorio DCD.", left, 810, right - left, { size: 6.5, color: "#475569" });
+  pdf.end();
+  const buffer = await done;
+  return {
+    buffer,
+    base64: buffer.toString("base64"),
+    mime: "application/pdf",
+    filename: buildDocumentoControlFilename(docData || {}),
+    hash_sha256: crypto.createHash("sha256").update(buffer).digest("hex"),
+    metadata: {
+      title: pdf.info.Title,
+      author: pdf.info.Author,
+      subject: pdf.info.Subject,
+      creator: pdf.info.Creator,
+      producer: pdf.info.Producer,
+      creation_date: createdAt.toISOString(),
+      modification_date: createdAt.toISOString(),
+      qr_url: qrUrl || "",
+      filename: buildDocumentoControlFilename(docData || {}),
+    },
+  };
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -1566,8 +1850,8 @@ module.exports = {
   buildDocumentoControlStructuredExport,
   buildDocumentoControlSignaturePackage,
   buildDocumentoControlQrDataUrl,
-  buildDocumentoControlHtml,
-  generateDocumentoControlPdf,
+  buildDocumentoControlHtml: buildDocumentoControlCmrHtml,
+  generateDocumentoControlPdf: generateDocumentoControlCmrPdf,
   buildDocumentoControlFilename,
   buildDocumentoControlExportFilename,
   buildDocumentoControlSignaturePackageFilename,

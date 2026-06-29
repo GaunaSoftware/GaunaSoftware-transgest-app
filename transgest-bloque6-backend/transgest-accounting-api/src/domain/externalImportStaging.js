@@ -11,6 +11,8 @@ const MAX_ROWS = 500;
 const PARTY_TYPES = ["customer", "supplier", "customer_supplier", "employee", "tax_authority", "bank", "other"];
 const ACCOUNT_TYPES = ["asset", "liability", "equity", "income", "expense", "memorandum"];
 const MATURITY_DIRECTIONS = ["receivable", "payable"];
+const BANK_TRANSACTION_DIRECTIONS = ["inflow", "outflow"];
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function inputError(message, status = 400) {
   const error = new Error(message);
@@ -265,6 +267,14 @@ function normalizeMaturityDirection(value) {
   return raw;
 }
 
+function normalizeBankTransactionDirection(value, sign) {
+  const raw = normalizeHeader(value);
+  if (!raw) return sign < 0 ? "outflow" : "inflow";
+  if (["inflow", "entrada", "cobro", "cobrado", "haber", "abono", "ingreso", "positivo"].includes(raw)) return "inflow";
+  if (["outflow", "salida", "pago", "pagado", "debe", "cargo", "gasto", "negativo"].includes(raw)) return "outflow";
+  return raw;
+}
+
 function normalizeDateLike(value) {
   const raw = String(value || "").trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
@@ -282,6 +292,22 @@ function isValidIsoDate(value) {
 
 function normalizeAmountLike(value) {
   return String(value || "").trim().replace(",", ".");
+}
+
+function parseBankTransactionAmountLike(value) {
+  const raw = String(value || "").trim().replace(/\s+/g, "").replace(/[€]/g, "");
+  if (!raw) return { amount: "", sign: 1 };
+  let normalized = raw;
+  if (/^-?\d{1,3}(\.\d{3})+,\d{1,6}$/.test(raw)) {
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (/^-?\d{1,3}(,\d{3})+\.\d{1,6}$/.test(raw)) {
+    normalized = raw.replace(/,/g, "");
+  } else {
+    normalized = raw.replace(",", ".");
+  }
+  const sign = normalized.startsWith("-") ? -1 : 1;
+  const absolute = sign < 0 ? normalized.slice(1) : normalized;
+  return { amount: absolute, sign };
 }
 
 function mapPartyStagingRow(row) {
@@ -333,6 +359,39 @@ function mapMaturityStagingRow(row) {
   return { mapped, errors, warnings };
 }
 
+function mapBankTransactionStagingRow(row) {
+  const payload = row.normalized_payload || row.raw_payload || {};
+  const parsedAmount = parseBankTransactionAmountLike(firstValue(payload, ["amount", "importe", "valor"]));
+  const direction = normalizeBankTransactionDirection(firstValue(payload, ["direction", "tipo", "sentido"]), parsedAmount.sign);
+  const transactionDate = normalizeDateLike(firstValue(payload, ["transaction_date", "fecha", "fecha_operacion", "date"]));
+  const valueDate = normalizeDateLike(firstValue(payload, ["value_date", "fecha_valor"]));
+  const mapped = {
+    bank_account_id: firstValue(payload, ["bank_account_id", "cuenta_bancaria_id", "cuenta_banco_id"]),
+    iban: firstValue(payload, ["iban", "cuenta_iban", "iban_cuenta"]).replace(/\s+/g, "").toUpperCase(),
+    transaction_date: transactionDate,
+    value_date: valueDate || null,
+    description: firstValue(payload, ["description", "descripcion", "concepto", "detalle"]),
+    reference: firstValue(payload, ["reference", "referencia", "ref", "documento"]),
+    counterparty_name: firstValue(payload, ["counterparty_name", "contraparte", "tercero", "nombre"]),
+    amount: parsedAmount.amount,
+    direction,
+    notes: firstValue(payload, ["notes", "notas", "observaciones"]),
+  };
+  const errors = [];
+  const warnings = [];
+  if (!mapped.bank_account_id && !mapped.iban) errors.push({ code: "missing_bank_account_reference", message: "Falta bank_account_id o IBAN" });
+  if (mapped.bank_account_id && !UUID_RE.test(mapped.bank_account_id)) errors.push({ code: "invalid_bank_account_id", message: "bank_account_id invalido" });
+  if (mapped.iban && !/^[A-Z]{2}[0-9A-Z]{13,32}$/.test(mapped.iban)) errors.push({ code: "invalid_iban", message: "IBAN invalido" });
+  if (!isValidIsoDate(mapped.transaction_date)) errors.push({ code: "invalid_transaction_date", message: "Fecha de operacion invalida" });
+  if (mapped.value_date && !isValidIsoDate(mapped.value_date)) errors.push({ code: "invalid_value_date", message: "Fecha valor invalida" });
+  if (!mapped.description) errors.push({ code: "missing_description", message: "Falta concepto o descripcion" });
+  if (!/^\d{1,12}(\.\d{1,6})?$/.test(mapped.amount) || Number(mapped.amount) <= 0) errors.push({ code: "invalid_amount", message: "Importe invalido" });
+  if (!BANK_TRANSACTION_DIRECTIONS.includes(mapped.direction)) errors.push({ code: "unsupported_bank_transaction_direction", message: `Tipo de movimiento no soportado: ${mapped.direction || "vacio"}` });
+  if (!mapped.reference) warnings.push({ code: "missing_reference", message: "Sin referencia bancaria" });
+  if (!mapped.counterparty_name) warnings.push({ code: "missing_counterparty", message: "Sin contraparte" });
+  return { mapped, errors, warnings };
+}
+
 function mapAccountStagingRow(row) {
   const payload = row.normalized_payload || row.raw_payload || {};
   const accountType = normalizeAccountType(firstValue(payload, ["account_type", "tipo", "tipo_cuenta", "naturaleza"]));
@@ -357,6 +416,7 @@ module.exports = {
   IMPORT_TYPES,
   ROW_STATUSES,
   mapAccountStagingRow,
+  mapBankTransactionStagingRow,
   mapMaturityStagingRow,
   mapPartyStagingRow,
   normalizeExternalImportApplyInput,

@@ -221,15 +221,17 @@ function formatExternalImportIssue(issue) {
   if (issue.party) return `${issue.code}: ${issue.party.legal_name || issue.party.tax_id || issue.party.id}`;
   if (issue.account) return `${issue.code}: ${issue.account.code || issue.account.name || issue.account.id}`;
   if (issue.maturity) return `${issue.code}: ${issue.maturity.document_ref || issue.maturity.description || issue.maturity.id}`;
+  if (issue.bank_transaction) return `${issue.code}: ${issue.bank_transaction.description || issue.bank_transaction.reference || issue.bank_transaction.id}`;
   return issue.message || issue.code || JSON.stringify(issue);
 }
 
 function externalImportPreviewTitle(row) {
-  return row.mapped?.legal_name || row.mapped?.party_name || row.mapped?.name || row.mapped?.code || row.mapped?.document_ref || "Sin nombre";
+  return row.mapped?.legal_name || row.mapped?.party_name || row.mapped?.description || row.mapped?.name || row.mapped?.code || row.mapped?.document_ref || "Sin nombre";
 }
 
 function externalImportPreviewSubtitle(row) {
   if (row.mapped?.code) return `${row.mapped.code} | ${row.mapped.account_type || "tipo pendiente"}`;
+  if (row.mapped?.transaction_date) return `${row.mapped.transaction_date} | ${row.mapped.amount || "sin importe"} | ${row.mapped.direction || "tipo pendiente"} | ${row.mapped.bank_account_name || row.mapped.iban || "cuenta pendiente"}`;
   if (row.mapped?.due_date) return `${row.mapped.due_date} | ${row.mapped.amount || "sin importe"} | ${row.mapped.direction || "tipo pendiente"}`;
   return `${row.mapped?.tax_id || "Sin NIF/CIF"} | ${row.mapped?.party_type || "tipo pendiente"}`;
 }
@@ -1654,6 +1656,7 @@ export default function App() {
         refreshParties(partyFilters),
         batch.import_type === "accounts" ? refreshAccounts({ ...accountFilters, fiscal_year_id: externalImportTargetYearId }) : Promise.resolve(),
         batch.import_type === "maturities" ? refreshMaturities(maturityFilters) : Promise.resolve(),
+        batch.import_type === "bank_transactions" ? refreshBanks(bankTransactionFilters, bankAccountFilters, { clearStatus: false }) : Promise.resolve(),
       ]);
     } catch (err) {
       setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
@@ -4024,10 +4027,11 @@ export default function App() {
                             {canWriteExternalImports && (
                               (batch.import_type === "parties" && canWriteParties) ||
                               (batch.import_type === "accounts" && canWriteAccounts) ||
-                              (batch.import_type === "maturities" && canWriteMaturities)
+                              (batch.import_type === "maturities" && canWriteMaturities) ||
+                              (batch.import_type === "bank_transactions" && canWriteBanks)
                             ) && batch.status === "approved" && (
                               <button type="button" onClick={() => handleApplyExternalImportBatch(batch)}>
-                                {batch.import_type === "accounts" ? "Aplicar cuentas" : batch.import_type === "maturities" ? "Aplicar vencimientos" : "Aplicar terceros"}
+                                {batch.import_type === "accounts" ? "Aplicar cuentas" : batch.import_type === "maturities" ? "Aplicar vencimientos" : batch.import_type === "bank_transactions" ? "Aplicar movimientos" : "Aplicar terceros"}
                               </button>
                             )}
                             {canWriteExternalImports && batch.status === "pending_review" && (

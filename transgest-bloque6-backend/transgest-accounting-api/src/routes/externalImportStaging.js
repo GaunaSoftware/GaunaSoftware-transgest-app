@@ -9,6 +9,7 @@ const {
   normalizeExternalImportReviewInput,
   normalizeExternalImportApplyInput,
   mapAccountStagingRow,
+  mapBankTransactionStagingRow,
   mapMaturityStagingRow,
   mapPartyStagingRow,
   nextBatchStatus,
@@ -17,6 +18,7 @@ const { hasPermission } = require("../domain/rbac");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
 const router = express.Router();
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function q(name) {
   return `"${config.schema}"."${String(name).replace(/"/g, '""')}"`;
@@ -256,10 +258,87 @@ async function buildMaturityImportPreview(client, selected, batch) {
   };
 }
 
+async function buildBankTransactionImportPreview(client, selected, batch) {
+  const rowsResult = await client.query(
+    `SELECT id, row_number, row_hash, status, raw_payload, normalized_payload, errors, warnings
+       FROM ${q("external_import_rows")}
+      WHERE batch_id=$1 AND company_id=$2
+      ORDER BY row_number`,
+    [batch.id, selected.company_id]
+  );
+  const mappedRows = rowsResult.rows.map(row => ({ row, mapped: mapBankTransactionStagingRow(row) }));
+  const bankAccountIds = mappedRows
+    .map(item => item.mapped.mapped.bank_account_id)
+    .filter(value => UUID_RE.test(String(value || "")));
+  const ibans = mappedRows.map(item => item.mapped.mapped.iban).filter(Boolean);
+  const sourceIds = rowsResult.rows.map(row => row.row_hash);
+
+  const accounts = await client.query(
+    `SELECT id, name, iban, currency
+       FROM ${q("accounting_bank_accounts")}
+      WHERE company_id=$1 AND is_active=TRUE
+        AND (
+          id=ANY($2::uuid[])
+          OR (cardinality($3::text[]) > 0 AND iban=ANY($3::text[]))
+        )`,
+    [selected.company_id, bankAccountIds, ibans]
+  );
+  const existing = sourceIds.length ? await client.query(
+    `SELECT id, bank_account_id, source_id, transaction_date, description, amount::text, direction
+       FROM ${q("bank_transactions")}
+      WHERE company_id=$1 AND source_system=$2 AND source_type='external_import' AND source_id=ANY($3::text[])`,
+    [selected.company_id, batch.provider_id, sourceIds]
+  ) : { rows: [] };
+  const byId = new Map(accounts.rows.map(row => [row.id, row]));
+  const byIban = new Map(accounts.rows.filter(row => row.iban).map(row => [row.iban, row]));
+  const bySource = new Map(existing.rows.map(row => [`${row.bank_account_id}:${row.source_id}`, row]));
+
+  const previewRows = mappedRows.map(({ row, mapped }) => {
+    const resolvedBankAccount = mapped.mapped.bank_account_id
+      ? byId.get(mapped.mapped.bank_account_id) || null
+      : byIban.get(mapped.mapped.iban) || null;
+    const errors = [...(row.errors || []), ...mapped.errors];
+    if (!resolvedBankAccount && !errors.some(error => error.code === "missing_bank_account_reference" || error.code === "invalid_bank_account_id" || error.code === "invalid_iban")) {
+      errors.push({ code: "bank_account_not_found", message: "Cuenta bancaria no encontrada o inactiva" });
+    }
+    const sourceConflict = resolvedBankAccount ? bySource.get(`${resolvedBankAccount.id}:${row.row_hash}`) || null : null;
+    const conflicts = sourceConflict ? [{ code: "bank_transaction_source_exists", bank_transaction: sourceConflict }] : [];
+    const action = errors.length ? "error" : conflicts.length ? "conflict" : "create";
+    return {
+      row_id: row.id,
+      row_number: row.row_number,
+      row_hash: row.row_hash,
+      action,
+      mapped: {
+        ...mapped.mapped,
+        bank_account_id: resolvedBankAccount?.id || mapped.mapped.bank_account_id || null,
+        bank_account_name: resolvedBankAccount?.name || null,
+        currency: resolvedBankAccount?.currency || "EUR",
+      },
+      errors,
+      warnings: [...(row.warnings || []), ...mapped.warnings],
+      conflicts,
+    };
+  });
+
+  return {
+    batch,
+    supported: true,
+    summary: {
+      rows: previewRows.length,
+      create: previewRows.filter(row => row.action === "create").length,
+      conflict: previewRows.filter(row => row.action === "conflict").length,
+      error: previewRows.filter(row => row.action === "error").length,
+    },
+    rows: previewRows,
+  };
+}
+
 function permissionForImportType(importType) {
   if (importType === "parties") return "parties.write";
   if (importType === "accounts") return "accounts.write";
   if (importType === "maturities") return "maturities.write";
+  if (importType === "bank_transactions") return "banks.write";
   return null;
 }
 
@@ -355,6 +434,7 @@ router.get("/external-import-batches/:id/preview", requirePermission("external_i
       if (batch.import_type === "parties") return buildPartyImportPreview(client, selected, batch);
       if (batch.import_type === "accounts") return buildAccountImportPreview(client, selected, batch, req.query.fiscal_year_id);
       if (batch.import_type === "maturities") return buildMaturityImportPreview(client, selected, batch);
+      if (batch.import_type === "bank_transactions") return buildBankTransactionImportPreview(client, selected, batch);
       return {
         batch,
         supported: false,
@@ -524,7 +604,9 @@ router.post(
           ? await buildAccountImportPreview(client, selected, batch, req.body?.fiscal_year_id)
           : batch.import_type === "maturities"
             ? await buildMaturityImportPreview(client, selected, batch)
-            : await buildPartyImportPreview(client, selected, batch);
+            : batch.import_type === "bank_transactions"
+              ? await buildBankTransactionImportPreview(client, selected, batch)
+              : await buildPartyImportPreview(client, selected, batch);
 
         if (batch.status === "applied") {
           const sourceIds = preview.rows.map(row => row.row_hash);
@@ -544,13 +626,21 @@ router.post(
                   ORDER BY due_date, document_ref`,
                 [selected.company_id, batch.provider_id, sourceIds]
               ) : { rows: [] })
-            : (sourceIds.length ? await client.query(
-              `SELECT id, source_party_id, party_type, legal_name, tax_id
-                 FROM ${q("accounting_parties")}
-                WHERE company_id=$1 AND source_system=$2 AND source_party_id=ANY($3::text[])
-                ORDER BY legal_name`,
-              [selected.company_id, batch.provider_id, sourceIds]
-            ) : { rows: [] });
+              : batch.import_type === "bank_transactions"
+                ? (sourceIds.length ? await client.query(
+                  `SELECT id, bank_account_id, source_id, transaction_date, description, amount::text, direction, status
+                     FROM ${q("bank_transactions")}
+                    WHERE company_id=$1 AND source_system=$2 AND source_type='external_import' AND source_id=ANY($3::text[])
+                    ORDER BY transaction_date DESC, description`,
+                  [selected.company_id, batch.provider_id, sourceIds]
+                ) : { rows: [] })
+                : (sourceIds.length ? await client.query(
+                  `SELECT id, source_party_id, party_type, legal_name, tax_id
+                     FROM ${q("accounting_parties")}
+                    WHERE company_id=$1 AND source_system=$2 AND source_party_id=ANY($3::text[])
+                    ORDER BY legal_name`,
+                  [selected.company_id, batch.provider_id, sourceIds]
+                ) : { rows: [] });
           return {
             batch,
             preview,
@@ -558,6 +648,7 @@ router.post(
             parties: batch.import_type === "parties" ? existing.rows : [],
             accounts: batch.import_type === "accounts" ? existing.rows : [],
             maturities: batch.import_type === "maturities" ? existing.rows : [],
+            bank_transactions: batch.import_type === "bank_transactions" ? existing.rows : [],
             repeated: true,
             summary: { applied: existing.rows.length, skipped: Math.max(0, preview.rows.length - existing.rows.length) },
           };
@@ -583,7 +674,75 @@ router.post(
         const createdParties = [];
         const createdAccounts = [];
         const createdMaturities = [];
+        const createdBankTransactions = [];
         for (const row of preview.rows.filter(item => item.action === "create")) {
+          if (batch.import_type === "bank_transactions") {
+            const created = await client.query(
+              `INSERT INTO ${q("bank_transactions")}
+                 (tenant_id, company_id, bank_account_id, transaction_date, value_date, description,
+                  reference, counterparty_name, amount, direction, source_system, source_type,
+                  source_id, notes, created_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'external_import',$12,$13,$14)
+               RETURNING id, tenant_id, company_id, bank_account_id, transaction_date, value_date,
+                         description, reference, counterparty_name, amount::text, direction, status,
+                         source_system, source_type, source_id, notes, created_at, updated_at`,
+              [
+                selected.tenant_id,
+                selected.company_id,
+                row.mapped.bank_account_id,
+                row.mapped.transaction_date,
+                row.mapped.value_date || null,
+                row.mapped.description,
+                row.mapped.reference || null,
+                row.mapped.counterparty_name || null,
+                row.mapped.amount,
+                row.mapped.direction,
+                batch.provider_id,
+                row.row_hash,
+                `Importado desde lote externo ${batch.id}, fila ${row.row_number}. ${input.reason}${row.mapped.notes ? ` ${row.mapped.notes}` : ""}`,
+                req.accountingUser.id,
+              ]
+            );
+            const bankTransaction = created.rows[0];
+            createdBankTransactions.push(bankTransaction);
+            await client.query(
+              `INSERT INTO ${q("audit_log")}
+                 (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+               VALUES ($1,$2,'user',$3,'bank_transaction.created_from_external_import','bank_transaction',$4,$5,$6::jsonb)`,
+              [
+                selected.tenant_id,
+                selected.company_id,
+                req.accountingUser.id,
+                bankTransaction.id,
+                req.id || null,
+                JSON.stringify({
+                  import_batch_id: batch.id,
+                  bank_account_id: bankTransaction.bank_account_id,
+                  row_number: row.row_number,
+                  row_hash: row.row_hash,
+                  provider_id: batch.provider_id,
+                  reason: input.reason,
+                }),
+              ]
+            );
+            await enqueueOutboxEvent(client, {
+              tenant_id: selected.tenant_id,
+              company_id: selected.company_id,
+              event_type: "AccountingBankTransactionCreated",
+              aggregate_type: "bank_transaction",
+              aggregate_id: bankTransaction.id,
+              payload: {
+                bank_transaction_id: bankTransaction.id,
+                bank_account_id: bankTransaction.bank_account_id,
+                transaction_date: String(bankTransaction.transaction_date).slice(0, 10),
+                direction: bankTransaction.direction,
+                amount: String(bankTransaction.amount),
+                status: bankTransaction.status,
+              },
+            });
+            continue;
+          }
+
           if (batch.import_type === "accounts") {
             const created = await client.query(
               `INSERT INTO ${q("accounts")}
@@ -779,7 +938,7 @@ router.post(
                   updated_at=NOW()
             WHERE id=$5
             RETURNING *`,
-          [req.accountingUser.id, createdParties.length + createdAccounts.length + createdMaturities.length, 0, input.reason, batch.id]
+          [req.accountingUser.id, createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length, 0, input.reason, batch.id]
         );
         const appliedBatch = updated.rows[0];
 
@@ -796,7 +955,7 @@ router.post(
             JSON.stringify({
               import_type: appliedBatch.import_type,
               provider_id: appliedBatch.provider_id,
-              applied_count: createdParties.length + createdAccounts.length + createdMaturities.length,
+              applied_count: createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length,
               skipped_count: 0,
               reason: input.reason,
             }),
@@ -811,7 +970,7 @@ router.post(
           payload: {
             import_batch_id: appliedBatch.id,
             import_type: appliedBatch.import_type,
-            applied_count: createdParties.length + createdAccounts.length + createdMaturities.length,
+            applied_count: createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length,
             skipped_count: 0,
           },
         });
@@ -819,12 +978,13 @@ router.post(
         return {
           batch: appliedBatch,
           preview,
-          records: batch.import_type === "accounts" ? createdAccounts : batch.import_type === "maturities" ? createdMaturities : createdParties,
+          records: batch.import_type === "accounts" ? createdAccounts : batch.import_type === "maturities" ? createdMaturities : batch.import_type === "bank_transactions" ? createdBankTransactions : createdParties,
           parties: createdParties,
           accounts: createdAccounts,
           maturities: createdMaturities,
+          bank_transactions: createdBankTransactions,
           repeated: false,
-          summary: { applied: createdParties.length + createdAccounts.length + createdMaturities.length, skipped: 0 },
+          summary: { applied: createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length, skipped: 0 },
         };
       });
       res.status(result.repeated ? 200 : 201).json(result);

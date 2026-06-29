@@ -7,6 +7,7 @@ const {
   normalizeExternalImportApplyInput,
   nextBatchStatus,
   mapAccountStagingRow,
+  mapBankTransactionStagingRow,
   mapMaturityStagingRow,
   mapPartyStagingRow,
   parseGenericCsv,
@@ -154,4 +155,38 @@ test("mapMaturityStagingRow mapea vencimientos y detecta errores", () => {
   assert.equal(invalid.errors.some(error => error.code === "unsupported_maturity_direction"), true);
   assert.equal(invalid.errors.some(error => error.code === "invalid_due_date"), true);
   assert.equal(invalid.errors.some(error => error.code === "invalid_amount"), true);
+});
+
+test("mapBankTransactionStagingRow mapea movimientos bancarios y detecta errores", () => {
+  const mapped = mapBankTransactionStagingRow({
+    raw_payload: {
+      iban: "ES91 2100 0418 4502 0005 1332",
+      fecha: "29/06/2026",
+      fecha_valor: "30/06/2026",
+      concepto: "Cobro cliente ruta norte",
+      referencia: "TRF-100",
+      tercero: "Cliente Demo",
+      importe: "-1.250,50",
+    },
+  });
+  assert.deepEqual(mapped.mapped, {
+    bank_account_id: "",
+    iban: "ES9121000418450200051332",
+    transaction_date: "2026-06-29",
+    value_date: "2026-06-30",
+    description: "Cobro cliente ruta norte",
+    reference: "TRF-100",
+    counterparty_name: "Cliente Demo",
+    amount: "1250.50",
+    direction: "outflow",
+    notes: "",
+  });
+  assert.equal(mapped.errors.length, 0);
+
+  const invalid = mapBankTransactionStagingRow({ raw_payload: { importe: "0", tipo: "otro" } });
+  assert.equal(invalid.errors.some(error => error.code === "missing_bank_account_reference"), true);
+  assert.equal(invalid.errors.some(error => error.code === "invalid_transaction_date"), true);
+  assert.equal(invalid.errors.some(error => error.code === "missing_description"), true);
+  assert.equal(invalid.errors.some(error => error.code === "invalid_amount"), true);
+  assert.equal(invalid.errors.some(error => error.code === "unsupported_bank_transaction_direction"), true);
 });

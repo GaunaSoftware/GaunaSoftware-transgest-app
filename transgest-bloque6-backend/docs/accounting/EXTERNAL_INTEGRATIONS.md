@@ -24,6 +24,7 @@ No existe una fuente publica unica y auditada que ordene con precision los 10 pr
 - La aplicacion controlada de terceros esta implementada en `/api/v1/external-import-batches/:id/apply`: solo acepta lotes aprobados, revalida errores/conflictos dentro de una transaccion, crea terceros con origen trazable al lote/fila, registra auditoria y emite outbox. No crea facturas, vencimientos ni asientos.
 - La previsualizacion y aplicacion controlada de cuentas contables reutiliza el mismo endpoint con `import_type=accounts` y `fiscal_year_id` explicito. Crea cuentas solo en el ejercicio seleccionado y bloquea codigos duplicados.
 - La previsualizacion y aplicacion controlada de vencimientos reutiliza el mismo endpoint con `import_type=maturities`. Resuelve terceros activos por `party_id`, NIF/CIF o nombre exacto, bloquea duplicados por origen externo y no crea facturas ni asientos.
+- La previsualizacion y aplicacion controlada de movimientos bancarios reutiliza el mismo endpoint con `import_type=bank_transactions`. Resuelve cuenta bancaria activa por `bank_account_id` o IBAN, bloquea duplicados por origen externo y crea movimientos en estado pendiente de conciliacion. No crea asientos ni conciliaciones automaticas.
 - Para programas con API, usar outbox transaccional, workers idempotentes, reintentos controlados y mapeo versionado por proveedor.
 - Para programas on-premise o cerrados, priorizar paquetes CSV/XLSX/PDF auditables y confirmados por asesoria.
 - Facturacion fiscal, VERI*FACTU, factura electronica B2B y SII siguen siendo ambitos separados. No se debe delegar emision fiscal en un conector externo sin decision expresa de arquitectura y revision legal.
@@ -84,6 +85,8 @@ La vista previa de lotes de cuentas exige `fiscal_year_id`. Mapea columnas habit
 
 La vista previa de lotes de vencimientos mapea columnas habituales como `nif`, `tercero`, `tipo`, `vencimiento`, `factura`, `concepto`, `importe` y `forma_pago`. Exige tercero existente y activo, fecha de vencimiento valida, direccion `receivable/payable` y un importe positivo.
 
+La vista previa de lotes de movimientos bancarios mapea columnas habituales como `bank_account_id`, `iban`, `fecha`, `fecha_valor`, `concepto`, `referencia`, `tercero`, `importe` y `tipo`. El signo del importe permite inferir entrada o salida si no viene una columna de tipo. Exige cuenta bancaria activa, fecha valida, descripcion, direccion `inflow/outflow` y un importe positivo tras normalizar el signo.
+
 La aplicacion de lotes de terceros exige estado `approved`; antes de insertar vuelve a ejecutar la misma previsualizacion dentro de la transaccion. Si hay errores o conflictos, responde 409 y no escribe datos maestros. Si el lote ya esta `applied`, la llamada es idempotente y devuelve los terceros ya localizados por origen externo.
 
 Estados iniciales:
@@ -96,9 +99,10 @@ Estados iniciales:
 
 Restricciones actuales:
 
-- No crea bancos, facturas ni asientos; terceros, cuentas y vencimientos solo se crean desde endpoints controlados de aplicacion de lotes aprobados.
+- No crea cuentas bancarias, facturas ni asientos; terceros, cuentas, vencimientos y movimientos bancarios solo se crean desde endpoints controlados de aplicacion de lotes aprobados.
 - Las cuentas solo se crean desde lotes `accounts` aprobados, con ejercicio destino explicito y sin crear saldos ni movimientos.
 - Los vencimientos importados son cartera operativa; no equivalen a factura fiscal ni asiento contable.
+- Los movimientos bancarios importados son tesoreria operativa en estado pendiente; no equivalen a conciliacion bancaria ni asiento contable.
 - No valida todavia formatos concretos de Sage, a3, CONTASOL, Holded u Odoo.
 - No declara homologacion ni compatibilidad productiva con proveedores externos.
 - La aprobacion solo autoriza el siguiente paso tecnico; cada tipo de aplicacion real requiere un caso de uso especifico por tipo de importacion.

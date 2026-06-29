@@ -403,7 +403,12 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
                 const ref = lote.obra_nombre || lote.pedido_ref || lote.cliente_movimiento_nombre || lote.notas || "Sin referencia";
                 return (
                   <button key={lote.id || `${lote.fecha}-${ref}`} type="button"
-                    onClick={() => setForm(p => ({ ...p, cantidad:String(lote.restante), pedido_ref:ref, cliente_movimiento_id:lote.cliente_movimiento_id || p.cliente_movimiento_id || "" }))}
+                    onClick={() => setForm(p => ({
+                      ...p,
+                      cantidad: String(Number(p.cantidad || 0) + Number(lote.restante || 0)),
+                      pedido_ref: p.pedido_ref && p.pedido_ref !== ref ? `${p.pedido_ref} | ${ref}` : ref,
+                      cliente_movimiento_id: lote.cliente_movimiento_id || p.cliente_movimiento_id || "",
+                    }))}
                     style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",textAlign:"left",padding:"7px 9px",borderRadius:7,border:"1px solid rgba(249,115,22,.24)",background:"rgba(249,115,22,.07)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                     <span style={{fontSize:12,fontWeight:800}}>{ref}</span>
                     <span style={{fontSize:11,color:"#f97316",fontWeight:900}}>{fmtN(lote.restante)} palets</span>

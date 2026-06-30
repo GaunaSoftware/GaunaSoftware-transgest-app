@@ -109,6 +109,8 @@ export default function ControlHorario() {
   const { user } = useAuth();
   const isMobile = useIsMobile();
   const canManage = ["gerente", "contable", "administrativo"].includes(user?.rol);
+  const isGerente = user?.rol === "gerente";
+  const showOwnClock = !isGerente;
   const [miJornada, setMiJornada] = useState(null);
   const [resumen, setResumen] = useState(null);
   const [items, setItems] = useState([]);
@@ -131,7 +133,7 @@ export default function ControlHorario() {
     setLoading(true);
     try {
       const [m, r, l] = await Promise.all([
-        getMiControlHorario().catch(() => null),
+        showOwnClock ? getMiControlHorario().catch(() => null) : Promise.resolve(null),
         getControlHorarioResumen({ desde, hasta }).catch(() => null),
         getControlHorario({ desde, hasta }).catch(() => []),
       ]);
@@ -144,7 +146,7 @@ export default function ControlHorario() {
     } finally {
       setLoading(false);
     }
-  }, [desde, hasta]);
+  }, [desde, hasta, showOwnClock]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {
@@ -157,6 +159,15 @@ export default function ControlHorario() {
   const abiertos = Array.isArray(resumen?.abiertas) ? resumen.abiertas : [];
   const estadoTexto = miJornadaLive?.en_pausa ? "En descanso" : miJornadaLive?.abierto ? "Jornada abierta" : miJornadaLive ? "Jornada cerrada" : "Sin fichar";
   const descansoExcedido = Boolean(miJornadaLive?.en_pausa && Number(miJornadaLive.pausa_total_live_min || 0) > Number(jornadaCfg.pausa_min || 0));
+  const revision = useMemo(() => {
+    const rows = Array.isArray(items) ? items : [];
+    const fueraBase = rows.filter(r => r.ubicacion_estado === "fuera_radio");
+    const tele = rows.filter(r => String(r.modalidad || "").toLowerCase() === "teletrabajo");
+    const abiertosPeriodo = rows.filter(r => !r.salida_at && r.estado !== "cerrado");
+    const descansosExcedidos = rows.filter(r => Number(r.pausa_total_live_min || r.pausa_total_min || 0) > Number(jornadaCfg.pausa_min || 0));
+    const pendientesJustificar = fueraBase.filter(r => !String(r.notas || r.motivo_ajuste || "").trim());
+    return { fueraBase:fueraBase.length, tele:tele.length, abiertos:abiertosPeriodo.length, descansos:descansosExcedidos.length, pendientesJustificar:pendientesJustificar.length };
+  }, [items, jornadaCfg.pausa_min]);
   const acciones = useMemo(() => {
     if (!miJornadaLive) return [["entrada", "Fichar entrada", "var(--accent)"]];
     if (miJornadaLive.salida_at) return [["entrada", "Jornada cerrada", "#64748b"]];
@@ -272,6 +283,27 @@ export default function ControlHorario() {
     }
   }
 
+  function setPeriodoRapido(tipo) {
+    const now = new Date();
+    if (tipo === "hoy") {
+      const d = todayIso();
+      setDesde(d);
+      setHasta(d);
+      return;
+    }
+    if (tipo === "mes") {
+      setDesde(formatLocalIso(new Date(now.getFullYear(), now.getMonth(), 1)));
+      setHasta(todayIso());
+      return;
+    }
+    if (tipo === "anterior") {
+      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const last = new Date(now.getFullYear(), now.getMonth(), 0);
+      setDesde(formatLocalIso(first));
+      setHasta(formatLocalIso(last));
+    }
+  }
+
   return (
     <div style={{...S.page,padding:isMobile ? "14px 12px 96px" : S.page.padding,overflowX:"hidden"}}>
       <div style={S.title}>Control horario oficina</div>
@@ -283,8 +315,17 @@ export default function ControlHorario() {
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "minmax(280px,1.1fr) minmax(280px,1fr)",gap:14,alignItems:"stretch"}}>
-        <div style={S.card}>
+      {canManage && (
+        <div style={{...S.card,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <button style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)"}} onClick={()=>setPeriodoRapido("hoy")}>Hoy</button>
+          <button style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)"}} onClick={()=>setPeriodoRapido("mes")}>Este mes</button>
+          <button style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)"}} onClick={()=>setPeriodoRapido("anterior")}>Mes anterior</button>
+          <div style={{fontSize:11,color:"var(--text5)",fontWeight:800,marginLeft:"auto"}}>Revision de fichajes, incidencias y teletrabajo</div>
+        </div>
+      )}
+
+      <div style={{display:"grid",gridTemplateColumns:isMobile || !showOwnClock ? "1fr" : "minmax(280px,1.1fr) minmax(280px,1fr)",gap:14,alignItems:"stretch"}}>
+        {showOwnClock && <div style={S.card}>
           <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
             <div>
               <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Mi jornada de hoy</div>
@@ -345,7 +386,7 @@ export default function ControlHorario() {
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
         <div style={S.card}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}>
@@ -360,6 +401,10 @@ export default function ControlHorario() {
             <Mini label="Abiertas" value={resumenBase.abiertas || 0} tone={Number(resumenBase.abiertas) ? "#f59e0b" : "var(--green)"} />
             <Mini label="Pausas" value={minToClock(resumenBase.pausa_min)} />
             <Mini label="Personas abiertas" value={abiertos.length} />
+            {canManage && <Mini label="Fuera de base" value={revision.fueraBase} tone={revision.fueraBase ? "#ef4444" : "var(--green)"} />}
+            {canManage && <Mini label="Teletrabajo" value={revision.tele} tone="var(--accent-xl)" />}
+            {canManage && <Mini label="Justificantes" value={revision.pendientesJustificar} tone={revision.pendientesJustificar ? "#f59e0b" : "var(--green)"} />}
+            {canManage && <Mini label="Descansos" value={revision.descansos} tone={revision.descansos ? "#f97316" : "var(--green)"} />}
           </div>
           <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "1fr 1fr",gap:8}}>
             <div><label style={S.lbl}>Desde</label><input type="date" style={{...S.inp,width:"100%"}} value={desde} onChange={e=>setDesde(e.target.value)} /></div>
@@ -377,6 +422,17 @@ export default function ControlHorario() {
           )}
         </div>
       </div>
+
+      {isGerente && (
+        <div style={{...S.card,display:"grid",gridTemplateColumns:isMobile ? "1fr" : "repeat(3,1fr)",gap:10}}>
+          <Mini label="Ausencias" value="Revisar" tone="#f59e0b" />
+          <Mini label="Vacaciones oficina" value="Nominas" tone="var(--accent-xl)" />
+          <Mini label="Vacaciones choferes" value="Choferes" tone="var(--accent-xl)" />
+          <div style={{gridColumn:"1/-1",fontSize:11,color:"var(--text5)",lineHeight:1.45}}>
+            Los saldos de vacaciones se muestran desde los datos reales de Nominas y fichas de chofer. Si no hay datos cargados, no se estiman importes ni dias.
+          </div>
+        </div>
+      )}
 
       <div style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "minmax(280px,1fr) minmax(280px,1fr)",gap:14,alignItems:"start"}}>
         <div style={S.card}>

@@ -14,6 +14,8 @@ const ROLES_PERMITIDOS = [
   "trafico",
   "administrativo",
   "responsable_taller",
+  "mecanico",
+  "colaborador",
   "visualizador",
   "chofer",
   "cliente",

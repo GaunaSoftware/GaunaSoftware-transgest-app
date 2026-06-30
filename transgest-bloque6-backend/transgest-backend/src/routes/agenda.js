@@ -6,8 +6,8 @@ const router = express.Router();
 
 router.use(authenticate);
 
-const ROLES_INTERNOS = ["gerente", "contable", "administrativo", "trafico", "responsable_taller", "visualizador", "chofer"];
-const PUEDE_VER_EQUIPO = new Set(["gerente", "contable", "administrativo", "trafico", "responsable_taller"]);
+const ROLES_INTERNOS = ["gerente", "contable", "administrativo", "trafico", "responsable_taller", "mecanico", "colaborador", "visualizador", "chofer"];
+const PUEDE_VER_EQUIPO = new Set(["gerente", "contable", "administrativo", "trafico", "responsable_taller", "mecanico"]);
 const PUEDE_EDITAR = requireRole(...ROLES_INTERNOS);
 
 function empresaId(req) {
@@ -141,6 +141,12 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
   if (!fechaInicio) return res.status(400).json({ error: "Fecha de inicio obligatoria" });
 
   const asignadoA = cleanText(body.asignado_a) || req.user.id;
+  const solicitadaAOtro = req.user?.rol !== "gerente" && String(asignadoA) !== String(req.user.id);
+  const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
+  if (solicitadaAOtro) {
+    metadata.solicitud_tarea = true;
+    metadata.solicitada_por = req.user.id;
+  }
   const { rows } = await db.query(
     `INSERT INTO agenda_eventos
       (empresa_id, creado_por, asignado_a, titulo, descripcion, fecha_inicio, fecha_fin,
@@ -159,11 +165,11 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
       !!body.todo_dia,
       normalizeType(body.tipo),
       normalizePriority(body.prioridad),
-      normalizeState(body.estado),
-      normalizeVisibility(body.visibilidad),
+      solicitadaAOtro ? "pendiente" : normalizeState(body.estado),
+      solicitadaAOtro ? "equipo" : normalizeVisibility(body.visibilidad),
       cleanText(body.pedido_id),
       cleanText(body.vehiculo_id),
-      body.metadata && typeof body.metadata === "object" ? body.metadata : {},
+      metadata,
     ]
   );
   res.status(201).json(rows[0]);
@@ -191,7 +197,15 @@ router.patch("/:id", PUEDE_EDITAR, async (req, res) => {
   if ("prioridad" in body) push("prioridad=?", normalizePriority(body.prioridad));
   if ("estado" in body) push("estado=?", normalizeState(body.estado));
   if ("visibilidad" in body) push("visibilidad=?", normalizeVisibility(body.visibilidad));
-  if ("asignado_a" in body) push("asignado_a=?::uuid", cleanText(body.asignado_a));
+  if ("asignado_a" in body) {
+    const nextAsignado = cleanText(body.asignado_a);
+    push("asignado_a=?::uuid", nextAsignado);
+    if (req.user?.rol !== "gerente" && nextAsignado && String(nextAsignado) !== String(req.user.id)) {
+      push("visibilidad=?", "equipo");
+      push("estado=?", "pendiente");
+      push("metadata=COALESCE(metadata,'{}'::jsonb) || ?::jsonb", { solicitud_tarea:true, solicitada_por:req.user.id });
+    }
+  }
   if ("pedido_id" in body) push("pedido_id=?::uuid", cleanText(body.pedido_id));
   if ("vehiculo_id" in body) push("vehiculo_id=?::uuid", cleanText(body.vehiculo_id));
   if ("metadata" in body) push("metadata=?::jsonb", body.metadata && typeof body.metadata === "object" ? body.metadata : {});

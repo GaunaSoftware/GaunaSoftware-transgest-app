@@ -342,7 +342,7 @@ router.get("/demo/options", authenticate, async (req, res) => {
     `SELECT id,nombre,email,username,rol,chofer_id,cliente_id
        FROM usuarios
       WHERE empresa_id=$1 AND activo IS DISTINCT FROM false
-        AND rol::text IN ('gerente','trafico','contable','chofer','administrativo','responsable_taller','visualizador')
+        AND rol::text IN ('gerente','trafico','contable','chofer','administrativo','responsable_taller','mecanico','colaborador','visualizador')
       ORDER BY CASE rol::text
         WHEN 'gerente' THEN 1
         WHEN 'trafico' THEN 2

@@ -1525,7 +1525,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
   );
 }
 
-export default function Vehiculos() {
+export default function Vehiculos({ initialTipo = "todos" }) {
   const { puedeEditar, user } = useAuth();
   const canEdit  = puedeEditar("vehiculos");
   // Dar de baja: gerente y contable
@@ -1539,7 +1539,7 @@ export default function Vehiculos() {
   const [loading,   setLoading]   = useState(true);
   const [modal,     setModal]     = useState(false);
   const [editando,  setEditando]  = useState(null);
-  const [filtroTipo,   setFiltroTipo]   = useState("todos");
+  const [filtroTipo,   setFiltroTipo]   = useState(initialTipo || "todos");
   const [filtroEstado, setFiltroEstado] = useState("todos");
   const [gpsSyncing, setGpsSyncing] = useState(false);
   const [gpsProviders, setGpsProviders] = useState([]);
@@ -1589,6 +1589,12 @@ export default function Vehiculos() {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    if (initialTipo && initialTipo !== filtroTipo) {
+      setFiltroTipo(initialTipo);
+      setFiltroEstado("todos");
+    }
+  }, [initialTipo]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!focusVehiculo?.vehiculo_id || loading) return;
     const found = vehiculos.find(v => String(v.id) === String(focusVehiculo.vehiculo_id));

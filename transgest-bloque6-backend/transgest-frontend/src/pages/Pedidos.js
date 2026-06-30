@@ -1745,7 +1745,9 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
   const [showHistory, setShowHistory] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
   const [aiStatus, setAiStatus] = useState(null);
+  const [voiceListening, setVoiceListening] = useState(false);
   const fileInputRef = useRef(null);
+  const speechSupported = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
   const pedidoPreview = preview?.pedido || null;
   const camposClave = [
@@ -1884,6 +1886,26 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
     handleAiFiles(e.dataTransfer?.files || []);
   }
 
+  function dictarPedidoIA() {
+    if (!speechSupported || voiceListening) return;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = "es-ES";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    setVoiceListening(true);
+    recognition.onresult = event => {
+      const transcript = Array.from(event.results || [])
+        .map(result => result?.[0]?.transcript || "")
+        .join(" ")
+        .trim();
+      if (transcript) setTexto(prev => `${prev ? `${prev}\n` : ""}${transcript}`);
+    };
+    recognition.onerror = () => setError("No se pudo capturar la voz. Revisa permisos de microfono del navegador.");
+    recognition.onend = () => setVoiceListening(false);
+    recognition.start();
+  }
+
   return (
     <div style={embedded ? {width:"100%"} : {position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:24,width:embedded ? "100%" : "min(640px,96vw)",maxHeight:embedded ? "none" : "92vh",overflowY:embedded ? "visible" : "auto",boxSizing:"border-box"}}>
@@ -1968,9 +1990,17 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
         </div>
 
         {modo==="texto" && (
-          <textarea value={texto} onChange={e=>setTexto(e.target.value)}
-            placeholder={"Ej: Cliente: Transportes Garcia\nOrigen: Barcelona\nDestino: Madrid\nFecha carga: 15/06/2026 08:00\nMercancia: palets fruta\nPeso: 24000 kg\nPrecio: 850 EUR\nReferencia: OC-1234"}
-            style={{width:"100%",minHeight:132,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+          <div style={{display:"grid",gap:8}}>
+            {speechSupported && (
+              <button type="button" onClick={dictarPedidoIA} disabled={voiceListening}
+                style={{justifySelf:"start",padding:"7px 12px",borderRadius:8,border:"1px solid rgba(59,130,246,.28)",background:voiceListening?"rgba(239,68,68,.12)":"rgba(59,130,246,.10)",color:voiceListening?"#ef4444":"var(--accent-xl)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:900,cursor:voiceListening?"wait":"pointer"}}>
+                {voiceListening ? "Escuchando..." : "Dictar pedido"}
+              </button>
+            )}
+            <textarea value={texto} onChange={e=>setTexto(e.target.value)}
+              placeholder={"Ej: Cliente: Transportes Garcia\nOrigen: Barcelona\nDestino: Madrid\nFecha carga: 15/06/2026 08:00\nMercancia: palets fruta\nPeso: 24000 kg\nPrecio: 850 EUR\nReferencia: OC-1234"}
+              style={{width:"100%",minHeight:132,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+          </div>
         )}
 
         {modo==="archivo" && (

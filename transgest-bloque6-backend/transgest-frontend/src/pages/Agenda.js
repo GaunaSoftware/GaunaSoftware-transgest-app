@@ -222,8 +222,9 @@ function AvisosIgnoradosTab({ mes, setMes }) {
   );
 }
 
-function ModalAgenda({ evento, usuarios, fechaBase, canEdit, onClose, onSaved }) {
+function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSaved }) {
   const now = new Date();
+  const esGerente = user?.rol === "gerente";
   const start = evento?.fecha_inicio || `${fechaBase}T09:00:00`;
   const end = evento?.fecha_fin || `${fechaBase}T10:00:00`;
   const [form, setForm] = useState({
@@ -259,6 +260,11 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, onClose, onSaved })
       fecha_fin: form.fecha_fin ? fromDateTimeLocal(form.fecha_fin, form.todo_dia) : null,
       asignado_a: form.asignado_a || null,
     };
+    if (!esGerente && payload.asignado_a && String(payload.asignado_a) !== String(user?.id || "")) {
+      payload.visibilidad = "equipo";
+      payload.estado = "pendiente";
+      payload.metadata = { ...(payload.metadata || {}), solicitud_tarea: true };
+    }
     await onSaved(payload);
   }
 
@@ -284,7 +290,7 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, onClose, onSaved })
             </select>
           </div>
           <div>
-            <label style={S.label}>Asignado a</label>
+            <label style={S.label}>{esGerente ? "Asignado a" : "Solicitar a"}</label>
             <select style={S.input} value={form.asignado_a} onChange={f("asignado_a")}>
               <option value="">Yo / sin asignar</option>
               {usuarios.map(u => <option key={u.id} value={u.id}>{u.nombre || u.username || u.email} · {u.rol}</option>)}
@@ -592,6 +598,7 @@ export default function Agenda() {
           usuarios={usuarios}
           fechaBase={selectedDay}
           canEdit={canEdit}
+          user={user}
           onClose={()=>setModal(null)}
           onSaved={guardarEvento}
         />

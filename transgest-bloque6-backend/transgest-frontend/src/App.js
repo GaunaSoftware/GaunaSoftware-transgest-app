@@ -42,6 +42,7 @@ const GestionTrafico      = lazy(() => import("./pages/GestionTrafico"));
 const PlanificacionOperativa = lazy(() => import("./pages/PlanificacionOperativa"));
 const Nominas             = lazy(() => import("./pages/Nominas"));
 const AppChofer           = lazy(() => import("./pages/AppChofer"));
+const AppMecanico         = lazy(() => import("./pages/AppMecanico"));
 const PortalClientes      = lazy(() => import("./pages/PortalClientes"));
 const Solicitudes         = lazy(() => import("./pages/Solicitudes"));
 const MiCuenta            = lazy(() => import("./pages/MiCuenta"));
@@ -208,6 +209,8 @@ const MODULOS_POR_PLAN = {
 };
 
 function planPermite(plan, moduloId) {
+  if (moduloId === "vehiculos_tractoras" || moduloId === "vehiculos_remolques") return planPermite(plan, "vehiculos");
+  if (moduloId === "app_mecanico") return planPermite(plan, "taller");
   const permitidos = MODULOS_POR_PLAN[plan] || MODULOS_POR_PLAN.profesional;
   if (permitidos === null) return true; // enterprise: todo
   return permitidos.includes(moduloId);
@@ -229,9 +232,10 @@ function filtrarModulosPorPlan(modulos, plan) {
 
 const ROLE_NAV_FALLBACK_PERMISSIONS = {
   gerente: ["contabilidad", "nominas", "hojas_ruta", "control_horario"],
-  contable: ["contabilidad", "nominas", "control_horario"],
-  administrativo: ["contabilidad", "nominas", "control_horario"],
+  contable: ["contabilidad", "nominas", "hojas_ruta", "control_horario"],
+  administrativo: ["contabilidad", "nominas", "hojas_ruta", "control_horario"],
   trafico: ["hojas_ruta"],
+  colaborador: ["hojas_ruta"],
   visualizador: ["hojas_ruta"],
 };
 
@@ -247,6 +251,8 @@ function filtrarModulosPorPermisos(modulos, permisos, rol) {
   };
   const puedeVerCompat = id => {
     if (puedeVer(id)) return true;
+    if (id === "vehiculos_tractoras" || id === "vehiculos_remolques") return puedeVer("vehiculos");
+    if (id === "app_mecanico") return puedeVer("taller");
     if (id === "control_tower") {
       return reglas.dashboard?.ver !== false && (reglas.dashboard?.ver === true || reglas.gestion_trafico?.ver === true);
     }
@@ -285,7 +291,10 @@ const MODULOS_GERENTE = [
     { id:"objetivos", icon:IC.rendimiento, label:"Objetivos" },
   ]},
   { titulo:"Flota y almacen", items:[
-    { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos" },
+    { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos", children:[
+      { id:"vehiculos_tractoras", label:"Tractoras" },
+      { id:"vehiculos_remolques", label:"Remolques" },
+    ]},
     { id:"choferes", icon:IC.choferes, label:"Choferes" },
     { id:"taller", icon:IC.taller, label:"Taller" },
     { id:"palets", icon:IC.almacen, label:"Gestion de almacen" },
@@ -296,6 +305,7 @@ const MODULOS_GERENTE = [
       { id:"contabilidad", label:"Contabilidad" },
       { id:"gastos_estructura", label:"Gastos de estructura" },
       { id:"nominas", label:"Nominas" },
+      { id:"hojas_ruta", label:"Hojas de ruta" },
     ]},
     { id:"informes_grupo", icon:IC.rendimiento, label:"Analisis y trazabilidad", children:[
       { id:"explotacion", label:"Explotacion" },
@@ -305,9 +315,7 @@ const MODULOS_GERENTE = [
     ]},
   ]},
   { titulo:"Gestion", items:[
-    { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
     { id:"control_horario", icon:IC.agenda, label:"Control horario" },
-    { id:"documentos", icon:IC.docs, label:"Documentos" },
     { id:"avisos", icon:IC.avisos, label:"Avisos" },
     { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
     { id:"usuarios", icon:IC.usuarios, label:"Usuarios y roles" },
@@ -327,24 +335,17 @@ const MODULOS_CONTABLE = [
     { id:"facturacion", icon:IC.facturacion, label:"Gestión financiera" },
     { id:"contabilidad", icon:IC.contabilidad, label:"Contabilidad" },
     { id:"nominas", icon:IC.nominas, label:"Nóminas" },
+    { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
     { id:"control_horario", icon:IC.agenda, label:"Control horario" },
     { id:"informes", icon:IC.rendimiento, label:"Informes" },
     { id:"empresa", icon:IC.empresa, label:"Mi Empresa" },
-    { id:"documentos", icon:IC.docs, label:"Documentos" },
     { id:"avisos", icon:IC.avisos, label:"Avisos" },
   ]},
 ];
 
 const MODULOS_RESPONSABLE_TALLER = [
   { titulo:"Taller", items:[
-    { id:"taller", icon:IC.taller, label:"Taller" },
-    { id:"agenda", icon:IC.agenda, label:"Agenda" },
-  ]},
-  { titulo:"Flota", items:[
-    { id:"vehiculos", icon:IC.vehiculos, label:"Vehículos" },
-  ]},
-  { titulo:"Gestión", items:[
-    { id:"avisos", icon:IC.avisos, label:"Avisos" },
+    { id:"app_mecanico", icon:IC.taller, label:"App mecanico" },
     { id:"mi_cuenta", icon:IC.usuarios, label:"Mi cuenta" },
   ]},
 ];
@@ -366,7 +367,10 @@ const MODULOS_TRAFICO = [
     { id:"colaboradores", icon:IC.colabor, label:"Colaboradores" },
   ]},
   { titulo:"Flota y almacen", items:[
-    { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos" },
+    { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos", children:[
+      { id:"vehiculos_tractoras", label:"Tractoras" },
+      { id:"vehiculos_remolques", label:"Remolques" },
+    ]},
     { id:"choferes", icon:IC.choferes, label:"Choferes" },
     { id:"taller", icon:IC.taller, label:"Taller" },
     { id:"palets", icon:IC.almacen, label:"Gestion de almacen" },
@@ -374,7 +378,6 @@ const MODULOS_TRAFICO = [
   { titulo:"Gestion", items:[
     { id:"hojas_ruta", icon:IC.hojaRuta, label:"Hojas de ruta" },
     { id:"control_horario", icon:IC.agenda, label:"Control horario" },
-    { id:"documentos", icon:IC.docs, label:"Documentos" },
     { id:"avisos", icon:IC.avisos, label:"Avisos" },
     { id:"excepciones", icon:IC.rendimiento, label:"Excepciones operativas" },
     { id:"actividad", icon:IC.actividad, label:"Trazabilidad" },
@@ -382,14 +385,17 @@ const MODULOS_TRAFICO = [
   ]},
 ];
 
-const MODULOS_VISOR = [
+const MODULOS_COLABORADOR = [
   { titulo:"Consulta", items:[
     { id:"agenda", icon:IC.agenda, label:"Agenda" },
     { id:"plan_diario", icon:IC.cuadrante, label:"Plan diario" },
     { id:"pedidos", icon:IC.pedidos, label:"Pedidos" },
     { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
     { id:"rutas", icon:IC.rutas, label:"Rutas y Tarifas" },
-    { id:"vehiculos", icon:IC.vehiculos, label:"Vehículos" },
+    { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos", children:[
+      { id:"vehiculos_tractoras", label:"Tractoras" },
+      { id:"vehiculos_remolques", label:"Remolques" },
+    ]},
     { id:"choferes", icon:IC.choferes, label:"Chóferes" },
   ]},
 ];
@@ -413,7 +419,9 @@ const MODULOS_POR_ROL = {
   administrativo:       MODULOS_CONTABLE,
   trafico:              MODULOS_TRAFICO,
   responsable_taller:   MODULOS_RESPONSABLE_TALLER,
-  visualizador:         MODULOS_VISOR,
+  mecanico:             MODULOS_RESPONSABLE_TALLER,
+  colaborador:          MODULOS_COLABORADOR,
+  visualizador:         MODULOS_COLABORADOR,
   chofer:               MODULOS_CHOFER,
   cliente:              MODULOS_CLIENTE,
   cliente_portal:       MODULOS_CLIENTE,
@@ -421,6 +429,7 @@ const MODULOS_POR_ROL = {
 
 function VISTA_DEFAULT(rol) {
   if (rol === "chofer")  return "app_chofer";
+  if (rol === "responsable_taller" || rol === "mecanico") return "app_mecanico";
   if (rol === "cliente" || rol === "cliente_portal") return "portal_cliente";
   if (rol === "gerente" || rol === "contable") return "dashboard";
   return "gestion_trafico";
@@ -436,6 +445,8 @@ const VISTAS = {
   rutas:        <Rutas />,
   calculador_portes: <CalculadorPortes />,
   vehiculos:    <Vehiculos />,
+  vehiculos_tractoras: <Vehiculos initialTipo="tractoras" />,
+  vehiculos_remolques: <Vehiculos initialTipo="remolques" />,
   choferes:     <Choferes />,
   colaboradores:<Colaboradores />,
   facturacion:  <Facturacion />,
@@ -461,6 +472,7 @@ const VISTAS = {
   rutas_recomendadas_chofer: <GestionTrafico initialVista="optimizacion" soloOptimizacion />,
   nominas:             <Nominas />,
   app_chofer:          <AppChofer />,
+  app_mecanico:        <AppMecanico />,
   portal_cliente:      <PortalClientes />,
   solicitudes:         <Solicitudes />,
   mi_cuenta:           <MiCuenta />,
@@ -495,6 +507,8 @@ const GUIDED_MODULE_LABELS = {
   clientes: "Clientes",
   tarifas: "Tarifas",
   colaboradores: "Colaboradores",
+  vehiculos_tractoras: "Tractoras",
+  vehiculos_remolques: "Remolques",
   vehiculos: "Vehículos",
   choferes: "Chóferes",
   taller: "Taller",
@@ -515,6 +529,7 @@ const GUIDED_MODULE_LABELS = {
   importacion: "Importación",
   solicitudes: "Peticiones viaje",
   palets: "Gestión de almacén",
+  app_mecanico: "App mecanico",
   app_chofer: "App chofer",
   portal_cliente: "Portal cliente",
   mi_cuenta: "Mi cuenta",
@@ -923,6 +938,8 @@ const DEMO_ROLE_LABELS = {
   chofer: "Chofer",
   administrativo: "Administrativo",
   responsable_taller: "Taller",
+  mecanico: "Mecanico",
+  colaborador: "Colaborador",
   visualizador: "Visualizador",
 };
 
@@ -931,15 +948,39 @@ function emitDemoToast(type, message) {
   window.dispatchEvent(new CustomEvent("tms:notify", { detail:{ type, message } }));
 }
 
+function isDemoLikeUser(user = {}) {
+  if (!user) return false;
+  const cfg = user.cfg_precios || user.config || {};
+  const values = [
+    user.demo_mode,
+    cfg.demo_mode,
+    user.email,
+    user.username,
+    user.nombre,
+    user.empresa_nombre,
+    user.empresa,
+    user.dominio,
+  ].map(v => String(v || "").trim().toLowerCase());
+  return values.some(v => (
+    v === "true" ||
+    v === "demo" ||
+    v === "gerente@demo.com" ||
+    v.startsWith("demo-") ||
+    v.includes("transgest demo") ||
+    v.includes("cuenta demo")
+  ));
+}
+
 function DemoShowcasePanel({ user, currentPlan, onSessionChanged }) {
   const [options, setOptions] = useState(null);
   const [busy, setBusy] = useState("");
   const [collapsed, setCollapsed] = useState(false);
   const plan = normalizePlan(user?.plan || currentPlan);
+  const demoEnabled = isDemoLikeUser(user);
 
   useEffect(() => {
     let active = true;
-    if (!user?.demo_mode) {
+    if (!demoEnabled) {
       setOptions(null);
       return () => { active = false; };
     }
@@ -947,9 +988,9 @@ function DemoShowcasePanel({ user, currentPlan, onSessionChanged }) {
       .then(data => { if (active) setOptions(data); })
       .catch(() => { if (active) setOptions(null); });
     return () => { active = false; };
-  }, [user?.id, user?.empresa_id, user?.demo_mode]);
+  }, [user?.id, user?.empresa_id, demoEnabled]);
 
-  if (!user?.demo_mode) return null;
+  if (!demoEnabled) return null;
 
   const plans = (Array.isArray(options?.plans) && options.plans.length ? options.plans : Object.keys(DEMO_PLAN_META))
     .map(item => normalizePlan(item?.id || item?.plan || item))
@@ -1302,7 +1343,7 @@ function AppInner() {
   // Obtener plan de la empresa del usuario
   const empresaPlan = normalizePlan(user?.plan || getEmpresaPlanLocal());
 
-  const modulosBase = MODULOS_POR_ROL[user.rol] || MODULOS_VISOR;
+  const modulosBase = MODULOS_POR_ROL[user.rol] || MODULOS_COLABORADOR;
   const modulosPlan = empresaPlan ? filtrarModulosPorPlan(modulosBase, empresaPlan) : modulosBase;
   const modulos = filtrarModulosPorPermisos(modulosPlan, user.permisos, user.rol);
   const modulosVisibles = new Set(

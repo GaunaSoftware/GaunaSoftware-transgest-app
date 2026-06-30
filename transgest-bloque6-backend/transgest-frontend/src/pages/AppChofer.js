@@ -637,8 +637,8 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
           <img src={doc.preview} alt="Vista previa albaran" style={{width:"100%",height:190,objectFit:"cover",display:"block",background:"#111827"}}/>
         ) : (
           <div style={{height:170,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:"#e5e7eb",textAlign:"center",padding:18,boxSizing:"border-box"}}>
-            <div style={{fontSize:13,fontWeight:800,marginBottom:6}}>Coloca el albaran dentro del marco</div>
-            <div style={{fontSize:11,lineHeight:1.45,color:"#cbd5e1"}}>Buena luz, documento completo y sin cortar esquinas. En movil abrira la camara trasera si esta disponible.</div>
+          <div style={{fontSize:13,fontWeight:800,marginBottom:6}}>Coloca el albaran dentro del marco</div>
+            <div style={{fontSize:11,lineHeight:1.45,color:"#cbd5e1"}}>La app detecta el papel, recorta el fondo y lo guarda con aspecto de escaner. Buena luz y esquinas visibles ayudan mucho.</div>
           </div>
         )}
         {["tl","tr","bl","br"].map(pos => (
@@ -2843,7 +2843,7 @@ export default function AppChofer(){
       <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.95)",zIndex:600,
         display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
         <div style={{color:"var(--text2)",fontSize:13,marginBottom:16,textAlign:"center"}}>
-          Haz una foto de la entrega o incidencia
+          Haz una foto de la entrega o incidencia. Se recortara y limpiara automaticamente como escaner.
         </div>
         <input type="file" accept="image/*" capture="environment"
           style={{display:"none"}} id="cam-input"

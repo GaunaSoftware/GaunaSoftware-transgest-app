@@ -755,14 +755,14 @@ export default function Dashboard() {
               icon={<DashboardIcon name="clipboard" size={17} />}
               title="Mis tareas de hoy"
               action={(
-                <button onClick={()=>navegar("excepciones")}
+                <button onClick={()=>navegar("agenda")}
                   style={{border:"1px solid rgba(15,118,110,.16)",background:"rgba(15,118,110,.07)",color:"var(--accent-xl)",borderRadius:9,padding:"8px 14px",fontSize:11,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                  Abrir bandeja
+                  Abrir agenda
                 </button>
               )}
             />
             {misTareas.length===0 ? (
-              <div style={{fontSize:12,color:"var(--green)",fontWeight:700}}>No tienes excepciones activas asignadas.</div>
+              <div style={{fontSize:12,color:"var(--green)",fontWeight:700}}>No tienes tareas pendientes asignadas.</div>
             ) : (
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:8}}>
                 {misTareas.map(t=>{

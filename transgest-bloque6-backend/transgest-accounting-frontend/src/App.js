@@ -10,12 +10,14 @@ import {
   createJournalReversalDraft,
   createMaturity,
   createExternalImportBatch,
+  createFixedAsset,
   createParty,
   downloadAdvisorPackageFile,
   downloadAdvisorPackageZip,
   downloadBalanceSheetCsv,
   downloadBankTransactionsCsv,
   downloadExternalImportBatchesCsv,
+  downloadFixedAssetsCsv,
   downloadJournalEntriesCsv,
   downloadLedgerAccountCsv,
   downloadMaturitiesCsv,
@@ -37,6 +39,8 @@ import {
   getExternalImportBatches,
   getExternalImportBatchPreview,
   getFiscalYears,
+  getFixedAssetDepreciationPlan,
+  getFixedAssets,
   getMe,
   getOutboxEvents,
   getParties,
@@ -61,6 +65,7 @@ import {
   getTrialBalance,
   updateJournalDraft,
   updateExternalImportBatchStatus,
+  updateFixedAssetStatus,
   updateBankTransactionStatus,
   updateMaturityStatus,
   updateParty,
@@ -76,6 +81,7 @@ const tabs = [
   { id: "accounts", label: "Plan contable" },
   { id: "parties", label: "Terceros" },
   { id: "maturities", label: "Vencimientos" },
+  { id: "fixed-assets", label: "Inmovilizado" },
   { id: "banks", label: "Bancos" },
   { id: "journal", label: "Diario" },
   { id: "ledger", label: "Mayor" },
@@ -151,6 +157,18 @@ const bankTransactionStatusLabels = {
   unmatched: "Pendiente",
   matched: "Conciliado",
   ignored: "Ignorado",
+};
+
+const fixedAssetStatusLabels = {
+  active: "Activo",
+  inactive: "Inactivo",
+  disposed: "Baja",
+};
+
+const fixedAssetActionLabels = {
+  activate: "Activar",
+  deactivate: "Desactivar",
+  dispose: "Dar de baja",
 };
 
 const integrationCategoryLabels = {
@@ -250,6 +268,12 @@ const externalImportCsvTemplates = {
 function maturityStatusTone(status) {
   if (status === "pending") return "warning";
   if (status === "settled") return "ok";
+  return "neutral";
+}
+
+function fixedAssetStatusTone(status) {
+  if (status === "active") return "ok";
+  if (status === "inactive") return "warning";
   return "neutral";
 }
 
@@ -538,6 +562,26 @@ export default function App() {
   });
   const [maturityStatusAction, setMaturityStatusAction] = useState(null);
   const [focusedMaturityId, setFocusedMaturityId] = useState(null);
+  const [fixedAssets, setFixedAssets] = useState([]);
+  const [fixedAssetsLoading, setFixedAssetsLoading] = useState(false);
+  const [fixedAssetsExporting, setFixedAssetsExporting] = useState(false);
+  const [fixedAssetStatus, setFixedAssetStatus] = useState(null);
+  const [fixedAssetPlan, setFixedAssetPlan] = useState(null);
+  const [fixedAssetStatusAction, setFixedAssetStatusAction] = useState(null);
+  const [fixedAssetFilters, setFixedAssetFilters] = useState({ fiscal_year_id: "", status: "", q: "" });
+  const [fixedAssetForm, setFixedAssetForm] = useState({
+    fiscal_year_id: "",
+    asset_code: "",
+    name: "",
+    acquisition_date: new Date().toISOString().slice(0, 10),
+    acquisition_cost: "",
+    residual_value: "0",
+    useful_life_months: "60",
+    asset_account_id: "",
+    accumulated_depreciation_account_id: "",
+    expense_account_id: "",
+    notes: "",
+  });
   const [bankAccounts, setBankAccounts] = useState([]);
   const [bankTransactions, setBankTransactions] = useState([]);
   const [bankStatementImports, setBankStatementImports] = useState([]);
@@ -697,6 +741,8 @@ export default function App() {
   const canWriteParties = permissions.includes("parties.write");
   const canReadMaturities = permissions.includes("maturities.read");
   const canWriteMaturities = permissions.includes("maturities.write");
+  const canReadFixedAssets = permissions.includes("fixed_assets.read");
+  const canWriteFixedAssets = permissions.includes("fixed_assets.write");
   const canReadBanks = permissions.includes("banks.read");
   const canWriteBanks = permissions.includes("banks.write");
   const canReadJournal = permissions.includes("journal.read");
@@ -715,6 +761,8 @@ export default function App() {
   const activeParties = parties.filter(party => party.is_active).length;
   const pendingReceivables = maturities.filter(item => item.status === "pending" && item.direction === "receivable").reduce((total, item) => total + Number(item.open_amount || 0), 0);
   const pendingPayables = maturities.filter(item => item.status === "pending" && item.direction === "payable").reduce((total, item) => total + Number(item.open_amount || 0), 0);
+  const fixedAssetCost = fixedAssets.reduce((total, item) => total + Number(item.acquisition_cost || 0), 0);
+  const activeFixedAssets = fixedAssets.filter(item => item.status === "active").length;
   const bankInflows = bankTransactions.filter(item => item.direction === "inflow").reduce((total, item) => total + Number(item.amount || 0), 0);
   const bankOutflows = bankTransactions.filter(item => item.direction === "outflow").reduce((total, item) => total + Number(item.amount || 0), 0);
   const bankOpeningBalance = bankAccounts.reduce((total, item) => total + Number(item.opening_balance || 0), 0);
@@ -799,6 +847,7 @@ export default function App() {
     { label: "Nueva cuenta", tab: "accounts", target: "account-create", enabled: canWriteAccounts, title: "Alta de cuenta contable", detail: "Completa el formulario Nueva cuenta. El alta queda auditada y no genera movimientos." },
     { label: "Nuevo tercero", tab: "parties", target: "party-create", enabled: canWriteParties, title: "Alta de tercero contable", detail: "Crea un cliente, proveedor u otro tercero para reutilizarlo en cartera y conciliacion." },
     { label: "Nuevo vencimiento", tab: "maturities", target: "maturity-create", enabled: canWriteMaturities, title: "Alta de vencimiento", detail: "Registra un cobro o pago previsto. No genera factura ni asiento contable." },
+    { label: "Nuevo inmovilizado", tab: "fixed-assets", target: "fixed-asset-create", enabled: canWriteFixedAssets, title: "Alta de inmovilizado", detail: "Registra un activo y revisa su plan de amortizacion lineal preliminar. No genera asientos." },
     { label: "Movimiento bancario", tab: "banks", target: "bank-transaction-create", enabled: canWriteBanks, title: "Alta de movimiento bancario", detail: "Registra o importa movimientos para preparar conciliacion manual." },
     { label: "Borrador de asiento", tab: "journal", target: "journal-create", enabled: canWriteJournal, title: "Nuevo borrador de diario", detail: "Prepara un asiento manual. La partida doble se valida antes de contabilizar." },
     { label: "Balance y PyG", tab: "reports", target: "reports-filters", enabled: canReadLedger, title: "Informes preliminares", detail: "Consulta Balance y PyG calculados desde asientos contabilizados." },
@@ -1001,6 +1050,22 @@ export default function App() {
     }
   }
 
+  async function refreshFixedAssets(nextFilters = fixedAssetFilters) {
+    if (!selectedCompanyId || !canReadFixedAssets) return;
+    setFixedAssetsLoading(true);
+    setFixedAssetStatus(null);
+    try {
+      const result = await getFixedAssets(nextFilters);
+      setFixedAssets(result.data || []);
+      setFixedAssetFilters(prev => ({ ...prev, ...nextFilters }));
+    } catch (err) {
+      setFixedAssets([]);
+      setFixedAssetStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setFixedAssetsLoading(false);
+    }
+  }
+
   async function refreshBanks(nextTransactionFilters = bankTransactionFilters, nextAccountFilters = bankAccountFilters, options = {}) {
     if (!selectedCompanyId || !canReadBanks) return;
     setBanksLoading(true);
@@ -1199,6 +1264,13 @@ export default function App() {
     setMaturityFilters(nextFilters);
     setFocusedMaturityId(null);
     await refreshMaturities(nextFilters);
+  }
+
+  async function clearFixedAssetFilters() {
+    const nextFilters = { fiscal_year_id: "", status: "", q: "" };
+    setFixedAssetFilters(nextFilters);
+    setFixedAssetPlan(null);
+    await refreshFixedAssets(nextFilters);
   }
 
   async function clearBankFilters() {
@@ -1427,6 +1499,13 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedCompanyId, canReadMaturities]);
+
+  useEffect(() => {
+    if (activeTab === "fixed-assets" || activeTab === "overview") {
+      refreshFixedAssets();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedCompanyId, canReadFixedAssets]);
 
   useEffect(() => {
     if (activeTab === "banks" || activeTab === "overview") {
@@ -1973,6 +2052,82 @@ export default function App() {
       await refreshMaturities();
     } catch (err) {
       setMaturityStatus({ tone: "danger", text: err.message });
+    }
+  }
+
+  async function handleFixedAssetFilter(event) {
+    event.preventDefault();
+    setFixedAssetPlan(null);
+    await refreshFixedAssets(fixedAssetFilters);
+  }
+
+  async function handleExportFixedAssetsCsv() {
+    setFixedAssetsExporting(true);
+    setFixedAssetStatus(null);
+    try {
+      const result = await downloadFixedAssetsCsv({ ...fixedAssetFilters, limit: 500 });
+      saveBlob(result.blob, result.filename || "inmovilizado.csv");
+      setFixedAssetStatus({ tone: "ok", text: "Exportacion CSV de inmovilizado generada y auditada." });
+    } catch (err) {
+      setFixedAssetStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setFixedAssetsExporting(false);
+    }
+  }
+
+  async function handleCreateFixedAsset(event) {
+    event.preventDefault();
+    setFixedAssetStatus(null);
+    try {
+      const result = await createFixedAsset({
+        ...fixedAssetForm,
+        asset_account_id: fixedAssetForm.asset_account_id || null,
+        accumulated_depreciation_account_id: fixedAssetForm.accumulated_depreciation_account_id || null,
+        expense_account_id: fixedAssetForm.expense_account_id || null,
+      });
+      setFixedAssetStatus({ tone: "ok", text: `Inmovilizado ${result.fixed_asset.asset_code} creado. No se han generado asientos.` });
+      setFixedAssetForm(prev => ({
+        ...prev,
+        asset_code: "",
+        name: "",
+        acquisition_cost: "",
+        residual_value: "0",
+        notes: "",
+      }));
+      await refreshFixedAssets();
+    } catch (err) {
+      setFixedAssetStatus({ tone: err.status === 409 ? "warning" : "danger", text: err.message });
+    }
+  }
+
+  async function handleOpenFixedAssetPlan(asset) {
+    setFixedAssetStatus(null);
+    try {
+      const result = await getFixedAssetDepreciationPlan(asset.id);
+      setFixedAssetPlan(result);
+    } catch (err) {
+      setFixedAssetStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    }
+  }
+
+  async function handleFixedAssetStatus(event) {
+    event.preventDefault();
+    if (!fixedAssetStatusAction?.asset) return;
+    setFixedAssetStatus(null);
+    try {
+      const result = await updateFixedAssetStatus(fixedAssetStatusAction.asset.id, {
+        action: fixedAssetStatusAction.action,
+        reason: fixedAssetStatusAction.reason,
+        disposed_at: fixedAssetStatusAction.disposed_at,
+      });
+      setFixedAssetStatus({
+        tone: "ok",
+        text: `Inmovilizado ${result.fixed_asset.asset_code} ${fixedAssetStatusLabels[result.fixed_asset.status] || result.fixed_asset.status}.`,
+      });
+      setFixedAssetStatusAction(null);
+      await refreshFixedAssets();
+    } catch (err) {
+      setFixedAssetStatus({ tone: "danger", text: err.message });
     }
   }
 
@@ -3003,6 +3158,118 @@ export default function App() {
                     {maturityStatusAction.action === "settle" && <label><span>Fecha</span><input type="date" value={maturityStatusAction.settled_date} onChange={e => setMaturityStatusAction(prev => ({ ...prev, settled_date: e.target.value }))} /></label>}
                     <label><span>Motivo</span><input minLength={5} required value={maturityStatusAction.reason} onChange={e => setMaturityStatusAction(prev => ({ ...prev, reason: e.target.value }))} /></label>
                     <div className="period-action-buttons"><button type="submit">Confirmar</button><button type="button" className="secondary" onClick={() => setMaturityStatusAction(null)}>Cancelar</button></div>
+                  </form>
+                )}
+              </>
+            )}
+          </section>
+        )}
+
+        {activeTab === "fixed-assets" && (
+          <section className="maturities-workspace">
+            <div className="workspace-heading compact">
+              <div>
+                <span className="eyebrow">Activos</span>
+                <h2>Inmovilizado</h2>
+                <p>Registro preliminar de activos y plan de amortizacion lineal. No genera asientos ni acredita tratamiento fiscal o legal.</p>
+              </div>
+              {fixedAssetsLoading && <StatusBadge tone="neutral" text="Actualizando" />}
+            </div>
+            <WorkspaceHint hint={workspaceHint?.tab === "fixed-assets" ? workspaceHint : null} onClose={closeWorkspaceHint} onOverview={returnToOverview} />
+            {!canReadFixedAssets ? (
+              <EmptyState title="Sin permiso" detail="Este usuario no tiene permiso fixed_assets.read." />
+            ) : (
+              <>
+                <div className="maturity-summary-strip">
+                  <div><span>Activos visibles</span><strong>{fixedAssets.length}</strong></div>
+                  <div><span>Activos en uso</span><strong>{activeFixedAssets}</strong></div>
+                  <div><span>Coste adquisicion</span><strong>{formatMoney(fixedAssetCost)} EUR</strong></div>
+                </div>
+                <form className="maturity-filters" onSubmit={handleFixedAssetFilter}>
+                  <label><span>Ejercicio</span><select value={fixedAssetFilters.fiscal_year_id} onChange={e => setFixedAssetFilters(prev => ({ ...prev, fiscal_year_id: e.target.value }))}><option value="">Todos</option>{fiscalYears.map(year => <option key={year.id} value={year.id}>{year.year_label}</option>)}</select></label>
+                  <label><span>Estado</span><select value={fixedAssetFilters.status} onChange={e => setFixedAssetFilters(prev => ({ ...prev, status: e.target.value }))}><option value="">Todos</option>{Object.entries(fixedAssetStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label><span>Buscar</span><input value={fixedAssetFilters.q} onChange={e => setFixedAssetFilters(prev => ({ ...prev, q: e.target.value }))} placeholder="Codigo, nombre o notas" /></label>
+                  <button type="submit">Aplicar</button>
+                  <button type="button" className="secondary" onClick={clearFixedAssetFilters}>Limpiar</button>
+                  <button type="button" className="secondary" onClick={handleExportFixedAssetsCsv} disabled={fixedAssetsExporting || !fixedAssets.length}>CSV</button>
+                </form>
+                {canWriteFixedAssets && (
+                  <div className="workspace-actions">
+                    <button type="button" onClick={() => toggleWorkspacePanel("fixed-asset-create")}>
+                      {isPanelOpen("fixed-asset-create") ? "Ocultar nuevo inmovilizado" : "Nuevo inmovilizado"}
+                    </button>
+                  </div>
+                )}
+                {canWriteFixedAssets && isPanelOpen("fixed-asset-create") && (
+                  <form className={targetClass("fixed-asset-create", "maturity-create")} data-workspace-target="fixed-asset-create" onSubmit={handleCreateFixedAsset}>
+                    <div className="form-title"><strong>Nuevo inmovilizado</strong><span>Alta manual auditada. La amortizacion se calcula como plan preliminar y no crea asientos.</span><button type="button" className="secondary" onClick={() => closeWorkspacePanel("fixed-asset-create")}>Ocultar</button></div>
+                    <label><span>Ejercicio</span><select required value={fixedAssetForm.fiscal_year_id} onChange={e => setFixedAssetForm(prev => ({ ...prev, fiscal_year_id: e.target.value }))}><option value="">Selecciona ejercicio</option>{fiscalYears.map(year => <option key={year.id} value={year.id}>{year.year_label}</option>)}</select></label>
+                    <label><span>Codigo</span><input required maxLength={60} value={fixedAssetForm.asset_code} onChange={e => setFixedAssetForm(prev => ({ ...prev, asset_code: e.target.value }))} placeholder="VEH-001" /></label>
+                    <label><span>Nombre</span><input required maxLength={220} value={fixedAssetForm.name} onChange={e => setFixedAssetForm(prev => ({ ...prev, name: e.target.value }))} placeholder="Cabeza tractora" /></label>
+                    <label><span>Adquisicion</span><input type="date" required value={fixedAssetForm.acquisition_date} onChange={e => setFixedAssetForm(prev => ({ ...prev, acquisition_date: e.target.value }))} /></label>
+                    <label><span>Coste</span><input required inputMode="decimal" pattern="[0-9]+([.,][0-9]{1,6})?" value={fixedAssetForm.acquisition_cost} onChange={e => setFixedAssetForm(prev => ({ ...prev, acquisition_cost: e.target.value }))} /></label>
+                    <label><span>Residual</span><input inputMode="decimal" pattern="[0-9]+([.,][0-9]{1,6})?" value={fixedAssetForm.residual_value} onChange={e => setFixedAssetForm(prev => ({ ...prev, residual_value: e.target.value }))} /></label>
+                    <label><span>Vida util meses</span><input required inputMode="numeric" value={fixedAssetForm.useful_life_months} onChange={e => setFixedAssetForm(prev => ({ ...prev, useful_life_months: e.target.value }))} /></label>
+                    <label><span>Cuenta activo</span><select value={fixedAssetForm.asset_account_id} onChange={e => setFixedAssetForm(prev => ({ ...prev, asset_account_id: e.target.value }))}><option value="">Sin cuenta</option>{accounts.filter(account => account.is_active).map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}</select></label>
+                    <label><span>Amortizacion acumulada</span><select value={fixedAssetForm.accumulated_depreciation_account_id} onChange={e => setFixedAssetForm(prev => ({ ...prev, accumulated_depreciation_account_id: e.target.value }))}><option value="">Sin cuenta</option>{accounts.filter(account => account.is_active).map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}</select></label>
+                    <label><span>Gasto amortizacion</span><select value={fixedAssetForm.expense_account_id} onChange={e => setFixedAssetForm(prev => ({ ...prev, expense_account_id: e.target.value }))}><option value="">Sin cuenta</option>{accounts.filter(account => account.is_active).map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}</select></label>
+                    <label><span>Notas</span><input maxLength={1000} value={fixedAssetForm.notes} onChange={e => setFixedAssetForm(prev => ({ ...prev, notes: e.target.value }))} /></label>
+                    <button type="submit">Crear inmovilizado</button>
+                  </form>
+                )}
+                {fixedAssetStatus && <div className="form-status"><StatusBadge tone={fixedAssetStatus.tone} text={fixedAssetStatus.text} /></div>}
+                {fixedAssetPlan && (
+                  <div className="focus-panel">
+                    <div>
+                      <span className="eyebrow">Plan de amortizacion</span>
+                      <strong>{fixedAssetPlan.fixed_asset.asset_code} - {fixedAssetPlan.fixed_asset.name}</strong>
+                      <small>{fixedAssetPlan.disclaimer}</small>
+                    </div>
+                    <div className="focus-panel-actions">
+                      <button type="button" className="secondary" onClick={() => setFixedAssetPlan(null)}>Cerrar plan</button>
+                    </div>
+                    <div className="maturities-table wide">
+                      <div className="maturity-row head"><span>Periodo</span><span>Fecha</span><span>Cuota</span><span>Acumulado</span><span>Valor neto</span></div>
+                      {fixedAssetPlan.plan.rows.slice(0, 24).map(row => (
+                        <div className="maturity-row" key={row.period_number}>
+                          <span>{row.period_number}</span>
+                          <span>{row.depreciation_date}</span>
+                          <span>{formatMoney(row.amount)} EUR</span>
+                          <span>{formatMoney(row.accumulated)} EUR</span>
+                          <span>{formatMoney(row.net_book_value)} EUR</span>
+                        </div>
+                      ))}
+                      {fixedAssetPlan.plan.rows.length > 24 && <div className="scope-note">Mostradas 24 de {fixedAssetPlan.plan.rows.length} cuotas. El CSV de inmovilizado no incluye todavia el plan completo.</div>}
+                    </div>
+                  </div>
+                )}
+                {fixedAssets.length ? (
+                  <div className="maturities-table">
+                    <div className="maturity-row head"><span>Activo</span><span>Ejercicio</span><span>Adquisicion</span><span>Coste</span><span>Vida util</span><span>Estado</span><span></span></div>
+                    {fixedAssets.map(asset => (
+                      <div className="maturity-row" key={asset.id}>
+                        <div><strong>{asset.asset_code}</strong><small>{asset.name}</small></div>
+                        <span>{asset.year_label || "-"}</span>
+                        <span>{String(asset.acquisition_date).slice(0, 10)}</span>
+                        <span>{formatMoney(asset.acquisition_cost)} EUR</span>
+                        <span>{asset.useful_life_months} meses</span>
+                        <StatusBadge tone={fixedAssetStatusTone(asset.status)} text={fixedAssetStatusLabels[asset.status] || asset.status} />
+                        <div className="maturity-actions">
+                          <button type="button" onClick={() => handleOpenFixedAssetPlan(asset)}>Plan</button>
+                          {canWriteFixedAssets && asset.status === "active" && <button type="button" onClick={() => setFixedAssetStatusAction({ asset, action: "deactivate", reason: "", disposed_at: "" })}>Desactivar</button>}
+                          {canWriteFixedAssets && asset.status === "inactive" && <button type="button" onClick={() => setFixedAssetStatusAction({ asset, action: "activate", reason: "", disposed_at: "" })}>Activar</button>}
+                          {canWriteFixedAssets && asset.status !== "disposed" && <button type="button" onClick={() => setFixedAssetStatusAction({ asset, action: "dispose", reason: "", disposed_at: new Date().toISOString().slice(0, 10) })}>Baja</button>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : <EmptyState title="Sin inmovilizado" detail="Registra activos para preparar su control contable y el plan preliminar de amortizacion." />}
+                {fixedAssetStatusAction && (
+                  <form className="period-action-form" onSubmit={handleFixedAssetStatus}>
+                    <div><strong>{fixedAssetActionLabels[fixedAssetStatusAction.action]}</strong><span>{fixedAssetStatusAction.asset.asset_code} - {fixedAssetStatusAction.asset.name}</span></div>
+                    {fixedAssetStatusAction.action === "dispose" && <label><span>Fecha baja</span><input type="date" value={fixedAssetStatusAction.disposed_at} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, disposed_at: e.target.value }))} /></label>}
+                    <label><span>Motivo</span><input minLength={5} required value={fixedAssetStatusAction.reason} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, reason: e.target.value }))} /></label>
+                    <div className="period-action-buttons"><button type="submit">Confirmar</button><button type="button" className="secondary" onClick={() => setFixedAssetStatusAction(null)}>Cancelar</button></div>
                   </form>
                 )}
               </>

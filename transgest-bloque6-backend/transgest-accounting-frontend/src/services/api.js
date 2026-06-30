@@ -66,6 +66,21 @@ function filenameFromDisposition(disposition) {
   return match?.[1] || null;
 }
 
+function buildQueryString(filters = {}, defaults = {}) {
+  const params = new URLSearchParams(defaults);
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value).trim());
+    }
+  });
+  return params.toString();
+}
+
+function withQuery(path, filters = {}, defaults = {}) {
+  const query = buildQueryString(filters, defaults);
+  return query ? `${path}?${query}` : path;
+}
+
 export async function exchangeSsoToken(ssoToken) {
   const data = await apiFetch("/auth/sso/exchange", {
     method: "POST",
@@ -221,14 +236,7 @@ export function downloadPartiesCsv(filters = {}) {
 }
 
 export function getMaturities(filters = {}) {
-  const params = new URLSearchParams();
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && String(value).trim()) {
-      params.set(key, String(value).trim());
-    }
-  });
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  return apiFetch(`/maturities${suffix}`);
+  return apiFetch(withQuery("/maturities", filters));
 }
 
 export const createMaturity = data => apiFetch("/maturities", { method: "POST", body: data });
@@ -238,37 +246,32 @@ export const updateMaturityStatus = (maturityId, data) => apiFetch(`/maturities/
 });
 
 export function downloadMaturitiesCsv(filters = {}) {
-  const params = new URLSearchParams({ format: "csv" });
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && String(value).trim()) {
-      params.set(key, String(value).trim());
-    }
-  });
-  return downloadFile(`/maturities?${params.toString()}`);
+  return downloadFile(withQuery("/maturities", filters, { format: "csv" }));
+}
+
+export function getFixedAssets(filters = {}) {
+  return apiFetch(withQuery("/fixed-assets", filters));
+}
+
+export const createFixedAsset = data => apiFetch("/fixed-assets", { method: "POST", body: data });
+export const updateFixedAssetStatus = (assetId, data) => apiFetch(`/fixed-assets/${assetId}/status`, {
+  method: "PATCH",
+  body: data,
+});
+export const getFixedAssetDepreciationPlan = assetId => apiFetch(`/fixed-assets/${assetId}/depreciation-plan`);
+
+export function downloadFixedAssetsCsv(filters = {}) {
+  return downloadFile(withQuery("/fixed-assets", filters, { format: "csv" }));
 }
 
 export function getBankAccounts(filters = {}) {
-  const params = new URLSearchParams();
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && String(value).trim()) {
-      params.set(key, String(value).trim());
-    }
-  });
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  return apiFetch(`/bank-accounts${suffix}`);
+  return apiFetch(withQuery("/bank-accounts", filters));
 }
 
 export const createBankAccount = data => apiFetch("/bank-accounts", { method: "POST", body: data });
 
 export function getBankTransactions(filters = {}) {
-  const params = new URLSearchParams();
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && String(value).trim()) {
-      params.set(key, String(value).trim());
-    }
-  });
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  return apiFetch(`/bank-transactions${suffix}`);
+  return apiFetch(withQuery("/bank-transactions", filters));
 }
 
 export const createBankTransaction = data => apiFetch("/bank-transactions", { method: "POST", body: data });
@@ -278,24 +281,10 @@ export const updateBankTransactionStatus = (transactionId, data) => apiFetch(`/b
 });
 export const importBankStatementCsv = data => apiFetch("/bank-statement-imports", { method: "POST", body: data });
 export function getBankStatementImports(filters = {}) {
-  const params = new URLSearchParams();
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && String(value).trim()) {
-      params.set(key, String(value).trim());
-    }
-  });
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  return apiFetch(`/bank-statement-imports${suffix}`);
+  return apiFetch(withQuery("/bank-statement-imports", filters));
 }
 export function getBankReconciliationSuggestions(transactionId, filters = {}) {
-  const params = new URLSearchParams();
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && String(value).trim()) {
-      params.set(key, String(value).trim());
-    }
-  });
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  return apiFetch(`/bank-transactions/${transactionId}/reconciliation-suggestions${suffix}`);
+  return apiFetch(withQuery(`/bank-transactions/${transactionId}/reconciliation-suggestions`, filters));
 }
 export const reconcileBankTransaction = (transactionId, data) => apiFetch(`/bank-transactions/${transactionId}/reconcile`, {
   method: "POST",
@@ -307,13 +296,7 @@ export const reverseBankReconciliation = (reconciliationId, data) => apiFetch(`/
 });
 
 export function downloadBankTransactionsCsv(filters = {}) {
-  const params = new URLSearchParams({ format: "csv" });
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && String(value).trim()) {
-      params.set(key, String(value).trim());
-    }
-  });
-  return downloadFile(`/bank-transactions?${params.toString()}`);
+  return downloadFile(withQuery("/bank-transactions", filters, { format: "csv" }));
 }
 export const getChartTemplates = () => apiFetch("/chart-templates");
 export const createChartTemplateFromFiscalYear = data => apiFetch("/chart-templates/from-fiscal-year", {

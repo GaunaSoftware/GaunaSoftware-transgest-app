@@ -7,6 +7,7 @@ require("./databasePrivileges.test");
 require("./eventContracts.test");
 require("./externalImportStaging.test");
 require("./externalIntegrations.test");
+require("./fixedAssets.test");
 require("./rbac.test");
 require("./sso.test");
 require("./migration.integration.test");

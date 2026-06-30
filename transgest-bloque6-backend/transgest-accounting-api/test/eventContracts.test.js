@@ -205,6 +205,28 @@ test("contratos de staging externo exigen lote y revision", () => {
   }), /Payload incompleto/);
 });
 
+test("contratos de inmovilizado exigen activo, ejercicio e importe", () => {
+  assert.doesNotThrow(() => validateEventContract("AccountingFixedAssetCreated", 1, {
+    fixed_asset_id: "asset-id",
+    fiscal_year_id: "year-id",
+    asset_code: "VEH-001",
+    name: "Cabeza tractora",
+    acquisition_date: "2026-06-30",
+    acquisition_cost: "120000.000000",
+    status: "active",
+  }));
+  assert.doesNotThrow(() => validateEventContract("AccountingFixedAssetStatusChanged", 1, {
+    fixed_asset_id: "asset-id",
+    previous_status: "active",
+    status: "disposed",
+    action: "dispose",
+    reason: "Venta del activo",
+  }));
+  assert.throws(() => validateEventContract("AccountingFixedAssetCreated", 1, {
+    fixed_asset_id: "asset-id",
+  }), /Payload incompleto/);
+});
+
 test("contrato de asiento contabilizado exige numero, totales y periodo", () => {
   assert.doesNotThrow(() => validateEventContract("AccountingJournalEntryReversalDraftCreated", 1, {
     journal_entry_id: "reversal-id",

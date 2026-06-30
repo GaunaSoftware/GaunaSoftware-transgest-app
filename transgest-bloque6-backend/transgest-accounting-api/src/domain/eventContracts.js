@@ -58,6 +58,12 @@ const EVENT_CONTRACTS = {
   AccountingExternalImportBatchApplied: {
     1: ["import_batch_id", "import_type", "applied_count", "skipped_count"],
   },
+  AccountingFixedAssetCreated: {
+    1: ["fixed_asset_id", "fiscal_year_id", "asset_code", "name", "acquisition_date", "acquisition_cost", "status"],
+  },
+  AccountingFixedAssetStatusChanged: {
+    1: ["fixed_asset_id", "previous_status", "status", "action", "reason"],
+  },
   AccountingBankTransactionReconciled: {
     1: ["bank_reconciliation_id", "bank_transaction_id", "maturity_id", "amount", "reason"],
   },

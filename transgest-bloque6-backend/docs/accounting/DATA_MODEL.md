@@ -705,20 +705,45 @@ Reglas actuales:
 
 ## Inmovilizado
 
-### `fixed_assets`
+### `accounting_fixed_assets`
 
 - `id`
 - `tenant_id`
 - `company_id`
+- `fiscal_year_id`
 - `asset_code`
 - `name`
 - `acquisition_date`
-- `acquisition_amount`
+- `acquisition_cost`
+- `residual_value`
+- `useful_life_months`
+- `depreciation_method` (`straight_line` en la version inicial)
 - `asset_account_id`
-- `depreciation_account_id`
+- `accumulated_depreciation_account_id`
 - `expense_account_id`
-- `status`
-- `source_invoice_id`
+- `status` (`active`, `inactive`, `disposed`)
+- `source_system`
+- `source_type`
+- `source_id`
+- `notes`
+- `disposed_at`
+- `status_reason`
+- `created_by`
+- `created_at`
+- `updated_at`
+
+Unicidad:
+
+- `(company_id, fiscal_year_id, asset_code)`
+
+Estado implementado:
+
+- Tabla creada por `018_fixed_assets`.
+- Permisos `fixed_assets.read` y `fixed_assets.write`.
+- Altas manuales, consulta filtrable, CSV auditado y cambio de estado con motivo desde la API contable.
+- Plan de amortizacion lineal calculado bajo demanda; no se persiste como plan oficial ni genera asientos.
+- Eventos `AccountingFixedAssetCreated` y `AccountingFixedAssetStatusChanged`.
+- No hay integracion automatica con facturas recibidas, no hay baja contable completa y no se declara cumplimiento fiscal o contable.
 
 ### `depreciation_plans`
 

@@ -4,9 +4,9 @@ Fecha: 2026-06-12
 
 ## Estado global estimado
 
-Estimacion de finalizacion del modulo completo: **40%**.
+Estimacion de finalizacion del modulo completo: **43%**.
 
-Esta cifra mide TransGest Contabilidad frente al objetivo de una solucion contable profesional para pymes espanolas, no solo frente a la Fase 1 tecnica. El avance actual cubre fundacion SaaS, SSO, multiempresa, RBAC, auditoria, outbox, plan contable manual, ejercicios/periodos, Diario manual, Mayor, informes preliminares, terceros, cartera manual de vencimientos, tesoreria bancaria manual, importacion CSV manual de extractos con historial de lotes, conciliacion manual exacta uno-a-uno, sugerencias asistidas de conciliacion, reverso auditado de conciliaciones e ignorar/reabrir movimientos bancarios con motivo. Quedan fuera todavia facturacion fiscal centralizada, IVA, facturas emitidas/recibidas, conciliacion bancaria automatica, importaciones bancarias normalizadas como Cuaderno 43, inmovilizado, cierres avanzados, adaptadores regulatorios y validacion legal externa.
+Esta cifra mide TransGest Contabilidad frente al objetivo de una solucion contable profesional para pymes espanolas, no solo frente a la Fase 1 tecnica. El avance actual cubre fundacion SaaS, SSO, multiempresa, RBAC, auditoria, outbox, plan contable manual, ejercicios/periodos, Diario manual, Mayor, informes preliminares, terceros, cartera manual de vencimientos, tesoreria bancaria manual, importacion CSV manual de extractos con historial de lotes, conciliacion manual exacta uno-a-uno, sugerencias asistidas de conciliacion, reverso auditado de conciliaciones, ignorar/reabrir movimientos bancarios con motivo e inmovilizado preliminar con plan de amortizacion lineal en modo consulta. Quedan fuera todavia facturacion fiscal centralizada, IVA, facturas emitidas/recibidas, conciliacion bancaria automatica, importaciones bancarias normalizadas como Cuaderno 43, generacion de asientos de amortizacion, bajas contables completas, cierres avanzados, adaptadores regulatorios y validacion legal externa.
 
 No se declara cumplimiento legal por el estado del codigo. Cualquier ambito fiscal, VERI*FACTU, factura electronica B2B, SII o conservacion documental requiere confirmacion con fuente oficial aplicable, asesor fiscal y/o revision juridica.
 
@@ -59,6 +59,8 @@ Estado Fase 1:
 - Implementada importacion CSV manual de extractos bancarios, con lote trazable, deduplicacion por fila normalizada, auditoria y evento `AccountingBankStatementImported`.
 - Implementado historial de lotes CSV en Bancos, con consulta por empresa seleccionada y contadores de filas, movimientos insertados, duplicados y errores.
 - Implementado cambio auditado de estado de movimientos bancarios para ignorar y reabrir movimientos con motivo, emitiendo `AccountingBankTransactionStatusChanged`.
+- Implementado registro preliminar de inmovilizado: altas manuales por ejercicio, filtros, CSV auditado, cambio de estado, vista de plan de amortizacion lineal y eventos `AccountingFixedAssetCreated` y `AccountingFixedAssetStatusChanged`.
+- Pendiente convertir amortizaciones en asientos periodicos mediante caso de uso explicito, bajas contables completas, integracion con facturas recibidas y validacion externa de criterios fiscales/contables.
 - Pendiente conciliacion automatica, importacion Cuaderno 43 u otros formatos normalizados, conciliaciones parciales, remesas y generacion de asientos desde bancos.
 - Implementado catalogo versionado de plantillas internas creadas desde un ejercicio existente.
 - Implementadas vista previa e importacion transaccional/idempotente de plantillas sin sobrescribir cuentas existentes.
@@ -345,6 +347,14 @@ Criterios de aceptacion:
 - No se duplica una amortizacion del mismo periodo.
 - Baja de activo queda trazada.
 - Parametros fiscales/contables requieren validacion externa.
+
+Estado parcial:
+
+- Implementada tabla `accounting_fixed_assets` con aislamiento por tenant, empresa y ejercicio.
+- Implementados permisos `fixed_assets.read` y `fixed_assets.write`.
+- Implementadas altas manuales de inmovilizado desde caso de uso/API contable, con transaccion, auditoria append-only y outbox.
+- Implementadas consulta, filtros, exportacion CSV auditada, cambio de estado (`active`, `inactive`, `disposed`) con motivo y plan de amortizacion lineal calculado bajo demanda.
+- No se generan todavia asientos de amortizacion, no hay tablas `depreciation_plans` ni `depreciation_runs`, no hay integracion automatica con facturas recibidas y no se declara cumplimiento contable/fiscal.
 
 ## Entrega 10 - Cierres, reaperturas y regularizacion
 

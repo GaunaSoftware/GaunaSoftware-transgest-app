@@ -38,6 +38,8 @@ const externalImportApplyPartiesUpSql = fs.readFileSync(path.join(migrationsDir,
 const externalImportApplyPartiesDownSql = fs.readFileSync(path.join(migrationsDir, "016_external_import_apply_parties.down.sql"), "utf8");
 const periodCloseMetadataUpSql = fs.readFileSync(path.join(migrationsDir, "017_period_close_metadata.up.sql"), "utf8");
 const periodCloseMetadataDownSql = fs.readFileSync(path.join(migrationsDir, "017_period_close_metadata.down.sql"), "utf8");
+const fixedAssetsUpSql = fs.readFileSync(path.join(migrationsDir, "018_fixed_assets.up.sql"), "utf8");
+const fixedAssetsDownSql = fs.readFileSync(path.join(migrationsDir, "018_fixed_assets.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -232,4 +234,16 @@ test("migracion de metadatos de cierre de periodos conserva trazabilidad", () =>
   assert.match(periodCloseMetadataDownSql, /closed_at IS NOT NULL/i);
   assert.match(periodCloseMetadataDownSql, /RAISE EXCEPTION/i);
   assert.match(periodCloseMetadataDownSql, /DROP COLUMN IF EXISTS closed_by/i);
+});
+
+test("migracion de inmovilizado crea registro inicial y permisos reversibles", () => {
+  assert.match(fixedAssetsUpSql, /CREATE TABLE IF NOT EXISTS accounting\.accounting_fixed_assets/i);
+  assert.match(fixedAssetsUpSql, /fiscal_year_id UUID NOT NULL REFERENCES accounting\.fiscal_years\(id\) ON DELETE RESTRICT/i);
+  assert.match(fixedAssetsUpSql, /depreciation_method VARCHAR\(40\) NOT NULL DEFAULT 'straight_line'/i);
+  assert.match(fixedAssetsUpSql, /UNIQUE \(company_id, fiscal_year_id, asset_code\)/i);
+  assert.match(fixedAssetsUpSql, /fixed_assets\.read/i);
+  assert.match(fixedAssetsUpSql, /fixed_assets\.write/i);
+  assert.match(fixedAssetsDownSql, /DELETE FROM accounting\.accounting_role_permissions/i);
+  assert.match(fixedAssetsDownSql, /DELETE FROM accounting\.accounting_permissions/i);
+  assert.match(fixedAssetsDownSql, /DROP TABLE IF EXISTS accounting\.accounting_fixed_assets/i);
 });

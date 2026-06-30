@@ -17,6 +17,7 @@ const companiesRoutes = require("./routes/companies");
 const dashboardRoutes = require("./routes/dashboard");
 const externalImportStagingRoutes = require("./routes/externalImportStaging");
 const externalIntegrationsRoutes = require("./routes/externalIntegrations");
+const fixedAssetsRoutes = require("./routes/fixedAssets");
 const journalEntriesRoutes = require("./routes/journalEntries");
 const ledgerRoutes = require("./routes/ledger");
 const maturitiesRoutes = require("./routes/maturities");
@@ -66,6 +67,7 @@ function createApp() {
   app.use("/api/v1", dashboardRoutes);
   app.use("/api/v1", externalImportStagingRoutes);
   app.use("/api/v1", externalIntegrationsRoutes);
+  app.use("/api/v1", fixedAssetsRoutes);
   app.use("/api/v1", journalEntriesRoutes);
   app.use("/api/v1", ledgerRoutes);
   app.use("/api/v1", maturitiesRoutes);

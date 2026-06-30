@@ -33,6 +33,8 @@ test("accounting_user tiene permisos minimos de Fase 1", () => {
   assert.ok(permissions.includes("banks.read"));
   assert.ok(permissions.includes("banks.write"));
   assert.ok(permissions.includes("company.select"));
+  assert.ok(permissions.includes("fixed_assets.read"));
+  assert.ok(permissions.includes("fixed_assets.write"));
   assert.ok(permissions.includes("fiscal_years.write"));
   assert.ok(permissions.includes("periods.write"));
   assert.ok(!permissions.includes("periods.reopen"));
@@ -44,6 +46,8 @@ test("accounting_viewer puede consultar pero no modificar el plan contable", () 
   assert.ok(permissions.includes("accounts.read"));
   assert.ok(permissions.includes("banks.read"));
   assert.ok(!permissions.includes("banks.write"));
+  assert.ok(permissions.includes("fixed_assets.read"));
+  assert.ok(!permissions.includes("fixed_assets.write"));
   assert.ok(permissions.includes("templates.read"));
   assert.ok(!permissions.includes("accounts.write"));
   assert.ok(!permissions.includes("templates.write"));

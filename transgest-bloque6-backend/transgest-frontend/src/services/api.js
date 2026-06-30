@@ -178,7 +178,9 @@ async function apiFetch(path, options = {}) {
       : e.message;
     const message = friendlyApiError(rawMessage, 0, null, path);
     rememberApiError({ status: 0, method, path, request_id: null, error: rawMessage || null, message });
-    if (!silentError) notifyError(message);
+    const isTimeout = e?.name === "AbortError" || String(rawMessage || "").toLowerCase().includes("tardado demasiado");
+    const shouldNotify = !silentError && (method !== "GET" || !isTimeout);
+    if (shouldNotify) notifyError(message);
     throw new Error(message);
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
@@ -725,7 +727,7 @@ export function saveEmpresa(d){
   if (typeof window !== "undefined") window.__TMS_EMPRESA_CACHE = d || {};
   try { localStorage.setItem("tms_empresa", JSON.stringify(d)); } catch {}
 }
-export const getEmpresaBackend = () => apiFetch("/empresa/perfil");
+export const getEmpresaBackend = (options = {}) => apiFetch("/empresa/perfil", options);
 export const saveEmpresaBackend = (data) => apiFetch("/empresa/perfil", { method:"PUT", body:data });
 export const getEmpresaFiscalConfig = () => apiFetch("/empresa/fiscal-config");
 export const saveEmpresaFiscalConfig = (data) => apiFetch("/empresa/fiscal-config", { method:"PUT", body:data });

@@ -197,6 +197,14 @@ app.use("/api/v1/fiscal/webhook", publicWorkflowLimiter);
 app.use("/api/v1/whatsapp/webhook", publicWorkflowLimiter);
 
 // ── Health check ──────────────────────────────────────
+app.head("/", (_req, res) => {
+  res.status(200).end();
+});
+
+app.get("/", (_req, res) => {
+  res.json({ status: "ok", service: "transgest-api", release: RELEASE });
+});
+
 app.get("/health", async (req, res) => {
   try {
     await db.query("SELECT 1");

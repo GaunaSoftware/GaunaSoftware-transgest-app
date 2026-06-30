@@ -1176,7 +1176,7 @@ function AppInner() {
   useEffect(() => {
     if (!user) return;
     setVista(VISTA_DEFAULT(user.rol));
-    getEmpresaBackend()
+    getEmpresaBackend({ silentError:true, timeoutMs:12000 })
       .then(perfil => {
         if (!perfil || typeof perfil !== "object") return;
         saveEmpresa(perfil);

@@ -187,14 +187,14 @@ async function ensureEmpresa() {
 
 async function ensureUser(empresaId, { nombre, email, rol, choferId = null }) {
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
-  const existing = await one("SELECT id FROM usuarios WHERE empresa_id=$1 AND LOWER(email)=LOWER($2) LIMIT 1", [empresaId, email]);
+  const existing = await one("SELECT id FROM usuarios WHERE LOWER(email)=LOWER($1) OR LOWER(username)=LOWER($1) LIMIT 1", [email]);
   if (existing) {
     return one(
       `UPDATE usuarios
-          SET nombre=$3, username=$2, password_hash=$4, rol=$5, activo=true, chofer_id=$6
+          SET empresa_id=$2, nombre=$3, email=$4, username=$4, password_hash=$5, rol=$6, activo=true, chofer_id=$7
         WHERE id=$1
         RETURNING *`,
-      [existing.id, email, nombre, passwordHash, rol, choferId]
+      [existing.id, empresaId, nombre, email, passwordHash, rol, choferId]
     );
   }
   return one(
@@ -227,16 +227,19 @@ async function ensureCliente(empresaId, data) {
 }
 
 async function ensureColaborador(empresaId, data) {
-  const existing = await one("SELECT id FROM colaboradores WHERE empresa_id=$1 AND LOWER(nombre)=LOWER($2) LIMIT 1", [empresaId, data.nombre]);
+  const existing = await one(
+    "SELECT id FROM colaboradores WHERE (empresa_id=$1 AND LOWER(nombre)=LOWER($2)) OR LOWER(COALESCE(email,''))=LOWER($3) OR cif=$4 LIMIT 1",
+    [empresaId, data.nombre, data.email, data.cif]
+  );
   if (existing) {
     return one(
       `UPDATE colaboradores
-          SET nombre=$2,cif=$3,email=$4,telefono=$5,iban=$6,valoracion=$7,notas=$8,activo=true,
+          SET empresa_id=$15,nombre=$2,cif=$3,email=$4,telefono=$5,iban=$6,valoracion=$7,notas=$8,activo=true,
               calle=$9,codigo_postal=$10,ciudad=$11,provincia=$12,pais='Espana',
               contacto_nombre=$13,contacto_telefono=$14,forma_pago='Transferencia bancaria'
         WHERE id=$1
         RETURNING id,nombre`,
-      [existing.id, data.nombre, data.cif, data.email, data.telefono, data.iban, data.valoracion, data.notas, data.calle, data.codigo_postal, data.ciudad, data.provincia, data.contacto_nombre, data.contacto_telefono]
+      [existing.id, data.nombre, data.cif, data.email, data.telefono, data.iban, data.valoracion, data.notas, data.calle, data.codigo_postal, data.ciudad, data.provincia, data.contacto_nombre, data.contacto_telefono, empresaId]
     );
   }
   return one(
@@ -274,13 +277,13 @@ async function ensureChofer(empresaId, data) {
 }
 
 async function ensureVehiculo(empresaId, data) {
-  let veh = await one("SELECT id FROM vehiculos WHERE empresa_id=$1 AND matricula=$2 LIMIT 1", [empresaId, data.matricula]);
+  let veh = await one("SELECT id FROM vehiculos WHERE matricula=$1 LIMIT 1", [data.matricula]);
   if (veh) {
     veh = await one(
       `UPDATE vehiculos
-          SET marca=$3,modelo=$4,clase=$5,tipo=$6,km_actuales=$7,chofer_id=$8,activo=true,
+          SET empresa_id=$2,marca=$3,modelo=$4,clase=$5,tipo=$6,km_actuales=$7,chofer_id=$8,activo=true,
               estado=$9,fecha_itv=$10,fecha_seguro=$11,notas_operacion=$12
-        WHERE id=$1 AND empresa_id=$2
+        WHERE id=$1
         RETURNING id,matricula`,
       [veh.id, empresaId, data.marca, data.modelo, data.clase, data.tipo, data.km_actuales, data.chofer_id, data.estado, data.fecha_itv, data.fecha_seguro, data.notas_operacion]
     );
@@ -400,7 +403,7 @@ async function ensurePieza(empresaId, data) {
   if (existing) {
     pieza = await one(
       `UPDATE taller_piezas
-          SET proveedor=$2,nombre=$3,codigo_barras=$5,categoria=$6,stock_actual=$7,stock_minimo=$8,
+          SET proveedor=$2,nombre=$3,referencia=$4,codigo_barras=$5,categoria=$6,stock_actual=$7,stock_minimo=$8,
               precio_compra=$9,etiqueta_tamano=$10,notas=$11,activo=true,updated_at=NOW()
         WHERE id=$1 AND empresa_id=$12
         RETURNING id,referencia,stock_actual`,

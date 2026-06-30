@@ -1155,7 +1155,7 @@ async function autoSeedIfEmpty() {
 }
 // ── Arranque ──────────────────────────────────────────
 function seedDemoShowcaseIfEnabled() {
-  if (process.env.DEMO_SHOWCASE_SEED !== "true") return;
+  if (process.env.DEMO_SHOWCASE_SEED === "false") return;
   runStartupScript("ensure_demo_showcase.js", "Demo showcase");
 }
 
@@ -1168,7 +1168,7 @@ async function startServer() {
   app.listen(PORT, () => {
     logger.info("TransGest API lista en puerto " + PORT + " - " + process.env.NODE_ENV);
     if (process.env.ALLOW_DEMO_SEED === "true") setTimeout(autoSeedIfEmpty, 5000);
-    if (process.env.DEMO_SHOWCASE_SEED === "true") setTimeout(seedDemoShowcaseIfEnabled, 7000);
+    if (process.env.DEMO_SHOWCASE_SEED !== "false") setTimeout(seedDemoShowcaseIfEnabled, 7000);
     try { backupService.startScheduler(); } catch (e) { logger.warn("Backup: " + e.message); }
     try { fiscalScheduler.startScheduler(); } catch (e) { logger.warn("Fiscal: " + e.message); }
     try { pedidosRoutes.startAlbaranesReminderScheduler?.(); } catch (e) { logger.warn("Albaranes: " + e.message); }

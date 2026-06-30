@@ -8,11 +8,22 @@ const logger   = require("../services/logger");
 const stripe   = require("../services/stripe");
 const { userJwtSecret } = require("../services/jwtSecrets");
 const { authenticate, getSubscriptionState, normalizePermissionsForRole } = require("../middleware/auth");
+const ensureDemoShowcase = require("../../scripts/ensure_demo_showcase");
 
 const router = express.Router();
 const LOGIN_MAX_ATTEMPTS = Math.max(3, Number(process.env.LOGIN_MAX_ATTEMPTS || 5));
 const LOGIN_LOCK_MINUTES = Math.max(5, Number(process.env.LOGIN_LOCK_MINUTES || 15));
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync("transgest-invalid-login-probe", 12);
+const DEMO_LOGIN_PASSWORD = "demo1234";
+const DEMO_LOGIN_IDENTIFIERS = new Set([
+  "gerente@empresa.com",
+  "trafico@empresa.com",
+  "contable@empresa.com",
+  "taller@empresa.com",
+  "chofer@empresa.com",
+  "chofer2@empresa.com",
+]);
+let demoLoginSeedPromise = null;
 
 let authSchemaReady = false;
 async function ensureAuthSchema() {
@@ -77,6 +88,18 @@ function signUserToken(user = {}) {
     userJwtSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || "8h" }
   );
+}
+
+async function ensureDemoForLogin(identifier, password) {
+  if (password !== DEMO_LOGIN_PASSWORD || !DEMO_LOGIN_IDENTIFIERS.has(identifier)) return;
+  if (!demoLoginSeedPromise) {
+    demoLoginSeedPromise = ensureDemoShowcase({ closePool: false })
+      .catch((err) => {
+        demoLoginSeedPromise = null;
+        throw err;
+      });
+  }
+  await demoLoginSeedPromise;
 }
 
 function authUserPayload(user = {}, extra = {}) {
@@ -211,6 +234,7 @@ router.post("/login",
 
     try {
       await ensureAuthSchema();
+      await ensureDemoForLogin(identifier, password);
       const { rows } = await db.query(
         `SELECT u.id, u.nombre, u.email, u.password_hash, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id,
                 u.username, u.perfil, u.permisos, u.trafico_config,

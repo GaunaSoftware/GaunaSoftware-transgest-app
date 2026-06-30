@@ -431,7 +431,8 @@ async function ensurePieza(empresaId, data) {
   return pieza;
 }
 
-async function main() {
+async function main(options = {}) {
+  const closePool = options.closePool !== false;
   await ensureSchema();
   const empresa = await ensureEmpresa();
   const empresaId = empresa.id;
@@ -588,11 +589,15 @@ async function main() {
       usuarios_chofer_app: 2,
     },
   }, null, 2));
-  await db.pool.end();
+  if (closePool) await db.pool.end();
 }
 
-main().catch(async (err) => {
-  console.error(err);
-  try { await db.pool.end(); } catch {}
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(async (err) => {
+    console.error(err);
+    try { await db.pool.end(); } catch {}
+    process.exit(1);
+  });
+}
+
+module.exports = main;

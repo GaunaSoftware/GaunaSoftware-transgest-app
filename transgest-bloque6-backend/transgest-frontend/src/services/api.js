@@ -457,6 +457,8 @@ export const getPedidoWhatsappPreflight = (id, target = "cliente") =>
   apiFetch(`/whatsapp/pedido/${id}/preflight?target=${encodeURIComponent(target)}`, { silentSuccess:true });
 export const enviarPedidoWhatsapp = (id, data = {}) =>
   apiFetch(`/whatsapp/pedido/${id}`, { method:"POST", body:data, silentSuccess:true });
+export const notificarPedidoChoferApp = (id, data = {}) =>
+  apiFetch(`/pedidos/${id}/notificar-chofer-app`, { method:"POST", body:data });
 export const getPlanDiario = (params = {}) =>
   apiFetch(`/plan-diario?${new URLSearchParams(params)}`, { silentSuccess:true });
 export const guardarPlanDiarioNota = (data) =>

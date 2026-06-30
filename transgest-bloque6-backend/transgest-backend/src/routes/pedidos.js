@@ -809,6 +809,28 @@ function minutosEntreIso(a, b) {
   return Math.round((end - start) / 60000);
 }
 
+function buildLocalDateTime(fecha, hora = "00:00") {
+  const date = normalizePedidoDate(fecha);
+  if (!date) return null;
+  const time = normalizePedidoTime(hora) || "00:00";
+  const d = new Date(`${date}T${time}:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function addMinutesDate(date, minutes = 0) {
+  if (!date || Number.isNaN(date.getTime())) return null;
+  return new Date(date.getTime() + Number(minutes || 0) * 60000);
+}
+
+function splitPedidoDateTime(date) {
+  if (!date || Number.isNaN(date.getTime())) return { fecha: null, hora: null };
+  const pad = n => String(n).padStart(2, "0");
+  return {
+    fecha: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    hora: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
+  };
+}
+
 async function notificarGestionPedido(empresaId, tipo, titulo, mensaje, data = {}, createdBy = null) {
   if (!empresaId) return;
   const { rows } = await db.query(
@@ -1536,10 +1558,73 @@ async function savePedidoChoferPasos({
     actorId
   );
   const pedidoMeta = await db.query(
-    "SELECT id, numero, origen, destino, origen_pais, destino_pais FROM pedidos WHERE id=$1 AND empresa_id=$2 LIMIT 1",
+    "SELECT id, numero, origen, destino, origen_pais, destino_pais, estado::text AS estado, chofer_id, fecha_carga, hora_carga, fecha_descarga, fecha_entrega, hora_descarga FROM pedidos WHERE id=$1 AND empresa_id=$2 LIMIT 1",
     [pedidoId, empresaId]
   ).catch(() => ({ rows: [] }));
   const pedido = pedidoMeta.rows[0] || {};
+  async function sincronizarPedidoYChoferDesdePasos() {
+    const updates = [];
+    const params = [];
+    const addUpdate = (sql, value) => {
+      params.push(value);
+      updates.push(`${sql}=$${params.length}`);
+    };
+    let nextEstado = null;
+    if (patch.descarga_ok || nextData.descarga_ok) nextEstado = "entregado";
+    else if (patch.descarga_iniciada || patch.posicionado_descarga || nextData.descarga_iniciada || nextData.posicionado_descarga) nextEstado = "descarga";
+    else if (patch.viaje_iniciado || patch.carga_ok || nextData.viaje_iniciado || nextData.carga_ok) nextEstado = "en_curso";
+    if (nextEstado && !["cancelado", "entregado"].includes(String(pedido.estado || "").toLowerCase())) {
+      addUpdate("estado", nextEstado);
+    }
+
+    const cargaPlan = buildLocalDateTime(pedido.fecha_carga, pedido.hora_carga || "00:00");
+    const descargaPlan = buildLocalDateTime(pedido.fecha_descarga || pedido.fecha_entrega, pedido.hora_descarga || "00:00");
+    const cargaReal = nextData.carga_iniciada_at ? new Date(nextData.carga_iniciada_at) : null;
+    const referenciaRetraso = cargaReal && Number.isFinite(cargaReal.getTime()) ? cargaReal : new Date();
+    const debeEvaluarRetraso = cargaPlan && descargaPlan && (
+      patch.carga_iniciada || patch.carga_ok || patch.viaje_iniciado || patch.posicionado_descarga || patch.descarga_iniciada || patch.descarga_ok || !nextData.carga_iniciada
+    );
+    const retrasoMin = debeEvaluarRetraso ? minutosEntreIso(cargaPlan.toISOString(), referenciaRetraso.toISOString()) : 0;
+    if (retrasoMin > 5) {
+      const nuevaDescarga = splitPedidoDateTime(addMinutesDate(descargaPlan, retrasoMin));
+      if (nuevaDescarga.fecha) {
+        if (pedido.fecha_descarga) addUpdate("fecha_descarga", nuevaDescarga.fecha);
+        else addUpdate("fecha_entrega", nuevaDescarga.fecha);
+      }
+      if (nuevaDescarga.hora) addUpdate("hora_descarga", nuevaDescarga.hora);
+    }
+
+    if (updates.length) {
+      params.push(pedidoId, empresaId);
+      await db.query(
+        `UPDATE pedidos SET ${updates.join(", ")}, updated_at=NOW() WHERE id=$${params.length - 1} AND empresa_id=$${params.length}`,
+        params
+      ).catch(e => logger.warn("No se pudo sincronizar pedido desde pasos de chofer:", e.message));
+      await logPedidoEvento(pedidoId, empresaId, "pedido.sincronizado_app_chofer", {
+        estado: nextEstado,
+        retraso_min: retrasoMin > 5 ? retrasoMin : 0,
+      }, actorTipo, actorId);
+      if (nextEstado === "entregado") {
+        await aplicarAutomatismosEntrega(pedidoId, empresaId, actorId || null, {}).catch(e => logger.warn("No se pudo aplicar automatismo de entrega desde app chofer:", e.message));
+      }
+    }
+
+    const choferTarget = choferId || pedido.chofer_id || current.chofer_id || null;
+    if (choferTarget) {
+      let estadoChofer = null;
+      if (patch.descarga_ok || nextData.descarga_ok) estadoChofer = "disponible";
+      else if (patch.descarga_iniciada || patch.posicionado_descarga || nextData.descarga_iniciada || nextData.posicionado_descarga) estadoChofer = "descargando";
+      else if (patch.viaje_iniciado || patch.carga_ok || nextData.viaje_iniciado || nextData.carga_ok) estadoChofer = "en_ruta";
+      else if (patch.carga_iniciada || patch.carga_proceso || nextData.carga_iniciada || nextData.carga_proceso) estadoChofer = "carga";
+      if (estadoChofer) {
+        await db.query(
+          "UPDATE choferes SET estado=$1 WHERE id=$2 AND empresa_id=$3 AND COALESCE(estado,'disponible') NOT IN ('baja','vacaciones','ausencia')",
+          [estadoChofer, choferTarget, empresaId]
+        ).catch(e => logger.warn("No se pudo actualizar estado del chofer desde app:", e.message));
+      }
+    }
+  }
+  await sincronizarPedidoYChoferDesdePasos();
   async function avisarParalizacion(fase, titulo, mins, dedupeSuffix) {
     if (!mins || mins <= 60) return;
     const paisOperacion = inferPaisOperacionPedido(pedido, fase);
@@ -6295,6 +6380,49 @@ router.get("/:id/ida-retorno", async (req, res) => {
   }
 });
 
+router.post("/:id/notificar-chofer-app", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const { rows } = await db.query(
+      `SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.hora_carga, p.chofer_id,
+              u.id AS usuario_id
+         FROM pedidos p
+         LEFT JOIN usuarios u ON u.chofer_id=p.chofer_id AND u.empresa_id=p.empresa_id AND u.activo=true
+        WHERE p.id=$1 AND p.empresa_id=$2
+        LIMIT 1`,
+      [req.params.id, empresaId]
+    );
+    const pedido = rows[0];
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (!pedido.chofer_id) return res.status(400).json({ error: "Asigna un chofer antes de enviar aviso a la app." });
+    if (!pedido.usuario_id) return res.status(400).json({ error: "El chofer no tiene usuario de app asociado." });
+    const mensaje = String(req.body?.mensaje || "").trim()
+      || `Revisa el pedido ${pedido.numero || ""}: ${pedido.origen || "-"} -> ${pedido.destino || "-"}`;
+    const notificacion = await crearNotificacion({
+      empresa_id: empresaId,
+      usuario_id: pedido.usuario_id,
+      tipo: "pedido_app_chofer",
+      titulo: `Pedido ${pedido.numero || ""}`,
+      mensaje,
+      data: {
+        pedido_id: pedido.id,
+        pedido_numero: pedido.numero,
+        fecha_carga: pedido.fecha_carga,
+        hora_carga: pedido.hora_carga,
+        dedupe_key: `pedido_app_chofer:${pedido.id}`,
+      },
+      created_by: req.user?.id || null,
+    });
+    await logPedidoEvento(pedido.id, empresaId, "app_chofer.notificado", {
+      mensaje,
+      notificacion_id: notificacion?.id || null,
+    }, req.user?.rol || "usuario", req.user?.id || null);
+    res.json({ ok: true, notificacion });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudo notificar al chofer en la app" });
+  }
+});
+
 router.post("/:id/ida-retorno", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     await ensureColaboradorWorkflowSchema();
@@ -6502,10 +6630,14 @@ router.get("/:id/eventos", async (req, res) => {
       return res.status(403).json({ error: "No puedes acceder a este pedido" });
     }
     const { rows } = await db.query(
-      `SELECT id,tipo,actor_tipo,actor_id,detalle,created_at
-         FROM pedido_eventos
-        WHERE pedido_id=$1 AND empresa_id=$2
-        ORDER BY created_at DESC
+      `SELECT pe.id,pe.tipo,pe.actor_tipo,pe.actor_id,pe.detalle,pe.created_at,
+              COALESCE(NULLIF(TRIM(CONCAT(u.nombre,' ',u.apellidos)),''), u.nombre, u.email) AS actor_nombre,
+              u.email AS actor_email,
+              u.rol AS actor_rol
+         FROM pedido_eventos pe
+         LEFT JOIN usuarios u ON u.id=pe.actor_id AND u.empresa_id=pe.empresa_id
+        WHERE pe.pedido_id=$1 AND pe.empresa_id=$2
+        ORDER BY pe.created_at DESC
         LIMIT 100`,
       [req.params.id, empresaId]
     );
@@ -7533,6 +7665,13 @@ router.post("/", GERENTE_O_TRAFICO,
           visual_ok: Boolean(aiMeta.visual_ok),
         }, req.user?.rol || "usuario", req.user?.id || null, client);
       }
+      await logPedidoEvento(pedido.id, empresaId, "pedido.creado", {
+        numero: pedido.numero,
+        cliente_id,
+        ruta_id: rutaIdNorm || null,
+        origen: pedido.origen || origen || null,
+        destino: pedido.destino || destino || null,
+      }, req.user?.rol || "usuario", req.user?.id || null, client);
       pedidoCreado = pedido;
       remolqueMatCreado = remolque_mat;
     });

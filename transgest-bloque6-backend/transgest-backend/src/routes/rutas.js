@@ -317,8 +317,45 @@ router.post("/", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes"), async 
       LIMIT 1`,
     [origenUp, destinoUp, clienteId, tipoVehiculo, empresaId]
   );
-  if (exists.rows[0]) return res.status(409).json({ error: "Ya existe una ruta con ese origen, destino, cliente y tipo de vehiculo", ruta: exists.rows[0] });
   const minima = normalizeMinimumsByTarifa(tarifa_tipo, minimo_facturable, minimo_unidades);
+  if (exists.rows[0]) {
+    const { rows: updatedRows } = await db.query(
+      `UPDATE rutas
+          SET km=COALESCE($1, km),
+              peajes=COALESCE($2, peajes),
+              tiempo_h=COALESCE($3, tiempo_h),
+              notas=COALESCE($4, notas),
+              pct_subida=COALESCE($5, pct_subida),
+              tarifa_tipo=$6,
+              precio_base=COALESCE($7, precio_base),
+              minimo_facturable=$8,
+              minimo_unidades=$9,
+              recargo_combustible_pct=COALESCE($10, recargo_combustible_pct),
+              empresa_id=COALESCE(empresa_id,$11)
+        WHERE id=$12 AND (empresa_id=$11 OR empresa_id IS NULL)
+        RETURNING *`,
+      [
+        numericOrNull(km), numericOrNull(peajes), numericOrNull(tiempo_h), notas || null,
+        numericOrNull(pct_subida), minima.tarifaTipo, numericOrNull(precio_base),
+        minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct),
+        empresaId, exists.rows[0].id,
+      ]
+    );
+    if (clienteId && updatedRows[0]) {
+      await db.query(
+        `INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (ruta_id,cliente_id) DO UPDATE SET
+           precio=EXCLUDED.precio,
+           tarifa_tipo=EXCLUDED.tarifa_tipo,
+           minimo_facturable=EXCLUDED.minimo_facturable,
+           minimo_unidades=EXCLUDED.minimo_unidades,
+           recargo_combustible_pct=EXCLUDED.recargo_combustible_pct`,
+        [updatedRows[0].id, clienteId, numericOrNull(precio_base) || 0, minima.tarifaTipo, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0]
+      ).catch(() => {});
+    }
+    return res.status(200).json({ ...(updatedRows[0] || exists.rows[0]), reutilizada: true });
+  }
   const { rows } = await db.query(
     "INSERT INTO rutas (origen,destino,km,peajes,tiempo_h,notas,tipo_vehiculo,pct_subida,cliente_id,tarifa_tipo,precio_base,minimo_facturable,minimo_unidades,recargo_combustible_pct,empresa_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *",
     [origenUp, destinoUp, km||null, peajes||0, tiempo_h||null, notas||null,

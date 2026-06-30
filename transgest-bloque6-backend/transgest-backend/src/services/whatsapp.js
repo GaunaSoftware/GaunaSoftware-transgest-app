@@ -6,6 +6,7 @@ const { encryptSecret, decryptSecret, maskSecret } = require("./apiKeys");
 const DEFAULT_TEMPLATES = {
   pedido_cliente: "pedido_confirmacion_cliente",
   orden_colaborador: "orden_carga_colaborador",
+  aviso_chofer: "aviso_pedido_chofer",
   docs_pendientes: "documentacion_pendiente",
   entrega_recordatorio: "recordatorio_entrega_albaran",
 };
@@ -162,6 +163,16 @@ function formatDateEs(value) {
 
 function buildPedidoWhatsappText(pedido = {}, target = "cliente") {
   const ruta = `${pedido.origen || "-"} -> ${pedido.destino || "-"}`;
+  if (target === "chofer") {
+    return [
+      `Aviso de viaje ${pedido.numero || ""}`,
+      `Ruta: ${ruta}`,
+      `Carga: ${formatDateEs(pedido.fecha_carga)} ${pedido.hora_carga || ""}`.trim(),
+      `Descarga: ${formatDateEs(pedido.fecha_descarga || pedido.fecha_entrega)} ${pedido.hora_descarga || ""}`.trim(),
+      pedido.mercancia ? `Mercancia: ${pedido.mercancia}` : "",
+      "Revisa el detalle en la app de chofer.",
+    ].filter(Boolean).join("\n");
+  }
   if (target === "colaborador") {
     return [
       `Orden de carga ${pedido.numero || ""}`,
@@ -173,7 +184,8 @@ function buildPedidoWhatsappText(pedido = {}, target = "cliente") {
     ].filter(Boolean).join("\n");
   }
   return [
-    `Le confirmamos el pedido ${pedido.numero || ""}.`,
+    `Actualizacion del pedido ${pedido.numero || ""}.`,
+    `Estado: ${pedido.estado || "pendiente"}`,
     `Ruta: ${ruta}`,
     `Carga: ${formatDateEs(pedido.fecha_carga)} ${pedido.hora_carga || ""}`.trim(),
     `Descarga: ${formatDateEs(pedido.fecha_descarga || pedido.fecha_entrega)} ${pedido.hora_descarga || ""}`.trim(),
@@ -186,10 +198,12 @@ async function loadPedidoWhatsappContext(pedidoId, empresaId) {
     SELECT p.*,
            c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
            co.nombre AS colaborador_nombre, co.telefono AS colaborador_telefono, co.contacto_nombre AS colaborador_contacto,
+           ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.telefono AS chofer_telefono,
            v.matricula AS vehiculo_matricula
       FROM pedidos p
       JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
       LEFT JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
+      LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
       LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
      WHERE p.id=$1 AND p.empresa_id=$2
      LIMIT 1
@@ -198,11 +212,18 @@ async function loadPedidoWhatsappContext(pedidoId, empresaId) {
 }
 
 function buildPedidoWhatsappPreflight(pedido = {}, cfg = {}, target = "cliente", overridePhone = "") {
-  const rawPhone = overridePhone || (target === "colaborador" ? pedido.colaborador_telefono : pedido.cliente_telefono);
+  const rawPhone = overridePhone
+    || (target === "colaborador" ? pedido.colaborador_telefono
+      : target === "chofer" ? pedido.chofer_telefono
+        : pedido.cliente_telefono);
   const phone = normalizePhone(rawPhone);
   const bloqueantes = [];
   const avisos = [];
-  if (!phone) bloqueantes.push(target === "colaborador" ? "El colaborador no tiene telefono valido." : "El cliente no tiene telefono valido.");
+  if (!phone) {
+    bloqueantes.push(target === "colaborador"
+      ? "El colaborador no tiene telefono valido."
+      : target === "chofer" ? "El chofer no tiene telefono valido." : "El cliente no tiene telefono valido.");
+  }
   if (!cfg?.activo) bloqueantes.push("La integracion de WhatsApp esta desactivada para esta empresa.");
   const hasCredentials = !!(cfg?.phone_number_id && cfg?.access_token);
   if (!hasCredentials) avisos.push("WhatsApp Cloud API no tiene credenciales completas; se registrara como envio simulado.");
@@ -326,7 +347,7 @@ async function sendPedidoWhatsapp({ empresaId, pedidoId, target = "cliente", pho
     throw err;
   }
   const cfg = await getEmpresaWhatsappConfig(empresaId, true) || publicWhatsappConfig({});
-  const selectedTemplate = templateName || (target === "colaborador" ? cfg.templates?.orden_colaborador : cfg.templates?.pedido_cliente) || "";
+  const selectedTemplate = templateName || (target === "colaborador" ? cfg.templates?.orden_colaborador : target === "chofer" ? cfg.templates?.aviso_chofer : cfg.templates?.pedido_cliente) || "";
   const finalMessage = message || buildPedidoWhatsappText(pedido, target);
   const preflight = buildPedidoWhatsappPreflight(pedido, cfg, target, phoneOverride);
   if (!preflight.ok) {

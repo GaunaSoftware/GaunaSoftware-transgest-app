@@ -17,6 +17,11 @@ const {
 const router = express.Router();
 const EID = req => req.empresaId || req.user?.empresa_id;
 
+function normalizeWhatsappTarget(value) {
+  const target = String(value || "cliente").toLowerCase();
+  return ["cliente", "colaborador", "chofer"].includes(target) ? target : "cliente";
+}
+
 function verifyMetaSignature(req, appSecret) {
   if (!appSecret) return { checked: false, ok: process.env.NODE_ENV !== "production" };
   const signature = String(req.get("x-hub-signature-256") || "");
@@ -154,7 +159,7 @@ router.get("/pedido/:id/preflight", GERENTE_O_TRAFICO, async (req, res) => {
     const pedido = await loadPedidoWhatsappContext(req.params.id, empresaId);
     if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
     const cfg = await getEmpresaWhatsappConfig(empresaId, true) || {};
-    const target = String(req.query.target || req.query.destinatario_tipo || "cliente").toLowerCase() === "colaborador" ? "colaborador" : "cliente";
+    const target = normalizeWhatsappTarget(req.query.target || req.query.destinatario_tipo);
     res.json(buildPedidoWhatsappPreflight(pedido, cfg, target, req.query.destinatario || ""));
   } catch(e) {
     res.status(500).json({ error: e.message });
@@ -166,7 +171,7 @@ router.post("/pedido/:id", GERENTE_O_TRAFICO, async (req, res) => {
     const result = await sendPedidoWhatsapp({
       empresaId: EID(req),
       pedidoId: req.params.id,
-      target: String(req.body?.target || req.body?.destinatario_tipo || "cliente").toLowerCase() === "colaborador" ? "colaborador" : "cliente",
+      target: normalizeWhatsappTarget(req.body?.target || req.body?.destinatario_tipo),
       phoneOverride: req.body?.destinatario || "",
       templateName: req.body?.template_name || "",
       message: req.body?.mensaje || "",

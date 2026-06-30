@@ -8,7 +8,7 @@ import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRuta
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta,
-         getPedidoWhatsappPreflight, enviarPedidoWhatsapp } from "../services/api";
+         getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp } from "../services/api";
 import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -5240,6 +5240,7 @@ function PedidoTimeline({ pedido }) {
 
   const labelEvento = tipo => ({
     "estado.actualizado": "Estado actualizado",
+    "pedido.creado": "Pedido creado",
     "pedido.editado": "Pedido editado",
     "pedido.creado_bandeja_ia": "Creado desde Bandeja IA",
     "pedido.editado_estado": "Estado editado",
@@ -5300,6 +5301,7 @@ function PedidoTimeline({ pedido }) {
               {eventos.slice(0,8).map(ev => {
                 const isAiEvent = ev.tipo === "pedido.creado_bandeja_ia";
                 const isSignatureWarning = ev.tipo === "firma.contexto_modificado";
+                const actor = ev.actor_nombre || ev.actor_email || ev.actor_tipo || "Sistema";
                 return (
                   <div key={ev.id} style={{display:"grid",gridTemplateColumns:"130px 1fr",gap:10,alignItems:"start",background:isSignatureWarning?"rgba(245,158,11,.08)":isAiEvent?"rgba(59,130,246,.08)":"var(--bg3)",border:`1px solid ${isSignatureWarning?"rgba(245,158,11,.28)":isAiEvent?"rgba(59,130,246,.25)":"#1e2d45"}`,borderRadius:8,padding:"8px 10px"}}>
                     <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text5)"}}>
@@ -5307,6 +5309,9 @@ function PedidoTimeline({ pedido }) {
                     </div>
                     <div>
                       <div style={{fontSize:12,fontWeight:800,color:isSignatureWarning?"#f59e0b":isAiEvent?"#60a5fa":"var(--text)"}}>{labelEvento(ev.tipo)}</div>
+                      <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,marginTop:1}}>
+                        {actor}{ev.actor_rol ? ` - ${ev.actor_rol}` : ""}
+                      </div>
                       {ev.detalle && Object.keys(ev.detalle).length>0 && (
                         <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>
                           {formatoDetalleEvento(ev.detalle)}
@@ -8235,9 +8240,10 @@ export default function Pedidos() {
         return;
       }
       const avisos = Array.isArray(preflight?.avisos) ? preflight.avisos : [];
+      const targetLabel = target === "chofer" ? "chofer por WhatsApp" : target === "colaborador" ? "colaborador/proveedor por WhatsApp" : "cliente con el estado del pedido";
       const force = avisos.length > 0
         ? await confirmDialog({
-            title: "Enviar WhatsApp",
+            title: `Enviar aviso a ${targetLabel}`,
             message: `${avisos.join("\n")}\n\nSe registrara el envio igualmente para dejar trazabilidad.`,
             confirmText: "Registrar envio",
             cancelText: "Cancelar",
@@ -8255,9 +8261,30 @@ export default function Pedidos() {
     }
   }
 
+  async function notificarChoferAppAccion(pedido) {
+    if (!pedido?.id || whatsappSending) return;
+    const key = `${pedido.id}:app_chofer`;
+    setWhatsappSending(key);
+    try {
+      await notificarPedidoChoferApp(pedido.id, {
+        mensaje: `Revisa el pedido ${pedido.numero || ""}: ${pedido.origen || "-"} -> ${pedido.destino || "-"}`,
+      });
+      notify("Aviso enviado a la app del chofer.", "success");
+      cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo enviar aviso a la app del chofer.", "error");
+    } finally {
+      setWhatsappSending("");
+    }
+  }
+
   async function convertirFacturaConConcepto(pedido) {
     if (pedidoTieneFacturaFinal(pedido) || pedidoTieneFacturaBorrador(pedido)) {
       notify(pedidoTieneFacturaBorrador(pedido) ? "El pedido ya tiene un borrador de factura vinculado: " + (pedido.factura_numero || "borrador") : "Pedido ya facturado: " + (pedido.factura_numero || "factura emitida"), "warning");
+      return;
+    }
+    if (String(pedido?.estado || "").toLowerCase() !== "entregado") {
+      notify("Solo se puede facturar cuando el pedido esta entregado. Si esta en descarga, se mandara automaticamente al terminar.", "warning");
       return;
     }
 
@@ -8559,6 +8586,10 @@ export default function Pedidos() {
       } catch (e) {
         notify("No se pudo refrescar el pedido completo. Se abre la version disponible.", "warning");
       }
+    }
+    if (!pedidoCompleto?.colaborador_id) {
+      notify("Asigna primero un colaborador/proveedor para poder mandar la orden de carga.", "warning");
+      return;
     }
     setOrdenCarga(normalizePedidoTarifaDraft(pedidoCompleto));
   }
@@ -9693,7 +9724,7 @@ export default function Pedidos() {
                         {canEdit&&<select value={p.estado} onChange={e=>cambiarEstado(p.id,e.target.value)} style={{...S.sel,width:130,padding:"4px 8px",fontSize:11}}>
                           {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
                         </select>}
-                        {canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&(p.estado==="entregado"||p.estado==="descarga")&&(
+                        {canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&p.estado==="entregado"&&(
                           <button style={{...S.btn,background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.2)",padding:"4px 10px",fontSize:11}} onClick={()=>setFacturando(p)}>Facturar</button>
                         )}
                         <button
@@ -9740,7 +9771,23 @@ export default function Pedidos() {
                                 style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
                                 disabled={whatsappSending === `${p.id}:cliente`}
                                 onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "cliente");}}>
-                                {whatsappSending === `${p.id}:cliente` ? "Registrando..." : "WhatsApp cliente"}
+                                {whatsappSending === `${p.id}:cliente` ? "Registrando..." : "WhatsApp cliente (estado)"}
+                              </button>
+                            )}
+                            {p.chofer_id&&(
+                              <button
+                                style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
+                                disabled={whatsappSending === `${p.id}:chofer`}
+                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "chofer");}}>
+                                {whatsappSending === `${p.id}:chofer` ? "Registrando..." : "WhatsApp chofer"}
+                              </button>
+                            )}
+                            {p.chofer_id&&(
+                              <button
+                                style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.1)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)",padding:"6px 10px",fontSize:11}}
+                                disabled={whatsappSending === `${p.id}:app_chofer`}
+                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");notificarChoferAppAccion(p);}}>
+                                {whatsappSending === `${p.id}:app_chofer` ? "Enviando..." : "App chofer"}
                               </button>
                             )}
                             {p.colaborador_telefono&&(

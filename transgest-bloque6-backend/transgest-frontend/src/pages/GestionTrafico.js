@@ -1106,7 +1106,7 @@ function buildCriticalAlertKey(item) {
 }
 
 // â”€â”€ Modal ediciÃ³n de viaje â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onClose, onSaved, onReload, onFacturaDesvinculada, focusContext = null, resolveSuggestedAssignment = null }) {
+function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onClose, onSaved, onReload, onFacturaDesvinculada, focusContext = null, resolveSuggestedAssignment = null, onClearAssignment = null, clearingAssignment = false }) {
   const [form, setForm] = useState(() => normalizePedidoForModal(pedido));
   const [saving, setSaving] = useState(false);
   const [avisoVehiculo, setAvisoVehiculo] = useState(null);
@@ -1652,6 +1652,16 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
                 <div style={{fontSize:11,color:"var(--text5)"}}>Y {conflictosOperativos.length - 3} conflicto(s) mas.</div>
               )}
             </div>
+            {(pedido.vehiculo_id || pedido.chofer_id || pedido.remolque_id) && (
+              <button
+                type="button"
+                onClick={() => onClearAssignment?.(pedido)}
+                disabled={clearingAssignment || !onClearAssignment}
+                style={{marginTop:9,padding:"6px 10px",borderRadius:7,border:"1px solid rgba(239,68,68,.28)",background:"rgba(239,68,68,.10)",color:"#f87171",fontSize:11,fontWeight:900,cursor:(clearingAssignment || !onClearAssignment) ? "not-allowed" : "pointer",opacity:(clearingAssignment || !onClearAssignment) ? .6 : 1,fontFamily:"'DM Sans',sans-serif"}}
+              >
+                {clearingAssignment ? "Limpiando..." : "Limpiar asignacion y devolver a bolsa"}
+              </button>
+            )}
           </div>
         )}
         {!!validationIssues.length && (
@@ -5189,6 +5199,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
           rutas={rutas}
           focusContext={focusContext}
           resolveSuggestedAssignment={getSuggestedAssignment}
+          onClearAssignment={limpiarAsignacionPedido}
+          clearingAssignment={quickAssigningId === String(editViaje.id)}
           onClose={() => {
             setEditViaje(null);
             setFocusContext(null);

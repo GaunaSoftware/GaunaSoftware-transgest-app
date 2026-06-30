@@ -112,9 +112,10 @@ router.post("/fiscal-years", requirePermission("fiscal_years.write"), async (req
 
 router.get("/periods", requirePermission("periods.read"), async (req, res) => {
   const { rows } = await db.query(
-    `SELECT p.*, fy.year_label
+    `SELECT p.*, fy.year_label, closed_user.display_name AS closed_by_name
        FROM ${q("accounting_periods")} p
        JOIN ${q("fiscal_years")} fy ON fy.id=p.fiscal_year_id
+       LEFT JOIN ${q("accounting_users")} closed_user ON closed_user.id=p.closed_by
       WHERE p.company_id=$1
       ORDER BY fy.start_date DESC, p.period_number ASC`,
     [req.accountingUser.selected_company_id]
@@ -157,12 +158,16 @@ router.patch("/periods/:id/status", async (req, res, next) => {
         `UPDATE ${q("accounting_periods")}
             SET status=$1,
                 locked_reason=$2,
+                closed_at=$3,
+                closed_by=$4,
                 updated_at=now()
-          WHERE id=$3
+          WHERE id=$5
           RETURNING *`,
         [
           change.target_status,
           change.target_status === "open" ? null : change.reason,
+          change.target_status === "closed" ? new Date().toISOString() : null,
+          change.target_status === "closed" ? req.accountingUser.id : null,
           period.id,
         ]
       );
@@ -185,6 +190,8 @@ router.patch("/periods/:id/status", async (req, res, next) => {
             previous_status: change.previous_status,
             status: updatedPeriod.status,
             reason: change.reason,
+            closed_at: updatedPeriod.closed_at || null,
+            closed_by: updatedPeriod.closed_by || null,
           }),
         ]
       );
@@ -203,6 +210,8 @@ router.patch("/periods/:id/status", async (req, res, next) => {
           previous_status: change.previous_status,
           status: updatedPeriod.status,
           reason: change.reason,
+          closed_at: updatedPeriod.closed_at || null,
+          closed_by: updatedPeriod.closed_by || null,
         },
       });
 

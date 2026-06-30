@@ -36,6 +36,8 @@ const externalImportStagingUpSql = fs.readFileSync(path.join(migrationsDir, "015
 const externalImportStagingDownSql = fs.readFileSync(path.join(migrationsDir, "015_external_import_staging.down.sql"), "utf8");
 const externalImportApplyPartiesUpSql = fs.readFileSync(path.join(migrationsDir, "016_external_import_apply_parties.up.sql"), "utf8");
 const externalImportApplyPartiesDownSql = fs.readFileSync(path.join(migrationsDir, "016_external_import_apply_parties.down.sql"), "utf8");
+const periodCloseMetadataUpSql = fs.readFileSync(path.join(migrationsDir, "017_period_close_metadata.up.sql"), "utf8");
+const periodCloseMetadataDownSql = fs.readFileSync(path.join(migrationsDir, "017_period_close_metadata.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -221,4 +223,13 @@ test("migracion de aplicacion de importacion externa amplia estados con rollback
   assert.match(externalImportApplyPartiesDownSql, /WHERE status = 'applied'/i);
   assert.match(externalImportApplyPartiesDownSql, /RAISE EXCEPTION/i);
   assert.match(externalImportApplyPartiesDownSql, /DROP COLUMN IF EXISTS applied_by/i);
+});
+
+test("migracion de metadatos de cierre de periodos conserva trazabilidad", () => {
+  assert.match(periodCloseMetadataUpSql, /ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ/i);
+  assert.match(periodCloseMetadataUpSql, /ADD COLUMN IF NOT EXISTS closed_by UUID REFERENCES accounting\.accounting_users\(id\) ON DELETE SET NULL/i);
+  assert.match(periodCloseMetadataUpSql, /idx_accounting_periods_closed/i);
+  assert.match(periodCloseMetadataDownSql, /closed_at IS NOT NULL/i);
+  assert.match(periodCloseMetadataDownSql, /RAISE EXCEPTION/i);
+  assert.match(periodCloseMetadataDownSql, /DROP COLUMN IF EXISTS closed_by/i);
 });

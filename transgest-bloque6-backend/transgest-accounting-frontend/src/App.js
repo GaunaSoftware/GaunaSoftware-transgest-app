@@ -3786,6 +3786,10 @@ export default function App() {
                   <div>
                     <strong>{period.name}</strong>
                     <span>{String(period.start_date).slice(0,10)} - {String(period.end_date).slice(0,10)}</span>
+                    {period.locked_reason && <small>{period.locked_reason}</small>}
+                    {period.status === "closed" && period.closed_at && (
+                      <small>Cerrado por {period.closed_by_name || "Usuario"} | {formatDateTime(period.closed_at)}</small>
+                    )}
                   </div>
                   <div className="period-actions">
                     <StatusBadge tone={statusTone(period.status)} text={period.status} />

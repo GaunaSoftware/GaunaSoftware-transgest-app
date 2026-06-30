@@ -105,6 +105,8 @@ Unicidad:
 
 - `(fiscal_year_id, period_number)`
 
+Al cerrar un periodo se registran `closed_at` y `closed_by`. Al reabrirlo se limpia ese sello y queda la accion en `audit_log`/outbox con motivo obligatorio.
+
 ## Plan contable
 
 ### `accounting_standards`

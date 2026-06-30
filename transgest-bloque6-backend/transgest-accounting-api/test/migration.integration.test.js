@@ -40,6 +40,8 @@ const periodCloseMetadataUpSql = fs.readFileSync(path.join(migrationsDir, "017_p
 const periodCloseMetadataDownSql = fs.readFileSync(path.join(migrationsDir, "017_period_close_metadata.down.sql"), "utf8");
 const fixedAssetsUpSql = fs.readFileSync(path.join(migrationsDir, "018_fixed_assets.up.sql"), "utf8");
 const fixedAssetsDownSql = fs.readFileSync(path.join(migrationsDir, "018_fixed_assets.down.sql"), "utf8");
+const depreciationRunsUpSql = fs.readFileSync(path.join(migrationsDir, "019_depreciation_runs.up.sql"), "utf8");
+const depreciationRunsDownSql = fs.readFileSync(path.join(migrationsDir, "019_depreciation_runs.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -246,4 +248,16 @@ test("migracion de inmovilizado crea registro inicial y permisos reversibles", (
   assert.match(fixedAssetsDownSql, /DELETE FROM accounting\.accounting_role_permissions/i);
   assert.match(fixedAssetsDownSql, /DELETE FROM accounting\.accounting_permissions/i);
   assert.match(fixedAssetsDownSql, /DROP TABLE IF EXISTS accounting\.accounting_fixed_assets/i);
+});
+
+test("migracion de amortizaciones crea ejecuciones idempotentes y rollback protegido", () => {
+  assert.match(depreciationRunsUpSql, /CREATE TABLE IF NOT EXISTS accounting\.depreciation_runs/i);
+  assert.match(depreciationRunsUpSql, /fixed_asset_id UUID NOT NULL REFERENCES accounting\.accounting_fixed_assets\(id\) ON DELETE RESTRICT/i);
+  assert.match(depreciationRunsUpSql, /journal_entry_id UUID NOT NULL REFERENCES accounting\.journal_entries\(id\) ON DELETE RESTRICT/i);
+  assert.match(depreciationRunsUpSql, /UNIQUE \(company_id, fixed_asset_id, period_id\)/i);
+  assert.match(depreciationRunsUpSql, /entry_type IN \('manual', 'reversal', 'depreciation'\)/i);
+  assert.match(depreciationRunsDownSql, /FROM accounting\.depreciation_runs/i);
+  assert.match(depreciationRunsDownSql, /entry_type = 'depreciation'/i);
+  assert.match(depreciationRunsDownSql, /RAISE EXCEPTION/i);
+  assert.match(depreciationRunsDownSql, /DROP TABLE IF EXISTS accounting\.depreciation_runs/i);
 });

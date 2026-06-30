@@ -222,6 +222,14 @@ test("contratos de inmovilizado exigen activo, ejercicio e importe", () => {
     action: "dispose",
     reason: "Venta del activo",
   }));
+  assert.doesNotThrow(() => validateEventContract("AccountingFixedAssetDepreciationDraftCreated", 1, {
+    depreciation_run_id: "run-id",
+    fixed_asset_id: "asset-id",
+    journal_entry_id: "entry-id",
+    fiscal_year_id: "year-id",
+    period_id: "period-id",
+    amount: "100.000000",
+  }));
   assert.throws(() => validateEventContract("AccountingFixedAssetCreated", 1, {
     fixed_asset_id: "asset-id",
   }), /Payload incompleto/);

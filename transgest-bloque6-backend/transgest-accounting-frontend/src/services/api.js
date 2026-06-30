@@ -254,6 +254,10 @@ export function getFixedAssets(filters = {}) {
 }
 
 export const createFixedAsset = data => apiFetch("/fixed-assets", { method: "POST", body: data });
+export const createFixedAssetDepreciationDraft = (assetId, data) => apiFetch(`/fixed-assets/${assetId}/depreciation-runs`, {
+  method: "POST",
+  body: data,
+});
 export const updateFixedAssetStatus = (assetId, data) => apiFetch(`/fixed-assets/${assetId}/status`, {
   method: "PATCH",
   body: data,

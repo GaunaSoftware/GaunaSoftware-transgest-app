@@ -6,11 +6,15 @@ const { authenticate, requirePermission } = require("../middleware/auth");
 const { buildCsv } = require("../domain/csv");
 const {
   buildStraightLineDepreciationPlan,
+  depreciationAmountForPeriod,
+  normalizeFixedAssetDepreciationRunInput,
   normalizeFixedAssetInput,
   normalizeFixedAssetQuery,
   normalizeFixedAssetStatusInput,
   nextStatusForAction,
 } = require("../domain/fixedAssets");
+const { journalDraftRequestHash } = require("../domain/journalEntries");
+const { hasPermission } = require("../domain/rbac");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
 const router = express.Router();
@@ -95,6 +99,44 @@ async function loadFixedAssetRows(client, companyId, filters) {
       LIMIT $${params.length}`,
     params
   );
+  return rows;
+}
+
+async function loadDepreciationRuns(client, companyId, fixedAssetId) {
+  const { rows } = await client.query(
+    `SELECT dr.id, dr.fixed_asset_id, dr.fiscal_year_id, dr.period_id, p.name AS period_name,
+            dr.journal_entry_id, je.status AS journal_entry_status, je.entry_number,
+            dr.run_date, dr.amount::text, dr.plan_from_date, dr.plan_to_date, dr.plan_periods,
+            dr.status, dr.idempotency_key, dr.created_at
+       FROM ${q("depreciation_runs")} dr
+       JOIN ${q("accounting_periods")} p ON p.id=dr.period_id
+       JOIN ${q("journal_entries")} je ON je.id=dr.journal_entry_id
+      WHERE dr.company_id=$1 AND dr.fixed_asset_id=$2
+      ORDER BY dr.run_date DESC, dr.created_at DESC`,
+    [companyId, fixedAssetId]
+  );
+  return rows;
+}
+
+async function assertPostableAccounts(client, companyId, fiscalYearId, accountIds) {
+  const uniqueIds = [...new Set(accountIds.filter(Boolean))];
+  const { rows } = await client.query(
+    `SELECT id, code, name, is_active, is_postable
+       FROM ${q("accounts")}
+      WHERE company_id=$1 AND fiscal_year_id=$2 AND id=ANY($3::uuid[])`,
+    [companyId, fiscalYearId, uniqueIds]
+  );
+  if (rows.length !== uniqueIds.length) {
+    const error = new Error("Una o mas cuentas de amortizacion no pertenecen al ejercicio y empresa seleccionados");
+    error.status = 400;
+    throw error;
+  }
+  const unusable = rows.find(account => !account.is_active || !account.is_postable);
+  if (unusable) {
+    const error = new Error(`La cuenta ${unusable.code} no esta activa o no admite movimientos`);
+    error.status = 409;
+    throw error;
+  }
   return rows;
 }
 
@@ -231,18 +273,271 @@ router.get("/fixed-assets/:id/depreciation-plan", requirePermission("fixed_asset
   try {
     const selected = selectedContext(req);
     if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
-    const { rows } = await db.query(
-      `SELECT * FROM ${q("accounting_fixed_assets")} WHERE id=$1 AND company_id=$2`,
-      [req.params.id, selected.company_id]
-    );
-    if (!rows.length) return res.status(404).json({ error: "Inmovilizado no encontrado para la empresa seleccionada" });
-    const asset = rows[0];
-    const plan = buildStraightLineDepreciationPlan(asset);
+    const { asset, plan, runs } = await db.transaction(async client => {
+      const assetResult = await client.query(
+        `SELECT * FROM ${q("accounting_fixed_assets")} WHERE id=$1 AND company_id=$2`,
+        [req.params.id, selected.company_id]
+      );
+      if (!assetResult.rows.length) {
+        const error = new Error("Inmovilizado no encontrado para la empresa seleccionada");
+        error.status = 404;
+        throw error;
+      }
+      const fixedAsset = assetResult.rows[0];
+      return {
+        asset: fixedAsset,
+        plan: buildStraightLineDepreciationPlan(fixedAsset),
+        runs: await loadDepreciationRuns(client, selected.company_id, fixedAsset.id),
+      };
+    });
     res.json({
       fixed_asset: asset,
       plan,
-      disclaimer: "Plan tecnico preliminar de amortizacion lineal. No genera asientos ni acredita tratamiento fiscal o legal.",
+      depreciation_runs: runs,
+      disclaimer: "Plan tecnico preliminar de amortizacion lineal. Los borradores generados requieren revision y contabilizacion manual; no acredita tratamiento fiscal o legal.",
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/fixed-assets/:id/depreciation-runs", requirePermission("fixed_assets.write"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    if (!hasPermission(req.accountingUser, "journal.write")) {
+      return res.status(403).json({ error: "Permiso contable denegado", permission: "journal.write" });
+    }
+    const input = normalizeFixedAssetDepreciationRunInput(req.body);
+    const result = await db.transaction(async client => {
+      const repeatedRun = await client.query(
+        `SELECT dr.*
+           FROM ${q("depreciation_runs")} dr
+          WHERE dr.company_id=$1 AND dr.idempotency_key=$2`,
+        [selected.company_id, input.idempotency_key]
+      );
+      if (repeatedRun.rows.length) {
+        return {
+          depreciation_run: repeatedRun.rows[0],
+          depreciation_runs: await loadDepreciationRuns(client, selected.company_id, repeatedRun.rows[0].fixed_asset_id),
+          repeated: true,
+        };
+      }
+
+      const assetResult = await client.query(
+        `SELECT * FROM ${q("accounting_fixed_assets")}
+          WHERE id=$1 AND company_id=$2
+          FOR UPDATE`,
+        [req.params.id, selected.company_id]
+      );
+      if (!assetResult.rows.length) {
+        const error = new Error("Inmovilizado no encontrado para la empresa seleccionada");
+        error.status = 404;
+        throw error;
+      }
+      const asset = assetResult.rows[0];
+      if (asset.status !== "active") {
+        const error = new Error("Solo se puede amortizar inmovilizado activo");
+        error.status = 409;
+        throw error;
+      }
+      if (!asset.expense_account_id || !asset.accumulated_depreciation_account_id) {
+        const error = new Error("El inmovilizado necesita cuenta de gasto y cuenta de amortizacion acumulada");
+        error.status = 409;
+        throw error;
+      }
+
+      const periodResult = await client.query(
+        `SELECT p.*, fy.status AS fiscal_year_status, fy.year_label
+           FROM ${q("accounting_periods")} p
+           JOIN ${q("fiscal_years")} fy ON fy.id=p.fiscal_year_id
+          WHERE p.id=$1 AND p.company_id=$2 AND p.fiscal_year_id=$3
+          FOR UPDATE OF p, fy`,
+        [input.period_id, selected.company_id, asset.fiscal_year_id]
+      );
+      if (!periodResult.rows.length) {
+        const error = new Error("Periodo no encontrado para el ejercicio del inmovilizado");
+        error.status = 400;
+        throw error;
+      }
+      const period = periodResult.rows[0];
+      if (period.fiscal_year_status !== "open") {
+        const error = new Error("El ejercicio no esta abierto");
+        error.status = 409;
+        throw error;
+      }
+      if (period.status !== "open") {
+        const error = new Error(`El periodo ${period.name} no esta abierto`);
+        error.status = 409;
+        throw error;
+      }
+
+      const duplicateRun = await client.query(
+        `SELECT id, journal_entry_id
+           FROM ${q("depreciation_runs")}
+          WHERE company_id=$1 AND fixed_asset_id=$2 AND period_id=$3`,
+        [selected.company_id, asset.id, period.id]
+      );
+      if (duplicateRun.rows.length) {
+        const error = new Error("Ya existe una amortizacion preparada para este activo y periodo");
+        error.status = 409;
+        throw error;
+      }
+
+      await assertPostableAccounts(client, selected.company_id, asset.fiscal_year_id, [
+        asset.expense_account_id,
+        asset.accumulated_depreciation_account_id,
+      ]);
+      const depreciation = depreciationAmountForPeriod(asset, period);
+      const description = input.description || `Amortizacion ${asset.asset_code} - ${period.name}`;
+      const lines = [
+        {
+          line_number: 1,
+          account_id: asset.expense_account_id,
+          side: "debit",
+          amount: depreciation.amount,
+          description: `Gasto amortizacion ${asset.asset_code}`,
+        },
+        {
+          line_number: 2,
+          account_id: asset.accumulated_depreciation_account_id,
+          side: "credit",
+          amount: depreciation.amount,
+          description: `Amortizacion acumulada ${asset.asset_code}`,
+        },
+      ];
+      const requestHash = journalDraftRequestHash({
+        fiscal_year_id: asset.fiscal_year_id,
+        entry_date: depreciation.run_date,
+        description,
+        lines,
+      });
+
+      const entryResult = await client.query(
+        `INSERT INTO ${q("journal_entries")}
+           (tenant_id, company_id, fiscal_year_id, period_id, entry_date, description,
+            status, entry_type, source_system, source_type, source_id, idempotency_key,
+            request_hash, trace_id, request_id, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,'draft','depreciation','accounting','fixed_asset_depreciation',$7,$8,$9,$10,$11,$12)
+         RETURNING *`,
+        [
+          selected.tenant_id,
+          selected.company_id,
+          asset.fiscal_year_id,
+          period.id,
+          depreciation.run_date,
+          description,
+          asset.id,
+          input.idempotency_key,
+          requestHash,
+          req.id || null,
+          req.id || null,
+          req.accountingUser.id,
+        ]
+      ).catch(error => {
+        if (error.code === "23505") {
+          const conflict = new Error("idempotency_key ya utilizado con otro contenido");
+          conflict.status = 409;
+          throw conflict;
+        }
+        throw error;
+      });
+      const entry = entryResult.rows[0];
+
+      for (const line of lines) {
+        await client.query(
+          `INSERT INTO ${q("journal_lines")}
+             (tenant_id, company_id, journal_entry_id, line_number, account_id,
+              debit_amount, credit_amount, currency, description)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'EUR',$8)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            entry.id,
+            line.line_number,
+            line.account_id,
+            line.side === "debit" ? line.amount : "0",
+            line.side === "credit" ? line.amount : "0",
+            line.description,
+          ]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO ${q("source_links")}
+           (tenant_id, company_id, journal_entry_id, source_system, source_type, source_id, source_line_id)
+         VALUES ($1,$2,$3,'accounting','fixed_asset',$4,$5)`,
+        [selected.tenant_id, selected.company_id, entry.id, asset.id, depreciation.plan_periods.join(",")]
+      );
+
+      const runResult = await client.query(
+        `INSERT INTO ${q("depreciation_runs")}
+           (tenant_id, company_id, fixed_asset_id, fiscal_year_id, period_id, journal_entry_id,
+            run_date, amount, plan_from_date, plan_to_date, plan_periods, idempotency_key, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::integer[],$12,$13)
+         RETURNING *`,
+        [
+          selected.tenant_id,
+          selected.company_id,
+          asset.id,
+          asset.fiscal_year_id,
+          period.id,
+          entry.id,
+          depreciation.run_date,
+          depreciation.amount,
+          depreciation.plan_from_date,
+          depreciation.plan_to_date,
+          depreciation.plan_periods,
+          input.idempotency_key,
+          req.accountingUser.id,
+        ]
+      );
+      const run = runResult.rows[0];
+
+      await client.query(
+        `INSERT INTO ${q("audit_log")}
+           (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+         VALUES ($1,$2,'user',$3,'fixed_asset.depreciation_draft_created','depreciation_run',$4,$5,$6::jsonb)`,
+        [
+          selected.tenant_id,
+          selected.company_id,
+          req.accountingUser.id,
+          run.id,
+          req.id || null,
+          JSON.stringify({
+            fixed_asset_id: asset.id,
+            journal_entry_id: entry.id,
+            fiscal_year_id: asset.fiscal_year_id,
+            period_id: period.id,
+            amount: depreciation.amount,
+            plan_periods: depreciation.plan_periods,
+          }),
+        ]
+      );
+      await enqueueOutboxEvent(client, {
+        tenant_id: selected.tenant_id,
+        company_id: selected.company_id,
+        event_type: "AccountingFixedAssetDepreciationDraftCreated",
+        aggregate_type: "depreciation_run",
+        aggregate_id: run.id,
+        payload: {
+          depreciation_run_id: run.id,
+          fixed_asset_id: asset.id,
+          journal_entry_id: entry.id,
+          fiscal_year_id: asset.fiscal_year_id,
+          period_id: period.id,
+          amount: depreciation.amount,
+        },
+      });
+
+      return {
+        depreciation_run: run,
+        journal_entry: entry,
+        depreciation_runs: await loadDepreciationRuns(client, selected.company_id, asset.id),
+        repeated: false,
+      };
+    });
+    res.status(result.repeated ? 200 : 201).json(result);
   } catch (error) {
     next(error);
   }

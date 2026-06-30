@@ -743,6 +743,7 @@ Estado implementado:
 - Altas manuales, consulta filtrable, CSV auditado y cambio de estado con motivo desde la API contable.
 - Plan de amortizacion lineal calculado bajo demanda; no se persiste como plan oficial ni genera asientos.
 - Eventos `AccountingFixedAssetCreated` y `AccountingFixedAssetStatusChanged`.
+- Las amortizaciones pueden preparar borradores de Diario mediante `depreciation_runs`, pero requieren revision y contabilizacion manual.
 - No hay integracion automatica con facturas recibidas, no hay baja contable completa y no se declara cumplimiento fiscal o contable.
 
 ### `depreciation_plans`
@@ -762,15 +763,32 @@ Estado implementado:
 - `tenant_id`
 - `company_id`
 - `fixed_asset_id`
+- `fiscal_year_id`
 - `period_id`
 - `amount`
+- `run_date`
+- `plan_from_date`
+- `plan_to_date`
+- `plan_periods`
+- `status`
 - `journal_entry_id`
 - `idempotency_key`
+- `created_by`
 - `created_at`
 
 Unicidad:
 
 - `(fixed_asset_id, period_id)`
+- `(company_id, idempotency_key)`
+
+Estado implementado:
+
+- Tabla creada por `019_depreciation_runs`.
+- Cada ejecucion crea un borrador en `journal_entries` con `entry_type='depreciation'`.
+- La escritura exige `fixed_assets.write` y `journal.write`.
+- El borrador tiene dos lineas: Debe en cuenta de gasto de amortizacion y Haber en cuenta de amortizacion acumulada.
+- `source_links` enlaza el borrador con el inmovilizado y los periodos del plan usados.
+- No existe contabilizacion automatica ni masiva; el usuario debe revisar y contabilizar desde Diario.
 
 ## Infraestructura de eventos implementada en Fase 1
 

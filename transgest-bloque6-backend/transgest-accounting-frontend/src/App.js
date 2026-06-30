@@ -11,6 +11,7 @@ import {
   createMaturity,
   createExternalImportBatch,
   createFixedAsset,
+  createFixedAssetDepreciationDraft,
   createParty,
   downloadAdvisorPackageFile,
   downloadAdvisorPackageZip,
@@ -568,6 +569,7 @@ export default function App() {
   const [fixedAssetStatus, setFixedAssetStatus] = useState(null);
   const [fixedAssetPlan, setFixedAssetPlan] = useState(null);
   const [fixedAssetStatusAction, setFixedAssetStatusAction] = useState(null);
+  const [fixedAssetDepreciationAction, setFixedAssetDepreciationAction] = useState(null);
   const [fixedAssetFilters, setFixedAssetFilters] = useState({ fiscal_year_id: "", status: "", q: "" });
   const [fixedAssetForm, setFixedAssetForm] = useState({
     fiscal_year_id: "",
@@ -2131,6 +2133,46 @@ export default function App() {
     }
   }
 
+  function startFixedAssetDepreciation(asset) {
+    const firstOpenPeriod = periods.find(period => (
+      period.fiscal_year_id === asset.fiscal_year_id
+      && period.status === "open"
+    ));
+    setFixedAssetDepreciationAction({
+      asset,
+      period_id: firstOpenPeriod?.id || "",
+      description: `Amortizacion ${asset.asset_code}`,
+      idempotency_key: newIdempotencyKey(`dep:${asset.asset_code}`),
+    });
+  }
+
+  async function handleFixedAssetDepreciation(event) {
+    event.preventDefault();
+    if (!fixedAssetDepreciationAction?.asset) return;
+    setFixedAssetStatus(null);
+    try {
+      const result = await createFixedAssetDepreciationDraft(fixedAssetDepreciationAction.asset.id, {
+        period_id: fixedAssetDepreciationAction.period_id,
+        description: fixedAssetDepreciationAction.description,
+        idempotency_key: fixedAssetDepreciationAction.idempotency_key,
+      });
+      setFixedAssetStatus({
+        tone: result.repeated ? "warning" : "ok",
+        text: result.repeated
+          ? "La amortizacion ya estaba preparada con esa clave. Revisa el borrador existente en Diario."
+          : `Borrador de amortizacion creado por ${formatMoney(result.depreciation_run.amount)} EUR. Revisa y contabiliza desde Diario.`,
+      });
+      setFixedAssetDepreciationAction(null);
+      if (fixedAssetPlan?.fixed_asset?.id === result.depreciation_run.fixed_asset_id) {
+        setFixedAssetPlan(prev => prev ? { ...prev, depreciation_runs: result.depreciation_runs || prev.depreciation_runs } : prev);
+      }
+      await refreshJournal();
+      await refreshFixedAssets();
+    } catch (err) {
+      setFixedAssetStatus({ tone: err.status === 409 ? "warning" : "danger", text: err.message });
+    }
+  }
+
   async function handleBankFilter(event) {
     event.preventDefault();
     await refreshBanks(bankTransactionFilters, bankAccountFilters);
@@ -3228,6 +3270,11 @@ export default function App() {
                     <div className="focus-panel-actions">
                       <button type="button" className="secondary" onClick={() => setFixedAssetPlan(null)}>Cerrar plan</button>
                     </div>
+                    {fixedAssetPlan.depreciation_runs?.length > 0 && (
+                      <div className="scope-note">
+                        Amortizaciones preparadas: {fixedAssetPlan.depreciation_runs.map(run => `${run.period_name}: ${formatMoney(run.amount)} EUR (${journalStatusLabel(run.journal_entry_status)})`).join(" | ")}
+                      </div>
+                    )}
                     <div className="maturities-table wide">
                       <div className="maturity-row head"><span>Periodo</span><span>Fecha</span><span>Cuota</span><span>Acumulado</span><span>Valor neto</span></div>
                       {fixedAssetPlan.plan.rows.slice(0, 24).map(row => (
@@ -3256,6 +3303,9 @@ export default function App() {
                         <StatusBadge tone={fixedAssetStatusTone(asset.status)} text={fixedAssetStatusLabels[asset.status] || asset.status} />
                         <div className="maturity-actions">
                           <button type="button" onClick={() => handleOpenFixedAssetPlan(asset)}>Plan</button>
+                          {canWriteFixedAssets && canWriteJournal && asset.status === "active" && asset.expense_account_id && asset.accumulated_depreciation_account_id && (
+                            <button type="button" onClick={() => startFixedAssetDepreciation(asset)}>Amortizar</button>
+                          )}
                           {canWriteFixedAssets && asset.status === "active" && <button type="button" onClick={() => setFixedAssetStatusAction({ asset, action: "deactivate", reason: "", disposed_at: "" })}>Desactivar</button>}
                           {canWriteFixedAssets && asset.status === "inactive" && <button type="button" onClick={() => setFixedAssetStatusAction({ asset, action: "activate", reason: "", disposed_at: "" })}>Activar</button>}
                           {canWriteFixedAssets && asset.status !== "disposed" && <button type="button" onClick={() => setFixedAssetStatusAction({ asset, action: "dispose", reason: "", disposed_at: new Date().toISOString().slice(0, 10) })}>Baja</button>}
@@ -3270,6 +3320,32 @@ export default function App() {
                     {fixedAssetStatusAction.action === "dispose" && <label><span>Fecha baja</span><input type="date" value={fixedAssetStatusAction.disposed_at} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, disposed_at: e.target.value }))} /></label>}
                     <label><span>Motivo</span><input minLength={5} required value={fixedAssetStatusAction.reason} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, reason: e.target.value }))} /></label>
                     <div className="period-action-buttons"><button type="submit">Confirmar</button><button type="button" className="secondary" onClick={() => setFixedAssetStatusAction(null)}>Cancelar</button></div>
+                  </form>
+                )}
+                {fixedAssetDepreciationAction && (
+                  <form className="period-action-form" onSubmit={handleFixedAssetDepreciation}>
+                    <div>
+                      <strong>Preparar amortizacion</strong>
+                      <span>{fixedAssetDepreciationAction.asset.asset_code} - {fixedAssetDepreciationAction.asset.name}</span>
+                    </div>
+                    <label>
+                      <span>Periodo abierto</span>
+                      <select required value={fixedAssetDepreciationAction.period_id} onChange={e => setFixedAssetDepreciationAction(prev => ({ ...prev, period_id: e.target.value }))}>
+                        <option value="">Selecciona periodo</option>
+                        {periods
+                          .filter(period => period.fiscal_year_id === fixedAssetDepreciationAction.asset.fiscal_year_id && period.status === "open")
+                          .map(period => <option key={period.id} value={period.id}>{period.name}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Concepto</span>
+                      <input maxLength={500} value={fixedAssetDepreciationAction.description} onChange={e => setFixedAssetDepreciationAction(prev => ({ ...prev, description: e.target.value }))} />
+                    </label>
+                    <div className="scope-note">Se creara un borrador en Diario. No se contabiliza automaticamente.</div>
+                    <div className="period-action-buttons">
+                      <button type="submit">Crear borrador</button>
+                      <button type="button" className="secondary" onClick={() => setFixedAssetDepreciationAction(null)}>Cancelar</button>
+                    </div>
                   </form>
                 )}
               </>

@@ -2,6 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   buildStraightLineDepreciationPlan,
+  depreciationAmountForPeriod,
+  normalizeFixedAssetDepreciationRunInput,
   normalizeFixedAssetInput,
   normalizeFixedAssetQuery,
   normalizeFixedAssetStatusInput,
@@ -78,4 +80,29 @@ test("normalizeFixedAssetQuery y status controlan filtros y transiciones", () =>
   assert.equal(nextStatusForAction("active", "dispose"), "disposed");
   assert.throws(() => normalizeFixedAssetQuery({ status: "bad" }), /status/);
   assert.throws(() => nextStatusForAction("disposed", "activate"), /inactivo/);
+});
+
+test("depreciationAmountForPeriod calcula cuota del periodo y exige idempotencia segura", () => {
+  const asset = {
+    acquisition_date: "2026-01-31",
+    acquisition_cost: "1200.000000",
+    residual_value: "0.000000",
+    useful_life_months: 12,
+  };
+  const period = { start_date: "2026-02-01", end_date: "2026-02-28" };
+  const depreciation = depreciationAmountForPeriod(asset, period);
+  assert.equal(depreciation.amount, "100.000000");
+  assert.equal(depreciation.run_date, "2026-02-28");
+  assert.deepEqual(depreciation.plan_periods, [2]);
+  assert.deepEqual(normalizeFixedAssetDepreciationRunInput({
+    period_id: "period-2026-02",
+    idempotency_key: "dep:asset:2026-02",
+    description: "Amortizacion febrero",
+  }), {
+    period_id: "period-2026-02",
+    idempotency_key: "dep:asset:2026-02",
+    description: "Amortizacion febrero",
+  });
+  assert.throws(() => depreciationAmountForPeriod(asset, { start_date: "2027-01-01", end_date: "2027-01-31" }), /No hay cuota/);
+  assert.throws(() => normalizeFixedAssetDepreciationRunInput({ period_id: "p", idempotency_key: "short" }), /idempotency_key/);
 });

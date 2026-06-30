@@ -121,6 +121,18 @@ function normalizeFixedAssetStatusInput(input = {}) {
   };
 }
 
+function normalizeFixedAssetDepreciationRunInput(input = {}) {
+  const idempotencyKey = normalizeRequired(input.idempotency_key, "idempotency_key", 120);
+  if (idempotencyKey.length < 12 || !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)) {
+    throw inputError("idempotency_key debe tener al menos 12 caracteres seguros");
+  }
+  return {
+    period_id: normalizeRequired(input.period_id, "period_id", 80),
+    idempotency_key: idempotencyKey,
+    description: normalizeOptionalText(input.description, 500, "description"),
+  };
+}
+
 function nextStatusForAction(currentStatus, action) {
   if (action === "activate") {
     if (currentStatus !== "inactive") throw inputError("Solo se puede activar inmovilizado inactivo");
@@ -134,6 +146,33 @@ function nextStatusForAction(currentStatus, action) {
     throw inputError("Solo se puede dar de baja inmovilizado activo o inactivo");
   }
   return "disposed";
+}
+
+function sumMoney(values = []) {
+  return values.reduce((total, value) => total + moneyToUnits(value, "amount"), 0n);
+}
+
+function depreciationAmountForPeriod(asset = {}, period = {}) {
+  const periodStart = String(period.start_date || "").slice(0, 10);
+  const periodEnd = String(period.end_date || "").slice(0, 10);
+  if (!periodStart || !periodEnd || periodStart > periodEnd) {
+    throw inputError("El periodo no tiene un rango de fechas valido");
+  }
+  const plan = buildStraightLineDepreciationPlan(asset);
+  const rows = plan.rows.filter(row => row.depreciation_date >= periodStart && row.depreciation_date <= periodEnd);
+  if (!rows.length) {
+    throw inputError("No hay cuota de amortizacion para el periodo seleccionado");
+  }
+  const amount = sumMoney(rows.map(row => row.amount));
+  if (amount <= 0n) throw inputError("La cuota de amortizacion del periodo debe ser mayor que cero");
+  return {
+    amount: unitsToMoney(amount),
+    run_date: rows[rows.length - 1].depreciation_date,
+    plan_from_date: rows[0].depreciation_date,
+    plan_to_date: rows[rows.length - 1].depreciation_date,
+    plan_periods: rows.map(row => row.period_number),
+    rows,
+  };
 }
 
 function addMonths(dateText, monthOffset) {
@@ -180,9 +219,13 @@ function buildStraightLineDepreciationPlan(asset = {}) {
 module.exports = {
   DEPRECIATION_METHODS,
   STATUSES,
+  depreciationAmountForPeriod,
   buildStraightLineDepreciationPlan,
+  moneyToUnits,
+  normalizeFixedAssetDepreciationRunInput,
   normalizeFixedAssetInput,
   normalizeFixedAssetQuery,
   normalizeFixedAssetStatusInput,
   nextStatusForAction,
+  unitsToMoney,
 };

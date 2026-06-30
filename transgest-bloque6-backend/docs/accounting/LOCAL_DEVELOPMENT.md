@@ -516,7 +516,7 @@ Controles:
 - Los asientos contabilizados no pueden editarse ni cancelarse desde estos endpoints. Pueden generar un borrador reverso revisable mediante caso de uso explicito.
 - El reverso solo se crea desde un asiento `posted`, invierte Debe/Haber, exige fecha, motivo, periodo abierto e idempotencia, y enlaza `source_links` al asiento original.
 - El detalle del Diario expone el origen tecnico del asiento y los `source_links` asociados cuando existen.
-- `source_links` prepara la trazabilidad futura y ya enlaza los borradores reversos con su asiento original. No enlaza todavia documentos externos.
+- `source_links` enlaza los borradores reversos con su asiento original y las importaciones externas de diario con cada fila de origen aprobada.
 
 Migracion:
 
@@ -623,6 +623,12 @@ Migracion:
 013_reversible_bank_reconciliations
 014_bank_statement_imports
 ```
+
+## Staging externo y diario importado
+
+El endpoint `/api/v1/external-import-batches` acepta `import_type=journal_entries` para preparar lineas externas de diario sin escribir todavia en `journal_entries`. La previsualizacion exige `fiscal_year_id`, agrupa por `entry_ref`, resuelve cuentas por `account_id` o codigo, valida periodo abierto y exige Debe/Haber cuadrado.
+
+La aplicacion de un lote aprobado crea solo borradores de diario. Cada linea creada queda enlazada en `source_links` con `source_type=external_import_journal_entry`, `source_id=entry_ref` y `source_line_id/payload_hash=row_hash`. La contabilizacion sigue requiriendo el caso de uso normal del Diario y permisos `journal.post`.
 
 ## Mayor y balance de sumas y saldos
 

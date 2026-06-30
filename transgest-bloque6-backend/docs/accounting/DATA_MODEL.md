@@ -271,6 +271,7 @@ Regla de transaccion:
 - La idempotencia de borrador compara `idempotency_key` y `request_hash`.
 - Un asiento contabilizado puede generar un unico borrador reverso. El reverso invierte Debe/Haber, exige motivo y periodo abierto, y queda enlazado mediante `reversal_of_entry_id`, `reversed_by_entry_id` y `source_links`.
 - El detalle read-only del Diario devuelve `source_links` para mostrar trazabilidad de origen sin exponer endpoints de escritura directa.
+- Las importaciones externas de diario crean solo borradores y enlazan cada linea importada mediante `source_links` con `source_type=external_import_journal_entry`.
 - Las relaciones del ledger usan borrado restringido; no se permite eliminar asientos por cascada desde tenant, empresa, ejercicio, periodo o cuenta.
 
 ### `source_links`
@@ -292,6 +293,7 @@ Regla de transaccion:
 Uso:
 
 - Permite navegar desde asiento a factura, pedido, cobro, extracto, envio fiscal o documento.
+- En importaciones externas de diario, `source_id` conserva la referencia externa del asiento y `source_line_id`/`payload_hash` conservan el hash de fila aprobada.
 
 ## Clientes, proveedores y vencimientos
 

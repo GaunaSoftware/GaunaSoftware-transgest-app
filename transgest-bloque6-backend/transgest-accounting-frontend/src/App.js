@@ -4079,6 +4079,18 @@ export default function App() {
                                 <div>
                                   <strong>{externalImportPreviewTitle(row)}</strong>
                                   <small>{externalImportPreviewSubtitle(row)}</small>
+                                  {row.lines?.length > 0 && (
+                                    <div className="external-import-preview-lines">
+                                      {row.lines.slice(0, 6).map(line => (
+                                        <span className="external-import-preview-line" key={`${line.row_hash || line.row_id}-${line.row_number}`}>
+                                          <strong>{line.account_code || "Cuenta pendiente"}</strong>
+                                          <em>{line.side === "debit" ? "Debe" : "Haber"} {line.amount}</em>
+                                          <small>{line.description || line.account_name || "-"}</small>
+                                        </span>
+                                      ))}
+                                      {row.lines.length > 6 && <small>{row.lines.length - 6} linea(s) mas en el lote</small>}
+                                    </div>
+                                  )}
                                 </div>
                                 <StatusBadge
                                   tone={row.action === "create" ? "ok" : row.action === "conflict" ? "warning" : "danger"}

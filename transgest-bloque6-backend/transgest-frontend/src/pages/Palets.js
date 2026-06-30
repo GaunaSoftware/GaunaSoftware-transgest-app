@@ -504,8 +504,6 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
   );
 }
 
-// 
-
 // Generar albaran desde historial
 function generarHtmlAlbaran(mv, cliente, empresa, obraCliente) {
   const fecha = new Date((mv.fecha||"")+"T12:00:00").toLocaleDateString("es-ES");
@@ -616,6 +614,7 @@ export default function Palets(){
     const [filtroCliente,setFiltroCliente]=useState("todos");
     const [devDesde,setDevDesde]=useState("");
     const [devHasta,setDevHasta]=useState("");
+    const [clientesPlegados,setClientesPlegados]=useState({});
     const empresa = useEmpresaPerfil();
     const cfgPalets = normalizePaletsCfg(empresaCfg?.cfg_precios?.palets);
 
@@ -952,16 +951,6 @@ export default function Palets(){
   const totalPaletsEnAlerta = alertasAntiguedad.reduce((s,a)=>s+Number(a.palets||0),0);
   const costeAlmacenajeEstimado = alertasAntiguedad.reduce((s,a)=>s+Number(a.coste_estimado||0),0);
 
-  const mvsFiltrados = filtroCliente==="todos"
-    ? movimientos
-    : movimientos.filter(m=>
-        clienteIdMovimiento(m)===filtroCliente ||
-        (m.propietario_nombre && clientes.find(c=>c.id===filtroCliente)?.nombre &&
-         m.propietario_nombre.toLowerCase().includes(clientes.find(c=>c.id===filtroCliente).nombre.toLowerCase().slice(0,8))) ||
-        (m.cliente_nombre && clientes.find(c=>c.id===filtroCliente)?.nombre &&
-         m.cliente_nombre.toLowerCase().includes(clientes.find(c=>c.id===filtroCliente).nombre.toLowerCase().slice(0,8)))
-      );
-
   function clienteIdMovimiento(m) {
     return m.propietario_cliente_id || m.cliente_id || "";
   }
@@ -970,6 +959,41 @@ export default function Palets(){
     const id = clienteIdMovimiento(m);
     return clientes.find(c => c.id === id)?.nombre || m.cliente_nombre || m.propietario_nombre || "Cliente sin identificar";
   }
+
+  function toggleClientePlegado(key) {
+    setClientesPlegados(prev => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  const clienteFiltroNombre = filtroCliente === "todos" ? "" : (clientes.find(c=>c.id===filtroCliente)?.nombre || "");
+  const movimientosHistorial = movimientos
+    .filter(m =>
+      filtroCliente === "todos" ||
+      clienteIdMovimiento(m) === filtroCliente ||
+      (m.propietario_nombre && clienteFiltroNombre && m.propietario_nombre.toLowerCase().includes(clienteFiltroNombre.toLowerCase().slice(0,8))) ||
+      (m.cliente_nombre && clienteFiltroNombre && m.cliente_nombre.toLowerCase().includes(clienteFiltroNombre.toLowerCase().slice(0,8)))
+    )
+    .slice()
+    .sort((a,b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) || String(b.created_at || "").localeCompare(String(a.created_at || "")));
+
+  const historialPorCliente = Object.values(movimientosHistorial.reduce((acc, m) => {
+    const key = clienteIdMovimiento(m) || `sin_cliente_${clienteNombreMovimiento(m)}`;
+    if (!acc[key]) {
+      acc[key] = {
+        id: key,
+        nombre: clienteNombreMovimiento(m),
+        entradas: 0,
+        salidas: 0,
+        importe: 0,
+        movimientos: [],
+      };
+    }
+    const signo = signoPaletsMovimiento(m);
+    if (signo > 0) acc[key].entradas += Number(m.cantidad || 0);
+    if (signo < 0) acc[key].salidas += Number(m.cantidad || 0);
+    if (m.tipo === "devolucion") acc[key].importe += Number(m.cantidad || 0) * Number(m.precio_unitario || 0);
+    acc[key].movimientos.push(m);
+    return acc;
+  }, {})).sort((a,b) => a.nombre.localeCompare(b.nombre, "es"));
 
   const movimientosCliente = movimientos
     .filter(m => ["entrega", "devolucion", "rectificativa_devolucion"].includes(m.tipo))
@@ -1269,22 +1293,32 @@ export default function Palets(){
             <div style={{padding:30,textAlign:"center",color:"var(--text5)"}}>Sin movimientos de cliente registrados.</div>
           ):(
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              {movimientosPorCliente.map(grupo=>(
+              {movimientosPorCliente.map(grupo=>{
+                const plegado = !!clientesPlegados[`dev_${grupo.id}`];
+                return (
                 <div key={grupo.id} style={{border:"1px solid var(--border2)",borderRadius:10,overflow:"hidden",background:"var(--bg3)"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"space-between",padding:"10px 12px",borderBottom:"1px solid var(--border2)",flexWrap:"wrap"}}>
-                    <div>
-                      <div style={{fontWeight:900,color:"var(--text)",fontSize:13}}>{grupo.nombre}</div>
-                      <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>{grupo.movimientos.length} registros separados</div>
+                  <button
+                    type="button"
+                    onClick={()=>toggleClientePlegado(`dev_${grupo.id}`)}
+                    aria-expanded={!plegado}
+                    style={{width:"100%",display:"flex",alignItems:"center",gap:10,justifyContent:"space-between",padding:"10px 12px",border:"none",borderBottom:plegado?"none":"1px solid var(--border2)",background:"transparent",textAlign:"left",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",flexWrap:"wrap"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,minWidth:220,flex:"1 1 240px"}}>
+                      <span style={{width:24,height:24,borderRadius:7,border:"1px solid var(--border2)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"var(--text4)",background:"var(--bg2)"}}>{plegado ? "+" : "-"}</span>
+                      <span>
+                        <span style={{display:"block",fontWeight:900,color:"var(--text)",fontSize:13}}>{grupo.nombre}</span>
+                        <span style={{display:"block",fontSize:11,color:"var(--text5)",marginTop:2}}>{grupo.movimientos.length} registros separados</span>
+                      </span>
                     </div>
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      <span style={{...S.btn,background:"rgba(249,115,22,.10)",color:"#f97316",border:"1px solid rgba(249,115,22,.25)",cursor:"default",padding:"4px 9px"}}>{fmtN(grupo.entradas)} entradas</span>
-                      <span style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.25)",cursor:"default",padding:"4px 9px"}}>{fmtN(grupo.devoluciones)} devueltas</span>
-                      <span style={{...S.btn,background:"rgba(245,158,11,.10)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",cursor:"default",padding:"4px 9px"}}>{fmtN(grupo.preparadas)} preparadas</span>
-                      <span style={{...S.btn,background:"var(--bg2)",color:"var(--text4)",border:"1px solid var(--border2)",cursor:"default",padding:"4px 9px"}}>{fmt2(grupo.importe)} EUR</span>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end",flex:"1 1 320px"}}>
+                      <span style={{...S.btn,background:"rgba(249,115,22,.10)",color:"#f97316",border:"1px solid rgba(249,115,22,.25)",cursor:"pointer",padding:"4px 9px"}}>{fmtN(grupo.entradas)} entradas</span>
+                      <span style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.25)",cursor:"pointer",padding:"4px 9px"}}>{fmtN(grupo.devoluciones)} devueltas</span>
+                      <span style={{...S.btn,background:"rgba(245,158,11,.10)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",cursor:"pointer",padding:"4px 9px"}}>{fmtN(grupo.preparadas)} preparadas</span>
+                      <span style={{...S.btn,background:"var(--bg2)",color:"var(--text4)",border:"1px solid var(--border2)",cursor:"pointer",padding:"4px 9px"}}>{fmt2(grupo.importe)} EUR</span>
                     </div>
-                  </div>
+                  </button>
+                  {!plegado && (
                   <div style={{overflowX:"auto"}}>
-                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <table style={{width:"100%",minWidth:980,borderCollapse:"collapse"}}>
                       <thead><tr>
                         <th style={S.th}>Fecha</th>
                         <th style={S.th}>Tipo</th>
@@ -1375,8 +1409,10 @@ export default function Palets(){
                       </tbody>
                     </table>
                   </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1385,138 +1421,159 @@ export default function Palets(){
       {/* Historial */}
       {tab==="historial"&&(
         <div style={S.card}>
-          <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"center"}}>
-            <select value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)} style={{...S.inp,width:220}}>
+          <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
+            <select value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)} style={{...S.inp,flex:"1 1 220px",maxWidth:320}}>
               <option value="todos">Todos los clientes</option>
               {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
-            <span style={{fontSize:12,color:"var(--text5)"}}>{mvsFiltrados.length} movimientos</span>
+            <span style={{fontSize:12,color:"var(--text5)"}}>{movimientosHistorial.length} movimientos</span>
           </div>
-          <div style={{maxHeight:400,overflowY:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead style={{position:"sticky",top:0,zIndex:2}}>
-                <tr>
-                  <th style={S.th}>Fecha</th>
-                  <th style={S.th}>Tipo</th>
-                  <th style={S.th}>Cliente</th>
-                  <th style={S.th}>Obra / origen</th>
-                  <th style={S.th}>Cantidad</th>
-                  <th style={S.th}>Importe</th>
-                  <th style={S.th}>Ref.</th>
-                  <th style={S.th}>Notas</th>
-                  <th style={S.th}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {mvsFiltrados.length===0?(
-                  <tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--text5)"}}>Sin movimientos</td></tr>
-                ):mvsFiltrados.map(m=>{
-                  const cli=clientes.find(c=>c.id===clienteIdMovimiento(m));
-                  const importe=m.tipo==="devolucion"?Number(m.cantidad||0)*Number(m.precio_unitario||0):0;
-                  const salidaPendiente=m.tipo==="devolucion"&&!salidaPaletsConfirmada(m);
-                  const puedeFacturarDevolucion = m.tipo==="devolucion" && !salidaPendiente && !m.factura_id && Number(m.precio_unitario||0)>0;
-                  const puedeRectificarDevolucion = m.tipo==="devolucion" && !salidaPendiente;
-                  const movimientoEditable = !m.factura_id && (m.tipo!=="devolucion" || salidaPendiente);
-                  return(
-                    <tr key={m.id} style={{background:salidaPendiente?"rgba(245,158,11,.05)":"transparent"}}>
-                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11}}>{formatDateEs(m.fecha)}</td>
-                      <td style={S.td}>
-                        <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,
-                          background:`${TIPO_COLOR[m.tipo]}15`,color:TIPO_COLOR[m.tipo],border:`1px solid ${TIPO_COLOR[m.tipo]}30`}}>
-                          {TIPO_ICON[m.tipo]} {TIPO_LABEL[m.tipo]}
+          {historialPorCliente.length===0?(
+            <div style={{padding:30,textAlign:"center",color:"var(--text5)"}}>Sin movimientos</div>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {historialPorCliente.map(grupo=>{
+                const plegado = !!clientesPlegados[`hist_${grupo.id}`];
+                return (
+                  <div key={grupo.id} style={{border:"1px solid var(--border2)",borderRadius:10,overflow:"hidden",background:"var(--bg3)"}}>
+                    <button
+                      type="button"
+                      onClick={()=>toggleClientePlegado(`hist_${grupo.id}`)}
+                      aria-expanded={!plegado}
+                      style={{width:"100%",display:"flex",alignItems:"center",gap:10,justifyContent:"space-between",padding:"10px 12px",border:"none",borderBottom:plegado?"none":"1px solid var(--border2)",background:"transparent",textAlign:"left",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",flexWrap:"wrap"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,minWidth:220,flex:"1 1 240px"}}>
+                        <span style={{width:24,height:24,borderRadius:7,border:"1px solid var(--border2)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"var(--text4)",background:"var(--bg2)"}}>{plegado ? "+" : "-"}</span>
+                        <span>
+                          <span style={{display:"block",fontWeight:900,color:"var(--text)",fontSize:13}}>{grupo.nombre}</span>
+                          <span style={{display:"block",fontSize:11,color:"var(--text5)",marginTop:2}}>{grupo.movimientos.length} movimientos</span>
                         </span>
-                        {salidaPendiente&&(
-                          <span style={{display:"inline-flex",marginTop:4,padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:800,background:"rgba(245,158,11,.12)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.28)"}}>
-                            Preparada
-                          </span>
-                        )}
-                        {salidaPendiente&&(
-                          <div style={{display:"flex",gap:5,marginTop:5,flexWrap:"wrap"}}>
-                            <button
-                              onClick={()=>{setMovimientoEditando(m);setModal(true);}}
-                              style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(245,158,11,.35)",background:"rgba(245,158,11,.08)",color:"#f59e0b",cursor:"pointer",whiteSpace:"nowrap"}}>
-                              Editar
-                            </button>
-                            <button
-                              onClick={()=>confirmarSalida(m)}
-                              style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.08)",color:"#10b981",cursor:"pointer",whiteSpace:"nowrap"}}>
-                              Confirmar salida + factura
-                            </button>
-                            <button
-                              onClick={()=>borrarDevolucionPreparada(m)}
-                              style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(239,68,68,.35)",background:"rgba(239,68,68,.08)",color:"#ef4444",cursor:"pointer",whiteSpace:"nowrap"}}>
-                              Eliminar
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                      <td style={S.td}>{cli?.nombre||"-"}</td>
-                      <td style={{...S.td,fontSize:11,color:"var(--text4)"}}>{m.obra_nombre || m.cliente_movimiento_nombre || "-"}</td>
-                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:TIPO_COLOR[m.tipo]}}>
-                        {signoPaletsMovimiento(m) > 0 ? "+" : signoPaletsMovimiento(m) < 0 ? "-" : ""}
-                        {fmtN(m.cantidad)}
-                      </td>
-                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"#10b981"}}>{importe>0?fmt2(importe)+" EUR":"-"}</td>
-                      <td style={{...S.td,fontSize:11,color:"var(--text5)"}}>{m.pedido_ref||"-"}</td>
-                      <td style={{...S.td,fontSize:11,color:"var(--text5)"}}>
-                        <div>{m.notas||"-"}</div>
-                        {m.factura_id&&(
-                          <div style={{marginTop:4,display:"inline-flex",padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:800,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.25)"}}>
-                            Factura borrador vinculada
-                          </div>
-                        )}
-                      </td>
-                      <td style={S.td}>
-                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                          {movimientoEditable && !salidaPendiente && (
-                            <button
-                              onClick={()=>{setMovimientoEditando(m);setModal(true);}}
-                              style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(59,130,246,.30)",
-                                background:"rgba(59,130,246,.08)",color:"#60a5fa",cursor:"pointer",whiteSpace:"nowrap"}}>
-                              Editar
-                            </button>
-                          )}
-                          {(m.tipo==="devolucion"||m.tipo==="entrega")&&m.num_albaran&&(
-                            <button
-                              onClick={()=>{
-                                const win=window.open("","_blank","width=800,height=600");
-                                win.document.write(generarHtmlAlbaran(m,clientes.find(c=>c.id===clienteIdMovimiento(m)),empresa,clientes.find(c=>c.id===m.cliente_movimiento_id)));
-                                win.document.close();
-                                win.focus();
-                                setTimeout(()=>win.print(),400);
-                              }}
-                              style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid var(--border2)",
-                                background:"var(--bg3)",color:"var(--text3)",cursor:"pointer",whiteSpace:"nowrap"}}>
-                              Albaran
-                            </button>
-                          )}
-                          {puedeRectificarDevolucion&&(
-                            <button
-                              onClick={()=>rectificarDevolucion(m)}
-                              style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(139,92,246,.35)",background:"rgba(139,92,246,.08)",color:"#8b5cf6",cursor:"pointer",whiteSpace:"nowrap"}}>
-                              Rectificar
-                            </button>
-                          )}
-                          {puedeFacturarDevolucion&&(
-                            <button
-                              onClick={()=>generarFacturaManual(m)}
-                              style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.08)",color:"#10b981",cursor:"pointer",whiteSpace:"nowrap"}}>
-                              Generar factura
-                            </button>
-                          )}
-                          {!movimientoEditable && (
-                            <span style={{fontSize:10,color:"var(--text5)",display:"inline-flex",alignItems:"center"}}>
-                              Bloqueado por factura vinculada
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      </div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end",flex:"1 1 300px"}}>
+                        <span style={{...S.btn,background:"rgba(249,115,22,.10)",color:"#f97316",border:"1px solid rgba(249,115,22,.25)",cursor:"pointer",padding:"4px 9px"}}>{fmtN(grupo.entradas)} entradas</span>
+                        <span style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.25)",cursor:"pointer",padding:"4px 9px"}}>{fmtN(grupo.salidas)} salidas</span>
+                        <span style={{...S.btn,background:"var(--bg2)",color:"var(--text4)",border:"1px solid var(--border2)",cursor:"pointer",padding:"4px 9px"}}>{fmt2(grupo.importe)} EUR</span>
+                      </div>
+                    </button>
+                    {!plegado && (
+                      <div style={{overflowX:"auto"}}>
+                        <table style={{width:"100%",minWidth:920,borderCollapse:"collapse"}}>
+                          <thead>
+                            <tr>
+                              <th style={S.th}>Fecha</th>
+                              <th style={S.th}>Tipo</th>
+                              <th style={S.th}>Obra / origen</th>
+                              <th style={S.th}>Cantidad</th>
+                              <th style={S.th}>Importe</th>
+                              <th style={S.th}>Ref.</th>
+                              <th style={S.th}>Notas</th>
+                              <th style={S.th}></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {grupo.movimientos.map(m=>{
+                              const importe=m.tipo==="devolucion"?Number(m.cantidad||0)*Number(m.precio_unitario||0):0;
+                              const salidaPendiente=m.tipo==="devolucion"&&!salidaPaletsConfirmada(m);
+                              const puedeFacturarDevolucion = m.tipo==="devolucion" && !salidaPendiente && !m.factura_id && Number(m.precio_unitario||0)>0;
+                              const puedeRectificarDevolucion = m.tipo==="devolucion" && !salidaPendiente;
+                              const movimientoEditable = !m.factura_id && (m.tipo!=="devolucion" || salidaPendiente);
+                              return(
+                                <tr key={m.id} style={{background:salidaPendiente?"rgba(245,158,11,.05)":"transparent"}}>
+                                  <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11}}>{formatDateEs(m.fecha)}</td>
+                                  <td style={S.td}>
+                                    <span style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,
+                                      background:`${TIPO_COLOR[m.tipo]}15`,color:TIPO_COLOR[m.tipo],border:`1px solid ${TIPO_COLOR[m.tipo]}30`}}>
+                                      {TIPO_ICON[m.tipo]} {TIPO_LABEL[m.tipo]}
+                                    </span>
+                                    {salidaPendiente&&(
+                                      <span style={{display:"inline-flex",marginTop:4,padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:800,background:"rgba(245,158,11,.12)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.28)"}}>
+                                        Preparada
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{...S.td,fontSize:11,color:"var(--text4)"}}>{m.obra_nombre || m.cliente_movimiento_nombre || "-"}</td>
+                                  <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:TIPO_COLOR[m.tipo]}}>
+                                    {signoPaletsMovimiento(m) > 0 ? "+" : signoPaletsMovimiento(m) < 0 ? "-" : ""}
+                                    {fmtN(m.cantidad)}
+                                  </td>
+                                  <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"#10b981"}}>{importe>0?fmt2(importe)+" EUR":"-"}</td>
+                                  <td style={{...S.td,fontSize:11,color:"var(--text5)"}}>{m.pedido_ref||"-"}</td>
+                                  <td style={{...S.td,fontSize:11,color:"var(--text5)"}}>
+                                    <div>{m.notas||"-"}</div>
+                                    {m.factura_id&&(
+                                      <div style={{marginTop:4,display:"inline-flex",padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:800,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.25)"}}>
+                                        Factura borrador vinculada
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td style={S.td}>
+                                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                                      {movimientoEditable && (
+                                        <button
+                                          onClick={()=>{setMovimientoEditando(m);setModal(true);}}
+                                          style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(59,130,246,.30)",background:"rgba(59,130,246,.08)",color:"#60a5fa",cursor:"pointer",whiteSpace:"nowrap"}}>
+                                          Editar
+                                        </button>
+                                      )}
+                                      {salidaPendiente&&(
+                                        <button
+                                          onClick={()=>confirmarSalida(m)}
+                                          style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.08)",color:"#10b981",cursor:"pointer",whiteSpace:"nowrap"}}>
+                                          Confirmar salida + factura
+                                        </button>
+                                      )}
+                                      {salidaPendiente&&(
+                                        <button
+                                          onClick={()=>borrarDevolucionPreparada(m)}
+                                          style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(239,68,68,.35)",background:"rgba(239,68,68,.08)",color:"#ef4444",cursor:"pointer",whiteSpace:"nowrap"}}>
+                                          Eliminar
+                                        </button>
+                                      )}
+                                      {(m.tipo==="devolucion"||m.tipo==="entrega")&&m.num_albaran&&(
+                                        <button
+                                          onClick={()=>{
+                                            const win=window.open("","_blank","width=800,height=600");
+                                            win.document.write(generarHtmlAlbaran(m,clientes.find(c=>c.id===clienteIdMovimiento(m)),empresa,clientes.find(c=>c.id===m.cliente_movimiento_id)));
+                                            win.document.close();
+                                            win.focus();
+                                            setTimeout(()=>win.print(),400);
+                                          }}
+                                          style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text3)",cursor:"pointer",whiteSpace:"nowrap"}}>
+                                          Albaran
+                                        </button>
+                                      )}
+                                      {puedeRectificarDevolucion&&(
+                                        <button
+                                          onClick={()=>rectificarDevolucion(m)}
+                                          style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(139,92,246,.35)",background:"rgba(139,92,246,.08)",color:"#8b5cf6",cursor:"pointer",whiteSpace:"nowrap"}}>
+                                          Rectificar
+                                        </button>
+                                      )}
+                                      {puedeFacturarDevolucion&&(
+                                        <button
+                                          onClick={()=>generarFacturaManual(m)}
+                                          style={{fontSize:11,padding:"3px 8px",borderRadius:5,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.08)",color:"#10b981",cursor:"pointer",whiteSpace:"nowrap"}}>
+                                          Generar factura
+                                        </button>
+                                      )}
+                                      {!movimientoEditable && (
+                                        <span style={{fontSize:10,color:"var(--text5)",display:"inline-flex",alignItems:"center"}}>
+                                          Bloqueado por factura vinculada
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1537,9 +1594,7 @@ export default function Palets(){
   );
 }
 
-// 
 // ALMACEN MERCANCIA PROPIA - articulos propios de venta
-// 
 
 function mercanciaApiToLocal(m) {
   return {
@@ -1922,9 +1977,7 @@ function AlmacenPropio() {
   );
 }
 
-// 
 // ALMACEN CLIENTE - mercancia de terceros (precio/dia)
-// 
 
 function AlmacenCliente() {
   const [depositos,   setDepositos]   = useState([]);

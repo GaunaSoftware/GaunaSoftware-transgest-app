@@ -52,6 +52,7 @@ async function ensureSchema() {
   await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS notas TEXT").catch(() => {});
   await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS forma_pago VARCHAR(120)").catch(() => {});
   await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS dias_pago VARCHAR(120)").catch(() => {});
+  await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS vencimiento VARCHAR(120)").catch(() => {});
 
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS apellidos VARCHAR(100)").catch(() => {});
@@ -212,17 +213,17 @@ async function ensureCliente(empresaId, data) {
       `UPDATE clientes
           SET nombre=$2,cif=$3,direccion=$4,ciudad=$5,pais='Espana',telefono=$6,email=$7,contacto=$8,
               activo=true,notas='Cliente demo con rutas, puntos y tarifas cargadas',
-              forma_pago=$9,dias_pago=$10
+              forma_pago=$9,dias_pago=$10,vencimiento=$11
         WHERE id=$1
         RETURNING id,nombre`,
-      [existing.id, data.nombre, data.cif, data.direccion, data.ciudad, data.telefono, data.email, data.contacto, data.forma_pago, data.dias_pago]
+      [existing.id, data.nombre, data.cif, data.direccion, data.ciudad, data.telefono, data.email, data.contacto, data.forma_pago, data.dias_pago, data.vencimiento]
     );
   }
   return one(
-    `INSERT INTO clientes (empresa_id,nombre,cif,direccion,ciudad,pais,telefono,email,contacto,activo,notas,forma_pago,dias_pago)
-     VALUES ($1,$2,$3,$4,$5,'Espana',$6,$7,$8,true,'Cliente demo con rutas, puntos y tarifas cargadas',$9,$10)
+    `INSERT INTO clientes (empresa_id,nombre,cif,direccion,ciudad,pais,telefono,email,contacto,activo,notas,forma_pago,dias_pago,vencimiento)
+     VALUES ($1,$2,$3,$4,$5,'Espana',$6,$7,$8,true,'Cliente demo con rutas, puntos y tarifas cargadas',$9,$10,$11)
      RETURNING id,nombre`,
-    [empresaId, data.nombre, data.cif, data.direccion, data.ciudad, data.telefono, data.email, data.contacto, data.forma_pago, data.dias_pago]
+    [empresaId, data.nombre, data.cif, data.direccion, data.ciudad, data.telefono, data.email, data.contacto, data.forma_pago, data.dias_pago, data.vencimiento]
   );
 }
 
@@ -438,16 +439,16 @@ async function main(options = {}) {
   const empresaId = empresa.id;
 
   const clientesData = [
-    ["Cementos Mediterraneo Demo", "B03000001", "Av. Industria 12", "Alicante", "965000100", "trafico@cementos-demo.local", "Logistica Capa", "Transferencia bancaria", "60 dias fecha factura"],
-    ["Almacenes Centro Demo", "B28000002", "Calle Mayor 40", "Alcala de Henares", "910000200", "operaciones@centro-demo.local", "Operaciones", "Transferencia bancaria", "30 dias fecha factura"],
-    ["FrioLevante Distribucion Demo", "B46000003", "Pol. Fuente del Jarro, nave 8", "Paterna", "961000300", "trafico@friolevante-demo.local", "Planificacion", "Confirming", "45 dias fecha factura"],
-    ["Metalurgicas Norte Demo", "B48000004", "Ribera de Axpe 20", "Erandio", "944000400", "cargas@metalnorte-demo.local", "Expediciones", "Transferencia bancaria", "Al finalizar viaje"],
-    ["Retail Sur Plataformas Demo", "B41000005", "Avenida Logistica 5", "Dos Hermanas", "955000500", "supply@retailsur-demo.local", "Supply Chain", "Transferencia bancaria", "30 dias fecha recepcion factura"],
+    ["Cementos Mediterraneo Demo", "B03000001", "Av. Industria 12", "Alicante", "965000100", "trafico@cementos-demo.local", "Logistica Capa", "Transferencia bancaria", "60 dias fecha factura", 60],
+    ["Almacenes Centro Demo", "B28000002", "Calle Mayor 40", "Alcala de Henares", "910000200", "operaciones@centro-demo.local", "Operaciones", "Transferencia bancaria", "30 dias fecha factura", 30],
+    ["FrioLevante Distribucion Demo", "B46000003", "Pol. Fuente del Jarro, nave 8", "Paterna", "961000300", "trafico@friolevante-demo.local", "Planificacion", "Confirming", "45 dias fecha factura", 45],
+    ["Metalurgicas Norte Demo", "B48000004", "Ribera de Axpe 20", "Erandio", "944000400", "cargas@metalnorte-demo.local", "Expediciones", "Transferencia bancaria", "Al finalizar viaje", 0],
+    ["Retail Sur Plataformas Demo", "B41000005", "Avenida Logistica 5", "Dos Hermanas", "955000500", "supply@retailsur-demo.local", "Supply Chain", "Transferencia bancaria", "30 dias fecha recepcion factura", 30],
   ];
   const clientes = [];
   for (const c of clientesData) {
     clientes.push(await ensureCliente(empresaId, {
-      nombre: c[0], cif: c[1], direccion: c[2], ciudad: c[3], telefono: c[4], email: c[5], contacto: c[6], forma_pago: c[7], dias_pago: c[8],
+      nombre: c[0], cif: c[1], direccion: c[2], ciudad: c[3], telefono: c[4], email: c[5], contacto: c[6], forma_pago: c[7], vencimiento: c[8], dias_pago: c[9],
     }));
   }
 

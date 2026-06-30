@@ -4128,6 +4128,11 @@ export default function App() {
                         <div>
                           <strong>Vista previa del lote</strong>
                           <span>{externalImportPreview.batch.original_filename || externalImportPreview.batch.provider_id}</span>
+                          <div className="external-import-meta">
+                            <span>Preparado: {externalImportPreview.batch.staged_by_name || "Usuario"}</span>
+                            {externalImportPreview.batch.reviewed_at && <span>Revisado: {externalImportPreview.batch.reviewed_by_name || "Usuario"} | {formatDateTime(externalImportPreview.batch.reviewed_at)}</span>}
+                            {externalImportPreview.batch.applied_at && <span>Aplicado: {externalImportPreview.batch.applied_by_name || "Usuario"} | {formatDateTime(externalImportPreview.batch.applied_at)}</span>}
+                          </div>
                         </div>
                         <button type="button" className="secondary" onClick={() => setExternalImportPreview(null)}>Cerrar</button>
                       </div>

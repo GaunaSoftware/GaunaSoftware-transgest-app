@@ -33,6 +33,22 @@ function selectedContext(req) {
   return req.accountingUser.contexts.find(c => c.company_id === req.accountingUser.selected_company_id);
 }
 
+async function findExternalImportBatch(client, companyId, batchId) {
+  const result = await client.query(
+    `SELECT batches.*,
+            staged_user.display_name AS staged_by_name,
+            reviewed_user.display_name AS reviewed_by_name,
+            applied_user.display_name AS applied_by_name
+       FROM ${q("external_import_batches")} batches
+       LEFT JOIN ${q("accounting_users")} staged_user ON staged_user.id=batches.staged_by
+       LEFT JOIN ${q("accounting_users")} reviewed_user ON reviewed_user.id=batches.reviewed_by
+       LEFT JOIN ${q("accounting_users")} applied_user ON applied_user.id=batches.applied_by
+      WHERE batches.id=$1 AND batches.company_id=$2`,
+    [batchId, companyId]
+  );
+  return result.rows[0] || null;
+}
+
 function sha256(value) {
   return crypto.createHash("sha256").update(String(value)).digest("hex");
 }
@@ -560,13 +576,8 @@ router.get("/external-import-batches/:id", requirePermission("external_imports.r
     const selected = selectedContext(req);
     if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
     const result = await db.transaction(async client => {
-      const batch = await client.query(
-        `SELECT *
-           FROM ${q("external_import_batches")}
-          WHERE id=$1 AND company_id=$2`,
-        [req.params.id, selected.company_id]
-      );
-      if (!batch.rows.length) {
+      const batch = await findExternalImportBatch(client, selected.company_id, req.params.id);
+      if (!batch) {
         const error = new Error("Lote staged no encontrado para la empresa seleccionada");
         error.status = 404;
         throw error;
@@ -579,7 +590,7 @@ router.get("/external-import-batches/:id", requirePermission("external_imports.r
           ORDER BY row_number`,
         [req.params.id, selected.company_id]
       );
-      return { batch: batch.rows[0], rows: rows.rows };
+      return { batch, rows: rows.rows };
     });
     res.json(result);
   } catch (error) {
@@ -592,18 +603,12 @@ router.get("/external-import-batches/:id/preview", requirePermission("external_i
     const selected = selectedContext(req);
     if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
     const result = await db.transaction(async client => {
-      const batchResult = await client.query(
-        `SELECT *
-           FROM ${q("external_import_batches")}
-          WHERE id=$1 AND company_id=$2`,
-        [req.params.id, selected.company_id]
-      );
-      if (!batchResult.rows.length) {
+      const batch = await findExternalImportBatch(client, selected.company_id, req.params.id);
+      if (!batch) {
         const error = new Error("Lote staged no encontrado para la empresa seleccionada");
         error.status = 404;
         throw error;
       }
-      const batch = batchResult.rows[0];
       if (batch.import_type === "parties") return buildPartyImportPreview(client, selected, batch);
       if (batch.import_type === "accounts") return buildAccountImportPreview(client, selected, batch, req.query.fiscal_year_id);
       if (batch.import_type === "maturities") return buildMaturityImportPreview(client, selected, batch);

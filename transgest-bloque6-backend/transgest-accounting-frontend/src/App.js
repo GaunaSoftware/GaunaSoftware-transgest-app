@@ -815,6 +815,7 @@ export default function App() {
   }, [activeTab]);
 
   useEffect(() => {
+    const launchTab = getInitialActiveTab();
     async function boot() {
       setBooting(true);
       setError(null);
@@ -823,7 +824,7 @@ export default function App() {
         const ssoToken = params.get("sso_token");
         if (ssoToken) {
           await exchangeSsoToken(ssoToken);
-          window.history.replaceState({}, document.title, accountingUrlForTab(activeTab));
+          window.history.replaceState({}, document.title, accountingUrlForTab(launchTab));
         } else if (!getToken()) {
           setBooting(false);
           return;

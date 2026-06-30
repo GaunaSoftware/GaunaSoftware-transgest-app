@@ -430,6 +430,8 @@ export const getPlanificacionCargaIA = (id) =>
 export const crearPedido    = (data)      => apiFetch("/pedidos", { method:"POST", body:data, timeoutMs:60000 });
 export const crearPedidoChofer = (data)   => apiFetch("/pedidos/chofer", { method:"POST", body:data, timeoutMs:60000 });
 export const getChoferClientes = (q = "") => apiFetch(`/pedidos/chofer/clientes${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+export const getChoferClientePuntosCarga = (clienteId) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/puntos-carga`);
+export const crearChoferClientePuntoCarga = (clienteId, data) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/puntos-carga`, { method:"POST", body:data });
 export const getChoferClienteRutas = (clienteId) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/rutas`);
 export const crearChoferRuta = (data) => apiFetch("/pedidos/chofer/rutas", { method:"POST", body:data });
 export const editarPedido   = (id,data)   => apiFetch(`/pedidos/${id}`, { method:"PUT", body:data });

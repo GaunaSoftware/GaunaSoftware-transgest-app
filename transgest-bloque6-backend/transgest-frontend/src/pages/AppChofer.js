@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
+import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -363,6 +363,36 @@ function buildUploadEvidence(kind, location) {
   return {
     evidence,
     note: `Evidencia app chofer: ${new Date(at).toLocaleString("es-ES")} - ${locText}`,
+  };
+}
+
+function direccionCompletaPuntoChofer(punto = {}) {
+  return [
+    punto.direccion,
+    punto.codigo_postal,
+    punto.ciudad,
+    punto.provincia,
+    punto.pais,
+  ].map(x => String(x || "").trim()).filter(Boolean).join(", ");
+}
+
+function puntoCargaToPedidoStop(punto = {}, fallbackDate = "", fallbackTime = "") {
+  const direccion = direccionCompletaPuntoChofer(punto) || punto.direccion || punto.nombre || "";
+  return {
+    nombre: punto.nombre || direccion,
+    direccion,
+    cliente_nombre: punto.nombre || "",
+    fecha: fallbackDate || "",
+    hora: fallbackTime || "",
+    ventana: punto.ventana || "",
+    notas: punto.pendiente_revision ? "Punto creado por chofer pendiente de revision de trafico" : (punto.notas || ""),
+    pais: punto.pais || "Espana",
+    provincia: punto.provincia || "",
+    google_maps_url: punto.google_maps_url || punto.metadata?.google_maps_url || "",
+    lat: punto.lat ?? null,
+    lng: punto.lng ?? null,
+    punto_interes_id: punto.id || null,
+    pendiente_revision: Boolean(punto.pendiente_revision || punto.metadata?.pending_review),
   };
 }
 
@@ -1927,7 +1957,7 @@ function ConjuntoChofer({ onRefresh }) {
   );
 }
 
-function JornadaChofer({ jornadaInfo, onRefresh }) {
+function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
   const jornada = jornadaInfo?.jornada || null;
   const chofer = jornadaInfo?.chofer || null;
   const resumen = jornada?.resumen || {};
@@ -1996,6 +2026,20 @@ function JornadaChofer({ jornadaInfo, onRefresh }) {
         <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
           Registro interno de jornada y asistente de tiempos. No sustituye al tacografo legal del vehiculo.
         </div>
+        {gpsSeguimientoEstado?.text && (
+          <div style={{
+            marginTop:10,
+            padding:"8px 10px",
+            borderRadius:8,
+            border:`1px solid ${gpsSeguimientoEstado.active ? "rgba(16,185,129,.28)" : "rgba(245,158,11,.28)"}`,
+            background:gpsSeguimientoEstado.active ? "rgba(16,185,129,.10)" : "rgba(245,158,11,.10)",
+            color:gpsSeguimientoEstado.active ? "#10b981" : "#f59e0b",
+            fontSize:11,
+            fontWeight:900,
+          }}>
+            {gpsSeguimientoEstado.text}
+          </div>
+        )}
         {chofer && (
           <div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <Mini label="Chofer" value={`${chofer.nombre || ""} ${chofer.apellidos || ""}`.trim()} />
@@ -2225,13 +2269,17 @@ function NuevoViajeChofer({ onCreado }) {
     bultos: "",
     referencia_cliente: "",
     notas: "",
+    puntos_carga: [],
   });
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState(null);
   const [clientes, setClientes] = useState([]);
   const [rutas, setRutas] = useState([]);
+  const [puntosCarga, setPuntosCarga] = useState([]);
   const [loadingRutas, setLoadingRutas] = useState(false);
+  const [loadingPuntos, setLoadingPuntos] = useState(false);
   const [creatingRuta, setCreatingRuta] = useState(false);
+  const [creatingPunto, setCreatingPunto] = useState(false);
   const set = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
   const inputStyle = {width:"100%",boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:8,padding:"10px 11px",fontSize:13,fontFamily:"'DM Sans',sans-serif",outline:"none"};
 
@@ -2251,6 +2299,7 @@ function NuevoViajeChofer({ onCreado }) {
   useEffect(() => {
     if (!form.cliente_id) {
       setRutas([]);
+      setPuntosCarga([]);
       return;
     }
     setLoadingRutas(true);
@@ -2258,7 +2307,30 @@ function NuevoViajeChofer({ onCreado }) {
       .then(data => setRutas(Array.isArray(data) ? data : []))
       .catch(() => setRutas([]))
       .finally(() => setLoadingRutas(false));
+    setLoadingPuntos(true);
+    getChoferClientePuntosCarga(form.cliente_id)
+      .then(data => {
+        const lista = Array.isArray(data) ? data : [];
+        setPuntosCarga(lista);
+        if (lista.length === 1 && !String(form.origen || "").trim()) {
+          seleccionarPuntoCarga(lista[0]);
+        }
+      })
+      .catch(() => setPuntosCarga([]))
+      .finally(() => setLoadingPuntos(false));
+    // seleccionarPuntoCarga uses current form values when the client changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.cliente_id]);
+
+  function cambiarClienteNombre(value) {
+    setForm(prev => ({
+      ...prev,
+      cliente_nombre: value,
+      cliente_id: value.trim() === prev.cliente_nombre.trim() ? prev.cliente_id : "",
+      ruta_id: "",
+      puntos_carga: [],
+    }));
+  }
 
   function seleccionarCliente(cliente) {
     setForm(prev => ({
@@ -2266,7 +2338,22 @@ function NuevoViajeChofer({ onCreado }) {
       cliente_id: cliente.id,
       cliente_nombre: cliente.nombre || prev.cliente_nombre,
       ruta_id: "",
+      puntos_carga: [],
     }));
+  }
+
+  function seleccionarPuntoCarga(punto) {
+    setForm(prev => {
+      const stop = puntoCargaToPedidoStop(punto, prev.fecha_carga, prev.hora_carga);
+      return {
+        ...prev,
+        origen: punto.nombre || punto.direccion || prev.origen,
+        puntos_carga: [stop],
+      };
+    });
+    if (punto?.pendiente_revision || punto?.metadata?.pending_review) {
+      notify("Punto de carga pendiente de revision por trafico.", "warning");
+    }
   }
 
   function seleccionarRuta(rutaId) {
@@ -2303,6 +2390,36 @@ function NuevoViajeChofer({ onCreado }) {
     }
   }
 
+  async function crearPuntoCargaPendiente() {
+    if (!form.cliente_id) {
+      notify("Selecciona primero un cliente.", "warning");
+      return;
+    }
+    const direccion = String(form.origen || "").trim();
+    if (!direccion) {
+      notify("Indica el punto de carga antes de guardarlo.", "warning");
+      return;
+    }
+    setCreatingPunto(true);
+    try {
+      const result = await crearChoferClientePuntoCarga(form.cliente_id, {
+        nombre: direccion,
+        direccion,
+        ventana: form.hora_carga ? `Hora indicada por chofer: ${form.hora_carga}` : "",
+        notas: "Alta rapida desde nuevo viaje del chofer.",
+      });
+      const punto = result?.punto || result;
+      const fresh = await getChoferClientePuntosCarga(form.cliente_id).catch(() => []);
+      setPuntosCarga(Array.isArray(fresh) ? fresh : []);
+      if (punto?.id) seleccionarPuntoCarga(punto);
+      notify("Punto de carga creado y enviado a trafico para revisar.", "success");
+    } catch (err) {
+      notify(err.message || "No se pudo crear el punto de carga", "error");
+    } finally {
+      setCreatingPunto(false);
+    }
+  }
+
   async function guardar() {
     if (!form.cliente_nombre.trim() || !form.origen.trim() || !form.destino.trim() || !form.mercancia.trim()) {
       notify("Completa cliente, origen, destino y mercancia.", "warning");
@@ -2325,7 +2442,9 @@ function NuevoViajeChofer({ onCreado }) {
         bultos: "",
         referencia_cliente: "",
         notas: "",
+        puntos_carga: [],
       }));
+      setPuntosCarga([]);
       onCreado?.();
     } catch (err) {
       notify(err.message || "No se pudo crear el viaje", "error");
@@ -2340,14 +2459,18 @@ function NuevoViajeChofer({ onCreado }) {
         <div style={{fontSize:15,fontWeight:900,color:"var(--text)",marginBottom:4}}>Nuevo viaje DCD</div>
         <div style={{fontSize:11,color:"var(--text5)",lineHeight:1.4,marginBottom:12}}>Crea un viaje propio para disponer del documento de control digital y su QR.</div>
         <div style={{display:"grid",gap:10}}>
-          <input value={form.cliente_nombre} onChange={e=>set("cliente_nombre", e.target.value)} placeholder="Cliente / destinatario" style={inputStyle}/>
+          <input value={form.cliente_nombre} onChange={e=>cambiarClienteNombre(e.target.value)} placeholder="Cliente / destinatario" style={inputStyle}/>
           {clientes.length > 0 && (
             <div style={{display:"grid",gap:6}}>
-              {clientes.slice(0, 5).map(cliente => (
+              <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>
+                {form.cliente_nombre.trim() ? "Coincidencias" : "Acceso rapido por cargas"}
+              </div>
+              {clientes.slice(0, form.cliente_nombre.trim() ? 8 : 5).map(cliente => (
                 <button key={cliente.id} type="button" onClick={()=>seleccionarCliente(cliente)}
                   style={{textAlign:"left",padding:"8px 10px",borderRadius:8,border:`1px solid ${form.cliente_id===cliente.id ? "rgba(20,184,166,.45)" : "var(--border2)"}`,background:form.cliente_id===cliente.id ? "rgba(20,184,166,.10)" : "var(--bg3)",color:"var(--text)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   {cliente.nombre}
                   {cliente.cif ? <span style={{fontWeight:600,color:"var(--text5)"}}> · {cliente.cif}</span> : null}
+                  {Number(cliente.cargas_total || 0) > 0 ? <span style={{fontWeight:700,color:"#14b8a6"}}> · {cliente.cargas_total} cargas</span> : null}
                 </button>
               ))}
             </div>
@@ -2363,6 +2486,27 @@ function NuevoViajeChofer({ onCreado }) {
             </div>
           )}
           <input value={form.origen} onChange={e=>set("origen", e.target.value)} placeholder="Origen / punto de carga" style={inputStyle}/>
+          {form.cliente_id && (
+            <div style={{display:"grid",gap:7,background:"rgba(20,184,166,.06)",border:"1px solid rgba(20,184,166,.18)",borderRadius:8,padding:9}}>
+              <div style={{fontSize:11,color:"var(--text4)",fontWeight:800}}>
+                {loadingPuntos ? "Cargando puntos de carga..." : puntosCarga.length ? "Puntos de carga del cliente" : "Este cliente no tiene puntos de carga guardados."}
+              </div>
+              {puntosCarga.slice(0, 6).map(punto => (
+                <button key={punto.id} type="button" onClick={()=>seleccionarPuntoCarga(punto)}
+                  style={{textAlign:"left",padding:"8px 9px",borderRadius:8,border:`1px solid ${String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "rgba(20,184,166,.45)" : "rgba(20,184,166,.18)"}`,background:String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "rgba(20,184,166,.12)" : "var(--bg3)",color:"var(--text)",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  {punto.nombre || punto.direccion}
+                  <span style={{display:"block",fontSize:10,fontWeight:700,color:"var(--text5)",marginTop:2}}>{direccionCompletaPuntoChofer(punto) || punto.direccion}</span>
+                  {punto.pendiente_revision ? <span style={{display:"inline-block",fontSize:10,fontWeight:900,color:"#f59e0b",marginTop:4}}>Pendiente de revision trafico</span> : null}
+                </button>
+              ))}
+              {form.origen.trim() && (
+                <button type="button" onClick={crearPuntoCargaPendiente} disabled={creatingPunto}
+                  style={{padding:"10px",borderRadius:8,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#14b8a6",fontSize:12,fontWeight:900,cursor:creatingPunto?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  {creatingPunto ? "Creando punto..." : "Crear punto de carga para revisar"}
+                </button>
+              )}
+            </div>
+          )}
           <input value={form.destino} onChange={e=>set("destino", e.target.value)} placeholder="Destino / punto de descarga" style={inputStyle}/>
           {form.cliente_id && form.origen.trim() && form.destino.trim() && !form.ruta_id && (
             <button type="button" onClick={crearRutaPendiente} disabled={creatingRuta}
@@ -2423,6 +2567,10 @@ export default function AppChofer(){
   const [expandedPedidoId, setExpandedPedidoId] = useState(null);
   const [routeNotifications, setRouteNotifications] = useState([]);
   const gpsSeguimientoRef = useRef({ lastSent: 0 });
+  const [gpsSeguimientoEstado, setGpsSeguimientoEstado] = useState({
+    active: false,
+    text: "Ubicacion en espera hasta iniciar jornada.",
+  });
 
   const hoy = new Date().toISOString().slice(0,10);
   const lunesStr = (() => { const d=new Date(); d.setDate(d.getDate()-(d.getDay()||7)+1); return d.toISOString().slice(0,10); })();
@@ -2500,21 +2648,47 @@ export default function AppChofer(){
   const gpsChoferProvider = jornadaInfo?.chofer?.gps_provider || "";
   const gpsChoferExternalId = jornadaInfo?.chofer?.gps_external_id || "";
 
-  // GPS app: solo con jornada abierta, sin pausa y si la empresa no usa GPS externo.
+  // GPS app: se activa con jornada abierta y se pausa en descanso, pausa o fin.
   useEffect(()=>{
     const actividad = String(gpsJornadaActividad || "").toLowerCase();
     const provider = String(gpsChoferProvider || "").trim().toLowerCase();
     const externalId = String(gpsChoferExternalId || "").trim();
     const hasExternalGps = provider && provider !== "manual" && provider !== "app_chofer" && externalId;
-    if (!navigator.geolocation || !gpsJornadaId || gpsJornadaEstado !== "abierta" || ["pausa", "descanso", "fin"].includes(actividad) || hasExternalGps || !gpsChoferVehiculoId) {
+    if (!navigator.geolocation) {
       gpsSeguimientoRef.current.lastSent = 0;
+      setGpsSeguimientoEstado({ active: false, text: "GPS no disponible en este dispositivo." });
+      return;
+    }
+    if (!gpsJornadaId || gpsJornadaEstado !== "abierta") {
+      gpsSeguimientoRef.current.lastSent = 0;
+      setGpsSeguimientoEstado({ active: false, text: "Ubicacion en espera hasta iniciar jornada." });
+      return;
+    }
+    if (["pausa", "descanso", "fin"].includes(actividad)) {
+      gpsSeguimientoRef.current.lastSent = 0;
+      setGpsSeguimientoEstado({ active: false, text: "Ubicacion pausada durante pausa, descanso o fin de jornada." });
+      return;
+    }
+    if (hasExternalGps) {
+      gpsSeguimientoRef.current.lastSent = 0;
+      setGpsSeguimientoEstado({ active: true, text: "Ubicacion gestionada por GPS del vehiculo." });
+      return;
+    }
+    if (!gpsChoferVehiculoId) {
+      gpsSeguimientoRef.current.lastSent = 0;
+      setGpsSeguimientoEstado({ active: false, text: "Asigna una tractora para registrar ubicacion desde la app." });
       return;
     }
     gpsSeguimientoRef.current.lastSent = 0;
+    setGpsSeguimientoEstado({ active: false, text: "Solicitando permiso de ubicacion..." });
     const id = navigator.geolocation.watchPosition(
       pos => {
         const now = Date.now();
-        if (gpsSeguimientoRef.current.lastSent && gpsSeguimientoRef.current.lastSent + 300000 > now) return;
+        setGpsSeguimientoEstado({
+          active: true,
+          text: `Ubicacion activa. Ultima senal ${new Date(now).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})}.`,
+        });
+        if (gpsSeguimientoRef.current.lastSent && gpsSeguimientoRef.current.lastSent + 60000 > now) return;
         gpsSeguimientoRef.current.lastSent = now;
         registrarGpsChoferApp({
           vehiculo_id: gpsChoferVehiculoId,
@@ -2525,7 +2699,9 @@ export default function AppChofer(){
           recorded_at: new Date().toISOString(),
         }).catch(()=>{});
       },
-      () => {},
+      () => {
+        setGpsSeguimientoEstado({ active: false, text: "Permiso de ubicacion denegado o no disponible." });
+      },
       { enableHighAccuracy: true, maximumAge: 60000, timeout: 15000 }
     );
     return () => navigator.geolocation.clearWatch(id);
@@ -2831,7 +3007,7 @@ export default function AppChofer(){
       )}
 
       {tab==="jornada" && (
-        <JornadaChofer jornadaInfo={jornadaInfo} onRefresh={cargar} />
+        <JornadaChofer jornadaInfo={jornadaInfo} gpsSeguimientoEstado={gpsSeguimientoEstado} onRefresh={cargar} />
       )}
 
       {tab==="vacaciones" && (

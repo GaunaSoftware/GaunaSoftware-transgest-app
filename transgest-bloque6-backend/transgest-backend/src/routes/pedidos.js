@@ -4628,23 +4628,89 @@ router.get("/chofer/clientes", async (req, res) => {
     if (req.user?.rol !== "chofer") return res.status(403).json({ error: "Solo app chofer" });
     const empresaId = req.empresaId || req.user.empresa_id;
     const q = String(req.query?.q || "").trim();
-    const params = [empresaId];
-    let where = "empresa_id=$1 AND COALESCE(activo,true)=true";
-    if (q) {
-      params.push(`%${q.toLowerCase()}%`);
-      where += ` AND (LOWER(nombre) LIKE $${params.length} OR LOWER(COALESCE(cif,'')) LIKE $${params.length})`;
+    const access = await getChoferAccessForUser(req.user, empresaId);
+    const ownClauses = [];
+    const ownParams = [empresaId];
+    if (access.choferIds.length) {
+      ownParams.push(access.choferIds);
+      ownClauses.push(`(p.chofer_id = ANY($${ownParams.length}::uuid[]) OR p.chofer2_id = ANY($${ownParams.length}::uuid[]))`);
     }
+    if (access.vehiculoIds.length) {
+      ownParams.push(access.vehiculoIds);
+      ownClauses.push(`p.vehiculo_id = ANY($${ownParams.length}::uuid[])`);
+    }
+
+    if (!q) {
+      if (!ownClauses.length) return res.json([]);
+      const { rows } = await db.query(
+        `SELECT c.id, c.nombre, c.cif, c.direccion, c.ciudad, c.pais,
+                COUNT(p.id)::int AS cargas_total,
+                MAX(COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date)) AS ultima_carga,
+                TRUE AS acceso_rapido
+           FROM pedidos p
+           JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
+          WHERE p.empresa_id=$1
+            AND COALESCE(c.activo,true)=true
+            AND p.cliente_id IS NOT NULL
+            AND (${ownClauses.join(" OR ")})
+          GROUP BY c.id
+          ORDER BY COUNT(p.id) DESC, MAX(COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date)) DESC NULLS LAST, c.nombre ASC
+          LIMIT 8`,
+        ownParams
+      );
+      return res.json(rows);
+    }
+
+    const params = [empresaId, `%${q.toLowerCase()}%`];
     const { rows } = await db.query(
-      `SELECT id, nombre, cif, direccion, ciudad, pais
-         FROM clientes
-        WHERE ${where}
-        ORDER BY nombre ASC
-        LIMIT 30`,
+      `SELECT c.id, c.nombre, c.cif, c.direccion, c.ciudad, c.pais,
+              COUNT(p.id)::int AS cargas_total,
+              MAX(COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date)) AS ultima_carga,
+              FALSE AS acceso_rapido
+         FROM clientes c
+         LEFT JOIN pedidos p ON p.cliente_id=c.id AND p.empresa_id=c.empresa_id
+        WHERE c.empresa_id=$1
+          AND COALESCE(c.activo,true)=true
+          AND (LOWER(c.nombre) LIKE $2 OR LOWER(COALESCE(c.cif,'')) LIKE $2)
+        GROUP BY c.id
+        ORDER BY COUNT(p.id) DESC, c.nombre ASC
+        LIMIT 20`,
       params
     );
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message || "No se pudieron cargar clientes" });
+  }
+});
+
+router.get("/chofer/clientes/:clienteId/puntos-carga", async (req, res) => {
+  try {
+    if (req.user?.rol !== "chofer") return res.status(403).json({ error: "Solo app chofer" });
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const clienteId = normalizePedidoUuid(req.params.clienteId);
+    if (!clienteId) return res.status(400).json({ error: "Cliente no valido" });
+    const { rows: clienteRows } = await db.query(
+      "SELECT id FROM clientes WHERE id=$1 AND empresa_id=$2 AND COALESCE(activo,true)=true LIMIT 1",
+      [clienteId, empresaId]
+    );
+    if (!clienteRows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
+    const { rows } = await db.query(
+      `SELECT id, cliente_id, nombre, direccion, codigo_postal, ciudad, provincia, pais,
+              lat, lng, tipo, ventana, contacto_nombre, contacto_telefono, email, notas, metadata,
+              COALESCE(metadata->>'google_maps_url','') AS google_maps_url,
+              CASE WHEN LOWER(COALESCE(metadata->>'pending_review','')) IN ('true','t','1','yes') THEN true ELSE false END AS pendiente_revision
+         FROM puntos_interes
+        WHERE empresa_id=$1
+          AND cliente_id=$2
+          AND activo=true
+          AND (tipo='carga' OR tipo='ambos')
+        ORDER BY CASE WHEN LOWER(COALESCE(metadata->>'pending_review','')) IN ('true','t','1','yes') THEN true ELSE false END DESC, nombre ASC
+        LIMIT 100`,
+      [empresaId, clienteId]
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudieron cargar puntos de carga del cliente" });
   }
 });
 
@@ -4673,6 +4739,74 @@ router.get("/chofer/clientes/:clienteId/rutas", async (req, res) => {
     res.json(rows);
   } catch (e) {
     res.status(500).json({ error: e.message || "No se pudieron cargar rutas del cliente" });
+  }
+});
+
+router.post("/chofer/clientes/:clienteId/puntos-carga", async (req, res) => {
+  try {
+    if (req.user?.rol !== "chofer") return res.status(403).json({ error: "Solo app chofer" });
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const clienteId = normalizePedidoUuid(req.params.clienteId);
+    if (!clienteId) return res.status(400).json({ error: "Cliente no valido" });
+    const nombre = String(req.body?.nombre || req.body?.direccion || "").trim().slice(0, 180);
+    const direccion = String(req.body?.direccion || "").trim().slice(0, 240);
+    if (!nombre || !direccion) return res.status(400).json({ error: "Indica nombre y direccion del punto de carga" });
+    const { rows: clienteRows } = await db.query(
+      "SELECT id, nombre FROM clientes WHERE id=$1 AND empresa_id=$2 AND COALESCE(activo,true)=true LIMIT 1",
+      [clienteId, empresaId]
+    );
+    const cliente = clienteRows[0];
+    if (!cliente) return res.status(404).json({ error: "Cliente no encontrado" });
+    const metadata = {
+      source: "app_chofer",
+      pending_review: true,
+      review_status: "pending",
+      created_by_user_id: req.user?.id || null,
+      created_at: new Date().toISOString(),
+      google_maps_url: String(req.body?.google_maps_url || "").trim(),
+    };
+    const notas = [
+      "Creado desde App Chofer. Pendiente de revision por trafico.",
+      String(req.body?.notas || "").trim(),
+    ].filter(Boolean).join(" ");
+    const { rows } = await db.query(
+      `INSERT INTO puntos_interes
+        (empresa_id, cliente_id, nombre, direccion, codigo_postal, ciudad, provincia, pais,
+         lat, lng, tipo, ventana, contacto_nombre, contacto_telefono, email, notas, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'carga',$11,$12,$13,$14,$15,$16::jsonb)
+       RETURNING *, COALESCE(metadata->>'google_maps_url','') AS google_maps_url,
+                 CASE WHEN LOWER(COALESCE(metadata->>'pending_review','')) IN ('true','t','1','yes') THEN true ELSE false END AS pendiente_revision`,
+      [
+        empresaId,
+        clienteId,
+        nombre,
+        direccion,
+        String(req.body?.codigo_postal || "").trim() || null,
+        String(req.body?.ciudad || "").trim() || null,
+        String(req.body?.provincia || "").trim() || null,
+        String(req.body?.pais || "Espana").trim() || "Espana",
+        parseLocaleNumber(req.body?.lat),
+        parseLocaleNumber(req.body?.lng),
+        String(req.body?.ventana || "").trim() || null,
+        String(req.body?.contacto_nombre || "").trim() || null,
+        String(req.body?.contacto_telefono || "").trim() || null,
+        String(req.body?.email || "").trim() || null,
+        notas,
+        JSON.stringify(metadata),
+      ]
+    );
+    const punto = rows[0];
+    await notificarGestionPedido(
+      empresaId,
+      "punto_carga_chofer_pendiente_revision",
+      "Nuevo punto de carga creado por chofer",
+      `El chofer ha creado un punto de carga para ${cliente.nombre}: ${nombre}. Revisar direccion y datos antes de validarlo.`,
+      { cliente_id: clienteId, cliente_nombre: cliente.nombre, punto_id: punto.id, nombre, direccion, dedupe_key: `punto-carga-chofer:${punto.id}` },
+      req.user?.id || null
+    );
+    res.status(201).json({ ok: true, punto, pendiente_revision: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudo crear el punto de carga desde app chofer" });
   }
 });
 

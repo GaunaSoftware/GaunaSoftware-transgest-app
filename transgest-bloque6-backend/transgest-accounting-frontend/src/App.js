@@ -196,6 +196,56 @@ const externalImportStatusLabels = {
   rejected: "Rechazado",
 };
 
+const externalImportCsvTemplates = {
+  accounts: {
+    filename: "plan_contable.csv",
+    csv: [
+      "codigo;nombre;tipo;movimiento;notas",
+      "43000001;Clientes transporte;Activo;si;Cuenta operativa de clientes",
+      "70000001;Ingresos por transporte;Ingreso;si;Cuenta de ventas",
+    ].join("\n"),
+  },
+  bank_transactions: {
+    filename: "movimientos_bancarios.csv",
+    csv: [
+      "iban;fecha;fecha_valor;concepto;referencia;tercero;importe;tipo",
+      "ES9121000418450200051332;30/06/2026;30/06/2026;Cobro cliente ruta norte;TRF-100;Cliente Demo;1250,50;entrada",
+      "ES9121000418450200051332;30/06/2026;30/06/2026;Pago proveedor gasoleo;TRF-101;Proveedor Demo;450,25;salida",
+    ].join("\n"),
+  },
+  generic: {
+    filename: "lote_generico.csv",
+    csv: [
+      "campo;valor;notas",
+      "referencia;EXT-001;Fila generica para revision manual",
+    ].join("\n"),
+  },
+  journal_entries: {
+    filename: "diario_borradores.csv",
+    csv: [
+      "entry_ref;fecha;concepto;cuenta;debe;haber;concepto_linea",
+      "A-2026-001;30/06/2026;Asiento importado ejemplo;43000001;1250,50;;Cliente Demo",
+      "A-2026-001;30/06/2026;Asiento importado ejemplo;70000001;;1250,50;Servicio transporte",
+    ].join("\n"),
+  },
+  maturities: {
+    filename: "vencimientos.csv",
+    csv: [
+      "nif;tercero;tipo;vencimiento;factura;concepto;importe;forma_pago",
+      "B00000000;Cliente Demo;cobro;31/07/2026;F-100;Servicio transporte;1250,50;transferencia",
+      "A00000000;Proveedor Demo;pago;05/08/2026;R-200;Gasto proveedor;450,25;transferencia",
+    ].join("\n"),
+  },
+  parties: {
+    filename: "terceros.csv",
+    csv: [
+      "nombre;nif;tipo;correo;telefono",
+      "Cliente Demo;B00000000;cliente;cliente@example.com;600000000",
+      "Proveedor Demo;A00000000;proveedor;proveedor@example.com;611000000",
+    ].join("\n"),
+  },
+};
+
 function maturityStatusTone(status) {
   if (status === "pending") return "warning";
   if (status === "settled") return "ok";
@@ -1589,6 +1639,19 @@ export default function App() {
   async function handleExternalImportFilter(event) {
     event.preventDefault();
     await refreshExternalImportBatches(externalImportFilters);
+  }
+
+  function loadExternalImportTemplate() {
+    const template = externalImportCsvTemplates[externalImportForm.import_type] || externalImportCsvTemplates.generic;
+    setExternalImportForm(prev => ({
+      ...prev,
+      original_filename: prev.original_filename || template.filename,
+      csv_text: template.csv,
+    }));
+    setExternalImportStatus({
+      tone: "neutral",
+      text: `Plantilla ${externalImportTypeLabels[externalImportForm.import_type] || "generica"} cargada. Revisa y sustituye los datos de ejemplo antes de preparar staging.`,
+    });
   }
 
   async function handleCreateExternalImportBatch(event) {
@@ -3977,6 +4040,7 @@ export default function App() {
                       <label className="wide">
                         <span>CSV</span>
                         <textarea value={externalImportForm.csv_text} onChange={e => setExternalImportForm(prev => ({ ...prev, csv_text: e.target.value }))} rows={5} required />
+                        <button type="button" className="external-import-template-button" onClick={loadExternalImportTemplate}>Cargar ejemplo</button>
                       </label>
                       <button type="submit">Preparar staging</button>
                     </form>

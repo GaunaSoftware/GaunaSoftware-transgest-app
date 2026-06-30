@@ -26,6 +26,7 @@ No existe una fuente publica unica y auditada que ordene con precision los 10 pr
 - La previsualizacion y aplicacion controlada de vencimientos reutiliza el mismo endpoint con `import_type=maturities`. Resuelve terceros activos por `party_id`, NIF/CIF o nombre exacto, bloquea duplicados por origen externo y no crea facturas ni asientos.
 - La previsualizacion y aplicacion controlada de movimientos bancarios reutiliza el mismo endpoint con `import_type=bank_transactions`. Resuelve cuenta bancaria activa por `bank_account_id` o IBAN, bloquea duplicados por origen externo y crea movimientos en estado pendiente de conciliacion. No crea asientos ni conciliaciones automaticas.
 - La previsualizacion y aplicacion controlada de diario reutiliza el mismo endpoint con `import_type=journal_entries` y `fiscal_year_id` explicito. Agrupa lineas por referencia externa, exige partida doble cuadrada y crea solo borradores de diario trazables. No contabiliza asientos automaticamente.
+- La UI de staging incluye plantillas CSV editables por tipo de importacion para arrancar pruebas con cabeceras compatibles. Son ejemplos tecnicos, no formatos certificados de proveedores.
 - Para programas con API, usar outbox transaccional, workers idempotentes, reintentos controlados y mapeo versionado por proveedor.
 - Para programas on-premise o cerrados, priorizar paquetes CSV/XLSX/PDF auditables y confirmados por asesoria.
 - Facturacion fiscal, VERI*FACTU, factura electronica B2B y SII siguen siendo ambitos separados. No se debe delegar emision fiscal en un conector externo sin decision expresa de arquitectura y revision legal.
@@ -89,6 +90,8 @@ La vista previa de lotes de vencimientos mapea columnas habituales como `nif`, `
 La vista previa de lotes de movimientos bancarios mapea columnas habituales como `bank_account_id`, `iban`, `fecha`, `fecha_valor`, `concepto`, `referencia`, `tercero`, `importe` y `tipo`. El signo del importe permite inferir entrada o salida si no viene una columna de tipo. Exige cuenta bancaria activa, fecha valida, descripcion, direccion `inflow/outflow` y un importe positivo tras normalizar el signo.
 
 La vista previa de lotes de diario mapea columnas habituales como `entry_ref`, `asiento`, `fecha`, `concepto`, `cuenta`, `codigo_cuenta`, `debe`, `haber`, `tipo` e `importe`. Cada `entry_ref` agrupa las lineas de un asiento; la previsualizacion exige cuentas existentes y operativas en el ejercicio destino, al menos dos lineas y totales Debe/Haber cuadrados.
+
+La pantalla de importacion permite cargar ejemplos CSV para `parties`, `accounts`, `maturities`, `bank_transactions`, `journal_entries` y `generic`. Estos ejemplos solo rellenan el formulario local; el usuario debe revisarlos y sustituirlos antes de preparar staging.
 
 La aplicacion de lotes de terceros exige estado `approved`; antes de insertar vuelve a ejecutar la misma previsualizacion dentro de la transaccion. Si hay errores o conflictos, responde 409 y no escribe datos maestros. Si el lote ya esta `applied`, la llamada es idempotente y devuelve los terceros ya localizados por origen externo.
 

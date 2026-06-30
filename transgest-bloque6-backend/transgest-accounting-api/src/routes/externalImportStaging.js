@@ -1,4 +1,5 @@
 require("../resolveWorkspaceModules");
+const crypto = require("crypto");
 const express = require("express");
 const config = require("../services/config");
 const db = require("../services/db");
@@ -10,15 +11,19 @@ const {
   normalizeExternalImportApplyInput,
   mapAccountStagingRow,
   mapBankTransactionStagingRow,
+  mapJournalEntryStagingRow,
   mapMaturityStagingRow,
   mapPartyStagingRow,
   nextBatchStatus,
 } = require("../domain/externalImportStaging");
+const { journalDraftRequestHash } = require("../domain/journalEntries");
 const { hasPermission } = require("../domain/rbac");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
 const router = express.Router();
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const MONEY_SCALE = 6;
+const MONEY_FACTOR = 10n ** BigInt(MONEY_SCALE);
 
 function q(name) {
   return `"${config.schema}"."${String(name).replace(/"/g, '""')}"`;
@@ -26,6 +31,27 @@ function q(name) {
 
 function selectedContext(req) {
   return req.accountingUser.contexts.find(c => c.company_id === req.accountingUser.selected_company_id);
+}
+
+function sha256(value) {
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+
+function moneyToUnits(value) {
+  const raw = String(value ?? "").trim().replace(",", ".");
+  if (!/^\d{1,12}(\.\d{1,6})?$/.test(raw)) return null;
+  const [whole, fraction = ""] = raw.split(".");
+  return (BigInt(whole) * MONEY_FACTOR) + BigInt(fraction.padEnd(MONEY_SCALE, "0"));
+}
+
+function unitsToMoney(units) {
+  const whole = units / MONEY_FACTOR;
+  const fraction = String(units % MONEY_FACTOR).padStart(MONEY_SCALE, "0");
+  return `${whole}.${fraction}`;
+}
+
+function journalImportIdempotencyKey(batch, entryRef) {
+  return `external-import:${batch.id}:${sha256(entryRef).slice(0, 24)}`;
 }
 
 async function assertFiscalYear(client, selected, fiscalYearId) {
@@ -334,11 +360,151 @@ async function buildBankTransactionImportPreview(client, selected, batch) {
   };
 }
 
+async function buildJournalEntryImportPreview(client, selected, batch, fiscalYearId) {
+  const fiscalYear = await assertFiscalYear(client, selected, fiscalYearId);
+  const rowsResult = await client.query(
+    `SELECT id, row_number, row_hash, status, raw_payload, normalized_payload, errors, warnings
+       FROM ${q("external_import_rows")}
+      WHERE batch_id=$1 AND company_id=$2
+      ORDER BY row_number`,
+    [batch.id, selected.company_id]
+  );
+  const mappedRows = rowsResult.rows.map(row => ({ row, mapped: mapJournalEntryStagingRow(row) }));
+  const accountIds = mappedRows
+    .map(item => item.mapped.mapped.account_id)
+    .filter(value => UUID_RE.test(String(value || "")));
+  const accountCodes = mappedRows.map(item => item.mapped.mapped.account_code).filter(Boolean);
+  const accounts = await client.query(
+    `SELECT id, code, name, is_active, is_postable
+       FROM ${q("accounts")}
+      WHERE company_id=$1 AND fiscal_year_id=$2
+        AND (
+          id=ANY($3::uuid[])
+          OR (cardinality($4::text[]) > 0 AND code=ANY($4::text[]))
+        )`,
+    [selected.company_id, fiscalYear.id, accountIds, accountCodes]
+  );
+  const byId = new Map(accounts.rows.map(row => [row.id, row]));
+  const byCode = new Map(accounts.rows.map(row => [row.code, row]));
+
+  const groups = new Map();
+  for (const { row, mapped } of mappedRows) {
+    const entryRef = mapped.mapped.entry_ref || `fila-${row.row_number}`;
+    if (!groups.has(entryRef)) {
+      groups.set(entryRef, {
+        entry_ref: entryRef,
+        row_number: row.row_number,
+        row_hashes: [],
+        lines: [],
+        errors: [],
+        warnings: [],
+      });
+    }
+    const group = groups.get(entryRef);
+    const resolvedAccount = mapped.mapped.account_id
+      ? byId.get(mapped.mapped.account_id) || null
+      : byCode.get(mapped.mapped.account_code) || null;
+    const errors = [...(row.errors || []), ...mapped.errors];
+    if (!resolvedAccount && !errors.some(error => error.code === "missing_account_reference" || error.code === "invalid_account_id" || error.code === "invalid_account_code")) {
+      errors.push({ code: "account_not_found", message: "Cuenta contable no encontrada para el ejercicio seleccionado" });
+    }
+    if (resolvedAccount && (!resolvedAccount.is_active || !resolvedAccount.is_postable)) {
+      errors.push({ code: "account_not_postable", message: `La cuenta ${resolvedAccount.code} no esta activa o no admite movimientos` });
+    }
+    const lineAmountUnits = moneyToUnits(mapped.mapped.amount);
+    group.row_hashes.push(row.row_hash);
+    group.errors.push(...errors.map(error => ({ ...error, row_number: row.row_number })));
+    group.warnings.push(...[...(row.warnings || []), ...mapped.warnings].map(warning => ({ ...warning, row_number: row.row_number })));
+    if (group.entry_date && mapped.mapped.entry_date && group.entry_date !== mapped.mapped.entry_date) {
+      group.errors.push({ code: "inconsistent_entry_date", message: "Las lineas del mismo asiento tienen fechas distintas", row_number: row.row_number });
+    }
+    if (group.description && mapped.mapped.description && group.description !== mapped.mapped.description) {
+      group.warnings.push({ code: "inconsistent_description", message: "Las lineas del mismo asiento tienen conceptos distintos; se usara el primero", row_number: row.row_number });
+    }
+    group.lines.push({
+      row_id: row.id,
+      row_number: row.row_number,
+      row_hash: row.row_hash,
+      account_id: resolvedAccount?.id || mapped.mapped.account_id || null,
+      account_code: resolvedAccount?.code || mapped.mapped.account_code || null,
+      account_name: resolvedAccount?.name || null,
+      side: mapped.mapped.side,
+      amount: mapped.mapped.amount,
+      amount_units: lineAmountUnits,
+      description: mapped.mapped.line_description || mapped.mapped.description || null,
+      entry_date: mapped.mapped.entry_date,
+      entry_description: mapped.mapped.description,
+    });
+    group.entry_date = group.entry_date || mapped.mapped.entry_date;
+    group.description = group.description || mapped.mapped.description;
+  }
+
+  const idempotencyKeys = [...groups.values()].map(group => journalImportIdempotencyKey(batch, group.entry_ref));
+  const existing = idempotencyKeys.length ? await client.query(
+    `SELECT id, idempotency_key, description, status
+       FROM ${q("journal_entries")}
+      WHERE company_id=$1 AND idempotency_key=ANY($2::text[])`,
+    [selected.company_id, idempotencyKeys]
+  ) : { rows: [] };
+  const byIdempotency = new Map(existing.rows.map(row => [row.idempotency_key, row]));
+
+  const previewRows = [...groups.values()].map(group => {
+    let debitUnits = 0n;
+    let creditUnits = 0n;
+    for (const line of group.lines) {
+      if (line.amount_units === null) continue;
+      if (line.side === "debit") debitUnits += line.amount_units;
+      if (line.side === "credit") creditUnits += line.amount_units;
+    }
+    if (group.lines.length < 2) group.errors.push({ code: "journal_entry_too_short", message: "El asiento necesita al menos dos lineas", row_number: group.row_number });
+    if (debitUnits !== creditUnits) group.errors.push({ code: "journal_entry_unbalanced", message: "El asiento no cuadra Debe/Haber", row_number: group.row_number });
+    const idempotencyKey = journalImportIdempotencyKey(batch, group.entry_ref);
+    const existingEntry = byIdempotency.get(idempotencyKey) || null;
+    const conflicts = existingEntry ? [{ code: "journal_entry_import_exists", journal_entry: existingEntry }] : [];
+    const action = group.errors.length ? "error" : conflicts.length ? "conflict" : "create";
+    return {
+      row_id: group.lines[0]?.row_id || null,
+      row_number: group.row_number,
+      row_hash: sha256(group.row_hashes.join(":")),
+      action,
+      mapped: {
+        fiscal_year_id: fiscalYear.id,
+        year_label: fiscalYear.year_label,
+        entry_ref: group.entry_ref,
+        entry_date: group.entry_date,
+        description: group.description,
+        idempotency_key: idempotencyKey,
+        line_count: group.lines.length,
+        total_debit: unitsToMoney(debitUnits),
+        total_credit: unitsToMoney(creditUnits),
+      },
+      lines: group.lines.map(({ amount_units, ...line }) => line),
+      errors: group.errors,
+      warnings: group.warnings,
+      conflicts,
+    };
+  });
+
+  return {
+    batch,
+    fiscal_year: fiscalYear,
+    supported: true,
+    summary: {
+      rows: previewRows.length,
+      create: previewRows.filter(row => row.action === "create").length,
+      conflict: previewRows.filter(row => row.action === "conflict").length,
+      error: previewRows.filter(row => row.action === "error").length,
+    },
+    rows: previewRows,
+  };
+}
+
 function permissionForImportType(importType) {
   if (importType === "parties") return "parties.write";
   if (importType === "accounts") return "accounts.write";
   if (importType === "maturities") return "maturities.write";
   if (importType === "bank_transactions") return "banks.write";
+  if (importType === "journal_entries") return "journal.write";
   return null;
 }
 
@@ -435,6 +601,7 @@ router.get("/external-import-batches/:id/preview", requirePermission("external_i
       if (batch.import_type === "accounts") return buildAccountImportPreview(client, selected, batch, req.query.fiscal_year_id);
       if (batch.import_type === "maturities") return buildMaturityImportPreview(client, selected, batch);
       if (batch.import_type === "bank_transactions") return buildBankTransactionImportPreview(client, selected, batch);
+      if (batch.import_type === "journal_entries") return buildJournalEntryImportPreview(client, selected, batch, req.query.fiscal_year_id);
       return {
         batch,
         supported: false,
@@ -606,7 +773,9 @@ router.post(
             ? await buildMaturityImportPreview(client, selected, batch)
             : batch.import_type === "bank_transactions"
               ? await buildBankTransactionImportPreview(client, selected, batch)
-              : await buildPartyImportPreview(client, selected, batch);
+              : batch.import_type === "journal_entries"
+                ? await buildJournalEntryImportPreview(client, selected, batch, req.body?.fiscal_year_id)
+                : await buildPartyImportPreview(client, selected, batch);
 
         if (batch.status === "applied") {
           const sourceIds = preview.rows.map(row => row.row_hash);
@@ -634,13 +803,21 @@ router.post(
                     ORDER BY transaction_date DESC, description`,
                   [selected.company_id, batch.provider_id, sourceIds]
                 ) : { rows: [] })
-                : (sourceIds.length ? await client.query(
-                  `SELECT id, source_party_id, party_type, legal_name, tax_id
-                     FROM ${q("accounting_parties")}
-                    WHERE company_id=$1 AND source_system=$2 AND source_party_id=ANY($3::text[])
-                    ORDER BY legal_name`,
-                  [selected.company_id, batch.provider_id, sourceIds]
-                ) : { rows: [] });
+                : batch.import_type === "journal_entries"
+                  ? (preview.rows.length ? await client.query(
+                    `SELECT id, idempotency_key, entry_date, description, status
+                       FROM ${q("journal_entries")}
+                      WHERE company_id=$1 AND idempotency_key=ANY($2::text[])
+                      ORDER BY entry_date, description`,
+                    [selected.company_id, preview.rows.map(row => row.mapped.idempotency_key)]
+                  ) : { rows: [] })
+                  : (sourceIds.length ? await client.query(
+                    `SELECT id, source_party_id, party_type, legal_name, tax_id
+                       FROM ${q("accounting_parties")}
+                      WHERE company_id=$1 AND source_system=$2 AND source_party_id=ANY($3::text[])
+                      ORDER BY legal_name`,
+                    [selected.company_id, batch.provider_id, sourceIds]
+                  ) : { rows: [] });
           return {
             batch,
             preview,
@@ -649,6 +826,7 @@ router.post(
             accounts: batch.import_type === "accounts" ? existing.rows : [],
             maturities: batch.import_type === "maturities" ? existing.rows : [],
             bank_transactions: batch.import_type === "bank_transactions" ? existing.rows : [],
+            journal_entries: batch.import_type === "journal_entries" ? existing.rows : [],
             repeated: true,
             summary: { applied: existing.rows.length, skipped: Math.max(0, preview.rows.length - existing.rows.length) },
           };
@@ -675,7 +853,150 @@ router.post(
         const createdAccounts = [];
         const createdMaturities = [];
         const createdBankTransactions = [];
+        const createdJournalEntries = [];
         for (const row of preview.rows.filter(item => item.action === "create")) {
+          if (batch.import_type === "journal_entries") {
+            const period = await client.query(
+              `SELECT p.*, fy.status AS fiscal_year_status
+                 FROM ${q("accounting_periods")} p
+                 JOIN ${q("fiscal_years")} fy ON fy.id=p.fiscal_year_id
+                WHERE p.company_id=$1 AND p.fiscal_year_id=$2
+                  AND $3::date BETWEEN p.start_date AND p.end_date
+                FOR UPDATE OF p, fy`,
+              [selected.company_id, preview.fiscal_year.id, row.mapped.entry_date]
+            );
+            if (!period.rows.length) {
+              const error = new Error("No existe un periodo para la fecha y ejercicio seleccionados");
+              error.status = 409;
+              throw error;
+            }
+            if (period.rows[0].fiscal_year_status !== "open") {
+              const error = new Error("El ejercicio no esta abierto");
+              error.status = 409;
+              throw error;
+            }
+            if (period.rows[0].status !== "open") {
+              const error = new Error(`El periodo ${period.rows[0].name} no esta abierto`);
+              error.status = 409;
+              throw error;
+            }
+            const lines = row.lines.map((line, index) => ({
+              line_number: index + 1,
+              account_id: line.account_id,
+              side: line.side,
+              amount: line.amount,
+              description: line.description || row.mapped.description,
+              row_hash: line.row_hash,
+              row_number: line.row_number,
+            }));
+            const requestHash = journalDraftRequestHash({
+              fiscal_year_id: preview.fiscal_year.id,
+              entry_date: row.mapped.entry_date,
+              description: row.mapped.description,
+              lines,
+            });
+            const inserted = await client.query(
+              `INSERT INTO ${q("journal_entries")}
+                 (tenant_id, company_id, fiscal_year_id, period_id, entry_date, description,
+                  status, entry_type, source_system, source_type, source_id, idempotency_key,
+                  request_hash, trace_id, request_id, created_by)
+               VALUES ($1,$2,$3,$4,$5,$6,'draft','manual',$7,'external_import',$8,$9,$10,$11,$12,$13)
+               RETURNING *`,
+              [
+                selected.tenant_id,
+                selected.company_id,
+                preview.fiscal_year.id,
+                period.rows[0].id,
+                row.mapped.entry_date,
+                row.mapped.description,
+                batch.provider_id,
+                row.mapped.entry_ref,
+                row.mapped.idempotency_key,
+                requestHash,
+                req.id || null,
+                req.id || null,
+                req.accountingUser.id,
+              ]
+            );
+            const entry = inserted.rows[0];
+            const createdLines = [];
+            for (const line of lines) {
+              const createdLine = await client.query(
+                `INSERT INTO ${q("journal_lines")}
+                   (tenant_id, company_id, journal_entry_id, line_number, account_id,
+                    debit_amount, credit_amount, currency, description)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,'EUR',$8)
+                 RETURNING id, line_number`,
+                [
+                  selected.tenant_id,
+                  selected.company_id,
+                  entry.id,
+                  line.line_number,
+                  line.account_id,
+                  line.side === "debit" ? line.amount : "0",
+                  line.side === "credit" ? line.amount : "0",
+                  line.description,
+                ]
+              );
+              const journalLine = createdLine.rows[0];
+              createdLines.push(journalLine);
+              await client.query(
+                `INSERT INTO ${q("source_links")}
+                   (tenant_id, company_id, journal_entry_id, journal_line_id, source_system,
+                    source_type, source_id, source_line_id, payload_hash)
+                 VALUES ($1,$2,$3,$4,$5,'external_import_journal_entry',$6,$7,$8)`,
+                [
+                  selected.tenant_id,
+                  selected.company_id,
+                  entry.id,
+                  journalLine.id,
+                  batch.provider_id,
+                  row.mapped.entry_ref,
+                  line.row_hash,
+                  line.row_hash,
+                ]
+              );
+            }
+            createdJournalEntries.push({ ...entry, line_count: createdLines.length });
+            await client.query(
+              `INSERT INTO ${q("audit_log")}
+                 (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+               VALUES ($1,$2,'user',$3,'journal_entry.draft_created_from_external_import','journal_entry',$4,$5,$6::jsonb)`,
+              [
+                selected.tenant_id,
+                selected.company_id,
+                req.accountingUser.id,
+                entry.id,
+                req.id || null,
+                JSON.stringify({
+                  import_batch_id: batch.id,
+                  entry_ref: row.mapped.entry_ref,
+                  fiscal_year_id: entry.fiscal_year_id,
+                  period_id: entry.period_id,
+                  row_hash: row.row_hash,
+                  provider_id: batch.provider_id,
+                  line_count: createdLines.length,
+                  reason: input.reason,
+                }),
+              ]
+            );
+            await enqueueOutboxEvent(client, {
+              tenant_id: selected.tenant_id,
+              company_id: selected.company_id,
+              event_type: "AccountingJournalEntryDraftCreated",
+              aggregate_type: "journal_entry",
+              aggregate_id: entry.id,
+              payload: {
+                journal_entry_id: entry.id,
+                fiscal_year_id: entry.fiscal_year_id,
+                period_id: entry.period_id,
+                entry_date: String(entry.entry_date).slice(0, 10),
+                line_count: createdLines.length,
+              },
+            });
+            continue;
+          }
+
           if (batch.import_type === "bank_transactions") {
             const created = await client.query(
               `INSERT INTO ${q("bank_transactions")}
@@ -938,7 +1259,7 @@ router.post(
                   updated_at=NOW()
             WHERE id=$5
             RETURNING *`,
-          [req.accountingUser.id, createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length, 0, input.reason, batch.id]
+          [req.accountingUser.id, createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length + createdJournalEntries.length, 0, input.reason, batch.id]
         );
         const appliedBatch = updated.rows[0];
 
@@ -955,7 +1276,7 @@ router.post(
             JSON.stringify({
               import_type: appliedBatch.import_type,
               provider_id: appliedBatch.provider_id,
-              applied_count: createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length,
+              applied_count: createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length + createdJournalEntries.length,
               skipped_count: 0,
               reason: input.reason,
             }),
@@ -970,7 +1291,7 @@ router.post(
           payload: {
             import_batch_id: appliedBatch.id,
             import_type: appliedBatch.import_type,
-            applied_count: createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length,
+            applied_count: createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length + createdJournalEntries.length,
             skipped_count: 0,
           },
         });
@@ -978,13 +1299,14 @@ router.post(
         return {
           batch: appliedBatch,
           preview,
-          records: batch.import_type === "accounts" ? createdAccounts : batch.import_type === "maturities" ? createdMaturities : batch.import_type === "bank_transactions" ? createdBankTransactions : createdParties,
+          records: batch.import_type === "accounts" ? createdAccounts : batch.import_type === "maturities" ? createdMaturities : batch.import_type === "bank_transactions" ? createdBankTransactions : batch.import_type === "journal_entries" ? createdJournalEntries : createdParties,
           parties: createdParties,
           accounts: createdAccounts,
           maturities: createdMaturities,
           bank_transactions: createdBankTransactions,
+          journal_entries: createdJournalEntries,
           repeated: false,
-          summary: { applied: createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length, skipped: 0 },
+          summary: { applied: createdParties.length + createdAccounts.length + createdMaturities.length + createdBankTransactions.length + createdJournalEntries.length, skipped: 0 },
         };
       });
       res.status(result.repeated ? 200 : 201).json(result);

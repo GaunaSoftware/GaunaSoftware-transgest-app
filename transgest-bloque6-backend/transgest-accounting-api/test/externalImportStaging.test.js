@@ -8,6 +8,7 @@ const {
   nextBatchStatus,
   mapAccountStagingRow,
   mapBankTransactionStagingRow,
+  mapJournalEntryStagingRow,
   mapMaturityStagingRow,
   mapPartyStagingRow,
   parseGenericCsv,
@@ -189,4 +190,49 @@ test("mapBankTransactionStagingRow mapea movimientos bancarios y detecta errores
   assert.equal(invalid.errors.some(error => error.code === "missing_description"), true);
   assert.equal(invalid.errors.some(error => error.code === "invalid_amount"), true);
   assert.equal(invalid.errors.some(error => error.code === "unsupported_bank_transaction_direction"), true);
+});
+
+test("mapJournalEntryStagingRow mapea lineas de diario y detecta errores", () => {
+  const debit = mapJournalEntryStagingRow({
+    raw_payload: {
+      asiento: "A-2026-001",
+      fecha: "30/06/2026",
+      concepto: "Importacion asiento inicial",
+      cuenta: "43000001",
+      debe: "1.250,50",
+      concepto_linea: "Cliente",
+    },
+  });
+  assert.deepEqual(debit.mapped, {
+    entry_ref: "A-2026-001",
+    entry_date: "2026-06-30",
+    description: "Importacion asiento inicial",
+    line_description: "Cliente",
+    account_id: "",
+    account_code: "43000001",
+    side: "debit",
+    amount: "1250.50",
+  });
+  assert.equal(debit.errors.length, 0);
+
+  const credit = mapJournalEntryStagingRow({
+    raw_payload: {
+      entry_ref: "A-2026-001",
+      entry_date: "2026-06-30",
+      description: "Importacion asiento inicial",
+      account_code: "70000001",
+      side: "haber",
+      amount: "1250.50",
+    },
+  });
+  assert.equal(credit.mapped.side, "credit");
+  assert.equal(credit.mapped.amount, "1250.50");
+
+  const invalid = mapJournalEntryStagingRow({ raw_payload: { importe: "0", tipo: "otro", cuenta: "43A" } });
+  assert.equal(invalid.errors.some(error => error.code === "missing_entry_ref"), true);
+  assert.equal(invalid.errors.some(error => error.code === "invalid_entry_date"), true);
+  assert.equal(invalid.errors.some(error => error.code === "missing_description"), true);
+  assert.equal(invalid.errors.some(error => error.code === "invalid_account_code"), true);
+  assert.equal(invalid.errors.some(error => error.code === "unsupported_journal_side"), true);
+  assert.equal(invalid.errors.some(error => error.code === "invalid_amount"), true);
 });

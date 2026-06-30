@@ -310,6 +310,22 @@ function parseBankTransactionAmountLike(value) {
   return { amount: absolute, sign };
 }
 
+function parseSignedAmountLike(value) {
+  const parsed = parseBankTransactionAmountLike(value);
+  return {
+    amount: parsed.amount,
+    sign: parsed.sign,
+  };
+}
+
+function normalizeJournalSide(value, sign = 1) {
+  const raw = normalizeHeader(value);
+  if (!raw) return sign < 0 ? "credit" : "debit";
+  if (["debit", "debe", "d", "cargo"].includes(raw)) return "debit";
+  if (["credit", "haber", "h", "abono"].includes(raw)) return "credit";
+  return raw;
+}
+
 function mapPartyStagingRow(row) {
   const payload = row.normalized_payload || row.raw_payload || {};
   const partyType = normalizePartyType(firstValue(payload, ["party_type", "tipo", "tipo_tercero"]));
@@ -392,6 +408,45 @@ function mapBankTransactionStagingRow(row) {
   return { mapped, errors, warnings };
 }
 
+function mapJournalEntryStagingRow(row) {
+  const payload = row.normalized_payload || row.raw_payload || {};
+  const debit = parseSignedAmountLike(firstValue(payload, ["debit_amount", "debit", "debe"]));
+  const credit = parseSignedAmountLike(firstValue(payload, ["credit_amount", "credit", "haber"]));
+  const rawAmount = firstValue(payload, ["amount", "importe"]);
+  const amount = parseSignedAmountLike(rawAmount);
+  const hasDebit = Boolean(debit.amount) && Number(debit.amount) > 0;
+  const hasCredit = Boolean(credit.amount) && Number(credit.amount) > 0;
+  const side = hasDebit ? "debit" : hasCredit ? "credit" : normalizeJournalSide(firstValue(payload, ["side", "tipo", "sentido", "debe_haber"]), amount.sign);
+  const resolvedAmount = hasDebit ? debit.amount : hasCredit ? credit.amount : amount.amount;
+  const entryDate = normalizeDateLike(firstValue(payload, ["entry_date", "fecha", "fecha_asiento", "date"]));
+  const mapped = {
+    entry_ref: firstValue(payload, ["entry_ref", "asiento", "asiento_id", "entry_id", "numero_asiento", "numero"]),
+    entry_date: entryDate,
+    description: firstValue(payload, ["description", "descripcion", "concepto", "concepto_asiento"]),
+    line_description: firstValue(payload, ["line_description", "descripcion_linea", "concepto_linea", "detalle"]),
+    account_id: firstValue(payload, ["account_id", "cuenta_id"]),
+    account_code: firstValue(payload, ["account_code", "codigo_cuenta", "cuenta", "code"]),
+    side,
+    amount: resolvedAmount,
+  };
+  const errors = [];
+  const warnings = [];
+  if (!mapped.entry_ref) errors.push({ code: "missing_entry_ref", message: "Falta referencia de asiento" });
+  if (mapped.entry_ref.length > 180) errors.push({ code: "entry_ref_too_long", message: "La referencia de asiento no puede superar 180 caracteres" });
+  if (!isValidIsoDate(mapped.entry_date)) errors.push({ code: "invalid_entry_date", message: "Fecha de asiento invalida" });
+  if (!mapped.description) errors.push({ code: "missing_description", message: "Falta concepto del asiento" });
+  if (mapped.description.length > 500) errors.push({ code: "description_too_long", message: "El concepto del asiento no puede superar 500 caracteres" });
+  if (mapped.line_description.length > 300) errors.push({ code: "line_description_too_long", message: "El concepto de linea no puede superar 300 caracteres" });
+  if (!mapped.account_id && !mapped.account_code) errors.push({ code: "missing_account_reference", message: "Falta cuenta contable por ID o codigo" });
+  if (mapped.account_id && !UUID_RE.test(mapped.account_id)) errors.push({ code: "invalid_account_id", message: "account_id invalido" });
+  if (mapped.account_code && !/^[0-9]{1,20}$/.test(mapped.account_code)) errors.push({ code: "invalid_account_code", message: "Codigo de cuenta invalido" });
+  if (hasDebit && hasCredit) errors.push({ code: "ambiguous_journal_side", message: "La linea no puede tener Debe y Haber a la vez" });
+  if (!["debit", "credit"].includes(mapped.side)) errors.push({ code: "unsupported_journal_side", message: `Lado no soportado: ${mapped.side || "vacio"}` });
+  if (!/^\d{1,12}(\.\d{1,6})?$/.test(mapped.amount) || Number(mapped.amount) <= 0) errors.push({ code: "invalid_amount", message: "Importe invalido" });
+  if (!mapped.line_description) warnings.push({ code: "missing_line_description", message: "Sin concepto de linea; se usara el concepto del asiento" });
+  return { mapped, errors, warnings };
+}
+
 function mapAccountStagingRow(row) {
   const payload = row.normalized_payload || row.raw_payload || {};
   const accountType = normalizeAccountType(firstValue(payload, ["account_type", "tipo", "tipo_cuenta", "naturaleza"]));
@@ -417,6 +472,7 @@ module.exports = {
   ROW_STATUSES,
   mapAccountStagingRow,
   mapBankTransactionStagingRow,
+  mapJournalEntryStagingRow,
   mapMaturityStagingRow,
   mapPartyStagingRow,
   normalizeExternalImportApplyInput,

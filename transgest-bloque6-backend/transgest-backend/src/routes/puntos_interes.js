@@ -22,6 +22,16 @@ function numberOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function boolFromBody(value) {
+  if (typeof value === "boolean") return value;
+  if (value === undefined || value === null) return false;
+  return ["1", "true", "si", "sí", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function puntoGeneralFromBody(body = {}) {
+  return boolFromBody(body.punto_general ?? body.es_general ?? body.general);
+}
+
 function normalizeMetadata(metadata = {}, googleMapsUrl = null) {
   const base = metadata && typeof metadata === "object" ? { ...metadata } : {};
   if (googleMapsUrl) base.google_maps_url = String(googleMapsUrl).trim();
@@ -34,6 +44,8 @@ function withComputedFields(row) {
   return {
     ...row,
     google_maps_url: metadata.google_maps_url || "",
+    es_general: !row?.cliente_id,
+    punto_general: !row?.cliente_id,
   };
 }
 
@@ -55,14 +67,14 @@ router.get("/", async (req, res) => {
   }
   if (cliente_id) {
     params.push(cliente_id);
-    where.push(`cliente_id=$${params.length}`);
+    where.push(`(cliente_id=$${params.length} OR cliente_id IS NULL)`);
   }
 
   const { rows } = await db.query(
     `SELECT *
        FROM puntos_interes
       WHERE ${where.join(" AND ")}
-      ORDER BY nombre ASC
+      ORDER BY ${cliente_id ? `CASE WHEN cliente_id=$${params.length} THEN 0 ELSE 1 END, ` : ""}nombre ASC
       LIMIT 200`,
     params
   );
@@ -78,6 +90,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     lat, lng, tipo, ventana, contacto_nombre, contacto_telefono,
     email, notas, metadata, google_maps_url, cliente_id,
   } = req.body || {};
+  const clienteId = puntoGeneralFromBody(req.body) ? null : emptyToNull(cliente_id);
 
   if (!nombre || !direccion) {
     return res.status(400).json({ error: "Nombre y direccion son obligatorios" });
@@ -92,7 +105,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
      RETURNING *`,
     [
       empresa,
-      emptyToNull(cliente_id),
+      clienteId,
       nombre.trim(),
       emptyToNull(cif),
       direccion.trim(),
@@ -125,7 +138,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
         ELSE 2
       END
       LIMIT 1`,
-    [empresa, direccion, emptyToNull(cliente_id)]
+    [empresa, direccion, clienteId]
   );
   return res.status(200).json(withComputedFields(existing.rows[0]));
 });
@@ -139,6 +152,7 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
     lat, lng, tipo, ventana, contacto_nombre, contacto_telefono,
     email, notas, metadata, google_maps_url, cliente_id,
   } = req.body || {};
+  const clienteId = puntoGeneralFromBody(req.body) ? null : emptyToNull(cliente_id);
 
   const { rows } = await db.query(
     `UPDATE puntos_interes SET
@@ -164,7 +178,7 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
       emptyToNull(email),
       emptyToNull(notas),
       normalizeMetadata(metadata, emptyToNull(google_maps_url)),
-      emptyToNull(cliente_id),
+      clienteId,
       req.params.id,
       empresa,
     ]

@@ -281,13 +281,13 @@ function PuntoClienteSelector({ cliente, onApply }) {
     let alive = true;
     const t = setTimeout(() => {
       setLoading(true);
-      getPuntosInteres({ q })
+      getPuntosInteres({ q, ...(cliente?.id ? { cliente_id: cliente.id } : {}) })
         .then(data => { if (alive) setPuntos(Array.isArray(data) ? data : []); })
         .catch(() => { if (alive) setPuntos([]); })
         .finally(() => { if (alive) setLoading(false); });
     }, 250);
     return () => { alive = false; clearTimeout(t); };
-  }, [query]);
+  }, [cliente?.id, query]);
 
   const vinculados = puntos.filter(p => cliente?.id && String(p.cliente_id || "") === String(cliente.id));
   const ordenados = [...vinculados, ...puntos.filter(p => !vinculados.some(v => String(v.id) === String(p.id)))].slice(0, 12);
@@ -316,6 +316,9 @@ function PuntoClienteSelector({ cliente, onApply }) {
               <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{p.direccion || "-"}{p.ciudad ? ` - ${p.ciudad}` : ""}</div>
               {cliente?.id && String(p.cliente_id || "") === String(cliente.id) && (
                 <div style={{fontSize:10,color:"var(--green)",fontWeight:900,marginTop:4}}>Vinculado a este cliente</div>
+              )}
+              {!p.cliente_id && (
+                <div style={{fontSize:10,color:"var(--accent)",fontWeight:900,marginTop:4}}>Punto general</div>
               )}
               <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
                 <button type="button" onClick={()=>onApply(p, "")} style={{...S.btn,background:"rgba(59,110,245,.10)",color:"var(--accent)",border:"1px solid rgba(59,110,245,.22)",padding:"6px 10px",fontSize:11,boxShadow:"none"}}>

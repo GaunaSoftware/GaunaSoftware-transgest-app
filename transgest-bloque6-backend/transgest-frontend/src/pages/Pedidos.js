@@ -1244,6 +1244,8 @@ function savePuntoInteres(punto) {
     notas: (punto?.notas || "").trim(),
     tipo: punto?.tipo || "ambos",
     cliente_id: punto?.cliente_id || "",
+    punto_general: punto?.punto_general ?? punto?.es_general ?? !punto?.cliente_id,
+    es_general: punto?.es_general ?? punto?.punto_general ?? !punto?.cliente_id,
     google_maps_url: cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || ""),
     lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? null,
     lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? null,
@@ -1282,10 +1284,41 @@ function isCargaPoint(punto = {}) {
   return tipo === "carga" || tipo === "ambos";
 }
 
+function isDescargaPoint(punto = {}) {
+  const tipo = String(punto?.tipo || "ambos").toLowerCase();
+  return tipo === "descarga" || tipo === "ambos";
+}
+
+function isPuntoGeneral(punto = {}) {
+  return !punto?.cliente_id;
+}
+
+function isPuntoVisibleParaCliente(punto = {}, clienteId = "") {
+  if (isPuntoGeneral(punto)) return true;
+  return !!clienteId && String(punto.cliente_id) === String(clienteId);
+}
+
+function sortPuntosByClienteScope(a = {}, b = {}, clienteId = "") {
+  const scope = (p) => (!isPuntoGeneral(p) && clienteId && String(p.cliente_id) === String(clienteId) ? 0 : 1);
+  const byScope = scope(a) - scope(b);
+  if (byScope) return byScope;
+  return String(a.nombre || a.direccion || "").localeCompare(String(b.nombre || b.direccion || ""), "es");
+}
+
+function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos" } = {}) {
+  return (Array.isArray(puntos) ? puntos : [])
+    .filter(p => isPuntoVisibleParaCliente(p, clienteId))
+    .filter(p => {
+      if (tipo === "carga") return isCargaPoint(p);
+      if (tipo === "descarga") return isDescargaPoint(p);
+      return true;
+    })
+    .sort((a, b) => sortPuntosByClienteScope(a, b, clienteId));
+}
+
 function getPuntosCargaCliente(clienteId, puntos = null) {
-  if (!clienteId) return [];
   const lista = Array.isArray(puntos) ? puntos : getPuntosInteres();
-  return lista.filter(p => String(p?.cliente_id || "") === String(clienteId) && isCargaPoint(p));
+  return filterPuntosForPedido(lista, { clienteId, tipo: "carga" });
 }
 
 function applyPuntoCargaToDraft(draft = {}, punto = {}) {
@@ -1606,9 +1639,11 @@ function calcIvaPedido(form = {}, baseOverride = null) {
   };
 }
 
-function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", style, puntos: puntosProp = null }) {
+function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", style, puntos: puntosProp = null, clienteId = "", tipo = "ambos" }) {
   const [puntos, setPuntos] = useState(getPuntosInteres);
-  const puntosDisponibles = Array.isArray(puntosProp) ? puntosProp : puntos;
+  const puntosDisponibles = Array.isArray(puntosProp)
+    ? filterPuntosForPedido(puntosProp, { clienteId, tipo })
+    : filterPuntosForPedido(puntos, { clienteId, tipo });
 
   useEffect(() => {
     const refresh = () => setPuntos(getPuntosInteres());
@@ -1634,7 +1669,7 @@ function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", sty
     >
       <option value="">{placeholder}</option>
       {puntosDisponibles.map(p => (
-        <option key={p.id} value={p.id}>{p.nombre} - {p.direccion}</option>
+        <option key={p.id} value={p.id}>{p.nombre} - {p.direccion}{isPuntoGeneral(p) ? " (general)" : ""}</option>
       ))}
     </select>
   );
@@ -2623,12 +2658,16 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                     <PuntoInteresPicker
                       placeholder={puntosCargaCliente.length === 1 ? "Punto de carga cargado" : "Elegir punto de carga del cliente"}
                       puntos={puntosCargaCliente}
+                      clienteId={form.cliente_id}
+                      tipo="carga"
                       onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
                       style={{...S.sel,flex:1}}
                     />
                   ) : (
                     <PuntoInteresPicker
                       placeholder={puntosCargaLoading ? "Cargando puntos..." : "Elegir entre todos los puntos"}
+                      clienteId={form.cliente_id}
+                      tipo="carga"
                       onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
                       style={{...S.sel,flex:1}}
                     />
@@ -2813,6 +2852,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   const [form, setForm] = useState(() => ({
     id: initial?.id || "",
     cliente_id: initial?.cliente_id || "",
+    punto_general: initial?.punto_general ?? initial?.es_general ?? !initial?.cliente_id,
     nombre: initial?.nombre || initial?.cliente_nombre || "",
     cif: initial?.cif || "",
     direccion: initial?.direccion || "",
@@ -2830,6 +2870,10 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     google_maps_url: initial?.google_maps_url || initial?.metadata?.google_maps_url || "",
   }));
   const set = k => e => setForm(p => ({...p, [k]: e.target.value}));
+  const setGeneral = e => {
+    const checked = e.target.checked;
+    setForm(p => ({...p, punto_general: checked, cliente_id: checked ? "" : (initial?.cliente_id || p.cliente_id || "")}));
+  };
   const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
   const lbl = {display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4,marginTop:10};
   const modalPais = canonicalCountry(form.pais || "España") || "España";
@@ -2843,6 +2887,8 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     if (!form.direccion.trim()) { notify("Indica la direccion del punto.", "warning"); return; }
     const payload = {
       ...form,
+      cliente_id: form.punto_general ? "" : form.cliente_id,
+      punto_general: !!form.punto_general,
       pais: canonicalCountry(form.pais || "España") || "España",
       provincia: String(form.provincia || "").trim(),
     };
@@ -2869,6 +2915,25 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
           {modalRegions.map(region => <option key={region} value={region} />)}
         </datalist>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
+          <div style={{gridColumn:"1/-1",border:"1px solid var(--border2)",background:"var(--bg3)",borderRadius:9,padding:"10px 12px",marginBottom:4}}>
+            <label style={{display:"flex",gap:10,alignItems:"flex-start",fontSize:13,fontWeight:800,color:"var(--text)",cursor:(!initial?.cliente_id && !form.cliente_id)?"default":"pointer"}}>
+              <input
+                type="checkbox"
+                checked={!!form.punto_general}
+                onChange={setGeneral}
+                disabled={!initial?.cliente_id && !form.cliente_id}
+                style={{marginTop:2}}
+              />
+              <span>
+                Punto general para todos los clientes
+                <span style={{display:"block",fontSize:11,fontWeight:500,color:"var(--text5)",marginTop:2}}>
+                  {initial?.cliente_id || form.cliente_id
+                    ? "Si no lo marcas, se guarda solo para el cliente del pedido."
+                    : "Sin cliente seleccionado, el punto se guarda como general."}
+                </span>
+              </span>
+            </label>
+          </div>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre empresa / punto *</label><input style={inp} value={form.nombre} onChange={set("nombre")} autoFocus placeholder="Ej: Logistica Madrid Norte"/></div>
           <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={set("cif")} /></div>
           <div><label style={lbl}>Tipo</label><select style={inp} value={form.tipo} onChange={set("tipo")}><option value="ambos">Carga y descarga</option><option value="carga">Carga</option><option value="descarga">Descarga</option></select></div>
@@ -3197,7 +3262,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       }
     : (mainLugar ? { direccion: mainLugar, fecha: mainFecha || "", hora: mainHora || "", pais: tipo === "carga" ? (form.origen_pais || "España") : (form.destino_pais || "España"), provincia: tipo === "carga" ? (form.origen_provincia || "") : (form.destino_provincia || ""), tipo, es_principal: true, es_adicional: false } : null);
   const stopsOrdenados = effectivePrimary ? [effectivePrimary, ...paradas] : paradas;
-  const puntosFiltrados = puntosInteres.filter(p => !p.tipo || p.tipo === "ambos" || p.tipo === tipo);
+  const puntosFiltrados = filterPuntosForPedido(puntosInteres, { clienteId: form.cliente_id || "", tipo });
   const puntosListId = `puntos-${tipo}-${pedidoId || "nuevo"}`;
   const countryListId = `paises-${tipo}-${pedidoId || "nuevo"}`;
   const paisesActivos = getEnabledEuropeCountries();
@@ -3273,6 +3338,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       nombre: newStop.cliente_nombre || texto,
       direccion: newStop.direccion || texto,
       tipo,
+      cliente_id: form.cliente_id || "",
     });
   };
 
@@ -6512,6 +6578,8 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                       <PuntoInteresPicker
                         placeholder={puntosCargaClienteModal.length === 1 ? "Punto de carga del cliente" : "Elegir punto de carga del cliente"}
                         puntos={puntosCargaClienteModal}
+                        clienteId={form.cliente_id}
+                        tipo="carga"
                         onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
                         style={{...S.sel,width:"100%"}}
                       />
@@ -6525,6 +6593,8 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                 <div style={{display:"flex",gap:6,marginTop:6}}>
                   <PuntoInteresPicker
                     placeholder="Usar punto como origen"
+                    clienteId={form.cliente_id}
+                    tipo="carga"
                     onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
                     style={{...S.sel,flex:1}}
                   />
@@ -6544,12 +6614,14 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                 <div style={{display:"flex",gap:6,marginTop:6}}>
                   <PuntoInteresPicker
                     placeholder="Usar punto como destino"
+                    clienteId={form.cliente_id}
+                    tipo="descarga"
                     onPick={p=>setForm(x=>{
                       return applyPuntoDescargaToDraft(x, p);
                     })}
                     style={{...S.sel,flex:1}}
                   />
-                  <button type="button" onClick={()=>setPoiDraft({nombre:form.destino,direccion:"",tipo:"descarga",ventana:form.ventana_descarga || "",pais:"España"})} disabled={!form.destino?.trim()}
+                  <button type="button" onClick={()=>setPoiDraft({nombre:form.destino,direccion:"",tipo:"descarga",cliente_id:form.cliente_id || "",ventana:form.ventana_descarga || "",pais:"España"})} disabled={!form.destino?.trim()}
                     style={{...S.btn,background:"transparent",color:form.destino?.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
                     Guardar punto
                   </button>

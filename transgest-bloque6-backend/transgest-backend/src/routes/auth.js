@@ -66,6 +66,7 @@ function isDemoEmpresa(row = {}) {
     dominio === "demo" ||
     dominio.startsWith("demo-") ||
     email === "gerente@demo.com" ||
+    email === "gerente@empresa.com" ||
     nombre.includes("demo")
   );
 }

@@ -965,6 +965,7 @@ function isDemoLikeUser(user = {}) {
     v === "true" ||
     v === "demo" ||
     v === "gerente@demo.com" ||
+    v === "gerente@empresa.com" ||
     v.startsWith("demo-") ||
     v.includes("transgest demo") ||
     v.includes("cuenta demo")

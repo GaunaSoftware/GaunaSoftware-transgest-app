@@ -81,6 +81,8 @@ Los informes contables requieren `fiscal_year_id` valido. Las descargas usan per
 
 El staging de entrada permite preparar CSV externos sin escribir en tablas contables operativas. Cada lote queda en `external_import_batches` con proveedor, tipo, formato, hash, estado y conteos. Cada fila queda en `external_import_rows` con `raw_payload`, `normalized_payload`, errores, avisos y hash de fila.
 
+El listado operativo de lotes muestra tambien el usuario que preparo el lote y, cuando aplica, quien lo reviso o aplico con su marca temporal. Esta trazabilidad es informacion operativa de auditoria interna; no declara por si sola cumplimiento normativo ni compatibilidad productiva con ningun programa externo.
+
 La vista previa de lotes de terceros clasifica cada fila como `create`, `conflict` o `error`. Los conflictos iniciales se comprueban contra `accounting_parties` por `source_system + source_party_id` y por `tax_id`.
 
 La vista previa de lotes de cuentas exige `fiscal_year_id`. Mapea columnas habituales como `codigo`, `cuenta`, `nombre`, `tipo`, `postable` o `movimiento`, normaliza tipos contables basicos y detecta conflictos por codigo dentro del ejercicio.

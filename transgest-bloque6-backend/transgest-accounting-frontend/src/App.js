@@ -4082,6 +4082,11 @@ export default function App() {
                           <div>
                             <strong>{batch.original_filename || batch.provider_id}</strong>
                             <small>{batch.provider_id} | {externalImportTypeLabels[batch.import_type] || batch.import_type} | {formatDateTime(batch.created_at)}</small>
+                            <div className="external-import-meta">
+                              <span>Preparado: {batch.staged_by_name || "Usuario"}</span>
+                              {batch.reviewed_at && <span>Revisado: {batch.reviewed_by_name || "Usuario"} | {formatDateTime(batch.reviewed_at)}</span>}
+                              {batch.applied_at && <span>Aplicado: {batch.applied_by_name || "Usuario"} | {formatDateTime(batch.applied_at)}</span>}
+                            </div>
                           </div>
                           <div className="external-import-counts">
                             <span>{batch.row_count} filas</span>

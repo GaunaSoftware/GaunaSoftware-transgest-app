@@ -159,6 +159,8 @@ dd { margin: 0; word-break: break-word; }
 .external-import-row:first-child { border-top: 0; }
 .external-import-row > div:first-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .external-import-row small, .external-import-counts span { color: var(--muted); overflow-wrap: anywhere; }
+.external-import-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.external-import-meta span { min-width: 0; overflow-wrap: anywhere; }
 .external-import-counts { display: flex; gap: 8px; flex-wrap: wrap; }
 .external-import-actions { display: flex; gap: 7px; justify-content: flex-end; flex-wrap: wrap; }
 .external-import-actions button { height: 30px; border: 0; border-radius: 6px; padding: 0 10px; background: #7c3aed; color: #fff; font-weight: 800; cursor: pointer; }

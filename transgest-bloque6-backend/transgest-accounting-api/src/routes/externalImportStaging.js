@@ -516,29 +516,36 @@ router.get("/external-import-batches", requirePermission("external_imports.read"
     if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
     const filters = normalizeExternalImportQuery(req.query);
     const params = [selected.company_id];
-    const where = ["company_id=$1"];
+    const where = ["batches.company_id=$1"];
     if (filters.status) {
       params.push(filters.status);
-      where.push(`status=$${params.length}`);
+      where.push(`batches.status=$${params.length}`);
     }
     if (filters.provider_id) {
       params.push(filters.provider_id);
-      where.push(`provider_id=$${params.length}`);
+      where.push(`batches.provider_id=$${params.length}`);
     }
     if (filters.import_type) {
       params.push(filters.import_type);
-      where.push(`import_type=$${params.length}`);
+      where.push(`batches.import_type=$${params.length}`);
     }
     params.push(filters.limit);
     const { rows } = await db.transaction(client => client.query(
-      `SELECT id, tenant_id, company_id, provider_id, import_type, source_format,
-              original_filename, status, row_count, valid_count, error_count,
-              warning_count, notes, staged_by, reviewed_by, reviewed_at,
-              review_reason, applied_by, applied_at, applied_count, skipped_count,
-              created_at, updated_at
-         FROM ${q("external_import_batches")}
+      `SELECT batches.id, batches.tenant_id, batches.company_id, batches.provider_id,
+              batches.import_type, batches.source_format, batches.original_filename,
+              batches.status, batches.row_count, batches.valid_count, batches.error_count,
+              batches.warning_count, batches.notes, batches.staged_by, batches.reviewed_by,
+              batches.reviewed_at, batches.review_reason, batches.applied_by, batches.applied_at,
+              batches.applied_count, batches.skipped_count, batches.created_at, batches.updated_at,
+              staged_user.display_name AS staged_by_name,
+              reviewed_user.display_name AS reviewed_by_name,
+              applied_user.display_name AS applied_by_name
+         FROM ${q("external_import_batches")} batches
+         LEFT JOIN ${q("accounting_users")} staged_user ON staged_user.id=batches.staged_by
+         LEFT JOIN ${q("accounting_users")} reviewed_user ON reviewed_user.id=batches.reviewed_by
+         LEFT JOIN ${q("accounting_users")} applied_user ON applied_user.id=batches.applied_by
         WHERE ${where.join(" AND ")}
-        ORDER BY created_at DESC
+        ORDER BY batches.created_at DESC
         LIMIT $${params.length}`,
       params
     ));

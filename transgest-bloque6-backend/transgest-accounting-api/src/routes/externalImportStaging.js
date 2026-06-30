@@ -16,6 +16,7 @@ const {
   mapPartyStagingRow,
   nextBatchStatus,
 } = require("../domain/externalImportStaging");
+const { buildCsv } = require("../domain/csv");
 const { journalDraftRequestHash } = require("../domain/journalEntries");
 const { hasPermission } = require("../domain/rbac");
 const { enqueueOutboxEvent } = require("../services/outbox");
@@ -27,6 +28,16 @@ const MONEY_FACTOR = 10n ** BigInt(MONEY_SCALE);
 
 function q(name) {
   return `"${config.schema}"."${String(name).replace(/"/g, '""')}"`;
+}
+
+function sendCsv(res, filename, csv) {
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(csv);
+}
+
+function compactFilters(filters) {
+  return Object.fromEntries(Object.entries(filters).filter(([, value]) => value !== null && value !== undefined && value !== ""));
 }
 
 function selectedContext(req) {
@@ -524,6 +535,44 @@ function permissionForImportType(importType) {
   return null;
 }
 
+async function loadExternalImportBatchRows(client, companyId, filters) {
+  const params = [companyId];
+  const where = ["batches.company_id=$1"];
+  if (filters.status) {
+    params.push(filters.status);
+    where.push(`batches.status=$${params.length}`);
+  }
+  if (filters.provider_id) {
+    params.push(filters.provider_id);
+    where.push(`batches.provider_id=$${params.length}`);
+  }
+  if (filters.import_type) {
+    params.push(filters.import_type);
+    where.push(`batches.import_type=$${params.length}`);
+  }
+  params.push(filters.limit);
+  const { rows } = await client.query(
+    `SELECT batches.id, batches.tenant_id, batches.company_id, batches.provider_id,
+            batches.import_type, batches.source_format, batches.original_filename,
+            batches.status, batches.row_count, batches.valid_count, batches.error_count,
+            batches.warning_count, batches.notes, batches.staged_by, batches.reviewed_by,
+            batches.reviewed_at, batches.review_reason, batches.applied_by, batches.applied_at,
+            batches.applied_count, batches.skipped_count, batches.created_at, batches.updated_at,
+            staged_user.display_name AS staged_by_name,
+            reviewed_user.display_name AS reviewed_by_name,
+            applied_user.display_name AS applied_by_name
+       FROM ${q("external_import_batches")} batches
+       LEFT JOIN ${q("accounting_users")} staged_user ON staged_user.id=batches.staged_by
+       LEFT JOIN ${q("accounting_users")} reviewed_user ON reviewed_user.id=batches.reviewed_by
+       LEFT JOIN ${q("accounting_users")} applied_user ON applied_user.id=batches.applied_by
+      WHERE ${where.join(" AND ")}
+      ORDER BY batches.created_at DESC
+      LIMIT $${params.length}`,
+    params
+  );
+  return rows;
+}
+
 router.use(authenticate);
 
 router.get("/external-import-batches", requirePermission("external_imports.read"), async (req, res, next) => {
@@ -531,40 +580,46 @@ router.get("/external-import-batches", requirePermission("external_imports.read"
     const selected = selectedContext(req);
     if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
     const filters = normalizeExternalImportQuery(req.query);
-    const params = [selected.company_id];
-    const where = ["batches.company_id=$1"];
-    if (filters.status) {
-      params.push(filters.status);
-      where.push(`batches.status=$${params.length}`);
+    if (filters.format === "csv") {
+      const rows = await db.transaction(async client => {
+        const batchRows = await loadExternalImportBatchRows(client, selected.company_id, filters);
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, request_id, detail)
+           VALUES ($1,$2,'user',$3,'external_import_batch.csv_exported','external_import_batch',$4,$5::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            req.id || null,
+            JSON.stringify({ filters: compactFilters(filters), row_count: batchRows.length }),
+          ]
+        );
+        return batchRows;
+      });
+      const csv = buildCsv([
+        { key: "provider_id", label: "Programa" },
+        { key: "import_type", label: "Tipo" },
+        { key: "original_filename", label: "Archivo" },
+        { key: "status", label: "Estado" },
+        { key: "row_count", label: "Filas" },
+        { key: "valid_count", label: "Validas" },
+        { key: "error_count", label: "Errores" },
+        { key: "warning_count", label: "Avisos" },
+        { key: "staged_by_name", label: "Preparado por" },
+        { key: "created_at", label: "Preparado en" },
+        { key: "reviewed_by_name", label: "Revisado por" },
+        { key: "reviewed_at", label: "Revisado en" },
+        { key: "review_reason", label: "Motivo revision" },
+        { key: "applied_by_name", label: "Aplicado por" },
+        { key: "applied_at", label: "Aplicado en" },
+        { key: "applied_count", label: "Aplicadas" },
+        { key: "skipped_count", label: "Omitidas" },
+        { key: "notes", label: "Notas" },
+      ], rows);
+      return sendCsv(res, "lotes-importacion-contable.csv", csv);
     }
-    if (filters.provider_id) {
-      params.push(filters.provider_id);
-      where.push(`batches.provider_id=$${params.length}`);
-    }
-    if (filters.import_type) {
-      params.push(filters.import_type);
-      where.push(`batches.import_type=$${params.length}`);
-    }
-    params.push(filters.limit);
-    const { rows } = await db.transaction(client => client.query(
-      `SELECT batches.id, batches.tenant_id, batches.company_id, batches.provider_id,
-              batches.import_type, batches.source_format, batches.original_filename,
-              batches.status, batches.row_count, batches.valid_count, batches.error_count,
-              batches.warning_count, batches.notes, batches.staged_by, batches.reviewed_by,
-              batches.reviewed_at, batches.review_reason, batches.applied_by, batches.applied_at,
-              batches.applied_count, batches.skipped_count, batches.created_at, batches.updated_at,
-              staged_user.display_name AS staged_by_name,
-              reviewed_user.display_name AS reviewed_by_name,
-              applied_user.display_name AS applied_by_name
-         FROM ${q("external_import_batches")} batches
-         LEFT JOIN ${q("accounting_users")} staged_user ON staged_user.id=batches.staged_by
-         LEFT JOIN ${q("accounting_users")} reviewed_user ON reviewed_user.id=batches.reviewed_by
-         LEFT JOIN ${q("accounting_users")} applied_user ON applied_user.id=batches.applied_by
-        WHERE ${where.join(" AND ")}
-        ORDER BY batches.created_at DESC
-        LIMIT $${params.length}`,
-      params
-    ));
+    const rows = await db.transaction(client => loadExternalImportBatchRows(client, selected.company_id, filters));
     res.json({ data: rows, filters });
   } catch (error) {
     next(error);

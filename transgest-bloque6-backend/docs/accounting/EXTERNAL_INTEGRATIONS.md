@@ -83,6 +83,8 @@ El staging de entrada permite preparar CSV externos sin escribir en tablas conta
 
 El listado operativo de lotes muestra tambien el usuario que preparo el lote y, cuando aplica, quien lo reviso o aplico con su marca temporal. Esta trazabilidad es informacion operativa de auditoria interna; no declara por si sola cumplimiento normativo ni compatibilidad productiva con ningun programa externo.
 
+El historial de lotes puede exportarse a CSV desde la bandeja de importacion. La descarga respeta filtros, permisos y registra un evento de auditoria interna `external_import_batch.csv_exported`.
+
 La vista previa de lotes de terceros clasifica cada fila como `create`, `conflict` o `error`. Los conflictos iniciales se comprueban contra `accounting_parties` por `source_system + source_party_id` y por `tax_id`.
 
 La vista previa de lotes de cuentas exige `fiscal_year_id`. Mapea columnas habituales como `codigo`, `cuenta`, `nombre`, `tipo`, `postable` o `movimiento`, normaliza tipos contables basicos y detecta conflictos por codigo dentro del ejercicio.

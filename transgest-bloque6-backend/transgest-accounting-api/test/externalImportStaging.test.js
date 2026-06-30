@@ -52,12 +52,14 @@ test("normalizeExternalImportBatchInput evita filas duplicadas", () => {
 });
 
 test("consulta y revision de lotes limitan filtros y transiciones", () => {
-  assert.deepEqual(normalizeExternalImportQuery({ status: "approved", limit: "999" }), {
+  assert.deepEqual(normalizeExternalImportQuery({ status: "approved", limit: "999", format: "csv" }), {
     status: "approved",
     provider_id: null,
     import_type: null,
     limit: 100,
+    format: "csv",
   });
+  assert.throws(() => normalizeExternalImportQuery({ format: "xlsx" }), /format no soportado/);
   assert.deepEqual(normalizeExternalImportReviewInput({ action: "reject", reason: "Formato no confirmado" }), {
     action: "reject",
     reason: "Formato no confirmado",

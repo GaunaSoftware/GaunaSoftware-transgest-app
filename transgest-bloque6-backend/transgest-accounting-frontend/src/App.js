@@ -15,6 +15,7 @@ import {
   downloadAdvisorPackageZip,
   downloadBalanceSheetCsv,
   downloadBankTransactionsCsv,
+  downloadExternalImportBatchesCsv,
   downloadJournalEntriesCsv,
   downloadLedgerAccountCsv,
   downloadMaturitiesCsv,
@@ -667,6 +668,7 @@ export default function App() {
   });
   const [externalImportBatches, setExternalImportBatches] = useState([]);
   const [externalImportLoading, setExternalImportLoading] = useState(false);
+  const [externalImportExporting, setExternalImportExporting] = useState(false);
   const [externalImportStatus, setExternalImportStatus] = useState(null);
   const [externalImportFilters, setExternalImportFilters] = useState({ status: "", provider_id: "", import_type: "", limit: 25 });
   const [externalImportTargetYearId, setExternalImportTargetYearId] = useState("");
@@ -1640,6 +1642,20 @@ export default function App() {
   async function handleExternalImportFilter(event) {
     event.preventDefault();
     await refreshExternalImportBatches(externalImportFilters);
+  }
+
+  async function handleExternalImportExportCsv() {
+    setExternalImportExporting(true);
+    setExternalImportStatus(null);
+    try {
+      const result = await downloadExternalImportBatchesCsv(externalImportFilters);
+      saveBlob(result.blob, result.filename || "lotes-importacion-contable.csv");
+      setExternalImportStatus({ tone: "ok", text: "Historial de lotes exportado a CSV con auditoria." });
+    } catch (err) {
+      setExternalImportStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setExternalImportExporting(false);
+    }
   }
 
   function loadExternalImportTemplate() {
@@ -4073,6 +4089,9 @@ export default function App() {
                       </select>
                     </label>
                     <button type="submit">Filtrar lotes</button>
+                    <button type="button" className="secondary" onClick={handleExternalImportExportCsv} disabled={externalImportExporting || !externalImportBatches.length}>
+                      {externalImportExporting ? "Exportando" : "CSV"}
+                    </button>
                   </form>
                   {externalImportStatus && <div className="form-status"><StatusBadge tone={externalImportStatus.tone} text={externalImportStatus.text} /></div>}
                   {externalImportBatches.length ? (

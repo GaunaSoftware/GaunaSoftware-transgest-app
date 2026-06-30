@@ -185,11 +185,14 @@ function normalizeExternalImportQuery(query = {}) {
   const rawLimit = Number.parseInt(query.limit, 10);
   const status = String(query.status || "").trim();
   const importType = String(query.import_type || "").trim();
+  const format = String(query.format || "json").trim().toLowerCase();
+  if (!["json", "csv"].includes(format)) throw inputError("format no soportado");
   return {
     limit: Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50,
     status: status && BATCH_STATUSES.includes(status) ? status : null,
     provider_id: String(query.provider_id || "").trim().slice(0, 80) || null,
     import_type: importType && IMPORT_TYPES.includes(importType) ? importType : null,
+    format,
   };
 }
 

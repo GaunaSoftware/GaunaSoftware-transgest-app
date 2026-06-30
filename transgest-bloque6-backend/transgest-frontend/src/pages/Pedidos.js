@@ -5404,6 +5404,72 @@ function PedidoRentabilidadPredictiva({ pedido }) {
 // PedidoModal - aislado del componente padre para evitar re-renders
 // La key prop asegura nuevo estado cuando cambia el pedido editado
 // ---------------------------------------------------------------------------
+function getPedidoIncidenciaResumen(pedido = {}) {
+  const descripcion = String(pedido.incidencia_descripcion || "").trim()
+    || (String(pedido.notas || "").match(/INCIDENCIA(?: AUTO)?:\s*([^|]+)/i)?.[1] || "").trim();
+  const estadoIncidencia = String(pedido.estado || "").toLowerCase() === "incidencia";
+  if (!descripcion && !estadoIncidencia) return null;
+  const minutos = Number(pedido.paralizacion_minutos || 0);
+  const importe = Number(pedido.paralizacion_importe || 0);
+  return {
+    tipo: pedido.incidencia_tipo || (minutos > 0 ? "paralizacion" : "operativa"),
+    descripcion: descripcion || "Incidencia abierta pendiente de detalle.",
+    origen: pedido.incidencia_origen || "trafico",
+    automatica: pedido.incidencia_automatica === true || pedido.incidencia_automatica === "true",
+    creadaAt: pedido.incidencia_creada_at || null,
+    minutos,
+    importe,
+    moneda: pedido.paralizacion_moneda || "EUR",
+    norma: pedido.paralizacion_norma || "",
+    pais: pedido.paralizacion_pais || "",
+  };
+}
+
+function PedidoIncidenciaPanel({ pedido }) {
+  const inc = getPedidoIncidenciaResumen(pedido);
+  if (!inc) return null;
+  const importeTxt = inc.importe > 0
+    ? `${inc.importe.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${inc.moneda}`
+    : "Pendiente de pacto/norma aplicable";
+  const origenTxt = inc.automatica ? "Automatica" : inc.origen === "chofer" ? "Chofer" : "Trafico";
+  const fechaTxt = inc.creadaAt ? new Date(inc.creadaAt).toLocaleString("es-ES") : "";
+  return (
+    <div style={{background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.28)",borderRadius:9,padding:"11px 13px",marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:11,color:"#ef4444",fontWeight:900,textTransform:"uppercase",letterSpacing:".08em"}}>Incidencia activa</div>
+          <div style={{fontSize:14,color:"var(--text)",fontWeight:900,marginTop:3}}>{inc.descripcion}</div>
+        </div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+          <span style={{fontSize:10,fontWeight:900,color:"#ef4444",border:"1px solid rgba(239,68,68,.32)",borderRadius:999,padding:"4px 8px",background:"rgba(239,68,68,.08)"}}>{origenTxt}</span>
+          {fechaTxt && <span style={{fontSize:10,fontWeight:800,color:"var(--text4)",border:"1px solid var(--border2)",borderRadius:999,padding:"4px 8px",background:"var(--bg3)"}}>{fechaTxt}</span>}
+        </div>
+      </div>
+      {(inc.minutos > 0 || inc.norma || inc.pais) && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginTop:10}}>
+          <div style={{border:"1px solid var(--border2)",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
+            <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase"}}>Tiempo detenido</div>
+            <div style={{fontSize:15,color:"var(--text)",fontWeight:900}}>{inc.minutos > 0 ? `${inc.minutos} min` : "-"}</div>
+          </div>
+          <div style={{border:"1px solid var(--border2)",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
+            <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase"}}>Importe orientativo</div>
+            <div style={{fontSize:15,color:"#ef4444",fontWeight:900}}>{importeTxt}</div>
+          </div>
+          <div style={{border:"1px solid var(--border2)",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
+            <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase"}}>Pais operacion</div>
+            <div style={{fontSize:15,color:"var(--text)",fontWeight:900}}>{inc.pais || "-"}</div>
+          </div>
+        </div>
+      )}
+      {inc.norma && (
+        <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.35,marginTop:8}}>
+          {inc.norma}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvinculada,
   pedidos, clientes: clientesProp, vehiculos, choferes, rutas: rutas_prop, colaboradores, canEdit,
   guidedActive = false, onGuidedProgress,
@@ -6345,6 +6411,8 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                 </button>
               </div>
             )}
+
+            <PedidoIncidenciaPanel pedido={form || editando} />
 
             <div style={S.sec}>Cliente y ruta</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -8040,7 +8108,7 @@ export default function Pedidos() {
   const [loading,    setLoading]    = useState(true);
   const [loadError,  setLoadError]  = useState("");
   const _rangoSemanaActual = currentWeekRangeLocal();
-  const [filtroEst,  setFiltroEst]  = useState(() => focusPedido?.pedido_id ? "todos" : "activos");
+  const [filtroEst,  setFiltroEst]  = useState(() => focusPedido?.estado ? String(focusPedido.estado) : focusPedido?.pedido_id ? "todos" : "activos");
   const [filtroMes,  setFiltroMes]  = useState("");
   const [filtroFechasCustom, setFiltroFechasCustom] = useState(false);
   const [filtroDesde, setFiltroDesde] = useState("");
@@ -8368,6 +8436,8 @@ export default function Pedidos() {
     if (!found) return;
     const t = window.setTimeout(() => {
       document.getElementById(`pedido-row-${focusPedido.pedido_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
+      setEditando(found);
+      setModal(true);
       clearRuntimeFocus("tms_pedidos_focus");
     }, 180);
     return () => window.clearTimeout(t);
@@ -8423,8 +8493,23 @@ export default function Pedidos() {
       notify(`No se puede pasar a "${LABEL_ESTADO[estado] || estado}" hasta completar: ${validationIssues.join(", ")}.`, "warning");
       return;
     }
+    const incidenciaTexto = String(extra.incidencia || "").trim();
+    if (estado === "incidencia" && !incidenciaTexto) {
+      const motivo = window.prompt("Describe la incidencia del pedido", "");
+      if (!motivo || !motivo.trim()) return;
+      extra = { ...extra, incidencia: motivo.trim(), incidencia_tipo: "operativa" };
+    }
     // Optimistic update - UI responds instantly
-    setPedidos(prev => prev.map(x => x.id===id ? {...x, estado, ...(estado === "cancelado" ? { motivo_cancelacion: extra.motivo_cancelacion || x.motivo_cancelacion || "" } : {})} : x));
+    setPedidos(prev => prev.map(x => x.id===id ? {
+      ...x,
+      estado,
+      ...(estado === "cancelado" ? { motivo_cancelacion: extra.motivo_cancelacion || x.motivo_cancelacion || "" } : {}),
+      ...(estado === "incidencia" ? {
+        incidencia_descripcion: extra.incidencia || x.incidencia_descripcion || "",
+        incidencia_tipo: extra.incidencia_tipo || x.incidencia_tipo || "operativa",
+        incidencia_origen: "trafico",
+      } : {}),
+    } : x));
     try {
       const payloadExtra = { ...extra };
       delete payloadExtra.__fromCancelFlow;

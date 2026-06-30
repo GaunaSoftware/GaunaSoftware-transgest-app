@@ -333,6 +333,61 @@ function normalizePedidoTime(value) {
   return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(11, 16);
 }
 
+function normalizeCountryKey(value = "") {
+  return String(value || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function paisEsEspana(value = "") {
+  const key = normalizeCountryKey(value);
+  return !key || ["espana", "españa", "spain", "es"].includes(key);
+}
+
+function calcularParalizacion({ minutos = 0, pais = "Espana", fase = "carga" } = {}) {
+  const totalMin = Math.max(0, Math.round(Number(minutos || 0)));
+  const ipremDia = Math.max(0, Number(process.env.IPREM_DIA_EUR || 20));
+  const graciaLegalMin = Math.max(0, Number(process.env.PARALIZACION_GRACIA_MIN || 60));
+  const avisoMin = Math.max(0, Number(process.env.PARALIZACION_AVISO_MIN || 60));
+  const horasPorDia = Math.max(1, Number(process.env.PARALIZACION_HORAS_DIA || 10));
+  const multiplicador = Math.max(0, Number(process.env.PARALIZACION_MULTIPLICADOR_IPREM || 2));
+  const esEspana = paisEsEspana(pais);
+  const reclamableMin = esEspana ? Math.max(0, totalMin - graciaLegalMin) : 0;
+  let horasPendientes = reclamableMin > 0 ? Math.ceil(reclamableMin / 60) : 0;
+  const tarifaHora = esEspana ? (ipremDia * multiplicador) / horasPorDia : 0;
+  let importeBase = 0;
+  let dia = 1;
+  while (horasPendientes > 0) {
+    const horasDia = Math.min(horasPendientes, horasPorDia);
+    const recargoDia = dia === 1 ? 1 : dia === 2 ? 1.25 : 1.5;
+    importeBase += horasDia * tarifaHora * recargoDia;
+    horasPendientes -= horasDia;
+    dia += 1;
+  }
+  const importe = Math.round(importeBase * 100) / 100;
+  return {
+    pais: pais || "Espana",
+    fase,
+    minutos: totalMin,
+    aviso: totalMin > avisoMin,
+    reclamable: esEspana && totalMin > graciaLegalMin,
+    importe,
+    moneda: "EUR",
+    norma: esEspana
+      ? "Espana: LCTTM art. 22. Reclamacion orientativa tras 1 h, sin computar la primera hora, segun IPREM/dia x2, maximo 10 h/dia y pacto aplicable."
+      : "Internacional/CMR: no hay cuantia uniforme en CMR para esperas de carga/descarga; aplicar pacto contractual o norma local del pais.",
+  };
+}
+
+function inferPaisOperacionPedido(pedido = {}, fase = "carga") {
+  if (String(fase || "").toLowerCase().includes("descarga")) {
+    return pedido.destino_pais || pedido.pais_destino || "Espana";
+  }
+  return pedido.origen_pais || pedido.pais_origen || "Espana";
+}
+
 function normalizePedidoForClient(pedido) {
   if (!pedido || typeof pedido !== "object") return pedido;
   return {
@@ -401,6 +456,17 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_en_camino_confirmada_at TIMESTAMPTZ").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_descarga_confirmada_at TIMESTAMPTZ").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_workflow_enviado_at TIMESTAMPTZ").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS incidencia_tipo VARCHAR(80)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS incidencia_descripcion TEXT").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS incidencia_origen VARCHAR(40)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS incidencia_creada_por UUID").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS incidencia_creada_at TIMESTAMPTZ").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS incidencia_automatica BOOLEAN DEFAULT false").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS paralizacion_minutos INTEGER DEFAULT 0").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS paralizacion_importe NUMERIC(10,2) DEFAULT 0").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS paralizacion_moneda VARCHAR(8) DEFAULT 'EUR'").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS paralizacion_norma TEXT").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS paralizacion_pais VARCHAR(80)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_cargador TEXT").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_cargador_nombre VARCHAR(180)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_cargador_fecha TIMESTAMPTZ").catch(() => {});
@@ -1470,21 +1536,54 @@ async function savePedidoChoferPasos({
     actorId
   );
   const pedidoMeta = await db.query(
-    "SELECT numero, origen, destino FROM pedidos WHERE id=$1 AND empresa_id=$2 LIMIT 1",
+    "SELECT id, numero, origen, destino, origen_pais, destino_pais FROM pedidos WHERE id=$1 AND empresa_id=$2 LIMIT 1",
     [pedidoId, empresaId]
   ).catch(() => ({ rows: [] }));
   const pedido = pedidoMeta.rows[0] || {};
   async function avisarParalizacion(fase, titulo, mins, dedupeSuffix) {
     if (!mins || mins <= 60) return;
+    const paisOperacion = inferPaisOperacionPedido(pedido, fase);
+    const calculo = calcularParalizacion({ minutos: mins, pais: paisOperacion, fase });
+    const descripcion = `${titulo}: ${mins} minutos en ${fase}. ${calculo.reclamable ? `Importe orientativo reclamable: ${calculo.importe.toLocaleString("es-ES", { minimumFractionDigits: 2 })} ${calculo.moneda}.` : "Revisar pacto/condiciones antes de reclamar."}`;
+    await db.query(
+      `UPDATE pedidos
+          SET estado='incidencia',
+              incidencia_tipo='paralizacion',
+              incidencia_descripcion=$3,
+              incidencia_origen='auto',
+              incidencia_creada_por=$4,
+              incidencia_creada_at=COALESCE(incidencia_creada_at, NOW()),
+              incidencia_automatica=true,
+              paralizacion_minutos=GREATEST(COALESCE(paralizacion_minutos,0), $5),
+              paralizacion_importe=$6,
+              paralizacion_moneda=$7,
+              paralizacion_norma=$8,
+              paralizacion_pais=$9,
+              notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $10))
+        WHERE id=$1 AND empresa_id=$2`,
+      [
+        pedidoId,
+        empresaId,
+        descripcion,
+        actorId || null,
+        calculo.minutos,
+        calculo.importe,
+        calculo.moneda,
+        calculo.norma,
+        calculo.pais,
+        `INCIDENCIA AUTO: ${descripcion}`,
+      ]
+    ).catch(e => logger.warn("No se pudo registrar incidencia automatica de paralizacion:", e.message));
     await notificarGestionPedido(
       empresaId,
       "chofer_paralizacion",
       titulo,
-      `El pedido ${pedido.numero || ""} lleva ${mins} minutos en ${fase}.`,
+      `El pedido ${pedido.numero || ""} lleva ${mins} minutos en ${fase}. ${calculo.reclamable ? `Posible reclamacion: ${calculo.importe.toLocaleString("es-ES", { minimumFractionDigits: 2 })} ${calculo.moneda}.` : "Revisar condiciones de paralizacion."}`,
       {
         pedido_id: pedidoId,
         fase,
         minutos: mins,
+        paralizacion: calculo,
         ruta: `${pedido.origen || ""} -> ${pedido.destino || ""}`,
         dedupe_key: `paralizacion:${fase}:${pedidoId}:${dedupeSuffix}`,
       },
@@ -4866,6 +4965,7 @@ router.post("/chofer/rutas", async (req, res) => {
 
 // GET /pedidos
 router.get("/", async (req, res) => {
+  await ensureColaboradorWorkflowSchema();
   const { estado, cliente_id, chofer_id, desde, hasta, facturado, pendiente_completar, tipo_carga, q, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
   const empresaId = req.empresaId || req.user.empresa_id;
@@ -5051,6 +5151,7 @@ router.get("/", async (req, res) => {
 // GET /pedidos/resumen-lista - listado operativo ligero para pantallas de trafico
 router.get("/resumen-lista", async (req, res) => {
   try {
+    await ensureColaboradorWorkflowSchema();
     const { estado, cliente_id, chofer_id, desde, hasta, facturado, pendiente_completar, tipo_carga, q, page = 1, limit = 100 } = req.query;
     const pageN = Math.max(Number(page) || 1, 1);
     const limitN = Math.min(Math.max(Number(limit) || 100, 1), 1000);
@@ -5135,6 +5236,9 @@ router.get("/resumen-lista", async (req, res) => {
              p.hora_carga, p.hora_descarga, p.origen, p.destino, p.referencia_cliente,
              p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
              p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,
+             p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
+             p.incidencia_creada_at, p.incidencia_automatica, p.paralizacion_minutos,
+             p.paralizacion_importe, p.paralizacion_moneda, p.paralizacion_norma, p.paralizacion_pais,
              p.tipo_carga, p.tipo_viaje, p.factura_id,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              co.nombre AS colaborador_nombre, co.telefono AS colaborador_telefono, co.email AS colaborador_email,
@@ -5162,6 +5266,9 @@ router.get("/resumen-lista", async (req, res) => {
              p.hora_carga, p.hora_descarga, p.origen, p.destino, p.referencia_cliente,
              p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
              p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,
+             p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
+             p.incidencia_creada_at, p.incidencia_automatica, p.paralizacion_minutos,
+             p.paralizacion_importe, p.paralizacion_moneda, p.paralizacion_norma, p.paralizacion_pais,
              p.tipo_carga, p.tipo_viaje, p.factura_id,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              NULL AS colaborador_nombre, NULL AS colaborador_telefono, NULL AS colaborador_email,
@@ -7493,6 +7600,9 @@ router.patch("/:id/estado",
 
     await ensureColaboradorWorkflowSchema();
     const incidencia = typeof req.body.incidencia === "string" ? req.body.incidencia.trim() : "";
+    const incidenciaTipo = typeof req.body.incidencia_tipo === "string" && req.body.incidencia_tipo.trim()
+      ? req.body.incidencia_tipo.trim().slice(0, 80)
+      : "operativa";
     const motivoCancelacion = typeof req.body.motivo_cancelacion === "string"
       ? req.body.motivo_cancelacion.trim()
       : typeof req.body.motivo === "string" ? req.body.motivo.trim() : "";
@@ -7507,9 +7617,15 @@ router.patch("/:id/estado",
       await db.query(
         `UPDATE pedidos
          SET estado=$1,
+             incidencia_tipo=$5,
+             incidencia_descripcion=$2,
+             incidencia_origen=$6,
+             incidencia_creada_por=$7,
+             incidencia_creada_at=NOW(),
+             incidencia_automatica=false,
              notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $2))
          WHERE id=$3 AND empresa_id=$4`,
-        [estado, `INCIDENCIA: ${incidencia}`, req.params.id, empresaId]
+        [estado, `INCIDENCIA: ${incidencia}`, req.params.id, empresaId, incidenciaTipo, req.user?.rol === "chofer" ? "chofer" : "trafico", req.user?.id || null]
       );
     } else if (estado === "cancelado") {
       await db.query(

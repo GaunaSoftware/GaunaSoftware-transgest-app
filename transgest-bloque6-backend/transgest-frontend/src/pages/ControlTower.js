@@ -49,6 +49,11 @@ function abrirItem(item) {
     title: item.title || "",
     description: item.description || "",
   };
+  if ((item.view === "pedidos" || item.view === "gestion_trafico") && focus.pedido_id) {
+    setRuntimeFocus("tms_pedidos_focus", focus);
+    navegar("pedidos");
+    return;
+  }
   if (item.view === "pedidos" || item.view === "gestion_trafico") {
     setRuntimeFocus("tms_trafico_focus", focus);
     navegar("gestion_trafico");
@@ -84,6 +89,11 @@ function abrirAccion(item, action) {
     requires_confirmation: !!action.requires_confirmation,
   };
   const targetView = action.view || item.view || "excepciones";
+  if ((targetView === "gestion_trafico" || targetView === "pedidos") && focus.pedido_id) {
+    setRuntimeFocus("tms_pedidos_focus", focus);
+    navegar("pedidos");
+    return;
+  }
   if (targetView === "gestion_trafico" || targetView === "pedidos") {
     setRuntimeFocus("tms_trafico_focus", focus);
     navegar("gestion_trafico");
@@ -105,7 +115,7 @@ function abrirAccion(item, action) {
 function abrirViajeEnTrafico(trip, extra = {}) {
   if (!trip) return;
   const route = trip.route || parseRouteFromItem(trip || {});
-  setRuntimeFocus("tms_trafico_focus", {
+  setRuntimeFocus("tms_pedidos_focus", {
     pedido_id: trip.entity_id || trip.id || trip.pedido_id || "",
     source: "control_tower",
     action: extra.action || "Abrir viaje",
@@ -116,7 +126,7 @@ function abrirViajeEnTrafico(trip, extra = {}) {
     title: trip.title || `Viaje ${trip.numero || trip.pedido_numero || ""}`.trim(),
     description: trip.description || `${trip.cliente_nombre || "Cliente"} - ${route.origen || trip.origen || "-"} -> ${route.destino || trip.destino || "-"}`,
   });
-  navegar("gestion_trafico");
+  navegar("pedidos");
 }
 
 function TowerItem({ item }) {

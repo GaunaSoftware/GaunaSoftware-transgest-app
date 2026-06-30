@@ -109,6 +109,35 @@ function abrirAlerta(alerta = {}) {
   navegar(alerta.view || "control_tower");
 }
 
+function abrirPedidosConEstado(estado, extra = {}) {
+  setRuntimeFocus("tms_pedidos_focus", {
+    source: "dashboard",
+    estado,
+    title: extra.title || `Pedidos en ${estado}`,
+  });
+  navegar("pedidos");
+}
+
+function abrirPedidoDesdeDashboard(pedido, extra = {}) {
+  if (!pedido?.id) return;
+  setRuntimeFocus("tms_pedidos_focus", {
+    source: "dashboard",
+    pedido_id: pedido.id,
+    numero: pedido.numero || "",
+    estado: pedido.estado || "",
+    title: extra.title || "Pedido destacado desde dashboard",
+  });
+  navegar("pedidos");
+}
+
+function incidenciaResumenPedido(pedido = {}) {
+  const directa = String(pedido.incidencia_descripcion || "").trim();
+  if (directa) return directa.replace(/^INCIDENCIA:\s*/i, "");
+  const notas = String(pedido.notas || "");
+  const match = notas.match(/INCIDENCIA(?: AUTO)?:\s*([^|]+)/i);
+  return match ? match[1].trim() : "";
+}
+
 function AlertRow({ icon, texto, color, bg, view, focusKey, focus, actionLabel = "Abrir" }) {
   return (
     <button onClick={()=>abrirAlerta({ view, focusKey, focus })}
@@ -322,6 +351,7 @@ export default function Dashboard() {
     nFacturas, costeTotal, margenTotal, margenPct,
     vDisp, vTaller, cDisp,
     estadosPed, facMensual, topClientes, alertas,
+    operativos,
     today, ultPedidos, estadoColor,
   } = useMemo(() => {
     const pedFilt = filterByPeriod(pedidos, "fecha_pedido");
@@ -369,6 +399,21 @@ export default function Dashboard() {
       count: estadoCounts[e],
       color: estadoPedidoMeta(e).color,
     })).filter(x=>x.count>0);
+    const enCarga = pedFilt.filter(p => {
+      const estado = String(p.estado || "").toLowerCase();
+      const fecha = String(p.fecha_carga || p.fecha_pedido || "").slice(0, 10);
+      const hoyIso = new Date().toISOString().slice(0, 10);
+      return estado === "confirmado" && Boolean(fecha) && fecha <= hoyIso;
+    });
+    const enDescarga = pedFilt.filter(p => String(p.estado || "").toLowerCase() === "descarga");
+    const enRuta = pedFilt.filter(p => String(p.estado || "").toLowerCase() === "en_curso");
+    const conIncidencia = pedFilt.filter(p => String(p.estado || "").toLowerCase() === "incidencia");
+    const operativos = [
+      { key:"carga", estado:"confirmado", label:"En carga", value:enCarga.length, color:"#f59e0b", sub:"Confirmados con carga ya prevista" },
+      { key:"ruta", estado:"en_curso", label:"En ruta", value:enRuta.length, color:"#3b82f6", sub:"Viajes circulando" },
+      { key:"descarga", estado:"descarga", label:"En descarga", value:enDescarga.length, color:"#a78bfa", sub:"En destino o descargando" },
+      { key:"incidencia", estado:"incidencia", label:"Incidencia", value:conIncidencia.length, color:"#ef4444", sub:"Requieren revisión" },
+    ];
   
     // ── Facturación mensual ──
     const facMensual = (() => {
@@ -516,6 +561,7 @@ export default function Dashboard() {
       nFacturas, costeTotal, margenTotal, margenPct,
       vDisp, vRuta, vTaller, cDisp,
       estadosPed, facMensual, topClientes, alertas,
+      operativos,
       today, ultPedidos, estadoColor,
     };
   }, [pedidos, facturas, vehiculos, choferes, filterByPeriod, empresaCfg, tallerEstado, paletMovimientos]);
@@ -603,6 +649,17 @@ export default function Dashboard() {
                 sub={k.sub}
                 valueColor={i === 3 ? "#b45309" : k.color}
               />
+            ))}
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:12, marginBottom:22 }}>
+            {operativos.map(item => (
+              <button key={item.key} onClick={()=>abrirPedidosConEstado(item.estado, { title:item.label })}
+                style={{...S.card,padding:"14px 16px",textAlign:"left",cursor:"pointer",borderColor:`${item.color}44`,background:`linear-gradient(135deg, ${item.color}12, var(--card-bg) 60%)`,fontFamily:"'DM Sans',sans-serif"}}>
+                <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:item.color}}>{item.label}</div>
+                <div style={{fontFamily:"'Syne',sans-serif",fontSize:25,fontWeight:900,color:"var(--text)",marginTop:5}}>{fmtN(item.value)}</div>
+                <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{item.sub}</div>
+              </button>
             ))}
           </div>
 
@@ -794,13 +851,14 @@ export default function Dashboard() {
                 : estadosPed.map((e,i) => {
                   const max = Math.max(...estadosPed.map(x=>x.count));
                   return (
-                    <div key={i} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                    <button key={i} type="button" onClick={()=>abrirPedidosConEstado(e.key)}
+                      style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, width:"100%", border:"none", background:"transparent", padding:0, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
                       <div style={{ width:90, fontSize:12, color:"var(--text2)", flexShrink:0 }}>{e.name}</div>
                       <div style={{ flex:1, background:"var(--bg4)", borderRadius:4, height:8, overflow:"hidden" }}>
                         <div style={{ width:`${(e.count/max)*100}%`, height:"100%", background:e.color, borderRadius:4, transition:"width .4s" }}/>
                       </div>
                       <div style={{ width:24, textAlign:"right", fontWeight:700, fontSize:12, color:"var(--text)", flexShrink:0 }}>{e.count}</div>
-                    </div>
+                    </button>
                   );
                 })
               }
@@ -901,7 +959,8 @@ export default function Dashboard() {
               {ultPedidos.length === 0
                 ? <div style={{ color:"var(--text5)", fontSize:12 }}>Sin actividad reciente</div>
                 : ultPedidos.map((p,i)=>(
-                  <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 0", borderBottom:"1px solid var(--border)" }}>
+                  <button key={i} type="button" onClick={()=>abrirPedidoDesdeDashboard(p, { title:String(p.estado).toLowerCase()==="incidencia" ? "Revisar incidencia" : "Abrir pedido" })}
+                    style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 0", border:"none", borderBottom:"1px solid var(--border)", background:"transparent", width:"100%", textAlign:"left", cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
                     <div style={{ width:8, height:8, borderRadius:"50%", background:estadoColor[p.estado]||"var(--text4)", flexShrink:0 }}/>
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize:12, fontWeight:600, color:"var(--text)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
@@ -910,11 +969,16 @@ export default function Dashboard() {
                       <div style={{ fontSize:10, color:"var(--text4)" }}>
                         {p.cliente_nombre||"-"} - {p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):""}
                       </div>
+                      {String(p.estado || "").toLowerCase() === "incidencia" && incidenciaResumenPedido(p) && (
+                        <div style={{fontSize:10,color:"#ef4444",fontWeight:800,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                          {incidenciaResumenPedido(p)}
+                        </div>
+                      )}
                     </div>
                     <span style={{ ...S.badge, background:`${estadoColor[p.estado]||"var(--text4)"}1a`, color:estadoColor[p.estado]||"var(--text4)", flexShrink:0 }}>
                       {estadoPedidoMeta(p.estado).label}
                     </span>
-                  </div>
+                  </button>
                 ))
               }
             </div>

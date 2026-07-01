@@ -5,6 +5,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+!transgest-bloque6-backend/transgest-frontend/.env.production
 
 # Logs
 logs/

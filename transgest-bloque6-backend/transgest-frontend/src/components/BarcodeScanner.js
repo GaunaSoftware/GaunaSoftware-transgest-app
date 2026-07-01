@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 
 const box = {
   position: "fixed",
@@ -47,35 +48,24 @@ const input = {
 
 export default function BarcodeScanner({ open, title = "Escanear codigo", onDetected, onClose }) {
   const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const timerRef = useRef(null);
+  const controlsRef = useRef(null);
   const lockedRef = useRef(false);
-  const detectorRef = useRef(null);
   const onDetectedRef = useRef(onDetected);
   const onCloseRef = useRef(onClose);
   const [manual, setManual] = useState("");
   const [status, setStatus] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
-  const [detectorReady, setDetectorReady] = useState(false);
 
   useEffect(() => { onDetectedRef.current = onDetected; }, [onDetected]);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
-  async function detectarFrameActual() {
-    if (!videoRef.current || lockedRef.current || !detectorRef.current) return false;
-    if (videoRef.current.readyState < 2) return false;
-    try {
-      const found = await detectorRef.current.detect(videoRef.current);
-      const code = found?.[0]?.rawValue?.trim();
-      if (!code) return false;
-      lockedRef.current = true;
-      onDetectedRef.current?.(code);
-      onCloseRef.current?.();
-      return true;
-    } catch {
-      setStatus("No se pudo leer automaticamente. Acerca el codigo o introduce el valor manual.");
-      return false;
-    }
+  function emitirCodigo(code) {
+    const value = String(code || "").trim();
+    if (!value || lockedRef.current) return;
+    lockedRef.current = true;
+    try { controlsRef.current?.stop?.(); } catch {}
+    onDetectedRef.current?.(value);
+    onCloseRef.current?.();
   }
 
   useEffect(() => {
@@ -85,61 +75,39 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
     lockedRef.current = false;
     setStatus("Preparando camara...");
     setCameraReady(false);
-    setDetectorReady(false);
-    detectorRef.current = null;
+    controlsRef.current = null;
 
     async function start() {
       if (!("mediaDevices" in navigator) || !navigator.mediaDevices.getUserMedia) {
         setStatus("Camara no disponible. Introduce el codigo manualmente.");
         return;
       }
-      if (!("BarcodeDetector" in window)) {
-        setStatus("El navegador no detecta codigos automaticamente. Usa la entrada manual.");
-      }
-
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
+        const reader = new BrowserMultiFormatReader(undefined, {
+          delayBetweenScanAttempts: 180,
+          delayBetweenScanSuccess: 500,
         });
-        if (cancelled) {
-          stream.getTracks().forEach(track => track.stop());
-          return;
-        }
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
+        const controls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+          const code = result?.getText?.() || result?.text || "";
+          if (code) emitirCodigo(code);
+        });
+        if (cancelled) { controls?.stop?.(); return; }
+        controlsRef.current = controls;
         setCameraReady(true);
-
-        if ("BarcodeDetector" in window) {
-          detectorRef.current = new window.BarcodeDetector({
-            formats: ["code_128", "code_39", "code_93", "codabar", "ean_13", "ean_8", "itf", "upc_a", "upc_e", "qr_code"],
-          });
-          setDetectorReady(true);
-          timerRef.current = window.setInterval(async () => {
-            await detectarFrameActual();
-          }, 650);
-        }
-      } catch {
-        setStatus("Permiso de camara denegado o no disponible. Introduce el codigo manualmente.");
+        setStatus("Camara activa. Acerca el codigo al recuadro.");
+      } catch (error) {
+        const msg = String(error?.message || error || "").toLowerCase();
+        setStatus(msg.includes("permission") || msg.includes("denied")
+          ? "Permiso de camara denegado. Introduce el codigo manualmente."
+          : "No se pudo abrir la camara. Revisa HTTPS/permisos o introduce el codigo manualmente.");
       }
     }
 
     start();
     return () => {
       cancelled = true;
-      if (timerRef.current) window.clearInterval(timerRef.current);
-      timerRef.current = null;
-      streamRef.current?.getTracks?.().forEach(track => track.stop());
-      streamRef.current = null;
-      detectorRef.current = null;
-      setDetectorReady(false);
+      try { controlsRef.current?.stop?.(); } catch {}
+      controlsRef.current = null;
     };
   }, [open]);
 
@@ -148,8 +116,7 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
   function submitManual() {
     const code = manual.trim();
     if (!code) return;
-    onDetected(code);
-    onClose();
+    emitirCodigo(code);
   }
 
   return (
@@ -209,7 +176,7 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
           )}
         </div>
 
-        {status && cameraReady && (
+        {status && (
           <div style={{fontSize:12,color:"var(--text5)",marginBottom:10}}>{status}</div>
         )}
 
@@ -225,10 +192,10 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
           <button style={{...btn,background:"var(--accent)",borderColor:"var(--accent)",color:"#fff"}} onClick={submitManual}>
             Usar
           </button>
-          {cameraReady && detectorReady && (
-            <button type="button" style={{...btn,gridColumn:"1/-1",background:"rgba(16,185,129,.12)",borderColor:"rgba(16,185,129,.35)",color:"#10b981"}} onClick={detectarFrameActual}>
-              Leer codigo ahora
-            </button>
+          {cameraReady && (
+            <div style={{gridColumn:"1/-1",fontSize:11,color:"var(--text5)",lineHeight:1.4}}>
+              Si no lee a la primera, mejora la luz, aleja un poco la cámara y mantén el código horizontal dentro del recuadro.
+            </div>
           )}
         </div>
       </div>

@@ -14,7 +14,7 @@ import BarcodeScanner from "../components/BarcodeScanner";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
 import { GeoFields } from "../components/GeoFields";
 
-const CATEGORIAS = ["Motor","Frenos","Neumaticos","Aceite / Lubricantes","Filtros","Electricidad","Carrocería","Hidráulica","Neumática","Refrigeración","Transmisión","EPIS","ROPA DE TRABAJO","Otros"];
+const CATEGORIAS = ["Motor","Frenos","Neumaticos","Aceite / Lubricantes","Filtros","Electricidad","Carrocería","Hidráulica","Neumática","Refrigeración","Transmisión","EPIS","ROPA DE TRABAJO","Cemento / áridos","Materiales venta","Otros"];
 const TIPOS_INT  = ["Mantenimiento preventivo","Avería / Reparación","Cambio aceite","Cambio neumáticos","Cambio filtros","Revisión ITV","Reparación carrocería","Otro"];
 
 const EMPTY_TALLER_SHARED = Object.freeze({
@@ -236,6 +236,9 @@ function piezaApiToLocal(p) {
     unidades_total: Number(p.unidades_total || 0),
     unidades_stock: Number(p.unidades_stock || 0),
     precio_unitario: Number(p.precio_compra || p.precio_unitario || 0),
+    precio_venta: Number(p.precio_venta || 0),
+    tipo_stock: p.tipo_stock || "pieza_taller",
+    unidad_medida: p.unidad_medida || "ud",
     proveedor: p.proveedor || "",
     etiqueta_tamano: p.etiqueta_tamano || "50x25",
     notas: p.notas || "",
@@ -344,40 +347,74 @@ const S = {
   tab:  {padding:"6px 14px",border:"none",borderBottom:"2px solid transparent",background:"none",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"},
 };
 
-function ModalPieza({editando, onClose, onSaved}) {
-  const [form, setForm] = useState(editando || {nombre:"",referencia:"",codigo_barras:"",categoria:"Otros",stock_actual:0,stock_minimo:2,precio_unitario:0,proveedor:"",etiqueta_tamano:"50x25",notas:""});
+function ModalPieza({editando, stockActual = [], onClose, onSaved}) {
+  const [form, setForm] = useState(editando || {nombre:"",referencia:"",codigo_barras:"",categoria:"Otros",stock_actual:0,stock_minimo:2,precio_unitario:0,precio_venta:0,tipo_stock:"pieza_taller",unidad_medida:"ud",proveedor:"",etiqueta_tamano:"50x25",notas:""});
   const [scannerOpen, setScannerOpen] = useState(false);
   const f = k => e => setForm(p=>({...p,[k]:e.target.value}));
   const setCodigo = code => setForm(p=>({...p,codigo_barras:code,referencia:p.referencia || code}));
   async function guardar() {
     if (!form.nombre) { notify("Nombre obligatorio", "warning"); return; }
     const d = tallerLoad();
-    const p = {...form,id:editando?.id||`p_${Date.now()}`,codigo_barras:form.codigo_barras||form.referencia||"",stock_actual:parseFloat(form.stock_actual)||0,stock_minimo:parseFloat(form.stock_minimo)||0,precio_unitario:parseFloat(form.precio_unitario)||0};
-    if (editando) { const i=d.stock.findIndex(x=>x.id===editando.id); if(i>=0) d.stock[i]=p; else d.stock.push(p); }
-    else d.stock.push(p);
+    const codigoNormalizado = String(form.codigo_barras || form.referencia || "").trim().toLowerCase();
+    const refNormalizada = String(form.referencia || "").trim().toLowerCase();
+    const existente = !editando ? (stockActual || d.stock || []).find(x => {
+      const xCode = String(x.codigo_barras || "").trim().toLowerCase();
+      const xRef = String(x.referencia || "").trim().toLowerCase();
+      return (codigoNormalizado && (xCode === codigoNormalizado || xRef === codigoNormalizado)) || (refNormalizada && xRef === refNormalizada);
+    }) : null;
+    const precioEntrada = parseFloat(form.precio_unitario) || 0;
+    if (existente && precioEntrada > Number(existente.precio_unitario || 0)) {
+      const ok = await confirmDialog({
+        title: "Precio de entrada superior",
+        message: `${existente.nombre} ya existe a ${fmt2(existente.precio_unitario)} EUR/${existente.unidad_medida || "ud"}. La nueva entrada es ${fmt2(precioEntrada)} EUR. Se sumara stock y se actualizara el precio de entrada. ¿Continuar?`,
+        confirmText: "Actualizar y sumar",
+        tone: "warning",
+      });
+      if (!ok) return;
+    } else if (existente) {
+      notify("La referencia ya existe. Se sumara la cantidad al stock existente.", "info");
+    }
+    const p = {
+      ...form,
+      id: editando?.id || existente?.id || `p_${Date.now()}`,
+      codigo_barras: form.codigo_barras || form.referencia || existente?.codigo_barras || "",
+      stock_actual: (existente && !editando ? Number(existente.stock_actual || 0) : 0) + (parseFloat(form.stock_actual) || 0),
+      stock_minimo: parseFloat(form.stock_minimo) || Number(existente?.stock_minimo || 0),
+      precio_unitario: precioEntrada,
+      precio_venta: parseFloat(form.precio_venta) || 0,
+      tipo_stock: form.tipo_stock || existente?.tipo_stock || "pieza_taller",
+      unidad_medida: form.unidad_medida || existente?.unidad_medida || "ud",
+    };
+    if (editando || existente) {
+      const i=d.stock.findIndex(x=>x.id===(editando?.id || existente?.id));
+      if(i>=0) d.stock[i]=p; else d.stock.push(p);
+    } else d.stock.push(p);
     const payload = {
       nombre: form.nombre,
       referencia: form.referencia || "",
       codigo_barras: form.codigo_barras || form.referencia || "",
       categoria: form.categoria || "Otros",
-      stock_actual: parseFloat(form.stock_actual) || 0,
+      stock_actual: p.stock_actual,
       stock_minimo: parseFloat(form.stock_minimo) || 0,
-      precio_compra: parseFloat(form.precio_unitario) || 0,
+      precio_compra: p.precio_unitario,
+      precio_venta: p.precio_venta,
+      tipo_stock: p.tipo_stock,
+      unidad_medida: p.unidad_medida,
       proveedor: form.proveedor || "",
       etiqueta_tamano: form.etiqueta_tamano || "50x25",
       notas: form.notas || "",
     };
-    if (!editando) {
+    if (!editando && !existente) {
       try {
         const saved = await crearTallerPieza(payload);
         d.stock = d.stock.map(x => x.id === p.id ? piezaApiToLocal(saved) : x);
       } catch (e) {
         notify("Pieza guardada localmente, pero no se sincronizo con la base de datos: " + e.message, "warning");
       }
-    } else if (isDbId(editando.id)) {
+    } else if (isDbId((editando || existente).id)) {
       try {
-        const saved = await editarTallerPieza(editando.id, payload);
-        d.stock = d.stock.map(x => x.id === editando.id ? piezaApiToLocal(saved) : x);
+        const saved = await editarTallerPieza((editando || existente).id, payload);
+        d.stock = d.stock.map(x => x.id === (editando || existente).id ? piezaApiToLocal(saved) : x);
       } catch (e) {
         notify("Pieza editada localmente, pero no se sincronizo con la base de datos: " + e.message, "warning");
       }
@@ -390,6 +427,8 @@ function ModalPieza({editando, onClose, onSaved}) {
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editando?"Editar pieza":"Nueva pieza al stock"}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Nombre *</label><input style={S.inp} value={form.nombre} onChange={f("nombre")} placeholder="Ej: Filtro aceite Mann W713"/></div>
+          <div><label style={S.lbl}>Tipo de stock</label><select value={form.tipo_stock || "pieza_taller"} onChange={f("tipo_stock")} style={S.sel}><option value="pieza_taller">Pieza / recambio taller</option><option value="producto_venta">Producto venta almacén</option></select></div>
+          <div><label style={S.lbl}>Unidad</label><select value={form.unidad_medida || "ud"} onChange={f("unidad_medida")} style={S.sel}><option value="ud">Unidad</option><option value="kg">Kg</option><option value="t">Tonelada</option><option value="saco">Saco</option><option value="palet">Palet</option><option value="m3">m3</option><option value="l">Litro</option></select></div>
           <div><label style={S.lbl}>Referencia</label><input style={S.inp} value={form.referencia} onChange={f("referencia")}/></div>
           <div>
             <label style={S.lbl}>Codigo de barras</label>
@@ -399,9 +438,10 @@ function ModalPieza({editando, onClose, onSaved}) {
             </div>
           </div>
           <div><label style={S.lbl}>Categoría</label><select value={form.categoria} onChange={f("categoria")} style={S.sel}>{CATEGORIAS.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
-          <div><label style={S.lbl}>Stock actual</label><input type="number" min="0" step="0.5" style={S.inp} value={form.stock_actual} onChange={f("stock_actual")} onFocus={e=>e.target.select()}/></div>
+          <div><label style={S.lbl}>Cantidad que entra</label><input type="number" min="0" step="0.5" style={S.inp} value={form.stock_actual} onChange={f("stock_actual")} onFocus={e=>e.target.select()}/></div>
           <div><label style={S.lbl}>Stock minimo (alerta)</label><input type="number" min="0" style={S.inp} value={form.stock_minimo} onChange={f("stock_minimo")} onFocus={e=>e.target.select()}/></div>
-          <div><label style={S.lbl}>Precio unitario (EUR)</label><input type="number" step="0.01" style={S.inp} value={form.precio_unitario} onChange={f("precio_unitario")} onFocus={e=>e.target.select()}/></div>
+          <div><label style={S.lbl}>Precio entrada (EUR)</label><input type="number" step="0.01" style={S.inp} value={form.precio_unitario} onChange={f("precio_unitario")} onFocus={e=>e.target.select()}/></div>
+          <div><label style={S.lbl}>Precio venta (EUR)</label><input type="number" step="0.01" style={S.inp} value={form.precio_venta || ""} onChange={f("precio_venta")} onFocus={e=>e.target.select()}/></div>
           <div><label style={S.lbl}>Proveedor</label><input style={S.inp} value={form.proveedor} onChange={f("proveedor")}/></div>
           <div><label style={S.lbl}>Tamano etiqueta</label><select value={form.etiqueta_tamano||"50x25"} onChange={f("etiqueta_tamano")} style={S.sel}>{ETIQUETA_TAMANOS.map(t=><option key={t} value={t}>{t} mm</option>)}</select></div>
           <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Notas</label><input style={S.inp} value={form.notas} onChange={f("notas")}/></div>
@@ -2435,6 +2475,7 @@ export default function Taller() {
   const [filtroVh,  setFiltroVh]  = useState("");
   const [q,         setQ]         = useState("");
   const [stockQ,    setStockQ]    = useState("");
+  const [stockTipo, setStockTipo] = useState("todos");
   const [proveedores, setProveedores] = useState([]);
   const [avisosMant,  setAvisosMant]  = useState([]);
   const [tareasMecanicos, setTareasMecanicos] = useState([]);
@@ -2636,9 +2677,12 @@ export default function Taller() {
   const stockTotalUnidades = useMemo(() => (taller.stock || []).reduce((s,p)=>s+Number(p.stock_actual || 0),0), [taller.stock]);
   const stockFiltrado = useMemo(() => {
     const term = stockQ.trim().toLowerCase();
-    if (!term) return taller.stock || [];
-    return (taller.stock || []).filter(p => `${p.nombre || ""} ${p.referencia || ""} ${p.codigo_barras || ""} ${p.categoria || ""} ${p.proveedor || ""}`.toLowerCase().includes(term));
-  }, [taller.stock, stockQ]);
+    return (taller.stock || []).filter(p => {
+      if (stockTipo !== "todos" && String(p.tipo_stock || "pieza_taller") !== stockTipo) return false;
+      if (!term) return true;
+      return `${p.nombre || ""} ${p.referencia || ""} ${p.codigo_barras || ""} ${p.categoria || ""} ${p.proveedor || ""}`.toLowerCase().includes(term);
+    });
+  }, [taller.stock, stockQ, stockTipo]);
   const gastoTaller = useMemo(() => resumenGastoTaller(taller.reparaciones || []), [taller.reparaciones]);
   const costoMes   = gastoTaller.mes;
   const costoTotal = gastoTaller.total;
@@ -2840,34 +2884,46 @@ export default function Taller() {
           En stock, la cifra trazable indica unidades individuales disponibles / unidades generadas.
         </div>
         <div style={{display:"flex",gap:10,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
-          <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={()=>{setEditPieza(null);setModalPieza(true);}}>+ Añadir pieza</button>
-          <input value={stockQ} onChange={e=>setStockQ(e.target.value)} placeholder="Buscar pieza, referencia, proveedor..." style={{...S.inp,width:280}}/>
+          <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={()=>{setEditPieza(null);setModalPieza(true);}}>+ Añadir stock</button>
+          <input value={stockQ} onChange={e=>setStockQ(e.target.value)} placeholder="Buscar pieza, producto, referencia, proveedor..." style={{...S.inp,width:280,maxWidth:"100%"}}/>
+          <select value={stockTipo} onChange={e=>setStockTipo(e.target.value)} style={{...S.sel,width:220}}>
+            <option value="todos">Todo el stock</option>
+            <option value="pieza_taller">Piezas / recambios</option>
+            <option value="producto_venta">Productos de venta</option>
+          </select>
           {stockBajo.length>0 && <div style={{padding:"6px 12px",background:"rgba(249,115,22,.1)",border:"1px solid rgba(249,115,22,.25)",borderRadius:7,fontSize:12,color:"#f97316",fontWeight:600}}>! {stockBajo.length} pieza{stockBajo.length!==1?"s":""} bajo minimo</div>}
           <span style={{marginLeft:"auto",fontSize:12,color:"var(--text5)"}}>{stockFiltrado.length} de {(taller.stock || []).length} referencias</span>
         </div>
-        <div style={S.card}>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr>{["Nombre","Ref.","Categoría","Stock","Mínimo","EUR/u","Proveedor",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
+        <div style={{...S.card,overflowX:"auto"}}>
+          <table style={{width:"100%",minWidth:1120,borderCollapse:"collapse"}}>
+            <thead><tr>{["Nombre / código","Ref.","Categoría","Stock","Mínimo","Entrada","Venta / margen","Proveedor",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
             <tbody>
-              {stockFiltrado.length===0 ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text5)"}}>Sin piezas en stock</td></tr>
+              {stockFiltrado.length===0 ? <tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--text5)"}}>Sin referencias en stock</td></tr>
               : stockFiltrado.map(p=>{
                 const bajo=(p.stock_actual||0)<=(p.stock_minimo||0);
+                const margen = Number(p.precio_venta || 0) - Number(p.precio_unitario || 0);
                 return (
                   <tr key={p.id} id={`pieza-stock-${p.id}`} style={{
                     background:String(focusTaller?.pieza_id || "") === String(p.id) ? "rgba(34,211,160,.10)" : bajo?"rgba(249,115,22,.04)":undefined,
                     boxShadow:String(focusTaller?.pieza_id || "") === String(p.id) ? "inset 3px 0 0 var(--green)" : undefined,
                   }}>
-                    <td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{p.nombre}</td>
+                    <td style={{...S.td,fontWeight:600,color:"var(--text)"}}>
+                      {p.nombre}
+                      <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>{p.tipo_stock==="producto_venta" ? "Producto venta" : "Pieza taller"} · {p.codigo_barras || "-"}</div>
+                    </td>
                     <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text5)"}}>{p.referencia||"-"}</td>
                     <td style={{...S.td,fontSize:11,color:"var(--text3)"}}>{p.categoria}</td>
                     <td style={S.td}>
-                      <div><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:bajo?"#f97316":"var(--green)"}}>{p.stock_actual}</span>{bajo&&<span style={{fontSize:10,color:"#f97316",marginLeft:4}}>!</span>}</div>
+                      <div><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:bajo?"#f97316":"var(--green)"}}>{p.stock_actual}</span> <span style={{fontSize:10,color:"var(--text5)"}}>{p.unidad_medida || "ud"}</span>{bajo&&<span style={{fontSize:10,color:"#f97316",marginLeft:4}}>!</span>}</div>
                       <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>
                         Trazables <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:p.unidades_stock?"var(--green)":"#f59e0b"}}>{p.unidades_stock || 0}</span> / {p.unidades_total || 0}
                       </div>
                     </td>
                     <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text4)"}}>{p.stock_minimo}</td>
                     <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"var(--text)"}}>{fmt2(p.precio_unitario)} EUR</td>
+                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:Number(p.precio_venta || 0) ? "var(--accent-xl)" : "var(--text5)"}}>
+                      {Number(p.precio_venta || 0) ? <>{fmt2(p.precio_venta)} EUR<div style={{fontSize:10,color:margen>0?"var(--green)":margen<0?"#ef4444":"var(--text5)"}}>Margen {fmt2(margen)} EUR</div></> : "-"}
+                    </td>
                     <td style={{...S.td,fontSize:12,color:"var(--text3)"}}>{p.proveedor||"-"}</td>
                     <td style={S.td}>
                       <div style={{display:"flex",gap:5}}>
@@ -2961,7 +3017,7 @@ export default function Taller() {
       {tab==="avisos_mant" && <AvisosTab vehiculos={vehiculos} reparaciones={taller.reparaciones} avisosMant={avisosMant} alertasDoc={alertasDoc} neumaticosVehiculos={neumaticosVehiculosShared} onReloadAvisos={recargarAvisos} onEditAviso={(a)=>{setEditAviso(a);setModalAviso(true);}} onNuevoAviso={()=>{setEditAviso(null);setModalAviso(true);}} onDeleteAviso={borrarAvisoMantenimiento} onKmUpdate={(vid,km)=>actualizarKmVehiculo(vid,km).then(()=>getVehiculos().then(v=>setVehiculos(Array.isArray(v)?v:[]))).catch(e=>notify(e.message, "error"))}/>}
 
       {modalRep   && <ModalIntervencion vehiculos={vehiculos} editando={editRep}   onClose={()=>{setModalRep(false);setEditRep(null);}}   onSaved={recargar}/>}
-      {modalPieza && <ModalPieza                              editando={editPieza} onClose={()=>{setModalPieza(false);setEditPieza(null);}} onSaved={recargar}/>}
+      {modalPieza && <ModalPieza editando={editPieza} stockActual={taller.stock || []} onClose={()=>{setModalPieza(false);setEditPieza(null);}} onSaved={recargar}/>}
       {unidadesPieza && <UnidadesPiezaModal pieza={unidadesPieza} onClose={()=>setUnidadesPieza(null)} />}
 
       {/* Modal Proveedor */}

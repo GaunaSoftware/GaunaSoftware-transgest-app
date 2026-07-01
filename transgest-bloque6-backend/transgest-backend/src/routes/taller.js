@@ -53,6 +53,22 @@ const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next))
 
 let tallerUnidadesSchemaPromise = null;
 let tallerIntervencionesExtraSchemaPromise = null;
+let tallerPiezasSchemaPromise = null;
+
+async function ensureTallerPiezasSchema() {
+  if (!tallerPiezasSchemaPromise) {
+    tallerPiezasSchemaPromise = (async () => {
+      await db.query("ALTER TABLE taller_piezas ADD COLUMN IF NOT EXISTS tipo_stock VARCHAR(30) NOT NULL DEFAULT 'pieza_taller'").catch(() => {});
+      await db.query("ALTER TABLE taller_piezas ADD COLUMN IF NOT EXISTS unidad_medida VARCHAR(30) NOT NULL DEFAULT 'ud'").catch(() => {});
+      await db.query("ALTER TABLE taller_piezas ADD COLUMN IF NOT EXISTS precio_venta NUMERIC(12,4) NOT NULL DEFAULT 0").catch(() => {});
+      await db.query("CREATE INDEX IF NOT EXISTS idx_taller_piezas_tipo ON taller_piezas(empresa_id, tipo_stock, activo)").catch(() => {});
+    })().catch((error) => {
+      tallerPiezasSchemaPromise = null;
+      throw error;
+    });
+  }
+  await tallerPiezasSchemaPromise;
+}
 
 async function ensureTallerIntervencionesExtraSchema() {
   if (!tallerIntervencionesExtraSchemaPromise) {
@@ -78,6 +94,7 @@ async function ensureTallerIntervencionesExtraSchema() {
 async function ensureTallerUnidadesSchema() {
   if (!tallerUnidadesSchemaPromise) {
     tallerUnidadesSchemaPromise = (async () => {
+      await ensureTallerPiezasSchema();
       await db.query(`
         CREATE TABLE IF NOT EXISTS taller_pieza_unidades (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -415,8 +432,9 @@ router.patch("/solicitudes/:id", PUEDE_GESTIONAR_SOLICITUDES, async (req, res) =
 
 router.get("/piezas", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  await ensureTallerPiezasSchema();
   await ensureTallerUnidadesSchema();
-  const { q, bajo_minimo } = req.query;
+  const { q, bajo_minimo, tipo_stock } = req.query;
   const params = [empresaId(req)];
   const where = ["p.empresa_id=$1", "p.activo=true"];
   if (q) {
@@ -424,6 +442,10 @@ router.get("/piezas", async (req, res) => {
     where.push(`(LOWER(p.nombre) LIKE $${params.length} OR LOWER(COALESCE(p.referencia,'')) LIKE $${params.length} OR LOWER(COALESCE(p.codigo_barras,'')) LIKE $${params.length})`);
   }
   if (bajo_minimo === "true") where.push("p.stock_actual <= p.stock_minimo");
+  if (tipo_stock && tipo_stock !== "todos") {
+    params.push(String(tipo_stock));
+    where.push(`p.tipo_stock=$${params.length}`);
+  }
 
   const { rows } = await db.query(
     `SELECT p.*, a.nombre AS almacen_nombre,
@@ -446,6 +468,7 @@ router.get("/piezas", async (req, res) => {
 
 router.get("/piezas/codigo/:codigo", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  await ensureTallerPiezasSchema();
   await ensureTallerUnidadesSchema();
   const code = String(req.params.codigo || "").trim().toLowerCase();
   if (!code) return res.status(400).json({ error: "Codigo obligatorio" });
@@ -848,9 +871,10 @@ router.patch("/piezas/unidades/:id/devolver", PUEDE_EDITAR_TALLER, asyncRoute(as
 
 router.post("/piezas", PUEDE_EDITAR_TALLER, async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  await ensureTallerPiezasSchema();
   const {
     almacen_id, proveedor, nombre, referencia, codigo_barras, categoria,
-    stock_actual, stock_minimo, precio_compra, etiqueta_tamano, notas,
+    stock_actual, stock_minimo, precio_compra, precio_venta, tipo_stock, unidad_medida, etiqueta_tamano, notas,
   } = req.body || {};
   if (!nombre) return res.status(400).json({ error: "Nombre obligatorio" });
 
@@ -858,8 +882,8 @@ router.post("/piezas", PUEDE_EDITAR_TALLER, async (req, res) => {
   const { rows } = await db.query(
     `INSERT INTO taller_piezas
       (empresa_id,almacen_id,proveedor,nombre,referencia,codigo_barras,categoria,stock_actual,stock_minimo,
-       precio_compra,etiqueta_tamano,notas)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       precio_compra,precio_venta,tipo_stock,unidad_medida,etiqueta_tamano,notas)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      RETURNING *`,
     [
       empresaId(req),
@@ -872,6 +896,9 @@ router.post("/piezas", PUEDE_EDITAR_TALLER, async (req, res) => {
       num(stock_actual),
       num(stock_minimo),
       num(precio_compra),
+      num(precio_venta),
+      ["producto_venta", "pieza_taller"].includes(String(tipo_stock || "")) ? String(tipo_stock) : "pieza_taller",
+      emptyToNull(unidad_medida) || "ud",
       emptyToNull(etiqueta_tamano) || "50x25",
       emptyToNull(notas),
     ]
@@ -881,16 +908,17 @@ router.post("/piezas", PUEDE_EDITAR_TALLER, async (req, res) => {
 
 router.put("/piezas/:id", PUEDE_EDITAR_TALLER, async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  await ensureTallerPiezasSchema();
   const {
     almacen_id, proveedor, nombre, referencia, codigo_barras, categoria,
-    stock_actual, stock_minimo, precio_compra, etiqueta_tamano, notas, activo,
+    stock_actual, stock_minimo, precio_compra, precio_venta, tipo_stock, unidad_medida, etiqueta_tamano, notas, activo,
   } = req.body || {};
   const { rows } = await db.query(
     `UPDATE taller_piezas SET
        almacen_id=$1,proveedor=$2,nombre=$3,referencia=$4,codigo_barras=$5,categoria=$6,
-       stock_actual=$7,stock_minimo=$8,precio_compra=$9,etiqueta_tamano=$10,notas=$11,
-       activo=$12,updated_at=NOW()
-     WHERE id=$13 AND empresa_id=$14
+       stock_actual=$7,stock_minimo=$8,precio_compra=$9,precio_venta=$10,tipo_stock=$11,unidad_medida=$12,
+       etiqueta_tamano=$13,notas=$14,activo=$15,updated_at=NOW()
+     WHERE id=$16 AND empresa_id=$17
      RETURNING *`,
     [
       emptyToNull(almacen_id),
@@ -902,6 +930,9 @@ router.put("/piezas/:id", PUEDE_EDITAR_TALLER, async (req, res) => {
       num(stock_actual),
       num(stock_minimo),
       num(precio_compra),
+      num(precio_venta),
+      ["producto_venta", "pieza_taller"].includes(String(tipo_stock || "")) ? String(tipo_stock) : "pieza_taller",
+      emptyToNull(unidad_medida) || "ud",
       emptyToNull(etiqueta_tamano) || "50x25",
       emptyToNull(notas),
       activo !== false,

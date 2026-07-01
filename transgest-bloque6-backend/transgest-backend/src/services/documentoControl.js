@@ -352,11 +352,21 @@ function isLocalhostBase(value) {
   }
 }
 
+function looksLikeFrontendAppHost(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return /^app\./i.test(url.hostname) || /vercel\.app$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function buildPublicUrl({ empresaId, pedidoId, config, appBaseUrl }) {
   const cfg = normalizeDocumentoControlConfig(config);
   const configuredBase = String(cfg.dominio_url || "").trim();
   const runtimeBase = String(appBaseUrl || "").trim();
-  const baseSource = configuredBase && !(isLocalhostBase(configuredBase) && runtimeBase && !isLocalhostBase(runtimeBase))
+  const configuredLooksFrontend = configuredBase && runtimeBase && looksLikeFrontendAppHost(configuredBase) && !looksLikeFrontendAppHost(runtimeBase);
+  const baseSource = configuredBase && !configuredLooksFrontend && !(isLocalhostBase(configuredBase) && runtimeBase && !isLocalhostBase(runtimeBase))
     ? configuredBase
     : runtimeBase;
   const base = String(baseSource || "").trim().replace(/\/$/, "");
@@ -1160,6 +1170,10 @@ function buildDocumentoControlPublicPayload(payload = {}) {
       horarios: documento.horarios || {},
       cargador_contractual: documento.cargador_contractual || {},
       transportista_efectivo: documento.transportista_efectivo || {},
+      empresa: documento.empresa || {},
+      chofer: documento.chofer || {},
+      colaborador: documento.colaborador || {},
+      firmas: documento.firmas || {},
       origen: documento.origen || {},
       destino: documento.destino || {},
       cargas: Array.isArray(documento.cargas) ? documento.cargas : [],
@@ -1167,6 +1181,8 @@ function buildDocumentoControlPublicPayload(payload = {}) {
       mercancia: documento.mercancia || {},
       vehiculo: documento.vehiculo || {},
       verificacion: documento.verificacion || {},
+      condiciones: documento.condiciones || {},
+      documentos_anexos: Array.isArray(documento.documentos_anexos) ? documento.documentos_anexos : [],
       observaciones: documento.observaciones || "",
     },
     orden_carga_numero: payload.orden_carga_numero || "",
@@ -1598,6 +1614,16 @@ async function buildDocumentoControlCmrHtml({
     ? "Carta de porte electronica CMR / Electronic consignment note"
     : "Documento de Control Digital - formato carta de porte";
   const firmas = doc.firmas || {};
+  const anexos = Array.isArray(doc.documentos_anexos) ? doc.documentos_anexos : [];
+  const anexosTexto = anexos.length
+    ? anexos.slice(0, 8).map((item, idx) => `${idx + 1}. ${escapeHtml(item.nombre || "Documento adjunto")}${item.tipo ? ` (${escapeHtml(item.tipo)})` : ""}`).join("<br>")
+    : "DCD/eCMR TransGest. Albaranes/POD pendientes de adjuntar al viaje.";
+  const anexosImagen = anexos
+    .filter(item => String(item.data_url || "").startsWith("data:image/"))
+    .slice(0, 2);
+  const anexosImagenHtml = anexosImagen.length
+    ? `<section class="cmr-box cmr-wide"><h2>Albaranes/POD escaneados adjuntos</h2><div class="cmr-annex-grid">${anexosImagen.map((item, idx) => `<figure><img src="${escapeHtml(item.data_url)}" alt="Anexo ${idx + 1}"><figcaption>${escapeHtml(item.nombre || `Anexo ${idx + 1}`)}</figcaption></figure>`).join("")}</div></section>`
+    : "";
   const cargaFecha = `${cmrDate(doc.horarios?.fecha_carga)} ${cmrText(doc.horarios?.hora_carga || doc.horarios?.ventana_carga, "")}`.trim();
   const descargaFecha = `${cmrDate(doc.horarios?.fecha_descarga)} ${cmrText(doc.horarios?.hora_descarga || doc.horarios?.ventana_descarga, "")}`.trim();
   const peso = doc.mercancia?.peso_kg ? `${Number(doc.mercancia.peso_kg).toLocaleString("es-ES")} kg` : "-";
@@ -1626,6 +1652,7 @@ async function buildDocumentoControlCmrHtml({
     .cmr-goods{width:100%;border-collapse:collapse;margin-top:10px;border:1px solid #111827}.cmr-goods th,.cmr-goods td{border:1px solid #111827;padding:7px;font-size:11px;text-align:left;vertical-align:top}.cmr-goods th{font-size:10px;text-transform:uppercase;background:#f8fafc}
     .cmr-signatures{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-left:1px solid #111827;border-top:1px solid #111827;margin-top:10px}
     .cmr-sign{min-height:128px;border-right:1px solid #111827;border-bottom:1px solid #111827;padding:8px}.cmr-sign-extra{font-size:11px;min-height:26px}.cmr-sign-line{border-top:1px solid #111827;margin:48px 8px 8px}.cmr-sign img{display:block;max-width:100%;height:48px;object-fit:contain;margin:8px 0}.cmr-hash{font-size:8px;word-break:break-all;color:#64748b}
+    .cmr-annex-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.cmr-annex-grid figure{margin:0}.cmr-annex-grid img{width:100%;max-height:360px;object-fit:contain;border:1px solid #cbd5e1;background:#fff}.cmr-annex-grid figcaption{font-size:10px;color:#475569;margin-top:4px}
     @media print{body{background:#fff}.no-print{display:none!important}.cmr-sheet{margin:0;max-width:none;border:2px solid #111827;page-break-after:auto}.cmr-box{min-height:76px}}
   </style></head><body>${controls}<main class="cmr-sheet">
     <header class="cmr-head">
@@ -1642,7 +1669,7 @@ async function buildDocumentoControlCmrHtml({
       <div class="cmr-box"><div class="cmr-num">18 Reservas y observaciones / Reservations</div><p>${escapeHtml(doc.observaciones || "-")}</p></div>
       <div class="cmr-box"><div class="cmr-num">4 Lugar y fecha de carga / Place and date of taking over</div>${cmrAddressLines(doc.origen).map(line => `<p>${escapeHtml(line)}</p>`).join("")}<p class="cmr-small">Previsto: ${escapeHtml(cargaFecha)}</p></div>
       <div class="cmr-box"><div class="cmr-num">19 Acuerdos especiales / Special agreements</div><p>Pago: ${escapeHtml(doc.condiciones?.forma_pago || "-")}</p></div>
-      <div class="cmr-box"><div class="cmr-num">5 Documentos anexos / Documents attached</div><p>DCD/eCMR TransGest, albaranes/POD si se adjuntan al viaje.</p></div>
+      <div class="cmr-box"><div class="cmr-num">5 Documentos anexos / Documents attached</div><p>${anexosTexto}</p></div>
       <div class="cmr-box"><div class="cmr-num">21 Establecido en / Established in</div><p>${escapeHtml(doc.origen?.provincia || doc.origen?.pais || "Espana")} - ${escapeHtml(cmrDate(generatedAt))}</p><p class="cmr-small">Control: ${escapeHtml(doc.codigo_control || "-")}</p></div>
     </section>
     <table class="cmr-goods">
@@ -1659,6 +1686,7 @@ async function buildDocumentoControlCmrHtml({
       ${cmrSignatureHtml("23 Firma transportista / Carrier signature", firmas.chofer, [doc.chofer?.nombre, doc.chofer?.dni].filter(Boolean).join(" | "))}
       ${cmrSignatureHtml("24 Firma destinatario / Consignee signature", firmas.destinatario, doc.destino?.destinatario || doc.destino?.nombre || "")}
     </section>
+    ${anexosImagenHtml}
     ${privateNotes}
     <p class="cmr-small" style="margin-top:10px">Generado: ${escapeHtml(new Date(generatedAt).toLocaleString("es-ES"))}. Hash y trazabilidad se conservan en el repositorio DCD de la empresa.</p>
   </main>${printScript}</body></html>`;
@@ -1760,7 +1788,11 @@ async function generateDocumentoControlCmrPdf({
   box("4", "Lugar y fecha de carga / Place and date of taking over", [...cmrAddressLines(docData.origen), `Previsto: ${cmrDate(docData.horarios?.fecha_carga)} ${docData.horarios?.hora_carga || docData.horarios?.ventana_carga || ""}`], left, y, colW, rowH);
   box("19", "Acuerdos especiales / Special agreements", `Pago: ${docData.condiciones?.forma_pago || "-"}`, left + colW, y, colW, rowH);
   y += rowH;
-  box("5", "Documentos anexos / Documents attached", "DCD/eCMR TransGest, albaranes/POD/CMR si se adjuntan al viaje.", left, y, colW, 46);
+  const anexosPdf = Array.isArray(docData.documentos_anexos) ? docData.documentos_anexos : [];
+  const anexosPdfTexto = anexosPdf.length
+    ? anexosPdf.slice(0, 5).map((item, idx) => `${idx + 1}. ${item.nombre || "Documento adjunto"}${item.tipo ? ` (${item.tipo})` : ""}`).join("\n")
+    : "DCD/eCMR TransGest. Albaranes/POD pendientes de adjuntar al viaje.";
+  box("5", "Documentos anexos / Documents attached", anexosPdfTexto, left, y, colW, 46);
   box("21", "Establecido en / Established in", `${docData.origen?.provincia || docData.origen?.pais || "Espana"} - ${cmrDate(generatedAt)}`, left + colW, y, colW, 46);
   y += 56;
 

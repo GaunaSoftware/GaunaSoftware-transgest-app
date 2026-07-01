@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
+import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, getTallerSolicitudCapacidades, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -15,7 +15,7 @@ const EC = {
 
 const PASOS_KEY = id => `tms_chofer_pasos_${id}`;
 const OFFLINE_QUEUE_KEY = "tms_offline_queue";
-const SOLICITUDES_KEY = "tms_solicitudes_mecanico";
+const LEGACY_SOLICITUDES_KEY = "tms_solicitudes_mecanico";
 const PROTOCOLO_CISTERNA = [
   { key:"protocolo_cisterna_epi", label:"EPI colocado", detail:"Guantes, gafas/pantalla y proteccion requerida para el producto." },
   { key:"protocolo_cisterna_zona", label:"Zona segura", detail:"Vehiculo inmovilizado, zona acotada y sin fuentes de ignicion." },
@@ -25,7 +25,7 @@ const PROTOCOLO_CISTERNA = [
   { key:"protocolo_cisterna_fugas", label:"Sin fugas", detail:"Comprobacion visual de fugas y derrames antes de iniciar operacion." },
 ];
 let choferPasosCache = {};
-let solicitudesMecanicoCache = null;
+let solicitudesTallerCache = null;
 
 function normalizeChoferPasos(value = {}) {
   const source = value && typeof value === "object" ? value : {};
@@ -140,24 +140,24 @@ function guardarPasosViaje(id, patch) {
 }
 
 function leerSolicitudesCache() {
-  if (Array.isArray(solicitudesMecanicoCache)) return solicitudesMecanicoCache.slice(0, 50);
+  if (Array.isArray(solicitudesTallerCache)) return solicitudesTallerCache.slice(0, 50);
   try {
-    const imported = JSON.parse(localStorage.getItem(SOLICITUDES_KEY) || "[]");
-    try { localStorage.removeItem(SOLICITUDES_KEY); } catch {}
-    solicitudesMecanicoCache = Array.isArray(imported) ? imported.slice(0, 50) : [];
-    if (typeof window !== "undefined") window.__TMS_SOLICITUDES_MECANICO = solicitudesMecanicoCache;
-    return solicitudesMecanicoCache.slice(0, 50);
+    const imported = JSON.parse(localStorage.getItem(LEGACY_SOLICITUDES_KEY) || "[]");
+    try { localStorage.removeItem(LEGACY_SOLICITUDES_KEY); } catch {}
+    solicitudesTallerCache = Array.isArray(imported) ? imported.slice(0, 50) : [];
+    if (typeof window !== "undefined") window.__TMS_SOLICITUDES_TALLER = solicitudesTallerCache;
+    return solicitudesTallerCache.slice(0, 50);
   } catch {
-    solicitudesMecanicoCache = [];
+    solicitudesTallerCache = [];
     return [];
   }
 }
 
 function guardarSolicitudesCache(items = []) {
-  solicitudesMecanicoCache = Array.isArray(items) ? items.slice(0, 50) : [];
-  if (typeof window !== "undefined") window.__TMS_SOLICITUDES_MECANICO = solicitudesMecanicoCache;
-  try { localStorage.removeItem(SOLICITUDES_KEY); } catch {}
-  return solicitudesMecanicoCache.slice(0, 50);
+  solicitudesTallerCache = Array.isArray(items) ? items.slice(0, 50) : [];
+  if (typeof window !== "undefined") window.__TMS_SOLICITUDES_TALLER = solicitudesTallerCache;
+  try { localStorage.removeItem(LEGACY_SOLICITUDES_KEY); } catch {}
+  return solicitudesTallerCache.slice(0, 50);
 }
 
 function leerOfflineQueue() {
@@ -601,7 +601,8 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
   const [archivo, setArchivo] = useState(null);
   const [doc, setDoc] = useState(null);
   const [error, setError] = useState("");
-  const inputId = `albaran-${fase}-${pedido.id}`;
+  const cameraInputId = `albaran-camera-${fase}-${pedido.id}`;
+  const fileInputId = `albaran-file-${fase}-${pedido.id}`;
 
   async function seleccionarArchivo(e) {
     const file = e.target.files?.[0];
@@ -661,8 +662,8 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
         <span style={{fontSize:10,fontWeight:800,color:"#3b82f6",background:"rgba(59,130,246,.12)",padding:"3px 8px",borderRadius:20}}>ESCANER</span>
       </div>
 
-      <label htmlFor={inputId}
-        style={{display:"block",position:"relative",minHeight:150,border:"2px dashed rgba(59,130,246,.55)",borderRadius:10,background:"#111827",overflow:"hidden",cursor:"pointer"}}>
+      <div
+        style={{display:"block",position:"relative",minHeight:150,border:"2px dashed rgba(59,130,246,.55)",borderRadius:10,background:"#111827",overflow:"hidden"}}>
         {doc?.preview ? (
           <img src={doc.preview} alt="Vista previa albaran" style={{width:"100%",height:190,objectFit:"cover",display:"block",background:"#111827"}}/>
         ) : (
@@ -682,21 +683,33 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
             left:pos.includes("l")?10:"auto",right:pos.includes("r")?10:"auto",
           }}/>
         ))}
-        <input id={inputId} type="file" accept="image/*,application/pdf" capture="environment" onChange={seleccionarArchivo} style={{display:"none"}}/>
-      </label>
+      </div>
+      <input id={cameraInputId} type="file" accept="image/*" capture="environment" onChange={seleccionarArchivo} style={{display:"none"}}/>
+      <input id={fileInputId} type="file" accept="image/*,application/pdf" onChange={seleccionarArchivo} style={{display:"none"}}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:9}}>
+        <button type="button" disabled={procesando || subiendo} onClick={()=>document.getElementById(cameraInputId)?.click()}
+          style={{padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.35)",background:"rgba(59,130,246,.10)",color:"#60a5fa",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          Abrir camara
+        </button>
+        <button type="button" disabled={procesando || subiendo} onClick={()=>document.getElementById(fileInputId)?.click()}
+          style={{padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text3)",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          Elegir archivo
+        </button>
+      </div>
 
       {archivo && (
         <div style={{fontSize:11,color:"var(--text4)",marginTop:7}}>
           Preparado: <strong style={{color:"var(--text)"}}>{archivo.name}</strong> - {doc?.sizeKb || Math.round(archivo.size/1024)} KB
+          {doc?.mime?.startsWith("image/") && (
+            <span style={{display:"block",marginTop:3,color:doc.scan_detected ? "#10b981" : "#f59e0b",fontWeight:800}}>
+              {doc.scan_detected ? "Documento detectado y recortado automaticamente." : "Imagen limpiada como escaner; no se detectaron bien los bordes del papel."}
+            </span>
+          )}
         </div>
       )}
       {error && <div style={{fontSize:12,color:"#ef4444",marginTop:8}}>{error}</div>}
 
       <div style={{display:"flex",gap:8,marginTop:10}}>
-        <button onClick={()=>document.getElementById(inputId)?.click()} disabled={procesando || subiendo}
-          style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-          {procesando ? "Preparando..." : "Hacer foto / elegir"}
-        </button>
         <button onClick={subir} disabled={!doc || subiendo}
           style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:doc ? "#10b981" : "var(--border2)",color:"#fff",fontWeight:800,fontSize:12,cursor:doc?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
           {subiendo ? "Subiendo..." : "Adjuntar"}
@@ -951,6 +964,13 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     return persistirPasos(patch, { silent: true });
   }
 
+  async function albaranSubido(key) {
+    await marcarPaso(key);
+    const fresh = await cargarDocumentoControl();
+    if (fresh) setDocControl(fresh);
+    onActualizar();
+  }
+
   const timerActual = (() => {
     void tick;
     if (pasos.carga_iniciada && !pasos.carga_proceso) {
@@ -1154,6 +1174,8 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       });
       await cambiarEstadoPedido(pedido.id,"entregado");
       await persistirPasos({ descarga_ok:true, firma_entrega:true, firma_entrega_at:new Date().toISOString(), ...patchKmParaPaso("firma_entrega") }, { silent:true });
+      const fresh = await cargarDocumentoControl();
+      if (fresh) setDocControl(fresh);
       setFirmando(false);
       onActualizar();
     }catch(err){notify(err.message, "error");}
@@ -1456,7 +1478,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                     <button
                       onClick={()=>abrirDocumentoControl(false)}
                       style={{padding:"10px",borderRadius:8,border:"1px solid rgba(16,185,129,.3)",background:"rgba(16,185,129,.08)",color:"#10b981",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                      Abrir soporte
+                      Mostrar DCD
                     </button>
                     <button
                       onClick={()=>abrirDocumentoControl(true)}
@@ -1502,9 +1524,9 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
               <div style={{fontWeight:900,fontSize:13,color:"var(--text)",marginBottom:4}}>{nextStep.label}</div>
               <div style={{fontSize:11,color:"var(--text5)",marginBottom:10,lineHeight:1.45}}>{nextStep.help}</div>
               {nextStep.type === "albaran_carga" ? (
-                <EscanerAlbaran pedido={pedido} fase="carga" onUploaded={()=>marcarPaso("albaran_carga")} />
+                <EscanerAlbaran pedido={pedido} fase="carga" onUploaded={()=>albaranSubido("albaran_carga")} />
               ) : nextStep.type === "albaran_descarga" ? (
-                <EscanerAlbaran pedido={pedido} fase="descarga" onUploaded={()=>marcarPaso("albaran_descarga")} />
+                <EscanerAlbaran pedido={pedido} fase="descarga" onUploaded={()=>albaranSubido("albaran_descarga")} />
               ) : (
                 <button onClick={nextStep.run} disabled={loading}
                   style={{width:"100%",padding:"12px",borderRadius:8,border:"none",background:nextStep.color || "#10b981",color:"#fff",fontSize:13,fontWeight:900,cursor:loading?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
@@ -1514,7 +1536,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
             </div>
           )}
 
-          {["en_curso","descarga"].includes(pedido.estado) && (!pasos.firma_entrega || !pedido.firma_fecha) && (
+          {["en_curso","descarga"].includes(pedido.estado) && pasos.descarga_ok && (!pasos.firma_entrega || !pedido.firma_fecha) && (
             <button onClick={abrirFirmaFinalizacionManual} disabled={loading}
               style={{width:"100%",padding:"11px",borderRadius:8,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.12)",color:"#10b981",fontSize:13,fontWeight:900,cursor:loading?"default":"pointer",fontFamily:"'DM Sans',sans-serif",marginBottom:12}}>
               {pasos.firma_entrega && !pedido.firma_fecha ? "Firmar y cerrar viaje" : "Finalizar / firmar entrega"}
@@ -1587,7 +1609,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
             </button>
             {pedido.estado!=="entregado"&&pedido.estado!=="cancelado"&&(
               <button onClick={()=>abrirIncidencia(pedido.estado==="descarga"?"descarga":"ruta")} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(251,191,36,.3)",background:"rgba(251,191,36,.1)",color:"#fbbf24",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                Incidencia
+                Aviso viaje
               </button>
             )}
             {pasos.firma_entrega&&(
@@ -1624,9 +1646,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   );
 }
 
-// Solicitud al mecanico
-
-// Solicitud al mecanico
+// Solicitudes de taller desde app chofer
 const MOTIVOS_AVERIA = [
   { id:"neumatico_pinchado",  l:"Neumatico pinchado" },
   { id:"averia_motor",        l:"Averia motor" },
@@ -1663,13 +1683,26 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
   const [motivo,   setMotivo]   = useState("");
   const [obs,      setObs]      = useState("");
   const [urgencia, setUrgencia] = useState("normal"); // normal | urgente | critica
+  const [capacidades, setCapacidades] = useState(null);
+  const [canal, setCanal] = useState("");
+  const [proveedorId, setProveedorId] = useState("");
   const [enviado,  setEnviado]  = useState(false);
   const [historial, setHistorial] = useState(() => Array.isArray(solicitudes) && solicitudes.length ? solicitudes.slice(0, 50) : []);
 
   useEffect(()=>{
     let alive = true;
-    getTallerSolicitudes().then(remotas => {
+    Promise.all([
+      getTallerSolicitudes().catch(() => []),
+      getTallerSolicitudCapacidades().catch(() => null),
+    ]).then(([remotas, caps]) => {
       if (!alive) return;
+      if (caps) {
+        setCapacidades(caps);
+        const nextCanal = caps.puede_mecanico ? "mecanico" : caps.puede_taller_externo ? "taller_externo" : "";
+        setCanal(prev => prev || nextCanal);
+        const proveedores = Array.isArray(caps.proveedores) ? caps.proveedores : [];
+        if (proveedores[0]?.id) setProveedorId(prev => prev || proveedores[0].id);
+      }
       if (Array.isArray(remotas)) {
         const synced = guardarSolicitudesCache(remotas);
         setHistorial(synced);
@@ -1690,6 +1723,17 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
 
   async function enviar() {
     if (!motivo) { notify("Selecciona el motivo de la averia", "warning"); return; }
+    const puedeMecanico = !!capacidades?.puede_mecanico;
+    const puedeTallerExterno = !!capacidades?.puede_taller_externo;
+    if (!puedeMecanico && !puedeTallerExterno) {
+      notify("No hay mecanicos ni talleres externos configurados para recibir solicitudes.", "warning");
+      return;
+    }
+    const canalSolicitud = canal || (puedeMecanico ? "mecanico" : "taller_externo");
+    if (canalSolicitud === "taller_externo" && !proveedorId && Array.isArray(capacidades?.proveedores) && capacidades.proveedores.length > 1) {
+      notify("Selecciona el taller externo.", "warning");
+      return;
+    }
     const solicitud = {
       id: "sol_"+Date.now(),
       chofer_nombre: chofer?.nombre || "Chofer",
@@ -1699,6 +1743,8 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
       motivo_label: MOTIVOS_AVERIA.find(m=>m.id===motivo)?.l || motivo,
       observaciones: obs,
       urgencia,
+      canal: canalSolicitud,
+      proveedor_id: canalSolicitud === "taller_externo" ? (proveedorId || capacidades?.proveedores?.[0]?.id || "") : "",
       fecha: new Date().toISOString(),
       estado: "pendiente",
       pedido_numero: vehiculo?.numero,
@@ -1729,7 +1775,7 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
       onSolicitudesSync?.(fallbackLocal);
       emitirSyncSolicitudesTaller();
       const q = leerOfflineQueue();
-      q.push({ tipo:"solicitud_mecanico", solicitud, fecha:new Date().toISOString() });
+      q.push({ tipo:"solicitud_taller", solicitud, fecha:new Date().toISOString() });
       guardarOfflineQueue(q);
       notify("Sin conexion: la solicitud se ha guardado y se enviara en cuanto vuelva el sistema.", "warning");
       setEnviado(true);
@@ -1758,13 +1804,50 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
         </div>
       ) : (
         <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{fontWeight:800,fontSize:16,color:"var(--text)",marginBottom:16}}>Solicitar asistencia mecanico</div>
+          <div style={{fontWeight:800,fontSize:16,color:"var(--text)",marginBottom:16}}>Solicitar asistencia de taller</div>
 
           {/* Vehiculo info */}
           {vehiculo && (
             <div style={{padding:"8px 12px",background:"var(--bg3)",borderRadius:8,marginBottom:14,fontSize:13,color:"var(--text4)"}}>
               Vehiculo: <strong style={{color:"var(--text)"}}>{vehiculo.matricula||"-"}</strong>
               {vehiculo.numero&&<span style={{marginLeft:8}}> - Pedido {vehiculo.numero}</span>}
+            </div>
+          )}
+
+          {capacidades && !capacidades.puede_mecanico && !capacidades.puede_taller_externo && (
+            <div style={{padding:"10px 12px",borderRadius:8,border:"1px solid rgba(245,158,11,.28)",background:"rgba(245,158,11,.10)",color:"#f59e0b",fontSize:12,fontWeight:800,lineHeight:1.4,marginBottom:14}}>
+              La empresa no tiene mecanico interno ni talleres externos configurados. Pide a gerencia que configure al menos un canal de taller.
+            </div>
+          )}
+
+          {capacidades && capacidades.puede_mecanico && capacidades.puede_taller_externo && (
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Enviar a</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <button type="button" onClick={()=>setCanal("mecanico")}
+                  style={{padding:"10px",borderRadius:8,border:`1.5px solid ${canal==="mecanico"?"var(--accent)":"var(--border)"}`,background:canal==="mecanico"?"rgba(59,130,246,.10)":"var(--bg3)",color:canal==="mecanico"?"var(--accent)":"var(--text3)",fontSize:12,fontWeight:900,cursor:"pointer"}}>
+                  Mecanico interno
+                </button>
+                <button type="button" onClick={()=>setCanal("taller_externo")}
+                  style={{padding:"10px",borderRadius:8,border:`1.5px solid ${canal==="taller_externo"?"var(--accent)":"var(--border)"}`,background:canal==="taller_externo"?"rgba(59,130,246,.10)":"var(--bg3)",color:canal==="taller_externo"?"var(--accent)":"var(--text3)",fontSize:12,fontWeight:900,cursor:"pointer"}}>
+                  Taller externo
+                </button>
+              </div>
+            </div>
+          )}
+
+          {capacidades && !capacidades.puede_mecanico && capacidades.puede_taller_externo && (
+            <div style={{padding:"9px 11px",borderRadius:8,background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.22)",color:"#14b8a6",fontSize:12,fontWeight:800,marginBottom:14}}>
+              Se enviara a taller externo.
+            </div>
+          )}
+
+          {canal === "taller_externo" && Array.isArray(capacidades?.proveedores) && capacidades.proveedores.length > 0 && (
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Taller externo</div>
+              <select value={proveedorId} onChange={e=>setProveedorId(e.target.value)} style={inp}>
+                {capacidades.proveedores.map(p => <option key={p.id || p.nombre} value={p.id || p.nombre}>{p.nombre}</option>)}
+              </select>
             </div>
           )}
 
@@ -1811,12 +1894,12 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
               style={{...inp,resize:"none"}}/>
           </div>
 
-          <button onClick={enviar}
+          <button onClick={enviar} disabled={capacidades && !capacidades.puede_mecanico && !capacidades.puede_taller_externo}
             style={{width:"100%",padding:"14px",borderRadius:10,border:"none",
               background:urgencia==="critica"?"#ef4444":urgencia==="urgente"?"#f59e0b":"var(--accent)",
               color:"#fff",fontWeight:800,fontSize:15,cursor:"pointer",
-              fontFamily:"'DM Sans',sans-serif"}}>
-            Enviar solicitud al mecanico
+              fontFamily:"'DM Sans',sans-serif",opacity:capacidades && !capacidades.puede_mecanico && !capacidades.puede_taller_externo ? .55 : 1}}>
+            Enviar solicitud de taller
           </button>
         </div>
       )}
@@ -1844,6 +1927,11 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
                     <span style={{fontSize:10,padding:"3px 8px",borderRadius:10,fontWeight:800,background:estadoMeta.bg,color:estadoMeta.c}}>
                       {estadoMeta.l}
                     </span>
+                    {s.canal && (
+                      <span style={{fontSize:10,padding:"3px 8px",borderRadius:10,fontWeight:800,background:"rgba(20,184,166,.12)",color:"#14b8a6"}}>
+                        {s.canal === "taller_externo" ? (s.proveedor_nombre || "Taller") : "Mecanico"}
+                      </span>
+                    )}
                     <span style={{fontSize:10,padding:"3px 8px",borderRadius:10,fontWeight:800,
                       background:s.urgencia==="critica"?"rgba(239,68,68,.15)":s.urgencia==="urgente"?"rgba(245,158,11,.15)":"rgba(59,130,246,.15)",
                       color:s.urgencia==="critica"?"#ef4444":s.urgencia==="urgente"?"#f59e0b":"var(--accent)"}}>
@@ -2019,6 +2107,19 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
     }
     return run(()=>cambiarChoferJornadaActividad({ actividad, ...payload }));
   }
+  async function cerrarJornadaCompleta() {
+    await run(async () => {
+      if (jornada?.actividad_actual !== "descanso") {
+        await cambiarChoferJornadaActividad({
+          actividad: "descanso",
+          objetivo_descanso_min: 660,
+          notas: "Descanso automatico al cerrar jornada",
+        });
+      }
+      await cerrarChoferJornada({ km_fin: kmFin || null, hace_noche: haceNoche, noche_lugar: nocheLugar || null, notas });
+    });
+    notify("Jornada cerrada y disco interno en descanso.", "success");
+  }
   return (
     <div>
       <div style={S.card}>
@@ -2117,7 +2218,7 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
             )}
             <label style={S.label}>Notas cierre</label>
             <input style={S.input} value={notas} onChange={e=>setNotas(e.target.value)} placeholder="Observaciones de cierre" />
-            <button disabled={saving} onClick={()=>run(()=>cerrarChoferJornada({ km_fin: kmFin || null, hace_noche: haceNoche, noche_lugar: nocheLugar || null, notas }))} style={{...S.btn,width:"100%",marginTop:12,background:"#ef4444",color:"#fff",borderColor:"#ef4444"}}>
+            <button disabled={saving} onClick={cerrarJornadaCompleta} style={{...S.btn,width:"100%",marginTop:12,background:"#ef4444",color:"#fff",borderColor:"#ef4444"}}>
               Cerrar jornada
             </button>
           </div>
@@ -2180,7 +2281,7 @@ function VacacionesChofer({ items = [], chofer, onRefresh }) {
         <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
           Solicita vacaciones y firma la solicitud desde la app. Si gerencia aprueba sin firma directa, aparecerá aquí para firmar la aceptación.
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}>
+        <div className="tg-chofer-vacaciones-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}>
           <div>
             <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Inicio</label>
             <input type="date" value={form.fecha_inicio} onChange={e=>setForm(p=>({...p,fecha_inicio:e.target.value}))}
@@ -2209,7 +2310,7 @@ function VacacionesChofer({ items = [], chofer, onRefresh }) {
           const [label, color] = estados[item.estado] || [item.estado || "Estado", "var(--text5)"];
           return (
             <div key={item.id} style={{borderTop:"1px solid var(--border)",padding:"10px 0"}}>
-              <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}>
+              <div className="tg-chofer-vacaciones-row" style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}>
                 <div>
                   <div style={{fontWeight:900,fontSize:13,color:"var(--text)"}}>
                     {String(item.fecha_inicio || "").slice(0,10)} a {String(item.fecha_fin || "").slice(0,10)}
@@ -2514,16 +2615,16 @@ function NuevoViajeChofer({ onCreado }) {
               {creatingRuta ? "Creando ruta..." : "Crear ruta para revisar"}
             </button>
           )}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div className="tg-chofer-nuevo-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <input type="date" value={form.fecha_carga} onChange={e=>set("fecha_carga", e.target.value)} style={inputStyle}/>
             <input type="time" value={form.hora_carga} onChange={e=>set("hora_carga", e.target.value)} style={inputStyle}/>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div className="tg-chofer-nuevo-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <input type="date" value={form.fecha_descarga} onChange={e=>set("fecha_descarga", e.target.value)} style={inputStyle}/>
             <input type="time" value={form.hora_descarga} onChange={e=>set("hora_descarga", e.target.value)} style={inputStyle}/>
           </div>
           <input value={form.mercancia} onChange={e=>set("mercancia", e.target.value)} placeholder="Mercancia" style={inputStyle}/>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div className="tg-chofer-nuevo-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <input inputMode="decimal" value={form.peso_kg} onChange={e=>set("peso_kg", e.target.value)} placeholder="Peso kg" style={inputStyle}/>
             <input inputMode="numeric" value={form.bultos} onChange={e=>set("bultos", e.target.value)} placeholder="Bultos" style={inputStyle}/>
           </div>
@@ -2553,7 +2654,6 @@ export default function AppChofer(){
   const [solicitudesChofer, setSolicitudesChofer] = useState([]);
   const [vacacionesChofer, setVacacionesChofer] = useState([]);
   const [loading,   setLoading]   = useState(true);
-  const [filtroFecha,setFiltroFecha]=useState("semana"); // hoy | semana | todos
   const [tab,       setTab]       = useState("activos"); // activos | nuevo | historial | solicitud
 
   // PWA state
@@ -2572,9 +2672,6 @@ export default function AppChofer(){
     text: "Ubicacion en espera hasta iniciar jornada.",
   });
 
-  const hoy = new Date().toISOString().slice(0,10);
-  const lunesStr = (() => { const d=new Date(); d.setDate(d.getDate()-(d.getDay()||7)+1); return d.toISOString().slice(0,10); })();
-
   const cargar = useCallback(async () => {
     setLoading(true);
     try{
@@ -2583,10 +2680,15 @@ export default function AppChofer(){
       setPedidos(arr);
       const jornada = await getChoferJornadaApp().catch(() => null);
       setJornadaInfo(jornada);
-      const avisos = await getNotificaciones(20).catch(() => ({ data: [] }));
-      setRouteNotifications((Array.isArray(avisos?.data) ? avisos.data : [])
-        .filter(n => String(n.tipo || "") === "ruta_chofer_app")
-        .slice(0, 3));
+      const puedeLeerAvisos = user?.rol !== "chofer" || user?.permisos?.avisos?.ver === true;
+      if (puedeLeerAvisos) {
+        const avisos = await getNotificaciones(20).catch(() => ({ data: [] }));
+        setRouteNotifications((Array.isArray(avisos?.data) ? avisos.data : [])
+          .filter(n => String(n.tipo || "") === "ruta_chofer_app")
+          .slice(0, 3));
+      } else {
+        setRouteNotifications([]);
+      }
       if (isLitePlan) {
         setSolicitudesChofer([]);
         setVacacionesChofer([]);
@@ -2600,7 +2702,7 @@ export default function AppChofer(){
       }
     }catch(e){ console.error(e); }
     finally{ setLoading(false); }
-  }, [user?.id, user?.chofer_id, isLitePlan]);
+  }, [user?.id, user?.chofer_id, user?.rol, user?.permisos?.avisos?.ver, isLitePlan]);
 
   useEffect(()=>{ cargar(); },[cargar]);
 
@@ -2720,11 +2822,6 @@ export default function AppChofer(){
     if(tab==="activos") return activo;
     if(tab==="historial") return !activo;
     return true;
-  }).filter(p=>{
-    const f=(p.fecha_carga||p.fecha_pedido||"").slice(0,10);
-    if(filtroFecha==="hoy")    return f===hoy;
-    if(filtroFecha==="semana") return f>=lunesStr;
-    return true;
   }).sort((a,b)=>(ORDEN_ESTADO[a.estado]??99)-(ORDEN_ESTADO[b.estado]??99));
 
   // Mark the next confirmed trip after any en_curso
@@ -2746,7 +2843,7 @@ export default function AppChofer(){
     } : null);
   const tabsChofer = isLitePlan
     ? [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["historial","Historial"]]
-    : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Mecanico"]];
+    : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Taller"]];
 
   // PWA helpers
   async function installApp() {
@@ -2778,7 +2875,7 @@ export default function AppChofer(){
     if (!q.length) return;
     Promise.all(q.map(async item => {
       try {
-        if (item.tipo === "solicitud_mecanico" && item.solicitud) {
+        if ((item.tipo === "solicitud_mecanico" || item.tipo === "solicitud_taller") && item.solicitud) {
           await crearTallerSolicitud(item.solicitud);
           return true;
         }
@@ -2814,7 +2911,50 @@ export default function AppChofer(){
       .tg-app-chofer-page, .tg-app-chofer-page * { box-sizing:border-box; min-width:0; }
       .tg-app-chofer-page { width:min(480px, 100vw); }
       .tg-app-chofer-page img, .tg-app-chofer-page video, .tg-app-chofer-page canvas, .tg-app-chofer-page svg { max-width:100%; }
+      .tg-chofer-header-main { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+      .tg-chofer-header-actions { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
+      .tg-chofer-tabs {
+        display:flex;
+        gap:2px;
+        overflow-x:auto;
+        overflow-y:hidden;
+        -webkit-overflow-scrolling:touch;
+        scrollbar-width:none;
+        scroll-snap-type:x proximity;
+      }
+      .tg-chofer-tabs::-webkit-scrollbar { display:none; }
+      .tg-chofer-tab {
+        flex:0 0 auto !important;
+        min-width:92px;
+        white-space:nowrap;
+        scroll-snap-align:start;
+      }
+      @media (max-width: 520px) {
+        .tg-chofer-nuevo-grid {
+          grid-template-columns:1fr !important;
+        }
+        .tg-chofer-header-main {
+          align-items:flex-start;
+        }
+        .tg-chofer-header-actions {
+          gap:6px;
+        }
+        .tg-chofer-header-actions button {
+          padding:7px 9px !important;
+          font-size:11px !important;
+        }
+      }
       @media (max-width: 380px) {
+        .tg-chofer-tab {
+          min-width:104px !important;
+        }
+        .tg-chofer-vacaciones-grid {
+          grid-template-columns:1fr !important;
+        }
+        .tg-chofer-vacaciones-row {
+          display:grid !important;
+          grid-template-columns:1fr !important;
+        }
         .tg-app-chofer-page [style*="grid-template-columns:1fr 1fr"],
         .tg-app-chofer-page [style*="grid-template-columns: 1fr 1fr"],
         .tg-app-chofer-page [style*="grid-template-columns:1fr 1fr 1fr"],
@@ -2838,7 +2978,7 @@ export default function AppChofer(){
 
       {/* Header fijo movil */}
       <div style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)",padding:"14px 16px",position:"sticky",top:0,zIndex:50}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div className="tg-chofer-header-main">
           <div>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"var(--text)"}}>Mis viajes</div>
             <div style={{fontSize:11,color:"var(--text4)",marginTop:1,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
@@ -2847,7 +2987,7 @@ export default function AppChofer(){
               {pedidos.filter(p=>p.estado==="confirmado").length>0&&<span style={{padding:"1px 7px",borderRadius:20,background:"rgba(59,130,246,.15)",color:"var(--accent)",fontWeight:700,fontSize:10}}>{pedidos.filter(p=>p.estado==="confirmado").length} pendiente{pedidos.filter(p=>p.estado==="confirmado").length>1?"s":""}</span>}
             </div>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div className="tg-chofer-header-actions">
             {notifPerm==="default" && (
               <button onClick={pedirNotificaciones} title="Activar notificaciones"
                 style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,
@@ -2919,10 +3059,10 @@ export default function AppChofer(){
       )}
 
       {/* Tabs */}
-      <div style={{display:"flex",background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+      <div className="tg-chofer-tabs" style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
         {tabsChofer.map(([id,l])=>(
-          <button key={id} onClick={()=>setTab(id)}
-            style={{flex:1,padding:"11px",border:"none",borderBottom:`2px solid ${tab===id?"var(--accent)":"transparent"}`,
+          <button className="tg-chofer-tab" key={id} onClick={()=>setTab(id)}
+            style={{padding:"11px 12px",border:"none",borderBottom:`2px solid ${tab===id?"var(--accent)":"transparent"}`,
               color:tab===id?"var(--accent)":"var(--text4)",background:"transparent",
               fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>
             {l}
@@ -2954,19 +3094,6 @@ export default function AppChofer(){
         </button>
       )}
 
-      {/* Filtro fecha */}
-      <div style={{display:"flex",gap:6,padding:"10px 16px",background:"var(--bg3)",borderBottom:"1px solid var(--border)"}}>
-        {[["hoy","Hoy"],["semana","Esta semana"],["todos","Todos"]].map(([v,l])=>(
-          <button key={v} onClick={()=>setFiltroFecha(v)}
-            style={{padding:"5px 12px",borderRadius:20,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",
-              background:filtroFecha===v?"var(--accent)":"transparent",
-              color:filtroFecha===v?"#fff":"var(--text4)",
-              border:`1px solid ${filtroFecha===v?"transparent":"var(--border)"}` }}>
-            {l}
-          </button>
-        ))}
-      </div>
-
       {/* Lista viajes */}
       {tab!=="solicitud" && tab!=="jornada" && tab!=="vacaciones" && tab!=="nuevo" && (
         <div style={{padding:"12px 16px"}}>
@@ -2992,10 +3119,10 @@ export default function AppChofer(){
       )}
 
       {tab==="nuevo" && (
-        <NuevoViajeChofer onCreado={()=>{ cargar(); setFiltroFecha("todos"); }} />
+        <NuevoViajeChofer onCreado={()=>{ cargar(); }} />
       )}
 
-      {/* Solicitud mecanico */}
+      {/* Solicitud taller */}
       {tab==="solicitud" && (
         <SolicitudMecanico
           chofer={user}

@@ -1033,6 +1033,8 @@ async function applyMigrations() {
         UNIQUE (vehiculo_id)
       )
     `).catch(()=>{});
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()").catch(()=>{});
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()").catch(()=>{});
     await db.query("CREATE INDEX IF NOT EXISTS idx_vehiculos_ext_empresa ON vehiculos_ext(empresa_id, vehiculo_id)").catch(()=>{});
     await db.query(`
       CREATE TABLE IF NOT EXISTS vehiculo_eventos (

@@ -52,6 +52,29 @@ function barcode(prefix = "TG") {
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 let tallerUnidadesSchemaPromise = null;
+let tallerIntervencionesExtraSchemaPromise = null;
+
+async function ensureTallerIntervencionesExtraSchema() {
+  if (!tallerIntervencionesExtraSchemaPromise) {
+    tallerIntervencionesExtraSchemaPromise = (async () => {
+      await db.query("ALTER TABLE taller_intervenciones ADD COLUMN IF NOT EXISTS origen_taller VARCHAR(30) NOT NULL DEFAULT 'propio'").catch(() => {});
+      await db.query("ALTER TABLE taller_intervenciones ADD COLUMN IF NOT EXISTS proveedor_id VARCHAR(120)").catch(() => {});
+      await db.query("ALTER TABLE taller_intervenciones ADD COLUMN IF NOT EXISTS factura_proveedor_num VARCHAR(120)").catch(() => {});
+      await db.query("ALTER TABLE taller_intervenciones ADD COLUMN IF NOT EXISTS factura_proveedor_nombre VARCHAR(200)").catch(() => {});
+      await db.query("ALTER TABLE taller_intervenciones ADD COLUMN IF NOT EXISTS factura_proveedor_importe NUMERIC(12,2) NOT NULL DEFAULT 0").catch(() => {});
+      await db.query("ALTER TABLE taller_intervenciones ADD COLUMN IF NOT EXISTS factura_proveedor_fecha DATE").catch(() => {});
+      await db.query("ALTER TABLE taller_intervenciones ADD COLUMN IF NOT EXISTS factura_proveedor_file_name VARCHAR(240)").catch(() => {});
+      await db.query("ALTER TABLE taller_intervenciones ADD COLUMN IF NOT EXISTS factura_proveedor_file_mime VARCHAR(120)").catch(() => {});
+      await db.query("ALTER TABLE taller_intervenciones ADD COLUMN IF NOT EXISTS factura_proveedor_file_base64 TEXT").catch(() => {});
+      await db.query("CREATE INDEX IF NOT EXISTS idx_taller_intervenciones_externo ON taller_intervenciones(empresa_id, origen_taller, fecha DESC)").catch(() => {});
+    })().catch((error) => {
+      tallerIntervencionesExtraSchemaPromise = null;
+      throw error;
+    });
+  }
+  await tallerIntervencionesExtraSchemaPromise;
+}
+
 async function ensureTallerUnidadesSchema() {
   if (!tallerUnidadesSchemaPromise) {
     tallerUnidadesSchemaPromise = (async () => {
@@ -232,10 +255,63 @@ router.get("/solicitudes", async (req, res) => {
   res.json(solicitudes);
 });
 
+router.get("/solicitudes/capacidades", async (req, res) => {
+  if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  const [{ rows: estadoRows }, { rows: mecanicosRows }] = await Promise.all([
+    db.query("SELECT data FROM taller_estado WHERE empresa_id=$1", [empresaId(req)]).catch(() => ({ rows: [] })),
+    db.query(
+      "SELECT COUNT(*)::int AS total FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('mecanico','responsable_taller')",
+      [empresaId(req)]
+    ).catch(() => ({ rows: [{ total: 0 }] })),
+  ]);
+  const data = normalizar(estadoRows[0]?.data);
+  const proveedores = Array.isArray(data.proveedores) ? data.proveedores.filter(p => p && p.nombre) : [];
+  const mecanicos = Number(mecanicosRows[0]?.total || 0);
+  res.json({
+    mecanicos,
+    proveedores_taller: proveedores.length,
+    proveedores: proveedores.map(p => ({
+      id: p.id || p.nombre,
+      nombre: p.nombre || "",
+      telefono: p.telefono || "",
+      email: p.email || "",
+    })).slice(0, 50),
+    puede_mecanico: mecanicos > 0,
+    puede_taller_externo: proveedores.length > 0,
+  });
+});
+
 router.post("/solicitudes", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const body = req.body || {};
   if (!body.motivo && !body.motivo_label) return res.status(400).json({ error: "Motivo obligatorio" });
+  const { rows } = await db.query(
+    "SELECT data FROM taller_estado WHERE empresa_id=$1",
+    [empresaId(req)]
+  );
+  const data = normalizar(rows[0]?.data);
+  const proveedores = Array.isArray(data.proveedores) ? data.proveedores.filter(p => p && p.nombre) : [];
+  const { rows: mecanicosRows } = await db.query(
+    "SELECT COUNT(*)::int AS total FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('mecanico','responsable_taller')",
+    [empresaId(req)]
+  ).catch(() => ({ rows: [{ total: 0 }] }));
+  const puedeMecanico = Number(mecanicosRows[0]?.total || 0) > 0;
+  const puedeTallerExterno = proveedores.length > 0;
+  if (!puedeMecanico && !puedeTallerExterno) {
+    return res.status(409).json({ error: "No hay mecanicos ni talleres externos configurados para recibir solicitudes." });
+  }
+  let canal = String(body.canal || "").toLowerCase();
+  if (!["mecanico", "taller_externo"].includes(canal)) canal = puedeMecanico ? "mecanico" : "taller_externo";
+  if (canal === "mecanico" && !puedeMecanico) {
+    return res.status(409).json({ error: "La empresa no tiene mecanico interno configurado. Selecciona un taller externo." });
+  }
+  if (canal === "taller_externo" && !puedeTallerExterno) {
+    return res.status(409).json({ error: "La empresa no tiene talleres externos configurados." });
+  }
+  const proveedorId = body.proveedor_id ? String(body.proveedor_id) : "";
+  const proveedor = canal === "taller_externo"
+    ? (proveedores.find(p => String(p.id || p.nombre) === proveedorId) || proveedores[0])
+    : null;
   const solicitud = {
     id: body.id || `sol_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     chofer_nombre: body.chofer_nombre || req.user?.nombre || req.user?.email || "Chofer",
@@ -246,6 +322,9 @@ router.post("/solicitudes", async (req, res) => {
     motivo: body.motivo || body.motivo_label,
     motivo_label: body.motivo_label || body.motivo,
     observaciones: body.observaciones || "",
+    canal,
+    proveedor_id: proveedor?.id || null,
+    proveedor_nombre: proveedor?.nombre || "",
     urgencia: URGENCIAS_SOLICITUD_TALLER.has(body.urgencia) ? body.urgencia : "normal",
     prioridad: prioridadSolicitudTaller(URGENCIAS_SOLICITUD_TALLER.has(body.urgencia) ? body.urgencia : "normal"),
     fecha: body.fecha || new Date().toISOString(),
@@ -257,16 +336,13 @@ router.post("/solicitudes", async (req, res) => {
     eventos: [eventoSolicitudTaller("solicitud.creada", req, {
       urgencia: URGENCIAS_SOLICITUD_TALLER.has(body.urgencia) ? body.urgencia : "normal",
       vehiculo: body.vehiculo || body.vehiculo_matricula || null,
+      canal,
+      proveedor_nombre: proveedor?.nombre || "",
     })],
     notificacion_taller_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 
-  const { rows } = await db.query(
-    "SELECT data FROM taller_estado WHERE empresa_id=$1",
-    [empresaId(req)]
-  );
-  const data = normalizar(rows[0]?.data);
   const solicitudes = Array.isArray(data.solicitudes_mecanico) ? data.solicitudes_mecanico : [];
   const yaExistente = solicitudes.find(s => String(s.id) === String(solicitud.id));
   data.solicitudes_mecanico = [solicitud, ...solicitudes.filter(s => s.id !== solicitud.id)].slice(0, 300);
@@ -664,7 +740,7 @@ router.post("/piezas/unidades/asignar", PUEDE_EDITAR_TALLER, asyncRoute(async (r
     );
     await client.query(
       `UPDATE taller_intervenciones
-          SET coste_total=coste_mano_obra + COALESCE((
+          SET coste_total=CASE WHEN origen_taller='externo' THEN COALESCE(factura_proveedor_importe,0) ELSE COALESCE(coste_mano_obra,0) END + COALESCE((
                 SELECT SUM(cantidad * precio_unitario)
                   FROM taller_intervencion_piezas
                  WHERE intervencion_id=$1
@@ -852,6 +928,7 @@ router.delete("/piezas/:id", PUEDE_EDITAR_TALLER, async (req, res) => {
 
 router.get("/intervenciones", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  await ensureTallerIntervencionesExtraSchema();
   const { estado, vehiculo_id } = req.query;
   const params = [empresaId(req)];
   const where = ["i.empresa_id=$1"];
@@ -896,17 +973,27 @@ router.get("/intervenciones", async (req, res) => {
 
 router.post("/intervenciones", PUEDE_EDITAR_TALLER, async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  await ensureTallerIntervencionesExtraSchema();
   const {
     vehiculo_id, fecha, tipo, descripcion, km_en_intervencion,
     taller_externo, coste_mano_obra, estado, notas,
+    origen_taller, proveedor_id, factura_proveedor_num, factura_proveedor_nombre,
+    factura_proveedor_importe, factura_proveedor_fecha, factura_proveedor_file_name,
+    factura_proveedor_file_mime, factura_proveedor_file_base64,
   } = req.body || {};
   if (!tipo) return res.status(400).json({ error: "Tipo obligatorio" });
+  const origen = String(origen_taller || (taller_externo ? "externo" : "propio")).trim().toLowerCase() === "externo" ? "externo" : "propio";
+  const manoObra = origen === "externo" ? 0 : num(coste_mano_obra);
+  const facturaImporte = num(factura_proveedor_importe);
+  const servicioCoste = origen === "externo" ? facturaImporte : manoObra;
 
   const { rows } = await db.query(
     `INSERT INTO taller_intervenciones
       (empresa_id,vehiculo_id,fecha,tipo,descripcion,km_en_intervencion,taller_externo,
-       coste_mano_obra,coste_total,estado,notas,created_by)
-     VALUES ($1,$2,COALESCE($3::date,CURRENT_DATE),$4,$5,$6,$7,$8,$8,$9,$10,$11)
+       coste_mano_obra,coste_total,estado,notas,created_by,origen_taller,proveedor_id,
+       factura_proveedor_num,factura_proveedor_nombre,factura_proveedor_importe,factura_proveedor_fecha,
+       factura_proveedor_file_name,factura_proveedor_file_mime,factura_proveedor_file_base64)
+     VALUES ($1,$2,COALESCE($3::date,CURRENT_DATE),$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
      RETURNING *`,
     [
       empresaId(req),
@@ -916,10 +1003,20 @@ router.post("/intervenciones", PUEDE_EDITAR_TALLER, async (req, res) => {
       emptyToNull(descripcion),
       emptyToNull(km_en_intervencion),
       emptyToNull(taller_externo),
-      num(coste_mano_obra),
+      manoObra,
+      servicioCoste,
       emptyToNull(estado) || "abierta",
       emptyToNull(notas),
       req.user?.id || null,
+      origen,
+      emptyToNull(proveedor_id),
+      emptyToNull(factura_proveedor_num),
+      emptyToNull(factura_proveedor_nombre) || emptyToNull(taller_externo),
+      facturaImporte,
+      emptyToNull(factura_proveedor_fecha),
+      emptyToNull(factura_proveedor_file_name),
+      emptyToNull(factura_proveedor_file_mime),
+      emptyToNull(factura_proveedor_file_base64),
     ]
   );
   res.status(201).json(rows[0]);
@@ -927,11 +1024,19 @@ router.post("/intervenciones", PUEDE_EDITAR_TALLER, async (req, res) => {
 
 router.put("/intervenciones/:id", PUEDE_EDITAR_TALLER, async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  await ensureTallerIntervencionesExtraSchema();
   const {
     vehiculo_id, fecha, tipo, descripcion, km_en_intervencion,
     taller_externo, coste_mano_obra, estado, notas,
+    origen_taller, proveedor_id, factura_proveedor_num, factura_proveedor_nombre,
+    factura_proveedor_importe, factura_proveedor_fecha, factura_proveedor_file_name,
+    factura_proveedor_file_mime, factura_proveedor_file_base64,
   } = req.body || {};
   if (!tipo) return res.status(400).json({ error: "Tipo obligatorio" });
+  const origen = String(origen_taller || (taller_externo ? "externo" : "propio")).trim().toLowerCase() === "externo" ? "externo" : "propio";
+  const manoObra = origen === "externo" ? 0 : num(coste_mano_obra);
+  const facturaImporte = num(factura_proveedor_importe);
+  const servicioCoste = origen === "externo" ? facturaImporte : manoObra;
 
   const { rows } = await db.query(
     `UPDATE taller_intervenciones
@@ -942,13 +1047,22 @@ router.put("/intervenciones/:id", PUEDE_EDITAR_TALLER, async (req, res) => {
             km_en_intervencion=$5,
             taller_externo=$6,
             coste_mano_obra=$7,
-            coste_total=$7 + COALESCE((
+            coste_total=$12 + COALESCE((
               SELECT SUM(cantidad * precio_unitario)
               FROM taller_intervencion_piezas
               WHERE intervencion_id=$8
             ),0),
             estado=COALESCE($9, estado),
             notas=$10,
+            origen_taller=$13,
+            proveedor_id=$14,
+            factura_proveedor_num=$15,
+            factura_proveedor_nombre=$16,
+            factura_proveedor_importe=$17,
+            factura_proveedor_fecha=$18,
+            factura_proveedor_file_name=COALESCE($19, factura_proveedor_file_name),
+            factura_proveedor_file_mime=COALESCE($20, factura_proveedor_file_mime),
+            factura_proveedor_file_base64=COALESCE($21, factura_proveedor_file_base64),
             updated_at=NOW()
       WHERE id=$8 AND empresa_id=$11
       RETURNING *`,
@@ -959,11 +1073,21 @@ router.put("/intervenciones/:id", PUEDE_EDITAR_TALLER, async (req, res) => {
       emptyToNull(descripcion),
       emptyToNull(km_en_intervencion),
       emptyToNull(taller_externo),
-      num(coste_mano_obra),
+      manoObra,
       req.params.id,
       emptyToNull(estado),
       emptyToNull(notas),
       empresaId(req),
+      servicioCoste,
+      origen,
+      emptyToNull(proveedor_id),
+      emptyToNull(factura_proveedor_num),
+      emptyToNull(factura_proveedor_nombre) || emptyToNull(taller_externo),
+      facturaImporte,
+      emptyToNull(factura_proveedor_fecha),
+      emptyToNull(factura_proveedor_file_name),
+      emptyToNull(factura_proveedor_file_mime),
+      emptyToNull(factura_proveedor_file_base64),
     ]
   );
   if (!rows[0]) return res.status(404).json({ error: "Intervencion no encontrada" });

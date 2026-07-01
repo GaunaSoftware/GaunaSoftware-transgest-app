@@ -50,9 +50,33 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
   const streamRef = useRef(null);
   const timerRef = useRef(null);
   const lockedRef = useRef(false);
+  const detectorRef = useRef(null);
+  const onDetectedRef = useRef(onDetected);
+  const onCloseRef = useRef(onClose);
   const [manual, setManual] = useState("");
   const [status, setStatus] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
+  const [detectorReady, setDetectorReady] = useState(false);
+
+  useEffect(() => { onDetectedRef.current = onDetected; }, [onDetected]);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
+  async function detectarFrameActual() {
+    if (!videoRef.current || lockedRef.current || !detectorRef.current) return false;
+    if (videoRef.current.readyState < 2) return false;
+    try {
+      const found = await detectorRef.current.detect(videoRef.current);
+      const code = found?.[0]?.rawValue?.trim();
+      if (!code) return false;
+      lockedRef.current = true;
+      onDetectedRef.current?.(code);
+      onCloseRef.current?.();
+      return true;
+    } catch {
+      setStatus("No se pudo leer automaticamente. Acerca el codigo o introduce el valor manual.");
+      return false;
+    }
+  }
 
   useEffect(() => {
     if (!open) return undefined;
@@ -61,6 +85,8 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
     lockedRef.current = false;
     setStatus("Preparando camara...");
     setCameraReady(false);
+    setDetectorReady(false);
+    detectorRef.current = null;
 
     async function start() {
       if (!("mediaDevices" in navigator) || !navigator.mediaDevices.getUserMedia) {
@@ -73,7 +99,11 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
           audio: false,
         });
         if (cancelled) {
@@ -88,23 +118,12 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
         setCameraReady(true);
 
         if ("BarcodeDetector" in window) {
-          const detector = new window.BarcodeDetector({
-            formats: ["code_128", "code_39", "ean_13", "ean_8", "itf", "qr_code"],
+          detectorRef.current = new window.BarcodeDetector({
+            formats: ["code_128", "code_39", "code_93", "codabar", "ean_13", "ean_8", "itf", "upc_a", "upc_e", "qr_code"],
           });
+          setDetectorReady(true);
           timerRef.current = window.setInterval(async () => {
-            if (!videoRef.current || lockedRef.current) return;
-            if (videoRef.current.readyState < 2) return;
-            try {
-              const found = await detector.detect(videoRef.current);
-              const code = found?.[0]?.rawValue?.trim();
-              if (code) {
-                lockedRef.current = true;
-                onDetected(code);
-                onClose();
-              }
-            } catch {
-              setStatus("No se pudo leer automaticamente. Puedes escribir el codigo.");
-            }
+            await detectarFrameActual();
           }, 650);
         }
       } catch {
@@ -119,8 +138,10 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
       timerRef.current = null;
       streamRef.current?.getTracks?.().forEach(track => track.stop());
       streamRef.current = null;
+      detectorRef.current = null;
+      setDetectorReady(false);
     };
-  }, [open, onClose, onDetected]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -204,6 +225,11 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
           <button style={{...btn,background:"var(--accent)",borderColor:"var(--accent)",color:"#fff"}} onClick={submitManual}>
             Usar
           </button>
+          {cameraReady && detectorReady && (
+            <button type="button" style={{...btn,gridColumn:"1/-1",background:"rgba(16,185,129,.12)",borderColor:"rgba(16,185,129,.35)",color:"#10b981"}} onClick={detectarFrameActual}>
+              Leer codigo ahora
+            </button>
+          )}
         </div>
       </div>
     </div>

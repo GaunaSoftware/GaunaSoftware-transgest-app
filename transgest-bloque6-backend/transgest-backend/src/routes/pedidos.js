@@ -210,6 +210,7 @@ async function logFirmaContextoModificadoSiProcede({ before, after, empresaId, a
 }
 
 function publicBaseUrl(req) {
+  const apiEnvUrl = process.env.PUBLIC_API_URL || process.env.API_PUBLIC_URL || process.env.BACKEND_PUBLIC_URL || "";
   const envUrl = process.env.PUBLIC_APP_URL || process.env.APP_PUBLIC_URL || "";
   const reqUrl = req?.protocol && typeof req.get === "function" ? `${req.protocol}://${req.get("host")}` : "";
   const isLocal = (value) => {
@@ -220,6 +221,16 @@ function publicBaseUrl(req) {
       return false;
     }
   };
+  const isFrontendHost = (value) => {
+    try {
+      const url = new URL(String(value || ""));
+      return /^app\./i.test(url.hostname) || /vercel\.app$/i.test(url.hostname);
+    } catch {
+      return false;
+    }
+  };
+  if (apiEnvUrl && !(isLocal(apiEnvUrl) && reqUrl && !isLocal(reqUrl))) return apiEnvUrl;
+  if (envUrl && reqUrl && isFrontendHost(envUrl) && !isFrontendHost(reqUrl)) return reqUrl;
   if (envUrl && !(isLocal(envUrl) && reqUrl && !isLocal(reqUrl))) return envUrl;
   if (reqUrl) return reqUrl;
   return "http://localhost";
@@ -1827,7 +1838,8 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
 async function getPedidoDocumentoControlExpedienteData(pedidoId, empresaId) {
   const [docsRes, eventosRes] = await Promise.all([
     db.query(`
-      SELECT id, nombre, tipo, file_mime, file_size_kb, notas, created_at
+      SELECT id, nombre, tipo, file_mime, file_size_kb, notas, created_at,
+             CASE WHEN file_mime ILIKE 'image/%' THEN file_base64 ELSE NULL END AS file_base64
         FROM pedido_docs
        WHERE pedido_id=$1 AND empresa_id=$2
        ORDER BY created_at DESC
@@ -1854,6 +1866,26 @@ async function getPedidoDocumentoControlExpedienteData(pedidoId, empresaId) {
   };
 }
 
+function anexosDocumentoControl(documentos = []) {
+  return (Array.isArray(documentos) ? documentos : []).map(doc => ({
+    nombre: doc.nombre || "Documento adjunto",
+    tipo: doc.tipo || "",
+    mime: doc.file_mime || "",
+    size_kb: doc.file_size_kb || null,
+    created_at: doc.created_at || null,
+    data_url: doc.file_base64 && String(doc.file_mime || "").startsWith("image/")
+      ? `data:${doc.file_mime};base64,${doc.file_base64}`
+      : "",
+  })).slice(0, 20);
+}
+
+function attachDocumentoControlAnexos(payload, documentos = []) {
+  if (payload?.documento) {
+    payload.documento.documentos_anexos = anexosDocumentoControl(documentos);
+  }
+  return payload;
+}
+
 async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
   const payload = buildDocumentoControlPayload({
     empresaId,
@@ -1864,6 +1896,7 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
     appBaseUrl: publicBaseUrl(req),
   });
   const expedienteData = await getPedidoDocumentoControlExpedienteData(ctx.pedido.id, empresaId);
+  attachDocumentoControlAnexos(payload, expedienteData.documentos);
   const postSignatureIntegrity = buildFirmaPostSignatureIntegrity(ctx.pedido, ctx.pedido?.firma_evidencia || null);
   const repositorio = await getDocumentoControlRepositorioByPedido(ctx.pedido.id, empresaId).catch(() => null);
   const regulatoryCore = await getPedidoRegulatoryCoreSummary(ctx.pedido.id, empresaId).catch(() => null);
@@ -3326,14 +3359,15 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
       res.setHeader("X-DCD-Repository-State", archived.estado || "archivado");
       res.setHeader("X-DCD-Archived", "true");
       res.setHeader("X-DCD-Public-Expires-At", archived.public_expires_at || "");
-      const livePayload = buildDocumentoControlPublicPayload(buildDocumentoControlPayload({
+      const expedienteData = await getPedidoDocumentoControlExpedienteData(pedidoId, empresaId);
+      const livePayload = buildDocumentoControlPublicPayload(attachDocumentoControlAnexos(buildDocumentoControlPayload({
         empresaId,
         pedido: ctx.pedido,
         empresa: ctx.empresa,
         cliente: ctx.cliente,
         colaborador: ctx.colaborador,
         appBaseUrl: publicBaseUrl(req),
-      }));
+      }), expedienteData.documentos));
       if (!wantsHtml) {
         const pdf = await generateDocumentoControlPdf({
           documento: livePayload.documento,
@@ -3357,14 +3391,15 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
         publicView: true,
       }));
     }
-    const payload = buildDocumentoControlPublicPayload(buildDocumentoControlPayload({
+    const expedienteData = await getPedidoDocumentoControlExpedienteData(pedidoId, empresaId);
+    const payload = buildDocumentoControlPublicPayload(attachDocumentoControlAnexos(buildDocumentoControlPayload({
       empresaId,
       pedido: ctx.pedido,
       empresa: ctx.empresa,
       cliente: ctx.cliente,
       colaborador: ctx.colaborador,
       appBaseUrl: publicBaseUrl(req),
-    }));
+    }), expedienteData.documentos));
     const eventoDcd = isDownload ? "documento_control.descargado" : isPrint ? "documento_control.impreso" : "documento_control.consultado";
     await logPedidoEvento(pedidoId, empresaId, eventoDcd, {
       source: "public_documento_control",
@@ -7800,6 +7835,28 @@ router.patch("/:id/estado",
       incidencia: incidencia || null,
       motivo_cancelacion: motivoCancelacion || null,
     }, req.user?.rol || "usuario", req.user?.id || null);
+
+    if (estado === "incidencia") {
+      const origenIncidencia = req.user?.rol === "chofer" ? "chofer" : "trafico";
+      await notificarGestionPedido(
+        empresaId,
+        "pedido_incidencia",
+        `Incidencia en ${rows[0].numero || "pedido"}`,
+        incidencia
+          ? `${origenIncidencia === "chofer" ? "El chofer" : "Trafico"} ha avisado: ${incidencia}`
+          : `${origenIncidencia === "chofer" ? "El chofer" : "Trafico"} ha marcado el pedido con incidencia.`,
+        {
+          pedido_id: req.params.id,
+          pedido_numero: rows[0].numero || null,
+          origen: origenIncidencia,
+          incidencia_tipo: incidenciaTipo,
+          incidencia: incidencia || null,
+          ruta: `${rows[0].origen || ""} -> ${rows[0].destino || ""}`,
+          dedupe_key: `incidencia:${req.params.id}:${crypto.randomUUID()}`,
+        },
+        req.user?.id || null
+      ).catch(e => logger.warn("No se pudo notificar incidencia de pedido:", e.message));
+    }
 
     if (estado === "entregado") {
       await aplicarAutomatismosEntrega(req.params.id, empresaId, req.user?.id || null, { appBaseUrl: publicBaseUrl(req) });

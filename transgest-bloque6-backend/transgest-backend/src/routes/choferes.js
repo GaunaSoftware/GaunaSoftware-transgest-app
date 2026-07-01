@@ -1034,15 +1034,15 @@ router.post("/app/jornada/cerrar", requireChoferApp, async (req, res) => {
   }
   const nowIso = new Date().toISOString();
   const eventos = [...jornadaEventos(current)];
-  if (current.actividad_actual === "conduccion") {
-    eventos.push({ tipo: "pausa", at: nowIso, nota: "Pausa automatica al cerrar turno desde conduccion" });
+  if (current.actividad_actual !== "descanso") {
+    eventos.push({ tipo: "descanso", at: nowIso, objetivo_descanso_min: TACOGRAFO.descansoDiarioNormalMin, nota: "Descanso automatico al cerrar jornada" });
   }
   eventos.push({ tipo: "fin", at: nowIso, km: kmFin, noche: !!req.body?.hace_noche, nota: "Cierre de turno. El descanso se contabiliza hasta la siguiente apertura." });
   const { rows } = await db.query(
     `UPDATE chofer_jornadas
         SET estado='cerrada',
             fin_at=NOW(),
-            actividad_actual='fin',
+            actividad_actual='descanso',
             km_fin=$1,
             hace_noche=$2,
             noche_lugar=$3,

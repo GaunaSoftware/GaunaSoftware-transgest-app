@@ -246,6 +246,15 @@ function isDbId(id) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || ""));
 }
 
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function intervencionApiToLocal(r) {
   return {
     ...r,
@@ -257,6 +266,7 @@ function intervencionApiToLocal(r) {
     })) : (r.piezas_usadas || []),
     coste_total: Number(r.coste_total || 0),
     coste_mano_obra: Number(r.coste_mano_obra || 0),
+    factura_proveedor_importe: Number(r.factura_proveedor_importe || 0),
   };
 }
 
@@ -689,6 +699,10 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
     factura_proveedor_num: editando?.factura_proveedor_num || "",
     factura_proveedor_nombre: editando?.factura_proveedor_nombre || "",
     factura_proveedor_importe: String(editando?.factura_proveedor_importe ?? ""),
+    factura_proveedor_fecha: editando?.factura_proveedor_fecha ? String(editando.factura_proveedor_fecha).slice(0,10) : "",
+    factura_proveedor_file_name: editando?.factura_proveedor_file_name || "",
+    factura_proveedor_file_mime: editando?.factura_proveedor_file_mime || "",
+    factura_proveedor_file_base64: editando?.factura_proveedor_file_base64 || "",
   }));
   const [taller] = useState(tallerLoad());
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -758,6 +772,27 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
     setCodigoManual("");
   }
 
+  async function seleccionarFacturaProveedor(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 6 * 1024 * 1024) {
+      notify("La factura no puede superar 6 MB.", "warning");
+      return;
+    }
+    try {
+      const base64 = await fileToBase64(file);
+      setForm(prev => ({
+        ...prev,
+        factura_proveedor_file_name: file.name,
+        factura_proveedor_file_mime: file.type || "application/octet-stream",
+        factura_proveedor_file_base64: base64,
+      }));
+      notify("Factura adjuntada a la intervencion.", "success");
+    } catch {
+      notify("No se pudo leer la factura adjunta.", "error");
+    }
+  }
+
   async function ensureProveedorExterno() {
     if (form.origen_taller !== "externo") return { id: form.proveedor_id || "", nombre: "" };
     const typed = String(form.taller_externo || "").trim();
@@ -824,6 +859,10 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
       taller_externo: form.origen_taller === "externo" ? (proveedorNombre || "") : "",
       factura_proveedor_nombre: proveedorNombre,
       factura_proveedor_importe: parseFloat(form.factura_proveedor_importe || 0) || 0,
+      factura_proveedor_fecha: form.factura_proveedor_fecha || "",
+      factura_proveedor_file_name: form.factura_proveedor_file_name || "",
+      factura_proveedor_file_mime: form.factura_proveedor_file_mime || "",
+      factura_proveedor_file_base64: form.factura_proveedor_file_base64 || "",
       coste_mano_obra: form.origen_taller === "externo" ? 0 : (parseFloat(form.coste_mano_obra || 0) || 0),
     };
 
@@ -867,8 +906,17 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
           tipo: form.tipo,
           descripcion: form.descripcion,
           km_en_intervencion: form.km_en_intervencion || null,
+          origen_taller: rep.origen_taller,
+          proveedor_id: rep.proveedor_id,
           taller_externo: rep.taller_externo || "",
           coste_mano_obra: Number(rep.coste_mano_obra || 0),
+          factura_proveedor_num: rep.factura_proveedor_num,
+          factura_proveedor_nombre: rep.factura_proveedor_nombre,
+          factura_proveedor_importe: rep.factura_proveedor_importe,
+          factura_proveedor_fecha: rep.factura_proveedor_fecha || null,
+          factura_proveedor_file_name: rep.factura_proveedor_file_name,
+          factura_proveedor_file_mime: rep.factura_proveedor_file_mime,
+          factura_proveedor_file_base64: rep.factura_proveedor_file_base64,
           notas: form.notas || "",
         });
         for (const pieza of form.piezas_usadas || []) {
@@ -893,9 +941,18 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
           tipo: form.tipo,
           descripcion: form.descripcion,
           km_en_intervencion: form.km_en_intervencion || null,
+          origen_taller: rep.origen_taller,
+          proveedor_id: rep.proveedor_id,
           taller_externo: rep.taller_externo || "",
           coste_mano_obra: Number(rep.coste_mano_obra || 0),
           estado: rep.estado || editando.estado || "abierta",
+          factura_proveedor_num: rep.factura_proveedor_num,
+          factura_proveedor_nombre: rep.factura_proveedor_nombre,
+          factura_proveedor_importe: rep.factura_proveedor_importe,
+          factura_proveedor_fecha: rep.factura_proveedor_fecha || null,
+          factura_proveedor_file_name: rep.factura_proveedor_file_name,
+          factura_proveedor_file_mime: rep.factura_proveedor_file_mime,
+          factura_proveedor_file_base64: rep.factura_proveedor_file_base64,
           notas: form.notas || "",
         });
         const idx = d.reparaciones.findIndex(r => r.id === editando.id);
@@ -964,6 +1021,18 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
               {form.origen_taller === "externo" ? null : <div><label style={S.lbl}>Proveedor</label><input style={S.inp} value={form.factura_proveedor_nombre||""} onChange={f("factura_proveedor_nombre")} placeholder="Proveedor de recambios"/></div>}
               <div><label style={S.lbl}>{form.origen_taller === "externo" ? "Importe factura taller (EUR)" : "Importe factura (EUR)"}</label><input type="number" step="0.01" style={S.inp} value={form.factura_proveedor_importe||""} onChange={f("factura_proveedor_importe")} onFocus={e=>e.target.select()}/></div>
             </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+              <div><label style={S.lbl}>Fecha factura</label><input type="date" style={S.inp} value={form.factura_proveedor_fecha||""} onChange={f("factura_proveedor_fecha")}/></div>
+              <div>
+                <label style={S.lbl}>Archivo factura</label>
+                <input type="file" accept="application/pdf,image/*" onChange={seleccionarFacturaProveedor} style={{...S.inp,padding:"7px 9px"}}/>
+              </div>
+            </div>
+            {form.factura_proveedor_file_name && (
+              <div style={{fontSize:11,color:"var(--green)",fontWeight:800,marginTop:6}}>
+                Factura adjunta: {form.factura_proveedor_file_name}
+              </div>
+            )}
             <div style={{fontSize:11,color:"var(--text5)",marginTop:6}}>
               {form.origen_taller === "externo"
                 ? "Si el taller no existe, al guardar te preguntaremos si quieres crearlo para reutilizarlo en futuras intervenciones."
@@ -2709,6 +2778,20 @@ export default function Taller() {
                           <div style={{fontWeight:700,color:"var(--accent)",fontFamily:"monospace"}}>{r.factura_proveedor_num}</div>
                           <div style={{color:"var(--text5)"}}>{r.factura_proveedor_nombre}</div>
                           {r.factura_proveedor_importe&&<div style={{color:"var(--green)",fontWeight:700}}>{fmt2(r.factura_proveedor_importe)} EUR</div>}
+                          {r.factura_proveedor_file_base64&&(
+                            <button
+                              type="button"
+                              style={{...S.btn,background:"transparent",color:"var(--accent-xl)",border:"none",padding:"3px 0",fontSize:10}}
+                              onClick={()=>{
+                                const a = document.createElement("a");
+                                a.href = `data:${r.factura_proveedor_file_mime || "application/octet-stream"};base64,${r.factura_proveedor_file_base64}`;
+                                a.download = r.factura_proveedor_file_name || `factura-${r.factura_proveedor_num || r.id}.pdf`;
+                                a.click();
+                              }}
+                            >
+                              Descargar factura
+                            </button>
+                          )}
                         </div>
                       : <span style={{color:"var(--text5)"}}>-</span>}
                   </td>

@@ -1177,13 +1177,17 @@ function AppInner() {
   useEffect(() => {
     if (!user) return;
     setVista(VISTA_DEFAULT(user.rol));
-    getEmpresaBackend({ silentError:true, timeoutMs:12000 })
-      .then(perfil => {
-        if (!perfil || typeof perfil !== "object") return;
-        saveEmpresa(perfil);
-        if (perfil.paleta_colores) saveCompanyPalette(perfil.paleta_colores);
-      })
-      .catch(() => {});
+    const isChoferAppOnly = user?.rol === "chofer";
+    if (!isChoferAppOnly) {
+      getEmpresaBackend({ silentError:true, timeoutMs:12000 })
+        .then(perfil => {
+          if (!perfil || typeof perfil !== "object") return;
+          saveEmpresa(perfil);
+          if (perfil.paleta_colores) saveCompanyPalette(perfil.paleta_colores);
+        })
+        .catch(() => {});
+    }
+    if (isChoferAppOnly) return;
     // Badges: defer 3s so dashboard renders first, then load in background
     function calcTallerBadge() {
       getTallerEstado().then(t => {

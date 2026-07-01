@@ -830,6 +830,7 @@ export const getAlertasDocVehiculos = ()       => apiFetch("/vehiculos/alertas-d
 export const getTallerEstado       = ()        => apiFetch("/taller/estado", { silentSuccess:true, silentError:true });
 export const guardarTallerEstado   = (data)    => apiFetch("/taller/estado", { method:"PUT", body:data });
 export const getTallerSolicitudes  = ()        => apiFetch("/taller/solicitudes");
+export const getTallerSolicitudCapacidades = () => apiFetch("/taller/solicitudes/capacidades", { silentSuccess:true, silentError:true });
 export const crearTallerSolicitud  = (data)    => apiFetch("/taller/solicitudes", { method:"POST", body:data });
 export const actualizarTallerSolicitud = (id,data) => apiFetch(`/taller/solicitudes/${id}`, { method:"PATCH", body:data });
 export const getTallerPiezas       = (params={}) => apiFetch(`/taller/piezas?${new URLSearchParams(params)}`);

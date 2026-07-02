@@ -44,6 +44,8 @@ const depreciationRunsUpSql = fs.readFileSync(path.join(migrationsDir, "019_depr
 const depreciationRunsDownSql = fs.readFileSync(path.join(migrationsDir, "019_depreciation_runs.down.sql"), "utf8");
 const depreciationRunCancellationUpSql = fs.readFileSync(path.join(migrationsDir, "020_depreciation_run_cancellation.up.sql"), "utf8");
 const depreciationRunCancellationDownSql = fs.readFileSync(path.join(migrationsDir, "020_depreciation_run_cancellation.down.sql"), "utf8");
+const depreciationRunPostingUpSql = fs.readFileSync(path.join(migrationsDir, "021_depreciation_run_posting.up.sql"), "utf8");
+const depreciationRunPostingDownSql = fs.readFileSync(path.join(migrationsDir, "021_depreciation_run_posting.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -272,4 +274,12 @@ test("migracion de cancelacion de amortizaciones conserva trazabilidad y libera 
   assert.match(depreciationRunCancellationDownSql, /WHERE status = 'cancelled'/i);
   assert.match(depreciationRunCancellationDownSql, /RAISE EXCEPTION/i);
   assert.match(depreciationRunCancellationDownSql, /ADD CONSTRAINT depreciation_runs_company_id_fixed_asset_id_period_id_key/i);
+});
+
+test("migracion de contabilizacion de amortizaciones mantiene bloqueo activo", () => {
+  assert.match(depreciationRunPostingUpSql, /status IN \('draft_created', 'posted', 'cancelled'\)/i);
+  assert.match(depreciationRunPostingUpSql, /WHERE status IN \('draft_created', 'posted'\)/i);
+  assert.match(depreciationRunPostingDownSql, /WHERE status = 'posted'/i);
+  assert.match(depreciationRunPostingDownSql, /RAISE EXCEPTION/i);
+  assert.match(depreciationRunPostingDownSql, /WHERE status = 'draft_created'/i);
 });

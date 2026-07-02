@@ -573,7 +573,7 @@ router.post("/fixed-assets/depreciation-runs/:runId/cancel", requirePermission("
           repeated: true,
         };
       }
-      if (run.journal_status !== "draft" || run.entry_type !== "depreciation") {
+      if (run.status === "posted" || run.journal_status !== "draft" || run.entry_type !== "depreciation") {
         const error = new Error("Solo se pueden cancelar borradores de amortizacion no contabilizados");
         error.status = 409;
         throw error;

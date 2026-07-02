@@ -236,6 +236,13 @@ test("contratos de inmovilizado exigen activo, ejercicio e importe", () => {
     journal_entry_id: "entry-id",
     reason: "Error de periodo",
   }));
+  assert.doesNotThrow(() => validateEventContract("AccountingFixedAssetDepreciationPosted", 1, {
+    depreciation_run_id: "run-id",
+    fixed_asset_id: "asset-id",
+    journal_entry_id: "entry-id",
+    period_id: "period-id",
+    amount: "100.000000",
+  }));
   assert.throws(() => validateEventContract("AccountingFixedAssetCreated", 1, {
     fixed_asset_id: "asset-id",
   }), /Payload incompleto/);

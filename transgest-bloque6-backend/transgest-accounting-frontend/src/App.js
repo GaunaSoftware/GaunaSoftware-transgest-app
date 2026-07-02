@@ -3304,9 +3304,9 @@ export default function App() {
                             <span>{run.period_name}</span>
                             <span>{String(run.run_date).slice(0, 10)}</span>
                             <span>{formatMoney(run.amount)} EUR</span>
-                            <StatusBadge tone={run.status === "cancelled" ? "neutral" : journalStatusTone(run.journal_entry_status)} text={run.status === "cancelled" ? "Cancelada" : journalStatusLabel(run.journal_entry_status)} />
+                            <StatusBadge tone={run.status === "cancelled" ? "neutral" : run.status === "posted" ? "ok" : journalStatusTone(run.journal_entry_status)} text={run.status === "cancelled" ? "Cancelada" : run.status === "posted" ? "Contabilizada" : journalStatusLabel(run.journal_entry_status)} />
                             <div className="maturity-actions">
-                              {canWriteFixedAssets && canWriteJournal && run.status !== "cancelled" && run.journal_entry_status === "draft" && (
+                              {canWriteFixedAssets && canWriteJournal && run.status === "draft_created" && run.journal_entry_status === "draft" && (
                                 <button type="button" className="secondary" onClick={() => setFixedAssetDepreciationCancelAction({ run, reason: "" })}>Cancelar</button>
                               )}
                             </div>

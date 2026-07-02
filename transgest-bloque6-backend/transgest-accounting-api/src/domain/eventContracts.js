@@ -70,6 +70,9 @@ const EVENT_CONTRACTS = {
   AccountingFixedAssetDepreciationDraftCancelled: {
     1: ["depreciation_run_id", "fixed_asset_id", "journal_entry_id", "reason"],
   },
+  AccountingFixedAssetDepreciationPosted: {
+    1: ["depreciation_run_id", "fixed_asset_id", "journal_entry_id", "period_id", "amount"],
+  },
   AccountingBankTransactionReconciled: {
     1: ["bank_reconciliation_id", "bank_transaction_id", "maturity_id", "amount", "reason"],
   },

@@ -715,6 +715,17 @@ router.post("/journal-entries/:id/post", requirePermission("journal.post"), asyn
         throw error;
       });
       const posted = updated.rows[0];
+      const depreciationRun = entry.entry_type === "depreciation"
+        ? await client.query(
+          `UPDATE ${q("depreciation_runs")}
+              SET status='posted'
+            WHERE company_id=$1
+              AND journal_entry_id=$2
+              AND status='draft_created'
+            RETURNING *`,
+          [selected.company_id, entry.id]
+        )
+        : { rows: [] };
 
       await client.query(
         `INSERT INTO ${q("audit_log")}
@@ -752,6 +763,41 @@ router.post("/journal-entries/:id/post", requirePermission("journal.post"), asyn
           line_count: lines.rows.length,
         },
       });
+      if (depreciationRun.rows.length) {
+        const run = depreciationRun.rows[0];
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'fixed_asset.depreciation_posted','depreciation_run',$4,$5,$6::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            run.id,
+            req.id || null,
+            JSON.stringify({
+              fixed_asset_id: run.fixed_asset_id,
+              journal_entry_id: posted.id,
+              period_id: run.period_id,
+              amount: run.amount,
+            }),
+          ]
+        );
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetDepreciationPosted",
+          aggregate_type: "depreciation_run",
+          aggregate_id: run.id,
+          payload: {
+            depreciation_run_id: run.id,
+            fixed_asset_id: run.fixed_asset_id,
+            journal_entry_id: posted.id,
+            period_id: run.period_id,
+            amount: run.amount,
+          },
+        });
+      }
       return { entry: await loadEntryWithLines(client, posted.id, selected.company_id), repeated: false };
     });
 

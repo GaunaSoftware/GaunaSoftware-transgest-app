@@ -120,6 +120,41 @@ async function loadDepreciationRuns(client, companyId, fixedAssetId) {
   return rows;
 }
 
+async function loadFixedAssetDisposalReadiness(client, companyId, fixedAssetId) {
+  const assetResult = await client.query(
+    `SELECT fa.id, fa.asset_code, fa.name, fa.status, fa.acquisition_cost::text,
+            COALESCE(SUM(CASE WHEN dr.status = 'posted' THEN dr.amount ELSE 0 END), 0)::text AS posted_depreciation_amount,
+            GREATEST(fa.acquisition_cost - COALESCE(SUM(CASE WHEN dr.status = 'posted' THEN dr.amount ELSE 0 END), 0), 0)::text AS estimated_net_book_value,
+            COUNT(*) FILTER (WHERE dr.status = 'draft_created')::int AS depreciation_draft_count,
+            COUNT(*) FILTER (WHERE dr.status = 'reversal_draft_created')::int AS reversal_draft_count
+       FROM ${q("accounting_fixed_assets")} fa
+       LEFT JOIN ${q("depreciation_runs")} dr ON dr.fixed_asset_id=fa.id AND dr.company_id=fa.company_id
+      WHERE fa.id=$1 AND fa.company_id=$2
+      GROUP BY fa.id`,
+    [fixedAssetId, companyId]
+  );
+  if (!assetResult.rows.length) return null;
+  const asset = assetResult.rows[0];
+  const blockers = [];
+  if (asset.status === "disposed") blockers.push("El inmovilizado ya esta dado de baja");
+  if (asset.depreciation_draft_count > 0) blockers.push("Existen borradores de amortizacion pendientes");
+  if (asset.reversal_draft_count > 0) blockers.push("Existen reversos de amortizacion pendientes de contabilizar o cancelar");
+
+  return {
+    fixed_asset_id: asset.id,
+    asset_code: asset.asset_code,
+    name: asset.name,
+    status: asset.status,
+    posted_depreciation_amount: asset.posted_depreciation_amount,
+    estimated_net_book_value: asset.estimated_net_book_value,
+    pending_depreciation_drafts: asset.depreciation_draft_count,
+    pending_reversal_drafts: asset.reversal_draft_count,
+    blockers,
+    ready: blockers.length === 0,
+    disclaimer: "Comprobacion operativa interna. No genera asiento de baja ni sustituye revision contable/fiscal.",
+  };
+}
+
 async function assertPostableAccounts(client, companyId, fiscalYearId, accountIds) {
   const uniqueIds = [...new Set(accountIds.filter(Boolean))];
   const { rows } = await client.query(
@@ -298,6 +333,22 @@ router.get("/fixed-assets/:id/depreciation-plan", requirePermission("fixed_asset
       depreciation_runs: runs,
       disclaimer: "Plan tecnico preliminar de amortizacion lineal. Los borradores generados requieren revision y contabilizacion manual; no acredita tratamiento fiscal o legal.",
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/fixed-assets/:id/disposal-readiness", requirePermission("fixed_assets.read"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const readiness = await db.transaction(client => loadFixedAssetDisposalReadiness(client, selected.company_id, req.params.id));
+    if (!readiness) {
+      const error = new Error("Inmovilizado no encontrado para la empresa seleccionada");
+      error.status = 404;
+      throw error;
+    }
+    res.json({ readiness });
   } catch (error) {
     next(error);
   }
@@ -694,6 +745,14 @@ router.patch("/fixed-assets/:id/status", requirePermission("fixed_assets.write")
       }
       const previous = current.rows[0];
       const nextStatus = nextStatusForAction(previous.status, input.action);
+      if (nextStatus === "disposed") {
+        const readiness = await loadFixedAssetDisposalReadiness(client, selected.company_id, previous.id);
+        if (!readiness?.ready) {
+          const error = new Error(`No se puede dar de baja el inmovilizado: ${readiness?.blockers.join("; ") || "revision pendiente"}`);
+          error.status = 409;
+          throw error;
+        }
+      }
       const { rows } = await client.query(
         `UPDATE ${q("accounting_fixed_assets")}
             SET status=$1::varchar,

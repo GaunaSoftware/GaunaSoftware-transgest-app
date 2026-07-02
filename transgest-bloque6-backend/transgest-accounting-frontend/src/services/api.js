@@ -266,6 +266,7 @@ export const updateFixedAssetStatus = (assetId, data) => apiFetch(`/fixed-assets
   method: "PATCH",
   body: data,
 });
+export const getFixedAssetDisposalReadiness = assetId => apiFetch(`/fixed-assets/${assetId}/disposal-readiness`);
 export const getFixedAssetDepreciationPlan = assetId => apiFetch(`/fixed-assets/${assetId}/depreciation-plan`);
 
 export function downloadFixedAssetsCsv(filters = {}) {

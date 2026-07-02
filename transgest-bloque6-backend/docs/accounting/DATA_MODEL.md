@@ -744,7 +744,8 @@ Estado implementado:
 - Plan de amortizacion lineal calculado bajo demanda; no se persiste como plan oficial ni genera asientos.
 - Eventos `AccountingFixedAssetCreated` y `AccountingFixedAssetStatusChanged`.
 - Las amortizaciones pueden preparar borradores de Diario mediante `depreciation_runs`, pero requieren revision y contabilizacion manual.
-- No hay integracion automatica con facturas recibidas, no hay baja contable completa y no se declara cumplimiento fiscal o contable.
+- La baja asistida comprueba pendientes de amortizacion, muestra valor neto estimado y bloquea la baja si existen borradores o reversos pendientes.
+- No hay integracion automatica con facturas recibidas, no hay asiento automatico de baja contable y no se declara cumplimiento fiscal o contable.
 
 ### `depreciation_plans`
 

@@ -42,6 +42,7 @@ import {
   getExternalImportBatchPreview,
   getFiscalYears,
   getFixedAssetDepreciationPlan,
+  getFixedAssetDisposalReadiness,
   getFixedAssets,
   getMe,
   getOutboxEvents,
@@ -2150,6 +2151,25 @@ export default function App() {
     }
   }
 
+  async function startFixedAssetDisposal(asset) {
+    setFixedAssetStatus(null);
+    try {
+      const result = await getFixedAssetDisposalReadiness(asset.id);
+      setFixedAssetStatusAction({
+        asset,
+        action: "dispose",
+        reason: "",
+        disposed_at: new Date().toISOString().slice(0, 10),
+        readiness: result.readiness,
+      });
+      if (!result.readiness?.ready) {
+        setFixedAssetStatus({ tone: "warning", text: "La baja necesita resolver pendientes antes de confirmar." });
+      }
+    } catch (err) {
+      setFixedAssetStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    }
+  }
+
   function startFixedAssetDepreciation(asset) {
     const firstOpenPeriod = periods.find(period => (
       period.fiscal_year_id === asset.fiscal_year_id
@@ -3362,7 +3382,7 @@ export default function App() {
                           )}
                           {canWriteFixedAssets && asset.status === "active" && <button type="button" onClick={() => setFixedAssetStatusAction({ asset, action: "deactivate", reason: "", disposed_at: "" })}>Desactivar</button>}
                           {canWriteFixedAssets && asset.status === "inactive" && <button type="button" onClick={() => setFixedAssetStatusAction({ asset, action: "activate", reason: "", disposed_at: "" })}>Activar</button>}
-                          {canWriteFixedAssets && asset.status !== "disposed" && <button type="button" onClick={() => setFixedAssetStatusAction({ asset, action: "dispose", reason: "", disposed_at: new Date().toISOString().slice(0, 10) })}>Baja</button>}
+                          {canWriteFixedAssets && asset.status !== "disposed" && <button type="button" onClick={() => startFixedAssetDisposal(asset)}>Baja</button>}
                         </div>
                       </div>
                     ))}
@@ -3372,8 +3392,14 @@ export default function App() {
                   <form className="period-action-form" onSubmit={handleFixedAssetStatus}>
                     <div><strong>{fixedAssetActionLabels[fixedAssetStatusAction.action]}</strong><span>{fixedAssetStatusAction.asset.asset_code} - {fixedAssetStatusAction.asset.name}</span></div>
                     {fixedAssetStatusAction.action === "dispose" && <label><span>Fecha baja</span><input type="date" value={fixedAssetStatusAction.disposed_at} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, disposed_at: e.target.value }))} /></label>}
+                    {fixedAssetStatusAction.action === "dispose" && fixedAssetStatusAction.readiness && (
+                      <div className="scope-note">
+                        Valor neto estimado: {formatMoney(fixedAssetStatusAction.readiness.estimated_net_book_value)} EUR. Amortizacion contabilizada: {formatMoney(fixedAssetStatusAction.readiness.posted_depreciation_amount)} EUR.
+                        {fixedAssetStatusAction.readiness.blockers?.length > 0 && ` Pendientes: ${fixedAssetStatusAction.readiness.blockers.join("; ")}.`}
+                      </div>
+                    )}
                     <label><span>Motivo</span><input minLength={5} required value={fixedAssetStatusAction.reason} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, reason: e.target.value }))} /></label>
-                    <div className="period-action-buttons"><button type="submit">Confirmar</button><button type="button" className="secondary" onClick={() => setFixedAssetStatusAction(null)}>Cancelar</button></div>
+                    <div className="period-action-buttons"><button type="submit" disabled={fixedAssetStatusAction.action === "dispose" && fixedAssetStatusAction.readiness && !fixedAssetStatusAction.readiness.ready}>Confirmar</button><button type="button" className="secondary" onClick={() => setFixedAssetStatusAction(null)}>Cancelar</button></div>
                   </form>
                 )}
                 {fixedAssetDepreciationAction && (

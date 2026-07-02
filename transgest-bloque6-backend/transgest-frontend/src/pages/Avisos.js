@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
-import { getTodosLosDocs, getVehiculos, getNotificaciones, marcarNotificacionLeida, marcarTodasNotificacionesLeidas, getTallerEstado, getEmpresaConfig, setConfigAlertas } from "../services/api";
+import { getTodosLosDocs, getVehiculos, getChoferes, getNotificaciones, marcarNotificacionLeida, marcarTodasNotificacionesLeidas, getTallerEstado, getEmpresaConfig, setConfigAlertas } from "../services/api";
 import { confirmDialog } from "../services/notify";
 import { setRuntimeFocus } from "../services/runtimeFocus";
+import { normalizePlatformDocuments } from "../components/PlatformDocumentsEditor";
 
 // ── Semáforo ─────────────────────────────────────────────────────────────
 function semaforo(fecha) {
@@ -121,6 +122,7 @@ export default function Avisos() {
   const [q,         setQ]         = useState("");
   const [tab,       setTab]       = useState("documentos");
   const [vehiculos, setVehiculos] = useState([]);
+  const [choferes,  setChoferes]  = useState([]);
   const [avisosCfg, setAvisosCfg] = useState([]);
   const [tallerEstado, setTallerEstado] = useState({ reparaciones: [] });
   const [modalAv,   setModalAv]   = useState(false);
@@ -134,13 +136,15 @@ export default function Avisos() {
     Promise.all([
       getTodosLosDocs().catch(()=>[]),
       getVehiculos().catch(()=>[]),
+      getChoferes().catch(()=>[]),
       getTallerEstado().catch(()=>null),
       getEmpresaConfig().catch(()=>null),
       cargarNotificaciones(),
     ])
-      .then(([docsData, vehiculosData, tallerData, empresaCfg]) => {
+      .then(([docsData, vehiculosData, choferesData, tallerData, empresaCfg]) => {
         setDocs(Array.isArray(docsData) ? docsData : []);
         setVehiculos(Array.isArray(vehiculosData) ? vehiculosData : []);
+        setChoferes(Array.isArray(choferesData) ? choferesData : []);
         setTallerEstado(tallerData && typeof tallerData === "object" ? tallerData : { reparaciones: [] });
         setAvisosCfg(Array.isArray(empresaCfg?.cfg_alertas) ? empresaCfg.cfg_alertas : []);
       })
@@ -273,7 +277,46 @@ export default function Avisos() {
     return [...map.values()].sort((a,b) => a.nivel - b.nivel || b.pct - a.pct);
   }, [avisosCfg, tallerEstado, vehiculos]);
 
-  const { vigentes: docsVigentes, duplicados: docsDuplicados } = useMemo(() => dedupeDocumentos(docs), [docs]);
+  const docsPlataformas = useMemo(() => {
+    const fromVehiculos = vehiculos.flatMap(v =>
+      normalizePlatformDocuments(v.plataformas).flatMap(platform =>
+        platform.documentos.map(doc => ({
+          id: `platform-veh-${v.id}-${platform.id}-${doc.id}`,
+          entidad_tipo: "vehiculo",
+          entidad_id: v.id,
+          entidad_nombre: v.matricula,
+          vehiculo_id: v.id,
+          vehiculo_matricula: v.matricula,
+          tipo_doc: `Plataforma ${platform.nombre || "-"} - ${doc.nombre || "Documento"}`,
+          fecha_vencimiento: doc.caducidad || null,
+          organismo: platform.nombre || "Plataforma",
+          origen: "plataforma",
+          notas: doc.notas || "",
+        }))
+      )
+    );
+    const fromChoferes = choferes.flatMap(c =>
+      normalizePlatformDocuments(c.plataformas).flatMap(platform =>
+        platform.documentos.map(doc => ({
+          id: `platform-ch-${c.id}-${platform.id}-${doc.id}`,
+          entidad_tipo: "chofer",
+          entidad_id: c.id,
+          entidad_nombre: `${c.nombre || ""} ${c.apellidos || ""}`.trim(),
+          chofer_id: c.id,
+          chofer_nombre: `${c.nombre || ""} ${c.apellidos || ""}`.trim(),
+          tipo_doc: `Plataforma ${platform.nombre || "-"} - ${doc.nombre || "Documento"}`,
+          fecha_vencimiento: doc.caducidad || null,
+          organismo: platform.nombre || "Plataforma",
+          origen: "plataforma",
+          notas: doc.notas || "",
+        }))
+      )
+    );
+    return [...fromVehiculos, ...fromChoferes];
+  }, [vehiculos, choferes]);
+
+  const docsAll = useMemo(() => [...docs, ...docsPlataformas], [docs, docsPlataformas]);
+  const { vigentes: docsVigentes, duplicados: docsDuplicados } = useMemo(() => dedupeDocumentos(docsAll), [docsAll]);
   const todosConSemaforo = docsVigentes.map(d => ({ ...d, s: semaforo(d.fecha_vencimiento) }));
 
   const filtrados = todosConSemaforo
@@ -299,11 +342,49 @@ export default function Avisos() {
   const sinFecha  = todosConSemaforo.filter(d=>!d.fecha_vencimiento).length;
   const enPlazo   = todosConSemaforo.filter(d=>d.fecha_vencimiento && d.s.nivel>=5).length;
   const filtrosDocumentos = [["todos","Todos"],["criticos","Criticos y caducados"],["incompletos","Incompletos"],["duplicados","Con historial"],["vehiculos","Vehiculos"],["choferes","Choferes"]];
+  const csv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const html = (v) => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+  const informeRows = filtrados.map(d => ({
+    entidad: d.vehiculo_matricula || d.chofer_nombre || d.entidad_nombre || "-",
+    tipo_entidad: d.vehiculo_matricula ? "Vehiculo" : d.chofer_nombre ? "Chofer" : (d.entidad_tipo || "Otros"),
+    documento: d.tipo_doc || d.tipo || "-",
+    estado: d.s.texto || d.s.label || "-",
+    dias: d.s.dias ?? "",
+    vencimiento: d.fecha_vencimiento ? new Date(d.fecha_vencimiento).toLocaleDateString("es-ES") : "",
+    organismo: d.organismo || "",
+    historial: Number(d.historial_oculto || 0),
+  }));
+  function exportarInformeCsv() {
+    const headers = ["Entidad","Tipo entidad","Documento","Estado","Dias restantes","Vencimiento","Organismo","Historicos ocultos"];
+    const lines = [headers.map(csv).join(";"), ...informeRows.map(r => [r.entidad,r.tipo_entidad,r.documento,r.estado,r.dias,r.vencimiento,r.organismo,r.historial].map(csv).join(";"))];
+    const blob = new Blob(["\ufeff" + lines.join("\n")], { type:"text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `informe-caducidades-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  function verInformeCaducidades() {
+    const rows = informeRows.map(r => `<tr><td>${html(r.entidad)}</td><td>${html(r.tipo_entidad)}</td><td>${html(r.documento)}</td><td>${html(r.estado)}</td><td>${html(r.dias)}</td><td>${html(r.vencimiento)}</td><td>${html(r.organismo)}</td></tr>`).join("");
+    const reportHtml = `<!doctype html><html><head><meta charset="utf-8"><title>Informe caducidades</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111827}h1{margin:0 0 6px}.muted{color:#64748b;font-size:12px;margin-bottom:18px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #cbd5e1;padding:8px;font-size:12px;text-align:left}th{background:#f1f5f9}.kpis{display:flex;gap:10px;margin:16px 0}.kpi{border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px}.n{font-size:22px;font-weight:800}</style></head><body><h1>Informe de caducidades documentales</h1><div class="muted">Generado ${html(new Date().toLocaleString("es-ES"))} con filtro: ${html(filtro)}. Registros: ${informeRows.length}.</div><div class="kpis"><div class="kpi"><div class="n">${caducados}</div><div>Caducados</div></div><div class="kpi"><div class="n">${criticos}</div><div>Criticos</div></div><div class="kpi"><div class="n">${sinFecha}</div><div>Sin fecha</div></div></div><table><thead><tr><th>Entidad</th><th>Tipo</th><th>Documento</th><th>Estado</th><th>Dias</th><th>Vencimiento</th><th>Organismo</th></tr></thead><tbody>${rows || "<tr><td colspan='7'>Sin registros.</td></tr>"}</tbody></table><script>window.print()</script></body></html>`;
+    const win = window.open("", "_blank", "noopener,noreferrer");
+    if (win) {
+      win.document.write(reportHtml);
+      win.document.close();
+    }
+  }
 
   return (
     <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
         <div style={S.title}>Avisos y vencimientos</div>
+        {tab === "documentos" && (
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+            <button onClick={verInformeCaducidades} style={{...S.btn,borderColor:"var(--border2)",background:"var(--bg4)",color:"var(--text2)"}}>Ver informe</button>
+            <button onClick={exportarInformeCsv} style={{...S.btn,borderColor:"rgba(16,185,129,.35)",background:"rgba(16,185,129,.12)",color:"var(--green)"}}>Exportar Excel</button>
+          </div>
+        )}
       </div>
       {/* Main tabs */}
       <div style={{display:"flex",gap:0,borderBottom:"1px solid var(--border)",marginBottom:18}}>

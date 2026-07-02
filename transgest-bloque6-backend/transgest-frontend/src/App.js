@@ -271,6 +271,16 @@ function filtrarModulosPorPermisos(modulos, permisos, rol) {
   }).filter(Boolean);
 }
 
+const ROLES_PORTAL_CERRADO = new Set(["chofer", "cliente", "cliente_portal", "colaborador", "mecanico", "responsable_taller"]);
+
+function modulosBaseParaUsuario(user) {
+  const rol = String(user?.rol || "").toLowerCase();
+  if (ROLES_PORTAL_CERRADO.has(rol)) return MODULOS_POR_ROL[rol] || MODULOS_COLABORADOR;
+  const reglas = user?.permisos?.modulos;
+  if (reglas && Object.keys(reglas).length > 0) return MODULOS_GERENTE;
+  return MODULOS_POR_ROL[rol] || MODULOS_COLABORADOR;
+}
+
 const MODULOS_GERENTE = [
   { titulo:"Trabajo diario", items:[
     { id:"dashboard", icon:IC.dashboard, label:"Dashboard" },
@@ -652,25 +662,108 @@ function getGuidedModuleSteps(route) {
   ];
 }
 
+function isVisibleTourElement(el) {
+  if (!el || typeof el.getBoundingClientRect !== "function") return false;
+  const rect = el.getBoundingClientRect();
+  const style = window.getComputedStyle(el);
+  const inViewport = rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+  return rect.width > 0 && rect.height > 0 && inViewport && style.visibility !== "hidden" && style.display !== "none";
+}
+
+function findTourElementByText(texts = []) {
+  if (typeof document === "undefined") return null;
+  const wanted = texts.map(t => String(t || "").toLowerCase().trim()).filter(Boolean);
+  if (!wanted.length) return null;
+  const nodes = Array.from(document.querySelectorAll("button,a,input,select,textarea,[role='button'],[data-tour]"));
+  return nodes.find(el => {
+    if (!isVisibleTourElement(el)) return false;
+    const text = String(el.innerText || el.textContent || el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || "").toLowerCase();
+    return wanted.some(w => text.includes(w));
+  }) || null;
+}
+
+function getGuidedTarget(route, stepTitle, label) {
+  if (typeof document === "undefined") return null;
+  const selectors = [
+    `[data-tour="guided-step-${String(stepTitle || "").toLowerCase().replace(/[^a-z0-9]+/g, "-")}"]`,
+    stepTitle?.toLowerCase?.().includes("abrir") ? `[data-tour="tutorial-open-module"]` : "",
+    `[data-tour="module-${route}"]`,
+  ].filter(Boolean);
+  for (const selector of selectors) {
+    const el = document.querySelector(selector);
+    if (isVisibleTourElement(el)) return el;
+  }
+  return findTourElementByText([stepTitle, label]);
+}
+
 function GlobalGuidedModulePanel({ mission, onClose, onOpenModule }) {
   const [step, setStep] = useState(0);
+  const [targetRect, setTargetRect] = useState(null);
   useEffect(() => { setStep(0); }, [mission?.route, mission?.startedAt]);
-  if (!mission?.active || !mission?.route) return null;
-  const steps = getGuidedModuleSteps(mission.route);
-  const label = GUIDED_MODULE_LABELS[mission.route] || mission.route;
+  const route = mission?.route || "";
+  const steps = getGuidedModuleSteps(route);
+  const label = GUIDED_MODULE_LABELS[route] || route;
   const current = steps[Math.min(step, steps.length - 1)];
-  const complete = step >= steps.length;
+  const complete = !mission?.active || !route || step >= steps.length;
   const progress = Math.min(100, Math.round((Math.min(step, steps.length) / steps.length) * 100));
+  useEffect(() => {
+    if (!mission?.active || complete) {
+      setTargetRect(null);
+      return;
+    }
+    let raf = 0;
+    function updateTarget() {
+      const target = getGuidedTarget(route, current?.[0], label);
+      if (!target) {
+        setTargetRect(null);
+        return;
+      }
+      target.scrollIntoView({ block:"center", inline:"center", behavior:"smooth" });
+      raf = window.requestAnimationFrame(() => {
+        const rect = target.getBoundingClientRect();
+        setTargetRect({
+          top: Math.max(8, rect.top - 7),
+          left: Math.max(8, rect.left - 7),
+          width: rect.width + 14,
+          height: rect.height + 14,
+        });
+      });
+    }
+    const timer = window.setTimeout(updateTarget, 180);
+    window.addEventListener("resize", updateTarget);
+    window.addEventListener("scroll", updateTarget, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", updateTarget);
+      window.removeEventListener("scroll", updateTarget, true);
+    };
+  }, [complete, current, label, mission?.active, route, step]);
+  if (!mission?.active || !route) return null;
   return (
-    <div style={{position:"fixed",right:18,bottom:18,zIndex:9300,width:"min(380px,calc(100vw - 36px))",background:"var(--bg2)",border:"1px solid rgba(20,184,166,.34)",borderRadius:10,boxShadow:"0 20px 55px rgba(0,0,0,.28)",padding:14,fontFamily:"'DM Sans',sans-serif"}}>
+    <>
+    <style>{`
+      .tg-guided-module-panel { position:fixed; right:18px; bottom:18px; z-index:9300; width:min(380px,calc(100vw - 36px)); background:var(--bg2); border:1px solid rgba(20,184,166,.34); border-radius:10px; box-shadow:0 20px 55px rgba(0,0,0,.28); padding:14px; font-family:'DM Sans',sans-serif; }
+      .tg-guided-steps { display:grid; gap:6px; }
+      @media (max-width: 640px) {
+        .tg-guided-module-panel { left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; max-width:100vw !important; max-height:48dvh !important; overflow:auto !important; border-radius:14px 14px 0 0 !important; padding:12px 14px 16px !important; }
+        .tg-guided-module-panel .tg-guided-steps { max-height:128px; overflow:auto; }
+        .tg-guided-module-panel h3, .tg-guided-module-panel [data-guided-title] { font-size:20px !important; line-height:1.05 !important; }
+        .tg-guided-module-panel button { min-height:42px; }
+      }
+    `}</style>
+    {targetRect && (
+      <div aria-hidden="true" style={{position:"fixed",zIndex:9290,top:targetRect.top,left:targetRect.left,width:targetRect.width,height:targetRect.height,border:"2px solid var(--accent)",borderRadius:10,boxShadow:"0 0 0 9999px rgba(2,6,23,.32), 0 0 0 6px rgba(20,184,166,.18)",pointerEvents:"none",transition:"all .18s ease"}} />
+    )}
+    <div className="tg-guided-module-panel">
       <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
         <div style={{width:34,height:34,borderRadius:9,background:complete?"rgba(16,185,129,.16)":"rgba(20,184,166,.14)",color:complete?"#10b981":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>
           {complete ? "OK" : step + 1}
         </div>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent-xl)"}}>Tutorial de modulo</div>
-          <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)",marginTop:2}}>{label}</div>
-          <div style={{fontSize:11,color:"var(--text5)",fontWeight:800,marginTop:3}}>{Math.min(step, steps.length)}/{steps.length} objetivos</div>
+          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent-xl)"}}>Tutorial de módulo</div>
+          <div data-guided-title style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)",marginTop:2}}>{label}</div>
+          <div style={{fontSize:11,color:"var(--text5)",fontWeight:800,marginTop:3}}>{Math.min(step, steps.length)}/{steps.length} pasos</div>
         </div>
         <button type="button" onClick={onClose} title="Cerrar tutorial" style={{border:"none",background:"transparent",color:"var(--text5)",fontSize:18,fontWeight:900,cursor:"pointer",lineHeight:1}}>x</button>
       </div>
@@ -681,7 +774,7 @@ function GlobalGuidedModulePanel({ mission, onClose, onOpenModule }) {
         <div style={{fontSize:12,fontWeight:900,color:complete?"#10b981":"var(--text)"}}>{complete ? "Tutorial completado" : current?.[0]}</div>
         <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45,marginTop:3}}>{complete ? "Ya puedes seguir trabajando o abrir otro modulo desde la guia." : current?.[1]}</div>
       </div>
-      <div style={{display:"grid",gap:6}}>
+      <div className="tg-guided-steps">
         {steps.map(([title], idx) => {
           const done = idx < step;
           const isCurrent = idx === step && !complete;
@@ -694,14 +787,15 @@ function GlobalGuidedModulePanel({ mission, onClose, onOpenModule }) {
         })}
       </div>
       <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
-        <button type="button" onClick={() => onOpenModule?.(mission.route)} style={{padding:"9px 11px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",fontSize:12,fontWeight:900,cursor:"pointer"}}>
+        <button type="button" data-tour="tutorial-open-module" onClick={() => onOpenModule?.(mission.route)} style={{padding:"9px 11px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",fontSize:12,fontWeight:900,cursor:"pointer"}}>
           Abrir modulo
         </button>
-        <button type="button" onClick={() => complete ? onClose?.() : setStep(x => Math.min(steps.length, x + 1))} style={{flex:1,minWidth:130,padding:"9px 11px",borderRadius:8,border:"1px solid var(--accent)",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:900,cursor:"pointer"}}>
+        <button type="button" data-tour="tutorial-next-step" onClick={() => complete ? onClose?.() : setStep(x => Math.min(steps.length, x + 1))} style={{flex:1,minWidth:130,padding:"9px 11px",borderRadius:8,border:"1px solid var(--accent)",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:900,cursor:"pointer"}}>
           {complete ? "Cerrar" : "Completar paso"}
         </button>
       </div>
     </div>
+    </>
   );
 }
 
@@ -1348,7 +1442,7 @@ function AppInner() {
   // Obtener plan de la empresa del usuario
   const empresaPlan = normalizePlan(user?.plan || getEmpresaPlanLocal());
 
-  const modulosBase = MODULOS_POR_ROL[user.rol] || MODULOS_COLABORADOR;
+  const modulosBase = modulosBaseParaUsuario(user);
   const modulosPlan = empresaPlan ? filtrarModulosPorPlan(modulosBase, empresaPlan) : modulosBase;
   const modulos = filtrarModulosPorPermisos(modulosPlan, user.permisos, user.rol);
   const modulosVisibles = new Set(

@@ -448,6 +448,8 @@ export const optimizarRuta = (data) => apiFetch("/route-optimizer/optimize", { m
 export const getRutaOptimizadaPedido = (pedidoId) => apiFetch(`/route-optimizer/pedido/${pedidoId}/latest`);
 export const getRutaEnviosPedido = (pedidoId) => apiFetch(`/route-optimizer/pedido/${pedidoId}/dispatches`);
 export const enviarRutaOptimizada = (pedidoId, data) => apiFetch(`/route-optimizer/pedido/${pedidoId}/send`, { method:"POST", body:data });
+export const resolveGeoPlace = (params = {}) =>
+  apiFetch(`/geocoding/resolve?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true, timeoutMs:12000 });
 export const avisarClientePedido = (id, data = {}) => apiFetch(`/pedidos/${id}/avisar-cliente`, { method:"POST", body:data });
 export const getWhatsappStatus = () => apiFetch("/whatsapp/status", { silentSuccess:true });
 export const getWhatsappConfig = () => apiFetch("/whatsapp/config", { silentSuccess:true });
@@ -556,6 +558,7 @@ export const editarChofer   = (id,data)   => apiFetch(`/choferes/${id}`, { metho
 export const getChoferJornadaApp = () => apiFetch("/choferes/app/jornada");
 export const getChoferConjuntoApp = () => apiFetch("/choferes/app/conjunto");
 export const cambiarChoferConjuntoApp = (data) => apiFetch("/choferes/app/conjunto", { method:"POST", body:data, silentSuccess:true });
+export const guardarChoferFirmaBaseApp = (data) => apiFetch("/choferes/app/firma-base", { method:"POST", body:data, silentSuccess:true });
 export const iniciarChoferJornada = (data) => apiFetch("/choferes/app/jornada/iniciar", { method:"POST", body:data, silentSuccess:true });
 export const cambiarChoferJornadaActividad = (data) => apiFetch("/choferes/app/jornada/actividad", { method:"POST", body:data, silentSuccess:true });
 export const cerrarChoferJornada = (data) => apiFetch("/choferes/app/jornada/cerrar", { method:"POST", body:data, silentSuccess:true });

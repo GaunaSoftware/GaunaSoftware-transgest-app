@@ -16,11 +16,29 @@ async function ensureChoferesTransparencySchema() {
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_alta DATE").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_baja DATE").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS motivo_baja TEXT").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base TEXT").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_nombre VARCHAR(180)").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_fecha TIMESTAMPTZ").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_nombre TEXT").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_mime VARCHAR(120)").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_base64 TEXT").catch(() => {});
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS historial_laboral JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS plataformas JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
   schemaReady = true;
+}
+
+function normalizePlataformas(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 40).map((platform, index) => ({
+    id: String(platform?.id || `plat-${index}`),
+    nombre: String(platform?.nombre || "").trim().slice(0, 160),
+    documentos: (Array.isArray(platform?.documentos) ? platform.documentos : []).slice(0, 120).map((doc, docIndex) => ({
+      id: String(doc?.id || `doc-${index}-${docIndex}`),
+      nombre: String(doc?.nombre || "").trim().slice(0, 180),
+      caducidad: doc?.caducidad ? String(doc.caducidad).slice(0, 10) : "",
+      notas: String(doc?.notas || "").trim().slice(0, 500),
+    })).filter(doc => doc.nombre || doc.caducidad || doc.notas),
+  })).filter(platform => platform.nombre || platform.documentos.length);
 }
 
 let jornadaSchemaReady = false;
@@ -84,6 +102,7 @@ async function ensureChoferVacacionesSchema() {
 }
 
 async function resolveChoferApp(req) {
+  await ensureChoferesTransparencySchema();
   const empresaId = req.empresaId || req.user?.empresa_id;
   if (!empresaId || req.user?.rol !== "chofer") return null;
   const params = [empresaId];
@@ -550,6 +569,42 @@ router.get("/app/jornada", requireChoferApp, async (req, res) => {
   res.json({ chofer, jornada: serializeJornada(rows[0]) });
 });
 
+router.post("/app/firma-base", requireChoferApp, async (req, res) => {
+  try {
+    await ensureChoferesTransparencySchema();
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const chofer = await resolveChoferApp(req);
+    if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
+    const firma = String(req.body?.firma_png || req.body?.firma || "").trim();
+    const nombre = String(req.body?.nombre || `${chofer.nombre || ""} ${chofer.apellidos || ""}`.trim()).trim();
+    if (!/^data:image\/(png|jpeg|webp);base64,/i.test(firma)) {
+      return res.status(400).json({ error: "Firma no valida" });
+    }
+    if (!nombre) return res.status(400).json({ error: "Indica el nombre de la firma" });
+    validateBase64Upload({ data: firma, maxBytes: 1024 * 1024, allowedMimes: new Set(["image/png", "image/jpeg", "image/webp"]) });
+    const { rows } = await db.query(
+      `UPDATE choferes
+          SET firma_base=$1,
+              firma_base_nombre=$2,
+              firma_base_fecha=NOW()
+        WHERE id=$3 AND empresa_id=$4
+        RETURNING *`,
+      [firma, nombre, chofer.id, empresaId]
+    );
+    await crearNotificacion(
+      empresaId,
+      "chofer_firma_base",
+      "Firma de chofer registrada",
+      `${nombre} ha registrado su firma base desde la app.`,
+      { chofer_id: chofer.id },
+      req.user?.id || null
+    ).catch(() => {});
+    res.json({ ok: true, chofer: rows[0] });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 router.get("/app/conjunto", requireChoferApp, async (req, res) => {
   const empresaId = req.empresaId || req.user?.empresa_id;
   const chofer = await resolveChoferApp(req);
@@ -899,6 +954,7 @@ router.post("/app/jornada/iniciar", requireChoferApp, async (req, res) => {
   const chofer = await resolveChoferApp(req);
   if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
   const kmInicio = req.body?.km_inicio === "" || req.body?.km_inicio == null ? null : Number(req.body.km_inicio);
+  if (kmInicio == null) return res.status(400).json({ error: "Kilometros de inicio obligatorios" });
   if (kmInicio != null && (!Number.isFinite(kmInicio) || kmInicio < 0)) return res.status(400).json({ error: "Kilometros de inicio no validos" });
   const open = await db.query(
     `SELECT * FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' ORDER BY inicio_at DESC LIMIT 1`,
@@ -1022,6 +1078,7 @@ router.post("/app/jornada/cerrar", requireChoferApp, async (req, res) => {
   const chofer = await resolveChoferApp(req);
   if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
   const kmFin = req.body?.km_fin === "" || req.body?.km_fin == null ? null : Number(req.body.km_fin);
+  if (kmFin == null) return res.status(400).json({ error: "Kilometros de cierre obligatorios" });
   if (kmFin != null && (!Number.isFinite(kmFin) || kmFin < 0)) return res.status(400).json({ error: "Kilometros de cierre no validos" });
   const { rows: currentRows } = await db.query(
     `SELECT * FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' ORDER BY inicio_at DESC LIMIT 1`,
@@ -1088,15 +1145,16 @@ router.get("/:id", async (req,res)=>{
 router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
   try {
     await ensureChoferesTransparencySchema();
-    const {nombre,dni,telefono,email,vehiculo_id,categoria_carnet,apellidos,tipo_contrato,salario,notas,sexo,puesto_valor,fecha_alta}=req.body;
+    const {nombre,dni,telefono,email,vehiculo_id,categoria_carnet,apellidos,tipo_contrato,salario,notas,sexo,puesto_valor,fecha_alta,plataformas}=req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
     const {rows}=await db.query(
-      `INSERT INTO choferes (nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,tipo_contrato,salario,notas,empresa_id,sexo,puesto_valor,fecha_alta,historial_laboral)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::date,CURRENT_DATE),$15::jsonb) RETURNING *`,
+      `INSERT INTO choferes (nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,tipo_contrato,salario,notas,empresa_id,sexo,puesto_valor,fecha_alta,historial_laboral,plataformas)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::date,CURRENT_DATE),$15::jsonb,$16::jsonb) RETURNING *`,
       [
         nombre,apellidos||null,dni||null,telefono||null,email||null,vehiculo_id||null,categoria_carnet||"C+E",tipo_contrato||null,salario||null,notas||null,empresaId,sexo||null,puesto_valor||null,
         fecha_alta || null,
-        JSON.stringify([{ tipo:"alta", fecha: fecha_alta || new Date().toISOString().slice(0,10), usuario_id: req.user?.id || null, created_at: new Date().toISOString() }])
+        JSON.stringify([{ tipo:"alta", fecha: fecha_alta || new Date().toISOString().slice(0,10), usuario_id: req.user?.id || null, created_at: new Date().toISOString() }]),
+        JSON.stringify(normalizePlataformas(plataformas))
       ]
     );
     res.status(201).json(rows[0]);
@@ -1105,7 +1163,7 @@ router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
 router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
   try {
     await ensureChoferesTransparencySchema();
-    const {nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,activo,notas,tipo_contrato,salario,sexo,puesto_valor,estado,avisos,fecha_alta,fecha_baja,motivo_baja,carta_renuncia_nombre,carta_renuncia_mime,carta_renuncia_base64}=req.body;
+    const {nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,activo,notas,tipo_contrato,salario,sexo,puesto_valor,estado,avisos,fecha_alta,fecha_baja,motivo_baja,carta_renuncia_nombre,carta_renuncia_mime,carta_renuncia_base64,plataformas}=req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
     const current = await db.query("SELECT * FROM choferes WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);
     if(!current.rows[0]) return res.status(404).json({error:"No encontrado"});
@@ -1154,7 +1212,8 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
               carta_renuncia_nombre=$21,
               carta_renuncia_mime=$22,
               carta_renuncia_base64=$23,
-              historial_laboral=$24::jsonb
+              historial_laboral=$24::jsonb,
+              plataformas=COALESCE($25::jsonb, plataformas)
         WHERE id=$16 AND empresa_id=$17
         RETURNING *`,
       [
@@ -1164,6 +1223,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
         Array.isArray(avisos) ? JSON.stringify(avisos.slice(0, 120)) : null,
         req.params.id,empresaId,
         fecha_alta || null,nextFechaBaja,nextMotivoBaja,nextCartaNombre,nextCartaMime,nextCartaBase64,JSON.stringify(nextHistorial.slice(-120)),
+        Array.isArray(plataformas) ? JSON.stringify(normalizePlataformas(plataformas)) : null,
       ]
     );
     if(!rows[0]) return res.status(404).json({error:"No encontrado"});

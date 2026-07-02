@@ -836,14 +836,28 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
             </tbody>
           </table>
 
+          <style>{`
+            .tg-factura-linked-panel { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 18px; }
+            .tg-factura-linked-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
+            .tg-factura-linked-row { display: grid; grid-template-columns: minmax(160px,1.05fr) minmax(180px,1.35fr) 92px 96px minmax(170px,auto); gap: 9px; align-items: center; padding: 10px 11px; border: 1px solid var(--border2); border-radius: 9px; background: var(--bg3); }
+            .tg-factura-linked-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+            @media (max-width: 780px) {
+              .tg-factura-linked-panel { padding: 11px; }
+              .tg-factura-linked-head { align-items: flex-start; flex-direction: column; }
+              .tg-factura-linked-row { grid-template-columns: 1fr !important; gap: 7px; }
+              .tg-factura-linked-metric { text-align: left !important; }
+              .tg-factura-linked-actions { justify-content: flex-start; }
+            }
+          `}</style>
+
           {pedidosFactura.length>0&&(
-            <div style={{background:"var(--bg3)",border:"1px solid #141a28",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
-              <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:8}}>
+            <div className="tg-factura-linked-panel">
+              <div className="tg-factura-linked-head">
                 <div>
-                  <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Pedidos vinculados y verificacion</div>
-                  <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>Corrige peso, mercancia, referencia o importe antes de emitir/enviar la factura.</div>
+                  <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)"}}>Pedidos vinculados y verificacion</div>
+                  <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>Corrige peso, mercancia, referencia o importe antes de emitir/enviar la factura.</div>
                 </div>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text5)"}}>{pedidosFactura.length} pedido(s)</span>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text4)",fontWeight:800}}>{pedidosFactura.length} pedido(s)</span>
               </div>
               <div style={{display:"grid",gap:7}}>
                 {pedidosFactura.map(p => {
@@ -851,22 +865,22 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                   const tone = facturacionAiTone(ai);
                   const diffs = Array.isArray(ai?.diferencias) ? ai.diferencias : [];
                   return (
-                    <div key={p.id} style={{display:"grid",gridTemplateColumns:"minmax(170px,1.2fr) minmax(180px,1.4fr) 96px 90px auto",gap:8,alignItems:"center",padding:"8px 9px",border:"1px solid #0f1520",borderRadius:8,background:"rgba(15,21,32,.45)"}}>
+                    <div key={p.id} className="tg-factura-linked-row">
                       <div>
                         <div style={{fontSize:12,fontWeight:900,color:"var(--text)",fontFamily:"'JetBrains Mono',monospace"}}>{p.numero || "-"}</div>
-                        <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>{p.fecha_carga ? new Date(p.fecha_carga).toLocaleDateString("es-ES") : "-"}</div>
+                        <div style={{fontSize:10,color:"var(--text4)",marginTop:2}}>{p.fecha_carga ? new Date(p.fecha_carga).toLocaleDateString("es-ES") : "-"}</div>
                       </div>
                       <div style={{minWidth:0}}>
-                        <div style={{fontSize:11,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.origen || "-"} -&gt; {p.destino || "-"}</div>
-                        <div style={{fontSize:10,color:"var(--text5)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.mercancia || "Mercancia sin indicar"}</div>
+                        <div style={{fontSize:11,color:"var(--text2)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.origen || "-"} -&gt; {p.destino || "-"}</div>
+                        <div style={{fontSize:10,color:"var(--text4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.mercancia || "Mercancia sin indicar"}</div>
                       </div>
-                      <div style={{fontSize:11,color:"var(--text3)",textAlign:"right",fontFamily:"'JetBrains Mono',monospace"}}>
+                      <div className="tg-factura-linked-metric" style={{fontSize:11,color:"var(--text2)",textAlign:"right",fontFamily:"'JetBrains Mono',monospace"}}>
                         {Number(p.peso_kg || 0).toLocaleString("es-ES")} kg
                       </div>
-                      <div style={{fontSize:11,color:"var(--green)",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:800}}>
+                      <div className="tg-factura-linked-metric" style={{fontSize:11,color:"var(--green)",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900}}>
                         {fmt2(p.importe || 0)} EUR
                       </div>
-                      <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                      <div className="tg-factura-linked-actions">
                         {aiDisponible && (
                           <span title={ai?.resumen || "Sin analisis IA"} style={{display:"inline-flex",alignItems:"center",padding:"3px 7px",borderRadius:999,background:tone.bg,color:tone.color,fontSize:10,fontWeight:900,border:`1px solid ${tone.color}33`}}>
                             {tone.label}{diffs.length ? ` (${diffs.length})` : ""}

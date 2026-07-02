@@ -3,6 +3,7 @@ import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactiva
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
+import PlatformDocumentsEditor, { normalizePlatformDocuments } from "../components/PlatformDocumentsEditor";
 
 function importeRealPedido(pedido = {}) {
   const importe = Number(pedido.importe ?? pedido.precio_cliente_col ?? pedido.precio_unitario ?? 0);
@@ -207,6 +208,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
   const [drafts, setDrafts] = useState({});
   const [savingId, setSavingId] = useState("");
   const [savingBulk, setSavingBulk] = useState(false);
+  const [gpsDiagnosticoOpen, setGpsDiagnosticoOpen] = useState(false);
   const gpsProviders = (providers || []).filter(p => p.id !== "manual");
   const selectableProviders = [
     { id:"manual", label:"Sin proveedor / manual" },
@@ -214,6 +216,21 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
   ];
   const vehiculosGps = useMemo(() => (vehiculos || []).filter(v => esVehiculoConGpsHabitual(v, vehiculos)), [vehiculos]);
   const activeProvider = syncProvider || status?.active_provider || gpsProviders.find(p => p.active)?.id || "";
+  const gpsWarnings = (status?.warnings || []).map(w =>
+    String(w || "")
+      .replace(/config[uú]ralo?.*superadmin\.?/gi, "Para configurarlo, contacta con soporte.")
+      .replace(/configura.*superadmin\.?/gi, "Para configurarlo, contacta con soporte.")
+      .replace(/desde\s+superadmin/gi, "contactando con soporte")
+      .replace(/en\s+superadmin/gi, "con soporte")
+      .replace(/SuperAdmin/g, "soporte")
+      .replace(/superadmin/g, "soporte")
+  );
+  const gpsSignalCauses = (status?.signal_help?.likely_causes || []).map(cause =>
+    String(cause || "")
+      .replace(/SuperAdmin/g, "soporte")
+      .replace(/superadmin/g, "soporte")
+      .replace(/desde\s+soporte/gi, "contactando con soporte")
+  );
   const mapped = vehiculosGps.filter(v => v.gps_provider && v.gps_provider !== "manual" && v.gps_external_id).length;
   const pendientes = vehiculosGps.filter(v => v.activo !== false && (!v.gps_provider || v.gps_provider === "manual" || !v.gps_external_id)).length;
   const dirtyLinks = vehiculosGps
@@ -465,27 +482,45 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
         </div>
       )}
 
-      {status?.warnings?.length > 0 && (
-        <div style={{marginTop:16,background:"linear-gradient(90deg,rgba(251,146,60,.14),var(--bg3))",border:"1px solid rgba(251,146,60,.35)",borderRadius:10,padding:"18px 20px",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:22,alignItems:"start"}}>
-          <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
-            <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:"rgba(251,146,60,.12)",color:"#f97316",flexShrink:0}}>
-              <UiIcon name="warning" color="#f97316" size={24} />
-            </div>
-            <div>
-              <div style={{fontSize:14,fontWeight:900,color:"#ea580c",marginBottom:8}}>Diagnostico GPS</div>
-              {status.warnings.map((w, i) => <div key={i} style={{fontSize:13,color:"var(--text3)",lineHeight:1.5}}>{w}</div>)}
-            </div>
-          </div>
-          {status?.signal_help && (
-            <div style={{borderLeft:"1px solid rgba(251,146,60,.28)",paddingLeft:20}}>
-              <div style={{fontSize:13,color:"var(--text)",fontWeight:900,lineHeight:1.45,marginBottom:7}}>
-                {status.signal_help.meaning}
+      {gpsWarnings.length > 0 && (
+        <div style={{marginTop:12,background:"linear-gradient(90deg,rgba(251,146,60,.10),var(--bg3))",border:"1px solid rgba(251,146,60,.30)",borderRadius:10,overflow:"hidden"}}>
+          <button
+            type="button"
+            onClick={() => setGpsDiagnosticoOpen(v => !v)}
+            style={{width:"100%",border:"none",background:"transparent",padding:"11px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",color:"var(--text)",textAlign:"left"}}
+          >
+            <span style={{display:"inline-flex",alignItems:"center",gap:10,minWidth:0}}>
+              <span style={{width:28,height:28,borderRadius:8,display:"grid",placeItems:"center",background:"rgba(251,146,60,.12)",color:"#f97316",flexShrink:0}}>
+                <UiIcon name="warning" color="#f97316" size={17} />
+              </span>
+              <span style={{minWidth:0}}>
+                <span style={{display:"block",fontSize:13,fontWeight:900,color:"#ea580c"}}>Diagnostico GPS</span>
+                <span style={{display:"block",fontSize:12,color:"var(--text4)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  {gpsWarnings.length} aviso(s). Para configurarlo, contacta con soporte.
+                </span>
+              </span>
+            </span>
+            <span style={{fontSize:12,fontWeight:900,color:"var(--accent)",whiteSpace:"nowrap"}}>
+              {gpsDiagnosticoOpen ? "Ocultar" : "Ver diagnostico"}
+            </span>
+          </button>
+          {gpsDiagnosticoOpen && (
+            <div style={{borderTop:"1px solid rgba(251,146,60,.22)",padding:"14px 16px",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:18,alignItems:"start"}}>
+              <div>
+                {gpsWarnings.map((w, i) => <div key={i} style={{fontSize:13,color:"var(--text3)",lineHeight:1.5}}>{w}</div>)}
               </div>
-              {(status.signal_help.likely_causes || []).slice(0, 4).map((cause, i) => (
-                <div key={i} style={{fontSize:13,color:"var(--text3)",lineHeight:1.5}}>
-                  - {cause}
+              {status?.signal_help && (
+                <div style={{borderLeft:"1px solid rgba(251,146,60,.28)",paddingLeft:18}}>
+                  <div style={{fontSize:13,color:"var(--text)",fontWeight:900,lineHeight:1.45,marginBottom:7}}>
+                    {String(status.signal_help.meaning || "").replace(/SuperAdmin/g, "soporte").replace(/superadmin/g, "soporte")}
+                  </div>
+                  {gpsSignalCauses.slice(0, 4).map((cause, i) => (
+                    <div key={i} style={{fontSize:13,color:"var(--text3)",lineHeight:1.5}}>
+                      - {cause}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>
@@ -904,6 +939,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
     compania_seguro:"", numero_poliza:"",
     // Notas
     notas:"",
+    plataformas: [],
     // Conjunto
     chofer_id: editando?.chofer_id || "",
     remolque_id: editando?.remolque_id || "",
@@ -986,7 +1022,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
     try {
       let savedId = editando?.id;
       let savedVehiculo = null;
-      const formToSave = {...form};
+      const formToSave = {...form, plataformas: normalizePlatformDocuments(form.plataformas ?? editando?.plataformas ?? [])};
       if (editando?.id) {
         try {
           savedVehiculo = await editarVehiculo(editando.id, formToSave);
@@ -1000,7 +1036,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
           });
         }
       } else {
-        const created = await crearVehiculo(form);
+        const created = await crearVehiculo(formToSave);
         savedVehiculo = created;
         savedId = created?.id || created?.data?.id;
       }
@@ -1030,6 +1066,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
     { id:"tecnica",        l:"Ficha tecnica" },
     { id:"economico",      l:"Compra / Venta" },
     { id:"docs",           l:"Documentacion" },
+    { id:"plataformas",    l:"Plataformas" },
     { id:"gps",            l:"GPS" },
     { id:"conjunto",       l:"Conjunto / Chofer" },
     ...(editando ? [{ id:"historial", l:"Historial" }] : []),
@@ -1457,6 +1494,17 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                 <div style={{color:"var(--text5)",fontSize:12,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:12}}>Guarda primero el vehiculo para adjuntar documentos.</div>
               )}
             </div>
+          )}
+
+          {tab === "plataformas" && (
+            <PlatformDocumentsEditor
+              value={form.plataformas}
+              canEdit={canEdit}
+              inputStyle={S.inp}
+              labelStyle={S.lbl}
+              buttonStyle={S.btn}
+              onChange={plataformas => setForm(p => ({ ...p, plataformas }))}
+            />
           )}
 
           {tab === "gps" && editando && (

@@ -500,6 +500,7 @@ const VEHICULO_EXT_FIELDS = [
   "fecha_venta", "valor_venta", "comprador",
   "compania_seguro", "numero_poliza",
   "taller_entrada_at", "estado_aux", "estado_aux_updated_at",
+  "plataformas",
 ];
 
 function extractVehiculoExtData(body = {}) {

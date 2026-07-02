@@ -76,6 +76,7 @@ function normalizeStopList(stops = [], fallback = {}) {
     google_maps_url: stop.google_maps_url || stop.maps_url || "",
     provincia: stop.provincia || stop.region || fallback.provincia || "",
     pais: stop.pais || stop.country || fallback.pais || "",
+    referencia: stop.referencia || stop.referencia_cliente || stop.ref || "",
   })).filter(stop => stop.direccion || stop.nombre);
 }
 
@@ -861,9 +862,9 @@ function buildDocumentoControlSignatures(pedido = {}) {
       imagen: pedido?.firma_cargador || "",
     }),
     chofer: pick("chofer", {
-      nombre: pedido?.firma_chofer_nombre || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim(),
-      fecha: pedido?.firma_chofer_fecha || "",
-      imagen: pedido?.firma_chofer || "",
+      nombre: pedido?.firma_chofer_nombre || pedido?.chofer_firma_base_nombre || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim(),
+      fecha: pedido?.firma_chofer_fecha || pedido?.chofer_firma_base_fecha || "",
+      imagen: pedido?.firma_chofer || pedido?.chofer_firma_base || "",
     }),
     destinatario: pick("destinatario", {
       nombre: pedido?.firma_nombre || "",
@@ -920,8 +921,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
         telefono: empresa?.telefono || "",
       };
 
-  const matriculaTractora = pedido?.matricula_colaborador || pedido?.vehiculo_matricula || pedido?.matricula || "";
-  const matriculaRemolque = pedido?.remolque_matricula_colaborador || pedido?.remolque_matricula || pedido?.remolque_mat || "";
+  const matriculaTractora = pedido?.matricula_colaborador || pedido?.vehiculo_matricula || pedido?.veh_matricula || pedido?.matricula || "";
+  const matriculaRemolque = pedido?.remolque_matricula_colaborador || pedido?.remolque_matricula || pedido?.rem_matricula || pedido?.remolque_mat || "";
   const pesoKg = Number(pedido?.peso_kg || pedido?.kg || 0);
   const codigoControl = buildCodigoControl({ empresaId, pedidoId: pedido?.id });
   const publicUrl = buildPublicUrl({ empresaId, pedidoId: pedido?.id, config, appBaseUrl });
@@ -952,9 +953,20 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     },
     cargador_contractual: cargador,
     transportista_efectivo: transportista,
+    colaborador: esColaborador ? transportista : null,
+    transportistas_sucesivos: esColaborador ? [transportista].filter(t => hasText(t.nombre)) : [],
     empresa: {
       nombre: companyName(empresa),
       cif: empresa?.cif || "",
+      nif: empresa?.cif || "",
+      domicilio: empresa?.domicilio || empresa?.direccion || "",
+      cp: empresa?.cp || empresa?.codigo_postal || "",
+      poblacion: empresa?.poblacion || empresa?.ciudad || "",
+      provincia: empresa?.provincia || "",
+      pais: empresa?.pais || "España",
+      telefono: empresa?.telefono || "",
+      email: empresa?.email || "",
+      contacto: empresa?.contacto || "",
       logo_url: dataUrlFromBase64(empresa?.logo_base64 || "", empresa?.logo_mime || "image/png"),
     },
     chofer: {
@@ -1012,7 +1024,9 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     },
     observaciones: pedido?.notas || pedido?.condiciones_adicionales || config.observaciones || "",
     condiciones: {
-      forma_pago: formatClientPaymentTerms(empresa),
+      forma_pago_interna: formatClientPaymentTerms(empresa),
+      reembolso_contra_entrega: pedido?.reembolso_contra_entrega || pedido?.cash_on_delivery || "",
+      acuerdos_especiales: pedido?.acuerdos_especiales || "",
       operativa_carga: buildOperativaCargaLabels(pedido),
       revision_combustible: "El precio pactado solo se ajustara por variacion del combustible si el indice G de variacion del precio medio del gasoleo publicado por la Administracion entre la fecha de esta orden de carga y la fecha de carga efectiva de la mercancia es igual o superior al 5%. El ajuste debera reflejarse en la factura correspondiente al transporte ejecutado como concepto separado e identificado. No se admitiran ajustes en facturas rectificativas o posteriores emitidas fuera del ciclo de facturacion habitual de las partes. Si el porteador hubiera percibido ayudas publicas que compensen total o parcialmente la variacion del gasoleo, el indice G se calculara sobre el precio neto tras descontar dichas ayudas. El ajuste a la baja opera en las mismas condiciones cuando la variacion sea favorable al cargador.",
       clausulas_orden_carga: [
@@ -1092,7 +1106,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     { key: "hora_descarga", ok: hasText(documento.horarios.hora_descarga) || hasText(documento.horarios.ventana_descarga), label: "Hora o ventana de descarga", category: "operativa" },
     { key: "vehiculo", ok: hasText(documento.vehiculo.tractora), label: "Matricula del vehiculo tractor", category: "vehiculo" },
     { key: "remolque", ok: hasText(documento.vehiculo.remolque), label: "Matricula de remolque si aplica", category: "vehiculo", required: false },
-    { key: "forma_pago", ok: hasText(documento.condiciones.forma_pago), label: "Condiciones de pago del servicio", category: "condiciones" },
+    { key: "operativa_carga", ok: Array.isArray(documento.condiciones.operativa_carga), label: "Operativa de carga documentada", category: "condiciones", required: false },
     { key: "ecmr_internacional", ok: documento.cmr_tipo !== "internacional" || buildEcmrConsignmentNote(documento).missing_fields.length === 0, label: "eCMR internacional con datos CMR minimos", category: "interoperabilidad" },
     { key: "firma_avanzada", ok: false, label: "Proveedor de firma avanzada eIDAS integrado", category: "firma", required: false },
     { key: "efti_platform", ok: false, label: "Preparado para plataforma eFTI/e-CMR certificada", category: "interoperabilidad", required: false },
@@ -1269,7 +1283,7 @@ async function buildDocumentoControlHtml({
   const operativa = Array.isArray(documento?.condiciones?.operativa_carga) ? documento.condiciones.operativa_carga : [];
   const clausulasOrden = Array.isArray(documento?.condiciones?.clausulas_orden_carga) ? documento.condiciones.clausulas_orden_carga : [];
   const condicionesBlock = publicView ? "" : `<div class="note"><strong>Condiciones del servicio:</strong><br>
-    Forma de pago: ${escapeHtml(documento?.condiciones?.forma_pago || "-")}<br>
+    Forma de pago interna: ${escapeHtml(documento?.condiciones?.forma_pago_interna || "-")}<br>
     ${operativa.length ? `Operativa: ${escapeHtml(operativa.join(" | "))}<br>` : ""}
     ${escapeHtml(documento?.condiciones?.revision_combustible || "")}
     ${clausulasOrden.length ? `<ul>${clausulasOrden.map(clausula => `<li><strong>${escapeHtml(clausula.titulo || "")}:</strong> ${escapeHtml(clausula.texto || "")}</li>`).join("")}</ul>` : ""}
@@ -1529,7 +1543,7 @@ async function generateDocumentoControlPdf({
   if (!publicView) {
     ensureSpace(150);
     section("Condiciones y observaciones");
-    writeLine("Forma de pago", documento?.condiciones?.forma_pago);
+    writeLine("Forma de pago interna", documento?.condiciones?.forma_pago_interna);
     writeLine("Observaciones", documento?.observaciones || "-");
     if (documento?.condiciones?.revision_combustible) writeLine("Revision combustible", documento.condiciones.revision_combustible, { size: 8 });
   } else if (documento?.observaciones) {
@@ -1631,7 +1645,7 @@ async function buildDocumentoControlCmrHtml({
   const controls = `<div class="no-print cmr-actions"><button onclick="window.print()">Imprimir</button>${qrUrl ? `<button onclick="navigator.clipboard && navigator.clipboard.writeText(${JSON.stringify(qrUrl)})">Copiar enlace QR</button>` : ""}</div>`;
   const printScript = autoPrint ? `<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250));</script>` : "";
   const privateNotes = publicView ? "" : `<section class="cmr-box cmr-wide"><h2>Condiciones documentadas / Documented terms</h2>
-    <p><strong>Pago:</strong> ${escapeHtml(doc.condiciones?.forma_pago || "-")}</p>
+    <p><strong>Pago interno:</strong> ${escapeHtml(doc.condiciones?.forma_pago_interna || "-")}</p>
     ${doc.condiciones?.revision_combustible ? `<p>${escapeHtml(doc.condiciones.revision_combustible)}</p>` : ""}
     <p><strong>Estado interoperabilidad:</strong> ${escapeHtml(buildEcmrConsignmentNote(doc).status || "-")}</p>
   </section>`;
@@ -1664,20 +1678,20 @@ async function buildDocumentoControlCmrHtml({
       <div class="cmr-box"><div class="cmr-num">1 Remitente / Sender</div>${cmrPartyLines(doc.cargador_contractual).map(line => `<p>${escapeHtml(line)}</p>`).join("")}</div>
       <div class="cmr-box"><div class="cmr-num">16 Transportista / Carrier</div>${cmrPartyLines(doc.transportista_efectivo).map(line => `<p>${escapeHtml(line)}</p>`).join("")}</div>
       <div class="cmr-box"><div class="cmr-num">2 Destinatario / Consignee</div>${cmrAddressLines(doc.destino).map(line => `<p>${escapeHtml(line)}</p>`).join("")}</div>
-      <div class="cmr-box"><div class="cmr-num">17 Transportistas sucesivos / Successive carriers</div><p>${escapeHtml(doc.colaborador?.nombre || doc.transportista_efectivo?.nombre || "-")}</p></div>
+      <div class="cmr-box"><div class="cmr-num">17 Transportistas sucesivos / Successive carriers</div><p>${escapeHtml((Array.isArray(doc.transportistas_sucesivos) ? doc.transportistas_sucesivos : []).map(t => [t.nombre, t.nif, t.domicilio].filter(Boolean).join(" | ")).join("\n") || "-")}</p></div>
       <div class="cmr-box"><div class="cmr-num">3 Lugar de entrega / Place of delivery</div>${cmrAddressLines(doc.destino).map(line => `<p>${escapeHtml(line)}</p>`).join("")}<p class="cmr-small">Previsto: ${escapeHtml(descargaFecha)}</p></div>
       <div class="cmr-box"><div class="cmr-num">18 Reservas y observaciones / Reservations</div><p>${escapeHtml(doc.observaciones || "-")}</p></div>
       <div class="cmr-box"><div class="cmr-num">4 Lugar y fecha de carga / Place and date of taking over</div>${cmrAddressLines(doc.origen).map(line => `<p>${escapeHtml(line)}</p>`).join("")}<p class="cmr-small">Previsto: ${escapeHtml(cargaFecha)}</p></div>
-      <div class="cmr-box"><div class="cmr-num">19 Acuerdos especiales / Special agreements</div><p>Pago: ${escapeHtml(doc.condiciones?.forma_pago || "-")}</p></div>
+      <div class="cmr-box"><div class="cmr-num">19 Acuerdos especiales / Special agreements</div><p>${escapeHtml(doc.condiciones?.acuerdos_especiales || "-")}</p></div>
       <div class="cmr-box"><div class="cmr-num">5 Documentos anexos / Documents attached</div><p>${anexosTexto}</p></div>
       <div class="cmr-box"><div class="cmr-num">21 Establecido en / Established in</div><p>${escapeHtml(doc.origen?.provincia || doc.origen?.pais || "Espana")} - ${escapeHtml(cmrDate(generatedAt))}</p><p class="cmr-small">Control: ${escapeHtml(doc.codigo_control || "-")}</p></div>
     </section>
     <table class="cmr-goods">
       <thead><tr><th>6 Marcas y numeros</th><th>7 Cantidad</th><th>8 Embalaje</th><th>9 Naturaleza mercancia</th><th>11 Peso bruto</th><th>12 Volumen</th></tr></thead>
-      <tbody><tr><td>${escapeHtml(doc.referencia_pedido || "-")}</td><td>${escapeHtml(doc.mercancia?.bultos || "-")}</td><td>${escapeHtml(doc.mercancia?.embalaje || "-")}</td><td>${escapeHtml(doc.mercancia?.descripcion || "-")}</td><td>${escapeHtml(peso)}</td><td>${escapeHtml(volumen)}</td></tr></tbody>
+      <tbody><tr><td>${escapeHtml(doc.mercancia?.marcas_numeros || "-")}</td><td>${escapeHtml(doc.mercancia?.bultos || "-")}</td><td>${escapeHtml(doc.mercancia?.embalaje || "-")}</td><td>${escapeHtml(doc.mercancia?.descripcion || "-")}</td><td>${escapeHtml(peso)}</td><td>${escapeHtml(volumen)}</td></tr></tbody>
     </table>
     <section class="cmr-grid">
-      <div class="cmr-box"><div class="cmr-num">15 Reembolso / Cash on delivery</div><p>${escapeHtml(doc.condiciones?.forma_pago || "-")}</p></div>
+      <div class="cmr-box"><div class="cmr-num">15 Reembolso / Cash on delivery</div><p>${escapeHtml(doc.condiciones?.reembolso_contra_entrega || "-")}</p></div>
       <div class="cmr-box"><div class="cmr-num">Vehiculo y chofer / Vehicle and driver</div><p>Tractora: ${escapeHtml(doc.vehiculo?.tractora || "-")} | Remolque: ${escapeHtml(doc.vehiculo?.remolque || "-")}</p><p>Chofer: ${escapeHtml([doc.chofer?.nombre, doc.chofer?.dni, doc.chofer?.telefono].filter(Boolean).join(" | ") || "-")}</p></div>
       <div class="cmr-box cmr-wide"><div class="cmr-num">QR y verificacion / Verification</div><p class="cmr-link">${escapeHtml(qrUrl || "Sin enlace publico configurado")}</p><p class="cmr-small">Codigo de verificacion: ${escapeHtml(doc.verificacion?.codigo_verificacion || "-")}</p></div>
     </section>
@@ -1780,13 +1794,13 @@ async function generateDocumentoControlCmrPdf({
   box("16", "Transportista / Carrier", cmrPartyLines(docData.transportista_efectivo), left + colW, y, colW, rowH);
   y += rowH;
   box("2", "Destinatario / Consignee", cmrAddressLines(docData.destino), left, y, colW, rowH);
-  box("17", "Transportistas sucesivos / Successive carriers", docData.colaborador?.nombre || docData.transportista_efectivo?.nombre || "-", left + colW, y, colW, rowH);
+  box("17", "Transportistas sucesivos / Successive carriers", (Array.isArray(docData.transportistas_sucesivos) ? docData.transportistas_sucesivos : []).map(t => [t.nombre, t.nif, t.domicilio].filter(Boolean).join(" | ")).join("\n") || "-", left + colW, y, colW, rowH);
   y += rowH;
   box("3", "Lugar de entrega / Place of delivery", [...cmrAddressLines(docData.destino), `Previsto: ${cmrDate(docData.horarios?.fecha_descarga)} ${docData.horarios?.hora_descarga || docData.horarios?.ventana_descarga || ""}`], left, y, colW, rowH);
   box("18", "Reservas y observaciones / Reservations", docData.observaciones || "-", left + colW, y, colW, rowH);
   y += rowH;
   box("4", "Lugar y fecha de carga / Place and date of taking over", [...cmrAddressLines(docData.origen), `Previsto: ${cmrDate(docData.horarios?.fecha_carga)} ${docData.horarios?.hora_carga || docData.horarios?.ventana_carga || ""}`], left, y, colW, rowH);
-  box("19", "Acuerdos especiales / Special agreements", `Pago: ${docData.condiciones?.forma_pago || "-"}`, left + colW, y, colW, rowH);
+  box("19", "Acuerdos especiales / Special agreements", docData.condiciones?.acuerdos_especiales || "-", left + colW, y, colW, rowH);
   y += rowH;
   const anexosPdf = Array.isArray(docData.documentos_anexos) ? docData.documentos_anexos : [];
   const anexosPdfTexto = anexosPdf.length
@@ -1804,7 +1818,7 @@ async function generateDocumentoControlCmrPdf({
     drawRect(x, y, w, goodsH);
     put(h, x + 4, y + 5, w - 8, { bold: true, size: 6.5, color: "#0f766e" });
     const value = [
-      docData.referencia_pedido || "-",
+      docData.mercancia?.marcas_numeros || "-",
       docData.mercancia?.bultos || "-",
       docData.mercancia?.embalaje || "-",
       docData.mercancia?.descripcion || "-",
@@ -1816,7 +1830,7 @@ async function generateDocumentoControlCmrPdf({
   });
   y += goodsH;
 
-  box("15", "Reembolso / Cash on delivery", docData.condiciones?.forma_pago || "-", left, y, colW, 48);
+  box("15", "Reembolso / Cash on delivery", docData.condiciones?.reembolso_contra_entrega || "-", left, y, colW, 48);
   box("", "Vehiculo y chofer / Vehicle and driver", [
     `Tractora: ${docData.vehiculo?.tractora || "-"} | Remolque: ${docData.vehiculo?.remolque || "-"}`,
     `Chofer: ${[docData.chofer?.nombre, docData.chofer?.dni, docData.chofer?.telefono].filter(Boolean).join(" | ") || "-"}`,
@@ -1834,7 +1848,7 @@ async function generateDocumentoControlCmrPdf({
 
   if (!publicView) {
     box("", "Condiciones documentadas / Documented terms", [
-      `Pago: ${docData.condiciones?.forma_pago || "-"}`,
+      `Pago interno: ${docData.condiciones?.forma_pago_interna || "-"}`,
       docData.condiciones?.revision_combustible || "",
       `Estado interoperabilidad: ${buildEcmrConsignmentNote(docData).status || "-"}`,
     ], left, y, right - left, 48);

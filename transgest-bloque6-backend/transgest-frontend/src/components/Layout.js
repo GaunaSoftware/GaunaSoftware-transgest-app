@@ -447,6 +447,7 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
           className={`tg-nav-item ${(isActive || (hasChildren && childActive)) ? "active" : ""}`}
           href={item.href}
           title={item.label}
+          data-tour={`module-${item.id}`}
           target={item.external ? "_blank" : undefined}
           rel={item.external ? "noopener noreferrer" : undefined}
         >
@@ -458,6 +459,7 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
         className={`tg-nav-item ${(isActive || (hasChildren && childActive)) ? "active" : ""}`}
         onClick={handleClick}
         title={item.label}
+        data-tour={`module-${item.id}`}
       >
         <span className="tg-nav-item-icon">{item.icon}</span>
         <span className="tg-nav-item-label">{item.label}</span>
@@ -525,6 +527,7 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
               key={sub.id}
               className={`tg-nav-subitem ${vistaActiva === sub.id ? "active" : ""}`}
               href={sub.href}
+              data-tour={`module-${sub.id}`}
               target={sub.external ? "_blank" : undefined}
               rel={sub.external ? "noopener noreferrer" : undefined}
             >
@@ -536,6 +539,7 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
               key={sub.id}
               className={`tg-nav-subitem ${vistaActiva === sub.id ? "active" : ""}`}
               onClick={() => setVista(sub.id)}
+              data-tour={`module-${sub.id}`}
             >
               <span className="tg-nav-dot"/>
               <span style={{flex:1}}>{sub.label}</span>

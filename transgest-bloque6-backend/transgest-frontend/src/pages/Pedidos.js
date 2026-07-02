@@ -7,8 +7,8 @@ import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRuta
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
-         getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta,
-         getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp } from "../services/api";
+         getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta, resolveGeoPlace,
+         getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos } from "../services/api";
 import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -65,6 +65,53 @@ function stopCountryInputValue(stop = {}, fallback = "España") {
 
 function stopRegion(stop = {}, fallback = "") {
   return stop.provincia || stop.region || stop.state || stop.provincia_origen || fallback || "";
+}
+
+function placeQueryFromDraft(draft = {}, ...extra) {
+  return [
+    ...extra,
+    draft.ciudad,
+    draft.municipio,
+    draft.direccion,
+    draft.address,
+    draft.nombre,
+    draft.name,
+    draft.cliente_nombre,
+  ].map(v => String(v || "").trim()).find(v => v.length >= 2) || "";
+}
+
+function mergeResolvedGeo(draft = {}, geo = {}, fallbackCountry = "EspaÃ±a") {
+  if (!geo) return draft;
+  const resolvedPais = canonicalCountry(geo.pais || geo.country || "") || geo.pais || geo.country || "";
+  const currentPais = canonicalCountry(draft.pais || "") || draft.pais || "";
+  const currentLooksDefault = !currentPais || ["espana", "espaÃ±a", "spain"].includes(String(currentPais).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase());
+  const pais = currentLooksDefault && resolvedPais ? resolvedPais : (currentPais || resolvedPais || fallbackCountry);
+  return {
+    ...draft,
+    ciudad: draft.ciudad || geo.municipio || geo.city || "",
+    pais,
+    provincia: draft.provincia || geo.provincia || geo.region || geo.state || "",
+    lat: draft.lat ?? draft.latitud ?? geo.lat ?? null,
+    lng: draft.lng ?? draft.longitud ?? geo.lng ?? null,
+  };
+}
+
+async function resolveGeoDraft(draft = {}, fallbackCountry = "EspaÃ±a", ...extra) {
+  const local = inferPlaceGeo(draft, ...extra, draft.ciudad, draft.direccion, draft.nombre, draft.cliente_nombre, draft.provincia, draft.pais);
+  if (local?.provincia || local?.pais) return mergeResolvedGeo(draft, local, fallbackCountry);
+  const q = placeQueryFromDraft(draft, ...extra);
+  if (!q) return draft;
+  try {
+    const remote = await resolveGeoPlace({
+      q,
+      country: draft.pais || fallbackCountry || "",
+      region: draft.provincia || "",
+    });
+    if (!remote?.ok && !remote?.provincia && !remote?.pais) return draft;
+    return mergeResolvedGeo(draft, remote, fallbackCountry);
+  } catch {
+    return draft;
+  }
 }
 
 function hydrateStopsGeo(stops = [], fallbackCountry = "España", fallbackRegion = "") {
@@ -2849,6 +2896,20 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
 }
 
 function PuntoInteresModal({ initial, onClose, onSave }) {
+  function inferPuntoGeoDraft(draft = {}) {
+    const inferred = inferPlaceGeo(draft, draft.ciudad, draft.direccion, draft.nombre);
+    if (!inferred) return draft;
+    return {
+      ...draft,
+      pais: draft.pais || canonicalCountry(inferred.pais || "España") || "España",
+      provincia: draft.provincia || inferred.provincia || "",
+    };
+  }
+  async function completarPuntoGeo(draft = form) {
+    const next = await resolveGeoDraft(draft, draft.pais || "EspaÃ±a", draft.ciudad, draft.direccion, draft.nombre);
+    setForm(next);
+    return next;
+  }
   const [form, setForm] = useState(() => ({
     id: initial?.id || "",
     cliente_id: initial?.cliente_id || "",
@@ -2869,7 +2930,13 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     tipo: initial?.tipo || "ambos",
     google_maps_url: initial?.google_maps_url || initial?.metadata?.google_maps_url || "",
   }));
-  const set = k => e => setForm(p => ({...p, [k]: e.target.value}));
+  useEffect(() => {
+    setForm(p => inferPuntoGeoDraft(p));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const set = k => e => setForm(p => {
+    const next = {...p, [k]: e.target.value};
+    return ["nombre", "direccion", "ciudad"].includes(k) ? inferPuntoGeoDraft(next) : next;
+  });
   const setGeneral = e => {
     const checked = e.target.checked;
     setForm(p => ({...p, punto_general: checked, cliente_id: checked ? "" : (initial?.cliente_id || p.cliente_id || "")}));
@@ -2885,12 +2952,13 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   async function guardar() {
     if (!form.nombre.trim()) { notify("Indica el nombre de la empresa o punto.", "warning"); return; }
     if (!form.direccion.trim()) { notify("Indica la direccion del punto.", "warning"); return; }
+    const resolvedForm = await completarPuntoGeo(form);
     const payload = {
-      ...form,
-      cliente_id: form.punto_general ? "" : form.cliente_id,
-      punto_general: !!form.punto_general,
-      pais: canonicalCountry(form.pais || "España") || "España",
-      provincia: String(form.provincia || "").trim(),
+      ...resolvedForm,
+      cliente_id: resolvedForm.punto_general ? "" : resolvedForm.cliente_id,
+      punto_general: !!resolvedForm.punto_general,
+      pais: canonicalCountry(resolvedForm.pais || form.pais || "España") || "España",
+      provincia: String(resolvedForm.provincia || "").trim(),
     };
     let saved = payload;
     try {
@@ -2934,13 +3002,13 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
               </span>
             </label>
           </div>
-          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre empresa / punto *</label><input style={inp} value={form.nombre} onChange={set("nombre")} autoFocus placeholder="Ej: Logistica Madrid Norte"/></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre empresa / punto *</label><input style={inp} value={form.nombre} onChange={set("nombre")} onBlur={()=>completarPuntoGeo()} autoFocus placeholder="Ej: Logistica Madrid Norte"/></div>
           <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={set("cif")} /></div>
           <div><label style={lbl}>Tipo</label><select style={inp} value={form.tipo} onChange={set("tipo")}><option value="ambos">Carga y descarga</option><option value="carga">Carga</option><option value="descarga">Descarga</option></select></div>
-          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Direccion completa *</label><input style={inp} value={form.direccion} onChange={set("direccion")} placeholder="Calle, numero, poligono, nave..." /></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Direccion completa *</label><input style={inp} value={form.direccion} onChange={set("direccion")} onBlur={()=>completarPuntoGeo()} placeholder="Calle, numero, poligono, nave..." /></div>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Enlace Google Maps</label><input style={inp} value={form.google_maps_url} onChange={set("google_maps_url")} placeholder="https://maps.google.com/..." /></div>
           <div><label style={lbl}>Codigo postal</label><input style={inp} value={form.codigo_postal} onChange={set("codigo_postal")} /></div>
-          <div><label style={lbl}>Ciudad</label><input style={inp} value={form.ciudad} onChange={set("ciudad")} /></div>
+          <div><label style={lbl}>Ciudad</label><input style={inp} value={form.ciudad} onChange={set("ciudad")} onBlur={()=>completarPuntoGeo()} /></div>
           <div>
             <label style={lbl}>Pais *</label>
             <input
@@ -3239,7 +3307,8 @@ function PagoColaboradorPanel({ pedido, onUpdated }) {
 function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const [adding, setAdding] = useState(false);
   const [puntosInteres, setPuntosInteres] = useState(getPuntosInteres);
-  const [newStop, setNewStop] = useState({ direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", notas:"", google_maps_url:"", pais:"España", provincia:"" });
+  const emptyStop = { direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", referencia:"", notas:"", google_maps_url:"", pais:"España", provincia:"" };
+  const [newStop, setNewStop] = useState(emptyStop);
   const [puntoQuery, setPuntoQuery] = useState("");
   const [poiDraft, setPoiDraft] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);
@@ -3247,21 +3316,91 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const mainLugar = tipo === "carga" ? form.origen : form.destino;
   const mainFecha = tipo === "carga" ? form.fecha_carga : form.fecha_descarga;
   const mainHora = tipo === "carga" ? form.hora_carga : form.hora_descarga;
+  const fallbackPais = tipo === "carga" ? (form.origen_pais || "España") : (form.destino_pais || "España");
+  const fallbackProvincia = tipo === "carga" ? (form.origen_provincia || "") : (form.destino_provincia || "");
+  const inferStopGeo = (stop = {}, idx = 0) => {
+    const inferred = inferPlaceGeo(stop, stopAddress(stop), stop.cliente_nombre, stop.direccion, stop.provincia, stop.pais);
+    return {
+      ...stop,
+      pais: stopCountryInputValue(stop, idx === 0 ? fallbackPais : "España") || canonicalCountry(inferred?.pais || "") || fallbackPais || "España",
+      provincia: stopRegion(stop) || inferred?.provincia || (idx === 0 ? fallbackProvincia : ""),
+    };
+  };
+  const resolveStopGeo = async (stop = {}, idx = 0) => {
+    const local = inferStopGeo(stop, idx);
+    if (local.provincia && (local.lat != null || local.lng != null)) return local;
+    const resolved = await resolveGeoDraft(
+      local,
+      stopCountryInputValue(local, idx === 0 ? fallbackPais : "EspaÃ±a"),
+      stopAddress(local),
+      local.cliente_nombre
+    );
+    return inferStopGeo(resolved, idx);
+  };
+  const completarNewStopGeo = async () => {
+    const next = await resolveStopGeo(newStop, stopsOrdenados.length ? 1 : 0);
+    setNewStop(next);
+    return next;
+  };
   const { primary: primaryStop, extras: paradas } = splitPrimaryAndAdditionalStops(form[key], mainLugar);
   const effectivePrimary = primaryStop
-    ? {
+    ? inferStopGeo({
         ...primaryStop,
         direccion: stopAddress(primaryStop) || mainLugar || "",
         fecha: primaryStop.fecha || mainFecha || "",
         hora: primaryStop.hora || mainHora || "",
-        pais: stopCountryInputValue(primaryStop, tipo === "carga" ? form.origen_pais : form.destino_pais),
-        provincia: stopRegion(primaryStop, tipo === "carga" ? form.origen_provincia : form.destino_provincia),
         tipo,
         es_principal: true,
         es_adicional: false,
-      }
-    : (mainLugar ? { direccion: mainLugar, fecha: mainFecha || "", hora: mainHora || "", pais: tipo === "carga" ? (form.origen_pais || "España") : (form.destino_pais || "España"), provincia: tipo === "carga" ? (form.origen_provincia || "") : (form.destino_provincia || ""), tipo, es_principal: true, es_adicional: false } : null);
+      }, 0)
+    : (mainLugar ? inferStopGeo({ direccion: mainLugar, fecha: mainFecha || "", hora: mainHora || "", pais: fallbackPais, provincia: fallbackProvincia, tipo, es_principal: true, es_adicional: false }, 0) : null);
   const stopsOrdenados = effectivePrimary ? [effectivePrimary, ...paradas] : paradas;
+  useEffect(() => {
+    const inferred = inferPlaceGeo(mainLugar);
+    if (!mainLugar || !inferred?.provincia) return;
+    setForm(p => {
+      if (tipo === "carga") {
+        if (p.origen_provincia) return p;
+        return {
+          ...p,
+          origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "España") || "España",
+          origen_provincia: inferred.provincia,
+        };
+      }
+      if (p.destino_provincia) return p;
+      return {
+        ...p,
+        destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "España") || "España",
+        destino_provincia: inferred.provincia,
+      };
+    });
+  }, [mainLugar, setForm, tipo]);
+  useEffect(() => {
+    let alive = true;
+    async function run() {
+      if (!mainLugar || fallbackProvincia) return;
+      const inferred = await resolveGeoDraft({ direccion: mainLugar, pais: fallbackPais }, fallbackPais, mainLugar);
+      if (!alive || !inferred?.provincia) return;
+      setForm(p => {
+        if (tipo === "carga") {
+          if (p.origen_provincia) return p;
+          return {
+            ...p,
+            origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "EspaÃ±a") || "EspaÃ±a",
+            origen_provincia: inferred.provincia,
+          };
+        }
+        if (p.destino_provincia) return p;
+        return {
+          ...p,
+          destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "EspaÃ±a") || "EspaÃ±a",
+          destino_provincia: inferred.provincia,
+        };
+      });
+    }
+    run();
+    return () => { alive = false; };
+  }, [fallbackPais, fallbackProvincia, mainLugar, setForm, tipo]);
   const puntosFiltrados = filterPuntosForPedido(puntosInteres, { clienteId: form.cliente_id || "", tipo });
   const puntosListId = `puntos-${tipo}-${pedidoId || "nuevo"}`;
   const countryListId = `paises-${tipo}-${pedidoId || "nuevo"}`;
@@ -3293,21 +3432,21 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const aplicarPuntoGuardado = (punto) => {
     if (!punto) return;
     setPuntoQuery(punto.nombre || punto.direccion || "");
-    setNewStop(prev => ({
+    setNewStop(prev => inferStopGeo({
       ...prev,
       ...puntoToStop(punto),
       pais: stopCountry(punto, prev.pais || "España"),
       provincia: stopRegion(punto, prev.provincia || ""),
       cliente_nombre: punto.cliente_nombre || punto.nombre || prev.cliente_nombre || "",
-    }));
+    }, stopsOrdenados.length ? 1 : 0));
   };
   const resetNewStop = () => {
-    resetNewStop();
+    setNewStop(emptyStop);
     setPuntoQuery("");
   };
   const puntoToSelectableStop = (punto) => {
     const puntoStop = puntoToStop(punto);
-    return {
+    const selectable = {
       ...newStop,
       ...puntoStop,
       punto_interes_id: punto?.id || puntoStop.punto_interes_id,
@@ -3319,6 +3458,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       provincia: stopRegion(puntoStop, newStop.provincia || ""),
       tipo,
     };
+    return inferStopGeo(selectable, stopsOrdenados.length ? 1 : 0);
   };
   const usarPuntoBuscado = (punto, modo = "adicional") => {
     if (!punto) return;
@@ -3356,6 +3496,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           bultos: x.bultos || "",
           peso_kg: x.peso_kg || "",
           precio: x.precio || "",
+          referencia: x.referencia || x.referencia_cliente || "",
           notas: x.notas || "",
         }))}));
       })
@@ -3377,17 +3518,12 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     setForm(p => {
       const stopsToStore = nextStops
         .filter(stop => stopAddress(stop) || stop?.cliente_nombre || stop?.google_maps_url)
-        .map((stop, idx) => {
-          const inferred = inferPlaceGeo(stopAddress(stop), stop.provincia, stop.pais);
-          return {
-            ...stop,
-            pais: stopCountryInputValue(stop, idx === 0 ? (tipo === "carga" ? p.origen_pais : p.destino_pais) : "Espa??a") || inferred?.pais || "Espa??a",
-            provincia: stopRegion(stop) || inferred?.provincia || "",
-            tipo,
-            es_principal: idx === 0,
-            es_adicional: idx !== 0,
-          };
-        });
+        .map((stop, idx) => inferStopGeo({
+          ...stop,
+          tipo,
+          es_principal: idx === 0,
+          es_adicional: idx !== 0,
+        }, idx));
       const first = stopsToStore[0] || {};
       const updated = {...p, [key]: stopsToStore};
       if (tipo === "carga") {
@@ -3414,14 +3550,15 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       return syncPrecioClienteCol(updated);
     });
   }
-  function addParada() {
+  async function addParada() {
     if (!newStop.direccion.trim()) { notify("La direccion es obligatoria", "warning"); return; }
-    setStopsOrdenados([...stopsOrdenados, {...newStop, direccion:newStop.direccion.trim(), es_adicional:true, es_principal:false}]);
-    setNewStop({ direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", notas:"", google_maps_url:"", pais:"España", provincia:"" });
+    const resolvedStop = await resolveStopGeo({...newStop, direccion:newStop.direccion.trim(), es_adicional:true, es_principal:false}, 1);
+    setStopsOrdenados([...stopsOrdenados, resolvedStop]);
+    setNewStop(emptyStop);
     setAdding(false);
   }
   function updateStop(idx, patch) {
-    const next = stopsOrdenados.map((stop, i) => i === idx ? { ...stop, ...patch } : stop);
+    const next = stopsOrdenados.map((stop, i) => i === idx ? inferStopGeo({ ...stop, ...patch }, i) : stop);
     setStopsOrdenados(next);
   }
   function removeStop(idx) {
@@ -3444,14 +3581,23 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     setDragIdx(null);
   }
 
-  const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:6,fontSize:12,outline:"none"};
+  const inp = {width:"100%",minWidth:0,boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:6,fontSize:12,outline:"none"};
   const label = tipo === "carga" ? "carga" : "descarga";
   const newStopPais = stopCountryInputValue(newStop, "España");
   const newStopRegions = getRegionsForCountry(newStopPais);
   const newStopRegionListId = `regiones-${tipo}-${pedidoId || "nuevo"}-new`;
 
   return (
-    <div>
+    <div className="tg-stop-editor">
+      <style>{`
+        .tg-stop-editor, .tg-stop-editor * { box-sizing:border-box; min-width:0; }
+        .tg-stop-editor input, .tg-stop-editor select, .tg-stop-editor textarea, .tg-stop-editor button { max-width:100%; }
+        @media (max-width: 760px) {
+          .tg-stop-add-grid, .tg-stop-mini-grid { grid-template-columns:1fr !important; }
+          .tg-stop-editor [draggable="true"] { align-items:flex-start !important; flex-wrap:wrap !important; }
+          .tg-stop-editor [draggable="true"] > div { flex:1 1 100% !important; }
+        }
+      `}</style>
       <datalist id={countryListId}>
         {paisesActivos.map(country => <option key={country} value={country} />)}
       </datalist>
@@ -3502,12 +3648,13 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                   {d.hora && <span style={{marginRight:8}}>{d.hora}</span>}
                   {d.ventana && <span style={{marginRight:8}}>{d.ventana}</span>}
                   {d.bultos && <span style={{marginRight:8}}>{d.bultos} bultos</span>}
+                  {d.referencia && <span style={{marginRight:8}}>Ref. {d.referencia}</span>}
                   {Number(d.precio||0) > 0 && <span style={{color:"var(--green)",fontWeight:700}}>+{Number(d.precio).toFixed(2)} EUR</span>}
                 </div>
                 <datalist id={stopRegionListId}>
                   {stopRegions.map(region => <option key={region} value={region} />)}
                 </datalist>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6,maxWidth:520}}>
+                <div className="tg-stop-mini-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginTop:6,maxWidth:680}}>
                   <input
                     list={countryListId}
                     style={inp}
@@ -3525,6 +3672,13 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     onChange={e=>updateStop(i, { provincia:e.target.value })}
                     onKeyDown={e=>completeOnTab(e, stopRegions, stopRegion(d), value=>updateStop(i, { provincia:value }))}
                     placeholder="Provincia / región"
+                  />
+                  <input
+                    style={inp}
+                    disabled={disabled}
+                    value={d.referencia || ""}
+                    onChange={e=>updateStop(i, { referencia:e.target.value })}
+                    placeholder={`Referencia ${label}`}
                   />
                 </div>
               </div>
@@ -3585,7 +3739,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               </div>
             )}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:6,marginBottom:6}}>
+          <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:6,marginBottom:6}}>
             {puntosFiltrados.length > 0 && (
               <select
                 style={{...inp,gridColumn:"1/-1"}}
@@ -3613,9 +3767,13 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 const val = e.target.value;
                 const punto = buscarPuntoExacto(val);
                 if (punto) aplicarPuntoGuardado(punto);
-                else setNewStop(p=>({...p,direccion:val}));
+                else setNewStop(p=>inferStopGeo({...p,direccion:val}, stopsOrdenados.length ? 1 : 0));
               }}
-              onBlur={e=>aplicarPuntoGuardado(buscarPuntoExacto(e.target.value))}
+              onBlur={e=>{
+                const punto = buscarPuntoExacto(e.target.value);
+                if (punto) aplicarPuntoGuardado(punto);
+                else completarNewStopGeo();
+              }}
             />
             <input style={{...inp,gridColumn:"1/-1"}} placeholder="Enlace Google Maps (opcional)" value={newStop.google_maps_url||""} onChange={e=>setNewStop(p=>({...p,google_maps_url:e.target.value}))}/>
             <datalist id={newStopRegionListId}>
@@ -3646,21 +3804,26 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 const val = e.target.value;
                 const punto = buscarPuntoExacto(val);
                 if (punto) aplicarPuntoGuardado(punto);
-                else setNewStop(p=>({...p,cliente_nombre:val}));
+                else setNewStop(p=>inferStopGeo({...p,cliente_nombre:val}, stopsOrdenados.length ? 1 : 0));
               }}
-              onBlur={e=>aplicarPuntoGuardado(buscarPuntoExacto(e.target.value))}
+              onBlur={e=>{
+                const punto = buscarPuntoExacto(e.target.value);
+                if (punto) aplicarPuntoGuardado(punto);
+                else completarNewStopGeo();
+              }}
             />
             <input type="date" style={inp} value={newStop.fecha} onChange={e=>setNewStop(p=>({...p,fecha:e.target.value}))}/>
             <input type="time" style={inp} value={newStop.hora} onChange={e=>setNewStop(p=>({...p,hora:e.target.value}))}/>
             <input style={inp} placeholder="Ventana (ej: 08:00-14:00)" value={newStop.ventana} onChange={e=>setNewStop(p=>({...p,ventana:e.target.value}))}/>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
+          <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
             <input type="number" style={inp} placeholder="Bultos" value={newStop.bultos} onChange={e=>setNewStop(p=>({...p,bultos:e.target.value}))}/>
             <input type="number" style={inp} placeholder="Peso kg" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))}/>
             <input type="number" step="0.01" style={inp} placeholder={`Precio ${label} EUR`} value={newStop.precio} onChange={e=>setNewStop(p=>({...p,precio:e.target.value}))}/>
-            <input style={inp} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>
+            <input style={inp} placeholder={`Referencia ${label}`} value={newStop.referencia} onChange={e=>setNewStop(p=>({...p,referencia:e.target.value}))}/>
+            <input style={{...inp,gridColumn:"1/-1"}} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>
           </div>
-          <div style={{display:"flex",gap:6}}>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             <button type="button" onClick={addParada} style={{padding:"5px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Anadir {label}</button>
             <button type="button" onClick={abrirCrearPunto} disabled={!String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"var(--accent)":"var(--text5)",fontSize:12,cursor:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"pointer":"not-allowed"}}>
               {buscarPuntoExacto(newStop.cliente_nombre || newStop.direccion) ? "Actualizar punto" : "Crear punto"}
@@ -5475,6 +5638,188 @@ function PedidoIncidenciaPanel({ pedido }) {
   );
 }
 
+function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
+  const isOrigen = side === "origen";
+  const sourceStop = stop || parseStops(isOrigen ? pedido.puntos_carga : pedido.puntos_descarga)[0] || {};
+  const lat = Number(sourceStop.lat || sourceStop.latitude || pedido[`${side}_lat`] || pedido[`${side}_latitude`]);
+  const lng = Number(sourceStop.lng || sourceStop.lon || sourceStop.longitude || pedido[`${side}_lng`] || pedido[`${side}_lon`] || pedido[`${side}_longitude`]);
+  const label = sourceStop.nombre || sourceStop.name || sourceStop.direccion || pedido[side] || "";
+  const provincia = sourceStop.provincia || pedido[`${side}_provincia`] || "";
+  const pais = sourceStop.pais || pedido[`${side}_pais`] || "España";
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, label, hasGeo:true };
+  const geo = inferPlaceGeo(sourceStop, label, pedido[`${side}_provincia`], pedido[`${side}_pais`]);
+  if (geo) return { lat: geo.lat, lng: geo.lng, label: label || geo.municipio || `${side} ${idx + 1}`, hasGeo:true };
+  const fallbackLabel = [label, provincia, pais].filter(Boolean).join(", ");
+  return fallbackLabel ? { lat:null, lng:null, label:fallbackLabel, hasGeo:false } : null;
+}
+
+function getPedidoMapaPasos(pedido = {}, choferPasos = null) {
+  return choferPasos?.data || choferPasos || pedido.chofer_pasos?.data || pedido.chofer_pasos || pedido.pasos_chofer || {};
+}
+
+function pedidoPointTone({ tipo, pedido = {}, pasos = {} }) {
+  const estado = String(pedido?.estado || "").toLowerCase();
+  const incidencia = estado === "incidencia" || pedido?.incidencia_activa || pedido?.incidencia_descripcion;
+  if (incidencia) return { key:"incidencia", label:"Incidencia", color:"#ef4444", bg:"rgba(239,68,68,.16)", border:"rgba(239,68,68,.55)" };
+  if (tipo === "carga") {
+    if (pasos.carga_ok || ["en_curso","descarga","entregado","facturado"].includes(estado)) {
+      return { key:"ok", label:"Carga OK", color:"#10b981", bg:"rgba(16,185,129,.17)", border:"rgba(16,185,129,.55)" };
+    }
+    if (pasos.carga_proceso || pasos.carga_iniciada) {
+      return { key:"activo", label:"En carga", color:"#f59e0b", bg:"rgba(245,158,11,.18)", border:"rgba(245,158,11,.55)" };
+    }
+  }
+  if (tipo === "descarga") {
+    if (pasos.descarga_ok || ["entregado","facturado"].includes(estado)) {
+      return { key:"ok", label:"Descarga OK", color:"#10b981", bg:"rgba(16,185,129,.17)", border:"rgba(16,185,129,.55)" };
+    }
+    if (pasos.descarga_iniciada || pasos.posicionado_descarga || estado === "descarga") {
+      return { key:"activo", label:pasos.descarga_iniciada || estado === "descarga" ? "En descarga" : "Llegado a descarga", color:"#f97316", bg:"rgba(249,115,22,.18)", border:"rgba(249,115,22,.55)" };
+    }
+    if (pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso") {
+      return { key:"proximo", label:"Destino pendiente", color:"#3b82f6", bg:"rgba(59,130,246,.16)", border:"rgba(59,130,246,.48)" };
+    }
+  }
+  return { key:"pendiente", label:"Pendiente", color:"var(--text4)", bg:"var(--bg3)", border:"var(--border2)" };
+}
+
+function buildPedidoMapPoints(pedido = {}, choferPasos = null) {
+  const cargaStops = parseStops(pedido.puntos_carga);
+  const descargaStops = parseStops(pedido.puntos_descarga);
+  const cargas = (cargaStops.length ? cargaStops : [{}]).map((stop, idx) => {
+    const point = getPedidoMapPoint(pedido, "origen", stop, idx);
+    return point ? { ...point, tipo:"carga", index:idx, title:`Carga ${idx + 1}` } : null;
+  }).filter(Boolean);
+  const descargas = (descargaStops.length ? descargaStops : [{}]).map((stop, idx) => {
+    const point = getPedidoMapPoint(pedido, "destino", stop, idx);
+    return point ? { ...point, tipo:"descarga", index:idx, title:`Descarga ${idx + 1}` } : null;
+  }).filter(Boolean);
+  const pasos = getPedidoMapaPasos(pedido, choferPasos);
+  return [...cargas, ...descargas].map(point => ({
+    ...point,
+    tone: pedidoPointTone({ tipo:point.tipo, pedido, pasos }),
+  }));
+}
+
+function projectPedidoMapPoint(point, bounds) {
+  const lngSpan = Math.max(0.0001, bounds.maxLng - bounds.minLng);
+  const latSpan = Math.max(0.0001, bounds.maxLat - bounds.minLat);
+  return {
+    x: Math.max(5, Math.min(95, ((point.lng - bounds.minLng) / lngSpan) * 100)),
+    y: Math.max(8, Math.min(92, (1 - ((point.lat - bounds.minLat) / latSpan)) * 100)),
+  };
+}
+
+function PedidoMapaOperativo({ pedido, choferPasos }) {
+  const mapPoints = buildPedidoMapPoints(pedido, choferPasos);
+  if (!mapPoints.length) return null;
+  const geoPoints = mapPoints.filter(p => Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)));
+  const hasAllGeo = geoPoints.length === mapPoints.length;
+  const minLat = geoPoints.length ? Math.min(...geoPoints.map(p => p.lat)) - 0.45 : 35.85;
+  const maxLat = geoPoints.length ? Math.max(...geoPoints.map(p => p.lat)) + 0.45 : 43.95;
+  const minLng = geoPoints.length ? Math.min(...geoPoints.map(p => p.lng)) - 0.65 : -9.75;
+  const maxLng = geoPoints.length ? Math.max(...geoPoints.map(p => p.lng)) + 0.65 : 4.45;
+  const bounds = { minLat, maxLat, minLng, maxLng };
+  const missingCarga = mapPoints.filter(p => p.tipo === "carga" && !p.hasGeo);
+  const missingDescarga = mapPoints.filter(p => p.tipo === "descarga" && !p.hasGeo);
+  const pointsProjected = mapPoints.map(point => {
+    if (point.hasGeo) return { ...point, screen:projectPedidoMapPoint(point, bounds) };
+    const bucket = point.tipo === "carga" ? missingCarga : missingDescarga;
+    const pos = Math.max(0, bucket.findIndex(p => p === point));
+    const total = Math.max(1, bucket.length);
+    return {
+      ...point,
+      screen:{
+        x: point.tipo === "carga" ? 26 : 74,
+        y: 40 + ((pos + 1) / (total + 1)) * 28,
+      },
+    };
+  });
+  const routePolyline = pointsProjected.map(p => `${p.screen.x},${p.screen.y}`).join(" ");
+  const pasos = getPedidoMapaPasos(pedido, choferPasos);
+  const estado = String(pedido?.estado || "pendiente").toLowerCase();
+  const routeColor = estado === "incidencia" ? "#ef4444" : ["entregado","facturado"].includes(estado) ? "#10b981" : estado === "descarga" ? "#f97316" : estado === "en_curso" ? "#3b82f6" : "rgba(100,116,139,.70)";
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${minLng.toFixed(6)},${minLat.toFixed(6)},${maxLng.toFixed(6)},${maxLat.toFixed(6)}&layer=mapnik`;
+  const currentLabel = pasos.descarga_ok || ["entregado","facturado"].includes(estado)
+    ? "Viaje entregado"
+    : pasos.descarga_iniciada || estado === "descarga"
+      ? "Descargando"
+      : pasos.posicionado_descarga
+        ? "En punto de descarga"
+        : pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso"
+          ? "En ruta"
+          : pasos.carga_proceso || pasos.carga_iniciada
+            ? "En carga"
+            : LABEL_ESTADO[estado] || estado;
+  return (
+    <div style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Mapa del pedido</div>
+          <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Puntos de carga y descarga marcados segun el estado operativo.</div>
+        </div>
+        <span style={{fontSize:10,fontWeight:900,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
+          {currentLabel}
+        </span>
+      </div>
+      <div style={{position:"relative",height:260,borderRadius:9,overflow:"hidden",border:"1px solid var(--border2)",background:"var(--bg3)"}}>
+        <iframe title={`Mapa pedido ${pedido?.numero || ""}`} src={src} style={{width:"100%",height:"100%",border:0}} loading="lazy" />
+        {!hasAllGeo && (
+          <div style={{position:"absolute",left:10,top:10,zIndex:5,maxWidth:330,border:"1px solid rgba(245,158,11,.38)",background:"rgba(255,251,235,.94)",color:"#92400e",borderRadius:8,padding:"7px 9px",fontSize:11,fontWeight:800,lineHeight:1.3}}>
+            Faltan coordenadas o enlace Maps en algun punto. El mapa se muestra orientativo hasta completar esos datos.
+          </div>
+        )}
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>
+          {pointsProjected.length > 1 && (
+            <polyline points={routePolyline} fill="none" stroke="rgba(255,255,255,.88)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          )}
+          {pointsProjected.length > 1 && (
+            <polyline points={routePolyline} fill="none" stroke={routeColor} strokeWidth="1.05" strokeLinecap="round" strokeLinejoin="round" strokeDasharray={estado === "pendiente" || estado === "confirmado" ? "2 2" : "0"} />
+          )}
+        </svg>
+        {pointsProjected.map(point => (
+          <div
+            key={`${point.tipo}-${point.index}-${point.label}`}
+            title={`${point.title}: ${point.label || "-"} - ${point.tone.label}`}
+            style={{
+              position:"absolute",
+              left:`${point.screen.x}%`,
+              top:`${point.screen.y}%`,
+              transform:"translate(-50%,-50%)",
+              minWidth:34,
+              minHeight:34,
+              borderRadius:999,
+              border:`3px solid ${point.tone.border}`,
+              background:point.tone.bg,
+              color:point.tone.color,
+              boxShadow:"0 10px 24px rgba(15,23,42,.20)",
+              display:"flex",
+              alignItems:"center",
+              justifyContent:"center",
+              fontSize:12,
+              fontWeight:1000,
+              fontFamily:"'JetBrains Mono',monospace",
+              zIndex:4,
+              opacity:point.hasGeo ? 1 : .92,
+            }}
+          >
+            {point.tipo === "carga" ? "C" : "D"}{point.index + 1}
+          </div>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginTop:9}}>
+        {mapPoints.map(point => (
+          <div key={`card-${point.tipo}-${point.index}-${point.label}`} style={{border:`1px solid ${point.tone.border}`,borderRadius:8,padding:"8px 10px",background:point.tone.bg}}>
+            <div style={{fontSize:10,color:point.tone.color,fontWeight:900,textTransform:"uppercase"}}>{point.title} - {point.tone.label}</div>
+            <div style={{fontSize:12,color:"var(--text)",fontWeight:800,marginTop:2}}>{point.label || "-"}</div>
+            {!point.hasGeo && <div style={{fontSize:10,color:"#f59e0b",fontWeight:900,marginTop:3}}>Pendiente de coordenadas / enlace Maps</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvinculada,
   pedidos, clientes: clientesProp, vehiculos, choferes, rutas: rutas_prop, colaboradores, canEdit,
   guidedActive = false, onGuidedProgress,
@@ -5482,8 +5827,20 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const { user } = useAuth();
   const esGerente = String(user?.rol || "").toLowerCase() === "gerente";
   const asignacionRef = React.useRef(null);
+  const [choferPasosMapa, setChoferPasosMapa] = useState(null);
   const [clientes, setClientes] = useState(clientesProp || []);
   const [rutas,    setRutas]    = useState(rutas_prop || []);
+
+  useEffect(() => {
+    let alive = true;
+    const pedidoId = editando?.id;
+    setChoferPasosMapa(null);
+    if (!pedidoId) return () => { alive = false; };
+    getPedidoChoferPasos(pedidoId)
+      .then(data => { if (alive) setChoferPasosMapa(data || null); })
+      .catch(() => { if (alive) setChoferPasosMapa(null); });
+    return () => { alive = false; };
+  }, [editando?.id]);
 
   // Sync clientes: use prop when available, fetch fresh if empty
   useEffect(() => {
@@ -6418,6 +6775,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
             )}
 
             <PedidoIncidenciaPanel pedido={form || editando} />
+            <PedidoMapaOperativo pedido={form || editando} choferPasos={choferPasosMapa} />
 
             <div style={S.sec}>Cliente y ruta</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -8044,7 +8402,7 @@ function GuidedPedidoTutorialPanel({ active, progress, onStart, onClose }) {
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent-xl)"}}>Tutorial interactivo</div>
           <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)",marginTop:2}}>Mision: crear pedido</div>
-          <div style={{fontSize:11,color:"var(--text5)",fontWeight:800,marginTop:3}}>{doneCount}/{GUIDED_PEDIDO_STEPS.length} objetivos completados</div>
+          <div style={{fontSize:11,color:"var(--text5)",fontWeight:800,marginTop:3}}>{doneCount}/{GUIDED_PEDIDO_STEPS.length} pasos completados</div>
         </div>
         <button type="button" onClick={onClose} title="Cerrar tutorial" style={{border:"none",background:"transparent",color:"var(--text5)",fontSize:18,fontWeight:900,cursor:"pointer",lineHeight:1}}>x</button>
       </div>
@@ -8096,6 +8454,8 @@ export default function Pedidos() {
   useEmpresaPerfil();
   const { puedeEditar, user } = useAuth();
   const canEdit = puedeEditar("pedidos");
+  const canFacturarPedidos = ["gerente","contable","contabilidad","administrativo","administracion","admin","superadmin"]
+    .includes(String(user?.rol || "").toLowerCase());
   const empresaPlan = getEmpresaPlanLocal();
   const aiVisualPlanActivo = planHasFeature(empresaPlan, "ai");
   const aiDisponible = planHasFeature(empresaPlan, "ai");
@@ -8279,6 +8639,10 @@ export default function Pedidos() {
   }
 
   async function convertirFacturaConConcepto(pedido) {
+    if (!canFacturarPedidos) {
+      notify("Solo gerencia, contabilidad o administracion pueden facturar pedidos.", "warning");
+      return;
+    }
     if (pedidoTieneFacturaFinal(pedido) || pedidoTieneFacturaBorrador(pedido)) {
       notify(pedidoTieneFacturaBorrador(pedido) ? "El pedido ya tiene un borrador de factura vinculado: " + (pedido.factura_numero || "borrador") : "Pedido ya facturado: " + (pedido.factura_numero || "factura emitida"), "warning");
       return;
@@ -8461,13 +8825,29 @@ export default function Pedidos() {
     if (!focusPedido?.pedido_id || loading) return;
     const found = pedidos.find(p => String(p.id) === String(focusPedido.pedido_id));
     if (!found) return;
+    let alive = true;
     const t = window.setTimeout(() => {
       document.getElementById(`pedido-row-${focusPedido.pedido_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
-      setEditando(found);
-      setModal(true);
-      clearRuntimeFocus("tms_pedidos_focus");
+      const focusText = `${focusPedido.type || ""} ${focusPedido.title || ""} ${focusPedido.action || ""} ${focusPedido.action_key || ""}`.toLowerCase();
+      const focusIncidencia = focusText.includes("incidencia") || String(found.estado || "").toLowerCase() === "incidencia";
+      getPedido(found.id)
+        .then(full => {
+          if (!alive) return;
+          setEditando({ ...(full || found), _focus_incidencia: focusIncidencia });
+          setModal(true);
+          clearRuntimeFocus("tms_pedidos_focus");
+        })
+        .catch(() => {
+          if (!alive) return;
+          setEditando({ ...found, _focus_incidencia: focusIncidencia });
+          setModal(true);
+          clearRuntimeFocus("tms_pedidos_focus");
+        });
     }, 180);
-    return () => window.clearTimeout(t);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
   }, [focusPedido, loading, pedidos]);
 
   function empresaRequiereMotivoCancelacion() {
@@ -9724,7 +10104,7 @@ export default function Pedidos() {
                         {canEdit&&<select value={p.estado} onChange={e=>cambiarEstado(p.id,e.target.value)} style={{...S.sel,width:130,padding:"4px 8px",fontSize:11}}>
                           {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
                         </select>}
-                        {canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&p.estado==="entregado"&&(
+                        {canFacturarPedidos&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&p.estado==="entregado"&&(
                           <button style={{...S.btn,background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.2)",padding:"4px 10px",fontSize:11}} onClick={()=>setFacturando(p)}>Facturar</button>
                         )}
                         <button

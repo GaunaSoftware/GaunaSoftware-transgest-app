@@ -166,6 +166,34 @@ function MetricBox({ label, value, detail, color = "var(--accent-xl)" }) {
   );
 }
 
+function MapMovedPanel({ item }) {
+  if (!item) return null;
+  const route = parseRouteFromItem(item || {});
+  return (
+    <div style={S.card}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
+        <div>
+          <div style={S.sec}>Mapa del pedido</div>
+          <div style={{fontSize:14,fontWeight:900,color:"var(--text)"}}>{item.numero || item.pedido_numero || item.title || "Viaje seleccionado"}</div>
+          <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.35}}>
+            {route.origen || item.origen || "-"} -&gt; {route.destino || item.destino || "-"}
+          </div>
+          <div style={{fontSize:11,color:"var(--text5)",marginTop:8,lineHeight:1.35}}>
+            El mapa se abre dentro del pedido para evitar vistas incompletas en Control Tower.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => abrirViajeEnTrafico(item, { action:"Ver mapa del pedido", action_key:"mapa_pedido" })}
+          style={{border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.12)",color:"var(--accent-xl)",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+        >
+          Abrir pedido
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
   const rows = Array.isArray(flujo) ? flujo : [];
   const max = Math.max(1, ...rows.map(r => Number(r.total || 0)));
@@ -742,6 +770,7 @@ function RouteMapPanelLegacy({ item }) {
   );
 }
 
+// eslint-disable-next-line no-unused-vars
 function ControlTowerTripDetail({ item, onClose, onOpenTraffic }) {
   const normalized = useMemo(() => normalizeTripForMap(item || {}) || item || {}, [item]);
   const route = normalized?.route || parseRouteFromItem(normalized || {});
@@ -820,6 +849,7 @@ function ControlTowerTripDetail({ item, onClose, onOpenTraffic }) {
   );
 }
 
+// eslint-disable-next-line no-unused-vars
 function RouteMapPanelReal({ item, trips = [], onSelectTrip, onOpenDetail, mapLayer = "streets", onMapLayerChange }) {
   const normalizedItem = useMemo(() => normalizeTripForMap(item || {}) || null, [item]);
   const route = normalizedItem?.route || parseRouteFromItem(item || {});
@@ -1127,9 +1157,6 @@ export default function ControlTower() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [statusPicker, setStatusPicker] = useState(null);
-  const [selectedTrip, setSelectedTrip] = useState(null);
-  const [detailTrip, setDetailTrip] = useState(null);
-  const [mapLayer, setMapLayer] = useState("streets");
 
   useEffect(() => {
     let alive = true;
@@ -1159,15 +1186,13 @@ export default function ControlTower() {
   const visibilidad = data?.visibilidad || {};
   const decisiones = Array.isArray(data?.decisiones) ? data.decisiones : [];
   const eventos = Array.isArray(data?.eventos_recientes) ? data.eventos_recientes : [];
-  const mapTrips = useMemo(() => collectMapTrips(viajesPorEstado, items), [viajesPorEstado, items]);
   const mapItem = useMemo(() => {
-    if (selectedTrip) return selectedTrip;
     const enRuta = Array.isArray(viajesPorEstado.en_curso) ? viajesPorEstado.en_curso[0] : null;
     if (enRuta) return enRuta;
     return items.find(item => ["en_ruta", "gps_sin_senal", "retraso", "incidencia_pedido"].includes(String(item?.type || ""))) ||
       items.find(item => parseRouteFromItem(item).origen && parseRouteFromItem(item).destino) ||
       null;
-  }, [items, selectedTrip, viajesPorEstado]);
+  }, [items, viajesPorEstado]);
 
   function abrirEstadoFlujo(row) {
     const key = row?.key || "";
@@ -1186,16 +1211,6 @@ export default function ControlTower() {
     };
     setStatusPicker(null);
     abrirViajeEnTrafico(focusedTrip, { action: "Abrir desde visibilidad", action_key: "abrir_viaje" });
-  }
-  function seleccionarViajeMapa(trip) {
-    const route = trip?.route || parseRouteFromItem(trip || {});
-    setSelectedTrip({
-      ...trip,
-      title: trip?.title || `Viaje ${trip?.numero || trip?.pedido_numero || ""}`.trim(),
-      entity_id: trip?.entity_id || trip?.id || "",
-      view: trip?.view || "pedidos",
-      description: trip?.description || `${trip?.cliente_nombre || "Cliente"} - ${route.origen || "-"} > ${route.destino || "-"}`,
-    });
   }
   const grupos = useMemo(() => ({
     todas: items,
@@ -1296,8 +1311,8 @@ export default function ControlTower() {
       {!loading && data && (
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12,marginBottom:12}}>
           <div style={{display:"grid",gap:12}}>
-            <FlowPanel flujo={flujo} selectedKey={statusPicker?.key || selectedTrip?.estado || ""} onStatusClick={abrirEstadoFlujo} />
-            {mapItem && <RouteMapPanelReal item={mapItem} trips={mapTrips} onSelectTrip={seleccionarViajeMapa} onOpenDetail={setDetailTrip} mapLayer={mapLayer} onMapLayerChange={setMapLayer} />}
+            <FlowPanel flujo={flujo} selectedKey={statusPicker?.key || ""} onStatusClick={abrirEstadoFlujo} />
+            {mapItem && <MapMovedPanel item={mapItem} />}
             <div style={{...S.card}}>
               <div style={S.sec}>Flota, recursos y señales</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
@@ -1389,16 +1404,6 @@ export default function ControlTower() {
             </section>
           ))}
         </div>
-      )}
-      {detailTrip && (
-        <ControlTowerTripDetail
-          item={detailTrip}
-          onClose={() => setDetailTrip(null)}
-          onOpenTraffic={(trip) => {
-            setDetailTrip(null);
-            abrirItem(trip);
-          }}
-        />
       )}
     </div>
   );

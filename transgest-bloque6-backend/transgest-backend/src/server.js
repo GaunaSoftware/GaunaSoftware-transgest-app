@@ -55,6 +55,7 @@ const accountingSsoRoutes = require("./routes/accounting_sso");
 const whatsappRoutes      = require("./routes/whatsapp");
 const planDiarioRoutes    = require("./routes/plan_diario");
 const controlHorarioRoutes = require("./routes/control_horario");
+const geocodingRoutes     = require("./routes/geocoding");
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -286,6 +287,7 @@ safeUse(`${api}/superadmin`,    exportacionRoutes);
 safeUse(`${api}/empresa`,       authenticate, requireModulePermission("empresa"), datosEmpresaRoutes);
 safeUse(`${api}/palets`,        authenticate, requireModulePermission("palets"), paletsRoutes);
 safeUse(`${api}/puntos-interes`, authenticate, requireModulePermission("pedidos"), puntosInteresRoutes);
+safeUse(`${api}/geocoding`,     authenticate, requireModulePermission("pedidos"), geocodingRoutes);
 safeUse(`${api}/backup`,        authenticate, requireModulePermission("mi_cuenta"), backupRoutes);
 safeUse(`${api}/ia`,            authenticate, requireModulePermission("ia"), requirePlanFeature("ai"), iaRoutes);
 safeUse(`${api}/taller`,        authenticate, requireModulePermission("taller"), tallerRoutes);

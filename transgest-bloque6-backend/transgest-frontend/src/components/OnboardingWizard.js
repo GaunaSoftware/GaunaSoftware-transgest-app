@@ -90,7 +90,7 @@ function buildSteps(user, visibleModules) {
       step: "Inicio",
       title: `Gu\u00eda inicial de ${ROLE_LABEL[role] || "usuario"}`,
       route: "",
-      body: "Te ense\u00f1o solo las zonas que tu usuario puede usar para que empieces sin ruido: operaciones, avisos, documentos y tareas principales.",
+      body: "Esta gu\u00eda muestra las zonas disponibles para tu perfil y las tareas principales de trabajo diario.",
       tips: [
         "El men\u00fa lateral muestra tus m\u00f3dulos autorizados.",
         "Los avisos visuales aparecen arriba cuando hay viajes o documentos pendientes.",
@@ -267,6 +267,17 @@ export default function OnboardingWizard({ user, visibleModules, storageKey, onC
             max-height:calc(100dvh - 24px) !important;
             overflow:auto !important;
           }
+          .tg-onboarding-actions {
+            display:grid !important;
+            grid-template-columns:1fr !important;
+            gap:8px !important;
+          }
+          .tg-onboarding-actions button {
+            width:100% !important;
+            justify-content:center !important;
+            margin-left:0 !important;
+            min-height:42px !important;
+          }
           .tg-onboarding-card [style*="position: absolute"] {
             top:14px !important;
             right:16px !important;
@@ -282,21 +293,21 @@ export default function OnboardingWizard({ user, visibleModules, storageKey, onC
         <ul style={S.tips}>
           {(p.tips || []).map((tip, idx) => <li key={idx} style={S.tip}>{tip}</li>)}
         </ul>
-        <div style={S.actions}>
+        <div className="tg-onboarding-actions" style={S.actions}>
           {p.route && (
-            <button type="button" style={S.btnSecondary} onClick={goToModule}>
+            <button type="button" style={S.btnSecondary} onClick={goToModule} data-tour="tutorial-open-module">
               {p.route === "pedidos" ? "Iniciar pedido guiado" : `Iniciar tutorial de ${MODULE_LABEL[p.route] || "m\u00f3dulo"}`}
             </button>
           )}
           {compact && (
-            <button type="button" style={S.restore} onClick={() => setCompact(false)}>
+            <button type="button" style={S.restore} onClick={() => setCompact(false)} data-tour="tutorial-expand">
               Ampliar tutorial
             </button>
           )}
-          <button type="button" style={S.btnPrimary} onClick={next}>
+          <button type="button" style={S.btnPrimary} onClick={next} data-tour="tutorial-next">
             {isLast ? "Terminar gu\u00eda" : "Siguiente"}
           </button>
-          <button type="button" style={S.skip} onClick={finish}>
+          <button type="button" style={S.skip} onClick={finish} data-tour="tutorial-dismiss">
             No volver a mostrar
           </button>
         </div>

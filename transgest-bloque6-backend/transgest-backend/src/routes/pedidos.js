@@ -1769,11 +1769,15 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
            c.id AS cliente_ref_id, c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.direccion AS cliente_direccion, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, NULL::text AS cliente_provincia, c.pais AS cliente_pais,
            c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion, c.emails_albaranes AS cliente_emails_albaranes, c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
            ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.dni AS chofer_dni, ch.telefono AS chofer_telefono, ch.email AS chofer_email,
+           ch.firma_base AS chofer_firma_base, ch.firma_base_nombre AS chofer_firma_base_nombre, ch.firma_base_fecha AS chofer_firma_base_fecha,
+           v.matricula AS veh_matricula, r.matricula AS rem_matricula,
            co.id AS colaborador_ref_id, co.nombre AS colaborador_nombre, co.cif AS colaborador_cif, co.email AS colaborador_email, co.telefono AS colaborador_telefono, co.contacto_nombre AS colaborador_contacto,
            TRIM(BOTH ' ' FROM CONCAT_WS(' ', co.calle, co.num_ext)) AS colaborador_direccion, co.codigo_postal AS colaborador_cp, co.ciudad AS colaborador_ciudad, co.provincia AS colaborador_provincia, co.pais AS colaborador_pais
     FROM pedidos p
     LEFT JOIN clientes c ON c.id=p.cliente_id
     LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+    LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
     LEFT JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
     WHERE p.id=$1 AND p.empresa_id=$2
   `, `
@@ -1781,10 +1785,14 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
            c.id AS cliente_ref_id, c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.direccion AS cliente_direccion, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, NULL::text AS cliente_provincia, c.pais AS cliente_pais,
            c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion, c.emails_albaranes AS cliente_emails_albaranes, c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
            ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.dni AS chofer_dni, ch.telefono AS chofer_telefono, ch.email AS chofer_email,
+           ch.firma_base AS chofer_firma_base, ch.firma_base_nombre AS chofer_firma_base_nombre, ch.firma_base_fecha AS chofer_firma_base_fecha,
+           v.matricula AS veh_matricula, r.matricula AS rem_matricula,
            NULL AS colaborador_ref_id, NULL AS colaborador_nombre, NULL AS colaborador_cif, NULL AS colaborador_email, NULL AS colaborador_telefono, NULL AS colaborador_contacto, NULL AS colaborador_direccion, NULL AS colaborador_cp, NULL AS colaborador_ciudad, NULL AS colaborador_provincia, NULL AS colaborador_pais
     FROM pedidos p
     LEFT JOIN clientes c ON c.id=p.cliente_id
     LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+    LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
     WHERE p.id=$1 AND p.empresa_id=$2
   `, [pedidoId, empresaId]);
   const pedido = rows[0];

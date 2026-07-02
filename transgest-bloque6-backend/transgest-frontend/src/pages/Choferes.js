@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
 import { GeoFields } from "../components/GeoFields";
+import PlatformDocumentsEditor, { normalizePlatformDocuments } from "../components/PlatformDocumentsEditor";
 
 // ---------------------------------------------------------------------------
 const EMPTY_TALLER_CHOFER = Object.freeze({ stock: [], entregas_equipos_choferes: {} });
@@ -575,6 +576,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
     carta_renuncia_nombre:"", carta_renuncia_mime:"", carta_renuncia_base64:"",
     vehiculo_id:"", remolque_id:"", tipo_contrato:"", salario:"",
     sexo:"", puesto_valor:"",
+    plataformas: [],
     // Carnets
     dni_vencimiento:"", carnet:"", carnet_vencimiento:"", carnet_tipo:"B+E",
     cap_vencimiento:"", tarjeta_tg:"", tarjeta_vencimiento:"",
@@ -626,8 +628,9 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
     }
     setSaving(true);
     try {
-      if (editando?.id) await editarChofer(editando.id, form);
-      else              await crearChofer(form);
+      const formToSave = { ...form, plataformas: normalizePlatformDocuments(form.plataformas ?? editando?.plataformas ?? []) };
+      if (editando?.id) await editarChofer(editando.id, formToSave);
+      else              await crearChofer(formToSave);
       // Update conjunto if remolque changed
       if (form.vehiculo_id && form.remolque_id !== undefined) {
         const veh = vehiculos?.find(v=>v.id===form.vehiculo_id);
@@ -664,6 +667,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
     { id:"datos",       l:"Datos personales" },
     { id:"contrato",    l:"Contrato & Carnets" },
     { id:"nominas",  l:"Nóminas" },
+    { id:"plataformas", l:"Plataformas" },
     { id:"equipos",     l:"Equipos / EPIs" },
     { id:"jornadas",    l:"Jornadas" },
     { id:"historial_veh", l:"Historial vehículos" },
@@ -912,6 +916,16 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
           {tab === "nominas" && editando && <TabNominas chofer={editando} />}
 
           {/* Equipos / EPIs */}
+          {tab === "plataformas" && (
+            <PlatformDocumentsEditor
+              value={form.plataformas}
+              canEdit={canEdit}
+              inputStyle={S.inp}
+              labelStyle={S.lbl}
+              buttonStyle={S.btn}
+              onChange={plataformas => setForm(p => ({ ...p, plataformas }))}
+            />
+          )}
           {tab === "equipos" && editando && <TabEquipos chofer={editando} tallerState={tallerState} onPersistTallerState={persistTallerState} />}
           {tab === "jornadas" && editando && <TabJornadas chofer={editando} />}
           {tab === "historial_veh" && editando && <TabHistorialVehiculos chofer={editando} />}
@@ -1084,4 +1098,3 @@ export default function Choferes() {
     </div>
   );
 }
-

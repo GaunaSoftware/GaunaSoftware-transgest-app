@@ -8,6 +8,9 @@ export function normalizePlaceKey(value = "") {
 }
 
 const KNOWN_PLACES = {
+  madrid: { municipio:"Madrid", provincia:"Madrid", pais:"Espana", lat:40.4168, lng:-3.7038 },
+  madrid_comunidad: { municipio:"Madrid", provincia:"Madrid", pais:"Espana", lat:40.4168, lng:-3.7038 },
+  comunidad_de_madrid: { municipio:"Madrid", provincia:"Madrid", pais:"Espana", lat:40.4168, lng:-3.7038 },
   gandia: { municipio:"Gandia", provincia:"Valencia", pais:"Espana", lat:38.9680, lng:-0.1845 },
   gandia_valencia: { municipio:"Gandia", provincia:"Valencia", pais:"Espana", lat:38.9680, lng:-0.1845 },
   minera_santa_marta: { municipio:"Munera", provincia:"Albacete", pais:"Espana", lat:39.0413, lng:-2.4803 },

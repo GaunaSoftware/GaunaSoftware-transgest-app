@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, getTallerSolicitudCapacidades, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
+import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, getTallerSolicitudCapacidades, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -41,6 +41,8 @@ function normalizeChoferPasos(value = {}) {
     "albaran_carga",
     "albaran_descarga",
     "firma_entrega",
+    "mercancia_confirmada",
+    "firma_cargador",
     "aviso_espera_carga",
     "aviso_espera_descarga",
     "dcd_revisado",
@@ -77,12 +79,17 @@ function normalizeChoferPasos(value = {}) {
     "albaran_carga_at",
     "albaran_descarga_at",
     "firma_entrega_at",
+    "mercancia_confirmada_at",
+    "firma_cargador_at",
     "aviso_espera_carga_at",
     "aviso_espera_descarga_at",
     "dcd_revisado_at",
     "dcd_disponible_at",
   ].forEach((key) => {
     if (source[key]) next[key] = String(source[key]);
+  });
+  ["mercancia_cargada", "mercancia_palets", "mercancia_peso_kg", "mercancia_referencia"].forEach((key) => {
+    if (source[key] !== undefined) next[key] = String(source[key] || "").trim();
   });
   Object.entries(source).forEach(([key, value]) => {
     if (!key.startsWith("protocolo_")) return;
@@ -406,7 +413,7 @@ function Mini({ label, value }) {
 }
 
 // Firma canvas
-function FirmaCanvas({ pedido, onFirma, onCancel }){
+function FirmaCanvas({ pedido, onFirma, onCancel, title = "Confirmacion de entrega", detail = "", confirmLabel = "Confirmar", placeholder = "Nombre y apellidos de quien firma" }){
   const canvasRef = useRef(null);
   const drawing   = useRef(false);
   const lastPt    = useRef(null);
@@ -441,7 +448,7 @@ function FirmaCanvas({ pedido, onFirma, onCancel }){
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:16}}>
       <div style={{background:"#fff",borderRadius:12,padding:16,width:"min(340px,95vw)"}}>
-        <div style={{fontWeight:700,fontSize:15,color:"#111",marginBottom:8,textAlign:"center"}}>Confirmacion de entrega</div>
+        <div style={{fontWeight:700,fontSize:15,color:"#111",marginBottom:8,textAlign:"center"}}>{title}</div>
         <div style={{fontSize:11,color:"#666",marginBottom:10,textAlign:"center"}}>
           Documento interno de entrega correcta. Origen: {pedido?.origen || "-"} · Destino: {pedido?.destino || "-"} · Mercancia: {pedido?.mercancia || pedido?.descripcion_carga || "-"}
         </div>
@@ -747,6 +754,13 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const [docControl,   setDocControl]   = useState(null);
   const [docControlLoading, setDocControlLoading] = useState(false);
   const [qrVisible, setQrVisible] = useState(false);
+  const [firmandoCargador, setFirmandoCargador] = useState(false);
+  const [mercanciaCarga, setMercanciaCarga] = useState({
+    mercancia: pedido.mercancia || pedido.descripcion_carga || "",
+    palets: pedido.bultos || "",
+    peso_kg: pedido.peso_kg || "",
+    referencia: pedido.referencia_cliente || "",
+  });
   const e = EC[pedido.estado]||EC.pendiente;
   const isEnCurso = ["en_curso","descarga"].includes(pedido.estado);
   const isProxima = pedido.es_proxima_carga;
@@ -901,15 +915,11 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       return ok;
     }
     if (pasos.dcd_revisado && pasos.dcd_disponible && data?.status?.ready) return true;
-    const faltantes = Array.isArray(data?.status?.faltantes) ? data.status.faltantes : [];
     const ok = await confirmDialog({
       title: data?.status?.ready ? "Confirmar DCD" : "DCD con datos pendientes",
-      message: [
-        data?.status?.ready
-          ? "Antes de salir, confirma que has revisado el DCD y lo llevas disponible en el movil o impreso."
-          : "El DCD no esta completo. Avisa a trafico si falta algun dato antes de circular.",
-        faltantes.length ? `Faltan: ${faltantes.slice(0, 5).join(", ")}${faltantes.length > 5 ? "..." : ""}` : null,
-      ].filter(Boolean).join("\n\n"),
+      message: data?.status?.ready
+        ? "Antes de salir, confirma que has revisado el DCD y lo llevas disponible en el movil o impreso."
+        : "El DCD esta pendiente de revision interna. Puedes continuar con aviso, pero informa a trafico si necesitas el soporte definitivo.",
       confirmText: data?.status?.ready ? "Lo llevo revisado" : "Continuar con aviso",
       cancelText: "Volver",
       tone: data?.status?.ready ? "success" : "warning",
@@ -969,6 +979,58 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     const fresh = await cargarDocumentoControl();
     if (fresh) setDocControl(fresh);
     onActualizar();
+  }
+
+  async function confirmarDatosMercanciaCarga() {
+    const mercancia = String(mercanciaCarga.mercancia || "").trim();
+    const palets = String(mercanciaCarga.palets || "").trim();
+    const peso = String(mercanciaCarga.peso_kg || "").trim();
+    if (!mercancia || !palets || !peso) {
+      notify("Indica mercancia, palets/bultos y peso antes de cerrar la carga.", "warning");
+      return;
+    }
+    const pesoNum = Number(String(peso).replace(",", "."));
+    if (!Number.isFinite(pesoNum) || pesoNum <= 0) {
+      notify("El peso debe ser un numero valido.", "warning");
+      return;
+    }
+    await editarPedido(pedido.id, {
+      mercancia,
+      bultos: palets,
+      peso_kg: pesoNum,
+      referencia_cliente: pedido.referencia_cliente || mercanciaCarga.referencia || null,
+    });
+    await persistirPasos({
+      mercancia_confirmada: true,
+      mercancia_confirmada_at: new Date().toISOString(),
+      mercancia_cargada: mercancia,
+      mercancia_palets: palets,
+      mercancia_peso_kg: String(pesoNum),
+      mercancia_referencia: String(mercanciaCarga.referencia || "").trim(),
+    }, { silent: true });
+    const fresh = await cargarDocumentoControl();
+    if (fresh) setDocControl(fresh);
+    notify("Datos de mercancia guardados.", "success");
+    onActualizar();
+  }
+
+  async function registrarFirmaCargador(dataURL, firmaNombre) {
+    try {
+      await guardarFirmaEntrega(pedido.id, {
+        rol: "cargador",
+        firma_destinatario: dataURL,
+        firma_nombre: firmaNombre || "Remitente",
+        source: "app_chofer_carga",
+      });
+      await persistirPasos({ firma_cargador:true, firma_cargador_at:new Date().toISOString() }, { silent:true });
+      const fresh = await cargarDocumentoControl();
+      if (fresh) setDocControl(fresh);
+      setFirmandoCargador(false);
+      notify("Firma del remitente registrada en el DCD.", "success");
+      onActualizar();
+    } catch(err) {
+      notify(err.message, "error");
+    }
   }
 
   const timerActual = (() => {
@@ -1046,8 +1108,12 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       notify("Primero inicia la carga.", "warning");
       return;
     }
+    if (!pasos.mercancia_confirmada || !pasos.albaran_carga || !pasos.firma_cargador) {
+      notify("Antes de finalizar la carga debes confirmar mercancia, adjuntar albaran y registrar la firma del remitente.", "warning");
+      return;
+    }
     await marcarPaso("carga_ok");
-    notify("Carga finalizada. Ahora sube el albaran de carga.", "success");
+    notify("Carga finalizada con mercancia, albaran y firma registrados.", "success");
     onActualizar();
   }
 
@@ -1110,8 +1176,10 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       return { label:"Posicionado en carga", help:"Registra que ya estas en el punto de carga. Desde aqui empieza la espera.", run: iniciarPosicionCarga, color:"#3b82f6" };
     }
     if (!pasos.carga_proceso) return { label:"Iniciar carga", help:"Empieza el contador real de carga y reinicia el temporizador visual del chofer.", run: iniciarCarga, color:"#f59e0b" };
-    if (!pasos.carga_ok) return { label:"Carga finalizada", help:"Marca este paso cuando la mercancia este cargada.", run: finalizarCarga, color:"#10b981" };
-    if (!pasos.albaran_carga) return { type:"albaran_carga", label:"Subir albaran de carga", help:"El albaran aparece ahora porque la carga ya esta marcada como finalizada." };
+    if (!pasos.mercancia_confirmada) return { type:"mercancia_carga", label:"Confirmar mercancia cargada", help:"Antes de firmar la carga, introduce mercancia, palets/bultos, peso y referencia si procede." };
+    if (!pasos.albaran_carga) return { type:"albaran_carga", label:"Subir albaran de carga", help:"Adjunta el albaran de carga para incorporarlo al DCD." };
+    if (!pasos.firma_cargador) return { label:"Firma del remitente", help:"El remitente/cargador firma la carga y la firma aparece en el bloque Sender del DCD.", run:()=>setFirmandoCargador(true), color:"#10b981" };
+    if (!pasos.carga_ok) return { label:"Carga finalizada", help:"Marca este paso cuando la mercancia ya este cargada, documentada y firmada.", run: finalizarCarga, color:"#10b981" };
     if (!pasos.viaje_iniciado) return { label:"Iniciar viaje", help:"Comienza el trayecto hacia destino. El viaje sigue activo hasta finalizar descarga y firma.", run: iniciarViaje, color:"#3b82f6" };
     if (!pasos.posicionado_descarga) return { label:"Posicionado para descarga", help:"Registra la llegada o posicionamiento en destino. Empieza la espera de descarga.", run: posicionarDescarga, color:"#3b82f6" };
     if (!pasos.descarga_iniciada) return { label:"Descarga iniciada", help:"Empieza el contador de descarga y avisa si supera 60 minutos.", run: iniciarDescarga, color:"#a78bfa" };
@@ -1380,8 +1448,8 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                 <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Documento de control digital</div>
                 <div style={{fontSize:11,color:"var(--text5)"}}>
                   {docControlLoading
-                    ? "Comprobando requisitos del viaje..."
-                    : docControl?.status?.summary || "Todavia no hay datos del documento de control."}
+                    ? "Preparando documento..."
+                    : docControlSupportUrl ? "Documento disponible para mostrar, descargar o compartir." : "Documento pendiente de preparar por trafico."}
                 </div>
               </div>
               <div style={{fontSize:11,fontWeight:800,color:dcdOperativoOk ? "#10b981" : dcdReady ? "#60a5fa" : "#f59e0b"}}>
@@ -1390,7 +1458,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
             </div>
             {docControl?.documento && (
               <>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                <div className="tg-driver-dcd-internal" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
                   {[
                     ["DCD listo", dcdReady],
                     ["Revisado", dcdRevisado],
@@ -1402,7 +1470,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                     </div>
                   ))}
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                <div className="tg-driver-dcd-internal" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
                   <div style={{background:"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Sistema</div>
                     <div style={{fontSize:12,fontWeight:800,color:"var(--text)"}}>{docControl.documento.sistema === "qr_url" ? "QR / URL" : "Codigo numerico"}</div>
@@ -1412,7 +1480,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                     <div style={{fontSize:12,fontWeight:800,color:"var(--text)",fontFamily:"'JetBrains Mono',monospace"}}>{docControl.documento.codigo_control || "Pendiente"}</div>
                   </div>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                <div className="tg-driver-dcd-internal" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
                   <div style={{background:"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Carga DCD</div>
                     <div style={{fontSize:12,fontWeight:800,color:"var(--text)"}}>{fmtDcdFecha(dcdHorarios.fecha_carga)}</div>
@@ -1425,7 +1493,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                   </div>
                 </div>
                 {(dcdCargas.length > 0 || dcdDescargas.length > 0) && (
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                  <div className="tg-driver-dcd-internal" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
                     {[
                       ["Cargas", dcdCargas],
                       ["Descargas", dcdDescargas],
@@ -1453,12 +1521,12 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                   </div>
                 )}
                 {Array.isArray(docControl.status?.faltantes) && docControl.status.faltantes.length > 0 && (
-                  <div style={{fontSize:11,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.2)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                  <div className="tg-driver-dcd-internal" style={{fontSize:11,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.2)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
                     Faltan datos: {docControl.status.faltantes.slice(0, 3).join(" | ")}{docControl.status.faltantes.length > 3 ? "..." : ""}
                   </div>
                 )}
                 {docControl?.remision && (
-                  <div style={{fontSize:11,color:"var(--text3)",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                  <div className="tg-driver-dcd-internal" style={{fontSize:11,color:"var(--text3)",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
                     <div style={{fontWeight:800,color:"var(--text)",marginBottom:4}}>Remision</div>
                     <div>{docControl.remision.etiqueta}</div>
                   </div>
@@ -1523,7 +1591,42 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
             <div style={{background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.22)",borderRadius:10,padding:12,marginBottom:12}}>
               <div style={{fontWeight:900,fontSize:13,color:"var(--text)",marginBottom:4}}>{nextStep.label}</div>
               <div style={{fontSize:11,color:"var(--text5)",marginBottom:10,lineHeight:1.45}}>{nextStep.help}</div>
-              {nextStep.type === "albaran_carga" ? (
+              {nextStep.type === "mercancia_carga" ? (
+                <div style={{display:"grid",gap:8}}>
+                  <input
+                    value={mercanciaCarga.mercancia}
+                    onChange={e=>setMercanciaCarga(p=>({...p,mercancia:e.target.value}))}
+                    placeholder="Mercancia cargada"
+                    style={{width:"100%",boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg2)",color:"var(--text)",borderRadius:8,padding:"10px 12px",fontFamily:"'DM Sans',sans-serif"}}
+                  />
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <input
+                      value={mercanciaCarga.palets}
+                      onChange={e=>setMercanciaCarga(p=>({...p,palets:e.target.value}))}
+                      placeholder="Palets / bultos"
+                      inputMode="numeric"
+                      style={{width:"100%",minWidth:0,boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg2)",color:"var(--text)",borderRadius:8,padding:"10px 12px",fontFamily:"'DM Sans',sans-serif"}}
+                    />
+                    <input
+                      value={mercanciaCarga.peso_kg}
+                      onChange={e=>setMercanciaCarga(p=>({...p,peso_kg:e.target.value}))}
+                      placeholder="Peso kg"
+                      inputMode="decimal"
+                      style={{width:"100%",minWidth:0,boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg2)",color:"var(--text)",borderRadius:8,padding:"10px 12px",fontFamily:"'DM Sans',sans-serif"}}
+                    />
+                  </div>
+                  <input
+                    value={mercanciaCarga.referencia}
+                    onChange={e=>setMercanciaCarga(p=>({...p,referencia:e.target.value}))}
+                    placeholder="Referencia de carga (opcional)"
+                    style={{width:"100%",boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg2)",color:"var(--text)",borderRadius:8,padding:"10px 12px",fontFamily:"'DM Sans',sans-serif"}}
+                  />
+                  <button onClick={confirmarDatosMercanciaCarga} disabled={loading}
+                    style={{width:"100%",padding:"12px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:13,fontWeight:900,cursor:loading?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    Guardar datos de carga
+                  </button>
+                </div>
+              ) : nextStep.type === "albaran_carga" ? (
                 <EscanerAlbaran pedido={pedido} fase="carga" onUploaded={()=>albaranSubido("albaran_carga")} />
               ) : nextStep.type === "albaran_descarga" ? (
                 <EscanerAlbaran pedido={pedido} fase="descarga" onUploaded={()=>albaranSubido("albaran_descarga")} />
@@ -1620,6 +1723,14 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       )}
 
       {firmando&&<FirmaCanvas pedido={pedido} onFirma={registrarFirma} onCancel={()=>setFirmando(false)}/>}
+      {firmandoCargador&&(
+        <FirmaCanvas
+          pedido={pedido}
+          title="Firma del remitente"
+          onFirma={registrarFirmaCargador}
+          onCancel={()=>setFirmandoCargador(false)}
+        />
+      )}
       {incidencia&&<ModalIncidencia pedido={pedido} fase={incidenciaFase} onClose={()=>setIncidencia(false)} onGuardado={()=>{setIncidencia(false);onActualizar();}}/>}
       {qrVisible&&(
         <div style={{position:"fixed",inset:0,background:"rgba(2,6,23,.96)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
@@ -1976,7 +2087,7 @@ function ConjuntoChofer({ onRefresh }) {
   const S = {
     card:{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14},
     btn:{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12},
-    input:{width:"100%",boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)",fontFamily:"'DM Sans',sans-serif"},
+    input:{width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)",fontFamily:"'DM Sans',sans-serif"},
     label:{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"},
   };
   const load = useCallback(async () => {
@@ -2011,7 +2122,7 @@ function ConjuntoChofer({ onRefresh }) {
     }
   }
   return (
-    <div style={S.card}>
+    <div className="tg-chofer-card" style={S.card}>
       <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"var(--text)"}}>Mi conjunto</div>
       <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
         Puedes seleccionar una tractora y remolque libres. Si necesitas mover un equipo ocupado, lo revisa trafico.
@@ -2026,14 +2137,14 @@ function ConjuntoChofer({ onRefresh }) {
           <select style={S.input} value={vehiculoId} onChange={e => { setVehiculoId(e.target.value); if (!e.target.value) setRemolqueId(""); }}>
             <option value="">Sin tractora</option>
             {tractorasVisibles.map(v => (
-              <option key={v.id} value={v.id}>{v.matricula} {v.marca || ""} {v.modelo || ""}</option>
+              <option key={v.id} value={v.id}>{v.matricula || "Sin matricula"}</option>
             ))}
           </select>
           <label style={S.label}>Remolque</label>
           <select style={S.input} value={remolqueId} onChange={e => setRemolqueId(e.target.value)} disabled={!vehiculoId}>
             <option value="">Sin remolque</option>
             {remolquesVisibles.map(r => (
-              <option key={r.id} value={r.id}>{r.matricula} {r.clase || ""}</option>
+              <option key={r.id} value={r.id}>{r.matricula || "Sin matricula"}</option>
             ))}
           </select>
           <button disabled={saving} onClick={guardar} style={{...S.btn,width:"100%",marginTop:12,background:"var(--accent)",color:"#fff",borderColor:"var(--accent)",opacity:saving?0.65:1}}>
@@ -2107,7 +2218,23 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
     }
     return run(()=>cambiarChoferJornadaActividad({ actividad, ...payload }));
   }
+  function kmValido(value, label) {
+    const raw = String(value || "").trim().replace(",", ".");
+    const n = Number(raw);
+    if (!raw || !Number.isFinite(n) || n < 0) {
+      notify(`${label} es obligatorio y debe ser un numero valido.`, "warning");
+      return null;
+    }
+    return Math.round(n * 10) / 10;
+  }
+  async function iniciarJornadaConKm() {
+    const km = kmValido(kmInicio, "Km inicio");
+    if (km == null) return;
+    await run(()=>iniciarChoferJornada({ km_inicio: km, actividad:"otros_trabajos", notas }));
+  }
   async function cerrarJornadaCompleta() {
+    const km = kmValido(kmFin, "Km cierre");
+    if (km == null) return;
     await run(async () => {
       if (jornada?.actividad_actual !== "descanso") {
         await cambiarChoferJornadaActividad({
@@ -2116,7 +2243,7 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
           notas: "Descanso automatico al cerrar jornada",
         });
       }
-      await cerrarChoferJornada({ km_fin: kmFin || null, hace_noche: haceNoche, noche_lugar: nocheLugar || null, notas });
+      await cerrarChoferJornada({ km_fin: km, hace_noche: haceNoche, noche_lugar: nocheLugar || null, notas });
     });
     notify("Jornada cerrada y disco interno en descanso.", "success");
   }
@@ -2155,7 +2282,7 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
           <input type="number" style={S.input} value={kmInicio} onChange={e=>setKmInicio(e.target.value)} placeholder={chofer?.km_actuales ? String(chofer.km_actuales) : "Kilometros actuales"} />
           <label style={S.label}>Notas inicio</label>
           <input style={S.input} value={notas} onChange={e=>setNotas(e.target.value)} placeholder="Base, incidencia inicial, observaciones..." />
-          <button disabled={saving} onClick={()=>run(()=>iniciarChoferJornada({ km_inicio: kmInicio || null, actividad:"otros_trabajos", notas }))} style={{...S.btn,width:"100%",marginTop:12,background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}}>
+          <button disabled={saving} onClick={iniciarJornadaConKm} style={{...S.btn,width:"100%",marginTop:12,background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}}>
             Iniciar jornada
           </button>
         </div>
@@ -2276,7 +2403,7 @@ function VacacionesChofer({ items = [], chofer, onRefresh }) {
 
   return (
     <div>
-      <div style={{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+      <div className="tg-chofer-card" style={{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)"}}>Vacaciones</div>
         <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
           Solicita vacaciones y firma la solicitud desde la app. Si gerencia aprueba sin firma directa, aparecerá aquí para firmar la aceptación.
@@ -2285,24 +2412,24 @@ function VacacionesChofer({ items = [], chofer, onRefresh }) {
           <div>
             <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Inicio</label>
             <input type="date" value={form.fecha_inicio} onChange={e=>setForm(p=>({...p,fecha_inicio:e.target.value}))}
-              style={{width:"100%",boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)"}} />
+              style={{width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)"}} />
           </div>
           <div>
             <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Fin</label>
             <input type="date" value={form.fecha_fin} onChange={e=>setForm(p=>({...p,fecha_fin:e.target.value}))}
-              style={{width:"100%",boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)"}} />
+              style={{width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)"}} />
           </div>
         </div>
         <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"}}>Motivo / notas</label>
         <textarea value={form.motivo} onChange={e=>setForm(p=>({...p,motivo:e.target.value}))} placeholder="Opcional"
-          style={{width:"100%",boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)",minHeight:70,resize:"vertical",fontFamily:"'DM Sans',sans-serif"}} />
+          style={{width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)",minHeight:70,resize:"vertical",fontFamily:"'DM Sans',sans-serif"}} />
         <button disabled={saving || !form.fecha_inicio || !form.fecha_fin} onClick={()=>setFirma("solicitud")}
           style={{width:"100%",marginTop:12,padding:"12px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",opacity:saving ? .6 : 1}}>
           Solicitar y firmar
         </button>
       </div>
 
-      <div style={{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+      <div className="tg-chofer-card" style={{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
         <div style={{fontWeight:900,fontSize:13,color:"var(--text)",marginBottom:8}}>Mis solicitudes</div>
         {items.length === 0 ? (
           <div style={{fontSize:12,color:"var(--text5)"}}>Sin solicitudes registradas.</div>
@@ -2382,7 +2509,7 @@ function NuevoViajeChofer({ onCreado }) {
   const [creatingRuta, setCreatingRuta] = useState(false);
   const [creatingPunto, setCreatingPunto] = useState(false);
   const set = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
-  const inputStyle = {width:"100%",boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:8,padding:"10px 11px",fontSize:13,fontFamily:"'DM Sans',sans-serif",outline:"none"};
+  const inputStyle = {width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:8,padding:"10px 11px",fontSize:13,fontFamily:"'DM Sans',sans-serif",outline:"none"};
 
   useEffect(() => {
     const q = form.cliente_nombre.trim();
@@ -2555,8 +2682,8 @@ function NuevoViajeChofer({ onCreado }) {
   }
 
   return (
-    <div style={{padding:"12px 16px"}}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+    <div className="tg-chofer-section-shell" style={{padding:"12px 16px"}}>
+      <div className="tg-chofer-card" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
         <div style={{fontSize:15,fontWeight:900,color:"var(--text)",marginBottom:4}}>Nuevo viaje DCD</div>
         <div style={{fontSize:11,color:"var(--text5)",lineHeight:1.4,marginBottom:12}}>Crea un viaje propio para disponer del documento de control digital y su QR.</div>
         <div style={{display:"grid",gap:10}}>
@@ -2666,6 +2793,7 @@ export default function AppChofer(){
   const [jornadaInfo, setJornadaInfo] = useState(null);
   const [expandedPedidoId, setExpandedPedidoId] = useState(null);
   const [routeNotifications, setRouteNotifications] = useState([]);
+  const [firmaBaseOpen, setFirmaBaseOpen] = useState(false);
   const gpsSeguimientoRef = useRef({ lastSent: 0 });
   const [gpsSeguimientoEstado, setGpsSeguimientoEstado] = useState({
     active: false,
@@ -2705,6 +2833,22 @@ export default function AppChofer(){
   }, [user?.id, user?.chofer_id, user?.rol, user?.permisos?.avisos?.ver, isLitePlan]);
 
   useEffect(()=>{ cargar(); },[cargar]);
+
+  useEffect(() => {
+    const chofer = jornadaInfo?.chofer;
+    if (user?.rol === "chofer" && chofer?.id && !chofer?.firma_base) setFirmaBaseOpen(true);
+  }, [jornadaInfo?.chofer, user?.rol]);
+
+  async function guardarFirmaBaseChofer(firma) {
+    try {
+      await guardarChoferFirmaBaseApp(firma);
+      setFirmaBaseOpen(false);
+      notify("Firma guardada en tu ficha de chofer.", "success");
+      await cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo guardar la firma", "error");
+    }
+  }
 
   useEffect(() => {
     if (isLitePlan && ["solicitud", "vacaciones"].includes(tab)) setTab("activos");
@@ -2909,8 +3053,22 @@ export default function AppChofer(){
     <>
     <style>{`
       .tg-app-chofer-page, .tg-app-chofer-page * { box-sizing:border-box; min-width:0; }
-      .tg-app-chofer-page { width:min(480px, 100vw); }
+      .tg-app-chofer-page { width:min(480px, 100vw); overflow-x:hidden; }
       .tg-app-chofer-page img, .tg-app-chofer-page video, .tg-app-chofer-page canvas, .tg-app-chofer-page svg { max-width:100%; }
+      .tg-driver-dcd-internal { display:none !important; }
+      .tg-app-chofer-page input,
+      .tg-app-chofer-page select,
+      .tg-app-chofer-page textarea,
+      .tg-app-chofer-page button {
+        max-width:100%;
+        min-width:0;
+      }
+      .tg-app-chofer-page input[type="date"],
+      .tg-app-chofer-page input[type="time"] {
+        -webkit-appearance:none;
+        appearance:none;
+        min-height:42px;
+      }
       .tg-chofer-header-main { display:flex; align-items:center; justify-content:space-between; gap:10px; }
       .tg-chofer-header-actions { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
       .tg-chofer-tabs {
@@ -2930,7 +3088,21 @@ export default function AppChofer(){
         scroll-snap-align:start;
       }
       @media (max-width: 520px) {
-        .tg-chofer-nuevo-grid {
+        .tg-chofer-section-shell {
+          padding:12px 10px !important;
+        }
+        .tg-chofer-card {
+          margin-left:10px !important;
+          margin-right:10px !important;
+          padding:12px !important;
+          border-radius:14px !important;
+        }
+        .tg-chofer-nuevo-grid,
+        .tg-chofer-vacaciones-grid {
+          grid-template-columns:1fr !important;
+        }
+        .tg-chofer-vacaciones-row {
+          display:grid !important;
           grid-template-columns:1fr !important;
         }
         .tg-chofer-header-main {
@@ -2947,13 +3119,6 @@ export default function AppChofer(){
       @media (max-width: 380px) {
         .tg-chofer-tab {
           min-width:104px !important;
-        }
-        .tg-chofer-vacaciones-grid {
-          grid-template-columns:1fr !important;
-        }
-        .tg-chofer-vacaciones-row {
-          display:grid !important;
-          grid-template-columns:1fr !important;
         }
         .tg-app-chofer-page [style*="grid-template-columns:1fr 1fr"],
         .tg-app-chofer-page [style*="grid-template-columns: 1fr 1fr"],
@@ -3139,6 +3304,16 @@ export default function AppChofer(){
 
       {tab==="vacaciones" && (
         <VacacionesChofer items={vacacionesChofer} chofer={jornadaInfo?.chofer || user} onRefresh={cargar} />
+      )}
+
+      {firmaBaseOpen && (
+        <FirmaLaboralCanvas
+          title="Firma del chofer"
+          detail="Firma en la pantalla para guardar tu firma base en la ficha de chofer. Se usara en documentos internos cuando corresponda."
+          defaultName={`${jornadaInfo?.chofer?.nombre || user?.nombre || ""} ${jornadaInfo?.chofer?.apellidos || ""}`.trim()}
+          onFirma={guardarFirmaBaseChofer}
+          onCancel={()=>setFirmaBaseOpen(false)}
+        />
       )}
 
     {/* Modal camara */}

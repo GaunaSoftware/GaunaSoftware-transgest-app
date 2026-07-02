@@ -13,7 +13,7 @@ const {
   normalizeFixedAssetStatusInput,
   nextStatusForAction,
 } = require("../domain/fixedAssets");
-const { journalDraftRequestHash } = require("../domain/journalEntries");
+const { journalDraftRequestHash, normalizeCancellationReason } = require("../domain/journalEntries");
 const { hasPermission } = require("../domain/rbac");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
@@ -538,6 +538,138 @@ router.post("/fixed-assets/:id/depreciation-runs", requirePermission("fixed_asse
       };
     });
     res.status(result.repeated ? 200 : 201).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/fixed-assets/depreciation-runs/:runId/cancel", requirePermission("fixed_assets.write"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    if (!hasPermission(req.accountingUser, "journal.write")) {
+      return res.status(403).json({ error: "Permiso contable denegado", permission: "journal.write" });
+    }
+    const reason = normalizeCancellationReason(req.body?.reason);
+    const result = await db.transaction(async client => {
+      const runResult = await client.query(
+        `SELECT dr.*, je.status AS journal_status, je.entry_type, je.company_id AS journal_company_id
+           FROM ${q("depreciation_runs")} dr
+           JOIN ${q("journal_entries")} je ON je.id=dr.journal_entry_id
+          WHERE dr.id=$1 AND dr.company_id=$2
+          FOR UPDATE OF dr, je`,
+        [req.params.runId, selected.company_id]
+      );
+      if (!runResult.rows.length) {
+        const error = new Error("Amortizacion no encontrada para la empresa seleccionada");
+        error.status = 404;
+        throw error;
+      }
+      const run = runResult.rows[0];
+      if (run.status === "cancelled") {
+        return {
+          depreciation_run: run,
+          depreciation_runs: await loadDepreciationRuns(client, selected.company_id, run.fixed_asset_id),
+          repeated: true,
+        };
+      }
+      if (run.journal_status !== "draft" || run.entry_type !== "depreciation") {
+        const error = new Error("Solo se pueden cancelar borradores de amortizacion no contabilizados");
+        error.status = 409;
+        throw error;
+      }
+
+      await client.query(
+        `UPDATE ${q("journal_entries")}
+            SET status='cancelled',
+                cancelled_at=NOW(),
+                cancelled_by=$1,
+                cancel_reason=$2,
+                updated_at=NOW()
+          WHERE id=$3`,
+        [req.accountingUser.id, reason, run.journal_entry_id]
+      );
+      const cancelledRun = await client.query(
+        `UPDATE ${q("depreciation_runs")}
+            SET status='cancelled',
+                cancelled_at=NOW(),
+                cancelled_by=$1,
+                cancel_reason=$2
+          WHERE id=$3
+          RETURNING *`,
+        [req.accountingUser.id, reason, run.id]
+      );
+      const updatedRun = cancelledRun.rows[0];
+
+      await client.query(
+        `INSERT INTO ${q("audit_log")}
+           (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+         VALUES ($1,$2,'user',$3,'journal_entry.draft_cancelled','journal_entry',$4,$5,$6::jsonb)`,
+        [
+          selected.tenant_id,
+          selected.company_id,
+          req.accountingUser.id,
+          run.journal_entry_id,
+          req.id || null,
+          JSON.stringify({
+            fiscal_year_id: run.fiscal_year_id,
+            period_id: run.period_id,
+            reason,
+            source: "fixed_asset.depreciation_run.cancel",
+          }),
+        ]
+      );
+      await client.query(
+        `INSERT INTO ${q("audit_log")}
+           (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+         VALUES ($1,$2,'user',$3,'fixed_asset.depreciation_draft_cancelled','depreciation_run',$4,$5,$6::jsonb)`,
+        [
+          selected.tenant_id,
+          selected.company_id,
+          req.accountingUser.id,
+          updatedRun.id,
+          req.id || null,
+          JSON.stringify({
+            fixed_asset_id: updatedRun.fixed_asset_id,
+            journal_entry_id: updatedRun.journal_entry_id,
+            reason,
+            source: "fixed_asset.depreciation_run.cancel",
+          }),
+        ]
+      );
+      await enqueueOutboxEvent(client, {
+        tenant_id: selected.tenant_id,
+        company_id: selected.company_id,
+        event_type: "AccountingJournalEntryDraftCancelled",
+        aggregate_type: "journal_entry",
+        aggregate_id: run.journal_entry_id,
+        payload: {
+          journal_entry_id: run.journal_entry_id,
+          fiscal_year_id: run.fiscal_year_id,
+          period_id: run.period_id,
+          reason,
+        },
+      });
+      await enqueueOutboxEvent(client, {
+        tenant_id: selected.tenant_id,
+        company_id: selected.company_id,
+        event_type: "AccountingFixedAssetDepreciationDraftCancelled",
+        aggregate_type: "depreciation_run",
+        aggregate_id: updatedRun.id,
+        payload: {
+          depreciation_run_id: updatedRun.id,
+          fixed_asset_id: updatedRun.fixed_asset_id,
+          journal_entry_id: updatedRun.journal_entry_id,
+          reason,
+        },
+      });
+      return {
+        depreciation_run: updatedRun,
+        depreciation_runs: await loadDepreciationRuns(client, selected.company_id, updatedRun.fixed_asset_id),
+        repeated: false,
+      };
+    });
+    res.json(result);
   } catch (error) {
     next(error);
   }

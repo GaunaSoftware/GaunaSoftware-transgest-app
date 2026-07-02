@@ -795,6 +795,20 @@ router.post("/journal-entries/:id/cancel", requirePermission("journal.write"), a
         [req.accountingUser.id, reason, entry.id]
       );
       const cancelled = updated.rows[0];
+      const depreciationRun = entry.entry_type === "depreciation"
+        ? await client.query(
+          `UPDATE ${q("depreciation_runs")}
+              SET status='cancelled',
+                  cancelled_at=NOW(),
+                  cancelled_by=$1,
+                  cancel_reason=$2
+            WHERE company_id=$3
+              AND journal_entry_id=$4
+              AND status='draft_created'
+            RETURNING *`,
+          [req.accountingUser.id, reason, selected.company_id, entry.id]
+        )
+        : { rows: [] };
 
       await client.query(
         `INSERT INTO ${q("audit_log")}
@@ -827,6 +841,40 @@ router.post("/journal-entries/:id/cancel", requirePermission("journal.write"), a
           reason,
         },
       });
+      if (depreciationRun.rows.length) {
+        const run = depreciationRun.rows[0];
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'fixed_asset.depreciation_draft_cancelled','depreciation_run',$4,$5,$6::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            run.id,
+            req.id || null,
+            JSON.stringify({
+              fixed_asset_id: run.fixed_asset_id,
+              journal_entry_id: entry.id,
+              reason,
+              source: "journal_entry.cancel",
+            }),
+          ]
+        );
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetDepreciationDraftCancelled",
+          aggregate_type: "depreciation_run",
+          aggregate_id: run.id,
+          payload: {
+            depreciation_run_id: run.id,
+            fixed_asset_id: run.fixed_asset_id,
+            journal_entry_id: entry.id,
+            reason,
+          },
+        });
+      }
       return { entry: await loadEntryWithLines(client, cancelled.id, selected.company_id), repeated: false };
     });
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   applyExternalImportBatch,
+  cancelFixedAssetDepreciationDraft,
   cancelJournalEntry,
   createAccount,
   createBankAccount,
@@ -570,6 +571,7 @@ export default function App() {
   const [fixedAssetPlan, setFixedAssetPlan] = useState(null);
   const [fixedAssetStatusAction, setFixedAssetStatusAction] = useState(null);
   const [fixedAssetDepreciationAction, setFixedAssetDepreciationAction] = useState(null);
+  const [fixedAssetDepreciationCancelAction, setFixedAssetDepreciationCancelAction] = useState(null);
   const [fixedAssetFilters, setFixedAssetFilters] = useState({ fiscal_year_id: "", status: "", q: "" });
   const [fixedAssetForm, setFixedAssetForm] = useState({
     fiscal_year_id: "",
@@ -2173,6 +2175,30 @@ export default function App() {
     }
   }
 
+  async function handleCancelFixedAssetDepreciation(event) {
+    event.preventDefault();
+    if (!fixedAssetDepreciationCancelAction?.run) return;
+    setFixedAssetStatus(null);
+    try {
+      const result = await cancelFixedAssetDepreciationDraft(fixedAssetDepreciationCancelAction.run.id, {
+        reason: fixedAssetDepreciationCancelAction.reason,
+      });
+      setFixedAssetStatus({
+        tone: result.repeated ? "warning" : "ok",
+        text: result.repeated
+          ? "La amortizacion ya estaba cancelada."
+          : "Borrador de amortizacion cancelado. El periodo queda disponible para preparar una nueva amortizacion.",
+      });
+      setFixedAssetDepreciationCancelAction(null);
+      if (fixedAssetPlan?.fixed_asset?.id === result.depreciation_run.fixed_asset_id) {
+        setFixedAssetPlan(prev => prev ? { ...prev, depreciation_runs: result.depreciation_runs || prev.depreciation_runs } : prev);
+      }
+      await refreshJournal();
+    } catch (err) {
+      setFixedAssetStatus({ tone: err.status === 409 ? "warning" : "danger", text: err.message });
+    }
+  }
+
   async function handleBankFilter(event) {
     event.preventDefault();
     await refreshBanks(bankTransactionFilters, bankAccountFilters);
@@ -3271,8 +3297,21 @@ export default function App() {
                       <button type="button" className="secondary" onClick={() => setFixedAssetPlan(null)}>Cerrar plan</button>
                     </div>
                     {fixedAssetPlan.depreciation_runs?.length > 0 && (
-                      <div className="scope-note">
-                        Amortizaciones preparadas: {fixedAssetPlan.depreciation_runs.map(run => `${run.period_name}: ${formatMoney(run.amount)} EUR (${journalStatusLabel(run.journal_entry_status)})`).join(" | ")}
+                      <div className="maturities-table wide">
+                        <div className="maturity-row head"><span>Periodo</span><span>Fecha</span><span>Importe</span><span>Estado</span><span></span></div>
+                        {fixedAssetPlan.depreciation_runs.map(run => (
+                          <div className="maturity-row" key={run.id}>
+                            <span>{run.period_name}</span>
+                            <span>{String(run.run_date).slice(0, 10)}</span>
+                            <span>{formatMoney(run.amount)} EUR</span>
+                            <StatusBadge tone={run.status === "cancelled" ? "neutral" : journalStatusTone(run.journal_entry_status)} text={run.status === "cancelled" ? "Cancelada" : journalStatusLabel(run.journal_entry_status)} />
+                            <div className="maturity-actions">
+                              {canWriteFixedAssets && canWriteJournal && run.status !== "cancelled" && run.journal_entry_status === "draft" && (
+                                <button type="button" className="secondary" onClick={() => setFixedAssetDepreciationCancelAction({ run, reason: "" })}>Cancelar</button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                     <div className="maturities-table wide">
@@ -3345,6 +3384,23 @@ export default function App() {
                     <div className="period-action-buttons">
                       <button type="submit">Crear borrador</button>
                       <button type="button" className="secondary" onClick={() => setFixedAssetDepreciationAction(null)}>Cancelar</button>
+                    </div>
+                  </form>
+                )}
+                {fixedAssetDepreciationCancelAction && (
+                  <form className="period-action-form" onSubmit={handleCancelFixedAssetDepreciation}>
+                    <div>
+                      <strong>Cancelar amortizacion</strong>
+                      <span>{fixedAssetDepreciationCancelAction.run.period_name} - {formatMoney(fixedAssetDepreciationCancelAction.run.amount)} EUR</span>
+                    </div>
+                    <label>
+                      <span>Motivo</span>
+                      <input minLength={5} required value={fixedAssetDepreciationCancelAction.reason} onChange={e => setFixedAssetDepreciationCancelAction(prev => ({ ...prev, reason: e.target.value }))} />
+                    </label>
+                    <div className="scope-note">Se cancelara el borrador de Diario asociado y se conservara la trazabilidad.</div>
+                    <div className="period-action-buttons">
+                      <button type="submit">Cancelar borrador</button>
+                      <button type="button" className="secondary" onClick={() => setFixedAssetDepreciationCancelAction(null)}>Cerrar</button>
                     </div>
                   </form>
                 )}

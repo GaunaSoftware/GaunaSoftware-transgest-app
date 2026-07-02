@@ -258,6 +258,10 @@ export const createFixedAssetDepreciationDraft = (assetId, data) => apiFetch(`/f
   method: "POST",
   body: data,
 });
+export const cancelFixedAssetDepreciationDraft = (runId, data) => apiFetch(`/fixed-assets/depreciation-runs/${runId}/cancel`, {
+  method: "POST",
+  body: data,
+});
 export const updateFixedAssetStatus = (assetId, data) => apiFetch(`/fixed-assets/${assetId}/status`, {
   method: "PATCH",
   body: data,

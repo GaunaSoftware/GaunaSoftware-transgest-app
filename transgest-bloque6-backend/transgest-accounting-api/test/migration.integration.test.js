@@ -42,6 +42,8 @@ const fixedAssetsUpSql = fs.readFileSync(path.join(migrationsDir, "018_fixed_ass
 const fixedAssetsDownSql = fs.readFileSync(path.join(migrationsDir, "018_fixed_assets.down.sql"), "utf8");
 const depreciationRunsUpSql = fs.readFileSync(path.join(migrationsDir, "019_depreciation_runs.up.sql"), "utf8");
 const depreciationRunsDownSql = fs.readFileSync(path.join(migrationsDir, "019_depreciation_runs.down.sql"), "utf8");
+const depreciationRunCancellationUpSql = fs.readFileSync(path.join(migrationsDir, "020_depreciation_run_cancellation.up.sql"), "utf8");
+const depreciationRunCancellationDownSql = fs.readFileSync(path.join(migrationsDir, "020_depreciation_run_cancellation.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -260,4 +262,14 @@ test("migracion de amortizaciones crea ejecuciones idempotentes y rollback prote
   assert.match(depreciationRunsDownSql, /entry_type = 'depreciation'/i);
   assert.match(depreciationRunsDownSql, /RAISE EXCEPTION/i);
   assert.match(depreciationRunsDownSql, /DROP TABLE IF EXISTS accounting\.depreciation_runs/i);
+});
+
+test("migracion de cancelacion de amortizaciones conserva trazabilidad y libera periodo", () => {
+  assert.match(depreciationRunCancellationUpSql, /ADD COLUMN IF NOT EXISTS cancelled_at/i);
+  assert.match(depreciationRunCancellationUpSql, /status IN \('draft_created', 'cancelled'\)/i);
+  assert.match(depreciationRunCancellationUpSql, /DROP CONSTRAINT IF EXISTS depreciation_runs_company_id_fixed_asset_id_period_id_key/i);
+  assert.match(depreciationRunCancellationUpSql, /WHERE status = 'draft_created'/i);
+  assert.match(depreciationRunCancellationDownSql, /WHERE status = 'cancelled'/i);
+  assert.match(depreciationRunCancellationDownSql, /RAISE EXCEPTION/i);
+  assert.match(depreciationRunCancellationDownSql, /ADD CONSTRAINT depreciation_runs_company_id_fixed_asset_id_period_id_key/i);
 });

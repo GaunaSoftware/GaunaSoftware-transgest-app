@@ -4,6 +4,7 @@ const {
   buildStraightLineDepreciationPlan,
   depreciationAmountForPeriod,
   normalizeFixedAssetDepreciationRunInput,
+  normalizeFixedAssetDisposalDraftInput,
   normalizeFixedAssetInput,
   normalizeFixedAssetQuery,
   normalizeFixedAssetStatusInput,
@@ -105,4 +106,22 @@ test("depreciationAmountForPeriod calcula cuota del periodo y exige idempotencia
   });
   assert.throws(() => depreciationAmountForPeriod(asset, { start_date: "2027-01-01", end_date: "2027-01-31" }), /No hay cuota/);
   assert.throws(() => normalizeFixedAssetDepreciationRunInput({ period_id: "p", idempotency_key: "short" }), /idempotency_key/);
+});
+
+test("normalizeFixedAssetDisposalDraftInput prepara baja revisable", () => {
+  assert.deepEqual(normalizeFixedAssetDisposalDraftInput({
+    period_id: "period-id",
+    disposal_date: "2026-12-31",
+    disposal_loss_account_id: "loss-account",
+    description: "Baja por retirada",
+    idempotency_key: "asset-disposal:VEH-001",
+  }), {
+    period_id: "period-id",
+    disposal_date: "2026-12-31",
+    disposal_loss_account_id: "loss-account",
+    description: "Baja por retirada",
+    idempotency_key: "asset-disposal:VEH-001",
+  });
+  assert.throws(() => normalizeFixedAssetDisposalDraftInput({ period_id: "p", disposal_date: "bad", idempotency_key: "asset-disposal:x" }), /disposal_date/);
+  assert.throws(() => normalizeFixedAssetDisposalDraftInput({ period_id: "p", disposal_date: "2026-12-31", idempotency_key: "short" }), /idempotency_key/);
 });

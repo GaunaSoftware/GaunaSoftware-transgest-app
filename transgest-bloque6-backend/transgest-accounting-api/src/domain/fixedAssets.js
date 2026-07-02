@@ -133,6 +133,20 @@ function normalizeFixedAssetDepreciationRunInput(input = {}) {
   };
 }
 
+function normalizeFixedAssetDisposalDraftInput(input = {}) {
+  const idempotencyKey = normalizeRequired(input.idempotency_key, "idempotency_key", 120);
+  if (idempotencyKey.length < 12 || !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)) {
+    throw inputError("idempotency_key debe tener al menos 12 caracteres seguros");
+  }
+  return {
+    period_id: normalizeRequired(input.period_id, "period_id", 80),
+    disposal_date: normalizeDate(input.disposal_date, "disposal_date"),
+    disposal_loss_account_id: normalizeOptionalText(input.disposal_loss_account_id, 80, "disposal_loss_account_id"),
+    description: normalizeOptionalText(input.description, 500, "description"),
+    idempotency_key: idempotencyKey,
+  };
+}
+
 function nextStatusForAction(currentStatus, action) {
   if (action === "activate") {
     if (currentStatus !== "inactive") throw inputError("Solo se puede activar inmovilizado inactivo");
@@ -223,6 +237,7 @@ module.exports = {
   buildStraightLineDepreciationPlan,
   moneyToUnits,
   normalizeFixedAssetDepreciationRunInput,
+  normalizeFixedAssetDisposalDraftInput,
   normalizeFixedAssetInput,
   normalizeFixedAssetQuery,
   normalizeFixedAssetStatusInput,

@@ -82,6 +82,9 @@ const EVENT_CONTRACTS = {
   AccountingFixedAssetDepreciationReversed: {
     1: ["depreciation_run_id", "fixed_asset_id", "journal_entry_id", "reversal_journal_entry_id", "reason"],
   },
+  AccountingFixedAssetDisposalDraftCreated: {
+    1: ["fixed_asset_id", "journal_entry_id", "fiscal_year_id", "period_id", "disposal_date", "estimated_net_book_value"],
+  },
   AccountingBankTransactionReconciled: {
     1: ["bank_reconciliation_id", "bank_transaction_id", "maturity_id", "amount", "reason"],
   },

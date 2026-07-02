@@ -4,9 +4,9 @@ Fecha: 2026-06-12
 
 ## Estado global estimado
 
-Estimacion de finalizacion del modulo completo: **49%**.
+Estimacion de finalizacion del modulo completo: **50%**.
 
-Esta cifra mide TransGest Contabilidad frente al objetivo de una solucion contable profesional para pymes espanolas, no solo frente a la Fase 1 tecnica. El avance actual cubre fundacion SaaS, SSO, multiempresa, RBAC, auditoria, outbox, plan contable manual, ejercicios/periodos, Diario manual, Mayor, informes preliminares, terceros, cartera manual de vencimientos, tesoreria bancaria manual, importacion CSV manual de extractos con historial de lotes, conciliacion manual exacta uno-a-uno, sugerencias asistidas de conciliacion, reverso auditado de conciliaciones, ignorar/reabrir movimientos bancarios con motivo e inmovilizado preliminar con plan de amortizacion lineal, generacion controlada, contabilizacion sincronizada, cancelacion trazable de borradores, reverso sincronizado de amortizaciones contabilizadas y baja asistida con bloqueo de pendientes. Quedan fuera todavia facturacion fiscal centralizada, IVA, facturas emitidas/recibidas, conciliacion bancaria automatica, importaciones bancarias normalizadas como Cuaderno 43, contabilizacion masiva de amortizaciones, baja contable con asiento automatico, cierres avanzados, adaptadores regulatorios y validacion legal externa.
+Esta cifra mide TransGest Contabilidad frente al objetivo de una solucion contable profesional para pymes espanolas, no solo frente a la Fase 1 tecnica. El avance actual cubre fundacion SaaS, SSO, multiempresa, RBAC, auditoria, outbox, plan contable manual, ejercicios/periodos, Diario manual, Mayor, informes preliminares, terceros, cartera manual de vencimientos, tesoreria bancaria manual, importacion CSV manual de extractos con historial de lotes, conciliacion manual exacta uno-a-uno, sugerencias asistidas de conciliacion, reverso auditado de conciliaciones, ignorar/reabrir movimientos bancarios con motivo e inmovilizado preliminar con plan de amortizacion lineal, generacion controlada, contabilizacion sincronizada, cancelacion trazable de borradores, reverso sincronizado de amortizaciones contabilizadas, baja asistida con bloqueo de pendientes y borrador contable revisable de baja por retirada. Quedan fuera todavia facturacion fiscal centralizada, IVA, facturas emitidas/recibidas, conciliacion bancaria automatica, importaciones bancarias normalizadas como Cuaderno 43, contabilizacion masiva de amortizaciones, bajas con ingreso/venta, cierres avanzados, adaptadores regulatorios y validacion legal externa.
 
 No se declara cumplimiento legal por el estado del codigo. Cualquier ambito fiscal, VERI*FACTU, factura electronica B2B, SII o conservacion documental requiere confirmacion con fuente oficial aplicable, asesor fiscal y/o revision juridica.
 
@@ -65,7 +65,8 @@ Estado Fase 1:
 - Implementada sincronizacion al contabilizar borradores de amortizacion: la ejecucion pasa a `posted`, mantiene bloqueado activo/periodo y emite `AccountingFixedAssetDepreciationPosted`.
 - Implementado reverso sincronizado de amortizaciones contabilizadas: al crear un reverso desde Diario la ejecucion pasa a `reversal_draft_created`; al contabilizarlo pasa a `reversed` y libera activo/periodo; al cancelar el reverso en borrador vuelve a `posted`.
 - Implementada baja asistida de inmovilizado: prevalidacion operativa, valor neto estimado y bloqueo si existen borradores de amortizacion o reversos pendientes.
-- Pendiente contabilizacion masiva, baja contable con asiento automatico, integracion con facturas recibidas y validacion externa de criterios fiscales/contables.
+- Implementada preparacion de borrador contable de baja por retirada: cancela coste contra amortizacion acumulada y perdida por valor neto, queda en Diario para revision manual y emite `AccountingFixedAssetDisposalDraftCreated`.
+- Pendiente contabilizacion masiva, bajas con ingreso/venta, integracion con facturas recibidas y validacion externa de criterios fiscales/contables.
 - Pendiente conciliacion automatica, importacion Cuaderno 43 u otros formatos normalizados, conciliaciones parciales, remesas y generacion de asientos desde bancos.
 - Implementado catalogo versionado de plantillas internas creadas desde un ejercicio existente.
 - Implementadas vista previa e importacion transaccional/idempotente de plantillas sin sobrescribir cuentas existentes.
@@ -365,7 +366,8 @@ Estado parcial:
 - Implementada marca `posted` en `depreciation_runs` al contabilizar el borrador asociado desde Diario; la unicidad activo/periodo cubre estados `draft_created` y `posted`.
 - Implementada reversion de amortizaciones contabilizadas mediante el caso de uso general de reverso de Diario, con estados `reversal_draft_created` y `reversed`, auditoria, outbox y rollback protegido por migracion.
 - Implementada baja asistida sin asiento automatico: calcula valor neto estimado desde amortizaciones contabilizadas y bloquea la baja si hay borradores o reversos de amortizacion pendientes.
-- No se contabiliza automaticamente, no hay amortizacion masiva, no hay asiento automatico de baja, no hay integracion automatica con facturas recibidas y no se declara cumplimiento contable/fiscal.
+- Implementada generacion de borrador de baja por retirada desde inmovilizado, con `entry_type='fixed_asset_disposal'`, `source_links`, auditoria y outbox; el usuario debe revisar y contabilizar desde Diario.
+- No se contabiliza automaticamente, no hay amortizacion masiva, no hay baja por venta con ingreso, no hay integracion automatica con facturas recibidas y no se declara cumplimiento contable/fiscal.
 
 ## Entrega 10 - Cierres, reaperturas y regularizacion
 

@@ -213,7 +213,7 @@ Reglas:
 - `posting_date`
 - `description`
 - `status` (`draft`, `posted`, `cancelled`)
-- `entry_type` (`manual`, `reversal`; tipos automaticos pendientes)
+- `entry_type` (`manual`, `reversal`, `depreciation`, `fixed_asset_disposal`)
 - `source_system`
 - `source_type`
 - `source_id`
@@ -745,7 +745,8 @@ Estado implementado:
 - Eventos `AccountingFixedAssetCreated` y `AccountingFixedAssetStatusChanged`.
 - Las amortizaciones pueden preparar borradores de Diario mediante `depreciation_runs`, pero requieren revision y contabilizacion manual.
 - La baja asistida comprueba pendientes de amortizacion, muestra valor neto estimado y bloquea la baja si existen borradores o reversos pendientes.
-- No hay integracion automatica con facturas recibidas, no hay asiento automatico de baja contable y no se declara cumplimiento fiscal o contable.
+- La baja por retirada puede preparar un borrador en Diario con `entry_type='fixed_asset_disposal'`: Debe amortizacion acumulada, Debe perdida por valor neto si procede y Haber cuenta del activo.
+- No hay integracion automatica con facturas recibidas, no hay baja por venta con ingreso y no se declara cumplimiento fiscal o contable.
 
 ### `depreciation_plans`
 

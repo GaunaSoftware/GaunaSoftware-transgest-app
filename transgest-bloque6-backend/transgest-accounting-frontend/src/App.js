@@ -13,6 +13,7 @@ import {
   createExternalImportBatch,
   createFixedAsset,
   createFixedAssetDepreciationDraft,
+  createFixedAssetDisposalDraft,
   createParty,
   downloadAdvisorPackageFile,
   downloadAdvisorPackageZip,
@@ -2161,12 +2162,41 @@ export default function App() {
         reason: "",
         disposed_at: new Date().toISOString().slice(0, 10),
         readiness: result.readiness,
+        disposal_period_id: periods.find(period => period.fiscal_year_id === asset.fiscal_year_id && period.status === "open")?.id || "",
+        disposal_loss_account_id: accounts.find(account => account.is_active && account.account_type === "expense")?.id || "",
+        disposal_description: `Baja inmovilizado ${asset.asset_code}`,
+        disposal_idempotency_key: newIdempotencyKey(`asset-disposal:${asset.asset_code}`),
       });
       if (!result.readiness?.ready) {
         setFixedAssetStatus({ tone: "warning", text: "La baja necesita resolver pendientes antes de confirmar." });
       }
     } catch (err) {
       setFixedAssetStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    }
+  }
+
+  async function handleFixedAssetDisposalDraft() {
+    if (!fixedAssetStatusAction?.asset) return;
+    setFixedAssetStatus(null);
+    try {
+      const result = await createFixedAssetDisposalDraft(fixedAssetStatusAction.asset.id, {
+        period_id: fixedAssetStatusAction.disposal_period_id,
+        disposal_date: fixedAssetStatusAction.disposed_at,
+        disposal_loss_account_id: fixedAssetStatusAction.disposal_loss_account_id || null,
+        description: fixedAssetStatusAction.disposal_description,
+        idempotency_key: fixedAssetStatusAction.disposal_idempotency_key,
+      });
+      setFixedAssetStatus({
+        tone: result.repeated ? "warning" : "ok",
+        text: result.repeated
+          ? "El borrador de baja ya existia con la misma clave."
+          : "Borrador de baja creado en Diario. Revisalo antes de contabilizar.",
+      });
+      setFixedAssetStatusAction(null);
+      setActiveTab("journal");
+      await refreshJournal();
+    } catch (err) {
+      setFixedAssetStatus({ tone: err.status === 409 ? "warning" : "danger", text: err.message });
     }
   }
 
@@ -3398,8 +3428,37 @@ export default function App() {
                         {fixedAssetStatusAction.readiness.blockers?.length > 0 && ` Pendientes: ${fixedAssetStatusAction.readiness.blockers.join("; ")}.`}
                       </div>
                     )}
+                    {fixedAssetStatusAction.action === "dispose" && fixedAssetStatusAction.readiness?.ready && canWriteJournal && (
+                      <>
+                        <label>
+                          <span>Periodo asiento</span>
+                          <select value={fixedAssetStatusAction.disposal_period_id} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, disposal_period_id: e.target.value }))}>
+                            <option value="">Selecciona periodo</option>
+                            {periods
+                              .filter(period => period.fiscal_year_id === fixedAssetStatusAction.asset.fiscal_year_id && period.status === "open")
+                              .map(period => <option key={period.id} value={period.id}>{period.name}</option>)}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Cuenta perdida</span>
+                          <select value={fixedAssetStatusAction.disposal_loss_account_id} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, disposal_loss_account_id: e.target.value }))}>
+                            <option value="">Sin cuenta</option>
+                            {accounts.filter(account => account.is_active && account.account_type === "expense").map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}
+                          </select>
+                        </label>
+                        <label>
+                          <span>Concepto asiento</span>
+                          <input maxLength={500} value={fixedAssetStatusAction.disposal_description} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, disposal_description: e.target.value }))} />
+                        </label>
+                        <div className="scope-note">Prepara un borrador en Diario para revisar. No contabiliza ni declara cumplimiento fiscal.</div>
+                      </>
+                    )}
                     <label><span>Motivo</span><input minLength={5} required value={fixedAssetStatusAction.reason} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, reason: e.target.value }))} /></label>
-                    <div className="period-action-buttons"><button type="submit" disabled={fixedAssetStatusAction.action === "dispose" && fixedAssetStatusAction.readiness && !fixedAssetStatusAction.readiness.ready}>Confirmar</button><button type="button" className="secondary" onClick={() => setFixedAssetStatusAction(null)}>Cancelar</button></div>
+                    <div className="period-action-buttons">
+                      {fixedAssetStatusAction.action === "dispose" && fixedAssetStatusAction.readiness?.ready && canWriteJournal && <button type="button" className="secondary" onClick={handleFixedAssetDisposalDraft} disabled={!fixedAssetStatusAction.disposal_period_id}>Preparar borrador</button>}
+                      <button type="submit" disabled={fixedAssetStatusAction.action === "dispose" && fixedAssetStatusAction.readiness && !fixedAssetStatusAction.readiness.ready}>Confirmar</button>
+                      <button type="button" className="secondary" onClick={() => setFixedAssetStatusAction(null)}>Cancelar</button>
+                    </div>
                   </form>
                 )}
                 {fixedAssetDepreciationAction && (

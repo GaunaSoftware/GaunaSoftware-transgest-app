@@ -8,10 +8,13 @@ const {
   buildStraightLineDepreciationPlan,
   depreciationAmountForPeriod,
   normalizeFixedAssetDepreciationRunInput,
+  normalizeFixedAssetDisposalDraftInput,
   normalizeFixedAssetInput,
   normalizeFixedAssetQuery,
   normalizeFixedAssetStatusInput,
   nextStatusForAction,
+  moneyToUnits,
+  unitsToMoney,
 } = require("../domain/fixedAssets");
 const { journalDraftRequestHash, normalizeCancellationReason } = require("../domain/journalEntries");
 const { hasPermission } = require("../domain/rbac");
@@ -590,6 +593,260 @@ router.post("/fixed-assets/:id/depreciation-runs", requirePermission("fixed_asse
         repeated: false,
       };
     });
+    res.status(result.repeated ? 200 : 201).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.write"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    if (!hasPermission(req.accountingUser, "journal.write")) {
+      return res.status(403).json({ error: "Permiso contable denegado", permission: "journal.write" });
+    }
+    const input = normalizeFixedAssetDisposalDraftInput(req.body);
+
+    const result = await db.transaction(async client => {
+      const assetResult = await client.query(
+        `SELECT * FROM ${q("accounting_fixed_assets")} WHERE id=$1 AND company_id=$2 FOR UPDATE`,
+        [req.params.id, selected.company_id]
+      );
+      if (!assetResult.rows.length) {
+        const error = new Error("Inmovilizado no encontrado para la empresa seleccionada");
+        error.status = 404;
+        throw error;
+      }
+      const asset = assetResult.rows[0];
+      const readiness = await loadFixedAssetDisposalReadiness(client, selected.company_id, asset.id);
+      if (!readiness?.ready) {
+        const error = new Error(`No se puede preparar la baja: ${readiness?.blockers.join("; ") || "revision pendiente"}`);
+        error.status = 409;
+        throw error;
+      }
+      if (!asset.asset_account_id) {
+        const error = new Error("El inmovilizado necesita cuenta de activo para preparar la baja");
+        error.status = 409;
+        throw error;
+      }
+
+      const acquisitionUnits = moneyToUnits(asset.acquisition_cost, "acquisition_cost");
+      const depreciationUnits = moneyToUnits(readiness.posted_depreciation_amount || "0", "posted_depreciation_amount", { allowZero: true });
+      const appliedDepreciationUnits = depreciationUnits > acquisitionUnits ? acquisitionUnits : depreciationUnits;
+      const netUnits = acquisitionUnits - appliedDepreciationUnits;
+      if (appliedDepreciationUnits > 0n && !asset.accumulated_depreciation_account_id) {
+        const error = new Error("El inmovilizado necesita cuenta de amortizacion acumulada para preparar la baja");
+        error.status = 409;
+        throw error;
+      }
+      if (netUnits > 0n && !input.disposal_loss_account_id) {
+        const error = new Error("Selecciona una cuenta de perdida para el valor neto pendiente");
+        error.status = 400;
+        throw error;
+      }
+
+      const periodResult = await client.query(
+        `SELECT p.*, fy.status AS fiscal_year_status, fy.year_label
+           FROM ${q("accounting_periods")} p
+           JOIN ${q("fiscal_years")} fy ON fy.id=p.fiscal_year_id
+          WHERE p.id=$1 AND p.company_id=$2 AND p.fiscal_year_id=$3
+            AND $4::date BETWEEN p.start_date AND p.end_date
+          FOR UPDATE OF p, fy`,
+        [input.period_id, selected.company_id, asset.fiscal_year_id, input.disposal_date]
+      );
+      if (!periodResult.rows.length) {
+        const error = new Error("Periodo no encontrado para la fecha de baja y ejercicio del inmovilizado");
+        error.status = 400;
+        throw error;
+      }
+      const period = periodResult.rows[0];
+      if (period.fiscal_year_status !== "open") {
+        const error = new Error("El ejercicio no esta abierto");
+        error.status = 409;
+        throw error;
+      }
+      if (period.status !== "open") {
+        const error = new Error(`El periodo ${period.name} no esta abierto`);
+        error.status = 409;
+        throw error;
+      }
+
+      await assertPostableAccounts(client, selected.company_id, asset.fiscal_year_id, [
+        asset.asset_account_id,
+        appliedDepreciationUnits > 0n ? asset.accumulated_depreciation_account_id : null,
+        netUnits > 0n ? input.disposal_loss_account_id : null,
+      ]);
+
+      const description = input.description || `Baja inmovilizado ${asset.asset_code}`;
+      const lines = [];
+      if (appliedDepreciationUnits > 0n) {
+        lines.push({
+          line_number: lines.length + 1,
+          account_id: asset.accumulated_depreciation_account_id,
+          side: "debit",
+          amount: unitsToMoney(appliedDepreciationUnits),
+          description: `Cancelar amortizacion acumulada ${asset.asset_code}`,
+        });
+      }
+      if (netUnits > 0n) {
+        lines.push({
+          line_number: lines.length + 1,
+          account_id: input.disposal_loss_account_id,
+          side: "debit",
+          amount: unitsToMoney(netUnits),
+          description: `Valor neto baja ${asset.asset_code}`,
+        });
+      }
+      lines.push({
+        line_number: lines.length + 1,
+        account_id: asset.asset_account_id,
+        side: "credit",
+        amount: unitsToMoney(acquisitionUnits),
+        description: `Baja coste ${asset.asset_code}`,
+      });
+
+      const requestHash = journalDraftRequestHash({
+        fiscal_year_id: asset.fiscal_year_id,
+        entry_date: input.disposal_date,
+        description,
+        lines,
+      });
+      const repeated = await client.query(
+        `SELECT id, request_hash FROM ${q("journal_entries")} WHERE company_id=$1 AND idempotency_key=$2`,
+        [selected.company_id, input.idempotency_key]
+      );
+      if (repeated.rows.length) {
+        if (repeated.rows[0].request_hash !== requestHash) {
+          const error = new Error("idempotency_key ya utilizado con otro contenido");
+          error.status = 409;
+          throw error;
+        }
+        return {
+          journal_entry: (await client.query(
+            `SELECT * FROM ${q("journal_entries")} WHERE id=$1 AND company_id=$2`,
+            [repeated.rows[0].id, selected.company_id]
+          )).rows[0],
+          readiness,
+          repeated: true,
+        };
+      }
+      const existingDraft = await client.query(
+        `SELECT id FROM ${q("journal_entries")}
+          WHERE company_id=$1
+            AND source_system='accounting'
+            AND source_type='fixed_asset_disposal'
+            AND source_id=$2
+            AND status <> 'cancelled'
+          LIMIT 1`,
+        [selected.company_id, asset.id]
+      );
+      if (existingDraft.rows.length) {
+        const error = new Error("Ya existe un borrador de baja no cancelado para este inmovilizado");
+        error.status = 409;
+        throw error;
+      }
+      const entryResult = await client.query(
+        `INSERT INTO ${q("journal_entries")}
+           (tenant_id, company_id, fiscal_year_id, period_id, entry_date, description,
+            status, entry_type, source_system, source_type, source_id, idempotency_key,
+            request_hash, trace_id, request_id, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,'draft','fixed_asset_disposal','accounting','fixed_asset_disposal',$7,$8,$9,$10,$11,$12)
+         RETURNING *`,
+        [
+          selected.tenant_id,
+          selected.company_id,
+          asset.fiscal_year_id,
+          period.id,
+          input.disposal_date,
+          description,
+          asset.id,
+          input.idempotency_key,
+          requestHash,
+          req.id || null,
+          req.id || null,
+          req.accountingUser.id,
+        ]
+      ).catch(error => {
+        if (error.code === "23505") {
+          const conflict = new Error("idempotency_key ya utilizado con otro contenido");
+          conflict.status = 409;
+          throw conflict;
+        }
+        throw error;
+      });
+      const entry = entryResult.rows[0];
+
+      for (const line of lines) {
+        await client.query(
+          `INSERT INTO ${q("journal_lines")}
+             (tenant_id, company_id, journal_entry_id, line_number, account_id,
+              debit_amount, credit_amount, currency, description)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'EUR',$8)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            entry.id,
+            line.line_number,
+            line.account_id,
+            line.side === "debit" ? line.amount : "0",
+            line.side === "credit" ? line.amount : "0",
+            line.description,
+          ]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO ${q("source_links")}
+           (tenant_id, company_id, journal_entry_id, source_system, source_type, source_id)
+         VALUES ($1,$2,$3,'accounting','fixed_asset',$4)`,
+        [selected.tenant_id, selected.company_id, entry.id, asset.id]
+      );
+
+      await client.query(
+        `INSERT INTO ${q("audit_log")}
+           (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+         VALUES ($1,$2,'user',$3,'fixed_asset.disposal_draft_created','accounting_fixed_asset',$4,$5,$6::jsonb)`,
+        [
+          selected.tenant_id,
+          selected.company_id,
+          req.accountingUser.id,
+          asset.id,
+          req.id || null,
+          JSON.stringify({
+            journal_entry_id: entry.id,
+            fiscal_year_id: asset.fiscal_year_id,
+            period_id: period.id,
+            disposal_date: input.disposal_date,
+            acquisition_cost: asset.acquisition_cost,
+            posted_depreciation_amount: readiness.posted_depreciation_amount,
+            estimated_net_book_value: unitsToMoney(netUnits),
+          }),
+        ]
+      );
+      await enqueueOutboxEvent(client, {
+        tenant_id: selected.tenant_id,
+        company_id: selected.company_id,
+        event_type: "AccountingFixedAssetDisposalDraftCreated",
+        aggregate_type: "accounting_fixed_asset",
+        aggregate_id: asset.id,
+        payload: {
+          fixed_asset_id: asset.id,
+          journal_entry_id: entry.id,
+          fiscal_year_id: asset.fiscal_year_id,
+          period_id: period.id,
+          disposal_date: input.disposal_date,
+          estimated_net_book_value: unitsToMoney(netUnits),
+        },
+      });
+
+      return {
+        journal_entry: entry,
+        readiness,
+        repeated: false,
+      };
+    });
+
     res.status(result.repeated ? 200 : 201).json(result);
   } catch (error) {
     next(error);

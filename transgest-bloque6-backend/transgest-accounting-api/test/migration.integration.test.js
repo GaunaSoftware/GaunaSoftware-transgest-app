@@ -48,6 +48,8 @@ const depreciationRunPostingUpSql = fs.readFileSync(path.join(migrationsDir, "02
 const depreciationRunPostingDownSql = fs.readFileSync(path.join(migrationsDir, "021_depreciation_run_posting.down.sql"), "utf8");
 const depreciationRunReversalUpSql = fs.readFileSync(path.join(migrationsDir, "022_depreciation_run_reversal.up.sql"), "utf8");
 const depreciationRunReversalDownSql = fs.readFileSync(path.join(migrationsDir, "022_depreciation_run_reversal.down.sql"), "utf8");
+const fixedAssetDisposalEntryTypeUpSql = fs.readFileSync(path.join(migrationsDir, "023_fixed_asset_disposal_entry_type.up.sql"), "utf8");
+const fixedAssetDisposalEntryTypeDownSql = fs.readFileSync(path.join(migrationsDir, "023_fixed_asset_disposal_entry_type.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -294,4 +296,12 @@ test("migracion de reverso de amortizaciones conserva trazabilidad hasta liberar
   assert.match(depreciationRunReversalDownSql, /WHERE status IN \('reversal_draft_created', 'reversed'\)/i);
   assert.match(depreciationRunReversalDownSql, /RAISE EXCEPTION/i);
   assert.match(depreciationRunReversalDownSql, /DROP COLUMN IF EXISTS reversal_journal_entry_id/i);
+});
+
+test("migracion de baja de inmovilizado amplia tipos de asiento con rollback protegido", () => {
+  assert.match(fixedAssetDisposalEntryTypeUpSql, /entry_type IN \('manual', 'reversal', 'depreciation', 'fixed_asset_disposal'\)/i);
+  assert.match(fixedAssetDisposalEntryTypeUpSql, /entry_type IN \('manual', 'depreciation', 'fixed_asset_disposal'\)/i);
+  assert.match(fixedAssetDisposalEntryTypeDownSql, /entry_type = 'fixed_asset_disposal'/i);
+  assert.match(fixedAssetDisposalEntryTypeDownSql, /RAISE EXCEPTION/i);
+  assert.match(fixedAssetDisposalEntryTypeDownSql, /entry_type IN \('manual', 'reversal', 'depreciation'\)/i);
 });

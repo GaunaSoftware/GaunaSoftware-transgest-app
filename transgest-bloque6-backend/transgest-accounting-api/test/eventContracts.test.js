@@ -243,6 +243,27 @@ test("contratos de inmovilizado exigen activo, ejercicio e importe", () => {
     period_id: "period-id",
     amount: "100.000000",
   }));
+  assert.doesNotThrow(() => validateEventContract("AccountingFixedAssetDepreciationReversalDraftCreated", 1, {
+    depreciation_run_id: "run-id",
+    fixed_asset_id: "asset-id",
+    journal_entry_id: "entry-id",
+    reversal_journal_entry_id: "reversal-id",
+    reason: "Correccion",
+  }));
+  assert.doesNotThrow(() => validateEventContract("AccountingFixedAssetDepreciationReversalDraftCancelled", 1, {
+    depreciation_run_id: "run-id",
+    fixed_asset_id: "asset-id",
+    journal_entry_id: "entry-id",
+    reversal_journal_entry_id: "reversal-id",
+    reason: "Correccion",
+  }));
+  assert.doesNotThrow(() => validateEventContract("AccountingFixedAssetDepreciationReversed", 1, {
+    depreciation_run_id: "run-id",
+    fixed_asset_id: "asset-id",
+    journal_entry_id: "entry-id",
+    reversal_journal_entry_id: "reversal-id",
+    reason: "Correccion",
+  }));
   assert.throws(() => validateEventContract("AccountingFixedAssetCreated", 1, {
     fixed_asset_id: "asset-id",
   }), /Payload incompleto/);

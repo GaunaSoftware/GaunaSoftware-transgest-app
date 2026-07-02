@@ -770,11 +770,15 @@ Estado implementado:
 - `plan_from_date`
 - `plan_to_date`
 - `plan_periods`
-- `status` (`draft_created`, `posted`, `cancelled`)
+- `status` (`draft_created`, `posted`, `cancelled`, `reversal_draft_created`, `reversed`)
 - `cancelled_at`
 - `cancelled_by`
 - `cancel_reason`
 - `journal_entry_id`
+- `reversal_journal_entry_id`
+- `reversal_reason`
+- `reversed_at`
+- `reversed_by`
 - `idempotency_key`
 - `created_by`
 - `created_at`
@@ -789,12 +793,16 @@ Estado implementado:
 - Tabla creada por `019_depreciation_runs`.
 - Cancelacion creada por `020_depreciation_run_cancellation`; la unicidad por activo/periodo se mantiene solo para ejecuciones activas `draft_created`.
 - Estado `posted` creado por `021_depreciation_run_posting`; la unicidad por activo/periodo cubre ejecuciones `draft_created` y `posted`.
+- Estados de reverso creados por `022_depreciation_run_reversal`: `reversal_draft_created` mantiene bloqueado activo/periodo y `reversed` lo libera para rehacer la amortizacion si procede.
 - Cada ejecucion crea un borrador en `journal_entries` con `entry_type='depreciation'`.
 - La escritura exige `fixed_assets.write` y `journal.write`.
 - El borrador tiene dos lineas: Debe en cuenta de gasto de amortizacion y Haber en cuenta de amortizacion acumulada.
 - `source_links` enlaza el borrador con el inmovilizado y los periodos del plan usados.
 - Cancelar una ejecucion marca tambien el borrador de Diario como `cancelled`, conserva motivo y emite evento `AccountingFixedAssetDepreciationDraftCancelled`.
 - Contabilizar el borrador asociado desde Diario marca la ejecucion como `posted` y emite `AccountingFixedAssetDepreciationPosted`.
+- Crear un reverso desde Diario sobre una amortizacion contabilizada marca la ejecucion como `reversal_draft_created`, guarda `reversal_journal_entry_id` y emite `AccountingFixedAssetDepreciationReversalDraftCreated`.
+- Cancelar el reverso en borrador restaura la ejecucion a `posted` y emite `AccountingFixedAssetDepreciationReversalDraftCancelled`.
+- Contabilizar el reverso marca la ejecucion como `reversed`, conserva `reversed_at`/`reversed_by` y emite `AccountingFixedAssetDepreciationReversed`.
 - No existe contabilizacion automatica ni masiva; el usuario debe revisar y contabilizar desde Diario.
 
 ## Infraestructura de eventos implementada en Fase 1

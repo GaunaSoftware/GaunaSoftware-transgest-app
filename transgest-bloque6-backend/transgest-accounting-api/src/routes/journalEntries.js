@@ -601,6 +601,19 @@ router.post("/journal-entries/:id/reverse", requirePermission("journal.write"), 
           WHERE id=$2`,
         [reversal.id, original.id]
       );
+      const depreciationReversalDraft = original.entry_type === "depreciation"
+        ? await client.query(
+          `UPDATE ${q("depreciation_runs")}
+              SET status='reversal_draft_created',
+                  reversal_journal_entry_id=$1,
+                  reversal_reason=$2
+            WHERE company_id=$3
+              AND journal_entry_id=$4
+              AND status='posted'
+            RETURNING *`,
+          [reversal.id, input.reason, selected.company_id, original.id]
+        )
+        : { rows: [] };
       await client.query(
         `INSERT INTO ${q("audit_log")}
            (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
@@ -637,6 +650,42 @@ router.post("/journal-entries/:id/reverse", requirePermission("journal.write"), 
           reason: input.reason,
         },
       });
+      if (depreciationReversalDraft.rows.length) {
+        const run = depreciationReversalDraft.rows[0];
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'fixed_asset.depreciation_reversal_draft_created','depreciation_run',$4,$5,$6::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            run.id,
+            req.id || null,
+            JSON.stringify({
+              fixed_asset_id: run.fixed_asset_id,
+              journal_entry_id: original.id,
+              reversal_journal_entry_id: reversal.id,
+              period_id: run.period_id,
+              reason: input.reason,
+            }),
+          ]
+        );
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetDepreciationReversalDraftCreated",
+          aggregate_type: "depreciation_run",
+          aggregate_id: run.id,
+          payload: {
+            depreciation_run_id: run.id,
+            fixed_asset_id: run.fixed_asset_id,
+            journal_entry_id: original.id,
+            reversal_journal_entry_id: reversal.id,
+            reason: input.reason,
+          },
+        });
+      }
 
       return { entry: await loadEntryWithLines(client, reversal.id, selected.company_id), repeated: false };
     });
@@ -726,6 +775,19 @@ router.post("/journal-entries/:id/post", requirePermission("journal.post"), asyn
           [selected.company_id, entry.id]
         )
         : { rows: [] };
+      const reversedDepreciationRun = entry.entry_type === "reversal"
+        ? await client.query(
+          `UPDATE ${q("depreciation_runs")}
+              SET status='reversed',
+                  reversed_at=NOW(),
+                  reversed_by=$1
+            WHERE company_id=$2
+              AND reversal_journal_entry_id=$3
+              AND status='reversal_draft_created'
+            RETURNING *`,
+          [req.accountingUser.id, selected.company_id, entry.id]
+        )
+        : { rows: [] };
 
       await client.query(
         `INSERT INTO ${q("audit_log")}
@@ -798,6 +860,42 @@ router.post("/journal-entries/:id/post", requirePermission("journal.post"), asyn
           },
         });
       }
+      if (reversedDepreciationRun.rows.length) {
+        const run = reversedDepreciationRun.rows[0];
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'fixed_asset.depreciation_reversed','depreciation_run',$4,$5,$6::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            run.id,
+            req.id || null,
+            JSON.stringify({
+              fixed_asset_id: run.fixed_asset_id,
+              journal_entry_id: run.journal_entry_id,
+              reversal_journal_entry_id: posted.id,
+              period_id: run.period_id,
+              reason: run.reversal_reason,
+            }),
+          ]
+        );
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetDepreciationReversed",
+          aggregate_type: "depreciation_run",
+          aggregate_id: run.id,
+          payload: {
+            depreciation_run_id: run.id,
+            fixed_asset_id: run.fixed_asset_id,
+            journal_entry_id: run.journal_entry_id,
+            reversal_journal_entry_id: posted.id,
+            reason: run.reversal_reason,
+          },
+        });
+      }
       return { entry: await loadEntryWithLines(client, posted.id, selected.company_id), repeated: false };
     });
 
@@ -855,6 +953,30 @@ router.post("/journal-entries/:id/cancel", requirePermission("journal.write"), a
           [req.accountingUser.id, reason, selected.company_id, entry.id]
         )
         : { rows: [] };
+      const restoredDepreciationRun = entry.entry_type === "reversal"
+        ? await client.query(
+          `UPDATE ${q("depreciation_runs")}
+              SET status='posted',
+                  reversal_journal_entry_id=NULL,
+                  reversal_reason=NULL
+            WHERE company_id=$1
+              AND reversal_journal_entry_id=$2
+              AND status='reversal_draft_created'
+            RETURNING *`,
+          [selected.company_id, entry.id]
+        )
+        : { rows: [] };
+      if (entry.entry_type === "reversal" && entry.reversal_of_entry_id) {
+        await client.query(
+          `UPDATE ${q("journal_entries")}
+              SET reversed_by_entry_id=NULL,
+                  updated_at=NOW()
+            WHERE company_id=$1
+              AND id=$2
+              AND reversed_by_entry_id=$3`,
+          [selected.company_id, entry.reversal_of_entry_id, entry.id]
+        );
+      }
 
       await client.query(
         `INSERT INTO ${q("audit_log")}
@@ -917,6 +1039,41 @@ router.post("/journal-entries/:id/cancel", requirePermission("journal.write"), a
             depreciation_run_id: run.id,
             fixed_asset_id: run.fixed_asset_id,
             journal_entry_id: entry.id,
+            reason,
+          },
+        });
+      }
+      if (restoredDepreciationRun.rows.length) {
+        const run = restoredDepreciationRun.rows[0];
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'fixed_asset.depreciation_reversal_draft_cancelled','depreciation_run',$4,$5,$6::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            run.id,
+            req.id || null,
+            JSON.stringify({
+              fixed_asset_id: run.fixed_asset_id,
+              journal_entry_id: run.journal_entry_id,
+              reversal_journal_entry_id: entry.id,
+              reason,
+            }),
+          ]
+        );
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetDepreciationReversalDraftCancelled",
+          aggregate_type: "depreciation_run",
+          aggregate_id: run.id,
+          payload: {
+            depreciation_run_id: run.id,
+            fixed_asset_id: run.fixed_asset_id,
+            journal_entry_id: run.journal_entry_id,
+            reversal_journal_entry_id: entry.id,
             reason,
           },
         });

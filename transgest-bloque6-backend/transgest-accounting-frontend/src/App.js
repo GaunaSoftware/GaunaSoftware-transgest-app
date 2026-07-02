@@ -403,6 +403,21 @@ function journalStatusLabel(status) {
   return "Borrador";
 }
 
+function depreciationRunStatusTone(run) {
+  if (run.status === "posted" || run.status === "reversed") return "ok";
+  if (run.status === "cancelled") return "neutral";
+  if (run.status === "reversal_draft_created") return "warning";
+  return journalStatusTone(run.journal_entry_status);
+}
+
+function depreciationRunStatusLabel(run) {
+  if (run.status === "cancelled") return "Cancelada";
+  if (run.status === "posted") return "Contabilizada";
+  if (run.status === "reversal_draft_created") return "Reverso preparado";
+  if (run.status === "reversed") return "Revertida";
+  return journalStatusLabel(run.journal_entry_status);
+}
+
 function newIdempotencyKey(prefix) {
   const suffix = typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
@@ -3304,7 +3319,7 @@ export default function App() {
                             <span>{run.period_name}</span>
                             <span>{String(run.run_date).slice(0, 10)}</span>
                             <span>{formatMoney(run.amount)} EUR</span>
-                            <StatusBadge tone={run.status === "cancelled" ? "neutral" : run.status === "posted" ? "ok" : journalStatusTone(run.journal_entry_status)} text={run.status === "cancelled" ? "Cancelada" : run.status === "posted" ? "Contabilizada" : journalStatusLabel(run.journal_entry_status)} />
+                            <StatusBadge tone={depreciationRunStatusTone(run)} text={depreciationRunStatusLabel(run)} />
                             <div className="maturity-actions">
                               {canWriteFixedAssets && canWriteJournal && run.status === "draft_created" && run.journal_entry_status === "draft" && (
                                 <button type="button" className="secondary" onClick={() => setFixedAssetDepreciationCancelAction({ run, reason: "" })}>Cancelar</button>

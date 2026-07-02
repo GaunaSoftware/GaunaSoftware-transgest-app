@@ -46,6 +46,8 @@ const depreciationRunCancellationUpSql = fs.readFileSync(path.join(migrationsDir
 const depreciationRunCancellationDownSql = fs.readFileSync(path.join(migrationsDir, "020_depreciation_run_cancellation.down.sql"), "utf8");
 const depreciationRunPostingUpSql = fs.readFileSync(path.join(migrationsDir, "021_depreciation_run_posting.up.sql"), "utf8");
 const depreciationRunPostingDownSql = fs.readFileSync(path.join(migrationsDir, "021_depreciation_run_posting.down.sql"), "utf8");
+const depreciationRunReversalUpSql = fs.readFileSync(path.join(migrationsDir, "022_depreciation_run_reversal.up.sql"), "utf8");
+const depreciationRunReversalDownSql = fs.readFileSync(path.join(migrationsDir, "022_depreciation_run_reversal.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -282,4 +284,14 @@ test("migracion de contabilizacion de amortizaciones mantiene bloqueo activo", (
   assert.match(depreciationRunPostingDownSql, /WHERE status = 'posted'/i);
   assert.match(depreciationRunPostingDownSql, /RAISE EXCEPTION/i);
   assert.match(depreciationRunPostingDownSql, /WHERE status = 'draft_created'/i);
+});
+
+test("migracion de reverso de amortizaciones conserva trazabilidad hasta liberar periodo", () => {
+  assert.match(depreciationRunReversalUpSql, /ADD COLUMN IF NOT EXISTS reversal_journal_entry_id UUID REFERENCES accounting\.journal_entries\(id\) ON DELETE RESTRICT/i);
+  assert.match(depreciationRunReversalUpSql, /ADD COLUMN IF NOT EXISTS reversed_at TIMESTAMPTZ/i);
+  assert.match(depreciationRunReversalUpSql, /status IN \('draft_created', 'posted', 'cancelled', 'reversal_draft_created', 'reversed'\)/i);
+  assert.match(depreciationRunReversalUpSql, /WHERE status IN \('draft_created', 'posted', 'reversal_draft_created'\)/i);
+  assert.match(depreciationRunReversalDownSql, /WHERE status IN \('reversal_draft_created', 'reversed'\)/i);
+  assert.match(depreciationRunReversalDownSql, /RAISE EXCEPTION/i);
+  assert.match(depreciationRunReversalDownSql, /DROP COLUMN IF EXISTS reversal_journal_entry_id/i);
 });

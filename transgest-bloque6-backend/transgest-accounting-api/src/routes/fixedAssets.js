@@ -106,11 +106,13 @@ async function loadDepreciationRuns(client, companyId, fixedAssetId) {
   const { rows } = await client.query(
     `SELECT dr.id, dr.fixed_asset_id, dr.fiscal_year_id, dr.period_id, p.name AS period_name,
             dr.journal_entry_id, je.status AS journal_entry_status, je.entry_number,
+            dr.reversal_journal_entry_id, rje.status AS reversal_journal_entry_status, rje.entry_number AS reversal_entry_number,
             dr.run_date, dr.amount::text, dr.plan_from_date, dr.plan_to_date, dr.plan_periods,
-            dr.status, dr.idempotency_key, dr.created_at
+            dr.status, dr.idempotency_key, dr.reversal_reason, dr.reversed_at, dr.created_at
        FROM ${q("depreciation_runs")} dr
        JOIN ${q("accounting_periods")} p ON p.id=dr.period_id
        JOIN ${q("journal_entries")} je ON je.id=dr.journal_entry_id
+       LEFT JOIN ${q("journal_entries")} rje ON rje.id=dr.reversal_journal_entry_id
       WHERE dr.company_id=$1 AND dr.fixed_asset_id=$2
       ORDER BY dr.run_date DESC, dr.created_at DESC`,
     [companyId, fixedAssetId]

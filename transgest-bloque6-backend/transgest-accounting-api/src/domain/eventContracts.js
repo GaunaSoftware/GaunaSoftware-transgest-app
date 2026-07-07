@@ -83,7 +83,18 @@ const EVENT_CONTRACTS = {
     1: ["depreciation_run_id", "fixed_asset_id", "journal_entry_id", "reversal_journal_entry_id", "reason"],
   },
   AccountingFixedAssetDisposalDraftCreated: {
-    1: ["fixed_asset_id", "journal_entry_id", "fiscal_year_id", "period_id", "disposal_date", "estimated_net_book_value"],
+    1: [
+      "fixed_asset_id",
+      "journal_entry_id",
+      "fiscal_year_id",
+      "period_id",
+      "disposal_date",
+      "disposal_type",
+      "estimated_net_book_value",
+      "sale_proceeds_amount",
+      "estimated_loss_amount",
+      "estimated_gain_amount",
+    ],
   },
   AccountingFixedAssetDisposalDraftCancelled: {
     1: ["fixed_asset_id", "journal_entry_id", "reason"],

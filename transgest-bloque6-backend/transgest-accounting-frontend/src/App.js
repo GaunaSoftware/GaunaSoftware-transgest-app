@@ -2169,8 +2169,12 @@ export default function App() {
         reason: "",
         disposed_at: new Date().toISOString().slice(0, 10),
         readiness: result.readiness,
+        disposal_type: "withdrawal",
         disposal_period_id: periods.find(period => period.fiscal_year_id === asset.fiscal_year_id && period.status === "open")?.id || "",
         disposal_loss_account_id: accounts.find(account => account.is_active && account.account_type === "expense")?.id || "",
+        disposal_gain_account_id: accounts.find(account => account.is_active && account.account_type === "income")?.id || "",
+        proceeds_account_id: accounts.find(account => account.is_active && account.account_type === "asset" && account.id !== asset.asset_account_id)?.id || "",
+        sale_proceeds_amount: "0",
         disposal_description: `Baja inmovilizado ${asset.asset_code}`,
         disposal_idempotency_key: newIdempotencyKey(`asset-disposal:${asset.asset_code}`),
       });
@@ -2187,9 +2191,13 @@ export default function App() {
     setFixedAssetStatus(null);
     try {
       const result = await createFixedAssetDisposalDraft(fixedAssetStatusAction.asset.id, {
+        disposal_type: fixedAssetStatusAction.disposal_type || "withdrawal",
         period_id: fixedAssetStatusAction.disposal_period_id,
         disposal_date: fixedAssetStatusAction.disposed_at,
         disposal_loss_account_id: fixedAssetStatusAction.disposal_loss_account_id || null,
+        disposal_gain_account_id: fixedAssetStatusAction.disposal_gain_account_id || null,
+        proceeds_account_id: fixedAssetStatusAction.proceeds_account_id || null,
+        sale_proceeds_amount: fixedAssetStatusAction.sale_proceeds_amount || "0",
         description: fixedAssetStatusAction.disposal_description,
         idempotency_key: fixedAssetStatusAction.disposal_idempotency_key,
       });
@@ -3446,6 +3454,35 @@ export default function App() {
                               .map(period => <option key={period.id} value={period.id}>{period.name}</option>)}
                           </select>
                         </label>
+                        <label>
+                          <span>Tipo de baja</span>
+                          <select value={fixedAssetStatusAction.disposal_type || "withdrawal"} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, disposal_type: e.target.value }))}>
+                            <option value="withdrawal">Retirada sin ingreso</option>
+                            <option value="sale">Venta con ingreso</option>
+                          </select>
+                        </label>
+                        {fixedAssetStatusAction.disposal_type === "sale" && (
+                          <>
+                            <label>
+                              <span>Importe venta</span>
+                              <input inputMode="decimal" value={fixedAssetStatusAction.sale_proceeds_amount} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, sale_proceeds_amount: e.target.value }))} />
+                            </label>
+                            <label>
+                              <span>Cuenta cobro/deudor</span>
+                              <select value={fixedAssetStatusAction.proceeds_account_id} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, proceeds_account_id: e.target.value }))}>
+                                <option value="">Selecciona cuenta</option>
+                                {accounts.filter(account => account.is_active && account.account_type === "asset").map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}
+                              </select>
+                            </label>
+                            <label>
+                              <span>Cuenta beneficio</span>
+                              <select value={fixedAssetStatusAction.disposal_gain_account_id} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, disposal_gain_account_id: e.target.value }))}>
+                                <option value="">Sin cuenta</option>
+                                {accounts.filter(account => account.is_active && account.account_type === "income").map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}
+                              </select>
+                            </label>
+                          </>
+                        )}
                         <label>
                           <span>Cuenta perdida</span>
                           <select value={fixedAssetStatusAction.disposal_loss_account_id} onChange={e => setFixedAssetStatusAction(prev => ({ ...prev, disposal_loss_account_id: e.target.value }))}>

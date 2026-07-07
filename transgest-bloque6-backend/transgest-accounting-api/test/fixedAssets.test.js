@@ -110,18 +110,32 @@ test("depreciationAmountForPeriod calcula cuota del periodo y exige idempotencia
 
 test("normalizeFixedAssetDisposalDraftInput prepara baja revisable", () => {
   assert.deepEqual(normalizeFixedAssetDisposalDraftInput({
+    disposal_type: "sale",
     period_id: "period-id",
     disposal_date: "2026-12-31",
     disposal_loss_account_id: "loss-account",
+    disposal_gain_account_id: "gain-account",
+    proceeds_account_id: "bank-account",
+    sale_proceeds_amount: "1250,50",
     description: "Baja por retirada",
     idempotency_key: "asset-disposal:VEH-001",
   }), {
+    disposal_type: "sale",
     period_id: "period-id",
     disposal_date: "2026-12-31",
     disposal_loss_account_id: "loss-account",
+    disposal_gain_account_id: "gain-account",
+    proceeds_account_id: "bank-account",
+    sale_proceeds_amount: "1250.500000",
     description: "Baja por retirada",
     idempotency_key: "asset-disposal:VEH-001",
   });
+  assert.equal(normalizeFixedAssetDisposalDraftInput({
+    period_id: "period-id",
+    disposal_date: "2026-12-31",
+    idempotency_key: "asset-disposal:VEH-002",
+  }).disposal_type, "withdrawal");
+  assert.throws(() => normalizeFixedAssetDisposalDraftInput({ disposal_type: "donation", period_id: "p", disposal_date: "2026-12-31", idempotency_key: "asset-disposal:x" }), /disposal_type/);
   assert.throws(() => normalizeFixedAssetDisposalDraftInput({ period_id: "p", disposal_date: "bad", idempotency_key: "asset-disposal:x" }), /disposal_date/);
   assert.throws(() => normalizeFixedAssetDisposalDraftInput({ period_id: "p", disposal_date: "2026-12-31", idempotency_key: "short" }), /idempotency_key/);
 });

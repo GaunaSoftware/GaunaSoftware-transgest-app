@@ -635,13 +635,33 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
       const depreciationUnits = moneyToUnits(readiness.posted_depreciation_amount || "0", "posted_depreciation_amount", { allowZero: true });
       const appliedDepreciationUnits = depreciationUnits > acquisitionUnits ? acquisitionUnits : depreciationUnits;
       const netUnits = acquisitionUnits - appliedDepreciationUnits;
+      const saleProceedsUnits = input.disposal_type === "sale"
+        ? moneyToUnits(input.sale_proceeds_amount, "sale_proceeds_amount", { allowZero: true })
+        : 0n;
+      if (input.disposal_type === "sale" && saleProceedsUnits <= 0n) {
+        const error = new Error("Indica un importe de venta mayor que cero");
+        error.status = 400;
+        throw error;
+      }
+      const lossUnits = netUnits > saleProceedsUnits ? netUnits - saleProceedsUnits : 0n;
+      const gainUnits = saleProceedsUnits > netUnits ? saleProceedsUnits - netUnits : 0n;
       if (appliedDepreciationUnits > 0n && !asset.accumulated_depreciation_account_id) {
         const error = new Error("El inmovilizado necesita cuenta de amortizacion acumulada para preparar la baja");
         error.status = 409;
         throw error;
       }
-      if (netUnits > 0n && !input.disposal_loss_account_id) {
-        const error = new Error("Selecciona una cuenta de perdida para el valor neto pendiente");
+      if (input.disposal_type === "sale" && !input.proceeds_account_id) {
+        const error = new Error("Selecciona una cuenta puente o de cobro para el importe de venta");
+        error.status = 400;
+        throw error;
+      }
+      if (lossUnits > 0n && !input.disposal_loss_account_id) {
+        const error = new Error("Selecciona una cuenta de perdida para la diferencia pendiente");
+        error.status = 400;
+        throw error;
+      }
+      if (gainUnits > 0n && !input.disposal_gain_account_id) {
+        const error = new Error("Selecciona una cuenta de beneficio para la diferencia de venta");
         error.status = 400;
         throw error;
       }
@@ -675,10 +695,16 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
       await assertPostableAccounts(client, selected.company_id, asset.fiscal_year_id, [
         asset.asset_account_id,
         appliedDepreciationUnits > 0n ? asset.accumulated_depreciation_account_id : null,
-        netUnits > 0n ? input.disposal_loss_account_id : null,
+        saleProceedsUnits > 0n ? input.proceeds_account_id : null,
+        lossUnits > 0n ? input.disposal_loss_account_id : null,
+        gainUnits > 0n ? input.disposal_gain_account_id : null,
       ]);
 
-      const description = input.description || `Baja inmovilizado ${asset.asset_code}`;
+      const description = input.description || (
+        input.disposal_type === "sale"
+          ? `Baja por venta inmovilizado ${asset.asset_code}`
+          : `Baja inmovilizado ${asset.asset_code}`
+      );
       const lines = [];
       if (appliedDepreciationUnits > 0n) {
         lines.push({
@@ -689,13 +715,22 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
           description: `Cancelar amortizacion acumulada ${asset.asset_code}`,
         });
       }
-      if (netUnits > 0n) {
+      if (saleProceedsUnits > 0n) {
+        lines.push({
+          line_number: lines.length + 1,
+          account_id: input.proceeds_account_id,
+          side: "debit",
+          amount: unitsToMoney(saleProceedsUnits),
+          description: `Importe venta baja ${asset.asset_code}`,
+        });
+      }
+      if (lossUnits > 0n) {
         lines.push({
           line_number: lines.length + 1,
           account_id: input.disposal_loss_account_id,
           side: "debit",
-          amount: unitsToMoney(netUnits),
-          description: `Valor neto baja ${asset.asset_code}`,
+          amount: unitsToMoney(lossUnits),
+          description: `Perdida baja ${asset.asset_code}`,
         });
       }
       lines.push({
@@ -705,11 +740,22 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
         amount: unitsToMoney(acquisitionUnits),
         description: `Baja coste ${asset.asset_code}`,
       });
+      if (gainUnits > 0n) {
+        lines.push({
+          line_number: lines.length + 1,
+          account_id: input.disposal_gain_account_id,
+          side: "credit",
+          amount: unitsToMoney(gainUnits),
+          description: `Beneficio baja ${asset.asset_code}`,
+        });
+      }
 
       const requestHash = journalDraftRequestHash({
         fiscal_year_id: asset.fiscal_year_id,
         entry_date: input.disposal_date,
         description,
+        disposal_type: input.disposal_type,
+        sale_proceeds_amount: unitsToMoney(saleProceedsUnits),
         lines,
       });
       const repeated = await client.query(
@@ -818,9 +864,13 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
             fiscal_year_id: asset.fiscal_year_id,
             period_id: period.id,
             disposal_date: input.disposal_date,
+            disposal_type: input.disposal_type,
             acquisition_cost: asset.acquisition_cost,
             posted_depreciation_amount: readiness.posted_depreciation_amount,
             estimated_net_book_value: unitsToMoney(netUnits),
+            sale_proceeds_amount: unitsToMoney(saleProceedsUnits),
+            estimated_loss_amount: unitsToMoney(lossUnits),
+            estimated_gain_amount: unitsToMoney(gainUnits),
           }),
         ]
       );
@@ -836,7 +886,11 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
           fiscal_year_id: asset.fiscal_year_id,
           period_id: period.id,
           disposal_date: input.disposal_date,
+          disposal_type: input.disposal_type,
           estimated_net_book_value: unitsToMoney(netUnits),
+          sale_proceeds_amount: unitsToMoney(saleProceedsUnits),
+          estimated_loss_amount: unitsToMoney(lossUnits),
+          estimated_gain_amount: unitsToMoney(gainUnits),
         },
       });
 

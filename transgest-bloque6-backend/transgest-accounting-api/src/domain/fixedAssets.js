@@ -138,10 +138,16 @@ function normalizeFixedAssetDisposalDraftInput(input = {}) {
   if (idempotencyKey.length < 12 || !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey)) {
     throw inputError("idempotency_key debe tener al menos 12 caracteres seguros");
   }
+  const disposalType = String(input.disposal_type || "withdrawal").trim();
+  if (!["withdrawal", "sale"].includes(disposalType)) throw inputError("disposal_type no soportado");
   return {
+    disposal_type: disposalType,
     period_id: normalizeRequired(input.period_id, "period_id", 80),
     disposal_date: normalizeDate(input.disposal_date, "disposal_date"),
     disposal_loss_account_id: normalizeOptionalText(input.disposal_loss_account_id, 80, "disposal_loss_account_id"),
+    disposal_gain_account_id: normalizeOptionalText(input.disposal_gain_account_id, 80, "disposal_gain_account_id"),
+    proceeds_account_id: normalizeOptionalText(input.proceeds_account_id, 80, "proceeds_account_id"),
+    sale_proceeds_amount: unitsToMoney(moneyToUnits(input.sale_proceeds_amount || "0", "sale_proceeds_amount", { allowZero: true })),
     description: normalizeOptionalText(input.description, 500, "description"),
     idempotency_key: idempotencyKey,
   };

@@ -148,6 +148,17 @@ function currentWeekRangeLocal(now = new Date()) {
   };
 }
 
+function currentMonthRangeLocal(now = new Date()) {
+  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return {
+    month: formatDateInputLocal(first),
+    desde: formatDateInputLocal(first),
+    hasta: formatDateInputLocal(last),
+    label: first.toLocaleDateString("es-ES", { month: "long", year: "numeric" }),
+  };
+}
+
 function addDaysLocal(dateIso, days) {
   const base = new Date(`${String(dateIso || "").slice(0, 10)}T00:00:00`);
   if (Number.isNaN(base.getTime())) return "";
@@ -6711,9 +6722,45 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
   // The modal JSX (extracted from Pedidos main render)
   return (
     <>
-<div style={S.modal}>
-          <div style={S.mbox}>
-            <div style={{position:"sticky",top:-28,zIndex:30,margin:"-28px -28px 16px",padding:"18px 28px 12px",background:"var(--bg2)",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:12}}>
+<div className="tg-pedido-modal-overlay" style={S.modal}>
+          <style>{`
+            .tg-pedido-modal, .tg-pedido-modal * { box-sizing:border-box; min-width:0; }
+            .tg-pedido-modal input, .tg-pedido-modal select, .tg-pedido-modal textarea, .tg-pedido-modal button { max-width:100%; }
+            .tg-pedido-modal-header { position:sticky; top:-28px; z-index:30; margin:-28px -28px 16px; padding:18px 28px 12px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; }
+            .tg-pedido-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+            .tg-pedido-form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+            .tg-pedido-form-grid-4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px; }
+            .tg-pedido-actions-row { display:flex; gap:6px; margin-top:6px; }
+            @media (max-width: 760px) {
+              .tg-pedido-modal-overlay { align-items:flex-start !important; justify-content:center !important; padding:8px !important; overflow:auto !important; }
+              .tg-pedido-modal { width:100% !important; max-width:calc(100vw - 16px) !important; max-height:calc(100dvh - 16px) !important; padding:16px 14px 18px !important; border-radius:12px !important; overflow-x:hidden !important; }
+              .tg-pedido-modal-header { top:-16px !important; margin:-16px -14px 12px !important; padding:12px 14px 10px !important; }
+              .tg-pedido-form-grid-2, .tg-pedido-form-grid-3, .tg-pedido-form-grid-4 { grid-template-columns:1fr !important; }
+              .tg-pedido-form-grid-2 > *, .tg-pedido-form-grid-3 > *, .tg-pedido-form-grid-4 > * { grid-column:1/-1 !important; }
+              .tg-pedido-actions-row { display:grid !important; grid-template-columns:1fr !important; }
+              .tg-pedido-actions-row > * { width:100% !important; }
+              .tg-pedido-modal [style*="grid-template-columns:1fr 1fr"],
+              .tg-pedido-modal [style*="grid-template-columns: 1fr 1fr"],
+              .tg-pedido-modal [style*="grid-template-columns:1fr 1fr 1fr"],
+              .tg-pedido-modal [style*="grid-template-columns: 1fr 1fr 1fr"],
+              .tg-pedido-modal [style*="grid-template-columns:1fr 1fr 1fr 1fr"],
+              .tg-pedido-modal [style*="grid-template-columns: 1fr 1fr 1fr 1fr"],
+              .tg-pedido-modal [style*="grid-template-columns:repeat(4"],
+              .tg-pedido-modal [style*="grid-template-columns: repeat(4"],
+              .tg-pedido-modal [style*="grid-template-columns:2fr"],
+              .tg-pedido-modal [style*="grid-template-columns: 2fr"],
+              .tg-pedido-modal [style*="grid-template-columns:1fr 2fr"],
+              .tg-pedido-modal [style*="grid-template-columns: 1fr 2fr"] {
+                grid-template-columns:1fr !important;
+              }
+              .tg-pedido-modal [style*="grid-column:1/3"],
+              .tg-pedido-modal [style*="grid-column:3/5"] {
+                grid-column:1/-1 !important;
+              }
+            }
+          `}</style>
+          <div className="tg-pedido-modal" style={S.mbox}>
+            <div className="tg-pedido-modal-header">
               <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,color:"var(--text)",flex:1}}>
                 {editando?._readonly
                   ? editando.numero
@@ -6778,7 +6825,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
             <PedidoMapaOperativo pedido={form || editando} choferPasos={choferPasosMapa} />
 
             <div style={S.sec}>Cliente y ruta</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div className="tg-pedido-form-grid-2">
               <div style={{gridColumn:"1/-1"}}>
                 <label style={S.label}>Cliente *</label>
                 {/* Autocomplete por nombre */}
@@ -7021,7 +7068,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                     )}
                   </div>
                 )}
-                <div style={{display:"flex",gap:6,marginTop:6}}>
+                <div className="tg-pedido-actions-row">
                   <PuntoInteresPicker
                     placeholder="Usar punto como origen"
                     clienteId={form.cliente_id}
@@ -7042,7 +7089,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
               <div>
                 <label style={S.label}>Destino (entrega) *</label>
                 <input style={S.input} value={form.destino||""} onChange={f("destino")}/>
-                <div style={{display:"flex",gap:6,marginTop:6}}>
+                <div className="tg-pedido-actions-row">
                   <PuntoInteresPicker
                     placeholder="Usar punto como destino"
                     clienteId={form.cliente_id}
@@ -7065,7 +7112,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
             </div>
 
             <div style={S.sec}>Planificacion</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
+            <div className="tg-pedido-form-grid-4">
               <div><label style={S.label}>Fecha pedido</label><input type="date" style={S.input} value={form.fecha_pedido||""} onChange={f("fecha_pedido")}/></div>
               <div><label style={S.label}>Fecha carga</label><input type="date" style={S.input} value={form.fecha_carga||""} onChange={f("fecha_carga")}/></div>
               <div><label style={S.label}>Hora carga</label><input type="time" style={S.input} value={form.hora_carga||""} onChange={f("hora_carga")}/></div>
@@ -7121,7 +7168,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
             </div>
 
             <div style={S.sec}>Distancias</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div className="tg-pedido-form-grid-2" style={{marginBottom:10}}>
               <div>
                 <label style={S.label}>
                   Km en ruta
@@ -7205,7 +7252,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                 <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>Se anadira a Grupajes para combinarlo con otros pedidos</span>
               )}
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+            <div className="tg-pedido-form-grid-3">
               <div style={{gridColumn:"1/-1"}}><label style={S.label}>Descripcion mercancia</label><input style={S.input} value={form.mercancia||""} onChange={f("mercancia")} placeholder="Pallets de ceramica, maquinaria..."/></div>
                 <div>
                   <label style={S.label}>Peso (kg)</label>
@@ -7235,7 +7282,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
 
             <div style={S.sec}>Precio</div>
             <div style={{fontSize:11,color:"var(--text5)",margin:"-6px 0 8px"}}>El porte se introduce sin IVA. Selecciona aqui si la orden va con IVA, 0% o exenta.</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+            <div className="tg-pedido-form-grid-3">
               <div><label style={S.label}>Tipo tarificacion</label>
                 <select value={form.tipo_precio||"viaje"} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,tipo_precio:e.target.value}, true)))} style={S.sel}>
                   {TIPOS_PRECIO.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
@@ -8519,6 +8566,9 @@ export default function Pedidos() {
   const [autoAsignando, setAutoAsignando] = useState(null);  // pedido para autoasignacion IA
   const [colaboradores,setColaboradores]=useState([]);
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
+  const _rangoMesActual = currentMonthRangeLocal();
+  const filtroPeriodoActivo = filtroFechasCustom || Boolean(filtroMes);
+  const vistaMesActualPorDefecto = !filtroPeriodoActivo && !debouncedQ && !filtroCliente;
 
   useEffect(() => {
     savePedidosCollapsedGroups(collapsedClientes);
@@ -8725,8 +8775,13 @@ export default function Pedidos() {
       if (filtroCliente) params.cliente_id = filtroCliente;
       const busquedaHistorica = Boolean(debouncedQ || filtroCliente);
       const aplicarRangoFechas = filtroFechasCustom || Boolean(filtroMes);
+      const rangoMesActualCarga = currentMonthRangeLocal();
       if (!busquedaHistorica && aplicarRangoFechas && filtroDesde) params.desde = filtroDesde;
       if (!busquedaHistorica && aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
+      if (!busquedaHistorica && !aplicarRangoFechas) {
+        params.desde = rangoMesActualCarga.desde;
+        params.hasta = rangoMesActualCarga.hasta;
+      }
       params.page  = page;
       params.limit = PAGE_SIZE;
       const p = await getPedidosResumenLista(params, { timeoutMs: 45000, silentError: true });
@@ -9727,6 +9782,19 @@ export default function Pedidos() {
         {(filtroEst!=="activos"||filtroDesde||filtroHasta||filtroMes||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
           <button onClick={()=>{setFiltroEst("activos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);}}
             style={{...S.btn,background:"rgba(239,68,68,.12)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",fontSize:11,padding:"4px 10px"}}>Reset</button>
+        )}
+        {vistaMesActualPorDefecto && (
+          <span style={{
+            fontSize:11,
+            fontWeight:900,
+            color:"#0f766e",
+            background:"rgba(16,185,129,.10)",
+            border:"1px solid rgba(16,185,129,.24)",
+            borderRadius:999,
+            padding:"5px 10px",
+          }}>
+            Mes actual: {_rangoMesActual.label}
+          </span>
         )}
         <span style={{
           fontSize:12,

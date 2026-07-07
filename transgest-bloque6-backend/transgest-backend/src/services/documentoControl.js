@@ -124,6 +124,40 @@ function formatClientPaymentTerms(empresa = {}) {
   return `Transferencia ${plazo || 60} dias fecha recepcion factura${dias ? `; pago dias ${dias}` : ""}`;
 }
 
+function cleanCmrOptionalField(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const normalized = normalizeSearchText(raw);
+  const paymentOnly = [
+    "transferencia",
+    "fecha factura",
+    "recepcion factura",
+    "dias fecha",
+    "forma pago",
+    "forma de pago",
+    "vencimiento",
+  ].some(term => normalized.includes(term));
+  return paymentOnly ? "" : raw;
+}
+
+function buildGoodsMarksAndReferences(pedido = {}, cargas = [], descargas = []) {
+  const refs = [];
+  const add = (value) => {
+    const raw = String(value || "").trim();
+    if (raw && !refs.includes(raw)) refs.push(raw);
+  };
+  [...(Array.isArray(cargas) ? cargas : []), ...(Array.isArray(descargas) ? descargas : [])].forEach(stop => {
+    add(stop?.referencia);
+    add(stop?.referencia_cliente);
+    add(stop?.ref);
+    add(stop?.albaran);
+    add(stop?.numero_albaran);
+  });
+  add(pedido?.referencia_cliente);
+  add(pedido?.albaran_numero);
+  return refs.slice(0, 6).join(" | ");
+}
+
 function buildOperativaCargaLabels(pedido = {}) {
   const labels = [];
   if (pedido?.carga_lateral) labels.push("Carga lateral");
@@ -1009,6 +1043,9 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       descripcion: pedido?.mercancia || pedido?.descripcion_carga || "",
       peso_kg: pesoKg || null,
       bultos: pedido?.bultos || null,
+      volumen: pedido?.volumen || null,
+      embalaje: pedido?.embalaje || (pedido?.bultos ? "Bultos/palets" : ""),
+      marcas_numeros: buildGoodsMarksAndReferences(pedido, cargas, descargas),
     },
     vehiculo: {
       tractora: matriculaTractora,
@@ -1025,8 +1062,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     observaciones: pedido?.notas || pedido?.condiciones_adicionales || config.observaciones || "",
     condiciones: {
       forma_pago_interna: formatClientPaymentTerms(empresa),
-      reembolso_contra_entrega: pedido?.reembolso_contra_entrega || pedido?.cash_on_delivery || "",
-      acuerdos_especiales: pedido?.acuerdos_especiales || "",
+      reembolso_contra_entrega: cleanCmrOptionalField(pedido?.reembolso_contra_entrega || pedido?.cash_on_delivery || ""),
+      acuerdos_especiales: cleanCmrOptionalField(pedido?.acuerdos_especiales || ""),
       operativa_carga: buildOperativaCargaLabels(pedido),
       revision_combustible: "El precio pactado solo se ajustara por variacion del combustible si el indice G de variacion del precio medio del gasoleo publicado por la Administracion entre la fecha de esta orden de carga y la fecha de carga efectiva de la mercancia es igual o superior al 5%. El ajuste debera reflejarse en la factura correspondiente al transporte ejecutado como concepto separado e identificado. No se admitiran ajustes en facturas rectificativas o posteriores emitidas fuera del ciclo de facturacion habitual de las partes. Si el porteador hubiera percibido ayudas publicas que compensen total o parcialmente la variacion del gasoleo, el indice G se calculara sobre el precio neto tras descontar dichas ayudas. El ajuste a la baja opera en las mismas condiciones cuando la variacion sea favorable al cargador.",
       clausulas_orden_carga: [

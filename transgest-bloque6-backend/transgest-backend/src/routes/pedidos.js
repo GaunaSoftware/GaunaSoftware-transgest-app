@@ -709,6 +709,21 @@ function normalizeChoferPasosPayload(value = {}) {
   for (const key of boolKeys) {
     if (source[key] !== undefined) next[key] = Boolean(source[key]);
   }
+  [
+    "mercancia",
+    "bultos",
+    "referencia_cliente",
+    "mercancia_cargada",
+    "mercancia_palets",
+    "mercancia_referencia",
+  ].forEach((key) => {
+    if (source[key] !== undefined) next[key] = String(source[key] || "").trim().slice(0, 500);
+  });
+  if (source.peso_kg !== undefined || source.mercancia_peso_kg !== undefined) {
+    const n = parseLocaleNumber(source.peso_kg ?? source.mercancia_peso_kg);
+    if (Number.isFinite(n) && n >= 0) next.peso_kg = Math.round(n * 100) / 100;
+    if (Number.isFinite(n) && n >= 0) next.mercancia_peso_kg = String(Math.round(n * 100) / 100);
+  }
   for (const key of ["km_carga", "km_descarga"]) {
     if (source[key] !== undefined && source[key] !== "") {
       const n = Number(source[key]);
@@ -1587,6 +1602,16 @@ async function savePedidoChoferPasos({
     if (nextEstado && !["cancelado", "entregado"].includes(String(pedido.estado || "").toLowerCase())) {
       addUpdate("estado", nextEstado);
     }
+    if (patch.mercancia_confirmada || nextData.mercancia_confirmada) {
+      const mercanciaReal = nextData.mercancia_cargada || nextData.mercancia || null;
+      const bultosReal = nextData.mercancia_palets || nextData.bultos || null;
+      const pesoReal = parseLocaleNumber(nextData.mercancia_peso_kg || nextData.peso_kg);
+      const referenciaReal = nextData.mercancia_referencia || nextData.referencia_cliente || null;
+      if (mercanciaReal) addUpdate("mercancia", mercanciaReal);
+      if (bultosReal) addUpdate("bultos", bultosReal);
+      if (Number.isFinite(pesoReal) && pesoReal > 0) addUpdate("peso_kg", pesoReal);
+      if (referenciaReal) addUpdate("referencia_cliente", referenciaReal);
+    }
 
     const cargaPlan = buildLocalDateTime(pedido.fecha_carga, pedido.hora_carga || "00:00");
     const descargaPlan = buildLocalDateTime(pedido.fecha_descarga || pedido.fecha_entrega, pedido.hora_descarga || "00:00");
@@ -1766,7 +1791,7 @@ async function getEmpresaPerfilPagos(empresaId) {
 async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
   const { rows } = await queryWithColaboradorFallback(`
     SELECT p.*,
-           c.id AS cliente_ref_id, c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.direccion AS cliente_direccion, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, NULL::text AS cliente_provincia, c.pais AS cliente_pais,
+           c.id AS cliente_ref_id, c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.direccion AS cliente_direccion, c.cp AS cliente_cp, COALESCE(c.municipio, c.ciudad) AS cliente_ciudad, c.provincia AS cliente_provincia, c.pais AS cliente_pais,
            c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion, c.emails_albaranes AS cliente_emails_albaranes, c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
            ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.dni AS chofer_dni, ch.telefono AS chofer_telefono, ch.email AS chofer_email,
            ch.firma_base AS chofer_firma_base, ch.firma_base_nombre AS chofer_firma_base_nombre, ch.firma_base_fecha AS chofer_firma_base_fecha,
@@ -1782,7 +1807,7 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
     WHERE p.id=$1 AND p.empresa_id=$2
   `, `
     SELECT p.*,
-           c.id AS cliente_ref_id, c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.direccion AS cliente_direccion, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, NULL::text AS cliente_provincia, c.pais AS cliente_pais,
+           c.id AS cliente_ref_id, c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.direccion AS cliente_direccion, c.cp AS cliente_cp, COALESCE(c.municipio, c.ciudad) AS cliente_ciudad, c.provincia AS cliente_provincia, c.pais AS cliente_pais,
            c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion, c.emails_albaranes AS cliente_emails_albaranes, c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
            ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, ch.dni AS chofer_dni, ch.telefono AS chofer_telefono, ch.email AS chofer_email,
            ch.firma_base AS chofer_firma_base, ch.firma_base_nombre AS chofer_firma_base_nombre, ch.firma_base_fecha AS chofer_firma_base_fecha,
@@ -1805,13 +1830,13 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
     pedido.orden_carga_numero = ordenCarga.numero;
     pedido.orden_carga_generada_at = ordenCarga.generated_at || pedido.orden_carga_generada_at || null;
   }
-  const empresaRes = await db.query("SELECT nombre, cif, logo_base64, cfg_precios FROM empresas WHERE id=$1 LIMIT 1", [empresaId]);
+  const empresaRes = await db.query("SELECT nombre, cif, email_admin, email_facturacion, logo_base64, cfg_precios FROM empresas WHERE id=$1 LIMIT 1", [empresaId]);
   const empresaRow = empresaRes.rows[0] || {};
   const perfil = empresaRow?.cfg_precios?.empresa_perfil || empresaRow?.cfg_precios || {};
   const logoMime = empresaRow?.cfg_precios?.logo_mime || perfil?.logo_mime || "image/png";
   return {
     pedido,
-    empresa: { nombre: empresaRow.nombre || "", cif: empresaRow.cif || "", ...(perfil || {}), logo_base64: empresaRow.logo_base64 || perfil?.logo_base64 || "", logo_mime: logoMime },
+    empresa: { nombre: empresaRow.nombre || "", cif: empresaRow.cif || "", email: empresaRow.email_facturacion || empresaRow.email_admin || "", email_admin: empresaRow.email_admin || "", ...(perfil || {}), logo_base64: empresaRow.logo_base64 || perfil?.logo_base64 || "", logo_mime: logoMime },
     cliente: {
       id: pedido.cliente_ref_id,
       nombre: pedido.cliente_nombre,
@@ -2098,6 +2123,7 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
     appBaseUrl,
   });
   const expedienteData = await getPedidoDocumentoControlExpedienteData(ctx.pedido.id, empresaId);
+  attachDocumentoControlAnexos(payload, expedienteData.documentos);
   const postSignatureIntegrity = buildFirmaPostSignatureIntegrity(ctx.pedido, ctx.pedido?.firma_evidencia || null);
   const expediente = buildDocumentoControlExpediente(payload, {
     ...expedienteData,

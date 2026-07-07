@@ -66,6 +66,7 @@ Estado Fase 1:
 - Implementado reverso sincronizado de amortizaciones contabilizadas: al crear un reverso desde Diario la ejecucion pasa a `reversal_draft_created`; al contabilizarlo pasa a `reversed` y libera activo/periodo; al cancelar el reverso en borrador vuelve a `posted`.
 - Implementada baja asistida de inmovilizado: prevalidacion operativa, valor neto estimado y bloqueo si existen borradores de amortizacion o reversos pendientes.
 - Implementada preparacion de borrador contable de baja por retirada: cancela coste contra amortizacion acumulada y perdida por valor neto, queda en Diario para revision manual y emite `AccountingFixedAssetDisposalDraftCreated`.
+- Implementada cancelacion trazable de borradores de baja por retirada desde Diario, emitiendo `AccountingFixedAssetDisposalDraftCancelled` y dejando disponible la preparacion de una nueva baja.
 - Implementada sincronizacion al contabilizar el borrador de baja: el activo pasa a `disposed`, conserva fecha de baja y emite `AccountingFixedAssetDisposalPosted` y `AccountingFixedAssetStatusChanged`.
 - Pendiente contabilizacion masiva, bajas con ingreso/venta, integracion con facturas recibidas y validacion externa de criterios fiscales/contables.
 - Pendiente conciliacion automatica, importacion Cuaderno 43 u otros formatos normalizados, conciliaciones parciales, remesas y generacion de asientos desde bancos.
@@ -368,6 +369,7 @@ Estado parcial:
 - Implementada reversion de amortizaciones contabilizadas mediante el caso de uso general de reverso de Diario, con estados `reversal_draft_created` y `reversed`, auditoria, outbox y rollback protegido por migracion.
 - Implementada baja asistida sin asiento automatico: calcula valor neto estimado desde amortizaciones contabilizadas y bloquea la baja si hay borradores o reversos de amortizacion pendientes.
 - Implementada generacion de borrador de baja por retirada desde inmovilizado, con `entry_type='fixed_asset_disposal'`, `source_links`, auditoria y outbox; el usuario debe revisar y contabilizar desde Diario.
+- Implementada cancelacion auditada del borrador de baja desde Diario; al quedar el asiento en `cancelled`, el inmovilizado puede preparar otro borrador de baja.
 - Implementada marca de baja del activo al contabilizar el asiento `fixed_asset_disposal`, dentro de la misma transaccion de posteo del Diario.
 - No se contabiliza automaticamente, no hay amortizacion masiva, no hay baja por venta con ingreso, no hay integracion automatica con facturas recibidas y no se declara cumplimiento contable/fiscal.
 

@@ -1154,6 +1154,39 @@ router.post("/journal-entries/:id/cancel", requirePermission("journal.write"), a
           },
         });
       }
+      if (entry.entry_type === "fixed_asset_disposal" && entry.source_id) {
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'fixed_asset.disposal_draft_cancelled','accounting_fixed_asset',$4,$5,$6::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            entry.source_id,
+            req.id || null,
+            JSON.stringify({
+              journal_entry_id: entry.id,
+              fiscal_year_id: entry.fiscal_year_id,
+              period_id: entry.period_id,
+              reason,
+              source: "journal_entry.cancel",
+            }),
+          ]
+        );
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetDisposalDraftCancelled",
+          aggregate_type: "accounting_fixed_asset",
+          aggregate_id: entry.source_id,
+          payload: {
+            fixed_asset_id: entry.source_id,
+            journal_entry_id: entry.id,
+            reason,
+          },
+        });
+      }
       return { entry: await loadEntryWithLines(client, cancelled.id, selected.company_id), repeated: false };
     });
 

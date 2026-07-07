@@ -746,6 +746,7 @@ Estado implementado:
 - Las amortizaciones pueden preparar borradores de Diario mediante `depreciation_runs`, pero requieren revision y contabilizacion manual.
 - La baja asistida comprueba pendientes de amortizacion, muestra valor neto estimado y bloquea la baja si existen borradores o reversos pendientes.
 - La baja por retirada puede preparar un borrador en Diario con `entry_type='fixed_asset_disposal'`: Debe amortizacion acumulada, Debe perdida por valor neto si procede y Haber cuenta del activo.
+- Cancelar ese borrador desde Diario conserva motivo, emite `AccountingFixedAssetDisposalDraftCancelled` y permite preparar otro borrador.
 - Al contabilizar ese borrador desde Diario, el activo pasa a `disposed` en la misma transaccion y se emiten eventos de baja contabilizada y cambio de estado.
 - No hay integracion automatica con facturas recibidas, no hay baja por venta con ingreso y no se declara cumplimiento fiscal o contable.
 

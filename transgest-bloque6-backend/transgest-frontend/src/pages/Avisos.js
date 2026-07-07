@@ -288,10 +288,10 @@ export default function Avisos() {
           vehiculo_id: v.id,
           vehiculo_matricula: v.matricula,
           tipo_doc: `Plataforma ${platform.nombre || "-"} - ${doc.nombre || "Documento"}`,
-          fecha_vencimiento: doc.caducidad || null,
+          fecha_vencimiento: doc.fecha_tope || doc.caducidad || null,
           organismo: platform.nombre || "Plataforma",
           origen: "plataforma",
-          notas: doc.notas || "",
+          notas: [doc.notas || "", doc.fecha_tope ? `Fecha tope plataforma: ${doc.fecha_tope}` : ""].filter(Boolean).join(" | "),
         }))
       )
     );
@@ -305,10 +305,10 @@ export default function Avisos() {
           chofer_id: c.id,
           chofer_nombre: `${c.nombre || ""} ${c.apellidos || ""}`.trim(),
           tipo_doc: `Plataforma ${platform.nombre || "-"} - ${doc.nombre || "Documento"}`,
-          fecha_vencimiento: doc.caducidad || null,
+          fecha_vencimiento: doc.fecha_tope || doc.caducidad || null,
           organismo: platform.nombre || "Plataforma",
           origen: "plataforma",
-          notas: doc.notas || "",
+          notas: [doc.notas || "", doc.fecha_tope ? `Fecha tope plataforma: ${doc.fecha_tope}` : ""].filter(Boolean).join(" | "),
         }))
       )
     );

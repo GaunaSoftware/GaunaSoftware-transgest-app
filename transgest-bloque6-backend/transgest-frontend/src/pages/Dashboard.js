@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { getFacturas, getPedidos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
+import { confirmDialog, notify } from "../services/notify";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const fmt2   = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -109,25 +110,52 @@ function abrirAlerta(alerta = {}) {
   navegar(alerta.view || "control_tower");
 }
 
-function abrirPedidosConEstado(estado, extra = {}) {
-  setRuntimeFocus("tms_pedidos_focus", {
+function enfocarPedidos(focus) {
+  setRuntimeFocus("tms_pedidos_focus", focus);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("tms:pedidos-focus", { detail: focus }));
+  }
+  navegar("pedidos");
+}
+
+async function abrirPedidosConEstado(estado, extra = {}) {
+  const total = Number(extra.count ?? 1);
+  const title = extra.title || estadoPedidoMeta(estado).label || `Pedidos en ${estado}`;
+  if (total <= 0) {
+    const crear = await confirmDialog({
+      title: `Sin pedidos: ${title}`,
+      message: `No hay pedidos en "${title}". Quieres crear uno nuevo?`,
+      confirmText: "Crear pedido",
+      cancelText: "Seguir en dashboard",
+    });
+    if (crear) {
+      enfocarPedidos({
+        source: "dashboard",
+        action: "nuevo",
+        title: "Nuevo pedido desde Dashboard",
+      });
+    } else {
+      notify(`No hay pedidos en "${title}".`, "info");
+    }
+    return;
+  }
+  enfocarPedidos({
     source: "dashboard",
     estado,
-    title: extra.title || `Pedidos en ${estado}`,
+    operativo: extra.operativo || "",
+    title,
   });
-  navegar("pedidos");
 }
 
 function abrirPedidoDesdeDashboard(pedido, extra = {}) {
   if (!pedido?.id) return;
-  setRuntimeFocus("tms_pedidos_focus", {
+  enfocarPedidos({
     source: "dashboard",
     pedido_id: pedido.id,
     numero: pedido.numero || "",
     estado: pedido.estado || "",
     title: extra.title || "Pedido destacado desde dashboard",
   });
-  navegar("pedidos");
 }
 
 function incidenciaResumenPedido(pedido = {}) {
@@ -654,7 +682,7 @@ export default function Dashboard() {
 
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:12, marginBottom:22 }}>
             {operativos.map(item => (
-              <button key={item.key} onClick={()=>abrirPedidosConEstado(item.estado, { title:item.label })}
+              <button key={item.key} onClick={()=>abrirPedidosConEstado(item.estado, { title:item.label, count:item.value, operativo:item.key })}
                 style={{...S.card,padding:"14px 16px",textAlign:"left",cursor:"pointer",borderColor:`${item.color}44`,background:`linear-gradient(135deg, ${item.color}12, var(--card-bg) 60%)`,fontFamily:"'DM Sans',sans-serif"}}>
                 <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:item.color}}>{item.label}</div>
                 <div style={{fontFamily:"'Syne',sans-serif",fontSize:25,fontWeight:900,color:"var(--text)",marginTop:5}}>{fmtN(item.value)}</div>
@@ -851,7 +879,7 @@ export default function Dashboard() {
                 : estadosPed.map((e,i) => {
                   const max = Math.max(...estadosPed.map(x=>x.count));
                   return (
-                    <button key={i} type="button" onClick={()=>abrirPedidosConEstado(e.key)}
+                    <button key={i} type="button" onClick={()=>abrirPedidosConEstado(e.key, { title:e.name, count:e.count })}
                       style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10, width:"100%", border:"none", background:"transparent", padding:0, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
                       <div style={{ width:90, fontSize:12, color:"var(--text2)", flexShrink:0 }}>{e.name}</div>
                       <div style={{ flex:1, background:"var(--bg4)", borderRadius:4, height:8, overflow:"hidden" }}>

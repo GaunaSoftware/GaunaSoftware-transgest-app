@@ -36,8 +36,9 @@ function normalizePlataformas(value) {
       id: String(doc?.id || `doc-${index}-${docIndex}`),
       nombre: String(doc?.nombre || "").trim().slice(0, 180),
       caducidad: doc?.caducidad ? String(doc.caducidad).slice(0, 10) : "",
+      fecha_tope: doc?.fecha_tope ? String(doc.fecha_tope).slice(0, 10) : "",
       notas: String(doc?.notas || "").trim().slice(0, 500),
-    })).filter(doc => doc.nombre || doc.caducidad || doc.notas),
+    })).filter(doc => doc.nombre || doc.caducidad || doc.fecha_tope || doc.notas),
   })).filter(platform => platform.nombre || platform.documentos.length);
 }
 

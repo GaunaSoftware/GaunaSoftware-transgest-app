@@ -10,8 +10,19 @@ const emptyDocument = () => ({
   id: `doc-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   nombre: "",
   caducidad: "",
+  fecha_tope: "",
   notas: "",
 });
+
+const QUICK_DOCUMENTS = [
+  "Alta en plataforma",
+  "CAE / PRL",
+  "Seguro RC",
+  "Tarjeta transporte",
+  "ITV",
+  "Permiso circulacion",
+  "Certificado corriente pagos",
+];
 
 export function normalizePlatformDocuments(value) {
   const list = Array.isArray(value) ? value : [];
@@ -22,9 +33,25 @@ export function normalizePlatformDocuments(value) {
       id: doc?.id || `doc-${index}-${docIndex}`,
       nombre: String(doc?.nombre || "").trim(),
       caducidad: doc?.caducidad ? String(doc.caducidad).slice(0, 10) : "",
+      fecha_tope: doc?.fecha_tope ? String(doc.fecha_tope).slice(0, 10) : "",
       notas: String(doc?.notas || "").trim(),
-    })).filter(doc => doc.nombre || doc.caducidad || doc.notas),
+    })).filter(doc => doc.nombre || doc.caducidad || doc.fecha_tope || doc.notas),
   })).filter(platform => platform.nombre || platform.documentos.length);
+}
+
+function normalizePlatformDocumentsForEdit(value) {
+  const list = Array.isArray(value) ? value : [];
+  return list.map((platform, index) => ({
+    id: platform?.id || `plat-${index}`,
+    nombre: String(platform?.nombre || ""),
+    documentos: (Array.isArray(platform?.documentos) ? platform.documentos : []).map((doc, docIndex) => ({
+      id: doc?.id || `doc-${index}-${docIndex}`,
+      nombre: String(doc?.nombre || ""),
+      caducidad: doc?.caducidad ? String(doc.caducidad).slice(0, 10) : "",
+      fecha_tope: doc?.fecha_tope ? String(doc.fecha_tope).slice(0, 10) : "",
+      notas: String(doc?.notas || ""),
+    })),
+  }));
 }
 
 function expiryStatus(date) {
@@ -35,6 +62,14 @@ function expiryStatus(date) {
   if (days <= 30) return { label: `${days} dias`, color: "#f97316", bg: "rgba(249,115,22,.12)", level: 2 };
   if (days <= 60) return { label: `${days} dias`, color: "#f59e0b", bg: "rgba(245,158,11,.12)", level: 3 };
   return { label: `${days} dias`, color: "var(--green)", bg: "rgba(16,185,129,.12)", level: 4 };
+}
+
+function documentStatus(doc) {
+  const status = expiryStatus(doc.fecha_tope || doc.caducidad);
+  if (doc.fecha_tope && doc.caducidad && doc.fecha_tope !== doc.caducidad) {
+    return { ...status, label: status.level <= 3 ? `Tope: ${status.label}` : "Vigilado" };
+  }
+  return status;
 }
 
 export function flattenPlatformDocuments(value, entity = {}) {
@@ -50,16 +85,16 @@ export function flattenPlatformDocuments(value, entity = {}) {
 
 export function platformDocumentsSummary(value) {
   const docs = flattenPlatformDocuments(value);
-  const expired = docs.filter(doc => expiryStatus(doc.caducidad).level === 0).length;
-  const urgent = docs.filter(doc => expiryStatus(doc.caducidad).level > 0 && expiryStatus(doc.caducidad).level <= 2).length;
+  const expired = docs.filter(doc => documentStatus(doc).level === 0).length;
+  const urgent = docs.filter(doc => documentStatus(doc).level > 0 && documentStatus(doc).level <= 2).length;
   return { total: docs.length, expired, urgent };
 }
 
 export default function PlatformDocumentsEditor({ value, onChange, canEdit = true, inputStyle, labelStyle, buttonStyle }) {
-  const platforms = useMemo(() => normalizePlatformDocuments(value), [value]);
+  const platforms = useMemo(() => normalizePlatformDocumentsForEdit(value), [value]);
   const summary = useMemo(() => platformDocumentsSummary(platforms), [platforms]);
 
-  const setPlatforms = (next) => onChange?.(normalizePlatformDocuments(next));
+  const setPlatforms = (next) => onChange?.(normalizePlatformDocumentsForEdit(next));
   const updatePlatform = (platformId, patch) => {
     setPlatforms(platforms.map(platform => platform.id === platformId ? { ...platform, ...patch } : platform));
   };
@@ -153,18 +188,23 @@ export default function PlatformDocumentsEditor({ value, onChange, canEdit = tru
 
           <div style={{ display: "grid", gap: 8 }}>
             {platform.documentos.map((doc, docIndex) => {
-              const status = expiryStatus(doc.caducidad);
+              const status = documentStatus(doc);
               return (
                 <div key={doc.id} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8, alignItems: "end" }}>
                   <div>
                     <label style={label}>Documento</label>
-                    <input disabled={!canEdit} style={input} value={doc.nombre} placeholder="Nombre documento"
+                    <input disabled={!canEdit} style={input} value={doc.nombre} list={`platform-docs-${platform.id}`} placeholder="Nombre documento"
                       onChange={e => updateDocument(platform.id, doc.id, { nombre: e.target.value })} />
                   </div>
                   <div>
                     <label style={label}>Caduca</label>
                     <input disabled={!canEdit} type="date" style={input} value={doc.caducidad || ""}
                       onChange={e => updateDocument(platform.id, doc.id, { caducidad: e.target.value })} />
+                  </div>
+                  <div>
+                    <label style={label}>Fecha tope aviso</label>
+                    <input disabled={!canEdit} type="date" style={input} value={doc.fecha_tope || ""}
+                      onChange={e => updateDocument(platform.id, doc.id, { fecha_tope: e.target.value })} />
                   </div>
                   <div>
                     <label style={label}>Notas</label>
@@ -184,12 +224,30 @@ export default function PlatformDocumentsEditor({ value, onChange, canEdit = tru
               );
             })}
           </div>
+          <datalist id={`platform-docs-${platform.id}`}>
+            {QUICK_DOCUMENTS.map(name => <option key={name} value={name} />)}
+          </datalist>
 
           {canEdit && (
-            <button type="button" style={{ ...btn, justifySelf: "start" }}
-              onClick={() => updatePlatform(platform.id, { documentos: [...platform.documentos, emptyDocument()] })}>
-              + Documento
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" style={{ ...btn }}
+                onClick={() => updatePlatform(platform.id, { documentos: [...platform.documentos, emptyDocument()] })}>
+                + Documento
+              </button>
+              <select
+                defaultValue=""
+                style={{ ...input, width: "min(260px,100%)" }}
+                onChange={e => {
+                  const nombre = e.target.value;
+                  if (!nombre) return;
+                  updatePlatform(platform.id, { documentos: [...platform.documentos, { ...emptyDocument(), nombre }] });
+                  e.target.value = "";
+                }}
+              >
+                <option value="">Crear documento rapido...</option>
+                {QUICK_DOCUMENTS.map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
           )}
         </div>
       ))}

@@ -8905,6 +8905,66 @@ export default function Pedidos() {
     };
   }, [focusPedido, loading, pedidos]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const resetFocusFilters = () => {
+      setFiltroMes("");
+      setFiltroFechasCustom(false);
+      setFiltroDesde("");
+      setFiltroHasta("");
+      setFiltroCliente("");
+      setFiltroSinAsignacion(false);
+      setFiltroPendienteCompletar(false);
+      setFiltroColaborador(false);
+      setSoloCriticos(false);
+      setPage(1);
+    };
+    const openFocusedPedido = (focus) => {
+      if (!focus) return;
+      if (focus.action === "nuevo") {
+        const draft = buildPedidoDraftFromTrafficFocus(focus, vehiculos, choferes);
+        resetFocusFilters();
+        setFiltroEst("todos");
+        setQ("");
+        setEditando(draft);
+        setModal(true);
+        clearRuntimeFocus("tms_pedidos_focus");
+        notify("Pedido nuevo preparado desde Dashboard.", "success");
+        return;
+      }
+      if (focus.pedido_id) {
+        resetFocusFilters();
+        setFiltroEst("todos");
+        setQ(focus.numero || "");
+        const fallback = pedidos.find(p => String(p.id) === String(focus.pedido_id));
+        const focusText = `${focus.type || ""} ${focus.title || ""} ${focus.action || ""} ${focus.action_key || ""}`.toLowerCase();
+        const focusIncidencia = focusText.includes("incidencia") || String(fallback?.estado || focus.estado || "").toLowerCase() === "incidencia";
+        getPedido(focus.pedido_id)
+          .then(full => setEditando({ ...(full || fallback || {}), _focus_incidencia: focusIncidencia }))
+          .catch(() => setEditando({ ...(fallback || { id: focus.pedido_id, numero: focus.numero || "" }), _focus_incidencia: focusIncidencia }))
+          .finally(() => {
+            setModal(true);
+            clearRuntimeFocus("tms_pedidos_focus");
+          });
+        return;
+      }
+      if (focus.estado) {
+        resetFocusFilters();
+        setFiltroEst(String(focus.estado));
+        if (focus.operativo === "carga") {
+          setFiltroFechasCustom(true);
+          setFiltroHasta(new Date().toISOString().slice(0, 10));
+        }
+        setQ("");
+        clearRuntimeFocus("tms_pedidos_focus");
+        notify(focus.title ? `Mostrando ${focus.title}.` : "Filtro de pedidos aplicado.", "info");
+      }
+    };
+    const handle = (event) => openFocusedPedido(event?.detail);
+    window.addEventListener("tms:pedidos-focus", handle);
+    return () => window.removeEventListener("tms:pedidos-focus", handle);
+  }, [vehiculos, choferes, pedidos]);
+
   function empresaRequiereMotivoCancelacion() {
     const cfg = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && typeof window.__TMS_EMPRESA_CONFIG === "object")
       ? window.__TMS_EMPRESA_CONFIG

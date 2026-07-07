@@ -91,6 +91,9 @@ const EVENT_CONTRACTS = {
   AccountingFixedAssetDisposalPosted: {
     1: ["fixed_asset_id", "journal_entry_id", "previous_status", "status", "disposed_at"],
   },
+  AccountingFixedAssetDisposalReversed: {
+    1: ["fixed_asset_id", "journal_entry_id", "reversal_journal_entry_id", "previous_status", "status"],
+  },
   AccountingBankTransactionReconciled: {
     1: ["bank_reconciliation_id", "bank_transaction_id", "maturity_id", "amount", "reason"],
   },

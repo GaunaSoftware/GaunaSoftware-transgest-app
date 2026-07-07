@@ -820,6 +820,67 @@ router.post("/journal-entries/:id/post", requirePermission("journal.post"), asyn
           ]
         )
         : { rows: [] };
+      let reversedFixedAssetDisposal = { rows: [] };
+      if (entry.entry_type === "reversal" && entry.reversal_of_entry_id) {
+        const originalDisposal = await client.query(
+          `SELECT id, source_id
+             FROM ${q("journal_entries")}
+            WHERE company_id=$1
+              AND id=$2
+              AND entry_type='fixed_asset_disposal'
+              AND source_system='accounting'
+              AND source_type='fixed_asset_disposal'
+              AND source_id IS NOT NULL`,
+          [selected.company_id, entry.reversal_of_entry_id]
+        );
+        if (originalDisposal.rows.length) {
+          const original = originalDisposal.rows[0];
+          const disposalAudit = await client.query(
+            `SELECT detail->>'previous_status' AS previous_status
+               FROM ${q("audit_log")}
+              WHERE company_id=$1
+                AND action='fixed_asset.disposal_posted'
+                AND entity_type='accounting_fixed_asset'
+                AND entity_id=$2::uuid
+                AND detail->>'journal_entry_id'=$3::text
+              ORDER BY created_at DESC
+              LIMIT 1`,
+            [selected.company_id, original.source_id, original.id]
+          );
+          const previousStatus = disposalAudit.rows[0]?.previous_status;
+          if (!["active", "inactive"].includes(previousStatus)) {
+            throw httpError("No se puede sincronizar el reverso de baja: falta estado previo auditado", 409);
+          }
+          reversedFixedAssetDisposal = await client.query(
+            `WITH previous AS (
+               SELECT *
+                 FROM ${q("accounting_fixed_assets")}
+                WHERE id=$2::uuid AND company_id=$1
+                FOR UPDATE
+             )
+             UPDATE ${q("accounting_fixed_assets")} fa
+                SET status=$3,
+                    disposed_at=NULL,
+                    status_reason=$4,
+                    updated_at=NOW()
+               FROM previous
+              WHERE fa.id=previous.id
+                AND fa.company_id=$1
+                AND previous.status='disposed'
+              RETURNING fa.*, previous.status AS previous_status, $3::text AS restored_status, $5::uuid AS original_journal_entry_id`,
+            [
+              selected.company_id,
+              original.source_id,
+              previousStatus,
+              `Baja revertida por asiento ${posted.entry_number}`,
+              original.id,
+            ]
+          );
+          if (!reversedFixedAssetDisposal.rows.length) {
+            throw httpError("No se puede sincronizar el reverso de baja: el activo no esta marcado como dado de baja", 409);
+          }
+        }
+      }
 
       await client.query(
         `INSERT INTO ${q("audit_log")}
@@ -925,6 +986,56 @@ router.post("/journal-entries/:id/post", requirePermission("journal.post"), asyn
             journal_entry_id: run.journal_entry_id,
             reversal_journal_entry_id: posted.id,
             reason: run.reversal_reason,
+          },
+        });
+      }
+      if (reversedFixedAssetDisposal.rows.length) {
+        const asset = reversedFixedAssetDisposal.rows[0];
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'fixed_asset.disposal_reversed','accounting_fixed_asset',$4,$5,$6::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            asset.id,
+            req.id || null,
+            JSON.stringify({
+              journal_entry_id: asset.original_journal_entry_id,
+              reversal_journal_entry_id: posted.id,
+              previous_status: asset.previous_status,
+              status: asset.status,
+              entry_number: posted.entry_number,
+            }),
+          ]
+        );
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetDisposalReversed",
+          aggregate_type: "accounting_fixed_asset",
+          aggregate_id: asset.id,
+          payload: {
+            fixed_asset_id: asset.id,
+            journal_entry_id: asset.original_journal_entry_id,
+            reversal_journal_entry_id: posted.id,
+            previous_status: asset.previous_status,
+            status: asset.status,
+          },
+        });
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetStatusChanged",
+          aggregate_type: "accounting_fixed_asset",
+          aggregate_id: asset.id,
+          payload: {
+            fixed_asset_id: asset.id,
+            previous_status: asset.previous_status,
+            status: asset.status,
+            action: "reverse_disposal",
+            reason: `Baja revertida por asiento ${posted.entry_number}`,
           },
         });
       }

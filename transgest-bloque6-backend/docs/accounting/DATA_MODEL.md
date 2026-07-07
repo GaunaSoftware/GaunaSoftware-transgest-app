@@ -749,6 +749,8 @@ Estado implementado:
 - La baja por retirada puede preparar un borrador en Diario con `entry_type='fixed_asset_disposal'`: Debe amortizacion acumulada, Debe perdida por valor neto si procede y Haber cuenta del activo.
 - Cancelar ese borrador desde Diario conserva motivo, emite `AccountingFixedAssetDisposalDraftCancelled` y permite preparar otro borrador.
 - Al contabilizar ese borrador desde Diario, el activo pasa a `disposed` en la misma transaccion y se emiten eventos de baja contabilizada y cambio de estado.
+- Al contabilizar el reverso de ese asiento desde Diario, el activo recupera el estado previo guardado en el `audit_log` append-only de `fixed_asset.disposal_posted`, limpia `disposed_at` y emite `AccountingFixedAssetDisposalReversed` mas `AccountingFixedAssetStatusChanged`.
+- Si no existe estado previo auditado valido (`active` o `inactive`), el posteo del reverso se rechaza para evitar restauraciones inventadas.
 - No hay integracion automatica con facturas recibidas, no hay baja por venta con ingreso y no se declara cumplimiento fiscal o contable.
 
 ### `depreciation_plans`

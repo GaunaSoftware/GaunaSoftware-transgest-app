@@ -175,6 +175,13 @@ const fixedAssetActionLabels = {
   dispose: "Dar de baja",
 };
 
+const journalEntryTypeLabels = {
+  manual: "Manual",
+  reversal: "Reverso",
+  depreciation: "Amortizacion",
+  fixed_asset_disposal: "Baja inmovilizado",
+};
+
 const integrationCategoryLabels = {
   advisor_suite: "Asesoria",
   cloud_accounting: "Cloud contable",
@@ -657,7 +664,7 @@ export default function App() {
   const [journalCancelAction, setJournalCancelAction] = useState(null);
   const [journalEditForm, setJournalEditForm] = useState(null);
   const [journalReverseAction, setJournalReverseAction] = useState(null);
-  const [journalFilters, setJournalFilters] = useState({ fiscal_year_id: "", status: "", q: "", date_from: "", date_to: "" });
+  const [journalFilters, setJournalFilters] = useState({ fiscal_year_id: "", status: "", entry_type: "", q: "", date_from: "", date_to: "" });
   const [journalForm, setJournalForm] = useState(() => ({
     fiscal_year_id: "",
     entry_date: new Date().toISOString().slice(0, 10),
@@ -1335,7 +1342,7 @@ export default function App() {
   }
 
   async function openJournalDraftsAlert() {
-    const nextFilters = { fiscal_year_id: "", status: "draft", q: "", date_from: "", date_to: "" };
+    const nextFilters = { fiscal_year_id: "", status: "draft", entry_type: "", q: "", date_from: "", date_to: "" };
     setJournalFilters(nextFilters);
     setFocusedMaturityId(null);
     setFocusedBankTransactionId(null);
@@ -2576,7 +2583,7 @@ export default function App() {
   }
 
   async function clearJournalFilters() {
-    const nextFilters = { fiscal_year_id: "", status: "", q: "", date_from: "", date_to: "" };
+    const nextFilters = { fiscal_year_id: "", status: "", entry_type: "", q: "", date_from: "", date_to: "" };
     setJournalFilters(nextFilters);
     await refreshJournal(nextFilters);
   }
@@ -3787,6 +3794,7 @@ export default function App() {
                 <form className="journal-filters" onSubmit={handleJournalFilter}>
                   <label><span>Ejercicio</span><select value={journalFilters.fiscal_year_id} onChange={e => setJournalFilters(prev => ({ ...prev, fiscal_year_id: e.target.value }))}><option value="">Todos</option>{fiscalYears.map(year => <option key={year.id} value={year.id}>{year.year_label}</option>)}</select></label>
                   <label><span>Estado</span><select value={journalFilters.status} onChange={e => setJournalFilters(prev => ({ ...prev, status: e.target.value }))}><option value="">Todos</option><option value="draft">Borradores</option><option value="posted">Contabilizados</option><option value="cancelled">Cancelados</option></select></label>
+                  <label><span>Tipo</span><select value={journalFilters.entry_type} onChange={e => setJournalFilters(prev => ({ ...prev, entry_type: e.target.value }))}><option value="">Todos</option>{Object.entries(journalEntryTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                   <label><span>Buscar</span><input value={journalFilters.q} maxLength={140} onChange={e => setJournalFilters(prev => ({ ...prev, q: e.target.value }))} placeholder="Concepto o numero" /></label>
                   <label><span>Desde</span><input type="date" value={journalFilters.date_from} onChange={e => setJournalFilters(prev => ({ ...prev, date_from: e.target.value }))} /></label>
                   <label><span>Hasta</span><input type="date" value={journalFilters.date_to} onChange={e => setJournalFilters(prev => ({ ...prev, date_to: e.target.value }))} /></label>
@@ -3844,7 +3852,7 @@ export default function App() {
                     {journalEntries.map(entry => (
                       <div className="journal-row" key={entry.id}>
                         <strong>{entry.entry_number || "Borrador"}</strong>
-                        <div><strong>{entry.description}</strong><small>{String(entry.entry_date).slice(0, 10)} · {entry.line_count} líneas</small></div>
+                        <div><strong>{entry.description}</strong><small>{String(entry.entry_date).slice(0, 10)} · {journalEntryTypeLabels[entry.entry_type] || entry.entry_type || "Manual"} · {entry.line_count} líneas</small></div>
                         <span>{entry.period_name}</span>
                         <span>{formatMoney(entry.total_debit)}</span>
                         <span>{formatMoney(entry.total_credit)}</span>
@@ -3873,7 +3881,7 @@ export default function App() {
                       </div>
                       <div className="source-row">
                         <span>Sistema</span><strong>{journalDetail.source_system || "accounting"}</strong>
-                        <span>Tipo</span><strong>{journalDetail.source_type || journalDetail.entry_type || "manual"}</strong>
+                        <span>Tipo</span><strong>{journalEntryTypeLabels[journalDetail.entry_type] || journalDetail.source_type || journalDetail.entry_type || "Manual"}</strong>
                         <span>Identificador</span><strong>{journalDetail.source_id || journalDetail.id}</strong>
                       </div>
                       {journalDetail.source_event_id && (

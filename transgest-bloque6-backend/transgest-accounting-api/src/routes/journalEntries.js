@@ -98,6 +98,10 @@ router.get("/journal-entries", requirePermission("journal.read"), async (req, re
       params.push(filters.status);
       where.push(`je.status=$${params.length}`);
     }
+    if (filters.entry_type) {
+      params.push(filters.entry_type);
+      where.push(`je.entry_type=$${params.length}`);
+    }
     if (filters.date_from) {
       params.push(filters.date_from);
       where.push(`je.entry_date >= $${params.length}::date`);
@@ -158,6 +162,7 @@ router.get("/journal-entries", requirePermission("journal.read"), async (req, re
         { key: "year_label", label: "Ejercicio" },
         { key: "period_name", label: "Periodo" },
         { key: "description", label: "Concepto" },
+        { key: "entry_type_label", label: "Tipo" },
         { key: "status_label", label: "Estado" },
         { key: "total_debit", label: "Debe" },
         { key: "total_credit", label: "Haber" },
@@ -166,6 +171,7 @@ router.get("/journal-entries", requirePermission("journal.read"), async (req, re
         ...row,
         entry_date: String(row.entry_date).slice(0, 10),
         entry_number: row.entry_number || "",
+        entry_type_label: row.entry_type === "reversal" ? "Reverso" : row.entry_type === "depreciation" ? "Amortizacion" : row.entry_type === "fixed_asset_disposal" ? "Baja inmovilizado" : "Manual",
         status_label: row.status === "posted" ? "Contabilizado" : row.status === "cancelled" ? "Cancelado" : "Borrador",
       })));
       return sendCsv(res, "diario.csv", csv);

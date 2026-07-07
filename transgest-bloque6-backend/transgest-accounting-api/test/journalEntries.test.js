@@ -110,6 +110,7 @@ test("contabilizacion rechaza asiento descuadrado", () => {
 test("filtros de diario limitan estado y cantidad", () => {
   const filters = normalizeJournalQuery({
     status: "cancelled",
+    entry_type: "fixed_asset_disposal",
     limit: "900",
     date_from: "2026-01-01",
     date_to: "2026-01-31",
@@ -123,6 +124,7 @@ test("filtros de diario limitan estado y cantidad", () => {
   }, {
     fiscal_year_id: null,
     status: "cancelled",
+    entry_type: "fixed_asset_disposal",
     date_from: "2026-01-01",
     date_to: "2026-01-31",
     q: "ajuste cierre",
@@ -131,6 +133,7 @@ test("filtros de diario limitan estado y cantidad", () => {
     limit: 200,
   });
   assert.throws(() => normalizeJournalQuery({ status: "deleted" }), /no soportado/);
+  assert.throws(() => normalizeJournalQuery({ entry_type: "sale" }), /entry_type/);
   assert.throws(() => normalizeJournalQuery({ date_from: "2026-02-01", date_to: "2026-01-31" }), /posterior/);
   assert.throws(() => normalizeJournalQuery({ format: "pdf" }), /format/);
 });

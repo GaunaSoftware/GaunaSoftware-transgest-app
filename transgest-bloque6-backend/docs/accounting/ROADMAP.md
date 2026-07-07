@@ -78,6 +78,7 @@ Estado Fase 1:
 - Implementada edicion transaccional de borradores no contabilizados, con reemplazo completo de lineas, auditoria y outbox.
 - Implementada cancelacion controlada de borradores con motivo, auditoria, outbox y sin borrado fisico.
 - Implementada idempotencia de borradores mediante clave y hash de peticion, con auditoria y eventos `AccountingJournalEntryDraftCreated`, `AccountingJournalEntryDraftUpdated`, `AccountingJournalEntryDraftCancelled` y `AccountingJournalEntryPosted`.
+- Implementado filtro de Diario por tipo de asiento (`manual`, `reversal`, `depreciation`, `fixed_asset_disposal`) en API, CSV y UI.
 - Implementado Mayor por cuenta y balance inicial de sumas y saldos calculados desde asientos contabilizados.
 - Implementados informes preliminares de Balance de situacion y PyG desde saldos por tipo de cuenta, con CSV auditado y aviso de no validez legal cerrada.
 - Implementada migracion `006_ledger_read_permission` para permiso `ledger.read`.

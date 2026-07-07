@@ -189,6 +189,10 @@ function normalizeJournalQuery(query = {}) {
   const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 200) : 50;
   const status = String(query.status || "").trim();
   if (status && !["draft", "posted", "cancelled"].includes(status)) throw inputError("status no soportado");
+  const entryType = String(query.entry_type || "").trim();
+  if (entryType && !["manual", "reversal", "depreciation", "fixed_asset_disposal"].includes(entryType)) {
+    throw inputError("entry_type no soportado");
+  }
   const dateFrom = normalizeOptionalDate(query.date_from, "date_from");
   const dateTo = normalizeOptionalDate(query.date_to, "date_to");
   if (dateFrom && dateTo && dateFrom > dateTo) throw inputError("date_from no puede ser posterior a date_to");
@@ -196,6 +200,7 @@ function normalizeJournalQuery(query = {}) {
   return {
     fiscal_year_id: String(query.fiscal_year_id || "").trim() || null,
     status: status || null,
+    entry_type: entryType || null,
     date_from: dateFrom,
     date_to: dateTo,
     q: q || null,

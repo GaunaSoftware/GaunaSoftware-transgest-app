@@ -12,6 +12,7 @@ El modelo separa contabilidad financiera, facturacion fiscal y adaptadores regul
 - Solo `transgest-accounting-api` puede escribir en ledger.
 - Otros modulos publican eventos o llaman casos de uso; nunca insertan asientos directamente.
 - No hay borrado fisico de asientos. Correcciones mediante reversos, rectificativos o regularizaciones.
+- La consulta del Diario admite filtro por `entry_type` para separar manuales, reversos, amortizaciones y bajas de inmovilizado.
 - Todos los importes usan `NUMERIC(18,6)` en lineas y redondeo controlado para informes.
 - Trazabilidad obligatoria: documento fuente, evento fuente, usuario/proceso, request id y version de esquema.
 

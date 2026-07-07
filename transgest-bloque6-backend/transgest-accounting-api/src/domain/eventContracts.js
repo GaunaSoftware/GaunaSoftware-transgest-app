@@ -85,6 +85,9 @@ const EVENT_CONTRACTS = {
   AccountingFixedAssetDisposalDraftCreated: {
     1: ["fixed_asset_id", "journal_entry_id", "fiscal_year_id", "period_id", "disposal_date", "estimated_net_book_value"],
   },
+  AccountingFixedAssetDisposalPosted: {
+    1: ["fixed_asset_id", "journal_entry_id", "previous_status", "status", "disposed_at"],
+  },
   AccountingBankTransactionReconciled: {
     1: ["bank_reconciliation_id", "bank_transaction_id", "maturity_id", "amount", "reason"],
   },

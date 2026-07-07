@@ -272,6 +272,13 @@ test("contratos de inmovilizado exigen activo, ejercicio e importe", () => {
     disposal_date: "2026-12-31",
     estimated_net_book_value: "100.000000",
   }));
+  assert.doesNotThrow(() => validateEventContract("AccountingFixedAssetDisposalPosted", 1, {
+    fixed_asset_id: "asset-id",
+    journal_entry_id: "entry-id",
+    previous_status: "active",
+    status: "disposed",
+    disposed_at: "2026-12-31",
+  }));
   assert.throws(() => validateEventContract("AccountingFixedAssetCreated", 1, {
     fixed_asset_id: "asset-id",
   }), /Payload incompleto/);

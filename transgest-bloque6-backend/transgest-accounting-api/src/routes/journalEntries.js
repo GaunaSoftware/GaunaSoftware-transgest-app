@@ -788,6 +788,32 @@ router.post("/journal-entries/:id/post", requirePermission("journal.post"), asyn
           [req.accountingUser.id, selected.company_id, entry.id]
         )
         : { rows: [] };
+      const fixedAssetDisposal = entry.entry_type === "fixed_asset_disposal"
+        ? await client.query(
+          `WITH previous AS (
+             SELECT *
+               FROM ${q("accounting_fixed_assets")}
+              WHERE id=$2::uuid AND company_id=$1
+              FOR UPDATE
+           )
+           UPDATE ${q("accounting_fixed_assets")} fa
+              SET status='disposed',
+                  disposed_at=$3::date,
+                  status_reason=$4,
+                  updated_at=NOW()
+             FROM previous
+            WHERE fa.id=previous.id
+              AND fa.company_id=$1
+              AND previous.status <> 'disposed'
+            RETURNING fa.*, previous.status AS previous_status`,
+          [
+            selected.company_id,
+            entry.source_id,
+            posted.entry_date,
+            `Baja contabilizada por asiento ${posted.entry_number}`,
+          ]
+        )
+        : { rows: [] };
 
       await client.query(
         `INSERT INTO ${q("audit_log")}
@@ -893,6 +919,56 @@ router.post("/journal-entries/:id/post", requirePermission("journal.post"), asyn
             journal_entry_id: run.journal_entry_id,
             reversal_journal_entry_id: posted.id,
             reason: run.reversal_reason,
+          },
+        });
+      }
+      if (fixedAssetDisposal.rows.length) {
+        const asset = fixedAssetDisposal.rows[0];
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'fixed_asset.disposal_posted','accounting_fixed_asset',$4,$5,$6::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            asset.id,
+            req.id || null,
+            JSON.stringify({
+              journal_entry_id: posted.id,
+              previous_status: asset.previous_status,
+              status: asset.status,
+              disposed_at: asset.disposed_at,
+              entry_number: posted.entry_number,
+            }),
+          ]
+        );
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetDisposalPosted",
+          aggregate_type: "accounting_fixed_asset",
+          aggregate_id: asset.id,
+          payload: {
+            fixed_asset_id: asset.id,
+            journal_entry_id: posted.id,
+            previous_status: asset.previous_status,
+            status: asset.status,
+            disposed_at: asset.disposed_at,
+          },
+        });
+        await enqueueOutboxEvent(client, {
+          tenant_id: selected.tenant_id,
+          company_id: selected.company_id,
+          event_type: "AccountingFixedAssetStatusChanged",
+          aggregate_type: "accounting_fixed_asset",
+          aggregate_id: asset.id,
+          payload: {
+            fixed_asset_id: asset.id,
+            previous_status: asset.previous_status,
+            status: asset.status,
+            action: "dispose",
+            reason: `Baja contabilizada por asiento ${posted.entry_number}`,
           },
         });
       }

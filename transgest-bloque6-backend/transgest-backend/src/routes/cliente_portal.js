@@ -305,6 +305,28 @@ async function notificarNuevaSolicitud(req, solicitud) {
   }).catch(() => null)));
 }
 
+async function notificarSolicitudIntegracion(req, detalle = {}) {
+  const { rows } = await db.query(
+    `SELECT id
+       FROM usuarios
+      WHERE empresa_id=$1
+        AND activo IS DISTINCT FROM false
+        AND rol::text IN ('gerente','trafico','administrativo')
+      LIMIT 20`,
+    [empresaId(req)]
+  ).catch(() => ({ rows: [] }));
+  const clienteNombre = req.user?.nombre || req.user?.email || "Cliente";
+  await Promise.all(rows.map(u => crearNotificacion({
+    empresa_id: empresaId(req),
+    usuario_id: u.id,
+    tipo: "portal_cliente_integracion",
+    titulo: "Solicitud de integracion EDI/API",
+    mensaje: `${clienteNombre} solicita configurar intercambio EDI/API.`,
+    data: { view: "clientes", cliente_id: req.user?.cliente_id || null, detalle },
+    created_by: req.user?.id || null,
+  }).catch(() => null)));
+}
+
 router.get("/resumen", requireCliente, async (req, res) => {
   try {
     await ensureSchema();
@@ -454,6 +476,32 @@ router.get("/resumen", requireCliente, async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message || "No se pudo cargar el resumen del portal cliente" });
+  }
+});
+
+router.post("/integracion/solicitar", requireCliente, async (req, res) => {
+  try {
+    await ensureSchema();
+    const detalle = {
+      canal: String(req.body?.canal || "edi_api").slice(0, 60),
+      notas: String(req.body?.notas || "").slice(0, 1000),
+      requested_at: new Date().toISOString(),
+    };
+    await notificarSolicitudIntegracion(req, detalle);
+    await db.query(
+      `INSERT INTO audit_log_saas (actor_tipo,actor_id,actor_email,empresa_id,accion,detalle,ip)
+       VALUES ('cliente',$1,$2,$3,'SOLICITUD portal_cliente.integracion_edi_api',$4,$5)`,
+      [
+        req.user?.id || null,
+        req.user?.email || req.user?.username || null,
+        empresaId(req),
+        JSON.stringify({ cliente_id: req.user?.cliente_id || null, ...detalle }),
+        req.ip || null,
+      ]
+    ).catch(() => {});
+    res.json({ ok: true, message: "Solicitud de integracion registrada" });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "No se pudo solicitar la integracion" });
   }
 });
 

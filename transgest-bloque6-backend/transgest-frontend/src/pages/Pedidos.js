@@ -10069,6 +10069,12 @@ export default function Pedidos() {
                 );
               }
               const { pedido: p, priorityMeta } = entry;
+              const estadoRow = String(p.estado || "").toLowerCase();
+              const estadoBackground =
+                estadoRow === "en_curso" ? "rgba(34,211,238,.12)" :
+                estadoRow === "descarga" ? "rgba(167,139,250,.10)" :
+                estadoRow === "incidencia" ? "rgba(251,191,36,.12)" :
+                undefined;
               const rowBackground =
                 String(focusPedido?.pedido_id || "") === String(p.id)
                   ? "rgba(34,211,160,.10)"
@@ -10076,7 +10082,7 @@ export default function Pedidos() {
                     ? "rgba(239,68,68,.08)"
                     : priorityMeta.flags.urgentAssignment
                       ? "rgba(245,158,11,.07)"
-                      : undefined;
+                      : estadoBackground;
               const rowShadow =
                 String(focusPedido?.pedido_id || "") === String(p.id)
                   ? "inset 3px 0 0 var(--green)"
@@ -10084,7 +10090,13 @@ export default function Pedidos() {
                     ? "inset 3px 0 0 rgba(239,68,68,.85)"
                     : priorityMeta.flags.urgentAssignment
                       ? "inset 3px 0 0 rgba(245,158,11,.8)"
-                      : undefined;
+                      : estadoRow === "en_curso"
+                        ? "inset 3px 0 0 rgba(34,211,238,.65)"
+                        : estadoRow === "descarga"
+                          ? "inset 3px 0 0 rgba(167,139,250,.55)"
+                          : estadoRow === "incidencia"
+                            ? "inset 3px 0 0 rgba(251,191,36,.55)"
+                            : undefined;
               const actionMenuOpen = openActionMenuPedidoId === String(p.id);
               return (
               <tr key={p.id} id={`pedido-row-${p.id}`} style={{

@@ -7,7 +7,7 @@ import MojibakeFixer from "./components/MojibakeFixer";
 import Login  from "./pages/Login";
 import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
-import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser } from "./services/api";
+import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
 import { getEmpresaPlanLocal, normalizePlan } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
@@ -1202,8 +1202,92 @@ function DemoShowcasePanel({ user, currentPlan, onSessionChanged }) {
   );
 }
 
+function PasswordChangeRequired({ user, onChanged, onLogout }) {
+  const [actual, setActual] = useState("");
+  const [nueva, setNueva] = useState("");
+  const [repetir, setRepetir] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError("");
+    if (!actual || !nueva || !repetir) {
+      setError("Completa la contrasena actual y la nueva contrasena.");
+      return;
+    }
+    if (nueva.length < 8) {
+      setError("La nueva contrasena debe tener al menos 8 caracteres.");
+      return;
+    }
+    if (nueva !== repetir) {
+      setError("La nueva contrasena y su repeticion no coinciden.");
+      return;
+    }
+    if (actual === nueva) {
+      setError("La nueva contrasena debe ser distinta a la provisional.");
+      return;
+    }
+    try {
+      setSaving(true);
+      await cambiarPassword(actual, nueva);
+      await onChanged?.();
+      window.dispatchEvent(new CustomEvent("tms:notify", { detail:{ type:"success", message:"Contrasena actualizada correctamente." } }));
+    } catch (err) {
+      setError(err?.message || "No se pudo cambiar la contrasena.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputStyle = {
+    width:"100%",
+    height:46,
+    border:"1px solid var(--border)",
+    borderRadius:8,
+    padding:"0 12px",
+    background:"var(--bg2)",
+    color:"var(--text)",
+    fontSize:14,
+    boxSizing:"border-box",
+  };
+
+  return (
+    <div style={{minHeight:"100vh",display:"grid",placeItems:"center",padding:20,background:"var(--bg)",color:"var(--text)",fontFamily:"'DM Sans',sans-serif"}}>
+      <form onSubmit={handleSubmit} style={{width:"min(460px,100%)",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,boxShadow:"0 18px 50px rgba(15,23,42,.14)",padding:24}}>
+        <div style={{fontSize:12,fontWeight:900,letterSpacing:.8,textTransform:"uppercase",color:"var(--muted)",marginBottom:8}}>Primer acceso</div>
+        <h1 style={{fontSize:28,margin:"0 0 8px",lineHeight:1.1,color:"var(--text)"}}>Cambia tu contrasena</h1>
+        <p style={{margin:"0 0 20px",color:"var(--muted)",fontSize:14,lineHeight:1.5}}>
+          Hola{user?.nombre ? `, ${user.nombre}` : ""}. Para entrar en TransGest tienes que guardar una contrasena propia.
+        </p>
+        <label style={{display:"grid",gap:6,marginBottom:12,fontSize:12,fontWeight:900,color:"var(--muted)",textTransform:"uppercase"}}>
+          Contrasena actual
+          <input style={inputStyle} type="password" value={actual} onChange={e=>setActual(e.target.value)} autoComplete="current-password" autoFocus />
+        </label>
+        <label style={{display:"grid",gap:6,marginBottom:12,fontSize:12,fontWeight:900,color:"var(--muted)",textTransform:"uppercase"}}>
+          Nueva contrasena
+          <input style={inputStyle} type="password" value={nueva} onChange={e=>setNueva(e.target.value)} autoComplete="new-password" />
+        </label>
+        <label style={{display:"grid",gap:6,marginBottom:12,fontSize:12,fontWeight:900,color:"var(--muted)",textTransform:"uppercase"}}>
+          Repetir nueva contrasena
+          <input style={inputStyle} type="password" value={repetir} onChange={e=>setRepetir(e.target.value)} autoComplete="new-password" />
+        </label>
+        {error ? <div style={{margin:"8px 0 14px",padding:"10px 12px",borderRadius:8,background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.35)",color:"#b91c1c",fontSize:13,fontWeight:800}}>{error}</div> : null}
+        <div style={{display:"flex",gap:10,justifyContent:"space-between",alignItems:"center",marginTop:16,flexWrap:"wrap"}}>
+          <button type="button" onClick={onLogout} style={{height:42,borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontWeight:900,padding:"0 14px",cursor:"pointer"}}>
+            Salir
+          </button>
+          <button type="submit" disabled={saving} style={{height:42,borderRadius:8,border:"1px solid #008577",background:"#008577",color:"#fff",fontWeight:900,padding:"0 18px",cursor:saving?"wait":"pointer",opacity:saving ? .8 : 1}}>
+            {saving ? "Guardando..." : "Guardar y entrar"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function AppInner() {
-  const { user, loading, refreshUser } = useAuth();
+  const { user, loading, refreshUser, logout } = useAuth();
   const [vista, setVista] = useState(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [avisosCriticos,   setAvisosCriticos]   = useState(0);
@@ -1270,6 +1354,7 @@ function AppInner() {
 
   useEffect(() => {
     if (!user) return;
+    if (user?.debe_cambiar_password) return;
     setVista(VISTA_DEFAULT(user.rol));
     const isChoferAppOnly = user?.rol === "chofer";
     if (!isChoferAppOnly) {
@@ -1425,6 +1510,10 @@ function AppInner() {
       setShowOnboarding(false);
       return;
     }
+    if (user?.debe_cambiar_password) {
+      setShowOnboarding(false);
+      return;
+    }
     const key = onboardingStorageKey(user);
     setShowOnboarding(!localStorage.getItem(key));
   }, [user]);
@@ -1437,6 +1526,7 @@ function AppInner() {
     </div>
   );
   if (!user) return <Login />;
+  if (user?.debe_cambiar_password) return <PasswordChangeRequired user={user} onChanged={refreshUser} onLogout={logout} />;
   if (bloqueado) return <Bloqueado motivo={bloqueado.motivo} mensaje={bloqueado.mensaje} user={user} />;
 
   // Obtener plan de la empresa del usuario

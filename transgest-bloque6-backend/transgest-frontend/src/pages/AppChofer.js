@@ -1067,12 +1067,6 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       notify("El peso debe ser un numero valido.", "warning");
       return;
     }
-    await editarPedido(pedido.id, {
-      mercancia,
-      bultos: palets,
-      peso_kg: pesoNum,
-      referencia_cliente: pedido.referencia_cliente || mercanciaCarga.referencia || null,
-    });
     await persistirPasos({
       mercancia_confirmada: true,
       mercancia_confirmada_at: new Date().toISOString(),

@@ -30,6 +30,8 @@ async function ensureAuthSchema() {
   if (authSchemaReady) return;
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trafico_config JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN NOT NULL DEFAULT false").catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ").catch(() => {});
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS logo_base64 TEXT").catch(() => {});
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
@@ -119,6 +121,8 @@ function authUserPayload(user = {}, extra = {}) {
     perfil: user.perfil,
     permisos,
     trafico_config: user.trafico_config || {},
+    debe_cambiar_password: Boolean(user.debe_cambiar_password),
+    password_changed_at: user.password_changed_at || null,
   };
 }
 
@@ -237,7 +241,7 @@ router.post("/login",
       await ensureDemoForLogin(identifier, password);
       const { rows } = await db.query(
         `SELECT u.id, u.nombre, u.email, u.password_hash, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id,
-                u.username, u.perfil, u.permisos, u.trafico_config,
+                u.username, u.perfil, u.permisos, u.trafico_config, u.debe_cambiar_password, u.password_changed_at,
                 u.login_failed_count, u.login_locked_until,
                 e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.cfg_precios,
                 e.plan, e.estado AS empresa_estado, e.fecha_vencimiento,
@@ -329,7 +333,7 @@ router.post("/login",
 router.get("/me", authenticate, async (req, res) => {
   const { rows } = await db.query(
     `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.empresa_id, u.cliente_id, u.chofer_id,
-            u.perfil, u.permisos, u.trafico_config,
+            u.perfil, u.permisos, u.trafico_config, u.debe_cambiar_password, u.password_changed_at,
             e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.plan, e.cfg_precios
        FROM usuarios u
        LEFT JOIN empresas e ON e.id=u.empresa_id
@@ -406,6 +410,7 @@ router.post("/demo/switch-plan", authenticate, async (req, res) => {
   );
   const { rows } = await db.query(
     `SELECT u.id,u.nombre,u.email,u.username,u.rol,u.empresa_id,u.cliente_id,u.chofer_id,u.perfil,u.permisos,u.trafico_config,
+            u.debe_cambiar_password,u.password_changed_at,
             e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.plan, e.cfg_precios
        FROM usuarios u
        JOIN empresas e ON e.id=u.empresa_id
@@ -436,6 +441,7 @@ router.post("/demo/switch-user", authenticate, async (req, res) => {
   }
   const { rows } = await db.query(
     `SELECT u.id,u.nombre,u.email,u.username,u.rol,u.empresa_id,u.cliente_id,u.chofer_id,u.perfil,u.permisos,u.trafico_config,
+            u.debe_cambiar_password,u.password_changed_at,
             e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.plan, e.cfg_precios
        FROM usuarios u
        JOIN empresas e ON e.id=u.empresa_id
@@ -558,7 +564,7 @@ router.post("/invitacion/:token",
     const hash = await bcrypt.hash(req.body.password, 12);
     await db.transaction(async (client) => {
       await client.query(
-        "UPDATE usuarios SET password_hash=$1, activo=true, debe_cambiar_password=false WHERE id=$2",
+        "UPDATE usuarios SET password_hash=$1, activo=true, debe_cambiar_password=false, password_changed_at=NOW() WHERE id=$2",
         [hash, inv.usuario_id]
       );
       await client.query("UPDATE invitaciones_usuario SET usado_at=NOW() WHERE id=$1", [inv.id]);
@@ -586,7 +592,10 @@ router.post("/cambiar-password", authenticate,
     if (!valid) return res.status(400).json({ error: "Contraseña actual incorrecta" });
 
     const hash = await bcrypt.hash(password_nuevo, 12);
-    await db.query("UPDATE usuarios SET password_hash = $1 WHERE id = $2", [hash, req.user.id]);
+    await db.query(
+      "UPDATE usuarios SET password_hash = $1, debe_cambiar_password=false, password_changed_at=NOW() WHERE id = $2",
+      [hash, req.user.id]
+    );
 
     logger.info(`Contraseña cambiada: ${req.user.email}`);
     res.json({ ok: true });

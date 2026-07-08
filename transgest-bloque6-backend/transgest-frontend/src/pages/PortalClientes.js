@@ -15,6 +15,8 @@ import {
   getPortalPedidoDocumentoControl,
   getPortalPedidoEventos,
   responderPortalClienteReprogramacion,
+  solicitarPortalClienteIntegracion,
+  extraerDocumentoIA,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
@@ -324,7 +326,7 @@ function buildSolicitudAcuseHtml({ solicitud = {}, eventos = [], empresa = {}, u
 }
 
 export default function PortalClientes() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const empresa = useEmpresaPerfil();
   const isProviderPortal = String(user?.rol || "").toLowerCase().includes("colaborador") || String(user?.rol || "").toLowerCase().includes("proveedor") || !!user?.colaborador_id;
   const portalName = isProviderPortal ? "Peticiones viajes" : "Portal cliente";
@@ -626,6 +628,18 @@ export default function PortalClientes() {
     }
   }
 
+  async function solicitarIntegracion() {
+    try {
+      await solicitarPortalClienteIntegracion({
+        canal: "edi_api",
+        notas: "Solicitud enviada desde el portal cliente para configurar intercambio automatico EDI/API.",
+      });
+      notify("Solicitud enviada. La empresa revisara la configuracion EDI/API.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo solicitar la integracion EDI/API.", "error");
+    }
+  }
+
   const S = {
     card: { background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: "14px 16px", marginBottom: 12 },
     th: { textAlign: "left", padding: "8px 12px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", borderBottom: "1px solid var(--border)" },
@@ -688,18 +702,33 @@ export default function PortalClientes() {
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
               <button
+                onClick={solicitarIntegracion}
+                style={{ ...S.btn, padding:"6px 10px", fontSize:11, background:"rgba(16,185,129,.12)", color:"#0f766e", borderColor:"rgba(16,185,129,.25)" }}
+                title="Pide a la empresa que active y configure credenciales EDI/API para tu cuenta."
+              >
+                Solicitar EDI/API
+              </button>
+              <button
                 onClick={descargarManifestIntegracion}
                 disabled={descargandoManifest}
+                title="Descarga la ficha tecnica de endpoints, campos y version del feed para integradores."
                 style={{ ...S.btn, padding:"6px 10px", fontSize:11, opacity:descargandoManifest ? .65 : 1 }}
               >
-                {descargandoManifest ? "Preparando..." : "Manifest EDI/API"}
+                {descargandoManifest ? "Preparando..." : "Ficha tecnica API"}
               </button>
               <button
                 onClick={descargarFeedIntegracion}
                 disabled={descargandoFeed}
+                title="Exporta un JSON con tus viajes, estados y documentos para pruebas de integracion."
                 style={{ ...S.btn, padding:"6px 10px", fontSize:11, opacity:descargandoFeed ? .65 : 1 }}
               >
-                {descargandoFeed ? "Preparando..." : "Exportar feed EDI/API"}
+                {descargandoFeed ? "Preparando..." : "Exportar datos API"}
+              </button>
+              <button
+                onClick={logout}
+                style={{ ...S.btn, padding:"6px 10px", fontSize:11, color:"#ef4444", borderColor:"rgba(239,68,68,.25)", background:"rgba(239,68,68,.08)" }}
+              >
+                Salir
               </button>
             </div>
           </div>
@@ -1261,6 +1290,7 @@ function FacturaPortalModal({ factura, onClose, empresa }) {
 
 function SolicitudServicio({ onDone, setTab }) {
   const [saving, setSaving] = useState(false);
+  const [analyzingDoc, setAnalyzingDoc] = useState(false);
   const [form, setForm] = useState({
     referencia_cliente: "",
     origen: "",
@@ -1278,6 +1308,14 @@ function SolicitudServicio({ onDone, setTab }) {
   const inp = { background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", padding: "9px 12px", borderRadius: 8, fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   const lbl = { display: "block", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", margin: "12px 0 4px" };
 
+  function cleanPayload(source = form) {
+    return {
+      ...source,
+      peso_kg: source.peso_kg || null,
+      bultos: source.bultos || null,
+    };
+  }
+
   async function enviar() {
     if (!form.origen || !form.destino) {
       notify("Origen y destino son obligatorios", "warning");
@@ -1286,9 +1324,7 @@ function SolicitudServicio({ onDone, setTab }) {
     setSaving(true);
     try {
       const res = await crearPortalClienteSolicitud({
-        ...form,
-        peso_kg: form.peso_kg || null,
-        bultos: form.bultos || null,
+        ...cleanPayload(form),
       });
       if (res?.duplicada) {
         notify("Ya existe una solicitud pendiente similar. La hemos abierto como referencia.", "warning");
@@ -1305,10 +1341,81 @@ function SolicitudServicio({ onDone, setTab }) {
     }
   }
 
+  async function analizarDocumento(file) {
+    if (!file) return;
+    setAnalyzingDoc(true);
+    try {
+      const isImage = String(file.type || "").startsWith("image/");
+      const texto = isImage ? "" : (await file.text()).slice(0, 60000);
+      const attachments = [];
+      if (isImage) {
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        attachments.push({ base64, mediaType: file.type, name: file.name });
+      }
+      const data = await extraerDocumentoIA({
+        tipo: "pedido",
+        nombre: file.name,
+        mime: file.type || "",
+        texto,
+        attachments,
+        contexto: { origen: "portal_cliente", accion: "crear_solicitud_servicio" },
+      });
+      const r = data?.resultado || data || {};
+      const next = {
+        referencia_cliente: r.referencia_cliente || r.referencia || form.referencia_cliente || "",
+        origen: r.origen || form.origen || "",
+        destino: r.destino || form.destino || "",
+        fecha_carga: r.fecha_carga || form.fecha_carga || "",
+        hora_carga: r.hora_carga || form.hora_carga || "",
+        fecha_descarga: r.fecha_descarga || form.fecha_descarga || "",
+        hora_descarga: r.hora_descarga || form.hora_descarga || "",
+        mercancia: r.mercancia || form.mercancia || "",
+        peso_kg: r.peso_kg || (r.toneladas ? Number(r.toneladas) * 1000 : form.peso_kg || ""),
+        bultos: r.bultos || form.bultos || "",
+        notas: [form.notas, r.observaciones ? `Documento ${file.name}: ${r.observaciones}` : `Documento analizado: ${file.name}`].filter(Boolean).join("\n"),
+      };
+      setForm(next);
+      if (next.origen && next.destino) {
+        await crearPortalClienteSolicitud(cleanPayload(next));
+        notify("Documento analizado y solicitud creada automaticamente.", "success");
+        setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", notas: "" });
+        await onDone();
+        setTab("solicitudes");
+      } else {
+        notify("Documento analizado. Completa los campos faltantes antes de enviar.", "warning");
+      }
+    } catch (e) {
+      notify(e.message || "No se pudo analizar el documento.", "error");
+    } finally {
+      setAnalyzingDoc(false);
+    }
+  }
+
   return (
     <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 18 }}>
       <div style={{ fontWeight: 900, color: "var(--text)", fontSize: 16 }}>Solicitar nuevo servicio</div>
       <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 4 }}>La solicitud queda vinculada solo a tu empresa transportista y a tu ficha de cliente.</div>
+      <div style={{ marginTop:12, padding:"12px 14px", borderRadius:8, border:"1px solid rgba(59,130,246,.22)", background:"rgba(59,130,246,.08)" }}>
+        <div style={{ fontWeight:900, color:"var(--text)", fontSize:13 }}>Crear desde documento</div>
+        <div style={{ fontSize:12, color:"var(--text4)", marginTop:3, lineHeight:1.4 }}>Sube un email, orden de carga, imagen o texto. Si detecta origen y destino, crea la solicitud; si no, rellena el formulario.</div>
+        <input
+          type="file"
+          accept=".txt,.csv,.eml,.html,.pdf,image/*"
+          disabled={analyzingDoc}
+          onChange={e => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            analizarDocumento(file);
+          }}
+          style={{ marginTop:10, width:"100%", color:"var(--text)", fontSize:12 }}
+        />
+        {analyzingDoc && <div style={{ marginTop:8, fontSize:12, color:"var(--accent)", fontWeight:800 }}>Analizando documento...</div>}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: "0 14px", marginTop: 8 }}>
         <div><label style={lbl}>Referencia cliente</label><input style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Pedido, OC, referencia interna..." /></div>
         <div><label style={lbl}>Mercancia</label><input style={inp} value={form.mercancia} onChange={f("mercancia")} placeholder="Tipo de mercancia" /></div>

@@ -944,7 +944,7 @@ router.post("/password-reset-requests/:id/reset", superAuth, async (req, res) =>
   const hash = await bcrypt.hash(password, 12);
   const updated = await db.query(
     `UPDATE usuarios
-        SET password_hash=$1, activo=true, debe_cambiar_password=false,
+        SET password_hash=$1, activo=true, debe_cambiar_password=true, password_changed_at=NULL,
             login_failed_count=0, login_locked_until=NULL
       WHERE id=$2
       RETURNING id,nombre,email,username,rol,empresa_id`,
@@ -1408,7 +1408,7 @@ router.post("/empresas/:id/reset-password", superAuth, async (req, res) => {
   if (usuario) {
     const updated = await db.query(
       `UPDATE usuarios
-       SET password_hash=$1, activo=true, debe_cambiar_password=false,
+       SET password_hash=$1, activo=true, debe_cambiar_password=true, password_changed_at=NULL,
            username=COALESCE(NULLIF(username,''), LOWER(COALESCE(email,$2)))
        WHERE id=$3
        RETURNING id,nombre,email,username,rol`,

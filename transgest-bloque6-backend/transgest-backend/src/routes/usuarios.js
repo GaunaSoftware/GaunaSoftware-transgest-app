@@ -90,6 +90,8 @@ async function normalizarChoferUsuario(choferId, rol, eid) {
 async function ensureUsuariosChoferSchema() {
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trafico_config JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN NOT NULL DEFAULT false").catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ").catch(() => {});
   await db.query("CREATE INDEX IF NOT EXISTS idx_usuarios_empresa_chofer ON usuarios(empresa_id, chofer_id)").catch(() => {});
 }
 
@@ -107,6 +109,7 @@ router.get("/", async (req, res) => {
   await ensureUsuariosChoferSchema();
   const { rows } = await db.query(
     `SELECT u.id,u.nombre,u.email,u.username,u.perfil,u.permisos,u.trafico_config,u.rol,u.cliente_id,u.chofer_id,u.activo,u.ultimo_acceso,u.created_at,
+            u.debe_cambiar_password,u.password_changed_at,
             ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, v.matricula AS vehiculo_matricula
      FROM usuarios u
      LEFT JOIN choferes ch ON ch.id=u.chofer_id AND ch.empresa_id=u.empresa_id
@@ -146,7 +149,7 @@ router.post("/",
       const { rows } = await db.query(
         `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,perfil,permisos,trafico_config,cliente_id,chofer_id,debe_cambiar_password)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true)
-         RETURNING id,nombre,email,username,perfil,permisos,trafico_config,rol,cliente_id,chofer_id,activo`,
+         RETURNING id,nombre,email,username,perfil,permisos,trafico_config,rol,cliente_id,chofer_id,activo,debe_cambiar_password`,
         [
           nombre.trim(),
           email || null,
@@ -222,7 +225,7 @@ router.patch("/:id", async (req, res) => {
          cliente_id=$9,
          chofer_id=$10
        WHERE id=$11 AND empresa_id=$12
-       RETURNING id,nombre,email,username,perfil,permisos,trafico_config,rol,cliente_id,chofer_id,activo`,
+       RETURNING id,nombre,email,username,perfil,permisos,trafico_config,rol,cliente_id,chofer_id,activo,debe_cambiar_password`,
       [
         nombre?.trim(),
         rol,
@@ -255,7 +258,7 @@ router.post("/:id/reset-password",
 
     const hash = await bcrypt.hash(req.body.password_nuevo, 12);
     const { rowCount } = await db.query(
-      "UPDATE usuarios SET password_hash=$1, debe_cambiar_password=true WHERE id=$2 AND empresa_id=$3",
+      "UPDATE usuarios SET password_hash=$1, debe_cambiar_password=true, password_changed_at=NULL WHERE id=$2 AND empresa_id=$3",
       [hash, req.params.id, empresaId(req)]
     );
     if (!rowCount) return res.status(404).json({ error: "Usuario no encontrado" });

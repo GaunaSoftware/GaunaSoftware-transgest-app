@@ -4,7 +4,7 @@ import {
   getRutasCliente, getRutasClienteSalud, crearRutaCliente, editarRutaCliente, borrarRutaCliente,
   getPedidosCliente, crearFacturaMultiple, getRutas, marcarClienteRevisado,
   crearPortalUsuarioCliente, getClienteIntegracionTokens, crearClienteIntegracionToken, revocarClienteIntegracionToken,
-  getFacturas, getPortalSolicitudesAdmin, getPuntosInteres,
+  getFacturas, getPortalSolicitudesAdmin, getPuntosInteres, crearPuntoInteres, borrarPuntoInteres,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -332,6 +332,157 @@ function PuntoClienteSelector({ cliente, onApply }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ClientePuntosPanel({ cliente, canEdit }) {
+  const [puntos, setPuntos] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    nombre: "",
+    tipo: "ambos",
+    direccion: "",
+    ciudad: "",
+    provincia: "",
+    pais: "Espana",
+    codigo_postal: "",
+    ventana: "",
+    contacto_nombre: "",
+    contacto_telefono: "",
+    google_maps_url: "",
+    punto_general: false,
+  });
+
+  const cargar = useCallback(() => {
+    if (!cliente?.id) return;
+    setLoading(true);
+    getPuntosInteres({ cliente_id: cliente.id })
+      .then(data => setPuntos(Array.isArray(data) ? data : []))
+      .catch(() => setPuntos([]))
+      .finally(() => setLoading(false));
+  }, [cliente?.id]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  function set(k, value) {
+    setForm(prev => ({ ...prev, [k]: value }));
+  }
+
+  async function crear(e) {
+    e.preventDefault();
+    if (!form.nombre.trim() || !form.direccion.trim()) {
+      notify("Indica nombre y direccion del punto", "warning");
+      return;
+    }
+    setSaving(true);
+    try {
+      await crearPuntoInteres({
+        ...form,
+        cliente_id: cliente.id,
+        nombre: form.nombre.trim(),
+        direccion: form.direccion.trim(),
+        ciudad: form.ciudad.trim(),
+        provincia: form.provincia.trim(),
+        codigo_postal: form.codigo_postal.trim(),
+        google_maps_url: form.google_maps_url.trim(),
+      });
+      notify(form.punto_general ? "Punto general creado" : "Punto vinculado al cliente creado", "success");
+      setForm(prev => ({ ...prev, nombre:"", direccion:"", codigo_postal:"", ciudad:"", provincia:"", ventana:"", contacto_nombre:"", contacto_telefono:"", google_maps_url:"" }));
+      cargar();
+    } catch (err) {
+      notify(err?.message || "No se pudo crear el punto", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function borrar(punto) {
+    const ok = await confirmDialog({
+      title: "Eliminar punto",
+      message: `Eliminar "${punto.nombre || "punto"}"? No se eliminan los pedidos ya creados.`,
+      confirmText: "Eliminar",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await borrarPuntoInteres(punto.id);
+      notify("Punto eliminado", "success");
+      cargar();
+    } catch (err) {
+      notify(err?.message || "No se pudo eliminar el punto", "error");
+    }
+  }
+
+  const input = { ...S.inp, minWidth:0 };
+
+  return (
+    <div style={{display:"grid",gap:14}}>
+      <div style={{background:"rgba(14,165,164,.08)",border:"1px solid rgba(14,165,164,.22)",borderRadius:10,padding:"12px 14px",fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
+        Los campos de origen y destino escritos en pedidos son poblaciones. Si necesitas muelle, cantera, almacen, obra o direccion concreta, crealo aqui como punto de carga, descarga o ambos.
+      </div>
+
+      {canEdit && (
+        <form onSubmit={crear} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Nuevo punto</div>
+              <div style={{fontSize:11,color:"var(--text4)"}}>Por defecto queda asociado a {cliente?.nombre}. Marca general si lo quieres reutilizar en otros clientes.</div>
+            </div>
+            <label style={{display:"inline-flex",alignItems:"center",gap:7,fontSize:12,fontWeight:800,color:"var(--text3)"}}>
+              <input type="checkbox" checked={form.punto_general} onChange={e=>set("punto_general", e.target.checked)} />
+              Punto general
+            </label>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+            <div><label style={S.lbl}>Nombre *</label><input style={input} value={form.nombre} onChange={e=>set("nombre", e.target.value)} placeholder="Almacen, cantera, obra..." /></div>
+            <div><label style={S.lbl}>Tipo</label><select style={input} value={form.tipo} onChange={e=>set("tipo", e.target.value)}><option value="ambos">Carga y descarga</option><option value="carga">Carga</option><option value="descarga">Descarga</option></select></div>
+            <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Direccion *</label><input style={input} value={form.direccion} onChange={e=>set("direccion", e.target.value)} placeholder="Calle, poligono, acceso o enlace de Maps" /></div>
+            <div><label style={S.lbl}>Poblacion</label><input style={input} value={form.ciudad} onChange={e=>set("ciudad", e.target.value)} /></div>
+            <div><label style={S.lbl}>Provincia / region</label><input style={input} value={form.provincia} onChange={e=>set("provincia", e.target.value)} /></div>
+            <div><label style={S.lbl}>CP</label><input style={input} value={form.codigo_postal} onChange={e=>set("codigo_postal", e.target.value)} /></div>
+            <div><label style={S.lbl}>Pais</label><input style={input} value={form.pais} onChange={e=>set("pais", e.target.value)} /></div>
+            <div><label style={S.lbl}>Ventana horaria</label><input style={input} value={form.ventana} onChange={e=>set("ventana", e.target.value)} placeholder="08:00-14:00" /></div>
+            <div><label style={S.lbl}>Contacto</label><input style={input} value={form.contacto_nombre} onChange={e=>set("contacto_nombre", e.target.value)} /></div>
+            <div><label style={S.lbl}>Telefono contacto</label><input style={input} value={form.contacto_telefono} onChange={e=>set("contacto_telefono", e.target.value)} /></div>
+            <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Enlace Maps / HERE</label><input style={input} value={form.google_maps_url} onChange={e=>set("google_maps_url", e.target.value)} placeholder="Opcional" /></div>
+          </div>
+          <button type="submit" disabled={saving} style={{...S.btn,marginTop:12,background:"var(--accent)",color:"#fff",opacity:saving?0.6:1}}>
+            {saving ? "Guardando..." : "Crear punto"}
+          </button>
+        </form>
+      )}
+
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
+        <div style={{padding:"10px 12px",fontSize:12,fontWeight:900,color:"var(--text3)",borderBottom:"1px solid var(--border)"}}>
+          Puntos del cliente y puntos generales disponibles
+        </div>
+        {loading ? (
+          <div style={{padding:18,textAlign:"center",color:"var(--text4)",fontSize:12}}>Cargando puntos...</div>
+        ) : puntos.length === 0 ? (
+          <div style={{padding:18,textAlign:"center",color:"var(--text4)",fontSize:12}}>Sin puntos guardados.</div>
+        ) : (
+          <div style={{display:"grid",gap:8,padding:10}}>
+            {puntos.map(p => (
+              <div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"center",border:"1px solid var(--border2)",borderRadius:8,padding:10,background:p.cliente_id ? "rgba(16,185,129,.07)" : "var(--bg3)"}}>
+                <div style={{minWidth:0}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <b style={{fontSize:13,color:"var(--text)"}}>{p.nombre}</b>
+                    <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:p.cliente_id ? "var(--green)" : "var(--accent)"}}>{p.cliente_id ? "Cliente" : "General"}</span>
+                    <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"var(--text5)"}}>{p.tipo || "ambos"}</span>
+                  </div>
+                  <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>{[p.direccion, p.codigo_postal, p.ciudad, p.provincia, p.pais].filter(Boolean).join(" - ")}</div>
+                  {(p.ventana || p.contacto_nombre || p.contacto_telefono) && (
+                    <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{[p.ventana, p.contacto_nombre, p.contacto_telefono].filter(Boolean).join(" | ")}</div>
+                  )}
+                </div>
+                {canEdit && <button type="button" onClick={()=>borrar(p)} style={{...S.btn,background:"rgba(239,68,68,.10)",border:"1px solid rgba(239,68,68,.25)",color:"#ef4444",padding:"7px 10px"}}>Eliminar</button>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -732,6 +883,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
 
   const TABS = [
     {id:"datos", l:"Datos"},
+    {id:"puntos", l:"Puntos"},
     {id:"facturacion", l:"Facturación"},
     {id:"rutas", l:"Rutas y tarifas"},
     {id:"pedidos", l:"Histórico"},
@@ -776,7 +928,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
 
         {/* Tabs */}
         <div style={{display:"flex",gap:0,borderBottom:"1px solid var(--border)",marginBottom:18,marginTop:12}}>
-          {(esNuevo ? TABS.slice(0,2) : TABS).map(t=>(
+          {(esNuevo ? TABS.filter(t => ["datos","facturacion"].includes(t.id)) : TABS).map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)}
               style={{...S.tab, borderBottomColor:tab===t.id?"#3b6ef5":"transparent",
                       color:tab===t.id?"var(--accent-xl)":"var(--text4)"}}>
@@ -925,6 +1077,10 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
         )}
 
         {/* TAB: Facturación */}
+        {tab==="puntos" && !esNuevo && (
+          <ClientePuntosPanel cliente={cliente} canEdit={canEdit} />
+        )}
+
         {tab==="facturacion" && (
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             <div>

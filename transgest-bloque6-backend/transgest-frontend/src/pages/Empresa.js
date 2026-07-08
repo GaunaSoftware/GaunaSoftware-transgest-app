@@ -179,6 +179,14 @@ export default function Empresa() {
     notas:"",
     ultima_prueba:null,
     historial_pruebas:[],
+    declaracion_responsable:{
+      visible:false,
+      url:"",
+      version:"",
+      fecha:"",
+      productor:"Gauna Software",
+      notas:"",
+    },
     verifactu:{
       habilitado:false,
       envio_automatico:true,
@@ -199,6 +207,9 @@ export default function Empresa() {
       certificado_alias:"",
       incluir_emitidas:true,
       incluir_recibidas:false,
+      sujeto:"no_aplica",
+      motivo_obligacion:"",
+      plazo_dias:4,
     },
   });
   const [fiscalStatus, setFiscalStatus] = useState(null);
@@ -353,6 +364,7 @@ export default function Empresa() {
   const ff = k => e => setFiscalCfg(p => ({ ...p, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value }));
   const ffv = k => e => setFiscalCfg(p => ({ ...p, verifactu:{ ...p.verifactu, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value } }));
   const ffs = k => e => setFiscalCfg(p => ({ ...p, sii:{ ...p.sii, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value } }));
+  const ffd = k => e => setFiscalCfg(p => ({ ...p, declaracion_responsable:{ ...p.declaracion_responsable, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value } }));
 
   async function guardarEmpresa() {
     const empresaToSave = {
@@ -1642,6 +1654,11 @@ export default function Empresa() {
                   </div>
                 </div>
                 <div style={{fontSize:12,color:"var(--text3)",marginBottom:8}}>{fiscalStatus.summary}</div>
+                {fiscalStatus.external_connector_required && (
+                  <div style={{fontSize:12,color:"#f59e0b",lineHeight:1.55,marginBottom:10}}>
+                    {fiscalStatus.external_connector_reason || "Este modo necesita un conector externo antes de usarse en produccion."}
+                  </div>
+                )}
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
                   {(Array.isArray(fiscalStatus.checks) ? fiscalStatus.checks : []).map((check) => (
                     <div key={check.label} style={{padding:"8px 10px",borderRadius:7,border:"1px solid #1e2d45",background:"var(--bg3)"}}>
@@ -1689,7 +1706,30 @@ export default function Empresa() {
                 Ajustes {fiscalCfg.modo === "sii" ? "SII" : "VERIFACTU"}
               </div>
               {fiscalCfg.modo === "sii" ? (
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"6px 14px",alignItems:"end"}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"6px 14px",alignItems:"end"}}>
+                  <div>
+                    <label style={S.lbl}>Situacion SII</label>
+                    <select value={fiscalCfg.sii?.sujeto || "no_aplica"} onChange={ffs("sujeto")} disabled={!esGerente} style={{ ...S.inp, background:esGerente ? "var(--bg4)":"var(--bg2)" }}>
+                      <option value="no_aplica">No aplica / pendiente</option>
+                      <option value="obligado">Obligado</option>
+                      <option value="voluntario">Voluntario</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Motivo SII</label>
+                    <select value={fiscalCfg.sii?.motivo_obligacion || ""} onChange={ffs("motivo_obligacion")} disabled={!esGerente} style={{ ...S.inp, background:esGerente ? "var(--bg4)":"var(--bg2)" }}>
+                      <option value="">Seleccionar motivo</option>
+                      <option value="gran_empresa">Gran empresa &gt; 6M EUR</option>
+                      <option value="redeme">REDEME</option>
+                      <option value="grupo_iva">Grupo de IVA</option>
+                      <option value="deposito_fiscal">Deposito fiscal hidrocarburos</option>
+                      <option value="voluntario">Opcion voluntaria</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Plazo control SII</label>
+                    <input type="number" min="1" max="30" style={S.inp} value={fiscalCfg.sii?.plazo_dias || 4} onChange={ffs("plazo_dias")} disabled={!esGerente}/>
+                  </div>
                   <div>
                     <label style={S.lbl}>Alias certificado</label>
                     <input style={S.inp} value={fiscalCfg.sii?.certificado_alias || ""} onChange={ffs("certificado_alias")} placeholder="cert-aeat-empresa" disabled={!esGerente}/>
@@ -1710,9 +1750,12 @@ export default function Empresa() {
                     <input type="checkbox" checked={!!fiscalCfg.sii?.incluir_recibidas} onChange={ffs("incluir_recibidas")} disabled={!esGerente}/>
                     Facturas recibidas
                   </label>
+                  <div style={{gridColumn:"1/-1",fontSize:11,color:"#f59e0b",lineHeight:1.55}}>
+                    SII queda preparado para configuracion y cola, pero no se considera listo hasta activar un conector AEAT externo con certificado, libros registro XML y acuses.
+                  </div>
                 </div>
               ) : (
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"6px 14px",alignItems:"end"}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"6px 14px",alignItems:"end"}}>
                   <div>
                     <label style={S.lbl}>Proveedor VERIFACTU</label>
                     <select value={fiscalCfg.verifactu?.proveedor || "directo"} onChange={ffv("proveedor")} disabled={!esGerente} style={{ ...S.inp, background:esGerente ? "var(--bg4)":"var(--bg2)" }}>
@@ -1763,6 +1806,11 @@ export default function Empresa() {
                   <div style={{gridColumn:"1/-1",fontSize:11,color:"var(--text5)"}}>
                     La identidad y version del software emisor se controlan globalmente desde SuperAdmin.
                   </div>
+                  {fiscalCfg.verifactu?.proveedor === "directo" && (
+                    <div style={{gridColumn:"1/-1",fontSize:11,color:"#f59e0b",lineHeight:1.55}}>
+                      El canal directo AEAT queda como preparado tecnico, pero necesita completar o contratar el conector real. Para produccion, usa Verifacti u otro proveedor fiscal hasta cerrar certificado, XML, firma, envio y acuses.
+                    </div>
+                  )}
                 </div>
               )}
               {fiscalCfg.modo === "verifactu" && fiscalCfg.verifactu?.proveedor === "verifacti" && (
@@ -1785,6 +1833,39 @@ export default function Empresa() {
                 </div>
               )}
             </div>
+
+            {fiscalCfg.modo !== "ninguno" && (
+              <div style={{marginTop:12,padding:"12px 14px",background:"var(--bg3)",border:"1px solid #1e2d45",borderRadius:8}}>
+                <div style={{fontWeight:700,fontSize:11,color:"var(--green)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>
+                  Declaracion responsable SIF
+                </div>
+                <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.55,marginBottom:10}}>
+                  Debe quedar publicada y visible para usuarios/compradores del software. Si se usa un proveedor externo, TransGest y el proveedor deben mantener su declaracion correspondiente.
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"6px 14px",alignItems:"end"}}>
+                  <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text3)",fontWeight:700,padding:"8px 0"}}>
+                    <input type="checkbox" checked={!!fiscalCfg.declaracion_responsable?.visible} onChange={ffd("visible")} disabled={!esGerente}/>
+                    Visible para usuarios
+                  </label>
+                  <div>
+                    <label style={S.lbl}>URL declaracion</label>
+                    <input style={S.inp} value={fiscalCfg.declaracion_responsable?.url || ""} onChange={ffd("url")} placeholder="https://..." disabled={!esGerente}/>
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Version declarada</label>
+                    <input style={S.inp} value={fiscalCfg.declaracion_responsable?.version || ""} onChange={ffd("version")} placeholder="1.0.0" disabled={!esGerente}/>
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Fecha declaracion</label>
+                    <input type="date" style={S.inp} value={fiscalCfg.declaracion_responsable?.fecha || ""} onChange={ffd("fecha")} disabled={!esGerente}/>
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Productor</label>
+                    <input style={S.inp} value={fiscalCfg.declaracion_responsable?.productor || ""} onChange={ffd("productor")} placeholder="Gauna Software" disabled={!esGerente}/>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div style={{marginTop:12}}>
               <label style={S.lbl}>Notas fiscales internas</label>

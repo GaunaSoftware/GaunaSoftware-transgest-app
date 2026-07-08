@@ -11,6 +11,14 @@ const FISCAL_DEFAULTS = {
   notas: "",
   ultima_prueba: null,
   historial_pruebas: [],
+  declaracion_responsable: {
+    visible: false,
+    url: "",
+    version: "",
+    fecha: "",
+    productor: "Gauna Software",
+    notas: "",
+  },
   verifactu: {
     habilitado: false,
     envio_automatico: true,
@@ -31,6 +39,9 @@ const FISCAL_DEFAULTS = {
     certificado_alias: "",
     incluir_emitidas: true,
     incluir_recibidas: false,
+    sujeto: "no_aplica",
+    motivo_obligacion: "",
+    plazo_dias: 4,
   },
 };
 
@@ -115,6 +126,16 @@ function normalizeFiscalConfig(raw = {}) {
     notas: String(cfg.notas || "").trim(),
     ultima_prueba: normalizeFiscalTestMeta(cfg.ultima_prueba || cfg.last_test || null),
     historial_pruebas: normalizeFiscalTestHistory(cfg.historial_pruebas || cfg.test_history || []),
+    declaracion_responsable: {
+      ...FISCAL_DEFAULTS.declaracion_responsable,
+      ...(cfg.declaracion_responsable && typeof cfg.declaracion_responsable === "object" ? cfg.declaracion_responsable : {}),
+      visible: cfg?.declaracion_responsable?.visible === true,
+      url: String(cfg?.declaracion_responsable?.url || "").trim(),
+      version: String(cfg?.declaracion_responsable?.version || "").trim(),
+      fecha: String(cfg?.declaracion_responsable?.fecha || "").trim(),
+      productor: String(cfg?.declaracion_responsable?.productor || FISCAL_DEFAULTS.declaracion_responsable.productor).trim(),
+      notas: String(cfg?.declaracion_responsable?.notas || "").trim(),
+    },
     verifactu: {
       ...FISCAL_DEFAULTS.verifactu,
       ...(cfg.verifactu && typeof cfg.verifactu === "object" ? cfg.verifactu : {}),
@@ -139,6 +160,13 @@ function normalizeFiscalConfig(raw = {}) {
       certificado_alias: String(cfg?.sii?.certificado_alias || "").trim(),
       incluir_emitidas: cfg?.sii?.incluir_emitidas !== false,
       incluir_recibidas: cfg?.sii?.incluir_recibidas === true,
+      sujeto: ["no_aplica", "obligado", "voluntario"].includes(String(cfg?.sii?.sujeto || "").toLowerCase())
+        ? String(cfg?.sii?.sujeto).toLowerCase()
+        : "no_aplica",
+      motivo_obligacion: String(cfg?.sii?.motivo_obligacion || "").trim(),
+      plazo_dias: Number.isFinite(Number(cfg?.sii?.plazo_dias)) && Number(cfg?.sii?.plazo_dias) > 0
+        ? Number(cfg?.sii?.plazo_dias)
+        : 4,
     },
   };
 }
@@ -211,6 +239,15 @@ function buildFiscalStatus(configInput = {}) {
   if (config.email_alertas) {
     addCheck("Formato email alertas", isValidEmail(config.email_alertas), "El email de alertas no tiene un formato valido.", "warning");
   }
+  if (config.modo !== "ninguno") {
+    addCheck("Declaracion responsable visible", !!config.declaracion_responsable.visible, "La declaracion responsable del SIF debe quedar visible para el usuario/comprador.");
+    addCheck("URL declaracion responsable", !!config.declaracion_responsable.url, "Falta enlazar o publicar la declaracion responsable del software.");
+    addCheck("Version declaracion responsable", !!config.declaracion_responsable.version, "Conviene asociar la declaracion responsable a una version del software.", "warning");
+  }
+
+  let externalConnectorRequired = false;
+  let externalConnectorReason = "";
+  let connectorReady = false;
 
   if (config.modo === "verifactu") {
     addCheck("Proveedor VERIFACTU", ["directo", "verifacti"].includes(config.verifactu.proveedor), "Selecciona un proveedor valido para VERIFACTU.");
@@ -218,19 +255,29 @@ function buildFiscalStatus(configInput = {}) {
       addCheck("Base URL Verifacti", !!config.verifactu.provider_base_url, "Falta la URL base de la API de Verifacti.");
       addCheck("API key Verifacti", !!config.verifactu.provider_api_key, "Falta la API key de Verifacti.");
       addCheck("Webhook secret Verifacti", !!config.verifactu.provider_webhook_secret, "Conviene definir un webhook secret para sincronizacion segura desde Verifacti.", "warning");
+      connectorReady = !!config.verifactu.provider_base_url && !!config.verifactu.provider_api_key;
     } else {
       addCheck("Alias certificado VERIFACTU", !!config.verifactu.certificado_alias, "Falta el alias del certificado VERIFACTU.");
       addCheck("Endpoint VERIFACTU", !!config.verifactu.endpoint_url, "Falta el endpoint VERIFACTU.");
+      externalConnectorRequired = true;
+      externalConnectorReason = "El canal AEAT directo requiere terminar/contratar el transporte certificado, firma, XML y respuesta AEAT. Mientras no este activo, usa Verifacti u otro proveedor externo.";
+      addCheck("Conector AEAT directo", false, externalConnectorReason);
     }
     addCheck("Nombre software", !!config.verifactu.software_nombre, "Falta el nombre del software emisor.");
     addCheck("ID software", !!config.verifactu.software_id, "Falta el identificador del software.");
     addCheck("Version software", !!config.verifactu.software_version, "Falta la version del software.");
     addCheck("Envio automatico", !!config.verifactu.envio_automatico, "El envio automatico esta desactivado. Habra que procesar la cola manualmente.", "warning");
   } else if (config.modo === "sii") {
+    addCheck("Empresa sujeta a SII", config.sii.sujeto !== "no_aplica", "Indica si la empresa esta obligada a SII o se acoge voluntariamente.");
+    addCheck("Motivo SII", !!config.sii.motivo_obligacion, "Indica el motivo: gran empresa, REDEME, grupo IVA, deposito fiscal o voluntario.", config.sii.sujeto === "no_aplica" ? "warning" : "required");
     addCheck("Alias certificado SII", !!config.sii.certificado_alias, "Falta el alias del certificado SII.");
     addCheck("Endpoint SII", !!config.sii.endpoint_url, "Falta el endpoint SII.");
     addCheck("Facturas emitidas activas", !!config.sii.incluir_emitidas, "SII deberia incluir al menos facturas emitidas.");
     addCheck("Envio automatico", !!config.sii.envio_automatico, "El envio automatico esta desactivado. Habra que procesar la cola manualmente.", "warning");
+    addCheck("Plazo SII configurado", Number(config.sii.plazo_dias) === 4, "El plazo operativo general de SII debe controlarse en 4 dias.", "warning");
+    externalConnectorRequired = true;
+    externalConnectorReason = "SII queda preparado en cola y configuracion, pero necesita conector real AEAT con certificado, libros registro, XML y acuses.";
+    addCheck("Conector SII AEAT", false, externalConnectorReason);
   }
 
   if (config.entorno === "produccion") {
@@ -285,11 +332,16 @@ function buildFiscalStatus(configInput = {}) {
     }
   }
 
-  const ready = issues.length === 0 && config.modo !== "ninguno";
-  const productionReady = ready && config.entorno === "produccion";
+  const lastTestOk = config.ultima_prueba?.ok === true && config.ultima_prueba?.pending_connector !== true;
+  const ready = issues.length === 0 && config.modo !== "ninguno" && !externalConnectorRequired;
+  const productionReady = ready && config.entorno === "produccion" && connectorReady && lastTestOk;
   return {
     ready,
     production_ready: productionReady,
+    connector_ready: connectorReady,
+    external_connector_required: externalConnectorRequired,
+    external_connector_reason: externalConnectorReason,
+    recommended_provider: config.modo === "verifactu" ? "Verifacti API por empresa/NIF" : config.modo === "sii" ? "Conector SII externo AEAT" : "",
     level: issues.length ? "error" : warnings.length ? "warning" : "ok",
     summary: issues.length
       ? `${issues.length} requisito(s) pendiente(s)`
@@ -326,6 +378,7 @@ function sanitizeFiscalConfigForClient(input = {}) {
     notas: config.notas,
     ultima_prueba: config.ultima_prueba,
     historial_pruebas: config.historial_pruebas,
+    declaracion_responsable: config.declaracion_responsable,
     verifactu: {
       habilitado: config.verifactu.habilitado,
       envio_automatico: config.verifactu.envio_automatico,
@@ -346,6 +399,9 @@ function sanitizeFiscalConfigForClient(input = {}) {
       certificado_alias: config.sii.certificado_alias,
       incluir_emitidas: config.sii.incluir_emitidas,
       incluir_recibidas: config.sii.incluir_recibidas,
+      sujeto: config.sii.sujeto,
+      motivo_obligacion: config.sii.motivo_obligacion,
+      plazo_dias: config.sii.plazo_dias,
     },
   };
 }

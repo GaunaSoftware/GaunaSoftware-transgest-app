@@ -77,8 +77,29 @@ function validatePeriodStatusChange(period, action, reason) {
   };
 }
 
+function buildPeriodCloseReadiness(stats = {}) {
+  const draftJournalEntries = Number(stats.draft_journal_entries || 0);
+  const pendingDepreciationDrafts = Number(stats.pending_depreciation_drafts || 0);
+  const pendingDepreciationReversals = Number(stats.pending_depreciation_reversals || 0);
+  const blockers = [];
+  if (draftJournalEntries > 0) blockers.push(`${draftJournalEntries} asiento(s) en borrador`);
+  if (pendingDepreciationDrafts > 0) blockers.push(`${pendingDepreciationDrafts} amortizacion(es) en borrador`);
+  if (pendingDepreciationReversals > 0) blockers.push(`${pendingDepreciationReversals} reverso(s) de amortizacion pendiente(s)`);
+  return {
+    ready: blockers.length === 0,
+    blockers,
+    counts: {
+      draft_journal_entries: draftJournalEntries,
+      pending_depreciation_drafts: pendingDepreciationDrafts,
+      pending_depreciation_reversals: pendingDepreciationReversals,
+    },
+    disclaimer: "Comprobacion operativa interna para cierre de periodo. No sustituye revision contable, fiscal ni legal.",
+  };
+}
+
 module.exports = {
   PERIOD_STATUSES,
+  buildPeriodCloseReadiness,
   getPeriodAction,
   validatePeriodStatusChange,
 };

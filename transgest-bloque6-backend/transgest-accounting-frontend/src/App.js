@@ -48,6 +48,7 @@ import {
   getMe,
   getOutboxEvents,
   getParties,
+  getPeriodCloseReadiness,
   getPeriods,
   getChartTemplates,
   getJournalEntries,
@@ -1661,9 +1662,20 @@ export default function App() {
     }
   }
 
-  function startPeriodAction(period, action) {
-    setPeriodAction({ period, action, reason: "" });
+  async function startPeriodAction(period, action) {
+    setPeriodAction({ period, action, reason: "", readiness: null, loading: action === "close" });
     setPeriodActionStatus(null);
+    if (action !== "close") return;
+    try {
+      const result = await getPeriodCloseReadiness(period.id);
+      setPeriodAction(prev => prev && prev.period.id === period.id && prev.action === action
+        ? { ...prev, loading: false, readiness: result.readiness }
+        : prev);
+    } catch (err) {
+      setPeriodAction(prev => prev && prev.period.id === period.id && prev.action === action
+        ? { ...prev, loading: false, readiness: { ready: false, blockers: [err.message], counts: {} } }
+        : prev);
+    }
   }
 
   async function handlePeriodStatusChange(event) {
@@ -4351,6 +4363,13 @@ export default function App() {
                     <strong>{periodActionLabels[periodAction.action]} periodo</strong>
                     <span>{periodAction.period.name}</span>
                   </div>
+                  {periodAction.action === "close" && (
+                    <div className="scope-note">
+                      {periodAction.loading && "Comprobando borradores y amortizaciones pendientes..."}
+                      {!periodAction.loading && periodAction.readiness?.ready && "Periodo listo para cierre operativo interno."}
+                      {!periodAction.loading && periodAction.readiness && !periodAction.readiness.ready && `Pendientes: ${periodAction.readiness.blockers.join("; ")}.`}
+                    </div>
+                  )}
                   <label>
                     <span>Motivo</span>
                     <input
@@ -4361,7 +4380,7 @@ export default function App() {
                     />
                   </label>
                   <div className="period-action-buttons">
-                    <button type="submit">{periodActionLabels[periodAction.action]}</button>
+                    <button type="submit" disabled={periodAction.action === "close" && (periodAction.loading || (periodAction.readiness && !periodAction.readiness.ready))}>{periodActionLabels[periodAction.action]}</button>
                     <button type="button" className="secondary" onClick={() => setPeriodAction(null)}>Cancelar</button>
                   </div>
                 </form>

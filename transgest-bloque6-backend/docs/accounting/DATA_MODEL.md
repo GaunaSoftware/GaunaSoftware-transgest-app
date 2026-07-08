@@ -108,6 +108,8 @@ Unicidad:
 
 Al cerrar un periodo se registran `closed_at` y `closed_by`. Al reabrirlo se limpia ese sello y queda la accion en `audit_log`/outbox con motivo obligatorio.
 
+Antes de cerrar un periodo, la API ejecuta una prevalidacion operativa y rechaza el cierre si existen asientos en borrador, amortizaciones en borrador o reversos de amortizacion pendientes asociados al periodo. Esta comprobacion queda disponible para UI mediante `GET /api/v1/periods/:id/close-readiness` y no sustituye revision contable, fiscal ni legal externa.
+
 ## Plan contable
 
 ### `accounting_standards`

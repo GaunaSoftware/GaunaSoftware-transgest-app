@@ -186,6 +186,7 @@ export async function selectCompany(companyId) {
 export const getFiscalYears = () => apiFetch("/fiscal-years");
 export const openFiscalYear = (data) => apiFetch("/fiscal-years", { method: "POST", body: data });
 export const getPeriods = () => apiFetch("/periods");
+export const getPeriodCloseReadiness = periodId => apiFetch(`/periods/${periodId}/close-readiness`);
 export const updatePeriodStatus = (periodId, data) => apiFetch(`/periods/${periodId}/status`, { method: "PATCH", body: data });
 
 export function getAccounts(filters = {}) {

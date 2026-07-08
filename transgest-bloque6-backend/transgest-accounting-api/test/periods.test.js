@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { getPeriodAction, validatePeriodStatusChange } = require("../src/domain/periods");
+const { buildPeriodCloseReadiness, getPeriodAction, validatePeriodStatusChange } = require("../src/domain/periods");
 
 test("acciones de periodo exponen permiso y evento esperado", () => {
   assert.equal(getPeriodAction("lock").permission, "periods.write");
@@ -35,4 +35,21 @@ test("reabrir periodo cerrado requiere motivo suficiente", () => {
   );
   const change = validatePeriodStatusChange({ status: "closed" }, "reopen", "Revision asesor");
   assert.equal(change.target_status, "open");
+});
+
+test("buildPeriodCloseReadiness bloquea cierre con borradores pendientes", () => {
+  const readiness = buildPeriodCloseReadiness({
+    draft_journal_entries: "2",
+    pending_depreciation_drafts: 1,
+    pending_depreciation_reversals: 0,
+  });
+  assert.equal(readiness.ready, false);
+  assert.deepEqual(readiness.counts, {
+    draft_journal_entries: 2,
+    pending_depreciation_drafts: 1,
+    pending_depreciation_reversals: 0,
+  });
+  assert.ok(readiness.blockers.some(item => item.includes("asiento")));
+  assert.ok(readiness.blockers.some(item => item.includes("amortizacion")));
+  assert.equal(buildPeriodCloseReadiness({}).ready, true);
 });

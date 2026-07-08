@@ -5,7 +5,7 @@ const db = require("../services/db");
 const { authenticate, requirePermission } = require("../middleware/auth");
 const { buildMonthlyPeriods, normalizeFiscalYearInput } = require("../domain/fiscalYears");
 const { hasPermission } = require("../domain/rbac");
-const { validatePeriodStatusChange } = require("../domain/periods");
+const { buildPeriodCloseReadiness, validatePeriodStatusChange } = require("../domain/periods");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
 const router = express.Router();
@@ -123,6 +123,48 @@ router.get("/periods", requirePermission("periods.read"), async (req, res) => {
   res.json({ data: rows });
 });
 
+async function loadPeriodCloseReadiness(client, companyId, periodId) {
+  const { rows } = await client.query(
+    `SELECT
+        COUNT(DISTINCT je.id) FILTER (WHERE je.status='draft')::int AS draft_journal_entries,
+        COUNT(DISTINCT dr.id) FILTER (WHERE dr.status='draft_created')::int AS pending_depreciation_drafts,
+        COUNT(DISTINCT dr.id) FILTER (WHERE dr.status='reversal_draft_created')::int AS pending_depreciation_reversals
+       FROM ${q("accounting_periods")} p
+       LEFT JOIN ${q("journal_entries")} je ON je.period_id=p.id AND je.company_id=p.company_id
+       LEFT JOIN ${q("depreciation_runs")} dr ON dr.period_id=p.id AND dr.company_id=p.company_id
+      WHERE p.id=$1 AND p.company_id=$2`,
+    [periodId, companyId]
+  );
+  return buildPeriodCloseReadiness(rows[0] || {});
+}
+
+router.get("/periods/:id/close-readiness", requirePermission("periods.read"), async (req, res, next) => {
+  try {
+    const selected = req.accountingUser.contexts.find(c => c.company_id === req.accountingUser.selected_company_id);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const result = await db.transaction(async client => {
+      const { rows } = await client.query(
+        `SELECT id, fiscal_year_id, period_number, name, status
+           FROM ${q("accounting_periods")}
+          WHERE id=$1 AND company_id=$2`,
+        [req.params.id, selected.company_id]
+      );
+      if (!rows.length) {
+        const err = new Error("Periodo no encontrado para la empresa seleccionada");
+        err.status = 404;
+        throw err;
+      }
+      return {
+        period: rows[0],
+        readiness: await loadPeriodCloseReadiness(client, selected.company_id, rows[0].id),
+      };
+    });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.patch("/periods/:id/status", async (req, res, next) => {
   try {
     const { action, reason } = req.body || {};
@@ -151,6 +193,15 @@ router.patch("/periods/:id/status", async (req, res, next) => {
         const err = new Error("Permiso contable denegado");
         err.status = 403;
         err.permission = change.permission;
+        throw err;
+      }
+      const closeReadiness = change.action === "close"
+        ? await loadPeriodCloseReadiness(client, selected.company_id, period.id)
+        : null;
+      if (closeReadiness && !closeReadiness.ready) {
+        const err = new Error(`No se puede cerrar el periodo: ${closeReadiness.blockers.join("; ")}`);
+        err.status = 409;
+        err.readiness = closeReadiness;
         throw err;
       }
 
@@ -192,6 +243,7 @@ router.patch("/periods/:id/status", async (req, res, next) => {
             reason: change.reason,
             closed_at: updatedPeriod.closed_at || null,
             closed_by: updatedPeriod.closed_by || null,
+            close_readiness: closeReadiness,
           }),
         ]
       );
@@ -212,6 +264,7 @@ router.patch("/periods/:id/status", async (req, res, next) => {
           reason: change.reason,
           closed_at: updatedPeriod.closed_at || null,
           closed_by: updatedPeriod.closed_by || null,
+          close_readiness: closeReadiness,
         },
       });
 

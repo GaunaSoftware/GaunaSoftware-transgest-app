@@ -13,6 +13,8 @@ const {
   normalizeJournalReversalInput,
   normalizeJournalQuery,
 } = require("../domain/journalEntries");
+const { ensureFiscalYearOpen } = require("../domain/fiscalYears");
+const { ensurePeriodOpen } = require("../domain/periods");
 const { buildCsv } = require("../domain/csv");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
@@ -221,6 +223,12 @@ router.post("/journal-entries/drafts", requirePermission("journal.write"), async
         [selected.company_id, input.fiscal_year_id, input.entry_date]
       );
       if (!period.rows.length) throw httpError("No existe un periodo para la fecha y ejercicio seleccionados", 409);
+      ensureFiscalYearOpen({
+        id: input.fiscal_year_id,
+        year_label: period.rows[0].year_label,
+        status: period.rows[0].fiscal_year_status,
+      }, "crear borradores de diario");
+      ensurePeriodOpen(period.rows[0], "crear borradores de diario");
 
       const accountIds = [...new Set(input.lines.map(line => line.account_id))];
       const accounts = await client.query(
@@ -350,7 +358,10 @@ router.put("/journal-entries/:id/draft", requirePermission("journal.write"), asy
       const entry = current.rows[0];
       if (entry.status === "posted") throw httpError("No se puede editar un asiento contabilizado", 409);
       if (entry.status === "cancelled") throw httpError("No se puede editar un borrador cancelado", 409);
-      if (entry.fiscal_year_status !== "open") throw httpError("El ejercicio no esta abierto", 409);
+      ensureFiscalYearOpen({
+        id: entry.fiscal_year_id,
+        status: entry.fiscal_year_status,
+      }, "editar borradores de diario");
 
       const input = normalizeJournalDraftUpdateInput(req.body, entry.fiscal_year_id, entry.idempotency_key);
       const requestHash = journalDraftRequestHash({
@@ -367,7 +378,7 @@ router.put("/journal-entries/:id/draft", requirePermission("journal.write"), asy
         [selected.company_id, entry.fiscal_year_id, input.entry_date]
       );
       if (!period.rows.length) throw httpError("No existe un periodo para la fecha y ejercicio seleccionados", 409);
-      if (period.rows[0].status !== "open") throw httpError(`El periodo ${period.rows[0].name} no esta abierto`, 409);
+      ensurePeriodOpen(period.rows[0], "editar borradores de diario");
 
       const accountIds = [...new Set(input.lines.map(line => line.account_id))];
       const accounts = await client.query(
@@ -487,7 +498,11 @@ router.post("/journal-entries/:id/reverse", requirePermission("journal.write"), 
       if (original.reversed_by_entry_id) {
         return { entry: await loadEntryWithLines(client, original.reversed_by_entry_id, selected.company_id), repeated: true };
       }
-      if (original.fiscal_year_status !== "open") throw httpError("El ejercicio no esta abierto", 409);
+      ensureFiscalYearOpen({
+        id: original.fiscal_year_id,
+        year_label: original.year_label,
+        status: original.fiscal_year_status,
+      }, "crear reversos de diario");
 
       const sourceLines = await client.query(
         `SELECT jl.*, a.code AS account_code, a.is_active, a.is_postable,
@@ -516,7 +531,7 @@ router.post("/journal-entries/:id/reverse", requirePermission("journal.write"), 
         [selected.company_id, original.fiscal_year_id, input.entry_date]
       );
       if (!period.rows.length) throw httpError("No existe un periodo para la fecha de reverso seleccionada", 409);
-      if (period.rows[0].status !== "open") throw httpError(`El periodo ${period.rows[0].name} no esta abierto`, 409);
+      ensurePeriodOpen(period.rows[0], "crear reversos de diario");
 
       const description = `Reverso asiento ${original.entry_number}: ${input.reason}`;
       const reversalLines = sourceLines.rows.map((line, index) => {
@@ -728,10 +743,12 @@ router.post("/journal-entries/:id/post", requirePermission("journal.post"), asyn
         throw httpError("El asiento ya esta contabilizado", 409);
       }
       if (entry.status === "cancelled") throw httpError("No se puede contabilizar un borrador cancelado", 409);
-      if (entry.period_status !== "open") {
-        throw httpError(`El periodo ${entry.period_name} no esta abierto`, 409);
-      }
-      if (entry.fiscal_year_status !== "open") throw httpError("El ejercicio no esta abierto", 409);
+      ensurePeriodOpen({ id: entry.period_id, name: entry.period_name, status: entry.period_status }, "contabilizar asientos");
+      ensureFiscalYearOpen({
+        id: entry.fiscal_year_id,
+        year_label: entry.year_label,
+        status: entry.fiscal_year_status,
+      }, "contabilizar asientos");
 
       const lines = await client.query(
         `SELECT jl.*, a.code AS account_code, a.is_active, a.is_postable,

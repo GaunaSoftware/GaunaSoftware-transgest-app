@@ -115,6 +115,8 @@ Al cerrar un periodo se registran `closed_at` y `closed_by`. Al reabrirlo se lim
 
 Antes de cerrar un periodo, la API ejecuta una prevalidacion operativa y rechaza el cierre si existen asientos en borrador, amortizaciones en borrador o reversos de amortizacion pendientes asociados al periodo. Esta comprobacion queda disponible para UI mediante `GET /api/v1/periods/:id/close-readiness` y no sustituye revision contable, fiscal ni legal externa.
 
+El Diario usa un guard compartido de dominio para impedir creacion, edicion, reverso o contabilizacion de asientos cuando el periodo destino no esta `open`. La misma ruta valida tambien que el ejercicio asociado siga abierto.
+
 ## Plan contable
 
 ### `accounting_standards`

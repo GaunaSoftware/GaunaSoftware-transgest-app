@@ -5,7 +5,12 @@ const {
   ensureFiscalYearOpen,
   validateFiscalYearStatusChange,
 } = require("../src/domain/fiscalYears");
-const { buildPeriodCloseReadiness, getPeriodAction, validatePeriodStatusChange } = require("../src/domain/periods");
+const {
+  buildPeriodCloseReadiness,
+  ensurePeriodOpen,
+  getPeriodAction,
+  validatePeriodStatusChange,
+} = require("../src/domain/periods");
 
 test("acciones de periodo exponen permiso y evento esperado", () => {
   assert.equal(getPeriodAction("lock").permission, "periods.write");
@@ -86,6 +91,18 @@ test("ensureFiscalYearOpen bloquea cambios ordinarios en ejercicios cerrados", (
   assert.equal(ensureFiscalYearOpen({ id: "fy-1", year_label: "2026", status: "open" }).id, "fy-1");
   assert.throws(
     () => ensureFiscalYearOpen({ id: "fy-1", year_label: "2026", status: "closed" }, "crear cuentas"),
+    /no esta abierto/
+  );
+});
+
+test("ensurePeriodOpen bloquea movimientos en periodos no abiertos", () => {
+  assert.equal(ensurePeriodOpen({ id: "p-1", name: "Enero", status: "open" }).id, "p-1");
+  assert.throws(
+    () => ensurePeriodOpen({ id: "p-1", name: "Enero", status: "locked" }, "crear borradores de diario"),
+    /no esta abierto/
+  );
+  assert.throws(
+    () => ensurePeriodOpen({ id: "p-2", name: "Febrero", status: "closed" }, "contabilizar asientos"),
     /no esta abierto/
   );
 });

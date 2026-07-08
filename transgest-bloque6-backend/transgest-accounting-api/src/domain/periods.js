@@ -97,9 +97,19 @@ function buildPeriodCloseReadiness(stats = {}) {
   };
 }
 
+function ensurePeriodOpen(period = {}, action = "operar") {
+  if (period.status !== "open") {
+    const err = new Error(`No se puede ${action}: el periodo ${period.name || period.id || ""} no esta abierto`);
+    err.status = 409;
+    throw err;
+  }
+  return period;
+}
+
 module.exports = {
   PERIOD_STATUSES,
   buildPeriodCloseReadiness,
+  ensurePeriodOpen,
   getPeriodAction,
   validatePeriodStatusChange,
 };

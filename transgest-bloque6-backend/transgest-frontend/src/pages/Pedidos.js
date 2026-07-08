@@ -8520,7 +8520,7 @@ export default function Pedidos() {
   const [loading,    setLoading]    = useState(true);
   const [loadError,  setLoadError]  = useState("");
   const _rangoSemanaActual = currentWeekRangeLocal();
-  const [filtroEst,  setFiltroEst]  = useState(() => focusPedido?.estado ? String(focusPedido.estado) : focusPedido?.pedido_id ? "todos" : "activos");
+  const [filtroEst,  setFiltroEst]  = useState(() => focusPedido?.estado ? String(focusPedido.estado) : "todos");
   const [filtroMes,  setFiltroMes]  = useState("");
   const [filtroFechasCustom, setFiltroFechasCustom] = useState(false);
   const [filtroDesde, setFiltroDesde] = useState("");
@@ -8568,7 +8568,7 @@ export default function Pedidos() {
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
   const _rangoMesActual = currentMonthRangeLocal();
   const filtroPeriodoActivo = filtroFechasCustom || Boolean(filtroMes);
-  const vistaMesActualPorDefecto = !filtroPeriodoActivo && !debouncedQ && !filtroCliente;
+  const vistaMesActualPorDefecto = !filtroPeriodoActivo;
 
   useEffect(() => {
     savePedidosCollapsedGroups(collapsedClientes);
@@ -8773,12 +8773,11 @@ export default function Pedidos() {
       else if (filtroEst !== "todos") { params.estado = filtroEst; }
       if (debouncedQ) params.q = debouncedQ;
       if (filtroCliente) params.cliente_id = filtroCliente;
-      const busquedaHistorica = Boolean(debouncedQ || filtroCliente);
       const aplicarRangoFechas = filtroFechasCustom || Boolean(filtroMes);
       const rangoMesActualCarga = currentMonthRangeLocal();
-      if (!busquedaHistorica && aplicarRangoFechas && filtroDesde) params.desde = filtroDesde;
-      if (!busquedaHistorica && aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
-      if (!busquedaHistorica && !aplicarRangoFechas) {
+      if (aplicarRangoFechas && filtroDesde) params.desde = filtroDesde;
+      if (aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
+      if (!aplicarRangoFechas) {
         params.desde = rangoMesActualCarga.desde;
         params.hasta = rangoMesActualCarga.hasta;
       }
@@ -9647,11 +9646,8 @@ export default function Pedidos() {
         ];
       })
     : usarAgrupadoCalendario ? pedidosAgrupados.flatMap(month => {
-        const showMonthGroup = pedidosAgrupados.length > 1;
         const monthCollapsed = !!collapsedClientes[month.key];
-        const entries = showMonthGroup
-          ? [{ _group: true, type: "month", key: month.key, label: month.label, count: month.count, collapsed: monthCollapsed }]
-          : [];
+        const entries = [{ _group: true, type: "month", key: month.key, label: month.label, count: month.count, collapsed: monthCollapsed }];
         if (monthCollapsed) return entries;
         month.weeks.forEach(week => {
           const weekCollapsed = !!collapsedClientes[week.key];
@@ -9855,8 +9851,8 @@ export default function Pedidos() {
           style={{...S.btn,background:soloCriticos?"#dc2626":"#fff",color:soloCriticos?"#fff":"#475569",border:soloCriticos?"1px solid #dc2626":"1px solid #dbe5ec"}}>
           {soloCriticos ? "Solo criticos" : "Ver criticos"}
         </button>
-        {(filtroEst!=="activos"||filtroDesde||filtroHasta||filtroMes||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
-          <button onClick={()=>{setFiltroEst("activos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);}}
+        {(filtroEst!=="todos"||filtroDesde||filtroHasta||filtroMes||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
+          <button onClick={()=>{setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);}}
             style={{...S.btn,background:"rgba(239,68,68,.12)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",fontSize:11,padding:"4px 10px"}}>Reset</button>
         )}
         {vistaMesActualPorDefecto && (

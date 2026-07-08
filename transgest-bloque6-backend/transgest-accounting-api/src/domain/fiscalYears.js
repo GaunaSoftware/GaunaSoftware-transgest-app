@@ -80,7 +80,72 @@ function buildMonthlyPeriods(startDateValue, endDateValue) {
   return periods;
 }
 
+function normalizeFiscalYearStatusReason(reason) {
+  const text = String(reason || "").trim();
+  if (text.length < 5 || text.length > 300) {
+    const err = new Error("reason debe tener entre 5 y 300 caracteres");
+    err.status = 400;
+    throw err;
+  }
+  return text;
+}
+
+function validateFiscalYearStatusChange(fiscalYear = {}, action, reason) {
+  const normalizedAction = String(action || "").trim().toLowerCase();
+  if (!["close", "reopen"].includes(normalizedAction)) {
+    const err = new Error("Accion de ejercicio no soportada");
+    err.status = 400;
+    throw err;
+  }
+  if (normalizedAction === "close" && fiscalYear.status !== "open") {
+    const err = new Error(`No se puede cerrar un ejercicio en estado ${fiscalYear.status}`);
+    err.status = 409;
+    throw err;
+  }
+  if (normalizedAction === "reopen" && fiscalYear.status !== "closed") {
+    const err = new Error(`No se puede reabrir un ejercicio en estado ${fiscalYear.status}`);
+    err.status = 409;
+    throw err;
+  }
+  return {
+    action: normalizedAction,
+    previous_status: fiscalYear.status,
+    target_status: normalizedAction === "close" ? "closed" : "open",
+    audit_action: normalizedAction === "close" ? "fiscal_year.closed" : "fiscal_year.reopened",
+    event_type: normalizedAction === "close" ? "AccountingFiscalYearClosed" : "AccountingFiscalYearReopened",
+    reason: normalizeFiscalYearStatusReason(reason),
+  };
+}
+
+function buildFiscalYearCloseReadiness(stats = {}) {
+  const openPeriods = Number(stats.open_periods || 0);
+  const lockedPeriods = Number(stats.locked_periods || 0);
+  const draftJournalEntries = Number(stats.draft_journal_entries || 0);
+  const pendingDepreciationDrafts = Number(stats.pending_depreciation_drafts || 0);
+  const pendingDepreciationReversals = Number(stats.pending_depreciation_reversals || 0);
+  const blockers = [];
+  if (openPeriods > 0) blockers.push(`${openPeriods} periodo(s) abierto(s)`);
+  if (lockedPeriods > 0) blockers.push(`${lockedPeriods} periodo(s) bloqueado(s)`);
+  if (draftJournalEntries > 0) blockers.push(`${draftJournalEntries} asiento(s) en borrador`);
+  if (pendingDepreciationDrafts > 0) blockers.push(`${pendingDepreciationDrafts} amortizacion(es) en borrador`);
+  if (pendingDepreciationReversals > 0) blockers.push(`${pendingDepreciationReversals} reverso(s) de amortizacion pendiente(s)`);
+  return {
+    ready: blockers.length === 0,
+    blockers,
+    counts: {
+      open_periods: openPeriods,
+      locked_periods: lockedPeriods,
+      draft_journal_entries: draftJournalEntries,
+      pending_depreciation_drafts: pendingDepreciationDrafts,
+      pending_depreciation_reversals: pendingDepreciationReversals,
+    },
+    disclaimer: "Comprobacion operativa interna para cierre de ejercicio. No genera regularizacion ni sustituye revision contable, fiscal o legal.",
+  };
+}
+
 module.exports = {
+  buildFiscalYearCloseReadiness,
   buildMonthlyPeriods,
   normalizeFiscalYearInput,
+  validateFiscalYearStatusChange,
 };

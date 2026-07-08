@@ -50,6 +50,8 @@ const depreciationRunReversalUpSql = fs.readFileSync(path.join(migrationsDir, "0
 const depreciationRunReversalDownSql = fs.readFileSync(path.join(migrationsDir, "022_depreciation_run_reversal.down.sql"), "utf8");
 const fixedAssetDisposalEntryTypeUpSql = fs.readFileSync(path.join(migrationsDir, "023_fixed_asset_disposal_entry_type.up.sql"), "utf8");
 const fixedAssetDisposalEntryTypeDownSql = fs.readFileSync(path.join(migrationsDir, "023_fixed_asset_disposal_entry_type.down.sql"), "utf8");
+const fiscalYearCloseMetadataUpSql = fs.readFileSync(path.join(migrationsDir, "024_fiscal_year_close_metadata.up.sql"), "utf8");
+const fiscalYearCloseMetadataDownSql = fs.readFileSync(path.join(migrationsDir, "024_fiscal_year_close_metadata.down.sql"), "utf8");
 
 const requiredTables = [
   "accounting_tenants",
@@ -244,6 +246,17 @@ test("migracion de metadatos de cierre de periodos conserva trazabilidad", () =>
   assert.match(periodCloseMetadataDownSql, /closed_at IS NOT NULL/i);
   assert.match(periodCloseMetadataDownSql, /RAISE EXCEPTION/i);
   assert.match(periodCloseMetadataDownSql, /DROP COLUMN IF EXISTS closed_by/i);
+});
+
+test("migracion de metadatos de cierre de ejercicios conserva trazabilidad", () => {
+  assert.match(fiscalYearCloseMetadataUpSql, /ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ/i);
+  assert.match(fiscalYearCloseMetadataUpSql, /ADD COLUMN IF NOT EXISTS closed_by UUID REFERENCES accounting\.accounting_users\(id\) ON DELETE SET NULL/i);
+  assert.match(fiscalYearCloseMetadataUpSql, /ADD COLUMN IF NOT EXISTS status_reason TEXT/i);
+  assert.match(fiscalYearCloseMetadataUpSql, /idx_fiscal_years_closed/i);
+  assert.match(fiscalYearCloseMetadataDownSql, /closed_at IS NOT NULL/i);
+  assert.match(fiscalYearCloseMetadataDownSql, /status_reason IS NOT NULL/i);
+  assert.match(fiscalYearCloseMetadataDownSql, /RAISE EXCEPTION/i);
+  assert.match(fiscalYearCloseMetadataDownSql, /DROP COLUMN IF EXISTS closed_by/i);
 });
 
 test("migracion de inmovilizado crea registro inicial y permisos reversibles", () => {

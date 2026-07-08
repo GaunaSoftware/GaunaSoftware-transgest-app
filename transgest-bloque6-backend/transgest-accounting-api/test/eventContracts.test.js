@@ -63,6 +63,20 @@ test("verifyEventIntegrity detecta payload manipulado", () => {
 });
 
 test("contratos de cuenta exigen trazabilidad de ejercicio y estado", () => {
+  assert.doesNotThrow(() => validateEventContract("AccountingFiscalYearClosed", 1, {
+    fiscal_year_id: "year-id",
+    year_label: "2026",
+    previous_status: "open",
+    status: "closed",
+    reason: "Cierre ejercicio",
+  }));
+  assert.doesNotThrow(() => validateEventContract("AccountingFiscalYearReopened", 1, {
+    fiscal_year_id: "year-id",
+    year_label: "2026",
+    previous_status: "closed",
+    status: "open",
+    reason: "Revision asesor",
+  }));
   assert.doesNotThrow(() => validateEventContract("AccountingAccountCreated", 1, {
     account_id: "account-id",
     fiscal_year_id: "year-id",

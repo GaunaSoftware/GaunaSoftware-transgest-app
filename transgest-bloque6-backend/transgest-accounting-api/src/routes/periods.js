@@ -3,7 +3,12 @@ const express = require("express");
 const config = require("../services/config");
 const db = require("../services/db");
 const { authenticate, requirePermission } = require("../middleware/auth");
-const { buildMonthlyPeriods, normalizeFiscalYearInput } = require("../domain/fiscalYears");
+const {
+  buildFiscalYearCloseReadiness,
+  buildMonthlyPeriods,
+  normalizeFiscalYearInput,
+  validateFiscalYearStatusChange,
+} = require("../domain/fiscalYears");
 const { hasPermission } = require("../domain/rbac");
 const { buildPeriodCloseReadiness, validatePeriodStatusChange } = require("../domain/periods");
 const { enqueueOutboxEvent } = require("../services/outbox");
@@ -105,6 +110,144 @@ router.post("/fiscal-years", requirePermission("fiscal_years.write"), async (req
     });
 
     res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+async function loadFiscalYearCloseReadiness(client, companyId, fiscalYearId) {
+  const { rows } = await client.query(
+    `SELECT
+        COUNT(DISTINCT p.id) FILTER (WHERE p.status='open')::int AS open_periods,
+        COUNT(DISTINCT p.id) FILTER (WHERE p.status='locked')::int AS locked_periods,
+        COUNT(DISTINCT je.id) FILTER (WHERE je.status='draft')::int AS draft_journal_entries,
+        COUNT(DISTINCT dr.id) FILTER (WHERE dr.status='draft_created')::int AS pending_depreciation_drafts,
+        COUNT(DISTINCT dr.id) FILTER (WHERE dr.status='reversal_draft_created')::int AS pending_depreciation_reversals
+       FROM ${q("fiscal_years")} fy
+       LEFT JOIN ${q("accounting_periods")} p ON p.fiscal_year_id=fy.id AND p.company_id=fy.company_id
+       LEFT JOIN ${q("journal_entries")} je ON je.fiscal_year_id=fy.id AND je.company_id=fy.company_id
+       LEFT JOIN ${q("depreciation_runs")} dr ON dr.fiscal_year_id=fy.id AND dr.company_id=fy.company_id
+      WHERE fy.id=$1 AND fy.company_id=$2`,
+    [fiscalYearId, companyId]
+  );
+  return buildFiscalYearCloseReadiness(rows[0] || {});
+}
+
+router.get("/fiscal-years/:id/close-readiness", requirePermission("fiscal_years.read"), async (req, res, next) => {
+  try {
+    const selected = req.accountingUser.contexts.find(c => c.company_id === req.accountingUser.selected_company_id);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const result = await db.transaction(async client => {
+      const { rows } = await client.query(
+        `SELECT id, year_label, status
+           FROM ${q("fiscal_years")}
+          WHERE id=$1 AND company_id=$2`,
+        [req.params.id, selected.company_id]
+      );
+      if (!rows.length) {
+        const err = new Error("Ejercicio no encontrado para la empresa seleccionada");
+        err.status = 404;
+        throw err;
+      }
+      return {
+        fiscal_year: rows[0],
+        readiness: await loadFiscalYearCloseReadiness(client, selected.company_id, rows[0].id),
+      };
+    });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch("/fiscal-years/:id/status", requirePermission("fiscal_years.write"), async (req, res, next) => {
+  try {
+    const selected = req.accountingUser.contexts.find(c => c.company_id === req.accountingUser.selected_company_id);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const { action, reason } = req.body || {};
+    const result = await db.transaction(async client => {
+      const { rows } = await client.query(
+        `SELECT *
+           FROM ${q("fiscal_years")}
+          WHERE id=$1 AND company_id=$2
+          FOR UPDATE`,
+        [req.params.id, selected.company_id]
+      );
+      if (!rows.length) {
+        const err = new Error("Ejercicio no encontrado para la empresa seleccionada");
+        err.status = 404;
+        throw err;
+      }
+      const fiscalYear = rows[0];
+      const change = validateFiscalYearStatusChange(fiscalYear, action, reason);
+      const closeReadiness = change.action === "close"
+        ? await loadFiscalYearCloseReadiness(client, selected.company_id, fiscalYear.id)
+        : null;
+      if (closeReadiness && !closeReadiness.ready) {
+        const err = new Error(`No se puede cerrar el ejercicio: ${closeReadiness.blockers.join("; ")}`);
+        err.status = 409;
+        err.readiness = closeReadiness;
+        throw err;
+      }
+      const { rows: updatedRows } = await client.query(
+        `UPDATE ${q("fiscal_years")}
+            SET status=$1,
+                closed_at=$2,
+                closed_by=$3,
+                status_reason=$4,
+                updated_at=NOW()
+          WHERE id=$5
+          RETURNING *`,
+        [
+          change.target_status,
+          change.action === "close" ? new Date().toISOString() : null,
+          change.action === "close" ? req.accountingUser.id : null,
+          change.reason,
+          fiscalYear.id,
+        ]
+      );
+      const updatedFiscalYear = updatedRows[0];
+      await client.query(
+        `INSERT INTO ${q("audit_log")}
+           (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+         VALUES ($1,$2,'user',$3,$4,'fiscal_year',$5,$6,$7::jsonb)`,
+        [
+          selected.tenant_id,
+          selected.company_id,
+          req.accountingUser.id,
+          change.audit_action,
+          updatedFiscalYear.id,
+          req.id || null,
+          JSON.stringify({
+            previous_status: change.previous_status,
+            status: updatedFiscalYear.status,
+            reason: change.reason,
+            closed_at: updatedFiscalYear.closed_at || null,
+            closed_by: updatedFiscalYear.closed_by || null,
+            close_readiness: closeReadiness,
+          }),
+        ]
+      );
+      await enqueueOutboxEvent(client, {
+        tenant_id: selected.tenant_id,
+        company_id: selected.company_id,
+        event_type: change.event_type,
+        aggregate_type: "fiscal_year",
+        aggregate_id: updatedFiscalYear.id,
+        schema_version: 1,
+        payload: {
+          fiscal_year_id: updatedFiscalYear.id,
+          year_label: updatedFiscalYear.year_label,
+          previous_status: change.previous_status,
+          status: updatedFiscalYear.status,
+          reason: change.reason,
+          closed_at: updatedFiscalYear.closed_at || null,
+          closed_by: updatedFiscalYear.closed_by || null,
+        },
+      });
+      return { fiscal_year: updatedFiscalYear };
+    });
+    res.json(result);
   } catch (err) {
     next(err);
   }

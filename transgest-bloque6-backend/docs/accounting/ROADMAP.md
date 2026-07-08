@@ -4,9 +4,9 @@ Fecha: 2026-06-12
 
 ## Estado global estimado
 
-Estimacion de finalizacion del modulo completo: **55%**.
+Estimacion de finalizacion del modulo completo: **56%**.
 
-Esta cifra mide TransGest Contabilidad frente al objetivo de una solucion contable profesional para pymes espanolas, no solo frente a la Fase 1 tecnica. El avance actual cubre fundacion SaaS, SSO, multiempresa, RBAC, auditoria, outbox, plan contable manual, ejercicios/periodos, Diario manual, Mayor, informes preliminares, terceros, cartera manual de vencimientos, tesoreria bancaria manual, importacion CSV manual de extractos con historial de lotes, conciliacion manual exacta uno-a-uno, sugerencias asistidas de conciliacion, reverso auditado de conciliaciones, ignorar/reabrir movimientos bancarios con motivo e inmovilizado preliminar con plan de amortizacion lineal, generacion controlada, contabilizacion sincronizada, cancelacion trazable de borradores, reverso sincronizado de amortizaciones contabilizadas, baja asistida con bloqueo de pendientes, borrador contable revisable de baja por retirada o venta preliminar, sincronizacion de estado al contabilizar la baja, restauracion trazable del activo al contabilizar el reverso de esa baja, paquete de asesoria con inmovilizado exportable y prevalidacion de cierre de periodos. Quedan fuera todavia facturacion fiscal centralizada, IVA, facturas emitidas/recibidas, conciliacion bancaria automatica, importaciones bancarias normalizadas como Cuaderno 43, contabilizacion masiva de amortizaciones, bajas con factura/IVA, cierres de ejercicio/regularizacion avanzados, adaptadores regulatorios y validacion legal externa.
+Esta cifra mide TransGest Contabilidad frente al objetivo de una solucion contable profesional para pymes espanolas, no solo frente a la Fase 1 tecnica. El avance actual cubre fundacion SaaS, SSO, multiempresa, RBAC, auditoria, outbox, plan contable manual, ejercicios/periodos, Diario manual, Mayor, informes preliminares, terceros, cartera manual de vencimientos, tesoreria bancaria manual, importacion CSV manual de extractos con historial de lotes, conciliacion manual exacta uno-a-uno, sugerencias asistidas de conciliacion, reverso auditado de conciliaciones, ignorar/reabrir movimientos bancarios con motivo e inmovilizado preliminar con plan de amortizacion lineal, generacion controlada, contabilizacion sincronizada, cancelacion trazable de borradores, reverso sincronizado de amortizaciones contabilizadas, baja asistida con bloqueo de pendientes, borrador contable revisable de baja por retirada o venta preliminar, sincronizacion de estado al contabilizar la baja, restauracion trazable del activo al contabilizar el reverso de esa baja, paquete de asesoria con inmovilizado exportable, prevalidacion de cierre de periodos y cierre/reapertura operativa de ejercicios. Quedan fuera todavia facturacion fiscal centralizada, IVA, facturas emitidas/recibidas, conciliacion bancaria automatica, importaciones bancarias normalizadas como Cuaderno 43, contabilizacion masiva de amortizaciones, bajas con factura/IVA, asientos de regularizacion/cierre avanzados, adaptadores regulatorios y validacion legal externa.
 
 No se declara cumplimiento legal por el estado del codigo. Cualquier ambito fiscal, VERI*FACTU, factura electronica B2B, SII o conservacion documental requiere confirmacion con fuente oficial aplicable, asesor fiscal y/o revision juridica.
 
@@ -91,6 +91,7 @@ Estado Fase 1:
 - Implementada apertura transaccional de ejercicios con periodos mensuales, auditoria y outbox.
 - Implementadas transiciones basicas de periodo (`lock`, `unlock`, `close`, `reopen`) con RBAC, motivo obligatorio, auditoria y outbox.
 - Implementada prevalidacion de cierre de periodo: bloquea el cierre si quedan asientos borrador, amortizaciones en borrador o reversos de amortizacion pendientes, y expone consulta de readiness para la UI.
+- Implementado cierre/reapertura operativa de ejercicios: metadata de cierre, motivo, auditoria, outbox, readiness y bloqueo si hay periodos no cerrados o pendientes contables.
 - Implementada consulta read-only de `audit_log` con permiso `audit.read`, filtros basicos y aislamiento por empresa seleccionada.
 - Implementado `accounting-worker` para consumo outbox con lease, reintentos, backoff y deduplicacion mediante `processed_events`.
 - Implementados contratos v1 de eventos, enqueue centralizado y verificacion SHA-256 de integridad del payload.
@@ -400,6 +401,12 @@ Criterios de aceptacion:
 - Reapertura requiere permiso y motivo.
 - Cierre genera auditoria append-only.
 - Informes cerrados pueden reproducirse.
+
+Estado parcial:
+
+- Implementada prevalidacion de cierre de periodo y ejercicio sin generar asientos automaticos.
+- Implementado cierre/reapertura de ejercicio con motivo, auditoria, outbox y metadatos `closed_at`/`closed_by`.
+- Pendiente regularizacion, asiento de cierre/apertura, bloqueo irreversible configurable y validacion externa.
 
 ## Entrega 11 - VERI*FACTU adapter
 

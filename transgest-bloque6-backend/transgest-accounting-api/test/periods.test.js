@@ -1,5 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const {
+  buildFiscalYearCloseReadiness,
+  validateFiscalYearStatusChange,
+} = require("../src/domain/fiscalYears");
 const { buildPeriodCloseReadiness, getPeriodAction, validatePeriodStatusChange } = require("../src/domain/periods");
 
 test("acciones de periodo exponen permiso y evento esperado", () => {
@@ -52,4 +56,27 @@ test("buildPeriodCloseReadiness bloquea cierre con borradores pendientes", () =>
   assert.ok(readiness.blockers.some(item => item.includes("asiento")));
   assert.ok(readiness.blockers.some(item => item.includes("amortizacion")));
   assert.equal(buildPeriodCloseReadiness({}).ready, true);
+});
+
+test("ejercicio solo cierra abierto y exige todos los periodos cerrados", () => {
+  const close = validateFiscalYearStatusChange({ status: "open" }, "close", "Cierre ejercicio");
+  assert.equal(close.target_status, "closed");
+  assert.equal(close.event_type, "AccountingFiscalYearClosed");
+  const reopen = validateFiscalYearStatusChange({ status: "closed" }, "reopen", "Revision asesor");
+  assert.equal(reopen.target_status, "open");
+  assert.equal(reopen.event_type, "AccountingFiscalYearReopened");
+  assert.throws(() => validateFiscalYearStatusChange({ status: "open" }, "reopen", "Revision asesor"), /No se puede reabrir/);
+
+  const readiness = buildFiscalYearCloseReadiness({
+    open_periods: 1,
+    locked_periods: 2,
+    draft_journal_entries: 3,
+    pending_depreciation_drafts: 0,
+    pending_depreciation_reversals: 1,
+  });
+  assert.equal(readiness.ready, false);
+  assert.equal(readiness.counts.open_periods, 1);
+  assert.ok(readiness.blockers.some(item => item.includes("periodo")));
+  assert.ok(readiness.blockers.some(item => item.includes("asiento")));
+  assert.equal(buildFiscalYearCloseReadiness({}).ready, true);
 });

@@ -4,6 +4,12 @@ const EVENT_CONTRACTS = {
   AccountingFiscalYearOpened: {
     1: ["fiscal_year_id", "year_label", "start_date", "end_date", "period_count"],
   },
+  AccountingFiscalYearClosed: {
+    1: ["fiscal_year_id", "year_label", "previous_status", "status", "reason"],
+  },
+  AccountingFiscalYearReopened: {
+    1: ["fiscal_year_id", "year_label", "previous_status", "status", "reason"],
+  },
   AccountingPeriodLocked: {
     1: ["period_id", "fiscal_year_id", "period_number", "previous_status", "status", "reason"],
   },

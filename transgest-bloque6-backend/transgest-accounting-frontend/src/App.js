@@ -41,6 +41,7 @@ import {
   getExternalIntegrations,
   getExternalImportBatches,
   getExternalImportBatchPreview,
+  getFiscalYearCloseReadiness,
   getFiscalYears,
   getFixedAssetDepreciationPlan,
   getFixedAssetDisposalReadiness,
@@ -70,6 +71,7 @@ import {
   getTrialBalance,
   updateJournalDraft,
   updateExternalImportBatchStatus,
+  updateFiscalYearStatus,
   updateFixedAssetStatus,
   updateBankTransactionStatus,
   updateMaturityStatus,
@@ -362,6 +364,11 @@ const periodActionLabels = {
   reopen: "Reabrir",
 };
 
+const fiscalYearActionLabels = {
+  close: "Cerrar",
+  reopen: "Reabrir",
+};
+
 function statusTone(status) {
   if (status === "open") return "ok";
   if (status === "locked") return "warning";
@@ -375,6 +382,14 @@ function availablePeriodActions(period, permissions) {
   if (period.status === "open" && canWrite) return ["lock", "close"];
   if (period.status === "locked" && canWrite) return ["unlock", "close"];
   if (period.status === "closed" && canReopen) return ["reopen"];
+  return [];
+}
+
+function availableFiscalYearActions(year, permissions) {
+  const canWrite = permissions.includes("fiscal_years.write");
+  if (!canWrite) return [];
+  if (year.status === "open") return ["close"];
+  if (year.status === "closed") return ["reopen"];
   return [];
 }
 
@@ -539,6 +554,8 @@ export default function App() {
     };
   });
   const [openYearStatus, setOpenYearStatus] = useState(null);
+  const [fiscalYearAction, setFiscalYearAction] = useState(null);
+  const [fiscalYearActionStatus, setFiscalYearActionStatus] = useState(null);
   const [periodAction, setPeriodAction] = useState(null);
   const [periodActionStatus, setPeriodActionStatus] = useState(null);
   const [accounts, setAccounts] = useState([]);
@@ -1657,6 +1674,48 @@ export default function App() {
       setError(err);
       setOpenYearStatus({
         tone: err.status === 409 ? "warning" : "danger",
+        text: err.message,
+      });
+    }
+  }
+
+  async function startFiscalYearAction(year, action) {
+    setFiscalYearAction({ year, action, reason: "", readiness: null, loading: action === "close" });
+    setFiscalYearActionStatus(null);
+    if (action !== "close") return;
+    try {
+      const result = await getFiscalYearCloseReadiness(year.id);
+      setFiscalYearAction(prev => prev && prev.year.id === year.id && prev.action === action
+        ? { ...prev, loading: false, readiness: result.readiness }
+        : prev);
+    } catch (err) {
+      setFiscalYearAction(prev => prev && prev.year.id === year.id && prev.action === action
+        ? { ...prev, loading: false, readiness: { ready: false, blockers: [err.message], counts: {} } }
+        : prev);
+    }
+  }
+
+  async function handleFiscalYearStatusChange(event) {
+    event.preventDefault();
+    if (!fiscalYearAction) return;
+    setError(null);
+    setFiscalYearActionStatus(null);
+    try {
+      const result = await updateFiscalYearStatus(fiscalYearAction.year.id, {
+        action: fiscalYearAction.action,
+        reason: fiscalYearAction.reason,
+      });
+      setFiscalYearActionStatus({
+        tone: "ok",
+        text: `${fiscalYearActionLabels[fiscalYearAction.action]} aplicado a ${result.fiscal_year.year_label}.`,
+      });
+      setFiscalYearAction(null);
+      await refreshPeriods();
+      await refreshDashboard();
+    } catch (err) {
+      setError(err);
+      setFiscalYearActionStatus({
+        tone: err.status === 403 ? "danger" : "warning",
         text: err.message,
       });
     }
@@ -4329,11 +4388,56 @@ export default function App() {
             <article className="panel">
               <h2>Ejercicios</h2>
               {fiscalYears.length ? fiscalYears.map(year => (
-                <div className="list-item" key={year.id}>
-                  <strong>{year.year_label}</strong>
-                  <span>{String(year.start_date).slice(0,10)} - {String(year.end_date).slice(0,10)} - {year.status}</span>
+                <div className="list-item period-item" key={year.id}>
+                  <div>
+                    <strong>{year.year_label}</strong>
+                    <span>{String(year.start_date).slice(0,10)} - {String(year.end_date).slice(0,10)}</span>
+                    {year.status_reason && <small>{year.status_reason}</small>}
+                    {year.status === "closed" && year.closed_at && <small>Cerrado | {formatDateTime(year.closed_at)}</small>}
+                  </div>
+                  <div className="period-actions">
+                    <StatusBadge tone={statusTone(year.status)} text={year.status} />
+                    {availableFiscalYearActions(year, permissions).map(action => (
+                      <button key={action} onClick={() => startFiscalYearAction(year, action)}>
+                        {fiscalYearActionLabels[action]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )) : <EmptyState title="Sin ejercicios" detail="Aun no hay ejercicios contables para esta empresa." />}
+              {fiscalYearAction && (
+                <form className="period-action-form" onSubmit={handleFiscalYearStatusChange}>
+                  <div>
+                    <strong>{fiscalYearActionLabels[fiscalYearAction.action]} ejercicio</strong>
+                    <span>{fiscalYearAction.year.year_label}</span>
+                  </div>
+                  {fiscalYearAction.action === "close" && (
+                    <div className="scope-note">
+                      {fiscalYearAction.loading && "Comprobando periodos y borradores pendientes..."}
+                      {!fiscalYearAction.loading && fiscalYearAction.readiness?.ready && "Ejercicio listo para cierre operativo interno."}
+                      {!fiscalYearAction.loading && fiscalYearAction.readiness && !fiscalYearAction.readiness.ready && `Pendientes: ${fiscalYearAction.readiness.blockers.join("; ")}.`}
+                    </div>
+                  )}
+                  <label>
+                    <span>Motivo</span>
+                    <input
+                      value={fiscalYearAction.reason}
+                      onChange={e => setFiscalYearAction(prev => ({ ...prev, reason: e.target.value }))}
+                      minLength={5}
+                      required
+                    />
+                  </label>
+                  <div className="period-action-buttons">
+                    <button type="submit" disabled={fiscalYearAction.action === "close" && (fiscalYearAction.loading || (fiscalYearAction.readiness && !fiscalYearAction.readiness.ready))}>{fiscalYearActionLabels[fiscalYearAction.action]}</button>
+                    <button type="button" className="secondary" onClick={() => setFiscalYearAction(null)}>Cancelar</button>
+                  </div>
+                </form>
+              )}
+              {fiscalYearActionStatus && (
+                <div className="form-status">
+                  <StatusBadge tone={fiscalYearActionStatus.tone} text={fiscalYearActionStatus.text} />
+                </div>
+              )}
             </article>
             <article className="panel">
               <h2>Periodos</h2>

@@ -82,10 +82,13 @@ Unicidad:
 - `status` (`draft`, `open`, `closing`, `closed`, `archived`)
 - `closed_at`
 - `closed_by`
+- `status_reason`
 
 Unicidad:
 
 - `(company_id, year_label)`
+
+El cierre/reapertura operativo de ejercicio registra motivo, `closed_at`, `closed_by`, auditoria y outbox. Antes de cerrar, la API comprueba que todos los periodos esten cerrados y que no queden asientos borrador, amortizaciones en borrador ni reversos de amortizacion pendientes. No genera todavia asientos de regularizacion, cierre o apertura.
 
 ### `accounting_periods`
 

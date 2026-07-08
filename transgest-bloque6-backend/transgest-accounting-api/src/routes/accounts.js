@@ -8,6 +8,7 @@ const {
   normalizeAccountQuery,
   normalizeAccountStatusInput,
 } = require("../domain/accounts");
+const { ensureFiscalYearOpen } = require("../domain/fiscalYears");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
 const router = express.Router();
@@ -64,7 +65,7 @@ router.post("/accounts", requirePermission("accounts.write"), async (req, res, n
 
     const account = await db.transaction(async client => {
       const fiscalYear = await client.query(
-        `SELECT id FROM ${q("fiscal_years")} WHERE id=$1 AND company_id=$2`,
+        `SELECT id, year_label, status FROM ${q("fiscal_years")} WHERE id=$1 AND company_id=$2`,
         [fiscalYearId, selected.company_id]
       );
       if (!fiscalYear.rows.length) {
@@ -72,6 +73,7 @@ router.post("/accounts", requirePermission("accounts.write"), async (req, res, n
         error.status = 404;
         throw error;
       }
+      ensureFiscalYearOpen(fiscalYear.rows[0], "crear cuentas");
 
       if (input.parent_account_id) {
         const parent = await client.query(
@@ -159,7 +161,11 @@ router.patch("/accounts/:id/status", requirePermission("accounts.write"), async 
 
     const account = await db.transaction(async client => {
       const current = await client.query(
-        `SELECT * FROM ${q("accounts")} WHERE id=$1 AND company_id=$2 FOR UPDATE`,
+        `SELECT a.*, fy.year_label, fy.status AS fiscal_year_status
+           FROM ${q("accounts")} a
+           JOIN ${q("fiscal_years")} fy ON fy.id=a.fiscal_year_id
+          WHERE a.id=$1 AND a.company_id=$2
+          FOR UPDATE OF a, fy`,
         [req.params.id, selected.company_id]
       );
       if (!current.rows.length) {
@@ -167,6 +173,11 @@ router.patch("/accounts/:id/status", requirePermission("accounts.write"), async 
         error.status = 404;
         throw error;
       }
+      ensureFiscalYearOpen({
+        id: current.rows[0].fiscal_year_id,
+        year_label: current.rows[0].year_label,
+        status: current.rows[0].fiscal_year_status,
+      }, "cambiar cuentas");
       if (current.rows[0].is_active === input.is_active) {
         const error = new Error(`La cuenta ya esta ${input.is_active ? "activa" : "inactiva"}`);
         error.status = 409;

@@ -9,6 +9,7 @@ const {
   normalizeTemplateSnapshotInput,
   templateChecksum,
 } = require("../domain/chartTemplates");
+const { ensureFiscalYearOpen } = require("../domain/fiscalYears");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
 const router = express.Router();
@@ -240,6 +241,7 @@ router.post("/chart-templates/:id/import", requirePermission("templates.write"),
 
       const template = await loadAccessibleTemplate(client, req.params.id, selected.company_id);
       const fiscalYear = await loadFiscalYear(client, input.fiscal_year_id, selected.company_id, true);
+      ensureFiscalYearOpen(fiscalYear, "importar plantillas en el plan contable");
       const previousImport = await client.query(
         `SELECT id FROM ${q("chart_template_imports")}
           WHERE company_id=$1 AND fiscal_year_id=$2 AND template_id=$3`,

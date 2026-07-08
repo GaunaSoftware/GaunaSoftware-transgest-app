@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   buildFiscalYearCloseReadiness,
+  ensureFiscalYearOpen,
   validateFiscalYearStatusChange,
 } = require("../src/domain/fiscalYears");
 const { buildPeriodCloseReadiness, getPeriodAction, validatePeriodStatusChange } = require("../src/domain/periods");
@@ -79,4 +80,12 @@ test("ejercicio solo cierra abierto y exige todos los periodos cerrados", () => 
   assert.ok(readiness.blockers.some(item => item.includes("periodo")));
   assert.ok(readiness.blockers.some(item => item.includes("asiento")));
   assert.equal(buildFiscalYearCloseReadiness({}).ready, true);
+});
+
+test("ensureFiscalYearOpen bloquea cambios ordinarios en ejercicios cerrados", () => {
+  assert.equal(ensureFiscalYearOpen({ id: "fy-1", year_label: "2026", status: "open" }).id, "fy-1");
+  assert.throws(
+    () => ensureFiscalYearOpen({ id: "fy-1", year_label: "2026", status: "closed" }, "crear cuentas"),
+    /no esta abierto/
+  );
 });

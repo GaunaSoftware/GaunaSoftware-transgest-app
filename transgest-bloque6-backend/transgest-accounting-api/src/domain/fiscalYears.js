@@ -143,9 +143,19 @@ function buildFiscalYearCloseReadiness(stats = {}) {
   };
 }
 
+function ensureFiscalYearOpen(fiscalYear = {}, action = "operar") {
+  if (fiscalYear.status !== "open") {
+    const err = new Error(`No se puede ${action}: el ejercicio ${fiscalYear.year_label || fiscalYear.id || ""} no esta abierto`);
+    err.status = 409;
+    throw err;
+  }
+  return fiscalYear;
+}
+
 module.exports = {
   buildFiscalYearCloseReadiness,
   buildMonthlyPeriods,
+  ensureFiscalYearOpen,
   normalizeFiscalYearInput,
   validateFiscalYearStatusChange,
 };

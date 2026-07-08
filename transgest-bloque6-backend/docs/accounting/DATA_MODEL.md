@@ -90,6 +90,8 @@ Unicidad:
 
 El cierre/reapertura operativo de ejercicio registra motivo, `closed_at`, `closed_by`, auditoria y outbox. Antes de cerrar, la API comprueba que todos los periodos esten cerrados y que no queden asientos borrador, amortizaciones en borrador ni reversos de amortizacion pendientes. No genera todavia asientos de regularizacion, cierre o apertura.
 
+Un ejercicio con estado distinto de `open` bloquea cambios ordinarios del plan contable: alta de cuentas, activacion/desactivacion de cuentas e importacion de plantillas. La creacion de una plantilla interna desde un ejercicio cerrado sigue permitida porque solo toma una instantanea de lectura.
+
 ### `accounting_periods`
 
 - `id`

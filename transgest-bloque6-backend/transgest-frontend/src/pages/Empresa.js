@@ -114,6 +114,8 @@ export default function Empresa() {
     smtp_from:"", smtp_from_nombre:"TransGest TMS",
     envio_facturas_auto: false,
     envio_avisos_carga_auto: false,
+    ai_inbox_enabled: false,
+    ai_inbox_email: "",
     asunto_factura:"Factura {numero} - {empresa}",
     cuerpo_factura:"Estimado/a {cliente},\n\nAdjunto encontrará la factura número {numero} con fecha {fecha} por importe de {total} €.\n\nQuedamos a su disposición para cualquier consulta.\n\nAtentamente,\n{empresa}",
     asunto_carga:"Nuevo pedido asignado - {numero}",
@@ -2298,6 +2300,27 @@ export default function Empresa() {
                 </button>
               </div>
             )}
+          </div>
+
+          <div style={S.section}>
+            <div style={S.secTitle}>Buzon IA para pedidos automaticos</div>
+            <div style={S.info}>
+              Indica el correo operativo al que los clientes enviaran pedidos para que la Bandeja IA los convierta en solicitudes. Usa una cuenta de la empresa o un alias reenviado a ella.
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+              <input type="checkbox" id="ai_inbox_enabled" checked={!!emailCfg.ai_inbox_enabled} onChange={fc("ai_inbox_enabled")} disabled={!esGerente}
+                style={{ width:16, height:16, accentColor:"var(--accent-l)" }}/>
+              <label htmlFor="ai_inbox_enabled" style={{ fontSize:13, color:"var(--text2)", cursor:"pointer" }}>
+                Activar recepcion de pedidos por correo IA
+              </label>
+            </div>
+            <div>
+              <label style={S.lbl}>Correo IA de pedidos</label>
+              <input type="email" style={S.inp} value={emailCfg.ai_inbox_email || ""} onChange={fc("ai_inbox_email")} placeholder="pedidos@empresa.com" disabled={!esGerente}/>
+              <div style={{ fontSize:10, color:"var(--text5)", marginTop:3 }}>
+                La Bandeja IA usara este buzon como canal de entrada. Si no hay SMTP configurado, el sistema conserva la configuracion pero no podra enviar invitaciones ni avisos desde la empresa.
+              </div>
+            </div>
           </div>
 
           <div style={S.section}>

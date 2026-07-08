@@ -590,6 +590,10 @@ router.post("/cambiar-password", authenticate,
 
     const valid = await bcrypt.compare(password_actual, rows[0].password_hash);
     if (!valid) return res.status(400).json({ error: "Contraseña actual incorrecta" });
+    const samePassword = await bcrypt.compare(password_nuevo, rows[0].password_hash);
+    if (samePassword) {
+      return res.status(400).json({ error: "La nueva contrasena debe ser distinta a la actual" });
+    }
 
     const hash = await bcrypt.hash(password_nuevo, 12);
     await db.query(

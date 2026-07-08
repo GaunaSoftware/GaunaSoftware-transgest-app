@@ -187,6 +187,7 @@ router.get("/config", SOLO_GERENTE, async (req,res) => {
     res.json(cfg || {
       smtp_host:"", smtp_port:"587", smtp_user:"", smtp_pass:"", smtp_from:"", smtp_from_nombre:"TransGest TMS", reply_to:"",
       envio_facturas_auto:false, envio_avisos_carga_auto:false,
+      ai_inbox_enabled:false, ai_inbox_email:"",
       asunto_factura:"Factura {numero} - {empresa}", cuerpo_factura:"",
       asunto_carga:"Nuevo pedido asignado - {numero}", cuerpo_carga:"",
       activo:true,

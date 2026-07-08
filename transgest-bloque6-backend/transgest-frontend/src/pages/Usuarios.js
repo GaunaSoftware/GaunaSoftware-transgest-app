@@ -215,7 +215,7 @@ export default function Usuarios() {
 
   function abrirNuevo() {
     setEditando(null);
-    setForm({rol:"trafico",activo:true,permisos:presetRol("trafico"),trafico_config:{ vehiculo_ids: [], tipos_viaje: ["normal","salida","retorno"] }});
+    setForm({rol:"trafico",activo:true,modo_alta:"invitacion",password:"",permisos:presetRol("trafico"),trafico_config:{ vehiculo_ids: [], tipos_viaje: ["normal","salida","retorno"] }});
     setErrors({});
     setModal(true);
   }
@@ -279,7 +279,7 @@ export default function Usuarios() {
     if(!String(form.username||"").trim()) nextErrors.username = "Indica un usuario de acceso.";
     if(!form.rol) nextErrors.rol = "Selecciona un rol.";
     if(form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(form.email))) nextErrors.email = "Email no valido.";
-    if(!editando && !form.password) nextErrors.password = "Indica una contrasena temporal.";
+    if(!editando && (form.modo_alta || "invitacion") === "invitacion" && !form.email) nextErrors.email = "Indica email para enviar la invitacion.";
     if(!editando && form.password && String(form.password).length < 8) nextErrors.password = "Minimo 8 caracteres.";
     if(form.rol === "chofer" && !form.chofer_id) nextErrors.chofer_id = "Vincula esta cuenta a una ficha de chofer.";
     if(Object.keys(nextErrors).length){
@@ -300,9 +300,24 @@ export default function Usuarios() {
         activo: form.activo !== false,
         chofer_id: form.rol === "chofer" ? (form.chofer_id || null) : null,
       };
-      if(!editando) body.password = form.password;
+      if(!editando) {
+        body.modo_alta = form.modo_alta || "invitacion";
+        if(body.modo_alta === "temporal" && form.password) body.password = form.password;
+      }
       if(editando) await editarUsuario(editando.id, body);
-      else await crearUsuario(body);
+      else {
+        const creado = await crearUsuario(body);
+        if (creado?.password_temporal) {
+          notify(`Usuario creado. Contrasena temporal: ${creado.password_temporal}`, "success");
+        } else if (creado?.invitacion_enviada) {
+          notify("Usuario creado. Invitacion enviada por email.", "success");
+        } else if (creado?.invitacion_url) {
+          notify("Usuario creado. SMTP no confirmado; enlace de invitacion copiado.", "warning");
+          if (typeof window !== "undefined" && window.navigator?.clipboard) {
+            window.navigator.clipboard.writeText(creado.invitacion_url).catch(()=>{});
+          }
+        }
+      }
       setModal(false);
       cargar();
     }catch(e){notify(e.message, "error");}finally{setSaving(false);}
@@ -379,11 +394,21 @@ export default function Usuarios() {
             <FormField label="Email" error={errors.email} hint="Opcional. Se usara para invitaciones y recuperacion si esta informado.">
               <input style={{...S.input,borderColor:errors.email?"#ef4444":"var(--border2)"}} type="email" value={form.email||""} onChange={f("email")} placeholder="correo@empresa.com"/>
             </FormField>
-            {!editando&&<>
-              <FormField label="Contraseña temporal" required error={errors.password} hint="Mínimo 8 caracteres.">
-                <input style={{...S.input,borderColor:errors.password?"#ef4444":"var(--border2)"}} type="password" value={form.password||""} onChange={f("password")}/>
-              </FormField>
-            </>}
+            {!editando && (
+              <>
+                <FormField label="Alta de acceso" required hint="Con invitacion, el usuario crea su contrasena y no se le pedira cambiarla despues. Con temporal, se genera una contrasena de un solo uso y debera cambiarla al entrar.">
+                  <select style={S.sel} value={form.modo_alta || "invitacion"} onChange={f("modo_alta")}>
+                    <option value="invitacion">Enviar invitacion por email</option>
+                    <option value="temporal">Generar contrasena temporal</option>
+                  </select>
+                </FormField>
+                {(form.modo_alta || "invitacion") === "temporal" && (
+                  <FormField label="Contrasena temporal manual" error={errors.password} hint="Opcional. Si lo dejas vacio, el sistema genera una segura y la muestra una sola vez.">
+                    <input style={{...S.input,borderColor:errors.password?"#ef4444":"var(--border2)"}} type="password" value={form.password||""} onChange={f("password")} autoComplete="new-password"/>
+                  </FormField>
+                )}
+              </>
+            )}
             <FormField label="Perfil">
               <input style={S.input} value={form.perfil||""} onChange={f("perfil")} placeholder="Operaciones, Administracion..."/>
             </FormField>

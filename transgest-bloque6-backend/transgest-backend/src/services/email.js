@@ -84,6 +84,8 @@ async function ensureEmailTables() {
       reply_to VARCHAR(255),
       envio_facturas_auto BOOLEAN NOT NULL DEFAULT false,
       envio_avisos_carga_auto BOOLEAN NOT NULL DEFAULT false,
+      ai_inbox_enabled BOOLEAN NOT NULL DEFAULT false,
+      ai_inbox_email VARCHAR(255),
       asunto_factura TEXT,
       cuerpo_factura TEXT,
       asunto_carga TEXT,
@@ -132,6 +134,8 @@ async function ensureEmailTables() {
   await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS adjuntos_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
   await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS message_id TEXT").catch(() => {});
   await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE empresa_smtp_config ADD COLUMN IF NOT EXISTS ai_inbox_enabled BOOLEAN NOT NULL DEFAULT false").catch(() => {});
+  await db.query("ALTER TABLE empresa_smtp_config ADD COLUMN IF NOT EXISTS ai_inbox_email VARCHAR(255)").catch(() => {});
 }
 
 function publicPlatformEmailConfig(row = {}) {
@@ -207,6 +211,8 @@ function publicEmailConfig(row = {}) {
     reply_to: row.reply_to || "",
     envio_facturas_auto: !!row.envio_facturas_auto,
     envio_avisos_carga_auto: !!row.envio_avisos_carga_auto,
+    ai_inbox_enabled: !!row.ai_inbox_enabled,
+    ai_inbox_email: row.ai_inbox_email || "",
     asunto_factura: row.asunto_factura || "Factura {numero} - {empresa}",
     cuerpo_factura: row.cuerpo_factura || "",
     asunto_carga: row.asunto_carga || "Nuevo pedido asignado - {numero}",
@@ -240,12 +246,12 @@ async function saveEmpresaEmailConfig(empresaId, data = {}, userId = null) {
   await db.query(`
     INSERT INTO empresa_smtp_config
       (empresa_id,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_encrypted,smtp_from,smtp_from_nombre,reply_to,
-       envio_facturas_auto,envio_avisos_carga_auto,asunto_factura,cuerpo_factura,asunto_carga,cuerpo_carga,activo,updated_by,updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
+       envio_facturas_auto,envio_avisos_carga_auto,ai_inbox_enabled,ai_inbox_email,asunto_factura,cuerpo_factura,asunto_carga,cuerpo_carga,activo,updated_by,updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW())
     ON CONFLICT (empresa_id) DO UPDATE SET
       smtp_host=$2,smtp_port=$3,smtp_secure=$4,smtp_user=$5,smtp_pass_encrypted=$6,smtp_from=$7,smtp_from_nombre=$8,reply_to=$9,
-      envio_facturas_auto=$10,envio_avisos_carga_auto=$11,asunto_factura=$12,cuerpo_factura=$13,asunto_carga=$14,cuerpo_carga=$15,
-      activo=$16,updated_by=$17,updated_at=NOW()
+      envio_facturas_auto=$10,envio_avisos_carga_auto=$11,ai_inbox_enabled=$12,ai_inbox_email=$13,asunto_factura=$14,cuerpo_factura=$15,asunto_carga=$16,cuerpo_carga=$17,
+      activo=$18,updated_by=$19,updated_at=NOW()
   `, [
     empresaId,
     String(data.smtp_host || "").trim(),
@@ -258,6 +264,8 @@ async function saveEmpresaEmailConfig(empresaId, data = {}, userId = null) {
     String(data.reply_to || data.smtp_from || "").trim(),
     !!data.envio_facturas_auto,
     !!data.envio_avisos_carga_auto,
+    !!data.ai_inbox_enabled,
+    String(data.ai_inbox_email || "").trim().toLowerCase(),
     data.asunto_factura || "",
     data.cuerpo_factura || "",
     data.asunto_carga || "",

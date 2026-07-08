@@ -1,7 +1,9 @@
 const express  = require("express");
 const bcrypt   = require("bcryptjs");
+const crypto   = require("crypto");
 const { body, validationResult } = require("express-validator");
 const db       = require("../services/db");
+const { enviarEmail } = require("../services/email");
 const { authenticate, SOLO_GERENTE } = require("../middleware/auth");
 
 const router = express.Router();
@@ -29,6 +31,18 @@ function normalizarPermisos(permisos) {
   return permisos && typeof permisos === "object" && !Array.isArray(permisos)
     ? permisos
     : {};
+}
+
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function appUrl() {
+  return (process.env.APP_URL || process.env.FRONTEND_URL || process.env.PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+}
+
+function generarPasswordTemporal() {
+  return `${crypto.randomBytes(12).toString("base64url")}A1!`;
 }
 
 const TIPOS_VIAJE_TRAFFIC = new Set(["normal", "salida", "retorno"]);
@@ -92,7 +106,34 @@ async function ensureUsuariosChoferSchema() {
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trafico_config JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN NOT NULL DEFAULT false").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ").catch(() => {});
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS invitaciones_usuario (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE,
+      usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+      email VARCHAR(200),
+      token_hash VARCHAR(200) NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      usado_at TIMESTAMPTZ,
+      created_by VARCHAR(200),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {});
+  await db.query("ALTER TABLE invitaciones_usuario ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
+  await db.query("ALTER TABLE invitaciones_usuario ADD COLUMN IF NOT EXISTS email VARCHAR(200)").catch(() => {});
+  await db.query("ALTER TABLE invitaciones_usuario ADD COLUMN IF NOT EXISTS created_by VARCHAR(200)").catch(() => {});
   await db.query("CREATE INDEX IF NOT EXISTS idx_usuarios_empresa_chofer ON usuarios(empresa_id, chofer_id)").catch(() => {});
+}
+
+async function crearInvitacionUsuario({ usuario, empresa, actorEmail }) {
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
+  await db.query(
+    `INSERT INTO invitaciones_usuario (empresa_id, usuario_id, email, token_hash, expires_at, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [empresa.id, usuario.id, usuario.email, hashToken(token), expiresAt, actorEmail || null]
+  );
+  return { token, expiresAt, url: `${appUrl()}/invitacion/${token}` };
 }
 
 async function assertVehiculosEmpresa(vehiculoIds, eid) {
@@ -125,16 +166,24 @@ router.post("/",
   body("nombre").isString().trim().isLength({ min: 2 }).withMessage("Nombre obligatorio"),
   body("username").isString().trim().isLength({ min: 3 }).withMessage("Usuario minimo 3 caracteres"),
   body("email").optional({ nullable: true, checkFalsy: true }).isEmail().normalizeEmail(),
-  body("password").isLength({ min: 8 }).withMessage("Minimo 8 caracteres"),
+  body("modo_alta").optional().isIn(["invitacion", "temporal"]),
+  body("password").optional({ nullable: true, checkFalsy: true }).isLength({ min: 8 }).withMessage("Minimo 8 caracteres"),
   body("rol").isIn(ROLES_PERMITIDOS),
   async (req, res) => {
     await ensureUsuariosChoferSchema();
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { nombre, email, username, password, rol, perfil, permisos, cliente_id, chofer_id } = req.body;
+    const { nombre, email, username, rol, perfil, permisos, cliente_id, chofer_id } = req.body;
     const eid = empresaId(req);
-    const hash = await bcrypt.hash(password, 12);
+    const modoAlta = String(req.body.modo_alta || (email ? "invitacion" : "temporal")).toLowerCase();
+    if (modoAlta === "invitacion" && !email) {
+      return res.status(400).json({ error: "El email es obligatorio para enviar invitacion" });
+    }
+    const passwordTemporal = modoAlta === "temporal"
+      ? String(req.body.password || generarPasswordTemporal())
+      : generarPasswordTemporal();
+    const hash = await bcrypt.hash(passwordTemporal, 12);
     const traficoConfig = normalizarTraficoConfig(req.body.trafico_config);
     traficoConfig.vehiculo_ids = await assertVehiculosEmpresa(traficoConfig.vehiculo_ids, eid);
     let clienteUsuario;
@@ -147,8 +196,8 @@ router.post("/",
 
     try {
       const { rows } = await db.query(
-        `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,perfil,permisos,trafico_config,cliente_id,chofer_id,debe_cambiar_password)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true)
+        `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,perfil,permisos,trafico_config,cliente_id,chofer_id,activo,debe_cambiar_password,password_changed_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL)
          RETURNING id,nombre,email,username,perfil,permisos,trafico_config,rol,cliente_id,chofer_id,activo,debe_cambiar_password`,
         [
           nombre.trim(),
@@ -162,9 +211,32 @@ router.post("/",
           traficoConfig,
           clienteUsuario,
           choferUsuario,
+          modoAlta === "invitacion" ? false : true,
+          modoAlta === "temporal",
         ]
       );
-      res.status(201).json(rows[0]);
+      const usuario = rows[0];
+      if (modoAlta === "invitacion") {
+        const empresa = await db.query("SELECT id,nombre FROM empresas WHERE id=$1 LIMIT 1", [eid]).then(r => r.rows[0] || { id: eid, nombre: "" });
+        const invitacion = await crearInvitacionUsuario({ usuario, empresa, actorEmail: req.user?.email || req.user?.username || "" });
+        const mail = await enviarEmail({
+          trigger: "invitacion_usuario",
+          destinatario: usuario.email,
+          plantilla: "invitacion_usuario",
+          empresa_id: eid,
+          datos: { nombre: usuario.nombre, empresa: empresa.nombre, url: invitacion.url },
+          meta: { usuario_id: usuario.id, modo_alta: "invitacion" },
+        }).catch(e => ({ error: e.message }));
+        return res.status(201).json({
+          ...usuario,
+          invitacion_enviada: !mail?.simulado && !mail?.error,
+          invitacion_simulada: !!mail?.simulado,
+          invitacion_error: mail?.error || "",
+          invitacion_url: invitacion.url,
+          invitacion_expira: invitacion.expiresAt,
+        });
+      }
+      res.status(201).json({ ...usuario, password_temporal: req.body.password ? null : passwordTemporal });
     } catch (e) {
       if (e.code === "23505") {
         return res.status(409).json({ error: "Ya existe un usuario o email en esta empresa" });
@@ -256,6 +328,15 @@ router.post("/:id/reset-password",
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
+    const current = await db.query(
+      "SELECT password_hash FROM usuarios WHERE id=$1 AND empresa_id=$2",
+      [req.params.id, empresaId(req)]
+    );
+    if (!current.rows[0]) return res.status(404).json({ error: "Usuario no encontrado" });
+    const samePassword = await bcrypt.compare(req.body.password_nuevo, current.rows[0].password_hash);
+    if (samePassword) {
+      return res.status(400).json({ error: "La nueva contrasena debe ser distinta a la actual" });
+    }
     const hash = await bcrypt.hash(req.body.password_nuevo, 12);
     const { rowCount } = await db.query(
       "UPDATE usuarios SET password_hash=$1, debe_cambiar_password=true, password_changed_at=NULL WHERE id=$2 AND empresa_id=$3",

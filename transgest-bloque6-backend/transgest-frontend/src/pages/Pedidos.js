@@ -9607,7 +9607,7 @@ export default function Pedidos() {
   const pedidosVisibles = soloCriticos
     ? pedidosCriticosOperativos
     : pedidosFiltrados;
-  const usarAgrupadoCalendario = !groupByCliente && filtroSemanaActualActivo;
+  const usarAgrupadoCalendario = !groupByCliente;
   const ordenarItemsPedidoPorFecha = (a, b) => {
     const da = pedidoFechaOperativaKey(a?.pedido);
     const db = pedidoFechaOperativaKey(b?.pedido);
@@ -9636,7 +9636,7 @@ export default function Pedidos() {
     : usarAgrupadoCalendario ? buildPedidoCalendarGroups(pedidosVisibles, {
         desde: filtroDesde || undefined,
         hasta: filtroHasta || undefined,
-        currentWeek: filtroSemanaActualActivo,
+          currentWeek: filtroSemanaActualActivo,
       }) : [];
   const pedidosRenderList = groupByCliente
     ? pedidosAgrupados.flatMap(group => {
@@ -9847,10 +9847,9 @@ export default function Pedidos() {
           Filtros avanzados
         </button>
         <button onClick={()=>setGroupByCliente(v=>!v)}
-          disabled={filtroSemanaActualActivo}
-          title={filtroSemanaActualActivo ? "La semana actual se muestra agrupada por dias." : "Agrupar por cliente"}
-          style={{...S.btn,background:groupByCliente&&!filtroSemanaActualActivo?"#008b82":"#fff",color:groupByCliente&&!filtroSemanaActualActivo?"#fff":"#475569",border:groupByCliente&&!filtroSemanaActualActivo?"1px solid #008b82":"1px solid #dbe5ec",opacity:filtroSemanaActualActivo?0.55:1,cursor:filtroSemanaActualActivo?"not-allowed":"pointer"}}>
-          {filtroSemanaActualActivo ? "Agrupado por dia" : groupByCliente ? "Agrupado por cliente" : "Agrupar por cliente"}
+          title={groupByCliente ? "Volver a agrupar por fechas" : "Agrupar por cliente"}
+          style={{...S.btn,background:groupByCliente?"#008b82":"#fff",color:groupByCliente?"#fff":"#475569",border:groupByCliente?"1px solid #008b82":"1px solid #dbe5ec"}}>
+          {groupByCliente ? "Agrupado por cliente" : "Agrupado por fecha"}
         </button>
         <button onClick={()=>setSoloCriticos(v=>!v)}
           style={{...S.btn,background:soloCriticos?"#dc2626":"#fff",color:soloCriticos?"#fff":"#475569",border:soloCriticos?"1px solid #dc2626":"1px solid #dbe5ec"}}>

@@ -53,10 +53,11 @@ test("manifiesto asesoria normaliza filtros y bloquea informes sin ejercicio", (
 
   const manifest = buildAdvisorPackageManifest({
     selectedCompany: { company_id: "company-1", name: "Demo" },
-    permissions: ["parties.read", "maturities.read", "banks.read", "journal.read", "ledger.read"],
+    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read", "ledger.read"],
     filters,
   });
   assert.equal(manifest.exports.find(item => item.id === "parties").available, true);
+  assert.equal(manifest.exports.find(item => item.id === "fixed_assets").available, true);
   assert.equal(manifest.exports.find(item => item.id === "trial_balance").available, false);
   assert.ok(manifest.exports.find(item => item.id === "trial_balance").blocked_reasons.includes("Selecciona un ejercicio"));
 });
@@ -64,11 +65,12 @@ test("manifiesto asesoria normaliza filtros y bloquea informes sin ejercicio", (
 test("manifiesto asesoria genera rutas CSV cuando hay ejercicio y permisos", () => {
   const manifest = buildAdvisorPackageManifest({
     selectedCompany: { company_id: "company-1", name: "Demo" },
-    permissions: ["parties.read", "maturities.read", "banks.read", "journal.read", "ledger.read"],
+    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read", "ledger.read"],
     filters: { fiscal_year_id: "fy-2026", include_empty: "false" },
   });
-  assert.equal(manifest.available_count, 7);
+  assert.equal(manifest.available_count, 8);
   assert.equal(manifest.blocked_count, 0);
+  assert.match(manifest.exports.find(item => item.id === "fixed_assets").path, /\/fixed-assets\?format=csv/);
   assert.match(manifest.exports.find(item => item.id === "journal_entries").path, /\/journal-entries\?format=csv/);
   assert.match(manifest.exports.find(item => item.id === "balance_sheet").path, /fiscal_year_id=fy-2026/);
 });
@@ -76,7 +78,7 @@ test("manifiesto asesoria genera rutas CSV cuando hay ejercicio y permisos", () 
 test("paquete asesoria ZIP incluye manifiesto e indice de exportaciones", () => {
   const manifest = buildAdvisorPackageManifest({
     selectedCompany: { company_id: "company-1", name: "Demo" },
-    permissions: ["parties.read", "maturities.read", "banks.read", "journal.read", "ledger.read"],
+    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read", "ledger.read"],
     filters: { fiscal_year_id: "fy-2026", include_empty: "true" },
   });
   const zip = buildAdvisorPackageZip(manifest, [
@@ -95,7 +97,7 @@ test("paquete asesoria ZIP incluye manifiesto e indice de exportaciones", () => 
 test("paquete asesoria construye CSV fisicos para exportaciones soportadas", async () => {
   const manifest = buildAdvisorPackageManifest({
     selectedCompany: { company_id: "company-1", name: "Demo" },
-    permissions: ["parties.read", "maturities.read", "banks.read", "journal.read"],
+    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read"],
     filters: { fiscal_year_id: "fy-2026", date_from: "2026-01-01", date_to: "2026-12-31" },
   });
   const journalParams = [];
@@ -140,6 +142,22 @@ test("paquete asesoria construye CSV fisicos para exportaciones soportadas", asy
           line_count: 2,
         }] };
       }
+      if (sql.includes("accounting_fixed_assets")) {
+        return { rows: [{
+          asset_code: "VEH-001",
+          name: "Cabeza tractora",
+          year_label: "2026",
+          acquisition_date: "2026-01-15",
+          acquisition_cost: "1000.000000",
+          residual_value: "100.000000",
+          useful_life_months: 60,
+          status: "active",
+          disposed_at: null,
+          asset_account_code: "21800000",
+          accumulated_depreciation_account_code: "28180000",
+          expense_account_code: "68100000",
+        }] };
+      }
       if (sql.includes("accounting_parties")) {
         return { rows: [{
           legal_name: "Cliente Demo",
@@ -160,11 +178,13 @@ test("paquete asesoria construye CSV fisicos para exportaciones soportadas", asy
     "exports/terceros.csv",
     "exports/vencimientos.csv",
     "exports/movimientos_bancarios.csv",
+    "exports/inmovilizado.csv",
     "exports/diario.csv",
   ]);
-  assert.deepEqual(result.summary.map(item => item.row_count), [1, 1, 1, 1]);
+  assert.deepEqual(result.summary.map(item => item.row_count), [1, 1, 1, 1, 1]);
   assert.ok(result.files[0].content.includes("Nombre fiscal"));
-  assert.ok(result.files[3].content.includes("Contabilizado"));
+  assert.ok(result.files[3].content.includes("Cabeza tractora"));
+  assert.ok(result.files[4].content.includes("Contabilizado"));
   assert.equal(journalParams.includes("fy-2026"), false);
 });
 

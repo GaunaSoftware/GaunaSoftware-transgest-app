@@ -249,6 +249,14 @@ function buildAdvisorPackageManifest({ selectedCompany, permissions = [], filter
       filters: { limit: 500 },
     }, context),
     exportItem({
+      id: "fixed_assets",
+      label: "Inmovilizado",
+      description: "Altas de inmovilizado, estado, vida util y cuentas asociadas.",
+      permission: "fixed_assets.read",
+      path: "/fixed-assets",
+      filters: { fiscal_year_id: normalized.fiscal_year_id, limit: 500 },
+    }, context),
+    exportItem({
       id: "journal_entries",
       label: "Libro diario",
       description: "Asientos y lineas del diario filtrados por ejercicio si se indica.",

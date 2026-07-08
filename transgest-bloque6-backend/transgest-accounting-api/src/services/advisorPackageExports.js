@@ -1,5 +1,6 @@
 const { normalizeBankTransactionQuery } = require("../domain/banks");
 const { buildCsv } = require("../domain/csv");
+const { normalizeFixedAssetQuery } = require("../domain/fixedAssets");
 const { normalizeJournalQuery } = require("../domain/journalEntries");
 const { buildFinancialStatements, normalizeFinancialStatementQuery, normalizeTrialBalanceQuery } = require("../domain/ledger");
 const { normalizeMaturityQuery } = require("../domain/maturities");
@@ -189,6 +190,60 @@ async function loadBankTransactionsCsv(client, companyId, manifestFilters = {}) 
       ...row,
       transaction_date: isoDate(row.transaction_date),
       value_date: isoDate(row.value_date),
+    }))),
+  };
+}
+
+async function loadFixedAssetsCsv(client, companyId, manifestFilters = {}) {
+  const filters = normalizeFixedAssetQuery({
+    format: "csv",
+    limit: 500,
+    fiscal_year_id: manifestFilters.fiscal_year_id,
+  });
+  const params = [companyId];
+  const where = ["fa.company_id=$1"];
+  if (filters.fiscal_year_id) {
+    params.push(filters.fiscal_year_id);
+    where.push(`fa.fiscal_year_id=$${params.length}`);
+  }
+  params.push(filters.limit);
+  const { rows } = await client.query(
+    `SELECT fa.asset_code, fa.name, fa.acquisition_date, fa.acquisition_cost::text,
+            fa.residual_value::text, fa.useful_life_months, fa.status, fa.disposed_at,
+            ay.code AS asset_account_code,
+            ad.code AS accumulated_depreciation_account_code,
+            ae.code AS expense_account_code,
+            fy.year_label
+       FROM ${q("accounting_fixed_assets")} fa
+       JOIN ${q("fiscal_years")} fy ON fy.id=fa.fiscal_year_id
+       LEFT JOIN ${q("accounts")} ay ON ay.id=fa.asset_account_id
+       LEFT JOIN ${q("accounts")} ad ON ad.id=fa.accumulated_depreciation_account_id
+       LEFT JOIN ${q("accounts")} ae ON ae.id=fa.expense_account_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY fy.year_label DESC, fa.asset_code ASC
+      LIMIT $${params.length}`,
+    params
+  );
+  return {
+    name: "exports/inmovilizado.csv",
+    row_count: rows.length,
+    content: buildCsv([
+      { key: "asset_code", label: "Codigo" },
+      { key: "name", label: "Nombre" },
+      { key: "year_label", label: "Ejercicio" },
+      { key: "acquisition_date", label: "Fecha adquisicion" },
+      { key: "acquisition_cost", label: "Coste adquisicion" },
+      { key: "residual_value", label: "Valor residual" },
+      { key: "useful_life_months", label: "Vida util meses" },
+      { key: "status", label: "Estado" },
+      { key: "disposed_at", label: "Fecha baja" },
+      { key: "asset_account_code", label: "Cuenta activo" },
+      { key: "accumulated_depreciation_account_code", label: "Cuenta amortizacion acumulada" },
+      { key: "expense_account_code", label: "Cuenta gasto amortizacion" },
+    ], rows.map(row => ({
+      ...row,
+      acquisition_date: isoDate(row.acquisition_date),
+      disposed_at: isoDate(row.disposed_at),
     }))),
   };
 }
@@ -425,6 +480,7 @@ async function buildAdvisorPackageCsvFiles({ client, companyId, manifest }) {
     ["parties", () => loadPartiesCsv(client, companyId)],
     ["maturities", () => loadMaturitiesCsv(client, companyId)],
     ["bank_transactions", () => loadBankTransactionsCsv(client, companyId, manifest.filters)],
+    ["fixed_assets", () => loadFixedAssetsCsv(client, companyId, manifest.filters)],
     ["journal_entries", () => loadJournalEntriesCsv(client, companyId, manifest.filters)],
     ["trial_balance", () => loadTrialBalanceCsv(client, companyId, manifest.filters)],
     ["balance_sheet", () => loadBalanceSheetCsv(client, companyId, manifest.filters)],

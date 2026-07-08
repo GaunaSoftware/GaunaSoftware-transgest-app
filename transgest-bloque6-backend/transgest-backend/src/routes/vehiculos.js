@@ -45,6 +45,7 @@ function parseMovildataLoc(value) {
 
 function listFromProviderPayload(payload) {
   if (Array.isArray(payload)) return payload;
+  if (typeof payload === "string") return [];
   if (Array.isArray(payload?.data)) return payload.data;
   if (Array.isArray(payload?.Data)) return payload.Data;
   if (Array.isArray(payload?.items)) return payload.items;
@@ -64,6 +65,31 @@ function listFromProviderPayload(payload) {
   return payload && typeof payload === "object" ? [payload] : [];
 }
 
+function parseXmlTagValue(block = "", tag = "") {
+  const re = new RegExp(`<(?:\\w+:)?${tag}[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${tag}>`, "i");
+  const match = re.exec(String(block || ""));
+  return match ? match[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : "";
+}
+
+function listFromXmlPayload(xml = "") {
+  const text = String(xml || "").trim();
+  if (!text || !text.includes("<")) return [];
+  const blocks = text.match(/<(?:\w+:)?(?:item|registro|posicion|position|gps|dato|row|punto|location)\b[\s\S]*?<\/(?:\w+:)?(?:item|registro|posicion|position|gps|dato|row|punto|location)>/gi)
+    || text.match(/<(?:\w+:)?Table\b[\s\S]*?<\/(?:\w+:)?Table>/gi)
+    || [];
+  return blocks.map(block => ({
+    Matricula: parseXmlTagValue(block, "Matricula") || parseXmlTagValue(block, "Plate") || parseXmlTagValue(block, "matricula"),
+    Imei: parseXmlTagValue(block, "Imei") || parseXmlTagValue(block, "IMEI") || parseXmlTagValue(block, "IdDispositivo") || parseXmlTagValue(block, "idv"),
+    Latitud: parseXmlTagValue(block, "Latitud") || parseXmlTagValue(block, "Latitude") || parseXmlTagValue(block, "Lat"),
+    Longitud: parseXmlTagValue(block, "Longitud") || parseXmlTagValue(block, "Longitude") || parseXmlTagValue(block, "Lng") || parseXmlTagValue(block, "Lon"),
+    Velocidad: parseXmlTagValue(block, "Velocidad") || parseXmlTagValue(block, "Speed"),
+    Odometro: parseXmlTagValue(block, "Odometro") || parseXmlTagValue(block, "Km") || parseXmlTagValue(block, "Kms"),
+    Fecha: parseXmlTagValue(block, "Fecha") || parseXmlTagValue(block, "FechaHora") || parseXmlTagValue(block, "DateTime"),
+    Direccion: parseXmlTagValue(block, "Direccion") || parseXmlTagValue(block, "Ubicacion") || parseXmlTagValue(block, "Address"),
+    raw_xml: block,
+  }));
+}
+
 function readFirst(item = {}, keys = []) {
   for (const key of keys) {
     if (item[key] !== undefined && item[key] !== null && item[key] !== "") return item[key];
@@ -73,35 +99,76 @@ function readFirst(item = {}, keys = []) {
 
 function numberFrom(value) {
   if (value === null || value === undefined || value === "") return null;
-  const n = Number(String(value).replace(",", "."));
+  const clean = String(value).trim().replace(/\s/g, "").replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", ".");
+  const n = Number(clean);
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeMovildataDate(value) {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const dotNet = raw.match(/\/Date\((\d+)(?:[+-]\d+)?\)\//i);
+  if (dotNet) {
+    const date = new Date(Number(dotNet[1]));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  const spanish = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (spanish) {
+    const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = spanish;
+    const date = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss)));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function movildataPayloadMessage(data, text = "") {
+  const message = data?.Message || data?.message || data?.error || data?.Error || data?.ExceptionMessage || data?.exceptionMessage || "";
+  const raw = typeof data?.raw_text === "string" ? data.raw_text : text;
+  return String(message || (typeof raw === "string" && raw.length < 500 ? raw : "") || "").trim();
+}
+
 function movildataPositionFromItem(item = {}) {
-  const loc = parseMovildataLoc(item.Loc ?? item.loc ?? item.localizacion ?? item.posicion ?? item.position);
-  const lat = numberFrom(readFirst(item, ["Latitud", "latitud", "Latitude", "latitude", "Lat", "lat", "Y", "y"])) ?? loc.lat ?? null;
-  const lng = numberFrom(readFirst(item, ["Longitud", "longitud", "Longitude", "longitude", "Lng", "lng", "Lon", "lon", "X", "x"])) ?? loc.lng ?? null;
+  const loc = parseMovildataLoc(item.Loc ?? item.loc ?? item.localizacion ?? item.Localizacion ?? item.posicion ?? item.Posicion ?? item.position ?? item.Position);
+  const lat = numberFrom(readFirst(item, ["Latitud", "latitud", "Latitude", "latitude", "Lat", "lat", "GpsLat", "gpsLat", "GPSLat", "Y", "y"])) ?? loc.lat ?? null;
+  const lng = numberFrom(readFirst(item, ["Longitud", "longitud", "Longitude", "longitude", "Lng", "lng", "Lon", "lon", "GpsLng", "gpsLng", "GPSLng", "X", "x"])) ?? loc.lng ?? null;
   return {
-    plate: readFirst(item, ["Matricula", "Matrícula", "matricula", "plate", "Plate", "registration", "Registration", "vehiclePlate"]),
-    imei: readFirst(item, ["Imei", "IMEI", "imei", "idv", "IDV", "Idv", "IdDispositivo", "idDispositivo", "deviceId", "DeviceId", "id", "Id"]),
+    plate: readFirst(item, ["Matricula", "Matrícula", "matricula", "MatriculaVehiculo", "matriculaVehiculo", "plate", "Plate", "Placa", "placa", "registration", "Registration", "vehiclePlate"]),
+    imei: readFirst(item, ["Imei", "IMEI", "imei", "idv", "IDV", "Idv", "IdDispositivo", "idDispositivo", "IMEIDispositivo", "imeiDispositivo", "deviceId", "DeviceId", "id", "Id"]),
     lat: Number.isFinite(lat) ? lat : null,
     lng: Number.isFinite(lng) ? lng : null,
-    velocidad: readFirst(item, ["Veloc", "veloc", "velocidad", "Velocidad", "speed", "Speed"]),
-    odometro: readFirst(item, ["Odometro", "odometro", "Odometer", "odometer", "Km", "km", "kilometros"]),
-    recorded_at: readFirst(item, ["Fecha", "fecha", "f", "F", "date", "Date", "recorded_at", "timestamp", "Timestamp", "UtcDate"]),
-    ubicacion: readFirst(item, ["Direccion", "direccion", "Poblacion", "poblacion", "Ubicacion", "ubicacion", "address", "Address", "dir", "Dir"]),
+    velocidad: readFirst(item, ["Veloc", "veloc", "velocidad", "Velocidad", "speed", "Speed", "KmH", "kmh"]),
+    odometro: readFirst(item, ["Odometro", "odometro", "Odometer", "odometer", "Km", "km", "Kms", "kms", "Kilometros", "kilometros", "Distancia", "distancia"]),
+    recorded_at: normalizeMovildataDate(readFirst(item, ["Fecha", "fecha", "FechaHora", "fechaHora", "FechaGPS", "fechaGps", "f", "F", "date", "Date", "DateTime", "dateTime", "recorded_at", "timestamp", "Timestamp", "UtcDate"])),
+    ubicacion: readFirst(item, ["Direccion", "direccion", "DireccionPostal", "direccionPostal", "Poblacion", "poblacion", "Ubicacion", "ubicacion", "Localizacion", "localizacion", "address", "Address", "dir", "Dir"]),
     raw: item,
   };
 }
 
 function movildataVehicleFromItem(item = {}) {
-  const plate = readFirst(item, ["Matricula", "Matrícula", "matricula", "plate", "Plate", "registration", "Registration", "vehiclePlate"]);
-  const imei = readFirst(item, ["Imei", "IMEI", "imei", "IdDispositivo", "idDispositivo", "deviceId", "DeviceId", "id", "Id"]);
+  const plate = readFirst(item, ["Matricula", "Matrícula", "matricula", "MatriculaVehiculo", "matriculaVehiculo", "plate", "Plate", "Placa", "placa", "registration", "Registration", "vehiclePlate"]);
+  const imei = readFirst(item, ["Imei", "IMEI", "imei", "IdDispositivo", "idDispositivo", "IMEIDispositivo", "imeiDispositivo", "deviceId", "DeviceId", "Codigo", "codigo", "id", "Id"]);
   const alias = readFirst(item, ["Alias", "alias", "Nombre", "nombre", "Name", "name", "descripcion", "Descripcion"]);
   return {
     plate: String(plate || "").trim(),
     imei: String(imei || "").trim(),
     alias: String(alias || "").trim(),
+    raw: item,
+  };
+}
+
+function movildataDistanceFromItem(item = {}) {
+  const plate = readFirst(item, ["Matricula", "Matrícula", "matricula", "MatriculaVehiculo", "matriculaVehiculo", "plate", "Plate", "Placa", "placa", "registration", "Registration"]);
+  const imei = readFirst(item, ["Imei", "IMEI", "imei", "IdDispositivo", "idDispositivo", "IMEIDispositivo", "imeiDispositivo", "deviceId", "DeviceId", "Codigo", "codigo", "id", "Id"]);
+  const km = numberFrom(readFirst(item, ["Km", "km", "Kms", "kms", "Kilometros", "kilometros", "Distancia", "distancia", "Distance", "distance", "Odometro", "odometro", "Odometer", "odometer"]));
+  const horas = numberFrom(readFirst(item, ["Horas", "horas", "Horometro", "horometro", "Hourmeter", "hourmeter", "Hours", "hours"]));
+  return {
+    plate: String(plate || "").trim(),
+    imei: String(imei || "").trim(),
+    km,
+    horas,
     raw: item,
   };
 }
@@ -121,23 +188,44 @@ function isMovildataAuthError(message = "") {
   return text.includes("deneg") || text.includes("autoriz") || text.includes("unauthorized") || text.includes("forbidden") || text.includes("401") || text.includes("403");
 }
 
-async function requestMovildata(path, apiKey, params = {}) {
+async function requestMovildata(path, apiKey, params = {}, options = {}) {
   const url = new URL(path, "https://mapi.movildata.com/");
   url.searchParams.set("apikey", apiKey);
   url.searchParams.set("apiKey", apiKey);
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
   }
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  const text = await res.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = { raw_text: text }; }
-  if (!res.ok) {
-    const err = new Error(data?.Message || data?.message || data?.error || `Movildata respondio HTTP ${res.status}`);
-    err.status = 502;
-    throw err;
+  const timeoutMs = Math.max(3000, Number(options.timeout_ms || options.timeoutMs || 15000));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { headers: { Accept: "application/json" }, signal: controller.signal });
+    const text = await res.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      const items = listFromXmlPayload(text);
+      data = items.length ? { items, raw_text: text } : { raw_text: text };
+    }
+    const message = movildataPayloadMessage(data, text);
+    if (!res.ok || isMovildataAuthError(message)) {
+      const err = new Error(message || `Movildata respondio HTTP ${res.status}`);
+      err.status = 502;
+      err.http_status = res.status;
+      throw err;
+    }
+    return data;
+  } catch (e) {
+    if (e.name === "AbortError") {
+      const err = new Error(`Movildata no respondio en ${Math.round(timeoutMs / 1000)} segundos.`);
+      err.status = 504;
+      throw err;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
   }
-  return data;
 }
 
 async function requestMovildataLastLocationForVehicle(apiKey, vehicle = {}) {
@@ -233,6 +321,58 @@ async function syncMovildataVehicleLinks(empresaId, apiKey) {
   return { linked, receivedVehicles: remoteVehicles.length, matched, unmatched };
 }
 
+async function syncMovildataDistanceHours(empresaId, apiKey) {
+  const { rows: vehiculos } = await db.query(
+    `SELECT id, matricula, gps_external_id, km_actuales
+     FROM vehiculos
+     WHERE empresa_id=$1 AND activo IS DISTINCT FROM false`,
+    [empresaId]
+  );
+  if (!vehiculos.length) return { updated: 0, received: 0, unmatched: 0, error: null };
+  const byPlate = new Map(vehiculos.map(v => [normalizePlate(v.matricula), v]).filter(([k]) => k));
+  const byExternal = new Map(vehiculos.map(v => [String(v.gps_external_id || "").trim().toUpperCase(), v]).filter(([k]) => k));
+  let payload = null;
+  try {
+    payload = await requestMovildata("Users/GetCurrentDistanceAndHours", apiKey, {}, { timeoutMs: 12000 });
+  } catch (e) {
+    return {
+      updated: 0,
+      received: 0,
+      unmatched: 0,
+      error: e.message || "Movildata no devolvio kilometraje actual.",
+    };
+  }
+  const snapshots = listFromProviderPayload(payload)
+    .map(movildataDistanceFromItem)
+    .filter(item => item.km !== null || item.horas !== null);
+  let updated = 0;
+  let unmatched = 0;
+  for (const snapshot of snapshots) {
+    const vehiculo = byExternal.get(String(snapshot.imei || "").trim().toUpperCase())
+      || byExternal.get(String(snapshot.plate || "").trim().toUpperCase())
+      || byPlate.get(normalizePlate(snapshot.plate));
+    if (!vehiculo) {
+      unmatched += 1;
+      continue;
+    }
+    if (snapshot.km === null || !Number.isFinite(snapshot.km) || snapshot.km < 0) continue;
+    const nextKm = Math.round(snapshot.km);
+    await db.query(
+      `UPDATE vehiculos
+       SET km_actuales=CASE
+             WHEN km_actuales IS NULL OR $1 >= km_actuales THEN $1
+             ELSE km_actuales
+           END,
+           ubicacion_fuente=COALESCE(NULLIF(ubicacion_fuente,''), 'movildata'),
+           updated_at=NOW()
+       WHERE id=$2 AND empresa_id=$3`,
+      [nextKm, vehiculo.id, empresaId]
+    );
+    updated += 1;
+  }
+  return { updated, received: snapshots.length, unmatched, error: null };
+}
+
 async function syncMovildataPositions(empresaId, apiKey) {
   const { rows: vehiculos } = await db.query(
     `SELECT id, matricula, gps_provider, gps_external_id
@@ -280,6 +420,7 @@ async function syncMovildataPositions(empresaId, apiKey) {
       positionsError = null;
     }
   }
+  const kmResult = await syncMovildataDistanceHours(empresaId, apiKey);
   if (positionsError && !positions.length) {
     const authError = isMovildataAuthError(positionsError) || fallbackErrors.some(isMovildataAuthError);
     return {
@@ -295,6 +436,10 @@ async function syncMovildataPositions(empresaId, apiKey) {
       fallback_errors: fallbackErrors.slice(0, 5),
       auth_error: authError,
       no_signal: !authError,
+      km_updated: kmResult.updated || 0,
+      km_received: kmResult.received || 0,
+      km_unmatched: kmResult.unmatched || 0,
+      km_error: kmResult.error || null,
     };
   }
   let updated = 0;
@@ -333,6 +478,122 @@ async function syncMovildataPositions(empresaId, apiKey) {
     fallback_errors: fallbackErrors.slice(0, 5),
     auth_error: false,
     no_signal: positions.length === 0,
+    km_updated: kmResult.updated || 0,
+    km_received: kmResult.received || 0,
+    km_unmatched: kmResult.unmatched || 0,
+    km_error: kmResult.error || null,
+  };
+}
+
+async function syncMovildataVehicleHistory(empresaId, apiKey, vehiculoId, { desde = "", hasta = "" } = {}) {
+  const { rows } = await db.query(
+    `SELECT id, matricula, gps_provider, gps_external_id
+     FROM vehiculos
+     WHERE id=$1 AND empresa_id=$2 AND activo IS DISTINCT FROM false
+     LIMIT 1`,
+    [vehiculoId, empresaId]
+  );
+  const vehicle = rows[0];
+  if (!vehicle) {
+    const err = new Error("Vehiculo no encontrado");
+    err.status = 404;
+    throw err;
+  }
+  const today = new Date();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const start = String(desde || sevenDaysAgo.toISOString().slice(0, 10)).slice(0, 10);
+  const end = String(hasta || today.toISOString().slice(0, 10)).slice(0, 10);
+  const matricula = String(vehicle.matricula || "").trim();
+  const attempts = [
+    ["Users/GetGPSData", { matricula, desde: start, hasta: end }],
+    ["Users/GetGPSDataNoFilter", { matricula, desde: start, hasta: end }],
+    ["Users/GetDataNoFilter", { matricula, fechaInicio: start, fechaFin: end }],
+    ["Users/GetRuta", { matricula, inicio: start, fin: end }],
+  ];
+  const errors = [];
+  let payload = null;
+  let source = "";
+  let positions = [];
+  for (const [path, params] of attempts) {
+    try {
+      payload = await requestMovildata(path, apiKey, params, { timeoutMs: 18000 });
+      positions = listFromProviderPayload(payload)
+        .map(item => {
+          const pos = movildataPositionFromItem(item);
+          return {
+            ...pos,
+            plate: pos.plate || matricula,
+            imei: pos.imei || vehicle.gps_external_id || "",
+          };
+        })
+        .filter(p => p.lat != null && p.lng != null);
+      if (positions.length) {
+        source = path;
+        break;
+      }
+      errors.push(`${path}: sin coordenadas en la respuesta`);
+    } catch (e) {
+      errors.push(`${path}: ${e.message || "error sin detalle"}`);
+    }
+  }
+  const historyByKey = new Map();
+  for (const pos of positions) {
+    const key = [
+      String(pos.imei || pos.plate || matricula).trim().toUpperCase(),
+      pos.recorded_at || "",
+      pos.lat,
+      pos.lng,
+    ].join("|");
+    if (!historyByKey.has(key)) historyByKey.set(key, pos);
+  }
+  positions = Array.from(historyByKey.values());
+  let inserted = 0;
+  let latest = null;
+  for (const pos of positions) {
+    await updateVehiclePosition({
+      empresaId,
+      vehiculoId: vehicle.id,
+      provider: "movildata",
+      externalId: pos.imei || pos.plate || vehicle.gps_external_id || matricula,
+      lat: pos.lat,
+      lng: pos.lng,
+      ubicacion: pos.ubicacion,
+      velocidad: pos.velocidad,
+      odometro: pos.odometro,
+      raw: { source: "movildata_history_sync", endpoint: source, payload: pos.raw },
+      recordedAt: pos.recorded_at,
+    });
+    inserted += 1;
+    const ts = pos.recorded_at ? new Date(pos.recorded_at).getTime() : 0;
+    if (!latest || ts >= (latest.recorded_at ? new Date(latest.recorded_at).getTime() : 0)) latest = pos;
+  }
+  await logVehiculoEvento({
+    empresaId,
+    vehiculoId: vehicle.id,
+    tipo: "vehiculo.gps_history_sync",
+    actorId: null,
+    detalle: {
+      provider: "movildata",
+      matricula,
+      desde: start,
+      hasta: end,
+      endpoint: source || null,
+      received: positions.length,
+      inserted,
+      errors: errors.slice(0, 5),
+    },
+  }).catch(() => {});
+  return {
+    vehiculo_id: vehicle.id,
+    matricula,
+    provider: "movildata",
+    endpoint: source || null,
+    desde: start,
+    hasta: end,
+    received: positions.length,
+    inserted,
+    latest,
+    errors: errors.slice(0, 8),
   };
 }
 
@@ -1193,6 +1454,37 @@ r1.get("/:id/posiciones", async (req, res) => {
   }
 });
 
+r1.post("/:id/posiciones/sync", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const { providers, activeProvider } = await getGpsProviderStatuses(empresaId);
+    const provider = String(req.body?.provider || activeProvider || "").trim().toLowerCase();
+    if (provider !== "movildata") {
+      return res.status(400).json({ error: "La sincronizacion historica por vehiculo esta disponible para Movildata." });
+    }
+    const providerStatus = providers.find(p => p.id === provider);
+    if (!providerStatus?.configured || providerStatus?.blocked) {
+      return res.status(400).json({ error: "Movildata no esta configurado para esta empresa. Contacta con soporte para activarlo." });
+    }
+    const resolved = await resolveApiKey(empresaId, "movildata");
+    if (!resolved.key) return res.status(400).json({ error: "Falta configurar la API de Movildata." });
+    const result = await syncMovildataVehicleHistory(empresaId, resolved.key, req.params.id, {
+      desde: req.body?.desde || req.query?.desde || "",
+      hasta: req.body?.hasta || req.query?.hasta || "",
+    });
+    await recordApiUsage(empresaId, "movildata", 1).catch(() => {});
+    res.json({
+      ok: true,
+      ...result,
+      message: result.inserted
+        ? `Movildata sincronizado para ${result.matricula}: ${result.inserted} punto(s) de ruta cargados desde ${result.endpoint}.`
+        : `Movildata no devolvio puntos GPS para ${result.matricula} en el periodo indicado.`,
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
 r1.post("/gps/sync", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
@@ -1238,8 +1530,12 @@ r1.post("/gps/sync", GERENTE_O_TRAFICO, async (req, res) => {
         fallback_errors: result.fallback_errors || [],
         auth_error: !!result.auth_error,
         no_signal: !!result.no_signal,
+        km_updated: result.km_updated || 0,
+        km_received: result.km_received || 0,
+        km_unmatched: result.km_unmatched || 0,
+        km_error: result.km_error || null,
         message: provider === "movildata"
-          ? `Movildata sincronizado: ${result.linked || 0} matricula(s) enlazadas y ${result.updated || 0} vehiculo(s) actualizados de ${result.received || 0} posicion(es) recibidas${result.fallback_used ? "; se uso consulta individual por vehiculo" : ""}${result.auth_error ? "; Movildata ha denegado el endpoint de posiciones para esta clave API" : ""}${result.no_signal ? "; no hay senal GPS disponible ahora mismo" : ""}${result.positions_error ? ` (${result.positions_error})` : ""}${result.unmatched ? `; ${result.unmatched} sin matricula/ID coincidente` : ""}${result.unmatchedVehicles?.length ? `; ${result.unmatchedVehicles.length} vehiculo(s) del proveedor no existen aun en TransGest` : ""}.`
+          ? `Movildata sincronizado: ${result.linked || 0} matricula(s) enlazadas, ${result.updated || 0} vehiculo(s) con posicion actualizada de ${result.received || 0} posicion(es) recibidas y ${result.km_updated || 0} kilometraje(s) actualizado(s)${result.fallback_used ? "; se uso consulta individual por vehiculo" : ""}${result.auth_error ? "; Movildata ha denegado el endpoint de posiciones para esta clave API" : ""}${result.no_signal ? "; no hay senal GPS disponible ahora mismo" : ""}${result.positions_error ? ` (${result.positions_error})` : ""}${result.km_error ? `; kilometraje no disponible: ${result.km_error}` : ""}${result.unmatched ? `; ${result.unmatched} posicion(es) sin matricula/ID coincidente` : ""}${result.km_unmatched ? `; ${result.km_unmatched} kilometraje(s) sin matricula/ID coincidente` : ""}${result.unmatchedVehicles?.length ? `; ${result.unmatchedVehicles.length} vehiculo(s) del proveedor no existen aun en TransGest` : ""}.`
           : `El proveedor ${GPS_PROVIDERS[provider] || provider} esta activo por webhook/API externa. Hay ${result.linked || 0} vehiculo(s) enlazados; cuando el proveedor envie posiciones se actualizaran automaticamente.`,
     });
   } catch (e) {

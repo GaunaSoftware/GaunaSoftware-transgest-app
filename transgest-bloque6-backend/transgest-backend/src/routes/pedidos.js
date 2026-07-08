@@ -210,9 +210,13 @@ async function logFirmaContextoModificadoSiProcede({ before, after, empresaId, a
 }
 
 function publicBaseUrl(req) {
-  const apiEnvUrl = process.env.PUBLIC_API_URL || process.env.API_PUBLIC_URL || process.env.BACKEND_PUBLIC_URL || "";
+  const apiEnvUrl = process.env.PUBLIC_API_URL || process.env.API_PUBLIC_URL || process.env.BACKEND_PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "";
   const envUrl = process.env.PUBLIC_APP_URL || process.env.APP_PUBLIC_URL || "";
-  const reqUrl = req?.protocol && typeof req.get === "function" ? `${req.protocol}://${req.get("host")}` : "";
+  const forwardedProto = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim();
+  const forwardedHost = String(req?.headers?.["x-forwarded-host"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || req?.protocol || "";
+  const host = forwardedHost || (typeof req?.get === "function" ? req.get("host") : "");
+  const reqUrl = protocol && host ? `${protocol}://${host}` : "";
   const isLocal = (value) => {
     try {
       const url = new URL(String(value || ""));
@@ -1830,13 +1834,35 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
     pedido.orden_carga_numero = ordenCarga.numero;
     pedido.orden_carga_generada_at = ordenCarga.generated_at || pedido.orden_carga_generada_at || null;
   }
-  const empresaRes = await db.query("SELECT nombre, cif, email_admin, email_facturacion, logo_base64, cfg_precios FROM empresas WHERE id=$1 LIMIT 1", [empresaId]);
+  const empresaRes = await db.query("SELECT * FROM empresas WHERE id=$1 LIMIT 1", [empresaId]);
   const empresaRow = empresaRes.rows[0] || {};
   const perfil = empresaRow?.cfg_precios?.empresa_perfil || empresaRow?.cfg_precios || {};
   const logoMime = empresaRow?.cfg_precios?.logo_mime || perfil?.logo_mime || "image/png";
+  const empresa = {
+    ...(perfil || {}),
+    ...(empresaRow || {}),
+    nombre: empresaRow.razon_social || empresaRow.nombre || perfil?.razon_social || perfil?.nombre || "",
+    razon_social: empresaRow.razon_social || perfil?.razon_social || empresaRow.nombre || perfil?.nombre || "",
+    cif: empresaRow.cif || empresaRow.nif || perfil?.cif || perfil?.nif || "",
+    nif: empresaRow.nif || empresaRow.cif || perfil?.nif || perfil?.cif || "",
+    domicilio: empresaRow.domicilio || empresaRow.direccion || perfil?.domicilio || perfil?.direccion || "",
+    direccion: empresaRow.direccion || empresaRow.domicilio || perfil?.direccion || perfil?.domicilio || "",
+    cp: empresaRow.cp || empresaRow.codigo_postal || perfil?.cp || perfil?.codigo_postal || "",
+    codigo_postal: empresaRow.codigo_postal || empresaRow.cp || perfil?.codigo_postal || perfil?.cp || "",
+    municipio: empresaRow.municipio || empresaRow.ciudad || perfil?.municipio || perfil?.ciudad || "",
+    ciudad: empresaRow.ciudad || empresaRow.municipio || perfil?.ciudad || perfil?.municipio || "",
+    provincia: empresaRow.provincia || perfil?.provincia || "",
+    pais: empresaRow.pais || perfil?.pais || "España",
+    telefono: empresaRow.telefono || perfil?.telefono || "",
+    email: empresaRow.email_facturacion || empresaRow.email_admin || empresaRow.email || perfil?.email || "",
+    email_admin: empresaRow.email_admin || perfil?.email_admin || "",
+    contacto: empresaRow.contacto || perfil?.contacto || "",
+    logo_base64: empresaRow.logo_base64 || perfil?.logo_base64 || "",
+    logo_mime: logoMime,
+  };
   return {
     pedido,
-    empresa: { nombre: empresaRow.nombre || "", cif: empresaRow.cif || "", email: empresaRow.email_facturacion || empresaRow.email_admin || "", email_admin: empresaRow.email_admin || "", ...(perfil || {}), logo_base64: empresaRow.logo_base64 || perfil?.logo_base64 || "", logo_mime: logoMime },
+    empresa,
     cliente: {
       id: pedido.cliente_ref_id,
       nombre: pedido.cliente_nombre,
@@ -5170,8 +5196,8 @@ router.get("/", async (req, res) => {
       params.push(scope.tipos_viaje);
     }
   }
-  if (desde)      { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido) >= $${i++}`);  params.push(desde); }
-  if (hasta)      { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido) <= $${i++}`);  params.push(hasta); }
+  if (desde)      { where.push(`COALESCE(p.fecha_descarga, p.fecha_entrega, p.fecha_carga, p.fecha_pedido) >= $${i++}`);  params.push(desde); }
+  if (hasta)      { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) <= $${i++}`);  params.push(hasta); }
   if (pendiente_completar === "true")  { where.push("p.pendiente_completar IS TRUE"); }
   if (pendiente_completar === "false") { where.push("COALESCE(p.pendiente_completar,false) IS FALSE"); }
   if (tipo_carga) { where.push(`COALESCE(p.tipo_carga,'') = $${i++}`); params.push(tipo_carga); }
@@ -5357,8 +5383,8 @@ router.get("/resumen-lista", async (req, res) => {
         params.push(scope.tipos_viaje);
       }
     }
-    if (desde) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido) >= $${i++}`); params.push(desde); }
-    if (hasta) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido) <= $${i++}`); params.push(hasta); }
+    if (desde) { where.push(`COALESCE(p.fecha_descarga, p.fecha_entrega, p.fecha_carga, p.fecha_pedido) >= $${i++}`); params.push(desde); }
+    if (hasta) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) <= $${i++}`); params.push(hasta); }
     if (pendiente_completar === "true") where.push("p.pendiente_completar IS TRUE");
     if (pendiente_completar === "false") where.push("COALESCE(p.pendiente_completar,false) IS FALSE");
     if (tipo_carga) { where.push(`COALESCE(p.tipo_carga,'') = $${i++}`); params.push(tipo_carga); }

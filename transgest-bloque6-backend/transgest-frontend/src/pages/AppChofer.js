@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, getTallerSolicitudCapacidades, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
+import { getCurrentLocation, requestForegroundLocationPermission, watchForegroundLocation, isNativeMobileApp } from "../services/mobileRuntime";
+import { enqueueOfflineItem, markOfflineAttempt, queueSummary, readOfflineQueue, readyOfflineItems, writeOfflineQueue } from "../services/offlineQueue";
 
 const EC = {
   pendiente:  { l:"Pendiente",   c:"#9ca3af", bg:"rgba(156,163,175,.15)" },
@@ -14,7 +16,6 @@ const EC = {
 };
 
 const PASOS_KEY = id => `tms_chofer_pasos_${id}`;
-const OFFLINE_QUEUE_KEY = "tms_offline_queue";
 const LEGACY_SOLICITUDES_KEY = "tms_solicitudes_mecanico";
 const PROTOCOLO_CISTERNA = [
   { key:"protocolo_cisterna_epi", label:"EPI colocado", detail:"Guantes, gafas/pantalla y proteccion requerida para el producto." },
@@ -168,17 +169,20 @@ function guardarSolicitudesCache(items = []) {
 }
 
 function leerOfflineQueue() {
-  try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]"); }
-  catch { return []; }
+  return readOfflineQueue();
 }
 
 function guardarOfflineQueue(items = []) {
-  const next = Array.isArray(items) ? items.slice(-100) : [];
-  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(next));
-  try {
-    window.dispatchEvent(new CustomEvent("tms:offline-queue-changed", { detail: next }));
-  } catch {}
-  return next;
+  return writeOfflineQueue(items);
+}
+
+function encolarOffline(item) {
+  return enqueueOfflineItem(item);
+}
+
+function payloadSizeKb(payload = {}) {
+  try { return Math.round(JSON.stringify(payload).length / 1024); }
+  catch { return 0; }
 }
 
 function esErrorOffline(error) {
@@ -190,6 +194,13 @@ function esErrorOffline(error) {
     msg.includes("network request failed") ||
     msg.includes("fetch failed")
   );
+}
+
+function queueOfflineCriticalAction(item, successMessage = "Guardado pendiente de sincronizar") {
+  const queue = encolarOffline(item);
+  const summary = queueSummary(queue);
+  notify(`${successMessage}. ${summary.pending} pendiente${summary.pending === 1 ? "" : "s"}.`, "warning");
+  return queue;
 }
 
 function faseLabel(fase) {
@@ -339,20 +350,15 @@ async function prepararArchivoEscaner(file) {
   };
 }
 
-function capturarUbicacionActual(timeoutMs = 4500) {
-  if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve(null);
-  return new Promise(resolve => {
-    navigator.geolocation.getCurrentPosition(
-      pos => resolve({
-        lat: Number(pos.coords.latitude),
-        lng: Number(pos.coords.longitude),
-        accuracy_m: Math.round(Number(pos.coords.accuracy || 0)),
-        captured_at: new Date().toISOString(),
-      }),
-      () => resolve(null),
-      { enableHighAccuracy:true, timeout:timeoutMs, maximumAge:60000 }
-    );
-  });
+async function capturarUbicacionActual(timeoutMs = 4500) {
+  const loc = await getCurrentLocation({ enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60000 });
+  if (!loc) return null;
+  return {
+    lat: loc.lat,
+    lng: loc.lng,
+    accuracy_m: Math.round(Number(loc.accuracy_m || 0)),
+    captured_at: loc.captured_at || new Date().toISOString(),
+  };
 }
 
 function buildUploadEvidence(kind, location) {
@@ -468,7 +474,7 @@ function FirmaCanvas({ pedido, onFirma, onCancel, title = "Confirmacion de entre
   );
 }
 
-function FirmaLaboralCanvas({ title = "Firma", detail = "", defaultName = "", onFirma, onCancel }){
+function FirmaLaboralCanvas({ title = "Firma", detail = "", defaultName = "", onFirma, onCancel, required = false }){
   const canvasRef = useRef(null);
   const drawing = useRef(false);
   const lastPt = useRef(null);
@@ -511,9 +517,16 @@ function FirmaLaboralCanvas({ title = "Firma", detail = "", defaultName = "", on
           onTouchStart={start} onTouchMove={move} onTouchEnd={end}/>
         <div style={{display:"flex",gap:8,marginTop:12}}>
           <button onClick={limpiar} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Borrar</button>
-          <button onClick={onCancel} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+          {!required && (
+            <button onClick={onCancel} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+          )}
           <button onClick={confirmar} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>Firmar</button>
         </div>
+        {required && (
+          <div style={{marginTop:10,fontSize:11,color:"#92400e",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"8px 10px",lineHeight:1.35}}>
+            La firma es obligatoria para usar la app. Se guardara en tu ficha de chofer y podras cambiarla despues desde Datos.
+          </div>
+        )}
       </div>
     </div>
   );
@@ -554,12 +567,13 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
     if(!texto.trim()){notify("Describe la incidencia", "warning");return;}
     setGuardando(true);
     setError("");
+    const incidenciaPayload = { incidencia: `[${faseLabel(fase)}] ${texto}` };
+    let uploadPayload = null;
     try {
-      await cambiarEstadoPedido(pedido.id, "incidencia", { incidencia: `[${faseLabel(fase)}] ${texto}` });
       if (doc) {
         const location = await capturarUbicacionActual();
         const uploadEvidence = buildUploadEvidence(`incidencia_${fase}`, location);
-        await subirPedidoDoc(pedido.id, {
+        uploadPayload = {
           nombre: `Incidencia ${faseLabel(fase)} - ${pedido.numero || pedido.id}`,
           tipo: `incidencia_${fase}`,
           file_base64: doc.base64,
@@ -567,10 +581,43 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
           file_size_kb: doc.sizeKb,
           notas: `${texto}\n\n${uploadEvidence.note}`,
           metadata: uploadEvidence.evidence,
-        });
+        };
+      }
+      await cambiarEstadoPedido(pedido.id, "incidencia", incidenciaPayload);
+      if (doc) {
+        await subirPedidoDoc(pedido.id, uploadPayload);
       }
       onGuardado();
     } catch (err) {
+      if (esErrorOffline(err)) {
+        try {
+          queueOfflineCriticalAction({
+            tipo: "pedido_estado",
+            pedido_id: pedido.id,
+            estado: "incidencia",
+            body: incidenciaPayload,
+            dedupe_key: `pedido_estado:${pedido.id}:incidencia:${Date.now()}`,
+            fecha: new Date().toISOString(),
+          }, "Incidencia guardada para sincronizar");
+          if (uploadPayload) {
+            if (payloadSizeKb(uploadPayload) > 4200) {
+              throw new Error("La foto se queda fuera de la cola porque pesa demasiado. Sube la evidencia cuando vuelva la cobertura.");
+            }
+            encolarOffline({
+              tipo: "pedido_doc_empresa",
+              pedido_id: pedido.id,
+              body: uploadPayload,
+              dedupe_key: `pedido_doc_empresa:${pedido.id}:${uploadPayload.tipo}:${uploadPayload.metadata?.captured_at || Date.now()}`,
+              fecha: new Date().toISOString(),
+            });
+          }
+          onGuardado();
+          return;
+        } catch (queueErr) {
+          setError(queueErr.message || "No se pudo guardar la incidencia sin conexion");
+          return;
+        }
+      }
       setError(err.message || "No se pudo registrar la incidencia");
     } finally {
       setGuardando(false);
@@ -636,11 +683,12 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
     if (!archivo || !doc) return;
     setSubiendo(true);
     setError("");
+    let tipo = fase === "carga" ? "albaran_carga" : "albaran_descarga";
+    let uploadPayload = null;
     try {
-      const tipo = fase === "carga" ? "albaran_carga" : "albaran_descarga";
       const location = await capturarUbicacionActual();
       const uploadEvidence = buildUploadEvidence(tipo, location);
-      await subirPedidoDocChofer(pedido.id, {
+      uploadPayload = {
         nombre: `${faseLabel(fase)} - albaran ${pedido.numero || pedido.id}`,
         tipo,
         file_base64: doc.base64,
@@ -648,11 +696,33 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
         file_size_kb: doc.sizeKb,
         notas: `Subido desde app chofer en fase ${faseLabel(fase)}\n${uploadEvidence.note}`,
         metadata: uploadEvidence.evidence,
-      });
+      };
+      await subirPedidoDocChofer(pedido.id, uploadPayload);
       setArchivo(null);
       setDoc(null);
       await onUploaded?.(tipo);
     } catch (err) {
+      if (esErrorOffline(err) && uploadPayload) {
+        try {
+          if (payloadSizeKb(uploadPayload) > 4200) {
+            throw new Error("El archivo es demasiado grande para guardarlo sin conexion. Intentalo cuando vuelva la cobertura.");
+          }
+          queueOfflineCriticalAction({
+            tipo: "pedido_doc_chofer",
+            pedido_id: pedido.id,
+            body: uploadPayload,
+            dedupe_key: `pedido_doc_chofer:${pedido.id}:${tipo}:${uploadPayload.metadata?.captured_at || Date.now()}`,
+            fecha: new Date().toISOString(),
+          }, "Albaran guardado para sincronizar");
+          setArchivo(null);
+          setDoc(null);
+          await onUploaded?.(tipo);
+          return;
+        } catch (queueErr) {
+          setError(queueErr.message || "No se pudo guardar el albaran sin conexion");
+          return;
+        }
+      }
       setError(err.message || "No se pudo subir el albaran");
     } finally {
       setSubiendo(false);
@@ -947,10 +1017,13 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       }
       return remote;
     } catch (err) {
-      const queued = guardarOfflineQueue([
-        ...leerOfflineQueue(),
-        { tipo: "pedido_chofer_pasos", pedido_id: pedido.id, patch: normalized, fecha: new Date().toISOString() },
-      ]);
+      const queued = encolarOffline({
+        tipo: "pedido_chofer_pasos",
+        pedido_id: pedido.id,
+        patch: normalized,
+        dedupe_key: `pedido_chofer_pasos:${pedido.id}:${Object.keys(normalized).sort().join(",")}`,
+        fecha: new Date().toISOString(),
+      });
       if (!silent) notify("Guardado pendiente de sincronizar", "warning");
       return { ...optimistic, offline_queue: queued.length };
     }
@@ -1015,13 +1088,14 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   async function registrarFirmaCargador(dataURL, firmaNombre) {
+    const firmaPayload = {
+      rol: "cargador",
+      firma_destinatario: dataURL,
+      firma_nombre: firmaNombre || "Remitente",
+      source: "app_chofer_carga",
+    };
     try {
-      await guardarFirmaEntrega(pedido.id, {
-        rol: "cargador",
-        firma_destinatario: dataURL,
-        firma_nombre: firmaNombre || "Remitente",
-        source: "app_chofer_carga",
-      });
+      await guardarFirmaEntrega(pedido.id, firmaPayload);
       await persistirPasos({ firma_cargador:true, firma_cargador_at:new Date().toISOString() }, { silent:true });
       const fresh = await cargarDocumentoControl();
       if (fresh) setDocControl(fresh);
@@ -1029,6 +1103,19 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       notify("Firma del remitente registrada en el DCD.", "success");
       onActualizar();
     } catch(err) {
+      if (esErrorOffline(err)) {
+        queueOfflineCriticalAction({
+          tipo: "pedido_firma",
+          pedido_id: pedido.id,
+          body: firmaPayload,
+          dedupe_key: `pedido_firma:${pedido.id}:cargador:${Date.now()}`,
+          fecha: new Date().toISOString(),
+        }, "Firma del remitente guardada para sincronizar");
+        await persistirPasos({ firma_cargador:true, firma_cargador_at:new Date().toISOString() }, { silent:true });
+        setFirmandoCargador(false);
+        onActualizar();
+        return;
+      }
       notify(err.message, "error");
     }
   }
@@ -1228,25 +1315,69 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
         }catch(e){}
       }
       onActualizar();
-    }catch(err){notify(err.message, "error");}
+    }catch(err){
+      if (esErrorOffline(err)) {
+        queueOfflineCriticalAction({
+          tipo: "pedido_estado",
+          pedido_id: pedido.id,
+          estado: nuevoEstado,
+          body: {},
+          dedupe_key: `pedido_estado:${pedido.id}:${nuevoEstado}:${Date.now()}`,
+          fecha: new Date().toISOString(),
+        }, "Cambio de estado guardado para sincronizar");
+        if(nuevoEstado==="en_curso") {
+          const location = await capturarUbicacionActual();
+          await persistirPasos({ carga_iniciada:true, carga_iniciada_at:new Date().toISOString(), ...(location ? { carga_ubicacion: location } : {}), ...patchKmParaPaso("carga_iniciada") }, { silent:true });
+        }
+        if(nuevoEstado==="descarga") await persistirPasos({ descarga_iniciada:true, ...patchKmParaPaso("descarga_iniciada") }, { silent:true });
+        if(nuevoEstado==="entregado") await persistirPasos({ descarga_ok:true, firma_entrega:true, ...patchKmParaPaso("firma_entrega") }, { silent:true });
+        onActualizar();
+        return;
+      }
+      notify(err.message, "error");
+    }
     finally{setLoading(false);}
   }
 
   async function registrarFirma(dataURL, firmaNombre){
+    const firmaPayload = {
+      firma_destinatario: dataURL,
+      firma_nombre: firmaNombre || "Destinatario",
+      source: "app_chofer",
+    };
     try{
       // Save digital signature to backend
-      await guardarFirmaEntrega(pedido.id, {
-        firma_destinatario: dataURL,
-        firma_nombre: firmaNombre || "Destinatario",
-        source: "app_chofer",
-      });
+      await guardarFirmaEntrega(pedido.id, firmaPayload);
       await cambiarEstadoPedido(pedido.id,"entregado");
       await persistirPasos({ descarga_ok:true, firma_entrega:true, firma_entrega_at:new Date().toISOString(), ...patchKmParaPaso("firma_entrega") }, { silent:true });
       const fresh = await cargarDocumentoControl();
       if (fresh) setDocControl(fresh);
       setFirmando(false);
       onActualizar();
-    }catch(err){notify(err.message, "error");}
+    }catch(err){
+      if (esErrorOffline(err)) {
+        queueOfflineCriticalAction({
+          tipo: "pedido_firma",
+          pedido_id: pedido.id,
+          body: firmaPayload,
+          dedupe_key: `pedido_firma:${pedido.id}:destinatario:${Date.now()}`,
+          fecha: new Date().toISOString(),
+        }, "Firma de entrega guardada para sincronizar");
+        encolarOffline({
+          tipo: "pedido_estado",
+          pedido_id: pedido.id,
+          estado: "entregado",
+          body: {},
+          dedupe_key: `pedido_estado:${pedido.id}:entregado:${Date.now()}`,
+          fecha: new Date().toISOString(),
+        });
+        await persistirPasos({ descarga_ok:true, firma_entrega:true, firma_entrega_at:new Date().toISOString(), ...patchKmParaPaso("firma_entrega") }, { silent:true });
+        setFirmando(false);
+        onActualizar();
+        return;
+      }
+      notify(err.message, "error");
+    }
   }
 
   async function abrirFirmaFinalizacionManual() {
@@ -1266,18 +1397,30 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   async function actualizarPosicion(){
-    if(!navigator.geolocation){notify("GPS no disponible", "warning");return;}
-    navigator.geolocation.getCurrentPosition(async(pos)=>{
-      try{
-        await actualizarGpsPedido(pedido.id, {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy_m: Math.round(Number(pos.coords.accuracy || 0)),
-          captured_at: new Date().toISOString(),
-        });
+    const pos = await capturarUbicacionActual(15000);
+    if(!pos){notify("GPS no disponible o permiso denegado", "warning");return;}
+    const gpsPayload = {
+      lat: pos.lat,
+      lng: pos.lng,
+      accuracy_m: Math.round(Number(pos.accuracy_m || 0)),
+      captured_at: pos.captured_at || new Date().toISOString(),
+    };
+    try{
+        await actualizarGpsPedido(pedido.id, gpsPayload);
         notify("Posicion actualizada", "success");
-      }catch(err){notify(err.message, "error");}
-    },()=>notify("No se pudo obtener la ubicacion", "error"));
+    }catch(err){
+      if (esErrorOffline(err)) {
+        queueOfflineCriticalAction({
+          tipo: "pedido_gps",
+          pedido_id: pedido.id,
+          body: gpsPayload,
+          dedupe_key: `pedido_gps:${pedido.id}:${Date.now()}`,
+          fecha: new Date().toISOString(),
+        }, "Posicion guardada para sincronizar");
+        return;
+      }
+      notify(err.message, "error");
+    }
   }
 
   async function abrirUbicacionEnApps(){
@@ -1885,9 +2028,12 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
       setHistorial(fallbackLocal);
       onSolicitudesSync?.(fallbackLocal);
       emitirSyncSolicitudesTaller();
-      const q = leerOfflineQueue();
-      q.push({ tipo:"solicitud_taller", solicitud, fecha:new Date().toISOString() });
-      guardarOfflineQueue(q);
+      encolarOffline({
+        tipo: "solicitud_taller",
+        solicitud,
+        dedupe_key: `solicitud_taller:${solicitud.id}`,
+        fecha: new Date().toISOString(),
+      });
       notify("Sin conexion: la solicitud se ha guardado y se enviara en cuanto vuelva el sistema.", "warning");
       setEnviado(true);
       setMotivo(""); setObs("");
@@ -2480,6 +2626,60 @@ function VacacionesChofer({ items = [], chofer, onRefresh }) {
   );
 }
 
+function DatosChofer({ chofer = {}, user = {}, onCambiarFirma }) {
+  const nombreCompleto = `${chofer?.nombre || user?.nombre || ""} ${chofer?.apellidos || ""}`.trim() || "Chofer";
+  const firmaFecha = chofer?.firma_base_fecha ? new Date(chofer.firma_base_fecha).toLocaleDateString("es-ES") : "";
+  const datos = [
+    ["Nombre", nombreCompleto],
+    ["DNI/NIE", chofer?.dni || user?.dni || "No informado"],
+    ["Telefono", chofer?.telefono || user?.telefono || "No informado"],
+    ["Email", chofer?.email || user?.email || "No informado"],
+    ["Tractora", chofer?.matricula || chofer?.vehiculo_matricula || "Sin asignar"],
+    ["Remolque", chofer?.remolque_matricula || "Sin asignar"],
+  ];
+
+  return (
+    <div className="tg-chofer-section-shell" style={{padding:"14px 16px"}}>
+      <div className="tg-chofer-card" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:16}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"var(--text)",marginBottom:4}}>Mis datos</div>
+        <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:14}}>
+          Revisa tus datos de chofer. Si algun dato no es correcto, solicita la modificacion a trafico o gerencia.
+        </div>
+        <div className="tg-chofer-datos-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          {datos.map(([label, value]) => (
+            <div key={label} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px"}}>
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>{label}</div>
+              <div style={{fontSize:13,color:"var(--text)",fontWeight:800,overflowWrap:"anywhere"}}>{value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="tg-chofer-card" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:16,marginTop:12}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:12}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)"}}>Firma</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>
+              {chofer?.firma_base ? `Guardada${firmaFecha ? ` el ${firmaFecha}` : ""}` : "Pendiente de registrar"}
+            </div>
+          </div>
+          <span style={{padding:"5px 9px",borderRadius:999,background:chofer?.firma_base ? "rgba(16,185,129,.12)" : "rgba(245,158,11,.14)",color:chofer?.firma_base ? "#10b981" : "#d97706",fontSize:11,fontWeight:900}}>
+            {chofer?.firma_base ? "Activa" : "Pendiente"}
+          </span>
+        </div>
+        {chofer?.firma_base && (
+          <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:10,marginBottom:12,textAlign:"center"}}>
+            <img src={chofer.firma_base} alt="Firma del chofer" style={{maxHeight:90,objectFit:"contain"}} />
+          </div>
+        )}
+        <button onClick={onCambiarFirma}
+          style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          {chofer?.firma_base ? "Cambiar firma" : "Registrar firma"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function NuevoViajeChofer({ onCreado }) {
   const today = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({
@@ -2794,7 +2994,9 @@ export default function AppChofer(){
   const [expandedPedidoId, setExpandedPedidoId] = useState(null);
   const [routeNotifications, setRouteNotifications] = useState([]);
   const [firmaBaseOpen, setFirmaBaseOpen] = useState(false);
+  const [firmaBaseForzada, setFirmaBaseForzada] = useState(false);
   const gpsSeguimientoRef = useRef({ lastSent: 0 });
+  const offlineSyncRef = useRef(false);
   const [gpsSeguimientoEstado, setGpsSeguimientoEstado] = useState({
     active: false,
     text: "Ubicacion en espera hasta iniciar jornada.",
@@ -2836,13 +3038,19 @@ export default function AppChofer(){
 
   useEffect(() => {
     const chofer = jornadaInfo?.chofer;
-    if (user?.rol === "chofer" && chofer?.id && !chofer?.firma_base) setFirmaBaseOpen(true);
+    if (user?.rol === "chofer" && chofer?.id && !chofer?.firma_base) {
+      setFirmaBaseForzada(true);
+      setFirmaBaseOpen(true);
+    } else if (chofer?.firma_base) {
+      setFirmaBaseForzada(false);
+    }
   }, [jornadaInfo?.chofer, user?.rol]);
 
   async function guardarFirmaBaseChofer(firma) {
     try {
       await guardarChoferFirmaBaseApp(firma);
       setFirmaBaseOpen(false);
+      setFirmaBaseForzada(false);
       notify("Firma guardada en tu ficha de chofer.", "success");
       await cargar();
     } catch (e) {
@@ -2900,7 +3108,9 @@ export default function AppChofer(){
     const provider = String(gpsChoferProvider || "").trim().toLowerCase();
     const externalId = String(gpsChoferExternalId || "").trim();
     const hasExternalGps = provider && provider !== "manual" && provider !== "app_chofer" && externalId;
-    if (!navigator.geolocation) {
+    const nativeApp = isNativeMobileApp();
+    const hasWebGps = typeof navigator !== "undefined" && !!navigator.geolocation;
+    if (!nativeApp && !hasWebGps) {
       gpsSeguimientoRef.current.lastSent = 0;
       setGpsSeguimientoEstado({ active: false, text: "GPS no disponible en este dispositivo." });
       return;
@@ -2926,31 +3136,45 @@ export default function AppChofer(){
       return;
     }
     gpsSeguimientoRef.current.lastSent = 0;
-    setGpsSeguimientoEstado({ active: false, text: "Solicitando permiso de ubicacion..." });
-    const id = navigator.geolocation.watchPosition(
-      pos => {
+    let cancelled = false;
+    let stopWatch = null;
+    setGpsSeguimientoEstado({ active: false, text: "Solicitando permiso de ubicacion para jornada activa..." });
+    (async () => {
+      const granted = await requestForegroundLocationPermission().catch(() => false);
+      if (cancelled) return;
+      if (!granted) {
+        setGpsSeguimientoEstado({ active: false, text: "Permiso de ubicacion denegado. Activalo para registrar posicion durante la jornada." });
+        return;
+      }
+      stopWatch = await watchForegroundLocation(
+        { enableHighAccuracy: true, maximumAge: 60000, timeout: 15000 },
+        pos => {
+          if (!pos) return;
         const now = Date.now();
         setGpsSeguimientoEstado({
           active: true,
-          text: `Ubicacion activa. Ultima senal ${new Date(now).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})}.`,
+          text: `Ubicacion activa con app abierta. Ultima senal ${new Date(now).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})}.`,
         });
         if (gpsSeguimientoRef.current.lastSent && gpsSeguimientoRef.current.lastSent + 60000 > now) return;
         gpsSeguimientoRef.current.lastSent = now;
         registrarGpsChoferApp({
           vehiculo_id: gpsChoferVehiculoId,
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy_m: Number.isFinite(pos.coords.accuracy) ? Number(pos.coords.accuracy.toFixed(1)) : null,
-          velocidad_kmh: Number.isFinite(pos.coords.speed) && pos.coords.speed >= 0 ? Number((pos.coords.speed * 3.6).toFixed(1)) : null,
+          lat: pos.lat,
+          lng: pos.lng,
+          accuracy_m: Number.isFinite(pos.accuracy_m) ? Number(pos.accuracy_m.toFixed(1)) : null,
+          velocidad_kmh: Number.isFinite(pos.speed_mps) && pos.speed_mps >= 0 ? Number((pos.speed_mps * 3.6).toFixed(1)) : null,
           recorded_at: new Date().toISOString(),
         }).catch(()=>{});
-      },
-      () => {
-        setGpsSeguimientoEstado({ active: false, text: "Permiso de ubicacion denegado o no disponible." });
-      },
-      { enableHighAccuracy: true, maximumAge: 60000, timeout: 15000 }
-    );
-    return () => navigator.geolocation.clearWatch(id);
+        },
+        () => {
+          setGpsSeguimientoEstado({ active: false, text: "Permiso de ubicacion denegado o no disponible." });
+        }
+      );
+    })();
+    return () => {
+      cancelled = true;
+      try { stopWatch?.(); } catch {}
+    };
   }, [
     gpsJornadaId,
     gpsJornadaEstado,
@@ -2976,6 +3200,7 @@ export default function AppChofer(){
   });
 
   const enCurso = pedidos.filter(p=>["en_curso","descarga"].includes(p.estado)).length;
+  const offlineQueueSummary = queueSummary(offlineQueue);
   const solicitudesAbiertas = solicitudesChofer.filter(s => !["resuelto","cerrado","cancelado"].includes(String(s.estado || "").toLowerCase())).length;
   const vacacionesFirmaPendiente = vacacionesChofer.filter(v => v.estado === "aprobada_pendiente_firma").length;
   const solicitudCritica = solicitudesChofer.find(s => String(s.urgencia || "").toLowerCase() === "critica" && !["resuelto","cerrado","cancelado"].includes(String(s.estado || "").toLowerCase()));
@@ -2986,8 +3211,8 @@ export default function AppChofer(){
       matricula: jornadaInfo.chofer.matricula || jornadaInfo.chofer.vehiculo_matricula || "",
     } : null);
   const tabsChofer = isLitePlan
-    ? [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["historial","Historial"]]
-    : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Taller"]];
+    ? [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["historial","Historial"]]
+    : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Taller"]];
 
   // PWA helpers
   async function installApp() {
@@ -3015,36 +3240,59 @@ export default function AppChofer(){
   }
 
   function syncOfflineQueue() {
-    const q = leerOfflineQueue();
-    if (!q.length) return;
-    Promise.all(q.map(async item => {
-      try {
-        if ((item.tipo === "solicitud_mecanico" || item.tipo === "solicitud_taller") && item.solicitud) {
-          await crearTallerSolicitud(item.solicitud);
-          return true;
+    if (offlineSyncRef.current) return;
+    const all = leerOfflineQueue();
+    const ready = readyOfflineItems().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    if (!ready.length) return;
+    offlineSyncRef.current = true;
+    (async () => {
+      const results = [];
+      for (const item of ready) {
+        try {
+          if ((item.tipo === "solicitud_mecanico" || item.tipo === "solicitud_taller") && item.solicitud) {
+            await crearTallerSolicitud(item.solicitud);
+          } else if (item.tipo === "pedido_chofer_pasos" && item.pedido_id && item.patch) {
+            await guardarPedidoChoferPasos(item.pedido_id, item.patch);
+          } else if (item.tipo === "pedido_doc_chofer" && item.pedido_id && item.body) {
+            await subirPedidoDocChofer(item.pedido_id, item.body);
+          } else if (item.tipo === "pedido_doc_empresa" && item.pedido_id && item.body) {
+            await subirPedidoDoc(item.pedido_id, item.body);
+          } else if (item.tipo === "pedido_firma" && item.pedido_id && item.body) {
+            await guardarFirmaEntrega(item.pedido_id, item.body);
+          } else if (item.tipo === "pedido_estado" && item.pedido_id && item.estado) {
+            await cambiarEstadoPedido(item.pedido_id, item.estado, item.body || {});
+          } else if (item.tipo === "pedido_gps" && item.pedido_id && item.body) {
+            await actualizarGpsPedido(item.pedido_id, item.body);
+          } else if (item.tipo === "pedido_editar" && item.pedido_id && item.body) {
+            await editarPedido(item.pedido_id, item.body);
+          } else if (item.url) {
+            const res = await fetch(item.url, {
+              method: item.method || "PUT",
+              headers: { "Content-Type":"application/json", "Authorization":"Bearer "+getToken() },
+              body: JSON.stringify(item.body || {}),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          }
+          results.push({ id: item.id, ok: true });
+        } catch (error) {
+          results.push({ id: item.id, ok: false, error: error?.message || "No se pudo sincronizar" });
         }
-        if (item.tipo === "pedido_chofer_pasos" && item.pedido_id && item.patch) {
-          await guardarPedidoChoferPasos(item.pedido_id, item.patch);
-          return true;
-        }
-        if (!item.url) return true;
-        const res = await fetch(item.url, {
-          method: item.method || "PUT",
-          headers: { "Content-Type":"application/json",
-                     "Authorization":"Bearer "+getToken() },
-          body: JSON.stringify(item.body || {}),
-        });
-        return res.ok;
-      } catch {
-        return false;
       }
-    })).then(results => {
-      const failed = q.filter((_, i) => !results[i]);
-      setOfflineQueue(guardarOfflineQueue(failed));
-      if (results.some(Boolean)) {
-        notify(`Sincronizadas ${results.filter(Boolean).length} accion(es) pendientes`, "success");
+      const okIds = new Set(results.filter(r => r.ok).map(r => r.id));
+      const failed = new Map(results.filter(r => !r.ok).map(r => [r.id, r.error]));
+      const next = all
+        .filter(item => !okIds.has(item.id))
+        .map(item => failed.has(item.id) ? markOfflineAttempt(item, failed.get(item.id)) : item);
+      const saved = guardarOfflineQueue(next);
+      setOfflineQueue(saved);
+      const okCount = okIds.size;
+      if (okCount) {
+        const summary = queueSummary(saved);
+        notify(`Sincronizadas ${okCount} accion(es) pendientes${summary.blocked ? `. ${summary.blocked} bloqueada(s)` : ""}.`, "success");
         cargar();
       }
+    })().finally(() => {
+      offlineSyncRef.current = false;
     });
   }
 
@@ -3103,6 +3351,9 @@ export default function AppChofer(){
         }
         .tg-chofer-vacaciones-row {
           display:grid !important;
+          grid-template-columns:1fr !important;
+        }
+        .tg-chofer-datos-grid {
           grid-template-columns:1fr !important;
         }
         .tg-chofer-header-main {
@@ -3177,7 +3428,22 @@ export default function AppChofer(){
           fontSize:12,color:"#ef4444",fontWeight:600}}>
           <span>Offline</span>
           <span>Sin conexion - los cambios se sincronizaran cuando vuelvas a conectarte
-            {offlineQueue.length>0?` (${offlineQueue.length} pendiente${offlineQueue.length>1?"s":""})`:""}</span>
+            {offlineQueueSummary.total>0?` (${offlineQueueSummary.pending} pendiente${offlineQueueSummary.pending===1?"":"s"})`:""}</span>
+        </div>
+      )}
+
+      {!offline && offlineQueueSummary.total > 0 && (
+        <div style={{background:"rgba(245,158,11,.14)",border:"1px solid rgba(245,158,11,.34)",
+          padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,
+          fontSize:12,color:"#d97706",fontWeight:700}}>
+          <span>
+            {offlineQueueSummary.pending} accion{offlineQueueSummary.pending===1?"":"es"} pendiente{offlineQueueSummary.pending===1?"":"s"} de sincronizar
+            {offlineQueueSummary.blocked ? ` · ${offlineQueueSummary.blocked} bloqueada${offlineQueueSummary.blocked===1?"":"s"}` : ""}
+          </span>
+          <button onClick={syncOfflineQueue}
+            style={{border:"1px solid rgba(245,158,11,.45)",background:"rgba(255,255,255,.12)",color:"#d97706",borderRadius:8,padding:"5px 8px",fontSize:11,fontWeight:900,cursor:"pointer"}}>
+            Reintentar
+          </button>
         </div>
       )}
 
@@ -3260,7 +3526,7 @@ export default function AppChofer(){
       )}
 
       {/* Lista viajes */}
-      {tab!=="solicitud" && tab!=="jornada" && tab!=="vacaciones" && tab!=="nuevo" && (
+      {tab!=="solicitud" && tab!=="jornada" && tab!=="vacaciones" && tab!=="nuevo" && tab!=="datos" && (
         <div style={{padding:"12px 16px"}}>
           {loading?(
             <div style={{padding:40,textAlign:"center",color:"var(--text5)"}}>Cargando viajes...</div>
@@ -3302,6 +3568,17 @@ export default function AppChofer(){
         <JornadaChofer jornadaInfo={jornadaInfo} gpsSeguimientoEstado={gpsSeguimientoEstado} onRefresh={cargar} />
       )}
 
+      {tab==="datos" && (
+        <DatosChofer
+          chofer={jornadaInfo?.chofer || {}}
+          user={user || {}}
+          onCambiarFirma={() => {
+            setFirmaBaseForzada(!jornadaInfo?.chofer?.firma_base);
+            setFirmaBaseOpen(true);
+          }}
+        />
+      )}
+
       {tab==="vacaciones" && (
         <VacacionesChofer items={vacacionesChofer} chofer={jornadaInfo?.chofer || user} onRefresh={cargar} />
       )}
@@ -3313,6 +3590,7 @@ export default function AppChofer(){
           defaultName={`${jornadaInfo?.chofer?.nombre || user?.nombre || ""} ${jornadaInfo?.chofer?.apellidos || ""}`.trim()}
           onFirma={guardarFirmaBaseChofer}
           onCancel={()=>setFirmaBaseOpen(false)}
+          required={firmaBaseForzada}
         />
       )}
 

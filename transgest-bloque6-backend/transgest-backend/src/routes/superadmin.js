@@ -85,7 +85,8 @@ function listFromProviderPayload(payload) {
 function gpsPlateFromItem(item = {}) {
   return String(
     item.Matricula || item["Matrícula"] || item.matricula ||
-    item.plate || item.Plate || item.registration || item.Registration || ""
+    item.MatriculaVehiculo || item.matriculaVehiculo || item.plate || item.Plate ||
+    item.Placa || item.placa || item.registration || item.Registration || ""
   ).trim();
 }
 
@@ -123,26 +124,40 @@ async function getGpsLinkedStats(empresaId, provider) {
   return rows[0] || null;
 }
 
-async function requestMovildataAdmin(path, apiKey, params = {}) {
+async function requestMovildataAdmin(path, apiKey, params = {}, options = {}) {
   const url = new URL(path, "https://mapi.movildata.com/");
   url.searchParams.set("apikey", apiKey);
   url.searchParams.set("apiKey", apiKey);
   Object.entries(params || {}).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, String(value));
   });
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  const text = await res.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = { raw_text: text }; }
-  const message = data?.Message || data?.message || data?.error || data?.Error ||
-    (typeof text === "string" && text.length < 500 ? text : "");
-  if (!res.ok || isGpsProviderAuthError(message)) {
-    const err = new Error(message || `Movildata respondio HTTP ${res.status}.`);
-    err.http_status = res.status;
-    err.payload = data;
-    throw err;
+  const timeoutMs = Math.max(3000, Number(options.timeout_ms || options.timeoutMs || 15000));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { headers: { Accept: "application/json" }, signal: controller.signal });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { raw_text: text }; }
+    const message = data?.Message || data?.message || data?.error || data?.Error ||
+      (typeof text === "string" && text.length < 500 ? text : "");
+    if (!res.ok || isGpsProviderAuthError(message)) {
+      const err = new Error(message || `Movildata respondio HTTP ${res.status}.`);
+      err.http_status = res.status;
+      err.payload = data;
+      throw err;
+    }
+    return { data, http_status: res.status };
+  } catch (e) {
+    if (e.name === "AbortError") {
+      const err = new Error(`Movildata no respondio en ${Math.round(timeoutMs / 1000)} segundos.`);
+      err.http_status = 504;
+      throw err;
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
   }
-  return { data, http_status: res.status };
 }
 
 async function testGpsProviderConnection(provider, apiKey, empresaId = null) {
@@ -187,20 +202,36 @@ async function testGpsProviderConnection(provider, apiKey, empresaId = null) {
         message: `Movildata conectado: ${vehicles.length} vehiculo(s) y ${positions.length} posicion(es) recibidos${plates.length ? ` (${plates.join(", ")})` : ""}.`,
       };
     } catch (e) {
+      let fallbackPositions = [];
+      let fallbackMessage = "";
+      if (plates[0]) {
+        try {
+          const fallback = await requestMovildataAdmin("Users/GetLastLocationPlate", apiKey, { plate: plates[0] }, { timeoutMs: 10000 });
+          fallbackPositions = listFromProviderPayload(fallback.data);
+          fallbackMessage = fallbackPositions.length
+            ? ` Endpoint masivo no disponible, pero GetLastLocationPlate responde para ${plates[0]}.`
+            : ` Endpoint masivo no disponible y GetLastLocationPlate no devolvio posicion para ${plates[0]}.`;
+        } catch (fallbackError) {
+          fallbackMessage = ` Endpoint masivo no disponible y la prueba por matricula tambien fallo: ${fallbackError.message || "sin detalle"}.`;
+        }
+      }
       return {
-        ok: false,
+        ok: fallbackPositions.length > 0,
         provider,
         pull_supported: true,
         auth_error: isGpsProviderAuthError(e.message),
         http_status: e.http_status || vehiclesResult.http_status || null,
         remote_vehicles: vehicles.length,
+        remote_positions: fallbackPositions.length,
         sample_plates: plates,
         linked_vehicles: Number(linkedStats?.enlazados || 0),
         active_vehicles: Number(linkedStats?.vehiculos_activos || 0),
         recent_signal_vehicles: Number(linkedStats?.con_senal_reciente || 0),
-        positions_ok: false,
-        positions_message: e.message || "Movildata ha denegado la consulta de posiciones.",
-        message: `Movildata responde a vehiculos (${vehicles.length}), pero no permite leer posiciones con esta clave API: ${e.message || "permiso denegado"}.`,
+        positions_ok: fallbackPositions.length > 0,
+        positions_message: `${e.message || "Movildata ha denegado la consulta masiva de posiciones."}${fallbackMessage}`,
+        message: fallbackPositions.length > 0
+          ? `Movildata conectado parcialmente: ${vehicles.length} vehiculo(s), posicion por matricula operativa para ${plates[0]}. Solicita a Movildata activar Users/GetLastLocations para sincronizacion masiva.`
+          : `Movildata responde a vehiculos (${vehicles.length}), pero no permite leer posiciones con esta clave API: ${e.message || "permiso denegado"}.${fallbackMessage}`,
       };
     }
   }

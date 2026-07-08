@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, actualizarKmVehiculo, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
+import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, actualizarKmVehiculo, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
@@ -597,6 +597,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
 function TabGpsHistorial({ vehiculo }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [syncingMovildata, setSyncingMovildata] = useState(false);
   const [error, setError] = useState("");
 
   const cargar = useCallback(() => {
@@ -614,6 +615,25 @@ function TabGpsHistorial({ vehiculo }) {
   const currentLat = vehiculo?.gps_lat;
   const currentLng = vehiculo?.gps_lng;
   const hasCurrentCoords = currentLat !== null && currentLat !== undefined && currentLng !== null && currentLng !== undefined;
+  const isMovildata = String(vehiculo?.gps_provider || vehiculo?.ubicacion_fuente || "").toLowerCase() === "movildata";
+
+  async function sincronizarMovildataVehiculo() {
+    if (!vehiculo?.id) return;
+    setSyncingMovildata(true);
+    setError("");
+    try {
+      const hasta = new Date().toISOString().slice(0, 10);
+      const desde = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const r = await sincronizarPosicionesVehiculo(vehiculo.id, { provider: "movildata", desde, hasta });
+      notify(r?.message || "Movildata sincronizado para este vehiculo", "success");
+      cargar();
+    } catch (e) {
+      setError(e.message || "No se pudo sincronizar Movildata para este vehiculo");
+      notify(e.message || "No se pudo sincronizar Movildata", "error");
+    } finally {
+      setSyncingMovildata(false);
+    }
+  }
 
   return (
     <div>
@@ -655,9 +675,16 @@ function TabGpsHistorial({ vehiculo }) {
 
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:8}}>
         <div style={{fontSize:12,fontWeight:800,color:"var(--text3)",textTransform:"uppercase",letterSpacing:".06em"}}>Historial de posiciones</div>
-        <button type="button" onClick={cargar} disabled={loading} style={{...S.btn,background:"var(--bg4)",color:"var(--text)",border:"1px solid var(--border2)"}}>
-          {loading ? "Actualizando..." : "Actualizar"}
-        </button>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+          {isMovildata && (
+            <button type="button" onClick={sincronizarMovildataVehiculo} disabled={syncingMovildata || loading} style={{...S.btn,background:"rgba(20,184,166,.12)",color:"#0f766e",border:"1px solid rgba(20,184,166,.28)"}}>
+              {syncingMovildata ? "Sincronizando..." : "Movildata 7 dias"}
+            </button>
+          )}
+          <button type="button" onClick={cargar} disabled={loading} style={{...S.btn,background:"var(--bg4)",color:"var(--text)",border:"1px solid var(--border2)"}}>
+            {loading ? "Actualizando..." : "Actualizar"}
+          </button>
+        </div>
       </div>
 
       {error && <div style={{fontSize:12,color:"var(--red)",marginBottom:8}}>{error}</div>}

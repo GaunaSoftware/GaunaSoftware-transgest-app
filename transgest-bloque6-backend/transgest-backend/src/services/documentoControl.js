@@ -62,6 +62,7 @@ function firstStopInfo(stops = [], fallbackName = "") {
     google_maps_url: stop.google_maps_url || stop.maps_url || "",
     provincia: stop.provincia || stop.region || "",
     pais: stop.pais || stop.country || "",
+    referencia: stop.referencia || stop.referencia_cliente || stop.ref || stop.albaran || stop.numero_albaran || "",
   };
 }
 
@@ -138,6 +139,10 @@ function cleanCmrOptionalField(value = "") {
     "vencimiento",
   ].some(term => normalized.includes(term));
   return paymentOnly ? "" : raw;
+}
+
+function formatStopReference(stop = {}) {
+  return String(stop?.referencia || stop?.referencia_cliente || stop?.ref || stop?.albaran || stop?.numero_albaran || "").trim();
 }
 
 function buildGoodsMarksAndReferences(pedido = {}, cargas = [], descargas = []) {
@@ -315,8 +320,13 @@ function isEuCmrCountry(value = "") {
   return CMR_EU_COUNTRY_TERMS.includes(normalizeSearchText(value));
 }
 
+function isEuOrUkCmrCountry(value = "") {
+  const normalized = normalizeSearchText(value);
+  return CMR_EU_UK_COUNTRY_TERMS.includes(normalized);
+}
+
 function shouldUseInternationalCmr(origenPais = "España", destinoPais = "España") {
-  return [origenPais, destinoPais].some(country => !isSpainLike(country) && isEuCmrCountry(country));
+  return [origenPais, destinoPais].some(country => !isSpainLike(country) && isEuOrUkCmrCountry(country));
 }
 
 function documentIsInternational(documento = {}) {
@@ -1016,6 +1026,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       provincia: pedido?.origen_provincia || "",
       pais: origenPais,
       google_maps_url: carga.google_maps_url || "",
+      referencia: carga.referencia || "",
     },
     destino: {
       nombre: descarga.nombre || pedido?.destino || "",
@@ -1024,6 +1035,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       provincia: pedido?.destino_provincia || "",
       pais: destinoPais,
       google_maps_url: descarga.google_maps_url || "",
+      referencia: descarga.referencia || "",
     },
     cargas: normalizeStopList(cargas, {
       fecha: pedido?.fecha_carga || "",
@@ -1635,8 +1647,15 @@ function cmrPartyLines(party = {}) {
 function cmrAddressLines(stop = {}) {
   return [
     cmrText(stop.nombre || stop.direccion),
-    [stop.direccion, stop.provincia, stop.pais].filter(Boolean).join(", "),
+    [stop.direccion, stop.provincia || stop.region, stop.pais || stop.country].filter(Boolean).join(", "),
   ].filter(Boolean);
+}
+
+function cmrStopLines(stop = {}) {
+  const lines = cmrAddressLines(stop);
+  const ref = formatStopReference(stop);
+  if (ref) lines.push(`Referencia: ${ref}`);
+  return lines;
 }
 
 function cmrSignatureHtml(label, firma = {}, extra = "") {
@@ -1681,8 +1700,7 @@ async function buildDocumentoControlCmrHtml({
   const volumen = doc.mercancia?.volumen ? `${cmrText(doc.mercancia.volumen)} m3` : "-";
   const controls = `<div class="no-print cmr-actions"><button onclick="window.print()">Imprimir</button>${qrUrl ? `<button onclick="navigator.clipboard && navigator.clipboard.writeText(${JSON.stringify(qrUrl)})">Copiar enlace QR</button>` : ""}</div>`;
   const printScript = autoPrint ? `<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250));</script>` : "";
-  const privateNotes = publicView ? "" : `<section class="cmr-box cmr-wide"><h2>Condiciones documentadas / Documented terms</h2>
-    <p><strong>Pago interno:</strong> ${escapeHtml(doc.condiciones?.forma_pago_interna || "-")}</p>
+  const privateNotes = publicView ? "" : `<section class="cmr-box cmr-wide"><h2>Condiciones operativas internas / Internal operational terms</h2>
     ${doc.condiciones?.revision_combustible ? `<p>${escapeHtml(doc.condiciones.revision_combustible)}</p>` : ""}
     <p><strong>Estado interoperabilidad:</strong> ${escapeHtml(buildEcmrConsignmentNote(doc).status || "-")}</p>
   </section>`;
@@ -1716,9 +1734,9 @@ async function buildDocumentoControlCmrHtml({
       <div class="cmr-box"><div class="cmr-num">16 Transportista / Carrier</div>${cmrPartyLines(doc.transportista_efectivo).map(line => `<p>${escapeHtml(line)}</p>`).join("")}</div>
       <div class="cmr-box"><div class="cmr-num">2 Destinatario / Consignee</div>${cmrAddressLines(doc.destino).map(line => `<p>${escapeHtml(line)}</p>`).join("")}</div>
       <div class="cmr-box"><div class="cmr-num">17 Transportistas sucesivos / Successive carriers</div><p>${escapeHtml((Array.isArray(doc.transportistas_sucesivos) ? doc.transportistas_sucesivos : []).map(t => [t.nombre, t.nif, t.domicilio].filter(Boolean).join(" | ")).join("\n") || "-")}</p></div>
-      <div class="cmr-box"><div class="cmr-num">3 Lugar de entrega / Place of delivery</div>${cmrAddressLines(doc.destino).map(line => `<p>${escapeHtml(line)}</p>`).join("")}<p class="cmr-small">Previsto: ${escapeHtml(descargaFecha)}</p></div>
+      <div class="cmr-box"><div class="cmr-num">3 Lugar de entrega / Place of delivery</div>${cmrStopLines(doc.destino).map(line => `<p>${escapeHtml(line)}</p>`).join("")}<p class="cmr-small">Previsto: ${escapeHtml(descargaFecha)}</p></div>
       <div class="cmr-box"><div class="cmr-num">18 Reservas y observaciones / Reservations</div><p>${escapeHtml(doc.observaciones || "-")}</p></div>
-      <div class="cmr-box"><div class="cmr-num">4 Lugar y fecha de carga / Place and date of taking over</div>${cmrAddressLines(doc.origen).map(line => `<p>${escapeHtml(line)}</p>`).join("")}<p class="cmr-small">Previsto: ${escapeHtml(cargaFecha)}</p></div>
+      <div class="cmr-box"><div class="cmr-num">4 Lugar y fecha de carga / Place and date of taking over</div>${cmrStopLines(doc.origen).map(line => `<p>${escapeHtml(line)}</p>`).join("")}<p class="cmr-small">Previsto: ${escapeHtml(cargaFecha)}</p></div>
       <div class="cmr-box"><div class="cmr-num">19 Acuerdos especiales / Special agreements</div><p>${escapeHtml(doc.condiciones?.acuerdos_especiales || "-")}</p></div>
       <div class="cmr-box"><div class="cmr-num">5 Documentos anexos / Documents attached</div><p>${anexosTexto}</p></div>
       <div class="cmr-box"><div class="cmr-num">21 Establecido en / Established in</div><p>${escapeHtml(doc.origen?.provincia || doc.origen?.pais || "Espana")} - ${escapeHtml(cmrDate(generatedAt))}</p><p class="cmr-small">Control: ${escapeHtml(doc.codigo_control || "-")}</p></div>
@@ -1833,10 +1851,10 @@ async function generateDocumentoControlCmrPdf({
   box("2", "Destinatario / Consignee", cmrAddressLines(docData.destino), left, y, colW, rowH);
   box("17", "Transportistas sucesivos / Successive carriers", (Array.isArray(docData.transportistas_sucesivos) ? docData.transportistas_sucesivos : []).map(t => [t.nombre, t.nif, t.domicilio].filter(Boolean).join(" | ")).join("\n") || "-", left + colW, y, colW, rowH);
   y += rowH;
-  box("3", "Lugar de entrega / Place of delivery", [...cmrAddressLines(docData.destino), `Previsto: ${cmrDate(docData.horarios?.fecha_descarga)} ${docData.horarios?.hora_descarga || docData.horarios?.ventana_descarga || ""}`], left, y, colW, rowH);
+  box("3", "Lugar de entrega / Place of delivery", [...cmrStopLines(docData.destino), `Previsto: ${cmrDate(docData.horarios?.fecha_descarga)} ${docData.horarios?.hora_descarga || docData.horarios?.ventana_descarga || ""}`], left, y, colW, rowH);
   box("18", "Reservas y observaciones / Reservations", docData.observaciones || "-", left + colW, y, colW, rowH);
   y += rowH;
-  box("4", "Lugar y fecha de carga / Place and date of taking over", [...cmrAddressLines(docData.origen), `Previsto: ${cmrDate(docData.horarios?.fecha_carga)} ${docData.horarios?.hora_carga || docData.horarios?.ventana_carga || ""}`], left, y, colW, rowH);
+  box("4", "Lugar y fecha de carga / Place and date of taking over", [...cmrStopLines(docData.origen), `Previsto: ${cmrDate(docData.horarios?.fecha_carga)} ${docData.horarios?.hora_carga || docData.horarios?.ventana_carga || ""}`], left, y, colW, rowH);
   box("19", "Acuerdos especiales / Special agreements", docData.condiciones?.acuerdos_especiales || "-", left + colW, y, colW, rowH);
   y += rowH;
   const anexosPdf = Array.isArray(docData.documentos_anexos) ? docData.documentos_anexos : [];
@@ -1884,13 +1902,27 @@ async function generateDocumentoControlCmrPdf({
   y += 106;
 
   if (!publicView) {
-    box("", "Condiciones documentadas / Documented terms", [
-      `Pago interno: ${docData.condiciones?.forma_pago_interna || "-"}`,
+    box("", "Condiciones operativas internas / Internal operational terms", [
       docData.condiciones?.revision_combustible || "",
       `Estado interoperabilidad: ${buildEcmrConsignmentNote(docData).status || "-"}`,
     ], left, y, right - left, 48);
   }
   put("Documento generado por TransGest. El QR abre el soporte alojado por empresa; la trazabilidad y los hashes se conservan en el repositorio DCD.", left, 810, right - left, { size: 6.5, color: "#475569" });
+  const anexosImagenPdf = (Array.isArray(docData.documentos_anexos) ? docData.documentos_anexos : [])
+    .filter(item => String(item.data_url || "").startsWith("data:image/"))
+    .slice(0, 4);
+  anexosImagenPdf.forEach((item, idx) => {
+    const img = dataUrlBuffer(item.data_url);
+    if (!img) return;
+    pdf.addPage({ margin: 28 });
+    put(`Anexo ${idx + 1}: ${item.nombre || "Documento adjunto"}`, left, 32, right - left, { bold: true, size: 12 });
+    put([item.tipo, item.created_at ? `Subido: ${new Date(item.created_at).toLocaleString("es-ES")}` : ""].filter(Boolean).join(" | "), left, 50, right - left, { size: 8, color: "#475569" });
+    try {
+      pdf.image(img, left, 72, { fit: [right - left, 700], align: "center", valign: "top" });
+    } catch {
+      put("No se pudo renderizar la imagen adjunta en el PDF.", left, 90, right - left, { size: 9, color: "#b91c1c" });
+    }
+  });
   pdf.end();
   const buffer = await done;
   return {

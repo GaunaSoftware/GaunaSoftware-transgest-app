@@ -549,6 +549,7 @@ export const vincularGpsVehiculo = (id, data) => apiFetch(`/vehiculos/${id}/gps-
 export const vincularGpsVehiculosBulk = (links) => apiFetch("/vehiculos/gps-links", { method:"PATCH", body:{ links } });
 export const actualizarPosicionVehiculo = (id, data) => apiFetch(`/vehiculos/${id}/posicion`, { method:"PATCH", body:data });
 export const getPosicionesVehiculo = (id) => apiFetch(`/vehiculos/${id}/posiciones`);
+export const sincronizarPosicionesVehiculo = (id, data = {}) => apiFetch(`/vehiculos/${id}/posiciones/sync`, { method:"POST", body:data });
 export const sincronizarGpsVehiculos = (provider) => apiFetch("/vehiculos/gps/sync", { method:"POST", body:{ provider } });
 
 // ── Choferes ──────────────────────────────────────────

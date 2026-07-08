@@ -8768,7 +8768,7 @@ export default function Pedidos() {
     try {
       const params = {};
       if (filtroEst === "activos") {
-        // Don't send multi-estado to backend - filter client-side below
+        params.estado = "pendiente,confirmado,en_curso,descarga,incidencia";
       }
       else if (filtroEst !== "todos") { params.estado = filtroEst; }
       if (debouncedQ) params.q = debouncedQ;
@@ -8787,9 +8787,9 @@ export default function Pedidos() {
       const p = await getPedidosResumenLista(params, { timeoutMs: 45000, silentError: true });
       // Handle paginated response {data, pagination} or legacy array
       let pedidosData = Array.isArray(p) ? p : (Array.isArray(p?.data) ? p.data : []);
-      // Client-side filter for "activos" (until backend supports multi-estado ANY)
+      // Safety net for "activos" if an older backend ignores multi-state filtering.
       if (filtroEst === "activos") {
-        pedidosData = pedidosData.filter(x => ["pendiente","confirmado","en_curso","descarga"].includes(x.estado));
+        pedidosData = pedidosData.filter(x => ["pendiente","confirmado","en_curso","descarga","incidencia"].includes(x.estado));
       }
       setPedidos(pedidosData);
       if (p?.pagination) {

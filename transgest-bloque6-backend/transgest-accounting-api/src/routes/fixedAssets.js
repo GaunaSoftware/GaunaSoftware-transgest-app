@@ -5,6 +5,7 @@ const db = require("../services/db");
 const { authenticate, requirePermission } = require("../middleware/auth");
 const { buildCsv } = require("../domain/csv");
 const {
+  buildFixedAssetDisposalDraft,
   buildStraightLineDepreciationPlan,
   depreciationAmountForPeriod,
   normalizeFixedAssetDepreciationRunInput,
@@ -13,8 +14,6 @@ const {
   normalizeFixedAssetQuery,
   normalizeFixedAssetStatusInput,
   nextStatusForAction,
-  moneyToUnits,
-  unitsToMoney,
 } = require("../domain/fixedAssets");
 const { journalDraftRequestHash, normalizeCancellationReason } = require("../domain/journalEntries");
 const { hasPermission } = require("../domain/rbac");
@@ -625,46 +624,7 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
         error.status = 409;
         throw error;
       }
-      if (!asset.asset_account_id) {
-        const error = new Error("El inmovilizado necesita cuenta de activo para preparar la baja");
-        error.status = 409;
-        throw error;
-      }
-
-      const acquisitionUnits = moneyToUnits(asset.acquisition_cost, "acquisition_cost");
-      const depreciationUnits = moneyToUnits(readiness.posted_depreciation_amount || "0", "posted_depreciation_amount", { allowZero: true });
-      const appliedDepreciationUnits = depreciationUnits > acquisitionUnits ? acquisitionUnits : depreciationUnits;
-      const netUnits = acquisitionUnits - appliedDepreciationUnits;
-      const saleProceedsUnits = input.disposal_type === "sale"
-        ? moneyToUnits(input.sale_proceeds_amount, "sale_proceeds_amount", { allowZero: true })
-        : 0n;
-      if (input.disposal_type === "sale" && saleProceedsUnits <= 0n) {
-        const error = new Error("Indica un importe de venta mayor que cero");
-        error.status = 400;
-        throw error;
-      }
-      const lossUnits = netUnits > saleProceedsUnits ? netUnits - saleProceedsUnits : 0n;
-      const gainUnits = saleProceedsUnits > netUnits ? saleProceedsUnits - netUnits : 0n;
-      if (appliedDepreciationUnits > 0n && !asset.accumulated_depreciation_account_id) {
-        const error = new Error("El inmovilizado necesita cuenta de amortizacion acumulada para preparar la baja");
-        error.status = 409;
-        throw error;
-      }
-      if (input.disposal_type === "sale" && !input.proceeds_account_id) {
-        const error = new Error("Selecciona una cuenta puente o de cobro para el importe de venta");
-        error.status = 400;
-        throw error;
-      }
-      if (lossUnits > 0n && !input.disposal_loss_account_id) {
-        const error = new Error("Selecciona una cuenta de perdida para la diferencia pendiente");
-        error.status = 400;
-        throw error;
-      }
-      if (gainUnits > 0n && !input.disposal_gain_account_id) {
-        const error = new Error("Selecciona una cuenta de beneficio para la diferencia de venta");
-        error.status = 400;
-        throw error;
-      }
+      const disposalDraft = buildFixedAssetDisposalDraft(asset, readiness, input);
 
       const periodResult = await client.query(
         `SELECT p.*, fy.status AS fiscal_year_status, fy.year_label
@@ -692,71 +652,20 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
         throw error;
       }
 
-      await assertPostableAccounts(client, selected.company_id, asset.fiscal_year_id, [
-        asset.asset_account_id,
-        appliedDepreciationUnits > 0n ? asset.accumulated_depreciation_account_id : null,
-        saleProceedsUnits > 0n ? input.proceeds_account_id : null,
-        lossUnits > 0n ? input.disposal_loss_account_id : null,
-        gainUnits > 0n ? input.disposal_gain_account_id : null,
-      ]);
-
-      const description = input.description || (
-        input.disposal_type === "sale"
-          ? `Baja por venta inmovilizado ${asset.asset_code}`
-          : `Baja inmovilizado ${asset.asset_code}`
+      await assertPostableAccounts(
+        client,
+        selected.company_id,
+        asset.fiscal_year_id,
+        disposalDraft.lines.map(line => line.account_id)
       );
-      const lines = [];
-      if (appliedDepreciationUnits > 0n) {
-        lines.push({
-          line_number: lines.length + 1,
-          account_id: asset.accumulated_depreciation_account_id,
-          side: "debit",
-          amount: unitsToMoney(appliedDepreciationUnits),
-          description: `Cancelar amortizacion acumulada ${asset.asset_code}`,
-        });
-      }
-      if (saleProceedsUnits > 0n) {
-        lines.push({
-          line_number: lines.length + 1,
-          account_id: input.proceeds_account_id,
-          side: "debit",
-          amount: unitsToMoney(saleProceedsUnits),
-          description: `Importe venta baja ${asset.asset_code}`,
-        });
-      }
-      if (lossUnits > 0n) {
-        lines.push({
-          line_number: lines.length + 1,
-          account_id: input.disposal_loss_account_id,
-          side: "debit",
-          amount: unitsToMoney(lossUnits),
-          description: `Perdida baja ${asset.asset_code}`,
-        });
-      }
-      lines.push({
-        line_number: lines.length + 1,
-        account_id: asset.asset_account_id,
-        side: "credit",
-        amount: unitsToMoney(acquisitionUnits),
-        description: `Baja coste ${asset.asset_code}`,
-      });
-      if (gainUnits > 0n) {
-        lines.push({
-          line_number: lines.length + 1,
-          account_id: input.disposal_gain_account_id,
-          side: "credit",
-          amount: unitsToMoney(gainUnits),
-          description: `Beneficio baja ${asset.asset_code}`,
-        });
-      }
 
       const requestHash = journalDraftRequestHash({
         fiscal_year_id: asset.fiscal_year_id,
         entry_date: input.disposal_date,
-        description,
+        description: disposalDraft.description,
         disposal_type: input.disposal_type,
-        sale_proceeds_amount: unitsToMoney(saleProceedsUnits),
-        lines,
+        sale_proceeds_amount: disposalDraft.sale_proceeds_amount,
+        lines: disposalDraft.lines,
       });
       const repeated = await client.query(
         `SELECT id, request_hash FROM ${q("journal_entries")} WHERE company_id=$1 AND idempotency_key=$2`,
@@ -805,7 +714,7 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
           asset.fiscal_year_id,
           period.id,
           input.disposal_date,
-          description,
+          disposalDraft.description,
           asset.id,
           input.idempotency_key,
           requestHash,
@@ -823,7 +732,7 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
       });
       const entry = entryResult.rows[0];
 
-      for (const line of lines) {
+      for (const line of disposalDraft.lines) {
         await client.query(
           `INSERT INTO ${q("journal_lines")}
              (tenant_id, company_id, journal_entry_id, line_number, account_id,
@@ -865,12 +774,12 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
             period_id: period.id,
             disposal_date: input.disposal_date,
             disposal_type: input.disposal_type,
-            acquisition_cost: asset.acquisition_cost,
-            posted_depreciation_amount: readiness.posted_depreciation_amount,
-            estimated_net_book_value: unitsToMoney(netUnits),
-            sale_proceeds_amount: unitsToMoney(saleProceedsUnits),
-            estimated_loss_amount: unitsToMoney(lossUnits),
-            estimated_gain_amount: unitsToMoney(gainUnits),
+            acquisition_cost: disposalDraft.acquisition_cost,
+            posted_depreciation_amount: disposalDraft.posted_depreciation_amount,
+            estimated_net_book_value: disposalDraft.estimated_net_book_value,
+            sale_proceeds_amount: disposalDraft.sale_proceeds_amount,
+            estimated_loss_amount: disposalDraft.estimated_loss_amount,
+            estimated_gain_amount: disposalDraft.estimated_gain_amount,
           }),
         ]
       );
@@ -887,10 +796,10 @@ router.post("/fixed-assets/:id/disposal-draft", requirePermission("fixed_assets.
           period_id: period.id,
           disposal_date: input.disposal_date,
           disposal_type: input.disposal_type,
-          estimated_net_book_value: unitsToMoney(netUnits),
-          sale_proceeds_amount: unitsToMoney(saleProceedsUnits),
-          estimated_loss_amount: unitsToMoney(lossUnits),
-          estimated_gain_amount: unitsToMoney(gainUnits),
+          estimated_net_book_value: disposalDraft.estimated_net_book_value,
+          sale_proceeds_amount: disposalDraft.sale_proceeds_amount,
+          estimated_loss_amount: disposalDraft.estimated_loss_amount,
+          estimated_gain_amount: disposalDraft.estimated_gain_amount,
         },
       });
 

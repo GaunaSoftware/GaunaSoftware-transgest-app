@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  buildFixedAssetDisposalDraft,
   buildStraightLineDepreciationPlan,
   depreciationAmountForPeriod,
   normalizeFixedAssetDepreciationRunInput,
@@ -138,4 +139,60 @@ test("normalizeFixedAssetDisposalDraftInput prepara baja revisable", () => {
   assert.throws(() => normalizeFixedAssetDisposalDraftInput({ disposal_type: "donation", period_id: "p", disposal_date: "2026-12-31", idempotency_key: "asset-disposal:x" }), /disposal_type/);
   assert.throws(() => normalizeFixedAssetDisposalDraftInput({ period_id: "p", disposal_date: "bad", idempotency_key: "asset-disposal:x" }), /disposal_date/);
   assert.throws(() => normalizeFixedAssetDisposalDraftInput({ period_id: "p", disposal_date: "2026-12-31", idempotency_key: "short" }), /idempotency_key/);
+});
+
+test("buildFixedAssetDisposalDraft genera retirada y ventas cuadradas", () => {
+  const asset = {
+    asset_code: "VEH-001",
+    acquisition_cost: "1000.000000",
+    asset_account_id: "asset-account",
+    accumulated_depreciation_account_id: "acc-dep-account",
+  };
+  const readiness = { posted_depreciation_amount: "400.000000" };
+
+  const withdrawal = buildFixedAssetDisposalDraft(asset, readiness, {
+    disposal_type: "withdrawal",
+    disposal_loss_account_id: "loss-account",
+  });
+  assert.deepEqual(withdrawal.lines.map(line => [line.side, line.account_id, line.amount]), [
+    ["debit", "acc-dep-account", "400.000000"],
+    ["debit", "loss-account", "600.000000"],
+    ["credit", "asset-account", "1000.000000"],
+  ]);
+  assert.equal(withdrawal.estimated_net_book_value, "600.000000");
+  assert.equal(withdrawal.estimated_loss_amount, "600.000000");
+
+  const saleWithLoss = buildFixedAssetDisposalDraft(asset, readiness, {
+    disposal_type: "sale",
+    proceeds_account_id: "customer-account",
+    disposal_loss_account_id: "loss-account",
+    sale_proceeds_amount: "500.000000",
+  });
+  assert.deepEqual(saleWithLoss.lines.map(line => [line.side, line.account_id, line.amount]), [
+    ["debit", "acc-dep-account", "400.000000"],
+    ["debit", "customer-account", "500.000000"],
+    ["debit", "loss-account", "100.000000"],
+    ["credit", "asset-account", "1000.000000"],
+  ]);
+  assert.equal(saleWithLoss.estimated_loss_amount, "100.000000");
+
+  const saleWithGain = buildFixedAssetDisposalDraft(asset, readiness, {
+    disposal_type: "sale",
+    proceeds_account_id: "customer-account",
+    disposal_gain_account_id: "gain-account",
+    sale_proceeds_amount: "700.000000",
+  });
+  assert.deepEqual(saleWithGain.lines.map(line => [line.side, line.account_id, line.amount]), [
+    ["debit", "acc-dep-account", "400.000000"],
+    ["debit", "customer-account", "700.000000"],
+    ["credit", "asset-account", "1000.000000"],
+    ["credit", "gain-account", "100.000000"],
+  ]);
+  assert.equal(saleWithGain.estimated_gain_amount, "100.000000");
+
+  assert.throws(() => buildFixedAssetDisposalDraft(asset, readiness, {
+    disposal_type: "sale",
+    proceeds_account_id: "customer-account",
+    sale_proceeds_amount: "0",
+  }), /mayor que cero/);
 });

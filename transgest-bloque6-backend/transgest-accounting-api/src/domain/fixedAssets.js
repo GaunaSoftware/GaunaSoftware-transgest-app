@@ -195,6 +195,95 @@ function depreciationAmountForPeriod(asset = {}, period = {}) {
   };
 }
 
+function buildFixedAssetDisposalDraft(asset = {}, readiness = {}, input = {}) {
+  if (!asset.asset_account_id) throw inputError("El inmovilizado necesita cuenta de activo para preparar la baja");
+  const acquisitionUnits = moneyToUnits(asset.acquisition_cost, "acquisition_cost");
+  const depreciationUnits = moneyToUnits(readiness.posted_depreciation_amount || "0", "posted_depreciation_amount", { allowZero: true });
+  const appliedDepreciationUnits = depreciationUnits > acquisitionUnits ? acquisitionUnits : depreciationUnits;
+  const netUnits = acquisitionUnits - appliedDepreciationUnits;
+  const saleProceedsUnits = input.disposal_type === "sale"
+    ? moneyToUnits(input.sale_proceeds_amount, "sale_proceeds_amount", { allowZero: true })
+    : 0n;
+  if (input.disposal_type === "sale" && saleProceedsUnits <= 0n) {
+    throw inputError("Indica un importe de venta mayor que cero");
+  }
+  const lossUnits = netUnits > saleProceedsUnits ? netUnits - saleProceedsUnits : 0n;
+  const gainUnits = saleProceedsUnits > netUnits ? saleProceedsUnits - netUnits : 0n;
+  if (appliedDepreciationUnits > 0n && !asset.accumulated_depreciation_account_id) {
+    throw inputError("El inmovilizado necesita cuenta de amortizacion acumulada para preparar la baja");
+  }
+  if (input.disposal_type === "sale" && !input.proceeds_account_id) {
+    throw inputError("Selecciona una cuenta puente o de cobro para el importe de venta");
+  }
+  if (lossUnits > 0n && !input.disposal_loss_account_id) {
+    throw inputError("Selecciona una cuenta de perdida para la diferencia pendiente");
+  }
+  if (gainUnits > 0n && !input.disposal_gain_account_id) {
+    throw inputError("Selecciona una cuenta de beneficio para la diferencia de venta");
+  }
+
+  const description = input.description || (
+    input.disposal_type === "sale"
+      ? `Baja por venta inmovilizado ${asset.asset_code}`
+      : `Baja inmovilizado ${asset.asset_code}`
+  );
+  const lines = [];
+  if (appliedDepreciationUnits > 0n) {
+    lines.push({
+      line_number: lines.length + 1,
+      account_id: asset.accumulated_depreciation_account_id,
+      side: "debit",
+      amount: unitsToMoney(appliedDepreciationUnits),
+      description: `Cancelar amortizacion acumulada ${asset.asset_code}`,
+    });
+  }
+  if (saleProceedsUnits > 0n) {
+    lines.push({
+      line_number: lines.length + 1,
+      account_id: input.proceeds_account_id,
+      side: "debit",
+      amount: unitsToMoney(saleProceedsUnits),
+      description: `Importe venta baja ${asset.asset_code}`,
+    });
+  }
+  if (lossUnits > 0n) {
+    lines.push({
+      line_number: lines.length + 1,
+      account_id: input.disposal_loss_account_id,
+      side: "debit",
+      amount: unitsToMoney(lossUnits),
+      description: `Perdida baja ${asset.asset_code}`,
+    });
+  }
+  lines.push({
+    line_number: lines.length + 1,
+    account_id: asset.asset_account_id,
+    side: "credit",
+    amount: unitsToMoney(acquisitionUnits),
+    description: `Baja coste ${asset.asset_code}`,
+  });
+  if (gainUnits > 0n) {
+    lines.push({
+      line_number: lines.length + 1,
+      account_id: input.disposal_gain_account_id,
+      side: "credit",
+      amount: unitsToMoney(gainUnits),
+      description: `Beneficio baja ${asset.asset_code}`,
+    });
+  }
+  return {
+    description,
+    lines,
+    acquisition_cost: unitsToMoney(acquisitionUnits),
+    posted_depreciation_amount: unitsToMoney(depreciationUnits),
+    applied_depreciation_amount: unitsToMoney(appliedDepreciationUnits),
+    estimated_net_book_value: unitsToMoney(netUnits),
+    sale_proceeds_amount: unitsToMoney(saleProceedsUnits),
+    estimated_loss_amount: unitsToMoney(lossUnits),
+    estimated_gain_amount: unitsToMoney(gainUnits),
+  };
+}
+
 function addMonths(dateText, monthOffset) {
   const [year, month, day] = String(dateText).slice(0, 10).split("-").map(Number);
   const base = new Date(Date.UTC(year, month - 1 + monthOffset, 1));
@@ -240,6 +329,7 @@ module.exports = {
   DEPRECIATION_METHODS,
   STATUSES,
   depreciationAmountForPeriod,
+  buildFixedAssetDisposalDraft,
   buildStraightLineDepreciationPlan,
   moneyToUnits,
   normalizeFixedAssetDepreciationRunInput,

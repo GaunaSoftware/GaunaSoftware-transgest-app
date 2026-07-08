@@ -87,6 +87,13 @@ test("aplicacion externa de cuentas y diario respeta cierres operativos", () => 
   assert.match(routeSource, /ensurePeriodOpen\(period\.rows\[0\], "aplicar lotes externos de diario"\)/);
 });
 
+test("preview externa senala ejercicios y periodos no abiertos", () => {
+  assert.match(routeSource, /fiscal_year_not_open/);
+  assert.match(routeSource, /period_not_found/);
+  assert.match(routeSource, /period_not_open/);
+  assert.match(routeSource, /period_status: targetPeriod\?\.status/);
+});
+
 test("mapPartyStagingRow mapea alias habituales y detecta errores", () => {
   const mapped = mapPartyStagingRow({
     raw_payload: {

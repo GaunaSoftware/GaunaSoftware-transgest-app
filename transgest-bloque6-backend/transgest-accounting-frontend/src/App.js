@@ -322,7 +322,7 @@ function externalImportPreviewTitle(row) {
 function externalImportPreviewSubtitle(row) {
   if (row.mapped?.code) return `${row.mapped.code} | ${row.mapped.account_type || "tipo pendiente"}`;
   if (row.mapped?.transaction_date) return `${row.mapped.transaction_date} | ${row.mapped.amount || "sin importe"} | ${row.mapped.direction || "tipo pendiente"} | ${row.mapped.bank_account_name || row.mapped.iban || "cuenta pendiente"}`;
-  if (row.mapped?.entry_date) return `${row.mapped.entry_date} | Debe ${row.mapped.total_debit || "0"} | Haber ${row.mapped.total_credit || "0"} | ${row.mapped.line_count || 0} lineas`;
+  if (row.mapped?.entry_date) return `${row.mapped.entry_date} | ${row.mapped.period_name || "periodo pendiente"} | Debe ${row.mapped.total_debit || "0"} | Haber ${row.mapped.total_credit || "0"} | ${row.mapped.line_count || 0} lineas`;
   if (row.mapped?.due_date) return `${row.mapped.due_date} | ${row.mapped.amount || "sin importe"} | ${row.mapped.direction || "tipo pendiente"}`;
   return `${row.mapped?.tax_id || "Sin NIF/CIF"} | ${row.mapped?.party_type || "tipo pendiente"}`;
 }

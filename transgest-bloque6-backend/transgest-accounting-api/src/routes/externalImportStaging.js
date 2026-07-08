@@ -83,6 +83,10 @@ function journalImportIdempotencyKey(batch, entryRef) {
   return `external-import:${batch.id}:${sha256(entryRef).slice(0, 24)}`;
 }
 
+function compactDate(value) {
+  return value ? String(value).slice(0, 10) : "";
+}
+
 async function assertFiscalYear(client, selected, fiscalYearId) {
   const id = String(fiscalYearId || "").trim();
   if (!id) {
@@ -187,6 +191,9 @@ async function buildPartyImportPreview(client, selected, batch) {
 
 async function buildAccountImportPreview(client, selected, batch, fiscalYearId) {
   const fiscalYear = await assertFiscalYear(client, selected, fiscalYearId);
+  const fiscalYearErrors = fiscalYear.status === "open"
+    ? []
+    : [{ code: "fiscal_year_not_open", message: `El ejercicio ${fiscalYear.year_label} no esta abierto` }];
   const rowsResult = await client.query(
     `SELECT id, row_number, row_hash, status, raw_payload, normalized_payload, errors, warnings
        FROM ${q("external_import_rows")}
@@ -209,7 +216,7 @@ async function buildAccountImportPreview(client, selected, batch, fiscalYearId) 
     const mapped = mapAccountStagingRow(row);
     const accountConflict = mapped.mapped.code ? byCode.get(mapped.mapped.code) || null : null;
     const conflicts = accountConflict ? [{ code: "account_code_exists", account: accountConflict }] : [];
-    const errors = [...(row.errors || []), ...mapped.errors];
+    const errors = [...(row.errors || []), ...mapped.errors, ...fiscalYearErrors];
     const action = errors.length ? "error" : conflicts.length ? "conflict" : "create";
     return {
       row_id: row.id,
@@ -391,6 +398,9 @@ async function buildBankTransactionImportPreview(client, selected, batch) {
 
 async function buildJournalEntryImportPreview(client, selected, batch, fiscalYearId) {
   const fiscalYear = await assertFiscalYear(client, selected, fiscalYearId);
+  const fiscalYearErrors = fiscalYear.status === "open"
+    ? []
+    : [{ code: "fiscal_year_not_open", message: `El ejercicio ${fiscalYear.year_label} no esta abierto` }];
   const rowsResult = await client.query(
     `SELECT id, row_number, row_hash, status, raw_payload, normalized_payload, errors, warnings
        FROM ${q("external_import_rows")}
@@ -415,6 +425,17 @@ async function buildJournalEntryImportPreview(client, selected, batch, fiscalYea
   );
   const byId = new Map(accounts.rows.map(row => [row.id, row]));
   const byCode = new Map(accounts.rows.map(row => [row.code, row]));
+  const periods = await client.query(
+    `SELECT id, name, status, start_date, end_date
+       FROM ${q("accounting_periods")}
+      WHERE company_id=$1 AND fiscal_year_id=$2`,
+    [selected.company_id, fiscalYear.id]
+  );
+  const periodsByDate = periods.rows.map(period => ({
+    ...period,
+    start_key: compactDate(period.start_date),
+    end_key: compactDate(period.end_date),
+  }));
 
   const groups = new Map();
   for (const { row, mapped } of mappedRows) {
@@ -487,6 +508,16 @@ async function buildJournalEntryImportPreview(client, selected, batch, fiscalYea
     }
     if (group.lines.length < 2) group.errors.push({ code: "journal_entry_too_short", message: "El asiento necesita al menos dos lineas", row_number: group.row_number });
     if (debitUnits !== creditUnits) group.errors.push({ code: "journal_entry_unbalanced", message: "El asiento no cuadra Debe/Haber", row_number: group.row_number });
+    group.errors.push(...fiscalYearErrors.map(error => ({ ...error, row_number: group.row_number })));
+    const targetPeriod = group.entry_date
+      ? periodsByDate.find(period => group.entry_date >= period.start_key && group.entry_date <= period.end_key)
+      : null;
+    if (group.entry_date && !targetPeriod) {
+      group.errors.push({ code: "period_not_found", message: "No existe un periodo para la fecha del asiento", row_number: group.row_number });
+    }
+    if (targetPeriod && targetPeriod.status !== "open") {
+      group.errors.push({ code: "period_not_open", message: `El periodo ${targetPeriod.name} no esta abierto`, row_number: group.row_number });
+    }
     const idempotencyKey = journalImportIdempotencyKey(batch, group.entry_ref);
     const existingEntry = byIdempotency.get(idempotencyKey) || null;
     const conflicts = existingEntry ? [{ code: "journal_entry_import_exists", journal_entry: existingEntry }] : [];
@@ -501,6 +532,9 @@ async function buildJournalEntryImportPreview(client, selected, batch, fiscalYea
         year_label: fiscalYear.year_label,
         entry_ref: group.entry_ref,
         entry_date: group.entry_date,
+        period_id: targetPeriod?.id || null,
+        period_name: targetPeriod?.name || null,
+        period_status: targetPeriod?.status || null,
         description: group.description,
         idempotency_key: idempotencyKey,
         line_count: group.lines.length,

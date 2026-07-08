@@ -284,7 +284,7 @@ Regla de transaccion:
 - Un asiento contabilizado puede generar un unico borrador reverso. El reverso invierte Debe/Haber, exige motivo y periodo abierto, y queda enlazado mediante `reversal_of_entry_id`, `reversed_by_entry_id` y `source_links`.
 - El detalle read-only del Diario devuelve `source_links` para mostrar trazabilidad de origen sin exponer endpoints de escritura directa.
 - Las importaciones externas de diario crean solo borradores y enlazan cada linea importada mediante `source_links` con `source_type=external_import_journal_entry`.
-- El staging externo de cuentas y Diario respeta los mismos bloqueos operativos que los casos de uso internos: ejercicio abierto para aplicar cuentas/asientos y periodo abierto para cada borrador de Diario.
+- El staging externo de cuentas y Diario respeta los mismos bloqueos operativos que los casos de uso internos: ejercicio abierto para aplicar cuentas/asientos y periodo abierto para cada borrador de Diario. La previsualizacion marca estos bloqueos como errores de fila antes de la aplicacion transaccional.
 - Las relaciones del ledger usan borrado restringido; no se permite eliminar asientos por cascada desde tenant, empresa, ejercicio, periodo o cuenta.
 
 ### `source_links`

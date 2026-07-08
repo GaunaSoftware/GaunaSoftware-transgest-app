@@ -5196,7 +5196,7 @@ router.get("/", async (req, res) => {
       params.push(scope.tipos_viaje);
     }
   }
-  if (desde)      { where.push(`COALESCE(p.fecha_descarga, p.fecha_entrega, p.fecha_carga, p.fecha_pedido) >= $${i++}`);  params.push(desde); }
+  if (desde)      { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) >= $${i++}`);  params.push(desde); }
   if (hasta)      { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) <= $${i++}`);  params.push(hasta); }
   if (pendiente_completar === "true")  { where.push("p.pendiente_completar IS TRUE"); }
   if (pendiente_completar === "false") { where.push("COALESCE(p.pendiente_completar,false) IS FALSE"); }
@@ -5227,7 +5227,7 @@ router.get("/", async (req, res) => {
       SELECT p.* -- empresa_id filtrado en where dinamico
         FROM pedidos p
        WHERE ${where.join(" AND ")}
-       ORDER BY p.fecha_pedido DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
        LIMIT $${i++} OFFSET $${i++}
     )
     SELECT p.*,
@@ -5262,13 +5262,13 @@ router.get("/", async (req, res) => {
         FROM pedido_docs d
        WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
     ) docs ON true
-    ORDER BY p.fecha_pedido DESC, p.created_at DESC
+    ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
   `, `
     WITH filtered AS (
       SELECT p.* -- empresa_id filtrado en where dinamico
         FROM pedidos p
        WHERE ${where.join(" AND ")}
-       ORDER BY p.fecha_pedido DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
        LIMIT $${i - 2} OFFSET $${i - 1}
     )
     SELECT p.*,
@@ -5302,7 +5302,7 @@ router.get("/", async (req, res) => {
         FROM pedido_docs d
        WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
     ) docs ON true
-    ORDER BY p.fecha_pedido DESC, p.created_at DESC
+    ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
   `, [...params, limit, offset]);
 
   // Get total count for pagination (params already excludes limit/offset)
@@ -5383,7 +5383,7 @@ router.get("/resumen-lista", async (req, res) => {
         params.push(scope.tipos_viaje);
       }
     }
-    if (desde) { where.push(`COALESCE(p.fecha_descarga, p.fecha_entrega, p.fecha_carga, p.fecha_pedido) >= $${i++}`); params.push(desde); }
+    if (desde) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) >= $${i++}`); params.push(desde); }
     if (hasta) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) <= $${i++}`); params.push(hasta); }
     if (pendiente_completar === "true") where.push("p.pendiente_completar IS TRUE");
     if (pendiente_completar === "false") where.push("COALESCE(p.pendiente_completar,false) IS FALSE");
@@ -5437,7 +5437,7 @@ router.get("/resumen-lista", async (req, res) => {
         LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
         LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
        LIMIT $${i++} OFFSET $${i++}
     `, `
       SELECT p.id, p.numero, p.empresa_id, p.cliente_id, p.colaborador_id,
@@ -5466,7 +5466,7 @@ router.get("/resumen-lista", async (req, res) => {
         LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
         LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
        LIMIT $${i - 2} OFFSET $${i - 1}
     `, [...params, limitN, offset]);
 

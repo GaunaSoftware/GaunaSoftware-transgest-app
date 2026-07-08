@@ -187,6 +187,17 @@ export default function Empresa() {
       productor:"Gauna Software",
       notas:"",
     },
+    factura_b2b:{
+      habilitada:false,
+      proveedor:"pendiente",
+      canal:"plataforma_privada",
+      endpoint_url:"",
+      api_key:"",
+      formatos:["FacturaE","UBL"],
+      estados:true,
+      recepcion:true,
+      notas:"",
+    },
     verifactu:{
       habilitado:false,
       envio_automatico:true,
@@ -365,6 +376,7 @@ export default function Empresa() {
   const ffv = k => e => setFiscalCfg(p => ({ ...p, verifactu:{ ...p.verifactu, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value } }));
   const ffs = k => e => setFiscalCfg(p => ({ ...p, sii:{ ...p.sii, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value } }));
   const ffd = k => e => setFiscalCfg(p => ({ ...p, declaracion_responsable:{ ...p.declaracion_responsable, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value } }));
+  const ffb = k => e => setFiscalCfg(p => ({ ...p, factura_b2b:{ ...p.factura_b2b, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value } }));
 
   async function guardarEmpresa() {
     const empresaToSave = {
@@ -1866,6 +1878,89 @@ export default function Empresa() {
                 </div>
               </div>
             )}
+
+            <div style={{marginTop:12,padding:"12px 14px",background:"rgba(59,130,246,.06)",border:"1px solid rgba(59,130,246,.18)",borderRadius:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:11,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".06em"}}>
+                    Factura electronica B2B
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.55,marginTop:4}}>
+                    Canal independiente de VERIFACTU/SII para emitir, recibir y seguir estados de facturas entre empresas.
+                  </div>
+                </div>
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text3)",fontWeight:800}}>
+                  <input type="checkbox" checked={!!fiscalCfg.factura_b2b?.habilitada} onChange={ffb("habilitada")} disabled={!esGerente}/>
+                  Preparar B2B
+                </label>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"6px 14px",alignItems:"end"}}>
+                <div>
+                  <label style={S.lbl}>Proveedor B2B</label>
+                  <select value={fiscalCfg.factura_b2b?.proveedor || "pendiente"} onChange={ffb("proveedor")} disabled={!esGerente || !fiscalCfg.factura_b2b?.habilitada} style={{ ...S.inp, background:esGerente ? "var(--bg4)":"var(--bg2)" }}>
+                    <option value="pendiente">Pendiente de elegir</option>
+                    <option value="b2brouter">B2Brouter</option>
+                    <option value="edicom">EDICOM</option>
+                    <option value="seres">SERES</option>
+                    <option value="publica_aeat">Solucion publica AEAT</option>
+                    <option value="otro">Otro proveedor</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={S.lbl}>Canal</label>
+                  <select value={fiscalCfg.factura_b2b?.canal || "plataforma_privada"} onChange={ffb("canal")} disabled={!esGerente || !fiscalCfg.factura_b2b?.habilitada} style={{ ...S.inp, background:esGerente ? "var(--bg4)":"var(--bg2)" }}>
+                    <option value="plataforma_privada">Plataforma privada</option>
+                    <option value="solucion_publica">Solucion publica</option>
+                    <option value="mixto">Mixto</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={S.lbl}>Endpoint / Base URL</label>
+                  <input style={S.inp} value={fiscalCfg.factura_b2b?.endpoint_url || ""} onChange={ffb("endpoint_url")} placeholder="https://..." disabled={!esGerente || !fiscalCfg.factura_b2b?.habilitada}/>
+                </div>
+                <div>
+                  <label style={S.lbl}>API key B2B</label>
+                  <input style={{...S.inp,fontFamily:"'JetBrains Mono',monospace"}} value={fiscalCfg.factura_b2b?.api_key || ""} onChange={ffb("api_key")} placeholder={fiscalCfg.factura_b2b?.api_key_masked ? `Guardada (${fiscalCfg.factura_b2b.api_key_masked})` : "Clave del proveedor"} disabled={!esGerente || !fiscalCfg.factura_b2b?.habilitada}/>
+                </div>
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text3)",fontWeight:700,padding:"8px 0"}}>
+                  <input
+                    type="checkbox"
+                    checked={(fiscalCfg.factura_b2b?.formatos || []).includes("FacturaE")}
+                    disabled={!esGerente || !fiscalCfg.factura_b2b?.habilitada}
+                    onChange={(e)=>setFiscalCfg(p=>{
+                      const current = new Set(p.factura_b2b?.formatos || []);
+                      if(e.target.checked) current.add("FacturaE"); else current.delete("FacturaE");
+                      return { ...p, factura_b2b:{ ...p.factura_b2b, formatos:[...current] } };
+                    })}
+                  />
+                  FacturaE
+                </label>
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text3)",fontWeight:700,padding:"8px 0"}}>
+                  <input
+                    type="checkbox"
+                    checked={(fiscalCfg.factura_b2b?.formatos || []).includes("UBL")}
+                    disabled={!esGerente || !fiscalCfg.factura_b2b?.habilitada}
+                    onChange={(e)=>setFiscalCfg(p=>{
+                      const current = new Set(p.factura_b2b?.formatos || []);
+                      if(e.target.checked) current.add("UBL"); else current.delete("UBL");
+                      return { ...p, factura_b2b:{ ...p.factura_b2b, formatos:[...current] } };
+                    })}
+                  />
+                  UBL
+                </label>
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text3)",fontWeight:700,padding:"8px 0"}}>
+                  <input type="checkbox" checked={!!fiscalCfg.factura_b2b?.estados} onChange={ffb("estados")} disabled={!esGerente || !fiscalCfg.factura_b2b?.habilitada}/>
+                  Estados aceptacion/rechazo/pago
+                </label>
+                <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text3)",fontWeight:700,padding:"8px 0"}}>
+                  <input type="checkbox" checked={!!fiscalCfg.factura_b2b?.recepcion} onChange={ffb("recepcion")} disabled={!esGerente || !fiscalCfg.factura_b2b?.habilitada}/>
+                  Recepcion de facturas
+                </label>
+              </div>
+              <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.55,marginTop:10}}>
+                Recomendacion practica: usar proveedor privado con API para salida/entrada y estados; dejar la solucion publica como respaldo cuando el desarrollo reglamentario y la API esten cerrados.
+              </div>
+            </div>
 
             <div style={{marginTop:12}}>
               <label style={S.lbl}>Notas fiscales internas</label>

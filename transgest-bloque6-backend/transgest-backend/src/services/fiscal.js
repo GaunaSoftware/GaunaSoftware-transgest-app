@@ -19,6 +19,17 @@ const FISCAL_DEFAULTS = {
     productor: "Gauna Software",
     notas: "",
   },
+  factura_b2b: {
+    habilitada: false,
+    proveedor: "pendiente",
+    canal: "plataforma_privada",
+    endpoint_url: "",
+    api_key: "",
+    formatos: ["FacturaE", "UBL"],
+    estados: true,
+    recepcion: true,
+    notas: "",
+  },
   verifactu: {
     habilitado: false,
     envio_automatico: true,
@@ -136,6 +147,25 @@ function normalizeFiscalConfig(raw = {}) {
       productor: String(cfg?.declaracion_responsable?.productor || FISCAL_DEFAULTS.declaracion_responsable.productor).trim(),
       notas: String(cfg?.declaracion_responsable?.notas || "").trim(),
     },
+    factura_b2b: {
+      ...FISCAL_DEFAULTS.factura_b2b,
+      ...(cfg.factura_b2b && typeof cfg.factura_b2b === "object" ? cfg.factura_b2b : {}),
+      habilitada: cfg?.factura_b2b?.habilitada === true,
+      proveedor: ["pendiente", "b2brouter", "edicom", "seres", "publica_aeat", "otro"].includes(String(cfg?.factura_b2b?.proveedor || "").toLowerCase())
+        ? String(cfg?.factura_b2b?.proveedor).toLowerCase()
+        : "pendiente",
+      canal: ["plataforma_privada", "solucion_publica", "mixto"].includes(String(cfg?.factura_b2b?.canal || "").toLowerCase())
+        ? String(cfg?.factura_b2b?.canal).toLowerCase()
+        : "plataforma_privada",
+      endpoint_url: String(cfg?.factura_b2b?.endpoint_url || "").trim(),
+      api_key: String(cfg?.factura_b2b?.api_key || "").trim(),
+      formatos: Array.isArray(cfg?.factura_b2b?.formatos)
+        ? cfg.factura_b2b.formatos.map(x => String(x || "").trim()).filter(Boolean)
+        : FISCAL_DEFAULTS.factura_b2b.formatos,
+      estados: cfg?.factura_b2b?.estados !== false,
+      recepcion: cfg?.factura_b2b?.recepcion !== false,
+      notas: String(cfg?.factura_b2b?.notas || "").trim(),
+    },
     verifactu: {
       ...FISCAL_DEFAULTS.verifactu,
       ...(cfg.verifactu && typeof cfg.verifactu === "object" ? cfg.verifactu : {}),
@@ -243,6 +273,19 @@ function buildFiscalStatus(configInput = {}) {
     addCheck("Declaracion responsable visible", !!config.declaracion_responsable.visible, "La declaracion responsable del SIF debe quedar visible para el usuario/comprador.");
     addCheck("URL declaracion responsable", !!config.declaracion_responsable.url, "Falta enlazar o publicar la declaracion responsable del software.");
     addCheck("Version declaracion responsable", !!config.declaracion_responsable.version, "Conviene asociar la declaracion responsable a una version del software.", "warning");
+  }
+  if (!config.factura_b2b.habilitada) {
+    addCheck("Factura electronica B2B", false, "Planifica el canal B2B: plataforma privada interoperable o solucion publica cuando este operativa.", "warning");
+  } else {
+    addCheck("Proveedor factura B2B", config.factura_b2b.proveedor !== "pendiente", "Selecciona proveedor o canal publico para factura electronica B2B.", "warning");
+    addCheck("Canal factura B2B", !!config.factura_b2b.canal, "Define si se usara plataforma privada, solucion publica o modelo mixto.", "warning");
+    addCheck("Formatos B2B", config.factura_b2b.formatos.length > 0, "Define formatos soportados, por ejemplo FacturaE y UBL.", "warning");
+    addCheck("Estados B2B", !!config.factura_b2b.estados, "El canal B2B debe contemplar estados de aceptacion, rechazo y pago.", "warning");
+    addCheck("Recepcion B2B", !!config.factura_b2b.recepcion, "Conviene contemplar recepcion de facturas para automatizar compras y vencimientos.", "warning");
+    if (!["publica_aeat"].includes(config.factura_b2b.proveedor)) {
+      addCheck("Endpoint/API B2B", !!config.factura_b2b.endpoint_url, "Falta endpoint o base URL del proveedor B2B.", "warning");
+      addCheck("Credencial API B2B", !!config.factura_b2b.api_key, "Falta credencial/API key del proveedor B2B.", "warning");
+    }
   }
 
   let externalConnectorRequired = false;
@@ -379,6 +422,17 @@ function sanitizeFiscalConfigForClient(input = {}) {
     ultima_prueba: config.ultima_prueba,
     historial_pruebas: config.historial_pruebas,
     declaracion_responsable: config.declaracion_responsable,
+    factura_b2b: {
+      habilitada: config.factura_b2b.habilitada,
+      proveedor: config.factura_b2b.proveedor,
+      canal: config.factura_b2b.canal,
+      endpoint_url: config.factura_b2b.endpoint_url,
+      api_key_masked: maskSecret(config.factura_b2b.api_key),
+      formatos: config.factura_b2b.formatos,
+      estados: config.factura_b2b.estados,
+      recepcion: config.factura_b2b.recepcion,
+      notas: config.factura_b2b.notas,
+    },
     verifactu: {
       habilitado: config.verifactu.habilitado,
       envio_automatico: config.verifactu.envio_automatico,
@@ -417,6 +471,11 @@ async function saveEmpresaFiscalConfig(empresaId, input, client = db) {
     rawVerifactu.provider_webhook_secret = current.verifactu.provider_webhook_secret;
   }
   raw.verifactu = rawVerifactu;
+  const rawB2b = raw.factura_b2b && typeof raw.factura_b2b === "object" ? { ...raw.factura_b2b } : {};
+  if (!String(rawB2b.api_key || "").trim() && current.factura_b2b.api_key) {
+    rawB2b.api_key = current.factura_b2b.api_key;
+  }
+  raw.factura_b2b = rawB2b;
   const config = normalizeFiscalConfig(raw);
   const { rows } = await client.query(
     `UPDATE empresas

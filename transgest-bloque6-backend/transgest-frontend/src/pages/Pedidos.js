@@ -9608,6 +9608,15 @@ export default function Pedidos() {
     ? pedidosCriticosOperativos
     : pedidosFiltrados;
   const usarAgrupadoCalendario = !groupByCliente && filtroSemanaActualActivo;
+  const ordenarItemsPedidoPorFecha = (a, b) => {
+    const da = pedidoFechaOperativaKey(a?.pedido);
+    const db = pedidoFechaOperativaKey(b?.pedido);
+    if (da !== db) return String(da).localeCompare(String(db));
+    const ha = String(a?.pedido?.hora_carga || "");
+    const hb = String(b?.pedido?.hora_carga || "");
+    if (ha !== hb) return ha.localeCompare(hb);
+    return String(a?.pedido?.numero || "").localeCompare(String(b?.pedido?.numero || ""));
+  };
   const pedidosAgrupados = groupByCliente
     ? Object.entries(
         pedidosVisibles.reduce((acc, item) => {
@@ -9616,7 +9625,14 @@ export default function Pedidos() {
           acc[key].items.push(item);
           return acc;
         }, {})
-      ).map(([key, group]) => ({ key, ...group }))
+      )
+        .map(([key, group]) => ({ key, ...group, items: [...group.items].sort(ordenarItemsPedidoPorFecha) }))
+        .sort((a, b) => {
+          const da = pedidoFechaOperativaKey(a.items[0]?.pedido);
+          const db = pedidoFechaOperativaKey(b.items[0]?.pedido);
+          if (da !== db) return String(da).localeCompare(String(db));
+          return String(a.label || "").localeCompare(String(b.label || ""));
+        })
     : usarAgrupadoCalendario ? buildPedidoCalendarGroups(pedidosVisibles, {
         desde: filtroDesde || undefined,
         hasta: filtroHasta || undefined,

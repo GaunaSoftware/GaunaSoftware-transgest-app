@@ -17,7 +17,9 @@ const {
   nextBatchStatus,
 } = require("../domain/externalImportStaging");
 const { buildCsv } = require("../domain/csv");
+const { ensureFiscalYearOpen } = require("../domain/fiscalYears");
 const { journalDraftRequestHash } = require("../domain/journalEntries");
+const { ensurePeriodOpen } = require("../domain/periods");
 const { hasPermission } = require("../domain/rbac");
 const { enqueueOutboxEvent } = require("../services/outbox");
 
@@ -89,7 +91,7 @@ async function assertFiscalYear(client, selected, fiscalYearId) {
     throw error;
   }
   const result = await client.query(
-    `SELECT id, year_label
+    `SELECT id, year_label, status
        FROM ${q("fiscal_years")}
       WHERE id=$1 AND company_id=$2`,
     [id, selected.company_id]
@@ -915,6 +917,9 @@ router.post(
           error.details = preview.summary;
           throw error;
         }
+        if (["accounts", "journal_entries"].includes(batch.import_type)) {
+          ensureFiscalYearOpen(preview.fiscal_year, `aplicar lotes externos de ${batch.import_type}`);
+        }
 
         const createdParties = [];
         const createdAccounts = [];
@@ -937,16 +942,12 @@ router.post(
               error.status = 409;
               throw error;
             }
-            if (period.rows[0].fiscal_year_status !== "open") {
-              const error = new Error("El ejercicio no esta abierto");
-              error.status = 409;
-              throw error;
-            }
-            if (period.rows[0].status !== "open") {
-              const error = new Error(`El periodo ${period.rows[0].name} no esta abierto`);
-              error.status = 409;
-              throw error;
-            }
+            ensureFiscalYearOpen({
+              id: preview.fiscal_year.id,
+              year_label: preview.fiscal_year.year_label,
+              status: period.rows[0].fiscal_year_status,
+            }, "aplicar lotes externos de diario");
+            ensurePeriodOpen(period.rows[0], "aplicar lotes externos de diario");
             const lines = row.lines.map((line, index) => ({
               line_number: index + 1,
               account_id: line.account_id,

@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   normalizeExternalImportBatchInput,
   normalizeExternalImportQuery,
@@ -13,6 +15,8 @@ const {
   mapPartyStagingRow,
   parseGenericCsv,
 } = require("../src/domain/externalImportStaging");
+
+const routeSource = fs.readFileSync(path.join(__dirname, "../src/routes/externalImportStaging.js"), "utf8");
 
 test("parseGenericCsv normaliza cabeceras y avisa de campos vacios", () => {
   const rows = parseGenericCsv("Nombre fiscal;NIF;Email\nCliente Demo;B00000000;\nProveedor Demo;A00000000;proveedor@example.com");
@@ -75,6 +79,12 @@ test("normalizeExternalImportApplyInput exige motivo operativo", () => {
     reason: "Aplicacion revisada por administracion",
   });
   assert.throws(() => normalizeExternalImportApplyInput({ reason: "bad" }), /reason/);
+});
+
+test("aplicacion externa de cuentas y diario respeta cierres operativos", () => {
+  assert.match(routeSource, /SELECT id, year_label, status\s+FROM \$\{q\("fiscal_years"\)\}/);
+  assert.match(routeSource, /ensureFiscalYearOpen\(preview\.fiscal_year, `aplicar lotes externos de \$\{batch\.import_type\}`\)/);
+  assert.match(routeSource, /ensurePeriodOpen\(period\.rows\[0\], "aplicar lotes externos de diario"\)/);
 });
 
 test("mapPartyStagingRow mapea alias habituales y detecta errores", () => {

@@ -85,8 +85,10 @@ export default function Login() {
       const saved = JSON.parse(localStorage.getItem("tms_remember_credentials") || "null");
       if (saved?.remember) {
         setEmail(saved.email || "");
-        setPass(saved.password || "");
         setRemember(true);
+        if (saved.password) {
+          localStorage.setItem("tms_remember_credentials", JSON.stringify({ remember:true, email:saved.email || "" }));
+        }
       }
     } catch {}
   }, []);
@@ -117,7 +119,7 @@ export default function Login() {
       await login(email, pass);
       try {
         if (remember) {
-          localStorage.setItem("tms_remember_credentials", JSON.stringify({ remember:true, email, password:pass }));
+          localStorage.setItem("tms_remember_credentials", JSON.stringify({ remember:true, email }));
         } else {
           localStorage.removeItem("tms_remember_credentials");
         }
@@ -249,7 +251,7 @@ export default function Login() {
                 }
               }}
             />
-            Recordar en este equipo
+            Recordar usuario en este equipo
           </label>
           <button
             type="button"

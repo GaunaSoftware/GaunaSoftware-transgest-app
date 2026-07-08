@@ -8,6 +8,7 @@ const logger   = require("../services/logger");
 const stripe   = require("../services/stripe");
 const { userJwtSecret } = require("../services/jwtSecrets");
 const { authenticate, getSubscriptionState, normalizePermissionsForRole } = require("../middleware/auth");
+const { ensurePasswordPolicySchema, assertPasswordNotReused, rememberPasswordHash } = require("../services/passwordPolicy");
 const ensureDemoShowcase = require("../../scripts/ensure_demo_showcase");
 
 const router = express.Router();
@@ -36,6 +37,7 @@ async function ensureAuthSchema() {
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ").catch(() => {});
+  await ensurePasswordPolicySchema(db).catch(() => {});
   await db.query(`
     CREATE TABLE IF NOT EXISTS password_reset_requests (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -552,7 +554,7 @@ router.post("/invitacion/:token",
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
     const tokenHash = hashToken(req.params.token || "");
     const { rows } = await db.query(`
-      SELECT i.id, i.usuario_id, i.expires_at, i.usado_at, u.email
+      SELECT i.id, i.usuario_id, i.empresa_id, i.expires_at, i.usado_at, u.email, u.password_hash
       FROM invitaciones_usuario i
       JOIN usuarios u ON u.id=i.usuario_id
       WHERE i.token_hash=$1
@@ -561,8 +563,20 @@ router.post("/invitacion/:token",
     if (!inv || inv.usado_at || new Date(inv.expires_at) < new Date()) {
       return res.status(404).json({ error: "Invitación no válida o caducada" });
     }
+    await assertPasswordNotReused({
+      usuarioId: inv.usuario_id,
+      empresaId: inv.empresa_id || null,
+      passwordNuevo: req.body.password,
+      currentHash: inv.password_hash,
+    });
     const hash = await bcrypt.hash(req.body.password, 12);
     await db.transaction(async (client) => {
+      await rememberPasswordHash({
+        usuarioId: inv.usuario_id,
+        empresaId: inv.empresa_id || null,
+        passwordHash: inv.password_hash,
+        queryClient: client,
+      });
       await client.query(
         "UPDATE usuarios SET password_hash=$1, activo=true, debe_cambiar_password=false, password_changed_at=NOW() WHERE id=$2",
         [hash, inv.usuario_id]
@@ -584,22 +598,32 @@ router.post("/cambiar-password", authenticate,
     const { password_actual, password_nuevo } = req.body;
 
     const { rows } = await db.query(
-      "SELECT password_hash FROM usuarios WHERE id = $1",
+      "SELECT id, empresa_id, password_hash FROM usuarios WHERE id = $1",
       [req.user.id]
     );
 
     const valid = await bcrypt.compare(password_actual, rows[0].password_hash);
     if (!valid) return res.status(400).json({ error: "Contraseña actual incorrecta" });
-    const samePassword = await bcrypt.compare(password_nuevo, rows[0].password_hash);
-    if (samePassword) {
-      return res.status(400).json({ error: "La nueva contrasena debe ser distinta a la actual" });
-    }
+    await assertPasswordNotReused({
+      usuarioId: rows[0].id,
+      empresaId: rows[0].empresa_id,
+      passwordNuevo: password_nuevo,
+      currentHash: rows[0].password_hash,
+    });
 
     const hash = await bcrypt.hash(password_nuevo, 12);
-    await db.query(
-      "UPDATE usuarios SET password_hash = $1, debe_cambiar_password=false, password_changed_at=NOW() WHERE id = $2",
-      [hash, req.user.id]
-    );
+    await db.transaction(async (client) => {
+      await rememberPasswordHash({
+        usuarioId: rows[0].id,
+        empresaId: rows[0].empresa_id,
+        passwordHash: rows[0].password_hash,
+        queryClient: client,
+      });
+      await client.query(
+        "UPDATE usuarios SET password_hash = $1, debe_cambiar_password=false, password_changed_at=NOW() WHERE id = $2",
+        [hash, req.user.id]
+      );
+    });
 
     logger.info(`Contraseña cambiada: ${req.user.email}`);
     res.json({ ok: true });

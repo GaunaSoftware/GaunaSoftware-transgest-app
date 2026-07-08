@@ -5,6 +5,7 @@ const { body, validationResult } = require("express-validator");
 const db       = require("../services/db");
 const { enviarEmail } = require("../services/email");
 const { authenticate, SOLO_GERENTE } = require("../middleware/auth");
+const { ensurePasswordPolicySchema, assertPasswordNotReused, rememberPasswordHash } = require("../services/passwordPolicy");
 
 const router = express.Router();
 
@@ -106,6 +107,7 @@ async function ensureUsuariosChoferSchema() {
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trafico_config JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN NOT NULL DEFAULT false").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ").catch(() => {});
+  await ensurePasswordPolicySchema(db).catch(() => {});
   await db.query(`
     CREATE TABLE IF NOT EXISTS invitaciones_usuario (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -329,20 +331,32 @@ router.post("/:id/reset-password",
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const current = await db.query(
-      "SELECT password_hash FROM usuarios WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, empresa_id, password_hash FROM usuarios WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId(req)]
     );
     if (!current.rows[0]) return res.status(404).json({ error: "Usuario no encontrado" });
-    const samePassword = await bcrypt.compare(req.body.password_nuevo, current.rows[0].password_hash);
-    if (samePassword) {
-      return res.status(400).json({ error: "La nueva contrasena debe ser distinta a la actual" });
-    }
+    await assertPasswordNotReused({
+      usuarioId: current.rows[0].id,
+      empresaId: current.rows[0].empresa_id,
+      passwordNuevo: req.body.password_nuevo,
+      currentHash: current.rows[0].password_hash,
+    });
     const hash = await bcrypt.hash(req.body.password_nuevo, 12);
-    const { rowCount } = await db.query(
-      "UPDATE usuarios SET password_hash=$1, debe_cambiar_password=true, password_changed_at=NULL WHERE id=$2 AND empresa_id=$3",
-      [hash, req.params.id, empresaId(req)]
-    );
-    if (!rowCount) return res.status(404).json({ error: "Usuario no encontrado" });
+    let updated = 0;
+    await db.transaction(async (client) => {
+      await rememberPasswordHash({
+        usuarioId: current.rows[0].id,
+        empresaId: current.rows[0].empresa_id,
+        passwordHash: current.rows[0].password_hash,
+        queryClient: client,
+      });
+      const result = await client.query(
+        "UPDATE usuarios SET password_hash=$1, debe_cambiar_password=true, password_changed_at=NULL WHERE id=$2 AND empresa_id=$3",
+        [hash, req.params.id, empresaId(req)]
+      );
+      updated = result.rowCount;
+    });
+    if (!updated) return res.status(404).json({ error: "Usuario no encontrado" });
     res.json({ ok: true });
   }
 );

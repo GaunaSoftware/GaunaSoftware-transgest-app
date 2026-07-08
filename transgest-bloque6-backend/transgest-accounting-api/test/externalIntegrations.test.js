@@ -58,6 +58,8 @@ test("manifiesto asesoria normaliza filtros y bloquea informes sin ejercicio", (
   });
   assert.equal(manifest.exports.find(item => item.id === "parties").available, true);
   assert.equal(manifest.exports.find(item => item.id === "fixed_assets").available, true);
+  assert.equal(manifest.exports.find(item => item.id === "period_status").available, false);
+  assert.ok(manifest.exports.find(item => item.id === "period_status").blocked_reasons.includes("Falta permiso periods.read"));
   assert.equal(manifest.exports.find(item => item.id === "trial_balance").available, false);
   assert.ok(manifest.exports.find(item => item.id === "trial_balance").blocked_reasons.includes("Selecciona un ejercicio"));
 });
@@ -65,20 +67,21 @@ test("manifiesto asesoria normaliza filtros y bloquea informes sin ejercicio", (
 test("manifiesto asesoria genera rutas CSV cuando hay ejercicio y permisos", () => {
   const manifest = buildAdvisorPackageManifest({
     selectedCompany: { company_id: "company-1", name: "Demo" },
-    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read", "ledger.read"],
+    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read", "periods.read", "ledger.read"],
     filters: { fiscal_year_id: "fy-2026", include_empty: "false" },
   });
-  assert.equal(manifest.available_count, 8);
+  assert.equal(manifest.available_count, 9);
   assert.equal(manifest.blocked_count, 0);
   assert.match(manifest.exports.find(item => item.id === "fixed_assets").path, /\/fixed-assets\?format=csv/);
   assert.match(manifest.exports.find(item => item.id === "journal_entries").path, /\/journal-entries\?format=csv/);
+  assert.match(manifest.exports.find(item => item.id === "period_status").path, /\/periods\?format=csv/);
   assert.match(manifest.exports.find(item => item.id === "balance_sheet").path, /fiscal_year_id=fy-2026/);
 });
 
 test("paquete asesoria ZIP incluye manifiesto e indice de exportaciones", () => {
   const manifest = buildAdvisorPackageManifest({
     selectedCompany: { company_id: "company-1", name: "Demo" },
-    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read", "ledger.read"],
+    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read", "periods.read", "ledger.read"],
     filters: { fiscal_year_id: "fy-2026", include_empty: "true" },
   });
   const zip = buildAdvisorPackageZip(manifest, [
@@ -97,7 +100,7 @@ test("paquete asesoria ZIP incluye manifiesto e indice de exportaciones", () => 
 test("paquete asesoria construye CSV fisicos para exportaciones soportadas", async () => {
   const manifest = buildAdvisorPackageManifest({
     selectedCompany: { company_id: "company-1", name: "Demo" },
-    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read"],
+    permissions: ["parties.read", "maturities.read", "banks.read", "fixed_assets.read", "journal.read", "periods.read"],
     filters: { fiscal_year_id: "fy-2026", date_from: "2026-01-01", date_to: "2026-12-31" },
   });
   const journalParams = [];
@@ -142,6 +145,20 @@ test("paquete asesoria construye CSV fisicos para exportaciones soportadas", asy
           line_count: 2,
         }] };
       }
+      if (sql.includes("accounting_periods")) {
+        return { rows: [{
+          year_label: "2026",
+          fiscal_year_status: "open",
+          period_number: 2,
+          name: "Febrero",
+          start_date: "2026-02-01",
+          end_date: "2026-02-28",
+          status: "closed",
+          locked_reason: "Cierre mensual",
+          closed_at: "2026-03-02T10:00:00.000Z",
+          closed_by_name: "Admin",
+        }] };
+      }
       if (sql.includes("accounting_fixed_assets")) {
         return { rows: [{
           asset_code: "VEH-001",
@@ -180,11 +197,13 @@ test("paquete asesoria construye CSV fisicos para exportaciones soportadas", asy
     "exports/movimientos_bancarios.csv",
     "exports/inmovilizado.csv",
     "exports/diario.csv",
+    "exports/periodos.csv",
   ]);
-  assert.deepEqual(result.summary.map(item => item.row_count), [1, 1, 1, 1, 1]);
+  assert.deepEqual(result.summary.map(item => item.row_count), [1, 1, 1, 1, 1, 1]);
   assert.ok(result.files[0].content.includes("Nombre fiscal"));
   assert.ok(result.files[3].content.includes("Cabeza tractora"));
   assert.ok(result.files[4].content.includes("Contabilizado"));
+  assert.ok(result.files[5].content.includes("Estado periodo"));
   assert.equal(journalParams.includes("fy-2026"), false);
 });
 

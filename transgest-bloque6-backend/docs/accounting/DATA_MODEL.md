@@ -864,6 +864,7 @@ Consultas read-only implementadas:
 - `format=csv` en ambas consultas genera descarga CSV y registra `audit_log` con la accion de exportacion y los filtros aplicados.
 - El paquete ZIP para asesoria incluye `exports/inmovilizado.csv` cuando el usuario tiene `fixed_assets.read`; contiene altas de inmovilizado, estado, fechas, vida util y cuentas asociadas como exportacion tecnica.
 - `exports/inmovilizado.csv` no es un libro oficial, no calcula impuestos y no sustituye revision contable/fiscal externa.
+- El paquete ZIP para asesoria incluye `exports/periodos.csv` cuando el usuario tiene `periods.read`; contiene ejercicios, periodos, estados, motivos de bloqueo y sellos de cierre como control operativo interno.
 
 No existe una tabla fisica de saldos en esta version. Los saldos y los informes preliminares se calculan desde `journal_lines`, `journal_entries` contabilizados y el `account_type` de cada cuenta. La clasificacion oficial por epigrafes PGC/PGC PYMES queda pendiente de fuente oficial validada y revision externa.
 

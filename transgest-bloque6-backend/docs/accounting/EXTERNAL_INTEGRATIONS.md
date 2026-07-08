@@ -71,6 +71,7 @@ Incluye:
 - Vencimientos: incluido fisicamente como `exports/vencimientos.csv`.
 - Movimientos bancarios: incluido fisicamente como `exports/movimientos_bancarios.csv`.
 - Libro diario: incluido fisicamente como `exports/diario.csv`.
+- Estado de periodos: incluido fisicamente como `exports/periodos.csv` cuando el usuario tiene `periods.read`.
 - Balance de sumas y saldos: incluido fisicamente como `exports/sumas_y_saldos.csv` cuando `fiscal_year_id` es UUID valido.
 - Balance de situacion: incluido fisicamente como `exports/balance_situacion.csv` cuando `fiscal_year_id` es UUID valido.
 - Cuenta de perdidas y ganancias: incluido fisicamente como `exports/perdidas_ganancias.csv` cuando `fiscal_year_id` es UUID valido.

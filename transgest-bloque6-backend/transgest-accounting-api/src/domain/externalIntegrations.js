@@ -265,6 +265,14 @@ function buildAdvisorPackageManifest({ selectedCompany, permissions = [], filter
       filters: { ...fiscalFilters, limit: 500 },
     }, context),
     exportItem({
+      id: "period_status",
+      label: "Estado de periodos",
+      description: "Ejercicios, periodos, estados operativos, motivos y sellos de cierre.",
+      permission: "periods.read",
+      path: "/periods",
+      filters: { fiscal_year_id: normalized.fiscal_year_id },
+    }, context),
+    exportItem({
       id: "trial_balance",
       label: "Balance de sumas y saldos",
       description: "Saldos de cuentas del ejercicio seleccionado.",

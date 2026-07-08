@@ -309,6 +309,48 @@ async function loadJournalEntriesCsv(client, companyId, manifestFilters = {}) {
   };
 }
 
+async function loadPeriodStatusCsv(client, companyId, manifestFilters = {}) {
+  const fiscalYearId = uuidOrNull(manifestFilters.fiscal_year_id);
+  const params = [companyId];
+  const where = ["p.company_id=$1"];
+  if (fiscalYearId) {
+    params.push(fiscalYearId);
+    where.push(`p.fiscal_year_id=$${params.length}`);
+  }
+  const { rows } = await client.query(
+    `SELECT fy.year_label, fy.status AS fiscal_year_status,
+            p.period_number, p.name, p.start_date, p.end_date, p.status,
+            p.locked_reason, p.closed_at, closed_user.display_name AS closed_by_name
+       FROM ${q("accounting_periods")} p
+       JOIN ${q("fiscal_years")} fy ON fy.id=p.fiscal_year_id
+       LEFT JOIN ${q("accounting_users")} closed_user ON closed_user.id=p.closed_by
+      WHERE ${where.join(" AND ")}
+      ORDER BY fy.start_date DESC, p.period_number ASC`,
+    params
+  );
+  return {
+    name: "exports/periodos.csv",
+    row_count: rows.length,
+    content: buildCsv([
+      { key: "year_label", label: "Ejercicio" },
+      { key: "fiscal_year_status", label: "Estado ejercicio" },
+      { key: "period_number", label: "Numero periodo" },
+      { key: "name", label: "Periodo" },
+      { key: "start_date", label: "Desde" },
+      { key: "end_date", label: "Hasta" },
+      { key: "status", label: "Estado periodo" },
+      { key: "locked_reason", label: "Motivo bloqueo" },
+      { key: "closed_at", label: "Fecha cierre" },
+      { key: "closed_by_name", label: "Cerrado por" },
+    ], rows.map(row => ({
+      ...row,
+      start_date: isoDate(row.start_date),
+      end_date: isoDate(row.end_date),
+      closed_at: row.closed_at ? String(row.closed_at).replace("T", " ").slice(0, 19) : "",
+    }))),
+  };
+}
+
 async function assertPeriodInFiscalYear(client, companyId, periodId, fiscalYearId) {
   if (!periodId) return;
   const { rows } = await client.query(
@@ -482,6 +524,7 @@ async function buildAdvisorPackageCsvFiles({ client, companyId, manifest }) {
     ["bank_transactions", () => loadBankTransactionsCsv(client, companyId, manifest.filters)],
     ["fixed_assets", () => loadFixedAssetsCsv(client, companyId, manifest.filters)],
     ["journal_entries", () => loadJournalEntriesCsv(client, companyId, manifest.filters)],
+    ["period_status", () => loadPeriodStatusCsv(client, companyId, manifest.filters)],
     ["trial_balance", () => loadTrialBalanceCsv(client, companyId, manifest.filters)],
     ["balance_sheet", () => loadBalanceSheetCsv(client, companyId, manifest.filters)],
     ["profit_loss", () => loadProfitLossCsv(client, companyId, manifest.filters)],

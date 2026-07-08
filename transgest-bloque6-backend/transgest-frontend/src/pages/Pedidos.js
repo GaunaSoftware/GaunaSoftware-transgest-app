@@ -9607,6 +9607,7 @@ export default function Pedidos() {
   const pedidosVisibles = soloCriticos
     ? pedidosCriticosOperativos
     : pedidosFiltrados;
+  const usarAgrupadoCalendario = !groupByCliente && filtroSemanaActualActivo;
   const pedidosAgrupados = groupByCliente
     ? Object.entries(
         pedidosVisibles.reduce((acc, item) => {
@@ -9616,11 +9617,11 @@ export default function Pedidos() {
           return acc;
         }, {})
       ).map(([key, group]) => ({ key, ...group }))
-    : buildPedidoCalendarGroups(pedidosVisibles, {
+    : usarAgrupadoCalendario ? buildPedidoCalendarGroups(pedidosVisibles, {
         desde: filtroDesde || undefined,
         hasta: filtroHasta || undefined,
         currentWeek: filtroSemanaActualActivo,
-      });
+      }) : [];
   const pedidosRenderList = groupByCliente
     ? pedidosAgrupados.flatMap(group => {
         const collapsed = !!collapsedClientes[group.key];
@@ -9629,7 +9630,7 @@ export default function Pedidos() {
           ...(collapsed ? [] : group.items),
         ];
       })
-    : pedidosAgrupados.flatMap(month => {
+    : usarAgrupadoCalendario ? pedidosAgrupados.flatMap(month => {
         const showMonthGroup = pedidosAgrupados.length > 1;
         const monthCollapsed = !!collapsedClientes[month.key];
         const entries = showMonthGroup
@@ -9637,7 +9638,7 @@ export default function Pedidos() {
           : [];
         if (monthCollapsed) return entries;
         month.weeks.forEach(week => {
-          const weekCollapsed = collapsedClientes[week.key] === undefined ? true : !!collapsedClientes[week.key];
+          const weekCollapsed = !!collapsedClientes[week.key];
           entries.push({ _group: true, type: "week", key: week.key, label: week.label, count: week.count, collapsed: weekCollapsed });
           if (weekCollapsed) return;
           week.days.forEach(day => {
@@ -9647,7 +9648,7 @@ export default function Pedidos() {
           });
         });
         return entries;
-      });
+      }) : pedidosVisibles;
   const pedidosVisiblesAccionables = pedidosVisibles
     .map(item => item.pedido)
     .filter(Boolean);

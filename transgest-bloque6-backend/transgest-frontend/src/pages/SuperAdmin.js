@@ -735,8 +735,8 @@ function IntegracionesAdmin({ saFetchFn }) {
   async function guardarGlobal(p) {
     try {
       const apiKey = await promptDialog({
-        title: `Clave global ${labels[p] || p}`,
-        message: "Se guardara cifrada en el backend. No se mostrara completa despues.",
+        title: `Clave global de respaldo ${labels[p] || p}`,
+        message: "Solo se usara para la demo o como fallback cuando una empresa no tenga clave propia activa. Se guardara cifrada y no se mostrara completa despues.",
         inputType: "password",
         placeholder: "Pega la API key",
         confirmText: "Guardar",
@@ -752,8 +752,8 @@ function IntegracionesAdmin({ saFetchFn }) {
 
   async function eliminarGlobal(p) {
     const ok = await confirmDialog({
-      title: `Eliminar clave global ${labels[p] || p}`,
-      message: "Las empresas que dependan de esta clave dejaran de usar ese proveedor.",
+      title: `Eliminar clave global de respaldo ${labels[p] || p}`,
+      message: "Las empresas que no tengan clave propia y dependan del fallback global dejaran de usar ese proveedor.",
       confirmText: "Eliminar",
       tone: "danger",
     });
@@ -765,6 +765,10 @@ function IntegracionesAdmin({ saFetchFn }) {
 
   async function guardarEmpresa() {
     if (!empresaId) return;
+    if (form.use_global === false && !String(form.api_key || "").trim() && !cfgEmpresa?.key_mask) {
+      notify("Pega una clave propia para esta empresa o cambia el modo a fallback global.", "warning");
+      return;
+    }
     try {
       await saFetchFn(`/integraciones/empresas/${empresaId}/${provider}`, { method:"PUT", body:form });
       notify("Integracion de empresa guardada.", "success");
@@ -915,7 +919,7 @@ function IntegracionesAdmin({ saFetchFn }) {
   async function guardarGpsEmpresa() {
     if (!empresaId || !gpsProvider) return;
     if (gpsForm.use_global === false && !String(gpsForm.api_key || "").trim() && !cfgGps?.key_mask) {
-      notify("Pega una clave GPS propia o cambia el modo a usar global.", "warning");
+      notify("Pega una clave GPS propia para esta empresa o cambia el modo a fallback global.", "warning");
       return;
     }
     try {
@@ -1046,10 +1050,16 @@ function IntegracionesAdmin({ saFetchFn }) {
   const companyProviderOptions = (data?.providers || []).filter(p => !gpsProviders.includes(p));
   const providerGlobalStatus = data?.global?.[provider] || {};
   const providerGlobalOk = !!providerGlobalStatus.global_configured;
-  const providerReady = !!cfgEmpresa?.key_mask || (form.use_global !== false && providerGlobalOk);
+  const providerReady = form.use_global === false ? !!cfgEmpresa?.key_mask : providerGlobalOk;
+  const providerEffectiveSource = form.use_global === false
+    ? (cfgEmpresa?.key_mask ? "Clave propia de empresa" : "Falta clave propia")
+    : (providerGlobalOk ? "Fallback global" : "Sin clave de respaldo");
   const gpsGlobalStatus = data?.global?.[gpsProvider] || {};
   const gpsGlobalOk = !!gpsGlobalStatus.global_configured;
-  const gpsReady = !!cfgGps?.key_mask || (gpsForm.use_global !== false && gpsGlobalOk);
+  const gpsReady = gpsForm.use_global === false ? !!cfgGps?.key_mask : gpsGlobalOk;
+  const gpsEffectiveSource = gpsForm.use_global === false
+    ? (cfgGps?.key_mask ? "Clave propia de empresa" : "Falta clave propia")
+    : (gpsGlobalOk ? "Fallback global" : "Sin clave de respaldo");
   const gpsActiveLabel = gpsActivoEmpresa ? (labels[gpsActivoEmpresa] || gpsActivoEmpresa) : "Sin GPS activo";
   const visibleGpsProviders = showGpsProviderPicker
     ? gpsProviders
@@ -1111,6 +1121,20 @@ function IntegracionesAdmin({ saFetchFn }) {
     ["empresa", "Empresas y APIs"],
     ["contabilidad", "Contabilidad externa"],
   ];
+  const integrationSubcard = {background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12};
+  const integrationGrid = {display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:10,alignItems:"end"};
+  const integrationButtonRow = {display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"};
+  const integrationStatusChip = (ok, warning = false) => ({
+    fontSize:10,
+    fontWeight:900,
+    textTransform:"uppercase",
+    color: ok ? "#34d399" : warning ? "#fbbf24" : "#94a3b8",
+    background: ok ? "rgba(16,185,129,.10)" : warning ? "rgba(245,158,11,.10)" : "rgba(148,163,184,.08)",
+    border:`1px solid ${ok ? "rgba(16,185,129,.24)" : warning ? "rgba(245,158,11,.24)" : "#22304a"}`,
+    borderRadius:999,
+    padding:"5px 9px",
+    whiteSpace:"nowrap",
+  });
   const accountingCatalog = accountingIntegrations || {};
   const accountingItems = Array.isArray(accountingCatalog.integrations) ? accountingCatalog.integrations : [];
   const accountingSummary = accountingCatalog.summary || {};
@@ -1201,7 +1225,7 @@ function IntegracionesAdmin({ saFetchFn }) {
     <div style={SaaS.card}>
       <div style={SaaS.title}>Integraciones / APIs</div>
       <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55,marginBottom:14}}>
-        Las claves se guardan en backend y nunca se envian al navegador. La version es global; IA, GPS, mapas, fiscalidad y cuotas se gestionan por empresa desde una sola pantalla.
+        Configura primero la empresa y despues cada proveedor. Las claves propias mandan sobre cualquier respaldo; las globales quedan solo para demo o fallback cuando una empresa no tenga clave privada.
       </div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
         {integrationTabs.map(([id, label]) => (
@@ -2035,93 +2059,142 @@ function IntegracionesAdmin({ saFetchFn }) {
           </div>
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,alignItems:"end",marginBottom:12}}>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor de rutas / IA</label>
-            <select style={input} value={provider} onChange={e=>setProvider(e.target.value)}>
-              {companyProviderOptions.map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
-            </select>
+        <div style={{...integrationSubcard,marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>1. Empresa seleccionada</div>
+              <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4}}>
+                Todo lo que guardes aqui afecta solo a esta empresa. Si no tiene clave propia, puede usar el respaldo global.
+              </div>
+            </div>
+            <span style={integrationStatusChip(!!selectedEmpresa)}>{selectedEmpresa?.nombre || "Selecciona empresa"}</span>
           </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Modo</label>
-            <select style={input} value={form.use_global ? "global" : "propia"} onChange={e=>setForm(p=>({...p,use_global:e.target.value==="global"}))}>
-              <option value="global">Usar global</option>
-              <option value="propia">Clave propia</option>
-            </select>
+          <div style={integrationGrid}>
+            <div>
+              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Empresa</label>
+              <select style={input} value={empresaId} onChange={e=>setEmpresaId(e.target.value)}>
+                {(data?.empresas || []).map(e => <option key={e.id} value={e.id}>{e.nombre} - {e.plan}</option>)}
+              </select>
+            </div>
+            <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45}}>
+              <strong style={{color:"#e2e8f0"}}>Regla:</strong> clave propia por empresa si existe y esta activa. La global queda como comodin para demo o para no bloquear una integracion mientras se configura.
+            </div>
           </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave propia</label>
-            <input type="password" style={input} value={form.api_key} onChange={e=>setForm(p=>({...p,api_key:e.target.value}))} placeholder={cfgEmpresa?.key_mask ? `Actual: ${cfgEmpresa.key_mask}` : "Pegar clave si es propia"} />
-          </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite proveedor/mes</label>
-            <input type="number" min="0" style={input} value={form.limite_mensual} onChange={e=>setForm(p=>({...p,limite_mensual:e.target.value}))} />
-          </div>
-          <div style={{display:"flex",gap:6,alignItems:"center"}}>
-            <button onClick={guardarEmpresa} style={{...SaaS.btnOk,height:36}}>Guardar</button>
-            <button onClick={()=>probarEmpresa(provider)} disabled={testingProvider===provider} style={{...SaaS.btn,height:36}}>
-              {testingProvider===provider ? "Probando..." : "Probar"}
-            </button>
-            {cfgEmpresa?.key_mask && <button onClick={()=>limpiarClaveEmpresa(provider)} style={{...SaaS.btn,color:"#f87171",height:36}}>Limpiar</button>}
-          </div>
-        </div>
-        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",margin:"-2px 0 12px",padding:"8px 10px",borderRadius:8,border:"1px solid #22304a",background:"#0f1726"}}>
-          <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,flex:"1 1 260px"}}>
-            Clave global de <strong style={{color:"#e2e8f0"}}>{labels[provider] || provider}</strong>:
-            <span style={{color:providerGlobalOk ? "#34d399" : "#94a3b8",fontWeight:900}}> {providerGlobalOk ? `configurada (${providerGlobalStatus.global_source || "global"})` : "sin configurar"}</span>.
-          </div>
-          <button onClick={()=>guardarGlobal(provider)} style={{...SaaS.btnOk,padding:"7px 10px"}}>Guardar global</button>
-          {providerGlobalOk && <button onClick={()=>eliminarGlobal(provider)} style={{...SaaS.btn,color:"#f87171",padding:"7px 10px"}}>Eliminar global</button>}
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,alignItems:"end"}}>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor GPS de esta empresa</label>
-            <select style={input} value={gpsProvider} onChange={e=>setGpsProvider(e.target.value)}>
-              {visibleGpsProviders.map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
-            </select>
-            <button
-              onClick={()=>setShowGpsProviderPicker(p=>!p)}
-              style={{...SaaS.btn,padding:"5px 8px",fontSize:10,marginTop:6,color:"#93c5fd",borderColor:"rgba(147,197,253,.24)"}}
-            >
-              {showGpsProviderPicker ? "Ocultar proveedores" : "Cambiar proveedor"}
-            </button>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:12,marginBottom:12}}>
+          <div style={integrationSubcard}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>2. Mapas, rutas e IA</div>
+                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>Proveedor operativo de esta empresa.</div>
+              </div>
+              <span style={integrationStatusChip(providerReady, !providerReady)}>{providerEffectiveSource}</span>
+            </div>
+            <div style={integrationGrid}>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor</label>
+                <select style={input} value={provider} onChange={e=>setProvider(e.target.value)}>
+                  {companyProviderOptions.map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave a usar</label>
+                <select style={input} value={form.use_global ? "global" : "propia"} onChange={e=>setForm(p=>({...p,use_global:e.target.value==="global"}))}>
+                  <option value="propia">Clave propia de esta empresa</option>
+                  <option value="global">Fallback global (demo / si no hay propia)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave propia</label>
+                <input type="password" style={input} value={form.api_key} onChange={e=>setForm(p=>({...p,api_key:e.target.value}))} placeholder={cfgEmpresa?.key_mask ? `Actual: ${cfgEmpresa.key_mask}` : "Pegar clave de esta empresa"} />
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite mensual</label>
+                <input type="number" min="0" style={input} value={form.limite_mensual} onChange={e=>setForm(p=>({...p,limite_mensual:e.target.value}))} />
+              </div>
+            </div>
+            <div style={{...integrationButtonRow,marginTop:10}}>
+              <button onClick={guardarEmpresa} style={{...SaaS.btnOk,height:36}}>Guardar empresa</button>
+              <button onClick={()=>probarEmpresa(provider)} disabled={testingProvider===provider} style={{...SaaS.btn,height:36}}>
+                {testingProvider===provider ? "Probando..." : "Probar"}
+              </button>
+              {cfgEmpresa?.key_mask && <button onClick={()=>limpiarClaveEmpresa(provider)} style={{...SaaS.btn,color:"#f87171",height:36}}>Limpiar clave propia</button>}
+            </div>
+            <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginTop:8}}>
+              Respaldo global de {labels[provider] || provider}: <strong style={{color:providerGlobalOk ? "#34d399" : "#94a3b8"}}>{providerGlobalOk ? `configurado (${providerGlobalStatus.global_source || "global"})` : "sin configurar"}</strong>.
+            </div>
           </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Modo GPS</label>
-            <select style={input} value={gpsForm.use_global ? "global" : "propia"} onChange={e=>setGpsForm(p=>({...p,use_global:e.target.value==="global"}))}>
-              <option value="global">Usar global</option>
-              <option value="propia">Clave propia</option>
-            </select>
+
+          <div style={integrationSubcard}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>3. GPS y telemetria</div>
+                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>Solo puede quedar un proveedor GPS activo por empresa.</div>
+              </div>
+              <span style={integrationStatusChip(gpsReady, !gpsReady)}>{gpsEffectiveSource}</span>
+            </div>
+            <div style={integrationGrid}>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor GPS</label>
+                <select style={input} value={gpsProvider} onChange={e=>setGpsProvider(e.target.value)}>
+                  {visibleGpsProviders.map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
+                </select>
+                <button
+                  onClick={()=>setShowGpsProviderPicker(p=>!p)}
+                  style={{...SaaS.btn,padding:"5px 8px",fontSize:10,marginTop:6,color:"#93c5fd",borderColor:"rgba(147,197,253,.24)"}}
+                >
+                  {showGpsProviderPicker ? "Ocultar proveedores" : "Cambiar proveedor"}
+                </button>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave a usar</label>
+                <select style={input} value={gpsForm.use_global ? "global" : "propia"} onChange={e=>setGpsForm(p=>({...p,use_global:e.target.value==="global"}))}>
+                  <option value="propia">Clave propia de esta empresa</option>
+                  <option value="global">Fallback global (demo / si no hay propia)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave GPS propia</label>
+                <input type="password" style={input} value={gpsForm.api_key} onChange={e=>setGpsForm(p=>({...p,api_key:e.target.value}))} placeholder={cfgGps?.key_mask ? `Actual: ${cfgGps.key_mask}` : "Pegar clave GPS de esta empresa"} />
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite mensual</label>
+                <input type="number" min="0" style={input} value={gpsForm.limite_mensual} onChange={e=>setGpsForm(p=>({...p,limite_mensual:e.target.value}))} />
+              </div>
+            </div>
+            <div style={{...integrationButtonRow,marginTop:10}}>
+              <button onClick={guardarGpsEmpresa} style={{...SaaS.btnOk,height:36}}>Guardar GPS activo</button>
+              <button onClick={()=>probarEmpresa(gpsProvider)} disabled={testingProvider===gpsProvider} style={{...SaaS.btn,height:36}}>
+                {testingProvider===gpsProvider ? "Diagnosticando..." : "Diagnosticar"}
+              </button>
+              <button onClick={desactivarGpsEmpresa} style={{...SaaS.btn,color:"#f87171",height:36}}>Desactivar</button>
+              {cfgGps?.key_mask && <button onClick={()=>limpiarClaveEmpresa(gpsProvider, true)} style={{...SaaS.btn,color:"#f87171",height:36}}>Limpiar clave propia</button>}
+            </div>
+            <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginTop:8}}>
+              Respaldo global de {labels[gpsProvider] || gpsProvider}: <strong style={{color:gpsGlobalOk ? "#34d399" : "#94a3b8"}}>{gpsGlobalOk ? `configurado (${gpsGlobalStatus.global_source || "global"})` : "sin configurar"}</strong>.
+              {gpsActivoEmpresa && gpsActivoEmpresa !== gpsProvider && <span style={{color:"#fbbf24",fontWeight:800}}> Activo ahora: {labels[gpsActivoEmpresa] || gpsActivoEmpresa}.</span>}
+            </div>
           </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave GPS</label>
-            <input type="password" style={input} value={gpsForm.api_key} onChange={e=>setGpsForm(p=>({...p,api_key:e.target.value}))} placeholder={cfgGps?.key_mask ? `Actual: ${cfgGps.key_mask}` : "Pegar clave GPS"} />
-          </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite GPS/mes</label>
-            <input type="number" min="0" style={input} value={gpsForm.limite_mensual} onChange={e=>setGpsForm(p=>({...p,limite_mensual:e.target.value}))} />
-          </div>
-          <button onClick={guardarGpsEmpresa} style={{...SaaS.btnOk,height:36}}>Guardar GPS activo</button>
-          <button onClick={()=>probarEmpresa(gpsProvider)} disabled={testingProvider===gpsProvider} style={{...SaaS.btn,height:36}}>
-            {testingProvider===gpsProvider ? "Diagnosticando..." : "Diagnosticar GPS"}
-          </button>
-          <button onClick={desactivarGpsEmpresa} style={{...SaaS.btn,color:"#f87171",height:36}}>Desactivar</button>
         </div>
-        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:8,padding:"8px 10px",borderRadius:8,border:"1px solid #22304a",background:"#0f1726"}}>
-          <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,flex:"1 1 260px"}}>
-            Clave global de <strong style={{color:"#e2e8f0"}}>{labels[gpsProvider] || gpsProvider}</strong>:
-            <span style={{color:gpsGlobalOk ? "#34d399" : "#94a3b8",fontWeight:900}}> {gpsGlobalOk ? `configurada (${gpsGlobalStatus.global_source || "global"})` : "sin configurar"}</span>.
-            {gpsActivoEmpresa && gpsActivoEmpresa !== gpsProvider && <span style={{color:"#fbbf24",fontWeight:800}}> El GPS activo ahora es {labels[gpsActivoEmpresa] || gpsActivoEmpresa}.</span>}
+
+        <div style={{...integrationSubcard,marginBottom:12,borderColor:"rgba(245,158,11,.22)",background:"rgba(245,158,11,.06)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Claves globales de respaldo</div>
+              <div style={{fontSize:11,color:"#fcd34d",lineHeight:1.45,marginTop:4}}>
+                Usalas solo para la demo o como fallback temporal. Una empresa con clave propia activa no necesita tocar estas claves.
+              </div>
+            </div>
+            <div style={integrationButtonRow}>
+              <button onClick={()=>guardarGlobal(provider)} style={{...SaaS.btnOk,padding:"7px 10px"}}>Global rutas/IA</button>
+              {providerGlobalOk && <button onClick={()=>eliminarGlobal(provider)} style={{...SaaS.btn,color:"#f87171",padding:"7px 10px"}}>Eliminar rutas/IA</button>}
+              <button onClick={()=>guardarGlobal(gpsProvider)} style={{...SaaS.btnOk,padding:"7px 10px"}}>Global GPS</button>
+              {gpsGlobalOk && <button onClick={()=>eliminarGlobal(gpsProvider)} style={{...SaaS.btn,color:"#f87171",padding:"7px 10px"}}>Eliminar GPS</button>}
+            </div>
           </div>
-          <button onClick={()=>guardarGlobal(gpsProvider)} style={{...SaaS.btnOk,padding:"7px 10px"}}>Guardar global GPS</button>
-          {gpsGlobalOk && <button onClick={()=>eliminarGlobal(gpsProvider)} style={{...SaaS.btn,color:"#f87171",padding:"7px 10px"}}>Eliminar global GPS</button>}
         </div>
-        {cfgGps?.key_mask && (
-          <button onClick={()=>limpiarClaveEmpresa(gpsProvider, true)} style={{...SaaS.btn,color:"#f87171",marginTop:8}}>
-            Limpiar clave propia GPS
-          </button>
-        )}
+
         <div style={{display:"block",marginTop:12,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
             <div>
@@ -2206,7 +2279,7 @@ function IntegracionesAdmin({ saFetchFn }) {
         <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginBottom:10}}>
           Esta version se usa como referencia general del producto y tambien alimenta la version del software emisor en VERIFACTU para todas las empresas.
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 140px 140px auto",gap:10,alignItems:"end",marginBottom:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,alignItems:"end",marginBottom:12}}>
           <div>
             <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Nombre producto</label>
             <input style={input} value={appMetaForm.brand_name} onChange={e=>setAppMetaForm(p=>({...p,brand_name:e.target.value}))} placeholder="TransGest" />
@@ -2221,7 +2294,7 @@ function IntegracionesAdmin({ saFetchFn }) {
           </div>
           <button onClick={guardarAppMeta} style={{...SaaS.btnOk,height:36}}>Guardar version</button>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
           <div>
             <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Nombre software fiscal</label>
             <input style={input} value={appMetaForm.fiscal_software_name} onChange={e=>setAppMetaForm(p=>({...p,fiscal_software_name:e.target.value}))} placeholder="TransGest" />
@@ -2233,50 +2306,6 @@ function IntegracionesAdmin({ saFetchFn }) {
         </div>
       </div>
 
-      <div style={{display:"none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14}}>
-        <div style={{fontWeight:800,color:"#e2e8f0",fontSize:14,marginBottom:10}}>Ajustes avanzados por empresa</div>
-        <div style={{display:"grid",gridTemplateColumns:"1.2fr .8fr .7fr .7fr",gap:10,alignItems:"end"}}>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Empresa</label>
-            <select style={input} value={empresaId} onChange={e=>setEmpresaId(e.target.value)}>
-              {(data?.empresas || []).map(e => <option key={e.id} value={e.id}>{e.nombre} - {e.plan}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor</label>
-            <select style={input} value={provider} onChange={e=>setProvider(e.target.value)}>
-              {companyProviderOptions.map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Modo</label>
-            <select style={input} value={form.use_global ? "global" : "propia"} onChange={e=>setForm(p=>({...p,use_global:e.target.value==="global"}))}>
-              <option value="global">Usar global</option>
-              <option value="propia">Clave propia</option>
-            </select>
-          </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Activo</label>
-            <select style={input} value={form.activo ? "si" : "no"} onChange={e=>setForm(p=>({...p,activo:e.target.value==="si"}))}>
-              <option value="si">Activo</option>
-              <option value="no">Bloqueado</option>
-            </select>
-          </div>
-          <div style={{gridColumn:"1 / span 2"}}>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave propia nueva</label>
-            <input type="password" style={input} value={form.api_key} onChange={e=>setForm(p=>({...p,api_key:e.target.value}))} placeholder={cfgEmpresa?.key_mask ? `Actual: ${cfgEmpresa.key_mask}` : "Solo si usa clave propia"} />
-          </div>
-          <div>
-            <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite mensual</label>
-            <input type="number" style={input} value={form.limite_mensual} onChange={e=>setForm(p=>({...p,limite_mensual:e.target.value}))} />
-          </div>
-          <button onClick={guardarEmpresa} style={{...SaaS.btnOk,height:36}}>Guardar empresa</button>
-        </div>
-        <div style={{fontSize:11,color:"#64748b",marginTop:10}}>
-          {selectedEmpresa ? `${selectedEmpresa.nombre}: ` : ""}
-          {cfgEmpresa ? `modo ${cfgEmpresa.use_global ? "global" : "clave propia"} - ${cfgEmpresa.activo ? "activo" : "bloqueado"} - usos ${cfgEmpresa.usos_mes || 0}/${cfgEmpresa.limite_mensual || 0}` : "sin configuracion propia, usa la global si existe."}
-        </div>
-      </div>
     </div>
   );
 }

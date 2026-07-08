@@ -152,6 +152,14 @@ async function setCompanyApiConfig(empresaId, provider, data, actorId = null) {
   const keyMask = apiKey ? maskSecret(apiKey) : null;
   const clearKey = data.clear_key === true;
   const useGlobal = clearKey ? true : (data.use_global !== undefined ? Boolean(data.use_global) : !apiKey);
+  if (!useGlobal && !apiKey && !clearKey) {
+    const current = await getCompanyApiConfig(empresaId, provider);
+    if (!current?.encrypted_key) {
+      const err = new Error("Para usar una clave propia de empresa debes pegar una clave API.");
+      err.status = 400;
+      throw err;
+    }
+  }
   const activo = data.activo !== undefined ? Boolean(data.activo) : true;
   const limite = Number(data.limite_mensual || 0);
   await db.query(`

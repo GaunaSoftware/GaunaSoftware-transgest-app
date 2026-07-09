@@ -4,9 +4,11 @@ import { notify, promptDialog } from "../services/notify";
 
 const ESTADO = {
   pendiente: { l: "Pendiente", c: "#f97316" },
-  revisada: { l: "Revisada", c: "#3b82f6" },
-  convertida: { l: "Convertida", c: "#10b981" },
-  descartada: { l: "Descartada", c: "#ef4444" },
+  revisada: { l: "En revision", c: "#3b82f6" },
+  convertida: { l: "Aceptada", c: "#10b981" },
+  descartada: { l: "Rechazada", c: "#ef4444" },
+  rechazada: { l: "Rechazada", c: "#ef4444" },
+  cancelada: { l: "Cancelada", c: "#ef4444" },
 };
 
 function refreshSolicitudBadges() {
@@ -35,6 +37,10 @@ function ageLabel(v) {
 
 function isOpen(sol) {
   return ["pendiente", "revisada"].includes(sol.estado);
+}
+
+function isRejected(sol) {
+  return ["rechazada", "descartada"].includes(String(sol?.estado || "").toLowerCase());
 }
 
 function isAged(sol) {
@@ -76,6 +82,8 @@ function resumenSolicitud(sol) {
     sol.bultos ? `Bultos: ${sol.bultos}` : "",
     sol.notas ? `Notas: ${sol.notas}` : "",
     sol.pedido_numero ? `Pedido: ${sol.pedido_numero}` : "",
+    sol.vehiculo_matricula || sol.matricula_colaborador ? `Tractora: ${sol.vehiculo_matricula || sol.matricula_colaborador}` : "",
+    sol.remolque_matricula || sol.remolque_matricula_colaborador ? `Remolque: ${sol.remolque_matricula || sol.remolque_matricula_colaborador}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -123,8 +131,8 @@ function buildSolicitudesAdminReportHtml({ solicitudes = [], resumen = {}, filtr
   <div class="grid">
     <div class="box"><div class="metric">${escapeHtml(solicitudes.length)}</div><div class="muted">En informe</div></div>
     <div class="box"><div class="metric">${escapeHtml(resumen.pendientes || 0)}</div><div class="muted">Pendientes</div></div>
-    <div class="box"><div class="metric">${escapeHtml(resumen.revisadas || 0)}</div><div class="muted">Revisadas</div></div>
-    <div class="box"><div class="metric">${escapeHtml(resumen.convertidas || 0)}</div><div class="muted">Convertidas</div></div>
+    <div class="box"><div class="metric">${escapeHtml(resumen.aceptadas || 0)}</div><div class="muted">Aceptadas</div></div>
+    <div class="box"><div class="metric">${escapeHtml(resumen.rechazadas || 0)}</div><div class="muted">Rechazadas</div></div>
     <div class="box"><div class="metric">${escapeHtml(resumen.vencidas || 0)}</div><div class="muted">Sin atender >24h</div></div>
   </div>
   <table>
@@ -162,21 +170,21 @@ export default function Solicitudes() {
   useEffect(() => { cargar(); }, [cargar]);
 
   const resumen = useMemo(() => ({
-    pendientes: sols.filter(s => s.estado === "pendiente").length,
-    revisadas: sols.filter(s => s.estado === "revisada").length,
-    convertidas: sols.filter(s => s.estado === "convertida").length,
-    descartadas: sols.filter(s => s.estado === "descartada").length,
+    pendientes: sols.filter(isOpen).length,
+    aceptadas: sols.filter(s => s.estado === "convertida").length,
+    rechazadas: sols.filter(isRejected).length,
+    canceladas: sols.filter(s => s.estado === "cancelada").length,
     vencidas: sols.filter(isAged).length,
   }), [sols]);
 
-  const pendientes = resumen.pendientes + resumen.revisadas;
-  const enPapelera = vista === "papelera";
+  const pendientes = resumen.pendientes;
+  const enRechazadas = vista === "rechazadas";
 
   const visibles = useMemo(() => {
     const term = q.trim().toLowerCase();
     const filtered = sols.filter(s => {
-      if (enPapelera && s.estado !== "descartada") return false;
-      if (!enPapelera && s.estado === "descartada") return false;
+      if (enRechazadas && !isRejected(s)) return false;
+      if (!enRechazadas && isRejected(s)) return false;
       if (estado && s.estado !== estado) return false;
       if (soloVencidas && !isAged(s)) return false;
       if (!term) return true;
@@ -202,13 +210,24 @@ export default function Solicitudes() {
       return score(b) - score(a);
     });
     return sorted;
-  }, [sols, estado, q, soloVencidas, orden, enPapelera]);
+  }, [sols, estado, q, soloVencidas, orden, enRechazadas]);
 
-  async function descartar(sol) {
+  async function rechazar(sol) {
+    const motivo = await promptDialog({
+      title: "Rechazar solicitud",
+      message: `Cliente: ${sol.cliente_nombre || "-"}\nRuta: ${sol.origen || "-"} -> ${sol.destino || "-"}`,
+      placeholder: "Motivo visible para el cliente...",
+      defaultValue: "",
+      confirmText: "Rechazar solicitud",
+    });
+    if (motivo === null) return;
     setTrabajando(sol.id);
     try {
-      await actualizarPortalSolicitudAdmin(sol.id, { estado: "descartada", respuesta: "Solicitud descartada por trafico." });
-      notify("Solicitud movida a papelera", "success");
+      const respuesta = String(motivo || "").trim()
+        ? `Solicitud rechazada por trafico. Motivo: ${String(motivo).trim()}`
+        : "Solicitud rechazada por trafico.";
+      await actualizarPortalSolicitudAdmin(sol.id, { estado: "rechazada", respuesta });
+      notify("Solicitud rechazada", "success");
       await cargar();
       refreshSolicitudBadges();
     } catch (e) {
@@ -222,24 +241,10 @@ export default function Solicitudes() {
     setTrabajando(sol.id);
     try {
       await actualizarPortalSolicitudAdmin(sol.id, {
-        estado: "revisada",
-        respuesta: sol.respuesta || "Solicitud restaurada desde papelera. Pendiente de revision.",
+        estado: "pendiente",
+        respuesta: "Solicitud reabierta. Pendiente de gestion.",
       });
       notify("Solicitud restaurada", "success");
-      await cargar();
-      refreshSolicitudBadges();
-    } catch (e) {
-      notify(e.message, "error");
-    } finally {
-      setTrabajando(null);
-    }
-  }
-
-  async function marcarRevisada(sol) {
-    setTrabajando(sol.id);
-    try {
-      await actualizarPortalSolicitudAdmin(sol.id, { estado: "revisada", respuesta: "Solicitud revisada. Pendiente de planificacion." });
-      notify("Solicitud marcada como revisada", "success");
       await cargar();
       refreshSolicitudBadges();
     } catch (e) {
@@ -265,10 +270,7 @@ export default function Solicitudes() {
     }
     setTrabajando(sol.id);
     try {
-      await actualizarPortalSolicitudAdmin(sol.id, {
-        respuesta,
-        estado: sol.estado === "pendiente" ? "revisada" : sol.estado,
-      });
+      await actualizarPortalSolicitudAdmin(sol.id, { respuesta });
       notify("Respuesta guardada", "success");
       await cargar();
       refreshSolicitudBadges();
@@ -317,7 +319,6 @@ export default function Solicitudes() {
     setTrabajando(sol.id);
     try {
       await actualizarPortalSolicitudAdmin(sol.id, {
-        estado: "revisada",
         fecha_propuesta: fecha,
         hora_propuesta: String(hora || "").trim() || null,
         decision_cliente: "pendiente",
@@ -408,7 +409,7 @@ export default function Solicitudes() {
     const html = buildSolicitudesAdminReportHtml({
       solicitudes: visibles,
       resumen,
-      filtros: { estado: enPapelera ? "papelera" : estado, q, orden, soloVencidas },
+      filtros: { estado: enRechazadas ? "rechazadas" : estado, q, orden, soloVencidas },
     });
     descargarArchivo(`informe-solicitudes-clientes-${new Date().toISOString().slice(0,10)}.html`, html, "text/html;charset=utf-8");
   }
@@ -439,18 +440,18 @@ export default function Solicitudes() {
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:16, marginBottom:28 }}>
         {[
           ["Pendientes", "pendiente", resumen.pendientes, "#f97316"],
-          ["Revisadas", "revisada", resumen.revisadas, "#3b82f6"],
-          ["Convertidas", "convertida", resumen.convertidas, "#10b981"],
-          ["Papelera", "papelera", resumen.descartadas, "#ef4444"],
+          ["Aceptadas", "convertida", resumen.aceptadas, "#10b981"],
+          ["Rechazadas", "rechazadas", resumen.rechazadas, "#ef4444"],
+          ["Canceladas", "cancelada", resumen.canceladas, "#ef4444"],
           ["Sin atender >24h", "vencidas", resumen.vencidas, "#ef4444"],
         ].map(([label, valueEstado, value, color]) => (
           <button key={label} onClick={() => {
-              if (valueEstado === "papelera") { setVista("papelera"); setEstado(""); setSoloVencidas(false); return; }
+              if (valueEstado === "rechazadas") { setVista("rechazadas"); setEstado(""); setSoloVencidas(false); return; }
               setVista("activas");
               if (valueEstado === "vencidas") { setSoloVencidas(v => !v); setEstado(""); }
               else { setEstado(valueEstado); setSoloVencidas(false); }
             }}
-            style={{ ...S.kpi, textAlign:"left", cursor:"pointer", borderColor: (valueEstado === "papelera" ? enPapelera : valueEstado === "vencidas" ? soloVencidas : !enPapelera && estado === valueEstado) ? color : "#dbe5ec", display:"grid", gridTemplateColumns:"54px 1fr", alignItems:"center", gap:14 }}>
+            style={{ ...S.kpi, textAlign:"left", cursor:"pointer", borderColor: (valueEstado === "rechazadas" ? enRechazadas : valueEstado === "vencidas" ? soloVencidas : !enRechazadas && estado === valueEstado) ? color : "#dbe5ec", display:"grid", gridTemplateColumns:"54px 1fr", alignItems:"center", gap:14 }}>
             <div style={{width:46,height:46,borderRadius:14,display:"grid",placeItems:"center",background:`${color}12`,color,fontSize:20,fontWeight:900}}>!</div>
             <div style={{minWidth:0}}>
               <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:26, fontWeight:900, color, lineHeight:1 }}>{value}</div>
@@ -464,7 +465,7 @@ export default function Solicitudes() {
         <div style={{ display:"flex", gap:6, background:"#f8fafc", padding:4, borderRadius:9, border:"1px solid #dbe5ec", flexWrap:"wrap" }}>
           {[
             ["activas", "Activas"],
-            ["papelera", `Papelera (${resumen.descartadas})`],
+            ["rechazadas", `Rechazadas (${resumen.rechazadas})`],
           ].map(([key, label]) => (
             <button key={key} onClick={() => { setVista(key); setEstado(""); setSoloVencidas(false); }}
               style={{ ...S.btn, border:"none", background:vista===key ? "linear-gradient(135deg,#0f766e,#0d9488)" : "transparent", color:vista===key ? "#fff" : "#64748b", padding:"10px 16px", boxShadow:"none" }}>
@@ -475,11 +476,13 @@ export default function Solicitudes() {
         <input value={q} onChange={e=>setQ(e.target.value)} style={{ ...S.input, width:"100%" }}
           placeholder="Buscar por cliente, ruta, referencia, mercancia o pedido..." />
         <select value={estado} onChange={e => setEstado(e.target.value)} style={{ ...S.input, width:"100%" }}>
-          <option value="">{enPapelera ? "Todas en papelera" : "Todos los estados activos"}</option>
-          {!enPapelera && <option value="pendiente">Pendientes</option>}
-          {!enPapelera && <option value="revisada">Revisadas</option>}
-          {!enPapelera && <option value="convertida">Convertidas</option>}
-          {enPapelera && <option value="descartada">Descartadas</option>}
+          <option value="">{enRechazadas ? "Todas las rechazadas" : "Todos los estados activos"}</option>
+          {!enRechazadas && <option value="pendiente">Pendientes</option>}
+          {!enRechazadas && <option value="revisada">En revision</option>}
+          {!enRechazadas && <option value="convertida">Aceptadas</option>}
+          {!enRechazadas && <option value="cancelada">Canceladas</option>}
+          {enRechazadas && <option value="rechazada">Rechazadas</option>}
+          {enRechazadas && <option value="descartada">Rechazadas antiguas</option>}
         </select>
         <select value={orden} onChange={e => setOrden(e.target.value)} style={{ ...S.input, width:"100%" }}>
           <option value="prioridad">Orden: prioridad</option>
@@ -490,14 +493,14 @@ export default function Solicitudes() {
         </select>
         <button onClick={exportarCsv} style={{...S.btn,color:"#0f766e"}}>Exportar CSV</button>
         <button onClick={exportarInformeHtml} style={{...S.btn,color:"#0f766e"}}>Informe HTML</button>
-        {(q || estado || soloVencidas || enPapelera) && (
+        {(q || estado || soloVencidas || enRechazadas) && (
           <button onClick={()=>{setQ("");setEstado("");setSoloVencidas(false);setVista("activas");}} style={S.btn}>Limpiar</button>
         )}
       </div>
       {!loading && sols.length > 0 && (
         <div style={{ margin:"0 0 16px", fontSize:14, color:"#64748b" }}>
-          {enPapelera ? "Papelera: " : "Activas: "}
-          Mostrando <strong style={{color:"#0f766e"}}>{visibles.length}</strong> de {enPapelera ? resumen.descartadas : sols.length - resumen.descartadas} solicitudes
+          {enRechazadas ? "Rechazadas: " : "Activas: "}
+          Mostrando <strong style={{color:"#0f766e"}}>{visibles.length}</strong> de {enRechazadas ? resumen.rechazadas : sols.length - resumen.rechazadas} solicitudes
           {soloVencidas ? " · solo sin atender mas de 24 h" : ""}
         </div>
       )}
@@ -508,7 +511,7 @@ export default function Solicitudes() {
           <div>
             <div style={{width:128,height:128,borderRadius:"50%",background:"rgba(15,118,110,.10)",margin:"0 auto 18px",display:"grid",placeItems:"center",color:"#0f766e",fontSize:64}}>▱</div>
             <div style={{fontSize:22,fontWeight:900,color:"#0f172a",marginBottom:8}}>
-              {enPapelera && sols.length > 0 ? "La papelera de solicitudes esta vacia." : "No hay solicitudes con esos filtros."}
+              {enRechazadas && sols.length > 0 ? "No hay solicitudes rechazadas." : "No hay solicitudes con esos filtros."}
             </div>
             <div style={{fontSize:14,color:"#94a3b8"}}>Prueba a cambiar los filtros o el criterio de busqueda.</div>
           </div>
@@ -517,8 +520,8 @@ export default function Solicitudes() {
 
       {!loading && visibles.map(sol => {
         const e = ESTADO[sol.estado] || ESTADO.pendiente;
-        const discarded = sol.estado === "descartada";
-        const disabled = trabajando === sol.id || ["convertida", "descartada"].includes(sol.estado);
+        const rejected = isRejected(sol);
+        const disabled = trabajando === sol.id || ["convertida", "rechazada", "descartada", "cancelada"].includes(sol.estado);
         const aged = isAged(sol);
         return (
           <div key={sol.id} style={{ ...S.card, borderColor: aged ? "rgba(239,68,68,.55)" : sol.estado === "pendiente" ? "rgba(249,115,22,.35)" : "var(--border)" }}>
@@ -560,6 +563,16 @@ export default function Solicitudes() {
               {sol.fecha_descarga && <span>Descarga: {dateEs(sol.fecha_descarga)} {sol.hora_descarga || ""}</span>}
               {sol.pedido_numero && <span>Pedido: {sol.pedido_numero}</span>}
             </div>
+            {(sol.vehiculo_matricula || sol.matricula_colaborador || sol.remolque_matricula || sol.remolque_matricula_colaborador) && (
+              <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 8 }}>
+                <div style={{ padding: 10, borderRadius: 8, background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.18)", fontSize: 12, color: "var(--text3)" }}>
+                  Tractora asignada: <strong style={{ color: "var(--text)" }}>{sol.vehiculo_matricula || sol.matricula_colaborador || "Pendiente"}</strong>
+                </div>
+                <div style={{ padding: 10, borderRadius: 8, background: "rgba(16,185,129,.08)", border: "1px solid rgba(16,185,129,.18)", fontSize: 12, color: "var(--text3)" }}>
+                  Remolque asignado: <strong style={{ color: "var(--text)" }}>{sol.remolque_matricula || sol.remolque_matricula_colaborador || "Pendiente"}</strong>
+                </div>
+              </div>
+            )}
             {sol.notas && <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "var(--bg3)", color: "var(--text3)", fontSize: 12 }}>{sol.notas}</div>}
             {sol.respuesta && (
               <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "rgba(59,130,246,.07)", border: "1px solid rgba(59,130,246,.18)", color: "var(--text3)", fontSize: 12 }}>
@@ -568,24 +581,19 @@ export default function Solicitudes() {
             )}
 
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-              {!discarded && (
+              {!rejected && (
                 <button onClick={() => convertir(sol)} disabled={disabled} style={{ ...S.btn, background: "#10b981", color: "#fff", borderColor: "#10b981", opacity: disabled ? .55 : 1 }}>
                   {trabajando === sol.id ? "Procesando..." : "Convertir en pedido"}
                 </button>
               )}
-              {!discarded && (
+              {!rejected && (
                 <button onClick={() => reprogramar(sol)} disabled={disabled} style={{ ...S.btn, opacity: disabled ? .55 : 1 }}>
                   Reprogramar
                 </button>
               )}
-              {!discarded && (
-                <button onClick={() => responder(sol)} disabled={trabajando === sol.id || ["convertida","descartada"].includes(sol.estado)} style={{ ...S.btn, opacity: trabajando === sol.id || ["convertida","descartada"].includes(sol.estado) ? .55 : 1 }}>
+              {!rejected && (
+                <button onClick={() => responder(sol)} disabled={trabajando === sol.id || ["convertida","rechazada","descartada","cancelada"].includes(sol.estado)} style={{ ...S.btn, opacity: trabajando === sol.id || ["convertida","rechazada","descartada","cancelada"].includes(sol.estado) ? .55 : 1 }}>
                   Responder / nota
-                </button>
-              )}
-              {!discarded && (
-                <button onClick={() => marcarRevisada(sol)} disabled={disabled || sol.estado === "revisada"} style={{ ...S.btn, opacity: disabled || sol.estado === "revisada" ? .55 : 1 }}>
-                  Marcar revisada
                 </button>
               )}
               <button onClick={() => copiarResumen(sol)} style={S.btn}>
@@ -594,13 +602,13 @@ export default function Solicitudes() {
               <button onClick={() => toggleEventos(sol)} style={S.btn}>
                 {eventosAbiertos[sol.id] ? "Ocultar historial" : "Ver historial"}
               </button>
-              {discarded ? (
+              {rejected ? (
                 <button onClick={() => restaurar(sol)} disabled={trabajando === sol.id} style={{ ...S.btn, color: "#10b981", borderColor: "rgba(16,185,129,.25)", opacity: trabajando === sol.id ? .55 : 1 }}>
                   Restaurar
                 </button>
               ) : (
-                <button onClick={() => descartar(sol)} disabled={disabled} style={{ ...S.btn, color: "#ef4444", borderColor: "rgba(239,68,68,.25)", opacity: disabled ? .55 : 1 }}>
-                  Mover a papelera
+                <button onClick={() => rechazar(sol)} disabled={disabled} style={{ ...S.btn, color: "#ef4444", borderColor: "rgba(239,68,68,.25)", opacity: disabled ? .55 : 1 }}>
+                  Rechazar
                 </button>
               )}
               {sol.pedido_numero && (

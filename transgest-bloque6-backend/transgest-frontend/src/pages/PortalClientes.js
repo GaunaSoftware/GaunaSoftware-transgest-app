@@ -30,10 +30,11 @@ const ESTADOS = {
   cancelado: { l: "Cancelado", c: "#ef4444" },
   incidencia: { l: "Incidencia", c: "#fbbf24" },
   facturado: { l: "Facturado", c: "#8b5cf6" },
-  convertida: { l: "Convertida", c: "#10b981" },
-  descartada: { l: "Descartada", c: "#ef4444" },
+  convertida: { l: "Aceptada", c: "#10b981" },
+  descartada: { l: "Rechazada", c: "#ef4444" },
+  rechazada: { l: "Rechazada", c: "#ef4444" },
   cancelada: { l: "Cancelada", c: "#ef4444" },
-  revisada: { l: "Revisada", c: "#3b82f6" },
+  revisada: { l: "En revision", c: "#3b82f6" },
 };
 
 const TIMELINE = [
@@ -90,6 +91,7 @@ function buildSolicitudesReportHtml({ solicitudes = [], pedidos = [], empresa = 
   const generated = new Date().toLocaleString("es-ES");
   const abiertas = solicitudes.filter(s => ["pendiente", "revisada"].includes(s.estado));
   const convertidas = solicitudes.filter(s => s.estado === "convertida");
+  const rechazadas = solicitudes.filter(s => ["rechazada", "descartada"].includes(s.estado));
   const propuestasPendientes = solicitudes.filter(s => s.fecha_propuesta && (!s.decision_cliente || s.decision_cliente === "pendiente"));
   const movimientos = solicitudes.reduce((sum, s) => sum + Number(s.eventos_count || 0), 0);
   const rows = (list) => list.map(s => `<tr>
@@ -123,7 +125,8 @@ function buildSolicitudesReportHtml({ solicitudes = [], pedidos = [], empresa = 
         <div class="box"><div class="metric">${escapeHtml(solicitudes.length)}</div><div class="muted">Solicitudes totales</div></div>
         <div class="box"><div class="metric">${escapeHtml(abiertas.length)}</div><div class="muted">Solicitudes abiertas</div></div>
         <div class="box"><div class="metric">${escapeHtml(propuestasPendientes.length)}</div><div class="muted">Propuestas pendientes</div></div>
-        <div class="box"><div class="metric">${escapeHtml(convertidas.length)}</div><div class="muted">Convertidas en pedido</div></div>
+        <div class="box"><div class="metric">${escapeHtml(convertidas.length)}</div><div class="muted">Aceptadas en pedido</div></div>
+        <div class="box"><div class="metric">${escapeHtml(rechazadas.length)}</div><div class="muted">Rechazadas</div></div>
         <div class="box"><div class="metric">${escapeHtml(movimientos)}</div><div class="muted">Movimientos trazados</div></div>
         <div class="box"><div class="metric">${escapeHtml(pedidos.length)}</div><div class="muted">Viajes visibles</div></div>
       </div>
@@ -267,7 +270,9 @@ function solicitudEventoLabel(tipo) {
   const labels = {
     "solicitud.creada": "Solicitud creada",
     "solicitud.reprogramacion.cliente": "Respuesta a reprogramacion",
+    "solicitud.reprogramacion.propuesta": "Reprogramacion propuesta",
     "solicitud.convertida": "Convertida en pedido",
+    "solicitud.rechazada": "Solicitud rechazada",
     "solicitud.cancelada.cliente": "Cancelada por cliente",
     "solicitud.actualizada": "Gestion actualizada",
   };
@@ -278,7 +283,9 @@ function solicitudEventoResumen(ev) {
   const d = ev?.detalle || {};
   if (ev.tipo === "solicitud.creada") return [d.origen, d.destino].filter(Boolean).join(" -> ") || "Solicitud registrada.";
   if (ev.tipo === "solicitud.reprogramacion.cliente") return `${d.decision || "Decision"} ${d.fecha_propuesta || ""} ${d.hora_propuesta || ""}`.trim();
+  if (ev.tipo === "solicitud.reprogramacion.propuesta") return d.fecha_propuesta ? `${d.fecha_propuesta}${d.hora_propuesta ? ` ${d.hora_propuesta}` : ""}` : "Trafico ha propuesto una nueva fecha.";
   if (ev.tipo === "solicitud.convertida") return d.pedido_numero ? `Pedido ${d.pedido_numero}` : "Convertida en pedido.";
+  if (ev.tipo === "solicitud.rechazada") return d.respuesta || "Solicitud rechazada por trafico.";
   if (ev.tipo === "solicitud.cancelada.cliente") return d.motivo ? `Motivo: ${d.motivo}` : "Cancelada desde el portal cliente.";
   if (ev.tipo === "solicitud.actualizada") return d.estado ? `Estado: ${d.estado}` : "Gestion actualizada.";
   return "";
@@ -381,7 +388,19 @@ export default function PortalClientes() {
   const movimientosSolicitudes = solicitudes.reduce((sum, s) => sum + Number(s.eventos_count || 0), 0);
   const pedidosFiltrados = pedidos.filter(p => matchesSearch(p, q, ["numero", "referencia_cliente", "origen", "destino", "mercancia", "vehiculo_matricula", "estado"]));
   const facturasFiltradas = facturas.filter(f => matchesSearch(f, q, ["numero", "estado", "forma_pago"]));
-  const solicitudesFiltradas = solicitudes.filter(s => matchesSearch(s, q, ["referencia_cliente", "origen", "destino", "mercancia", "estado", "pedido_numero", "respuesta"]));
+  const solicitudesFiltradas = solicitudes.filter(s => matchesSearch(s, q, [
+    "referencia_cliente",
+    "origen",
+    "destino",
+    "mercancia",
+    "estado",
+    "pedido_numero",
+    "respuesta",
+    "vehiculo_matricula",
+    "matricula_colaborador",
+    "remolque_matricula",
+    "remolque_matricula_colaborador",
+  ]));
 
   async function verAlbaranes(pedidoId) {
     if (!pedidoId) return;
@@ -1001,7 +1020,7 @@ export default function PortalClientes() {
                   {[
                     ["Abiertas", solicitudesAbiertas.length, "#f97316"],
                     ["Propuestas pendientes", reprogramacionesPendientes.length, reprogramacionesPendientes.length ? "#f59e0b" : "#10b981"],
-                    ["Convertidas", solicitudesConvertidas.length, "#10b981"],
+                    ["Aceptadas", solicitudesConvertidas.length, "#10b981"],
                     ["Movimientos", movimientosSolicitudes, "#3b82f6"],
                   ].map(([label,value,color]) => (
                     <div key={label} style={{ background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:8, padding:"9px 11px" }}>
@@ -1033,6 +1052,21 @@ export default function PortalClientes() {
                     </div>
                     <span style={{ alignSelf: "flex-start", padding: "3px 10px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 11, fontWeight: 800 }}>{e.l}</span>
                   </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:8, marginTop:10 }}>
+                    <Mini label="Mercancia" value={s.mercancia || "-"} />
+                    <Mini label="Peso" value={s.peso_kg ? `${Number(s.peso_kg).toLocaleString("es-ES")} kg` : "-"} />
+                    <Mini label="Bultos / palets" value={s.bultos || "-"} />
+                    <Mini label="Descarga" value={s.fecha_descarga ? `${dateEs(s.fecha_descarga)} ${s.hora_descarga || ""}`.trim() : "-"} />
+                  </div>
+                  {(s.vehiculo_matricula || s.matricula_colaborador || s.remolque_matricula || s.remolque_matricula_colaborador) && (
+                    <div style={{ marginTop:10, padding:"10px 12px", borderRadius:8, background:"rgba(16,185,129,.08)", border:"1px solid rgba(16,185,129,.18)", fontSize:12, color:"var(--text3)" }}>
+                      Matrículas asignadas:
+                      <strong style={{ color:"var(--text)", marginLeft:6 }}>{s.vehiculo_matricula || s.matricula_colaborador || "Tractora pendiente"}</strong>
+                      {(s.remolque_matricula || s.remolque_matricula_colaborador) && (
+                        <span> · Remolque <strong style={{ color:"var(--text)" }}>{s.remolque_matricula || s.remolque_matricula_colaborador}</strong></span>
+                      )}
+                    </div>
+                  )}
                   {s.respuesta && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text3)" }}>{s.respuesta}</div>}
                   {s.fecha_propuesta && (
                     <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(59,130,246,.2)", background: "rgba(59,130,246,.08)" }}>
@@ -1042,7 +1076,7 @@ export default function PortalClientes() {
                       <div style={{ marginTop: 4, fontSize: 12, color: "var(--text4)" }}>
                         {s.decision_cliente === "aceptada" && "Ya has aceptado esta propuesta."}
                         {s.decision_cliente === "rechazada" && "Has rechazado esta propuesta. La solicitud vuelve a quedar pendiente."}
-                        {(!s.decision_cliente || s.decision_cliente === "pendiente") && "Puedes aceptarla o rechazarla desde aqui."}
+                        {(!s.decision_cliente || s.decision_cliente === "pendiente") && "Trafico ha propuesto una nueva fecha. Acepta o rechaza para que puedan planificar el viaje."}
                       </div>
                       {(!s.decision_cliente || s.decision_cliente === "pendiente") && (
                         <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>

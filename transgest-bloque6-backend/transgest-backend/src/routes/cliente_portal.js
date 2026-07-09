@@ -275,13 +275,13 @@ function requireGestion(req, res, next) {
 function normalizeSolicitudEstado(value) {
   if (value === undefined || value === null || value === "") return null;
   const estado = String(value).trim().toLowerCase();
-  return ["pendiente", "revisada", "convertida", "descartada", "cancelada"].includes(estado) ? estado : false;
+  return ["pendiente", "revisada", "convertida", "descartada", "rechazada", "cancelada"].includes(estado) ? estado : false;
 }
 
 function normalizeDecisionCliente(value) {
   if (value === undefined || value === null || value === "") return null;
   const decision = String(value).trim().toLowerCase();
-  return ["aceptada", "rechazada"].includes(decision) ? decision : false;
+  return ["pendiente", "aceptada", "rechazada"].includes(decision) ? decision : false;
 }
 
 function safeFilename(value, fallback = "albaran.pdf") {
@@ -1064,10 +1064,16 @@ router.get("/solicitudes", requireCliente, async (req, res) => {
   await ensureSchema();
   const { rows } = await db.query(
     `SELECT s.*, p.numero AS pedido_numero,
+            v.matricula AS vehiculo_matricula,
+            r.matricula AS remolque_matricula,
+            COALESCE(p.matricula_colaborador,'') AS matricula_colaborador,
+            COALESCE(p.remolque_matricula_colaborador,'') AS remolque_matricula_colaborador,
             COALESCE(ev.eventos_count,0)::int AS eventos_count,
             ev.ultimo_evento_at
        FROM portal_solicitudes_cliente s
        LEFT JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
+       LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+       LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
        LEFT JOIN LATERAL (
          SELECT COUNT(*) AS eventos_count, MAX(created_at) AS ultimo_evento_at
            FROM portal_solicitud_eventos e
@@ -1241,7 +1247,7 @@ router.post("/solicitudes/:id/cancelar", requireCliente, async (req, res) => {
       result = { status: 409, body: { error: "Esta solicitud ya esta convertida en pedido. Contacta con trafico para cancelarla." } };
       return;
     }
-    if (["cancelada", "descartada"].includes(String(solicitud.estado || "").toLowerCase())) {
+    if (["cancelada", "descartada", "rechazada"].includes(String(solicitud.estado || "").toLowerCase())) {
       result = { status: 200, body: solicitud };
       return;
     }
@@ -1299,8 +1305,8 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
       result = { status: 404, body: { error: "Solicitud no encontrada" } };
       return;
     }
-    if (sol.estado === "descartada") {
-      result = { status: 400, body: { error: "No se puede convertir una solicitud descartada" } };
+    if (["descartada", "rechazada"].includes(String(sol.estado || "").toLowerCase())) {
+      result = { status: 400, body: { error: "No se puede convertir una solicitud rechazada" } };
       return;
     }
     if (sol.pedido_id) {
@@ -1391,10 +1397,12 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
           SET estado='convertida',
               pedido_id=$1,
               respuesta=$2,
+              decision_cliente='aceptada',
+              decision_cliente_at=NOW(),
               updated_at=NOW()
         WHERE id=$3 AND empresa_id=$4
         RETURNING *`,
-      [pedido.id, `Convertida en pedido ${pedido.numero}.`, sol.id, eid]
+      [pedido.id, `Solicitud aceptada. Pedido ${pedido.numero} creado.`, sol.id, eid]
     );
     await addSolicitudEvento(client, req, sol.id, "solicitud.convertida", {
       pedido_id: pedido.id,
@@ -1420,11 +1428,17 @@ router.get("/admin/solicitudes", requireGestion, async (req, res) => {
   }
   const { rows } = await db.query(
     `SELECT s.*, c.nombre AS cliente_nombre, c.email AS cliente_email, p.numero AS pedido_numero,
+            v.matricula AS vehiculo_matricula,
+            r.matricula AS remolque_matricula,
+            COALESCE(p.matricula_colaborador,'') AS matricula_colaborador,
+            COALESCE(p.remolque_matricula_colaborador,'') AS remolque_matricula_colaborador,
             COALESCE(ev.eventos_count,0)::int AS eventos_count,
             ev.ultimo_evento_at
        FROM portal_solicitudes_cliente s
        JOIN clientes c ON c.id=s.cliente_id AND c.empresa_id=s.empresa_id
        LEFT JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
+       LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+       LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
        LEFT JOIN LATERAL (
          SELECT COUNT(*) AS eventos_count, MAX(created_at) AS ultimo_evento_at
            FROM portal_solicitud_eventos e
@@ -1493,7 +1507,12 @@ router.patch("/admin/solicitudes/:id", requireGestion, async (req, res) => {
         eid,
       ]
     );
-    await addSolicitudEvento(client, req, rows[0].id, "solicitud.actualizada", {
+    const tipoEvento = estadoNormalizado === "rechazada"
+      ? "solicitud.rechazada"
+      : fecha_propuesta
+        ? "solicitud.reprogramacion.propuesta"
+        : "solicitud.actualizada";
+    await addSolicitudEvento(client, req, rows[0].id, tipoEvento, {
       estado: estadoNormalizado,
       pedido_id: pedido_id || null,
       respuesta: respuesta || null,

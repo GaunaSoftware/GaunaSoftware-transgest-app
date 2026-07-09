@@ -1074,11 +1074,12 @@ router.get("/solicitudes", requireCliente, async (req, res) => {
        LEFT JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
        LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
-       LEFT JOIN LATERAL (
-         SELECT COUNT(*) AS eventos_count, MAX(created_at) AS ultimo_evento_at
-           FROM portal_solicitud_eventos e
-          WHERE e.solicitud_id=s.id AND e.empresa_id=s.empresa_id
-       ) ev ON true
+       LEFT JOIN (
+         SELECT solicitud_id, empresa_id, COUNT(*) AS eventos_count, MAX(created_at) AS ultimo_evento_at
+           FROM portal_solicitud_eventos
+          WHERE empresa_id=$1
+          GROUP BY solicitud_id, empresa_id
+       ) ev ON ev.solicitud_id=s.id AND ev.empresa_id=s.empresa_id
       WHERE s.empresa_id=$1 AND s.cliente_id=$2
       ORDER BY s.created_at DESC
       LIMIT 100`,
@@ -1315,7 +1316,18 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
         [sol.pedido_id, eid]
       );
       if (pedidoExistente.rows[0]) {
-        result = { status: 200, body: { ok: true, pedido: pedidoExistente.rows[0], solicitud: sol, ya_convertida: true } };
+        const updatedExisting = await client.query(
+          `UPDATE portal_solicitudes_cliente
+              SET estado='convertida',
+                  respuesta=COALESCE(respuesta,$1),
+                  decision_cliente=COALESCE(decision_cliente,'aceptada'),
+                  decision_cliente_at=COALESCE(decision_cliente_at,NOW()),
+                  updated_at=NOW()
+            WHERE id=$2 AND empresa_id=$3
+            RETURNING *`,
+          [`Solicitud aceptada. Pedido ${pedidoExistente.rows[0].numero} creado.`, sol.id, eid]
+        );
+        result = { status: 200, body: { ok: true, pedido: pedidoExistente.rows[0], solicitud: updatedExisting.rows[0] || sol, ya_convertida: true } };
         return;
       }
     }

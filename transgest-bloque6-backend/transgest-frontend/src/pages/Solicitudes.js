@@ -39,8 +39,16 @@ function isOpen(sol) {
   return ["pendiente", "revisada"].includes(sol.estado);
 }
 
+function isAccepted(sol) {
+  return String(sol?.estado || "").toLowerCase() === "convertida";
+}
+
 function isRejected(sol) {
   return ["rechazada", "descartada"].includes(String(sol?.estado || "").toLowerCase());
+}
+
+function isClosed(sol) {
+  return isAccepted(sol) || isRejected(sol) || String(sol?.estado || "").toLowerCase() === "cancelada";
 }
 
 function isAged(sol) {
@@ -179,6 +187,11 @@ export default function Solicitudes() {
 
   const pendientes = resumen.pendientes;
   const enRechazadas = vista === "rechazadas";
+  const totalVistaActual = enRechazadas
+    ? resumen.rechazadas
+    : estado
+      ? sols.filter(s => !isRejected(s) && s.estado === estado).length
+      : sols.filter(s => !isRejected(s) && !isClosed(s)).length;
 
   const visibles = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -186,6 +199,7 @@ export default function Solicitudes() {
       if (enRechazadas && !isRejected(s)) return false;
       if (!enRechazadas && isRejected(s)) return false;
       if (estado && s.estado !== estado) return false;
+      if (!estado && !enRechazadas && isClosed(s)) return false;
       if (soloVencidas && !isAged(s)) return false;
       if (!term) return true;
       return [
@@ -338,9 +352,23 @@ export default function Solicitudes() {
     setTrabajando(sol.id);
     try {
       const r = await convertirPortalSolicitudAdmin(sol.id);
+      const solicitudActualizada = r?.solicitud || {};
+      const pedido = r?.pedido || {};
+      setSols(prev => prev.map(item => String(item.id) === String(sol.id)
+        ? {
+            ...item,
+            ...solicitudActualizada,
+            estado: "convertida",
+            pedido_id: pedido.id || solicitudActualizada.pedido_id || item.pedido_id,
+            pedido_numero: pedido.numero || solicitudActualizada.pedido_numero || item.pedido_numero,
+            respuesta: solicitudActualizada.respuesta || `Solicitud aceptada. Pedido ${pedido.numero || ""} creado.`.trim(),
+            decision_cliente: "aceptada",
+          }
+        : item
+      ));
       notify(r?.ya_convertida ? "La solicitud ya estaba convertida" : `Solicitud convertida en pedido ${r?.pedido?.numero || ""}`.trim(), "success");
-      await cargar();
       refreshSolicitudBadges();
+      cargar().catch(() => {});
     } catch (e) {
       notify(e.message, "error");
     } finally {
@@ -500,7 +528,7 @@ export default function Solicitudes() {
       {!loading && sols.length > 0 && (
         <div style={{ margin:"0 0 16px", fontSize:14, color:"#64748b" }}>
           {enRechazadas ? "Rechazadas: " : "Activas: "}
-          Mostrando <strong style={{color:"#0f766e"}}>{visibles.length}</strong> de {enRechazadas ? resumen.rechazadas : sols.length - resumen.rechazadas} solicitudes
+          Mostrando <strong style={{color:"#0f766e"}}>{visibles.length}</strong> de {totalVistaActual} solicitudes
           {soloVencidas ? " · solo sin atender mas de 24 h" : ""}
         </div>
       )}

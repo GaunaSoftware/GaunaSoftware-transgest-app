@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  cancelarPortalClienteSolicitud,
   crearPortalClienteSolicitud,
   descargarArchivoProtegido,
   getPortalClienteFactura,
@@ -31,6 +32,7 @@ const ESTADOS = {
   facturado: { l: "Facturado", c: "#8b5cf6" },
   convertida: { l: "Convertida", c: "#10b981" },
   descartada: { l: "Descartada", c: "#ef4444" },
+  cancelada: { l: "Cancelada", c: "#ef4444" },
   revisada: { l: "Revisada", c: "#3b82f6" },
 };
 
@@ -266,6 +268,7 @@ function solicitudEventoLabel(tipo) {
     "solicitud.creada": "Solicitud creada",
     "solicitud.reprogramacion.cliente": "Respuesta a reprogramacion",
     "solicitud.convertida": "Convertida en pedido",
+    "solicitud.cancelada.cliente": "Cancelada por cliente",
     "solicitud.actualizada": "Gestion actualizada",
   };
   return labels[tipo] || tipo || "Evento";
@@ -276,11 +279,12 @@ function solicitudEventoResumen(ev) {
   if (ev.tipo === "solicitud.creada") return [d.origen, d.destino].filter(Boolean).join(" -> ") || "Solicitud registrada.";
   if (ev.tipo === "solicitud.reprogramacion.cliente") return `${d.decision || "Decision"} ${d.fecha_propuesta || ""} ${d.hora_propuesta || ""}`.trim();
   if (ev.tipo === "solicitud.convertida") return d.pedido_numero ? `Pedido ${d.pedido_numero}` : "Convertida en pedido.";
+  if (ev.tipo === "solicitud.cancelada.cliente") return d.motivo ? `Motivo: ${d.motivo}` : "Cancelada desde el portal cliente.";
   if (ev.tipo === "solicitud.actualizada") return d.estado ? `Estado: ${d.estado}` : "Gestion actualizada.";
   return "";
 }
 
-function buildSolicitudAcuseHtml({ solicitud = {}, eventos = [], empresa = {}, user = {} } = {}) {
+function buildSolicitudHistorialHtml({ solicitud = {}, eventos = [], empresa = {}, user = {} } = {}) {
   const generated = new Date().toLocaleString("es-ES");
   const estado = ESTADOS[solicitud.estado] || { l: solicitud.estado || "-", c: "#64748b" };
   const eventRows = (Array.isArray(eventos) ? eventos : []).map(ev => `<tr>
@@ -289,7 +293,7 @@ function buildSolicitudAcuseHtml({ solicitud = {}, eventos = [], empresa = {}, u
     <td>${escapeHtml(solicitudEventoResumen(ev) || "-")}</td>
   </tr>`).join("");
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"/>
-    <title>Acuse de solicitud</title>
+    <title>Historial de solicitud</title>
     <style>
       body{font-family:Arial,sans-serif;background:#f8fafc;color:#111827;margin:0;padding:28px}
       main{max-width:900px;margin:0 auto;background:#fff;border:1px solid #dbe3ef;border-radius:12px;padding:24px 28px}
@@ -301,7 +305,7 @@ function buildSolicitudAcuseHtml({ solicitud = {}, eventos = [], empresa = {}, u
       .status{display:inline-block;border-radius:20px;padding:4px 10px;background:${escapeHtml(estado.c)}18;color:${escapeHtml(estado.c)};font-weight:800;font-size:12px}
       @media print{body{background:#fff;padding:0}main{border:none;border-radius:0;max-width:none}}
     </style></head><body><main>
-      <h1>Acuse de solicitud de transporte</h1>
+      <h1>Historial de solicitud de transporte</h1>
       <div class="sub">${escapeHtml(empresa.razon_social || "TransGest")} - generado el ${escapeHtml(generated)} para ${escapeHtml(user.nombre || user.username || "cliente")}.</div>
       <div class="grid">
         <div class="box"><div class="label">Estado</div><div class="value"><span class="status">${escapeHtml(estado.l)}</span></div></div>
@@ -339,7 +343,7 @@ export default function PortalClientes() {
   const [loadingDocControl, setLoadingDocControl] = useState(null);
   const [loadingPedidoEventos, setLoadingPedidoEventos] = useState(null);
   const [loadingSolicitudEventos, setLoadingSolicitudEventos] = useState(null);
-  const [descargandoSolicitudAcuse, setDescargandoSolicitudAcuse] = useState(null);
+  const [descargandoSolicitudHistorial, setDescargandoSolicitudHistorial] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("seguimiento");
   const [q, setQ] = useState("");
@@ -405,6 +409,23 @@ export default function PortalClientes() {
     }
   }
 
+  async function cancelarSolicitud(solicitud) {
+    if (!solicitud?.id) return;
+    if (solicitud.pedido_id || solicitud.estado === "convertida") {
+      notify("Esta solicitud ya esta convertida en pedido. Contacta con trafico para cancelarla.", "warning");
+      return;
+    }
+    const motivo = window.prompt("Motivo de cancelacion para trafico (opcional):") || "";
+    try {
+      await cancelarPortalClienteSolicitud(solicitud.id, { motivo });
+      notify("Solicitud cancelada.", "success");
+      await cargar();
+      setTab("solicitudes");
+    } catch (e) {
+      notify(e.message || "No se pudo cancelar la solicitud.", "error");
+    }
+  }
+
   async function verSolicitudEventos(id) {
     if (!id) return;
     if (solicitudEventos[id]) {
@@ -441,9 +462,9 @@ export default function PortalClientes() {
     }
   }
 
-  async function descargarAcuseSolicitud(solicitud) {
+  async function descargarHistorialSolicitud(solicitud) {
     if (!solicitud?.id) return;
-    setDescargandoSolicitudAcuse(solicitud.id);
+    setDescargandoSolicitudHistorial(solicitud.id);
     try {
       let eventos = solicitudEventos[solicitud.id];
       if (!eventos) {
@@ -451,21 +472,21 @@ export default function PortalClientes() {
         eventos = Array.isArray(data) ? data : [];
         setSolicitudEventos(prev => ({ ...prev, [solicitud.id]: eventos }));
       }
-      const html = buildSolicitudAcuseHtml({ solicitud, eventos, empresa, user });
+      const html = buildSolicitudHistorialHtml({ solicitud, eventos, empresa, user });
       const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `acuse-solicitud-${solicitud.referencia_cliente || solicitud.id}-${new Date().toISOString().slice(0, 10)}.html`.replace(/[^\w.-]+/g, "-");
+      a.download = `historial-solicitud-${solicitud.referencia_cliente || solicitud.id}-${new Date().toISOString().slice(0, 10)}.html`.replace(/[^\w.-]+/g, "-");
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      notify("Acuse de solicitud descargado.", "success");
+      notify("Historial de solicitud descargado.", "success");
     } catch (e) {
-      notify(e.message || "No se pudo generar el acuse.", "error");
+      notify(e.message || "No se pudo generar el historial.", "error");
     } finally {
-      setDescargandoSolicitudAcuse(null);
+      setDescargandoSolicitudHistorial(null);
     }
   }
 
@@ -1043,12 +1064,20 @@ export default function PortalClientes() {
                     >
                       {loadingSolicitudEventos === s.id ? "Cargando historial..." : solicitudEventosAbierta === s.id ? "Ocultar historial" : "Ver historial"}
                     </button>
+                    {["pendiente", "revisada"].includes(String(s.estado || "").toLowerCase()) && !s.pedido_id && (
+                      <button
+                        style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(239,68,68,.08)", color: "#ef4444", borderColor: "rgba(239,68,68,.25)" }}
+                        onClick={() => cancelarSolicitud(s)}
+                      >
+                        Cancelar solicitud
+                      </button>
+                    )}
                     <button
                       style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(16,185,129,.12)", color: "#10b981", borderColor: "rgba(16,185,129,.25)" }}
-                      onClick={() => descargarAcuseSolicitud(s)}
-                      disabled={descargandoSolicitudAcuse === s.id}
+                      onClick={() => descargarHistorialSolicitud(s)}
+                      disabled={descargandoSolicitudHistorial === s.id}
                     >
-                      {descargandoSolicitudAcuse === s.id ? "Preparando acuse..." : "Descargar acuse"}
+                      {descargandoSolicitudHistorial === s.id ? "Preparando historial..." : "Descargar historial"}
                     </button>
                   </div>
                   {solicitudEventosAbierta === s.id && (

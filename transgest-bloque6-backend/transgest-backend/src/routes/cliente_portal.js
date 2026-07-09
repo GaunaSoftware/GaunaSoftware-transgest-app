@@ -275,7 +275,7 @@ function requireGestion(req, res, next) {
 function normalizeSolicitudEstado(value) {
   if (value === undefined || value === null || value === "") return null;
   const estado = String(value).trim().toLowerCase();
-  return ["pendiente", "revisada", "convertida", "descartada"].includes(estado) ? estado : false;
+  return ["pendiente", "revisada", "convertida", "descartada", "cancelada"].includes(estado) ? estado : false;
 }
 
 function normalizeDecisionCliente(value) {
@@ -1215,6 +1215,49 @@ router.post("/solicitudes/:id/reprogramacion", requireCliente, async (req, res) 
       fecha_propuesta: solicitud.fecha_propuesta,
       hora_propuesta: solicitud.hora_propuesta,
     });
+    result = { status: 200, body: updated.rows[0] };
+  });
+  res.status(result.status).json(result.body);
+});
+
+router.post("/solicitudes/:id/cancelar", requireCliente, async (req, res) => {
+  await ensureSchema();
+  const motivo = String(req.body?.motivo || "").trim().slice(0, 500);
+  let result;
+  await db.transaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT *
+         FROM portal_solicitudes_cliente
+        WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3
+        FOR UPDATE`,
+      [req.params.id, empresaId(req), req.user.cliente_id]
+    );
+    const solicitud = rows[0];
+    if (!solicitud) {
+      result = { status: 404, body: { error: "Solicitud no encontrada" } };
+      return;
+    }
+    if (solicitud.pedido_id || solicitud.estado === "convertida") {
+      result = { status: 409, body: { error: "Esta solicitud ya esta convertida en pedido. Contacta con trafico para cancelarla." } };
+      return;
+    }
+    if (["cancelada", "descartada"].includes(String(solicitud.estado || "").toLowerCase())) {
+      result = { status: 200, body: solicitud };
+      return;
+    }
+    const respuesta = motivo ? `Cancelada por el cliente. Motivo: ${motivo}` : "Cancelada por el cliente.";
+    const updated = await client.query(
+      `UPDATE portal_solicitudes_cliente
+          SET estado='cancelada',
+              decision_cliente='cancelada',
+              decision_cliente_at=NOW(),
+              respuesta=$1,
+              updated_at=NOW()
+        WHERE id=$2 AND empresa_id=$3
+        RETURNING *`,
+      [respuesta, solicitud.id, empresaId(req)]
+    );
+    await addSolicitudEvento(client, req, solicitud.id, "solicitud.cancelada.cliente", { motivo });
     result = { status: 200, body: updated.rows[0] };
   });
   res.status(result.status).json(result.body);

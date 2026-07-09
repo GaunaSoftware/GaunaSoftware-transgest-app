@@ -255,6 +255,16 @@ function portalClientePermission(req, res, next) {
   if (["cliente", "cliente_portal"].includes(req.user?.rol) && !req.path.startsWith("/admin/")) {
     return next();
   }
+  const modulos = req.user?.permisos?.modulos || {};
+  const hasPortalPermission = Boolean(
+    modulos.portal_cliente?.ver ||
+    modulos.portal_cliente?.editar ||
+    modulos["portal-cliente"]?.ver ||
+    modulos["portal-cliente"]?.editar
+  );
+  if (req.user?.cliente_id && hasPortalPermission && !req.path.startsWith("/admin/")) {
+    return next();
+  }
   const modulo = req.path.startsWith("/admin/") ? "solicitudes" : "portal-cliente";
   return requireModulePermission(modulo)(req, res, next);
 }

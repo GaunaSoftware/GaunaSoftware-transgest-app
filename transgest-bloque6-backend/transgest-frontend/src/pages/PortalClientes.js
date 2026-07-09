@@ -16,7 +16,6 @@ import {
   getPortalPedidoEventos,
   responderPortalClienteReprogramacion,
   solicitarPortalClienteIntegracion,
-  extraerPortalClienteSolicitudDocumento,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
@@ -1290,7 +1289,6 @@ function FacturaPortalModal({ factura, onClose, empresa }) {
 
 function SolicitudServicio({ onDone, setTab }) {
   const [saving, setSaving] = useState(false);
-  const [analyzingDoc, setAnalyzingDoc] = useState(false);
   const [form, setForm] = useState({
     referencia_cliente: "",
     origen: "",
@@ -1341,72 +1339,10 @@ function SolicitudServicio({ onDone, setTab }) {
     }
   }
 
-  async function analizarDocumento(file) {
-    if (!file) return;
-    setAnalyzingDoc(true);
-    try {
-      if (String(file.type || "").startsWith("image/")) {
-        notify("El portal cliente no usa IA. Para prellenar una solicitud, sube un documento con texto o rellena el formulario manualmente.", "warning");
-        return;
-      }
-      const texto = (await file.text()).slice(0, 60000);
-      const data = await extraerPortalClienteSolicitudDocumento({
-        tipo: "pedido",
-        nombre: file.name,
-        mime: file.type || "",
-        texto,
-      });
-      const r = data?.resultado || data || {};
-      const next = {
-        referencia_cliente: r.referencia_cliente || r.referencia || form.referencia_cliente || "",
-        origen: r.origen || form.origen || "",
-        destino: r.destino || form.destino || "",
-        fecha_carga: r.fecha_carga || form.fecha_carga || "",
-        hora_carga: r.hora_carga || form.hora_carga || "",
-        fecha_descarga: r.fecha_descarga || form.fecha_descarga || "",
-        hora_descarga: r.hora_descarga || form.hora_descarga || "",
-        mercancia: r.mercancia || form.mercancia || "",
-        peso_kg: r.peso_kg || (r.toneladas ? Number(r.toneladas) * 1000 : form.peso_kg || ""),
-        bultos: r.bultos || form.bultos || "",
-        notas: [form.notas, r.observaciones ? `Documento ${file.name}: ${r.observaciones}` : `Documento analizado: ${file.name}`].filter(Boolean).join("\n"),
-      };
-      setForm(next);
-      if (next.origen && next.destino) {
-        await crearPortalClienteSolicitud(cleanPayload(next));
-        notify("Documento analizado y solicitud creada automaticamente.", "success");
-        setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", notas: "" });
-        await onDone();
-        setTab("solicitudes");
-      } else {
-        notify("Documento analizado. Completa los campos faltantes antes de enviar.", "warning");
-      }
-    } catch (e) {
-      notify(e.message || "No se pudo analizar el documento.", "error");
-    } finally {
-      setAnalyzingDoc(false);
-    }
-  }
-
   return (
     <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 18 }}>
       <div style={{ fontWeight: 900, color: "var(--text)", fontSize: 16 }}>Solicitar nuevo servicio</div>
       <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 4 }}>La solicitud queda vinculada solo a tu empresa transportista y a tu ficha de cliente.</div>
-      <div style={{ marginTop:12, padding:"12px 14px", borderRadius:8, border:"1px solid rgba(59,130,246,.22)", background:"rgba(59,130,246,.08)" }}>
-        <div style={{ fontWeight:900, color:"var(--text)", fontSize:13 }}>Crear desde documento</div>
-        <div style={{ fontSize:12, color:"var(--text4)", marginTop:3, lineHeight:1.4 }}>Sube un email, orden de carga, imagen o texto. Si detecta origen y destino, crea la solicitud; si no, rellena el formulario.</div>
-        <input
-          type="file"
-          accept=".txt,.csv,.eml,.html,.pdf,image/*"
-          disabled={analyzingDoc}
-          onChange={e => {
-            const file = e.target.files?.[0];
-            e.target.value = "";
-            analizarDocumento(file);
-          }}
-          style={{ marginTop:10, width:"100%", color:"var(--text)", fontSize:12 }}
-        />
-        {analyzingDoc && <div style={{ marginTop:8, fontSize:12, color:"var(--accent)", fontWeight:800 }}>Analizando documento...</div>}
-      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: "0 14px", marginTop: 8 }}>
         <div><label style={lbl}>Referencia cliente</label><input style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Pedido, OC, referencia interna..." /></div>
         <div><label style={lbl}>Mercancia</label><input style={inp} value={form.mercancia} onChange={f("mercancia")} placeholder="Tipo de mercancia" /></div>

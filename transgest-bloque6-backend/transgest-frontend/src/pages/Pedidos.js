@@ -8520,13 +8520,13 @@ export default function Pedidos() {
   const [loading,    setLoading]    = useState(true);
   const [loadError,  setLoadError]  = useState("");
   const _rangoSemanaActual = currentWeekRangeLocal();
-  const [filtroEst,  setFiltroEst]  = useState(() => focusPedido?.estado ? String(focusPedido.estado) : "todos");
+  const [filtroEst,  setFiltroEst]  = useState(() => (focusPedido?.source && focusPedido?.estado && !focusPedido?.pedido_id) ? String(focusPedido.estado) : "todos");
   const [filtroMes,  setFiltroMes]  = useState("");
   const [filtroFechasCustom, setFiltroFechasCustom] = useState(false);
   const [filtroDesde, setFiltroDesde] = useState("");
   const [filtroHasta, setFiltroHasta] = useState("");
   const [filtroCliente,setFiltroCliente]=useState("");
-  const [q,          setQ]          = useState(() => focusPedido?.numero || "");
+  const [q,          setQ]          = useState(() => focusPedido?.pedido_id ? (focusPedido?.numero || "") : "");
   const [soloCriticos, setSoloCriticos] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [filtroSinAsignacion, setFiltroSinAsignacion] = useState(false);
@@ -8781,8 +8781,11 @@ export default function Pedidos() {
         params.desde = rangoMesActualCarga.desde;
         params.hasta = rangoMesActualCarga.hasta;
       }
-      params.page  = page;
-      params.limit = PAGE_SIZE;
+      const cargarPeriodoCompleto = !debouncedQ || groupByCliente || !filtroFechasCustom || Boolean(filtroMes);
+      const effectivePage = cargarPeriodoCompleto ? 1 : page;
+      const effectiveLimit = cargarPeriodoCompleto ? 1000 : PAGE_SIZE;
+      params.page  = effectivePage;
+      params.limit = effectiveLimit;
       const p = await getPedidosResumenLista(params, { timeoutMs: 45000, silentError: true });
       // Handle paginated response {data, pagination} or legacy array
       let pedidosData = Array.isArray(p) ? p : (Array.isArray(p?.data) ? p.data : []);
@@ -8792,7 +8795,7 @@ export default function Pedidos() {
       }
       setPedidos(pedidosData);
       if (p?.pagination) {
-        setTotalPages(p.pagination.totalPages || 1);
+        setTotalPages(cargarPeriodoCompleto ? 1 : (p.pagination.totalPages || 1));
         setTotalCount(p.pagination.total || pedidosData.length);
       } else {
         setTotalPages(1);
@@ -8845,7 +8848,7 @@ export default function Pedidos() {
         setLoadError(e.message || "No se pudieron cargar los viajes.");
       }
     finally { if (!listadoCargado) setLoading(false); }
-  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page]);
+  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {

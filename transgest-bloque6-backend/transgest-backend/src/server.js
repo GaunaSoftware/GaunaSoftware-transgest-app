@@ -252,6 +252,9 @@ function portalClientePermission(req, res, next) {
   if (req.user?.integracion_token_id && req.path.startsWith("/integracion/")) {
     return next();
   }
+  if (["cliente", "cliente_portal"].includes(req.user?.rol) && !req.path.startsWith("/admin/")) {
+    return next();
+  }
   const modulo = req.path.startsWith("/admin/") ? "solicitudes" : "portal-cliente";
   return requireModulePermission(modulo)(req, res, next);
 }

@@ -104,6 +104,14 @@ const PERMISOS = {
     ver:    ["agenda","vehiculos","taller","avisos"],
     editar: ["agenda","vehiculos","taller"],
   },
+  mecanico: {
+    ver:    ["taller","vehiculos","avisos","mi_cuenta"],
+    editar: ["taller","avisos","mi_cuenta"],
+  },
+  colaborador: {
+    ver:    ["pedidos","documentos","mi_cuenta"],
+    editar: ["pedidos","documentos","mi_cuenta"],
+  },
   visualizador: {
     ver:    ["dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","clientes","vehiculos","choferes","documentos"],
     editar: [],
@@ -111,12 +119,19 @@ const PERMISOS = {
 };
 
 function checkPermiso(user, modulo, tipo) {
+  const aliases = modulo === "portal_cliente" || modulo === "portal-cliente"
+    ? ["portal_cliente", "portal-cliente"]
+    : [modulo];
   const reglas = user?.permisos?.modulos;
-  if (reglas?.[modulo]) return Boolean(reglas[modulo][tipo]);
+  if (reglas) {
+    for (const id of aliases) {
+      if (reglas[id]) return Boolean(reglas[id][tipo]);
+    }
+  }
   const rol = user?.rol;
   if (!rol) return false;
   const p = PERMISOS[rol];
   if (!p) return false;
   const lista = p[tipo] || [];
-  return lista.includes("todo") || lista.includes(modulo);
+  return lista.includes("todo") || aliases.some(id => lista.includes(id));
 }

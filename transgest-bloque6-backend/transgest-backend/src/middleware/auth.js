@@ -144,6 +144,9 @@ const ROLE_PERMISSION_PRESETS = {
   },
   chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","mi_cuenta"], editar: ["app_chofer","mi_cuenta"] },
   cliente: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
+  cliente_portal: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
+  colaborador: { ver: ["pedidos","documentos","mi_cuenta"], editar: ["pedidos","documentos","mi_cuenta"] },
+  mecanico: { ver: ["taller","vehiculos","avisos","mi_cuenta"], editar: ["taller","avisos","mi_cuenta"] },
 };
 
 function isChoferPedidosOperationalPath(req) {

@@ -87,6 +87,19 @@ function normalizePositiveInteger(value) {
   return Math.round(n);
 }
 
+function normalizeTime(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const clean = raw.replace(/[hH.]/g, ":").replace(/\s+/g, "");
+  const simpleHour = clean.match(/^([01]?\d|2[0-3])$/);
+  if (simpleHour) return `${simpleHour[1].padStart(2, "0")}:00`;
+  const hourMinute = clean.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (hourMinute) return `${hourMinute[1].padStart(2, "0")}:${hourMinute[2]}`;
+  const compact = clean.match(/^([01]?\d|2[0-3])([0-5]\d)$/);
+  if (compact) return `${compact[1].padStart(2, "0")}:${compact[2]}`;
+  return null;
+}
+
 async function nextPedidoNumero(client, empresaId) {
   const year = new Date().getFullYear();
   const prefix = `PED-${year}-`;
@@ -1200,9 +1213,9 @@ router.post("/solicitudes", requireCliente, async (req, res) => {
       String(body.origen || "").trim(),
       String(body.destino || "").trim(),
       body.fecha_carga || body.fecha || null,
-      body.hora_carga || null,
+      normalizeTime(body.hora_carga),
       body.fecha_descarga || null,
-      body.hora_descarga || null,
+      normalizeTime(body.hora_descarga),
       body.mercancia || null,
       body.peso_kg || body.peso || null,
       normalizePositiveInteger(body.bultos),
@@ -1418,7 +1431,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
           sol.origen,
           sol.destino,
           sol.fecha_carga,
-          sol.hora_carga,
+          normalizeTime(sol.hora_carga),
           sol.fecha_descarga,
           sol.mercancia,
           normalizeNumeric(sol.peso_kg),
@@ -1427,7 +1440,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
           eid,
           sol.referencia_cliente,
           sol.fecha_descarga,
-          sol.hora_descarga,
+          normalizeTime(sol.hora_descarga),
           "Creado desde solicitud de cliente. Completar precio, camion, chofer, costes y documentacion.",
           sol.id,
         ]
@@ -1447,7 +1460,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
           sol.origen,
           sol.destino,
           sol.fecha_carga,
-          sol.hora_carga,
+          normalizeTime(sol.hora_carga),
           sol.fecha_descarga,
           sol.mercancia,
           normalizeNumeric(sol.peso_kg),

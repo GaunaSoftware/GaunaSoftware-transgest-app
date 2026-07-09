@@ -841,6 +841,19 @@ function importeClienteColCalculado(form) {
   return importe > 0 ? Number(importe.toFixed(2)) : "";
 }
 
+function precioKmPedidoInfo(form) {
+  const km = parseLocaleNumber(form?.km_ruta || form?.km, 0);
+  const importe = calcImporte(form);
+  if (!Number.isFinite(km) || km <= 0) return { value: null, label: "-", hint: "Faltan km de ruta" };
+  if (!Number.isFinite(importe) || importe <= 0) return { value: null, label: "-", hint: "Falta precio del viaje" };
+  const value = importe / km;
+  return {
+    value,
+    label: `${value.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR/km`,
+    hint: `${importe.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR / ${km.toLocaleString("es-ES", { maximumFractionDigits: 1 })} km`,
+  };
+}
+
 function importeColaboradorCalculado(form) {
   const unit = parseLocaleNumber(form?.precio_colaborador_unitario, NaN);
   if (Number.isFinite(unit) && unit > 0 && form?.tipo_precio !== "viaje") {
@@ -2926,6 +2939,18 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           <div>
             <label style={S.label}>Km ruta</label>
             <input type="text" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Si existe ruta, se cargara al crear"/>
+          </div>
+          <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.22)",borderRadius:8,padding:"8px 10px"}}>
+            <label style={S.label}>EUR/km venta</label>
+            {(() => {
+              const eurKm = precioKmPedidoInfo(form);
+              return (
+                <>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:900,color:eurKm.value ? "var(--green)" : "var(--text5)"}}>{eurKm.label}</div>
+                  <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>{eurKm.hint}</div>
+                </>
+              );
+            })()}
           </div>
           <div style={{gridColumn:"1/-1"}}><label style={S.label}>Referencia de carga</label><input style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Referencia / carga / orden"/></div>
           <div style={{gridColumn:"1/-1"}}>
@@ -7383,6 +7408,18 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                   }));
                 }}/>
               </div>
+              <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.22)",borderRadius:8,padding:"8px 10px"}}>
+                <label style={S.label}>EUR/km venta</label>
+                {(() => {
+                  const eurKm = precioKmPedidoInfo(form);
+                  return (
+                    <>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:900,color:eurKm.value ? "var(--green)" : "var(--text5)"}}>{eurKm.label}</div>
+                      <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>{eurKm.hint}</div>
+                    </>
+                  );
+                })()}
+              </div>
               {form.tipo_precio!=="viaje"&&<div><label style={S.label}>{form.tipo_precio==="kg"?"Peso kg":form.tipo_precio==="tonelada"?"Toneladas":form.tipo_precio==="km"?"Kilometros":form.tipo_precio==="palet"?"Palets":"Horas"}</label>
                 <input type="text" inputMode="decimal" style={S.input} value={compactNumberInput(form.cantidad)} onChange={e=>setForm(p=>syncPrecioClienteCol(syncPrecioColaboradorCalc({...p,cantidad:e.target.value})))}/>
               </div>}
@@ -7475,6 +7512,13 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                       <span style={{fontSize:10,color:"#f59e0b",marginLeft:6}}>minimo</span>}
                   </span>
                   <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:18,color:"var(--green)"}}>{calcImporte(form).toFixed(2)} EUR</span>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(34,211,160,.2)"}}>
+                  <span style={{fontSize:11,color:"var(--text3)"}}>EUR/km venta</span>
+                  {(() => {
+                    const eurKm = precioKmPedidoInfo(form);
+                    return <span title={eurKm.hint} style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:13,color:eurKm.value ? "var(--green)" : "var(--text5)"}}>{eurKm.label}</span>;
+                  })()}
                 </div>
                 {parseLocaleNumber(form.importe_paralizacion,0)>0&&(
                   <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(34,211,160,.2)"}}>

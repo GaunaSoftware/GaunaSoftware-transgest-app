@@ -25,7 +25,13 @@ function numberOrNull(value) {
 function boolFromBody(value) {
   if (typeof value === "boolean") return value;
   if (value === undefined || value === null) return false;
-  return ["1", "true", "si", "sí", "yes", "on"].includes(String(value).trim().toLowerCase());
+  return ["1", "true", "si", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function boolFromQuery(value) {
+  if (typeof value === "boolean") return value;
+  if (value === undefined || value === null) return false;
+  return ["1", "true", "si", "yes", "on"].includes(String(value).trim().toLowerCase());
 }
 
 function puntoGeneralFromBody(body = {}) {
@@ -54,6 +60,7 @@ router.get("/", async (req, res) => {
   if (!empresa) return res.status(401).json({ error: "Sin empresa_id" });
 
   const { q, tipo, cliente_id } = req.query;
+  const includeGeneral = boolFromQuery(req.query.include_general ?? req.query.incluir_generales ?? req.query.generales);
   const params = [empresa];
   const where = ["empresa_id=$1", "activo=true"];
 
@@ -67,14 +74,14 @@ router.get("/", async (req, res) => {
   }
   if (cliente_id) {
     params.push(cliente_id);
-    where.push(`(cliente_id=$${params.length} OR cliente_id IS NULL)`);
+    where.push(includeGeneral ? `(cliente_id=$${params.length} OR cliente_id IS NULL)` : `cliente_id=$${params.length}`);
   }
 
   const { rows } = await db.query(
     `SELECT *
        FROM puntos_interes
       WHERE ${where.join(" AND ")}
-      ORDER BY ${cliente_id ? `CASE WHEN cliente_id=$${params.length} THEN 0 ELSE 1 END, ` : ""}nombre ASC
+      ORDER BY ${cliente_id && includeGeneral ? `CASE WHEN cliente_id=$${params.length} THEN 0 ELSE 1 END, ` : ""}nombre ASC
       LIMIT 200`,
     params
   );
@@ -132,6 +139,10 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
       WHERE empresa_id=$1
         AND LOWER(TRIM(direccion))=LOWER(TRIM($2))
         AND activo=true
+        AND (
+          ($3::uuid IS NULL AND cliente_id IS NULL)
+          OR ($3::uuid IS NOT NULL AND cliente_id=$3::uuid)
+        )
       ORDER BY CASE
         WHEN cliente_id::text = COALESCE($3::text,'') THEN 0
         WHEN cliente_id IS NULL THEN 1

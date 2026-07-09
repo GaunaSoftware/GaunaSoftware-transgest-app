@@ -4980,11 +4980,10 @@ router.get("/chofer/clientes/:clienteId/puntos-carga", async (req, res) => {
               CASE WHEN LOWER(COALESCE(metadata->>'pending_review','')) IN ('true','t','1','yes') THEN true ELSE false END AS pendiente_revision
         FROM puntos_interes
         WHERE empresa_id=$1
-          AND (cliente_id=$2 OR cliente_id IS NULL)
+          AND cliente_id=$2
           AND activo=true
           AND (tipo='carga' OR tipo='ambos')
-        ORDER BY CASE WHEN cliente_id=$2 THEN 0 ELSE 1 END,
-                 CASE WHEN LOWER(COALESCE(metadata->>'pending_review','')) IN ('true','t','1','yes') THEN true ELSE false END DESC,
+        ORDER BY CASE WHEN LOWER(COALESCE(metadata->>'pending_review','')) IN ('true','t','1','yes') THEN true ELSE false END DESC,
                  nombre ASC
         LIMIT 100`,
       [empresaId, clienteId]

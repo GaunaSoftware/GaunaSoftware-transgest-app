@@ -1405,8 +1405,8 @@ function isPuntoGeneral(punto = {}) {
   return !punto?.cliente_id;
 }
 
-function isPuntoVisibleParaCliente(punto = {}, clienteId = "") {
-  if (isPuntoGeneral(punto)) return true;
+function isPuntoVisibleParaCliente(punto = {}, clienteId = "", { includeGenerales = false } = {}) {
+  if (isPuntoGeneral(punto)) return !!includeGenerales;
   return !!clienteId && String(punto.cliente_id) === String(clienteId);
 }
 
@@ -1417,9 +1417,9 @@ function sortPuntosByClienteScope(a = {}, b = {}, clienteId = "") {
   return String(a.nombre || a.direccion || "").localeCompare(String(b.nombre || b.direccion || ""), "es");
 }
 
-function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos" } = {}) {
+function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos", includeGenerales = false } = {}) {
   return (Array.isArray(puntos) ? puntos : [])
-    .filter(p => isPuntoVisibleParaCliente(p, clienteId))
+    .filter(p => isPuntoVisibleParaCliente(p, clienteId, { includeGenerales }))
     .filter(p => {
       if (tipo === "carga") return isCargaPoint(p);
       if (tipo === "descarga") return isDescargaPoint(p);
@@ -2794,13 +2794,9 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                       style={{...S.sel,flex:1}}
                     />
                   ) : (
-                    <PuntoInteresPicker
-                      placeholder={puntosCargaLoading ? "Cargando puntos..." : "Elegir entre todos los puntos"}
-                      clienteId={form.cliente_id}
-                      tipo="carga"
-                      onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
-                      style={{...S.sel,flex:1}}
-                    />
+                    <div style={{...S.sel,flex:1,display:"flex",alignItems:"center",color:"var(--text5)",fontSize:12}}>
+                      {puntosCargaLoading ? "Cargando puntos..." : "Este cliente no tiene puntos de carga propios"}
+                    </div>
                   )}
                   <button type="button" onClick={()=>setPoiDraftRapido({nombre:form.origen || clienteSeleccionadoRapido.nombre,direccion:"",tipo:"carga",cliente_id:clienteSeleccionadoRapido.id,ventana:"",pais:"España"})}
                     style={{...S.btn,background:"transparent",color:"var(--accent)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
@@ -2808,7 +2804,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                   </button>
                 </div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
-                  {puntosCargaCliente.length > 1 ? "Este cliente tiene varios puntos de carga: elige el origen correcto." : puntosCargaCliente.length === 1 ? "Origen cargado desde el punto habitual del cliente." : "Sin puntos propios: puedes usar uno general o crear uno nuevo para este cliente."}
+                  {puntosCargaCliente.length > 1 ? "Este cliente tiene varios puntos de carga: elige el origen correcto." : puntosCargaCliente.length === 1 ? "Origen cargado desde el punto habitual del cliente." : "Sin puntos propios: crea uno nuevo para este cliente."}
                 </div>
               </div>
             </div>
@@ -7140,7 +7136,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                       />
                     ) : (
                       <div style={{fontSize:11,color:"var(--text5)",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7,padding:"7px 9px"}}>
-                        {puntosCargaClienteLoading ? "Cargando puntos de carga del cliente..." : "Este cliente no tiene puntos de carga propios. Puedes usar un punto general o crear uno nuevo."}
+                        {puntosCargaClienteLoading ? "Cargando puntos de carga del cliente..." : "Este cliente no tiene puntos de carga propios. Crea un punto nuevo asociado a este cliente."}
                       </div>
                     )}
                   </div>

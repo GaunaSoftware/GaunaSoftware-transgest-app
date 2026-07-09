@@ -15,7 +15,7 @@ const billingReminders = require("./services/billingReminders");
 const { ensureTables: ensureApiKeyTables } = require("./services/apiKeys");
 const { ensureNotificacionesSchema } = require("./services/notificaciones");
 const { validateEnv } = require("./services/envValidator");
-const { authenticate, requireModulePermission, requirePlanFeature } = require("./middleware/auth");
+const { authenticate, requireModulePermission, requirePlanFeature, requireRole } = require("./middleware/auth");
 
 // ── Rutas ─────────────────────────────────────────────
 const authRoutes          = require("./routes/auth");
@@ -293,7 +293,7 @@ safeUse(`${api}/palets`,        authenticate, requireModulePermission("palets"),
 safeUse(`${api}/puntos-interes`, authenticate, requireModulePermission("pedidos"), puntosInteresRoutes);
 safeUse(`${api}/geocoding`,     authenticate, requireModulePermission("pedidos"), geocodingRoutes);
 safeUse(`${api}/backup`,        authenticate, requireModulePermission("mi_cuenta"), backupRoutes);
-safeUse(`${api}/ia`,            authenticate, requireModulePermission("ia"), requirePlanFeature("ai"), iaRoutes);
+safeUse(`${api}/ia`,            authenticate, requireRole("gerente", "trafico", "administrativo", "contable"), requireModulePermission("ia"), requirePlanFeature("ai"), iaRoutes);
 safeUse(`${api}/taller`,        authenticate, requireModulePermission("taller"), tallerRoutes);
 safeUse(`${api}/route-optimizer`, routeOptimizerAuthUnlessPublic, routeOptimizerPlanUnlessPublic, routeOptimizerRoutes);
 safeUse(`${api}/notificaciones`, authenticate, requireModulePermission("avisos"), notificacionesRoutes);

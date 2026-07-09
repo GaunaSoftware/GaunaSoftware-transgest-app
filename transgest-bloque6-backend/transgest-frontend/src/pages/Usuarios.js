@@ -79,6 +79,7 @@ const MODULOS_PERM = [
 ].map(([id, label]) => ({ id, label }));
 
 const ALL_MODULE_IDS = MODULOS_PERM.map(m => m.id);
+const IA_ALLOWED_ROLES = new Set(["gerente", "trafico", "administrativo", "contable"]);
 
 const ROLE_PRESETS = {
   gerente: { ver: ALL_MODULE_IDS, editar: ALL_MODULE_IDS },
@@ -128,6 +129,7 @@ function presetRol(rol) {
 }
 
 function normalizarPermisosUI(permisos, rol) {
+  const normalizedRole = String(rol || "").toLowerCase();
   let parsed = {};
   if (typeof permisos === "string") {
     try { parsed = JSON.parse(permisos || "{}"); } catch { parsed = {}; }
@@ -144,6 +146,9 @@ function normalizarPermisosUI(permisos, rol) {
         editar: Boolean(actual.editar),
       };
     }
+  }
+  if (!IA_ALLOWED_ROLES.has(normalizedRole) && base.modulos.ia) {
+    base.modulos.ia = { ver: false, editar: false };
   }
   return base;
 }
@@ -236,6 +241,7 @@ export default function Usuarios() {
 
   function togglePermiso(modulo, tipo) {
     setForm(p => {
+      if (modulo === "ia" && !IA_ALLOWED_ROLES.has(String(p.rol || "").toLowerCase())) return p;
       const permisos = normalizarPermisosUI(p.permisos, p.rol);
       const actual = permisos.modulos[modulo] || { ver:false, editar:false };
       const next = { ...actual, [tipo]: !actual[tipo] };
@@ -514,14 +520,18 @@ export default function Usuarios() {
               </div>
               {MODULOS_PERM.map(m => {
                 const permisos = normalizarPermisosUI(form.permisos, form.rol).modulos[m.id] || {};
+                const disabled = m.id === "ia" && !IA_ALLOWED_ROLES.has(String(form.rol || "").toLowerCase());
                 return (
                   <div key={m.id} style={{display:"grid",gridTemplateColumns:"1fr 64px 64px",alignItems:"center",borderTop:"1px solid #1d2840"}}>
-                    <div style={{padding:"8px 10px",fontSize:12,color:"var(--text2)"}}>{m.label}</div>
+                    <div style={{padding:"8px 10px",fontSize:12,color:disabled ? "var(--text5)" : "var(--text2)"}}>
+                      {m.label}
+                      {disabled && <span style={{display:"block",fontSize:10,color:"var(--text5)",marginTop:2}}>Solo gerencia, trafico, administracion y contabilidad</span>}
+                    </div>
                     <label style={{display:"flex",justifyContent:"center",padding:8}}>
-                      <input type="checkbox" checked={!!permisos.ver} onChange={()=>togglePermiso(m.id,"ver")}/>
+                      <input type="checkbox" disabled={disabled} checked={!!permisos.ver} onChange={()=>togglePermiso(m.id,"ver")}/>
                     </label>
                     <label style={{display:"flex",justifyContent:"center",padding:8}}>
-                      <input type="checkbox" checked={!!permisos.editar} onChange={()=>togglePermiso(m.id,"editar")}/>
+                      <input type="checkbox" disabled={disabled} checked={!!permisos.editar} onChange={()=>togglePermiso(m.id,"editar")}/>
                     </label>
                   </div>
                 );

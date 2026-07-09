@@ -120,6 +120,8 @@ const MODULE_IDS = [
   "mi_cuenta",
 ];
 
+const IA_ALLOWED_ROLES = new Set(["gerente", "trafico", "administrativo", "contable"]);
+
 const ROLE_PERMISSION_PRESETS = {
   gerente: { ver: MODULE_IDS, editar: MODULE_IDS },
   contable: {
@@ -222,8 +224,9 @@ function presetPermisosRol(rol) {
 }
 
 function normalizePermissionsForRole(permisos, rol) {
+  const normalizedRole = String(rol || "").toLowerCase();
   const base = presetPermisosRol(rol);
-  if (["chofer", "cliente", "cliente_portal"].includes(String(rol || "").toLowerCase())) return base;
+  if (["chofer", "cliente", "cliente_portal"].includes(normalizedRole)) return base;
   const raw = permisos && typeof permisos === "object" && !Array.isArray(permisos) ? permisos : {};
   const modulos = raw.modulos && typeof raw.modulos === "object" ? raw.modulos : raw;
   for (const id of MODULE_IDS) {
@@ -234,6 +237,9 @@ function normalizePermissionsForRole(permisos, rol) {
         editar: Boolean(regla.editar),
       };
     }
+  }
+  if (!IA_ALLOWED_ROLES.has(normalizedRole) && base.modulos.ia) {
+    base.modulos.ia = { ver: false, editar: false };
   }
   return base;
 }

@@ -1281,6 +1281,32 @@ function coordsFromMapsUrl(value) {
   return null;
 }
 
+function normalizePuntoInteresForForm(punto = {}) {
+  const metadata = punto?.metadata && typeof punto.metadata === "object" ? punto.metadata : {};
+  const googleMapsUrl = cleanMapsUrl(
+    punto?.google_maps_url ||
+    punto?.googleMapsUrl ||
+    metadata.google_maps_url ||
+    metadata.maps_url ||
+    ""
+  );
+  const mapsCoords = coordsFromMapsUrl(googleMapsUrl);
+  return {
+    ...punto,
+    metadata,
+    google_maps_url: googleMapsUrl,
+    punto_general: punto?.punto_general ?? punto?.es_general ?? !punto?.cliente_id,
+    telefono: punto?.telefono || metadata.telefono || metadata.phone || "",
+    email: punto?.email || metadata.email || "",
+    contacto_nombre: punto?.contacto_nombre || metadata.contacto_nombre || metadata.contacto || "",
+    contacto_telefono: punto?.contacto_telefono || metadata.contacto_telefono || metadata.telefono_contacto || "",
+    ventana: punto?.ventana || metadata.ventana || metadata.horario || "",
+    notas: punto?.notas || metadata.notas || metadata.notes || "",
+    lat: punto?.lat ?? punto?.latitud ?? metadata.lat ?? metadata.latitud ?? mapsCoords?.lat ?? "",
+    lng: punto?.lng ?? punto?.longitud ?? punto?.lon ?? metadata.lng ?? metadata.longitud ?? metadata.lon ?? mapsCoords?.lng ?? "",
+  };
+}
+
 function resolvePuntoInteresQuery(place, puntos = null) {
   const raw = typeof place === "object" && place !== null
     ? String(place.address || place.direccion || place.lugar || place.name || place.nombre || "").trim()
@@ -2953,6 +2979,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
 }
 
 function PuntoInteresModal({ initial, onClose, onSave }) {
+  const initialPoint = normalizePuntoInteresForForm(initial || {});
   function inferPuntoGeoDraft(draft = {}) {
     const inferred = inferPlaceGeo(draft, draft.ciudad, draft.direccion, draft.nombre);
     if (!inferred) return draft;
@@ -2968,24 +2995,27 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     return next;
   }
   const [form, setForm] = useState(() => ({
-    id: initial?.id || "",
-    cliente_id: initial?.cliente_id || "",
-    punto_general: initial?.punto_general ?? initial?.es_general ?? !initial?.cliente_id,
-    nombre: initial?.nombre || initial?.cliente_nombre || "",
-    cif: initial?.cif || "",
-    direccion: initial?.direccion || "",
-    codigo_postal: initial?.codigo_postal || "",
-    ciudad: initial?.ciudad || "",
-    provincia: initial?.provincia || "",
+    id: initialPoint.id || "",
+    cliente_id: initialPoint.cliente_id || "",
+    punto_general: initialPoint.punto_general,
+    nombre: initialPoint.nombre || initialPoint.cliente_nombre || "",
+    cif: initialPoint.cif || "",
+    direccion: initialPoint.direccion || "",
+    codigo_postal: initialPoint.codigo_postal || "",
+    ciudad: initialPoint.ciudad || "",
+    provincia: initialPoint.provincia || "",
     pais: initial?.pais || "España",
-    telefono: initial?.telefono || "",
-    email: initial?.email || "",
-    contacto_nombre: initial?.contacto_nombre || "",
-    contacto_telefono: initial?.contacto_telefono || "",
-    ventana: initial?.ventana || "",
-    notas: initial?.notas || "",
-    tipo: initial?.tipo || "ambos",
-    google_maps_url: initial?.google_maps_url || initial?.metadata?.google_maps_url || "",
+    telefono: initialPoint.telefono || "",
+    email: initialPoint.email || "",
+    contacto_nombre: initialPoint.contacto_nombre || "",
+    contacto_telefono: initialPoint.contacto_telefono || "",
+    ventana: initialPoint.ventana || "",
+    notas: initialPoint.notas || "",
+    tipo: initialPoint.tipo || "ambos",
+    google_maps_url: initialPoint.google_maps_url || "",
+    lat: initialPoint.lat ?? "",
+    lng: initialPoint.lng ?? "",
+    metadata: initialPoint.metadata || {},
   }));
   useEffect(() => {
     setForm(p => inferPuntoGeoDraft(p));
@@ -2996,7 +3026,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   });
   const setGeneral = e => {
     const checked = e.target.checked;
-    setForm(p => ({...p, punto_general: checked, cliente_id: checked ? "" : (initial?.cliente_id || p.cliente_id || "")}));
+    setForm(p => ({...p, punto_general: checked, cliente_id: checked ? "" : (initialPoint?.cliente_id || p.cliente_id || "")}));
   };
   const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
   const lbl = {display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4,marginTop:10};
@@ -3010,12 +3040,16 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     if (!form.nombre.trim()) { notify("Indica el nombre de la empresa o punto.", "warning"); return; }
     if (!form.direccion.trim()) { notify("Indica la direccion del punto.", "warning"); return; }
     const resolvedForm = await completarPuntoGeo(form);
+    const mapsCoords = coordsFromMapsUrl(resolvedForm.google_maps_url);
     const payload = {
       ...resolvedForm,
       cliente_id: resolvedForm.punto_general ? "" : resolvedForm.cliente_id,
       punto_general: !!resolvedForm.punto_general,
       pais: canonicalCountry(resolvedForm.pais || form.pais || "España") || "España",
       provincia: String(resolvedForm.provincia || "").trim(),
+      google_maps_url: cleanMapsUrl(resolvedForm.google_maps_url),
+      lat: resolvedForm.lat || mapsCoords?.lat || null,
+      lng: resolvedForm.lng || mapsCoords?.lng || null,
     };
     let saved = payload;
     try {
@@ -3063,7 +3097,16 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
           <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={set("cif")} /></div>
           <div><label style={lbl}>Tipo</label><select style={inp} value={form.tipo} onChange={set("tipo")}><option value="ambos">Carga y descarga</option><option value="carga">Carga</option><option value="descarga">Descarga</option></select></div>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Direccion completa *</label><input style={inp} value={form.direccion} onChange={set("direccion")} onBlur={()=>completarPuntoGeo()} placeholder="Calle, numero, poligono, nave..." /></div>
-          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Enlace Google Maps</label><input style={inp} value={form.google_maps_url} onChange={set("google_maps_url")} placeholder="https://maps.google.com/..." /></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Enlace Google Maps</label><input style={inp} value={form.google_maps_url} onChange={e=>setForm(p=>{
+            const google_maps_url = e.target.value;
+            const coords = coordsFromMapsUrl(google_maps_url);
+            return {...p, google_maps_url, lat: p.lat || coords?.lat || "", lng: p.lng || coords?.lng || ""};
+          })} onBlur={()=>setForm(p=>{
+            const coords = coordsFromMapsUrl(p.google_maps_url);
+            return coords ? {...p, lat: p.lat || coords.lat, lng: p.lng || coords.lng} : p;
+          })} placeholder="https://maps.google.com/..." /></div>
+          <div><label style={lbl}>Latitud</label><input style={inp} value={form.lat ?? ""} onChange={set("lat")} placeholder="Ej: 38.3452" /></div>
+          <div><label style={lbl}>Longitud</label><input style={inp} value={form.lng ?? ""} onChange={set("lng")} placeholder="Ej: -0.4815" /></div>
           <div><label style={lbl}>Codigo postal</label><input style={inp} value={form.codigo_postal} onChange={set("codigo_postal")} /></div>
           <div><label style={lbl}>Ciudad</label><input style={inp} value={form.ciudad} onChange={set("ciudad")} onBlur={()=>completarPuntoGeo()} /></div>
           <div>

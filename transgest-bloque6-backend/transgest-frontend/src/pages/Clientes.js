@@ -4,7 +4,7 @@ import {
   getRutasCliente, getRutasClienteSalud, crearRutaCliente, editarRutaCliente, borrarRutaCliente,
   getPedidosCliente, crearFacturaMultiple, getRutas, marcarClienteRevisado,
   crearPortalUsuarioCliente, getClienteIntegracionTokens, crearClienteIntegracionToken, revocarClienteIntegracionToken,
-  getFacturas, getPortalSolicitudesAdmin, getPuntosInteres, crearPuntoInteres, borrarPuntoInteres,
+  getFacturas, getPortalSolicitudesAdmin, getPuntosInteres, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -337,10 +337,7 @@ function PuntoClienteSelector({ cliente, onApply }) {
 }
 
 function ClientePuntosPanel({ cliente, canEdit }) {
-  const [puntos, setPuntos] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
+  const emptyPointForm = {
     nombre: "",
     tipo: "ambos",
     direccion: "",
@@ -351,9 +348,29 @@ function ClientePuntosPanel({ cliente, canEdit }) {
     ventana: "",
     contacto_nombre: "",
     contacto_telefono: "",
+    email: "",
+    notas: "",
     google_maps_url: "",
     punto_general: false,
-  });
+  };
+  const pointToForm = (punto = {}) => {
+    const metadata = punto.metadata && typeof punto.metadata === "object" ? punto.metadata : {};
+    return {
+      ...emptyPointForm,
+      ...punto,
+      punto_general: punto.punto_general ?? punto.es_general ?? !punto.cliente_id,
+      google_maps_url: punto.google_maps_url || metadata.google_maps_url || "",
+      contacto_nombre: punto.contacto_nombre || metadata.contacto_nombre || metadata.contacto || "",
+      contacto_telefono: punto.contacto_telefono || metadata.contacto_telefono || metadata.telefono_contacto || "",
+      email: punto.email || metadata.email || "",
+      notas: punto.notas || metadata.notas || "",
+    };
+  };
+  const [puntos, setPuntos] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editingPoint, setEditingPoint] = useState(null);
+  const [form, setForm] = useState(emptyPointForm);
 
   const cargar = useCallback(() => {
     if (!cliente?.id) return;
@@ -370,7 +387,7 @@ function ClientePuntosPanel({ cliente, canEdit }) {
     setForm(prev => ({ ...prev, [k]: value }));
   }
 
-  async function crear(e) {
+  async function guardar(e) {
     e.preventDefault();
     if (!form.nombre.trim() || !form.direccion.trim()) {
       notify("Indica nombre y direccion del punto", "warning");
@@ -378,24 +395,37 @@ function ClientePuntosPanel({ cliente, canEdit }) {
     }
     setSaving(true);
     try {
-      await crearPuntoInteres({
+      const payload = {
         ...form,
-        cliente_id: cliente.id,
+        cliente_id: form.punto_general ? "" : cliente.id,
         nombre: form.nombre.trim(),
         direccion: form.direccion.trim(),
         ciudad: form.ciudad.trim(),
         provincia: form.provincia.trim(),
         codigo_postal: form.codigo_postal.trim(),
         google_maps_url: form.google_maps_url.trim(),
-      });
-      notify(form.punto_general ? "Punto general creado" : "Punto vinculado al cliente creado", "success");
-      setForm(prev => ({ ...prev, nombre:"", direccion:"", codigo_postal:"", ciudad:"", provincia:"", ventana:"", contacto_nombre:"", contacto_telefono:"", google_maps_url:"" }));
+      };
+      if (editingPoint?.id) await editarPuntoInteres(editingPoint.id, payload);
+      else await crearPuntoInteres(payload);
+      notify(editingPoint?.id ? "Punto actualizado" : (form.punto_general ? "Punto general creado" : "Punto vinculado al cliente creado"), "success");
+      setEditingPoint(null);
+      setForm(emptyPointForm);
       cargar();
     } catch (err) {
-      notify(err?.message || "No se pudo crear el punto", "error");
+      notify(err?.message || "No se pudo guardar el punto", "error");
     } finally {
       setSaving(false);
     }
+  }
+
+  function editar(punto) {
+    setEditingPoint(punto);
+    setForm(pointToForm(punto));
+  }
+
+  function cancelarEdicion() {
+    setEditingPoint(null);
+    setForm(emptyPointForm);
   }
 
   async function borrar(punto) {
@@ -424,11 +454,11 @@ function ClientePuntosPanel({ cliente, canEdit }) {
       </div>
 
       {canEdit && (
-        <form onSubmit={crear} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
+        <form onSubmit={guardar} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
             <div>
-              <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Nuevo punto</div>
-              <div style={{fontSize:11,color:"var(--text4)"}}>Por defecto queda asociado a {cliente?.nombre}. Marca general si lo quieres reutilizar en otros clientes.</div>
+              <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>{editingPoint?.id ? "Ficha del punto" : "Nuevo punto"}</div>
+              <div style={{fontSize:11,color:"var(--text4)"}}>{editingPoint?.id ? "Revisa y actualiza los datos guardados del punto." : `Por defecto queda asociado a ${cliente?.nombre}. Marca general si lo quieres reutilizar en otros clientes.`}</div>
             </div>
             <label style={{display:"inline-flex",alignItems:"center",gap:7,fontSize:12,fontWeight:800,color:"var(--text3)"}}>
               <input type="checkbox" checked={form.punto_general} onChange={e=>set("punto_general", e.target.checked)} />
@@ -446,11 +476,20 @@ function ClientePuntosPanel({ cliente, canEdit }) {
             <div><label style={S.lbl}>Ventana horaria</label><input style={input} value={form.ventana} onChange={e=>set("ventana", e.target.value)} placeholder="08:00-14:00" /></div>
             <div><label style={S.lbl}>Contacto</label><input style={input} value={form.contacto_nombre} onChange={e=>set("contacto_nombre", e.target.value)} /></div>
             <div><label style={S.lbl}>Telefono contacto</label><input style={input} value={form.contacto_telefono} onChange={e=>set("contacto_telefono", e.target.value)} /></div>
+            <div><label style={S.lbl}>Email contacto</label><input style={input} value={form.email || ""} onChange={e=>set("email", e.target.value)} /></div>
             <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Enlace Maps / HERE</label><input style={input} value={form.google_maps_url} onChange={e=>set("google_maps_url", e.target.value)} placeholder="Opcional" /></div>
+            <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Notas operativas</label><textarea style={{...input,minHeight:74,resize:"vertical"}} value={form.notas || ""} onChange={e=>set("notas", e.target.value)} placeholder="Entrada, muelle, persona de contacto, instrucciones..." /></div>
           </div>
-          <button type="submit" disabled={saving} style={{...S.btn,marginTop:12,background:"var(--accent)",color:"#fff",opacity:saving?0.6:1}}>
-            {saving ? "Guardando..." : "Crear punto"}
-          </button>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+            <button type="submit" disabled={saving} style={{...S.btn,background:"var(--accent)",color:"#fff",opacity:saving?0.6:1}}>
+              {saving ? "Guardando..." : (editingPoint?.id ? "Guardar cambios" : "Crear punto")}
+            </button>
+            {editingPoint?.id && (
+              <button type="button" onClick={cancelarEdicion} style={{...S.btn,background:"transparent",border:"1px solid var(--border2)",color:"var(--text3)"}}>
+                Cancelar
+              </button>
+            )}
+          </div>
         </form>
       )}
 
@@ -476,8 +515,18 @@ function ClientePuntosPanel({ cliente, canEdit }) {
                   {(p.ventana || p.contacto_nombre || p.contacto_telefono) && (
                     <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{[p.ventana, p.contacto_nombre, p.contacto_telefono].filter(Boolean).join(" | ")}</div>
                   )}
+                  {(p.google_maps_url || p.email || p.notas) && (
+                    <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>
+                      {[p.google_maps_url ? "Maps configurado" : "", p.email, p.notas].filter(Boolean).join(" | ")}
+                    </div>
+                  )}
                 </div>
-                {canEdit && <button type="button" onClick={()=>borrar(p)} style={{...S.btn,background:"rgba(239,68,68,.10)",border:"1px solid rgba(239,68,68,.25)",color:"#ef4444",padding:"7px 10px"}}>Eliminar</button>}
+                {canEdit && (
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                    <button type="button" onClick={()=>editar(p)} style={{...S.btn,background:"transparent",border:"1px solid var(--border2)",color:"var(--accent)",padding:"7px 10px"}}>Abrir ficha</button>
+                    <button type="button" onClick={()=>borrar(p)} style={{...S.btn,background:"rgba(239,68,68,.10)",border:"1px solid rgba(239,68,68,.25)",color:"#ef4444",padding:"7px 10px"}}>Eliminar</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

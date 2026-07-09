@@ -80,6 +80,13 @@ function normalizeNumeric(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizePositiveInteger(value) {
+  if (value === "" || value === undefined || value === null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n);
+}
+
 async function nextPedidoNumero(client, empresaId) {
   const year = new Date().getFullYear();
   const prefix = `PED-${year}-`;
@@ -1198,7 +1205,7 @@ router.post("/solicitudes", requireCliente, async (req, res) => {
       body.hora_descarga || null,
       body.mercancia || null,
       body.peso_kg || body.peso || null,
-      body.bultos || null,
+      normalizePositiveInteger(body.bultos),
       body.referencia_cliente || null,
       body.notas || null,
     ]
@@ -1398,7 +1405,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
           sol.fecha_descarga,
           sol.mercancia,
           normalizeNumeric(sol.peso_kg),
-          normalizeNumeric(sol.bultos),
+          normalizePositiveInteger(sol.bultos),
           notas,
           eid,
           sol.referencia_cliente,
@@ -1427,7 +1434,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
           sol.fecha_descarga,
           sol.mercancia,
           normalizeNumeric(sol.peso_kg),
-          normalizeNumeric(sol.bultos),
+          normalizePositiveInteger(sol.bultos),
           notas,
           eid,
         ]

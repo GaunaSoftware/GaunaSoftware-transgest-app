@@ -51,6 +51,11 @@ function isClosed(sol) {
   return isAccepted(sol) || isRejected(sol) || String(sol?.estado || "").toLowerCase() === "cancelada";
 }
 
+function validBultos(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : "";
+}
+
 function isAged(sol) {
   return isOpen(sol) && ageHours(sol.created_at) >= 24;
 }
@@ -87,7 +92,7 @@ function resumenSolicitud(sol) {
     sol.referencia_cliente ? `Referencia cliente: ${sol.referencia_cliente}` : "",
     sol.mercancia ? `Mercancia: ${sol.mercancia}` : "",
     sol.peso_kg ? `Peso: ${Number(sol.peso_kg).toLocaleString("es-ES")} kg` : "",
-    sol.bultos ? `Bultos: ${sol.bultos}` : "",
+    validBultos(sol.bultos) ? `Bultos: ${validBultos(sol.bultos)}` : "",
     sol.notas ? `Notas: ${sol.notas}` : "",
     sol.pedido_numero ? `Pedido: ${sol.pedido_numero}` : "",
     sol.vehiculo_matricula || sol.matricula_colaborador ? `Tractora: ${sol.vehiculo_matricula || sol.matricula_colaborador}` : "",
@@ -441,7 +446,7 @@ export default function Solicitudes() {
       s.hora_carga,
       s.mercancia,
       s.peso_kg,
-      s.bultos,
+      validBultos(s.bultos),
       s.pedido_numero,
       s.created_at,
       ageHours(s.created_at),
@@ -610,7 +615,8 @@ export default function Solicitudes() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--text3)", marginTop: 12 }}>
               {sol.mercancia && <span>Mercancia: {sol.mercancia}</span>}
               {sol.peso_kg && <span>Peso: {Number(sol.peso_kg).toLocaleString("es-ES")} kg</span>}
-              {sol.bultos && <span>Bultos: {sol.bultos}</span>}
+              {validBultos(sol.bultos) && <span>Bultos: {validBultos(sol.bultos)}</span>}
+              {Number(sol.bultos) < 0 && <span style={{color:"#f97316",fontWeight:900}}>Bultos a revisar: valor negativo corregido al aceptar</span>}
               {sol.fecha_descarga && <span>Descarga: {dateEs(sol.fecha_descarga)} {sol.hora_descarga || ""}</span>}
               {sol.pedido_numero && <span>Pedido: {sol.pedido_numero}</span>}
             </div>

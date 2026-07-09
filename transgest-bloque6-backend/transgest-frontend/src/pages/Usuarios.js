@@ -190,6 +190,7 @@ const S = {
 export default function Usuarios() {
   const [usuarios,setUsuarios]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [tab,setTab]=useState("equipo");
   const [modal,setModal]=useState(false);
   const [editando,setEditando]=useState(null);
   const [form,setForm]=useState({});
@@ -219,9 +220,9 @@ export default function Usuarios() {
     setErrors(prev => prev.rol ? { ...prev, rol: "" } : prev);
   };
 
-  function abrirNuevo() {
+  function abrirNuevo(rolInicial = tab === "clientes" ? "cliente" : "trafico") {
     setEditando(null);
-    setForm({rol:"trafico",activo:true,modo_alta:"invitacion",password:"",permisos:presetRol("trafico"),trafico_config:{ vehiculo_ids: [], tipos_viaje: ["normal","salida","retorno"] }});
+    setForm({rol:rolInicial,activo:true,modo_alta:"invitacion",password:"",permisos:presetRol(rolInicial),cliente_id:"",trafico_config:{ vehiculo_ids: [], tipos_viaje: ["normal","salida","retorno"] }});
     setErrors({});
     setModal(true);
   }
@@ -344,19 +345,44 @@ export default function Usuarios() {
     try{await resetPassword(u.id,pw);notify("Contraseña actualizada", "success");}catch(e){notify(e.message, "error");}
   }
 
+  const usuariosFiltrados = usuarios.filter(u => tab === "clientes" ? u.rol === "cliente" : u.rol !== "cliente");
+  const rolesDisponibles = tab === "clientes" ? ["cliente"] : ROLES.filter(r => r !== "cliente");
+
   return (
     <div className="tg-responsive-page" style={S.page}>
       <div style={S.title}>Usuarios y roles</div>
-      <div style={{marginBottom:16}}>
-        <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={abrirNuevo}>+ Nuevo usuario</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:16}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {[
+            ["equipo", "Equipo"],
+            ["clientes", "Clientes"],
+          ].map(([id,label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              style={{...S.btn,background:tab===id?"var(--accent)":"var(--bg4)",color:tab===id?"#fff":"var(--text2)",border:`1px solid ${tab===id?"var(--accent)":"var(--border2)"}`}}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={()=>abrirNuevo()}>
+          {tab === "clientes" ? "+ Nuevo acceso cliente" : "+ Nuevo usuario"}
+        </button>
       </div>
-      <div style={S.card}>
+      {tab === "clientes" && (
+        <div style={{...S.card,padding:14,marginBottom:12,color:"var(--text3)",fontSize:13,lineHeight:1.45}}>
+          Crea aqui los accesos del portal cliente. Cada usuario debe quedar vinculado a una ficha de cliente para poder solicitar viajes, ver facturas, documentos y seguimiento.
+        </div>
+      )}
+      <div style={{...S.card,overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
           <thead><tr>{["Nombre","Usuario","Email","Rol","Vinculo","Alcance trafico","Estado","Ultimo acceso","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
             {loading?<tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
-            :usuarios.length===0?<tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Sin usuarios.</td></tr>
-            :usuarios.map(u=>(
+            :usuariosFiltrados.length===0?<tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>{tab === "clientes" ? "Sin accesos de cliente." : "Sin usuarios."}</td></tr>
+            :usuariosFiltrados.map(u=>(
               <tr key={u.id}>
                 <td style={{...S.td,fontWeight:600}}>{u.nombre}</td>
                 <td style={{...S.td,fontSize:12,color:"var(--text2)",fontFamily:"'JetBrains Mono',monospace"}}>{u.username || "-"}</td>
@@ -388,7 +414,7 @@ export default function Usuarios() {
 
       {modal&&(
         <ModalShell
-          title={editando?"Editar usuario":"Nuevo usuario"}
+          title={editando ? "Editar usuario" : tab === "clientes" ? "Nuevo acceso cliente" : "Nuevo usuario"}
           onClose={()=>setModal(false)}
           width={560}
           footer={<>
@@ -425,7 +451,7 @@ export default function Usuarios() {
             </FormField>
             <FormField label="Rol" required error={errors.rol}>
               <select value={form.rol||"trafico"} onChange={cambiarRol} style={{...S.sel,borderColor:errors.rol?"#ef4444":"var(--border2)"}}>
-                {ROLES.map(r=><option key={r} value={r}>{LABEL[r]||r}</option>)}
+                {rolesDisponibles.map(r=><option key={r} value={r}>{LABEL[r]||r}</option>)}
               </select>
             </FormField>
             {form.rol === "chofer" && (

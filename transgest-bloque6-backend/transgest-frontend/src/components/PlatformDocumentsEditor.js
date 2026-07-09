@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 const emptyPlatform = () => ({
   id: `plat-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -93,6 +93,7 @@ export function platformDocumentsSummary(value) {
 export default function PlatformDocumentsEditor({ value, onChange, canEdit = true, inputStyle, labelStyle, buttonStyle }) {
   const platforms = useMemo(() => normalizePlatformDocumentsForEdit(value), [value]);
   const summary = useMemo(() => platformDocumentsSummary(platforms), [platforms]);
+  const [quickNames, setQuickNames] = useState({});
 
   const setPlatforms = (next) => onChange?.(normalizePlatformDocumentsForEdit(next));
   const updatePlatform = (platformId, patch) => {
@@ -106,6 +107,13 @@ export default function PlatformDocumentsEditor({ value, onChange, canEdit = tru
         documentos: platform.documentos.map(doc => doc.id === docId ? { ...doc, ...patch } : doc),
       };
     }));
+  };
+  const addDocument = (platformId, nombre = "") => {
+    const cleanName = String(nombre || "").trim();
+    setPlatforms(platforms.map(platform => platform.id === platformId
+      ? { ...platform, documentos: [...platform.documentos, { ...emptyDocument(), nombre: cleanName }] }
+      : platform
+    ));
   };
 
   const btn = {
@@ -231,7 +239,7 @@ export default function PlatformDocumentsEditor({ value, onChange, canEdit = tru
           {canEdit && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button type="button" style={{ ...btn }}
-                onClick={() => updatePlatform(platform.id, { documentos: [...platform.documentos, emptyDocument()] })}>
+                onClick={() => addDocument(platform.id)}>
                 + Documento
               </button>
               <select
@@ -240,13 +248,41 @@ export default function PlatformDocumentsEditor({ value, onChange, canEdit = tru
                 onChange={e => {
                   const nombre = e.target.value;
                   if (!nombre) return;
-                  updatePlatform(platform.id, { documentos: [...platform.documentos, { ...emptyDocument(), nombre }] });
+                  addDocument(platform.id, nombre);
                   e.target.value = "";
                 }}
               >
                 <option value="">Crear documento rapido...</option>
                 {QUICK_DOCUMENTS.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
+              <div style={{ display: "flex", gap: 8, flex: "1 1 280px", minWidth: 240 }}>
+                <input
+                  style={{ ...input, minWidth: 0 }}
+                  value={quickNames[platform.id] || ""}
+                  placeholder="Nuevo documento rapido..."
+                  onChange={e => setQuickNames(prev => ({ ...prev, [platform.id]: e.target.value }))}
+                  onKeyDown={e => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    const nombre = quickNames[platform.id] || "";
+                    if (!String(nombre).trim()) return;
+                    addDocument(platform.id, nombre);
+                    setQuickNames(prev => ({ ...prev, [platform.id]: "" }));
+                  }}
+                />
+                <button
+                  type="button"
+                  style={{ ...btn, whiteSpace: "nowrap" }}
+                  onClick={() => {
+                    const nombre = quickNames[platform.id] || "";
+                    if (!String(nombre).trim()) return;
+                    addDocument(platform.id, nombre);
+                    setQuickNames(prev => ({ ...prev, [platform.id]: "" }));
+                  }}
+                >
+                  Crear
+                </button>
+              </div>
             </div>
           )}
         </div>

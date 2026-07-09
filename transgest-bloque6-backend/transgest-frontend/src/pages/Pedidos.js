@@ -3872,17 +3872,9 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,padding:10,marginBottom:10}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
               <div>
-                <div style={{fontSize:12,fontWeight:900,color:"var(--text)",textTransform:"uppercase",letterSpacing:".04em"}}>Buscar punto de {label}</div>
-                <div style={{fontSize:11,color:"var(--text5)"}}>Selecciona un punto guardado o crealo si no existe.</div>
+                <div style={{fontSize:12,fontWeight:900,color:"var(--text)",textTransform:"uppercase",letterSpacing:".04em"}}>{tipo === "carga" ? "Origen / punto de carga" : "Destino / punto de descarga"}</div>
+                <div style={{fontSize:11,color:"var(--text5)"}}>Escribe la poblacion o selecciona un punto guardado del cliente.</div>
               </div>
-              <button
-                type="button"
-                onClick={abrirCrearPunto}
-                disabled={!String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()}
-                style={{padding:"6px 12px",borderRadius:7,border:"1px solid var(--border2)",background:"rgba(20,184,166,.08)",color:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"var(--accent)":"var(--text5)",fontSize:12,fontWeight:800,cursor:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"pointer":"not-allowed"}}
-              >
-                Crear punto
-              </button>
             </div>
             <input
               style={{...inp,width:"100%",boxSizing:"border-box"}}
@@ -3906,8 +3898,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             )}
             {noExistePuntoBusqueda && (
               <div style={{marginTop:8,padding:9,borderRadius:8,border:"1px solid rgba(245,158,11,.35)",background:"rgba(245,158,11,.08)",display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-                <span style={{fontSize:12,color:"var(--text4)"}}>No hay ningun punto guardado con esa busqueda.</span>
-                <button type="button" onClick={abrirCrearPunto} style={{padding:"5px 12px",borderRadius:6,border:"1px solid rgba(245,158,11,.45)",background:"rgba(245,158,11,.12)",color:"var(--orange)",fontSize:12,fontWeight:800,cursor:"pointer"}}>Crear "{puntoQuery.trim()}"</button>
+                <span style={{fontSize:12,color:"var(--text4)"}}>No hay ningun punto guardado con esa busqueda. Puedes usarlo como poblacion o guardarlo como punto.</span>
+                <button type="button" onClick={abrirCrearPunto} style={{padding:"5px 12px",borderRadius:6,border:"1px solid rgba(245,158,11,.45)",background:"rgba(245,158,11,.12)",color:"var(--orange)",fontSize:12,fontWeight:800,cursor:"pointer"}}>Guardar punto</button>
               </div>
             )}
           </div>
@@ -3933,7 +3925,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             <input
               list={puntosListId}
               style={inp}
-              placeholder={`Punto o direccion de ${label} *`}
+              placeholder={tipo === "carga" ? "Poblacion o punto de carga *" : "Poblacion o punto de descarga *"}
               value={newStop.direccion}
               onChange={e=>{
                 const val = e.target.value;
@@ -3955,9 +3947,14 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             <input style={inp} placeholder="Ventana" value={newStop.ventana} onChange={e=>setNewStop(p=>({...p,ventana:e.target.value}))}/>
           </div>
           <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
-            <button type="button" onClick={()=>setNewStopDetailsOpen(v=>!v)} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,fontWeight:800,cursor:"pointer"}}>
-              {newStopDetailsOpen ? "Ocultar detalles" : "Mas detalles"}
-            </button>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <button type="button" onClick={()=>setNewStopDetailsOpen(v=>!v)} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+                {newStopDetailsOpen ? "Ocultar detalles" : "Mas detalles"}
+              </button>
+              <button type="button" onClick={abrirCrearPunto} disabled={!String(puntoQuery || newStop.direccion).trim()} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:String(puntoQuery || newStop.direccion).trim()?"var(--accent)":"var(--text5)",fontSize:12,fontWeight:800,cursor:String(puntoQuery || newStop.direccion).trim()?"pointer":"not-allowed"}}>
+                Guardar como punto
+              </button>
+            </div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               <button type="button" onClick={addParada} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Anadir {label}</button>
               <button type="button" onClick={()=>{ setAdding(false); resetNewStop(); }} style={{padding:"6px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
@@ -3982,30 +3979,13 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               onChange={e=>setNewStop(p=>({...p,provincia:e.target.value}))}
               onKeyDown={e=>completeOnTab(e, newStopRegions, newStop.provincia || "", value=>setNewStop(p=>({...p,provincia:value})))}
             />
-            <input
-              list={puntosListId}
-              style={inp}
-              placeholder={tipo==="carga"?"Cargador / remitente":"Cliente destinatario"}
-              value={newStop.cliente_nombre}
-              onChange={e=>{
-                const val = e.target.value;
-                const punto = buscarPuntoExacto(val);
-                if (punto) aplicarPuntoGuardado(punto);
-                else setNewStop(p=>inferStopGeo({...p,cliente_nombre:val}, stopsOrdenados.length ? 1 : 0));
-              }}
-              onBlur={e=>{
-                const punto = buscarPuntoExacto(e.target.value);
-                if (punto) aplicarPuntoGuardado(punto);
-                else completarNewStopGeo();
-              }}
-            />
             <input type="number" style={inp} placeholder="Bultos" value={newStop.bultos} onChange={e=>setNewStop(p=>({...p,bultos:e.target.value}))}/>
             <input type="number" style={inp} placeholder="Peso kg" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))}/>
             <input type="number" step="0.01" style={inp} placeholder={`Precio ${label} EUR`} value={newStop.precio} onChange={e=>setNewStop(p=>({...p,precio:e.target.value}))}/>
             <input style={inp} placeholder={`Referencia ${label}`} value={newStop.referencia} onChange={e=>setNewStop(p=>({...p,referencia:e.target.value}))}/>
             <input style={{...inp,gridColumn:"1/-1"}} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>
-            <button type="button" onClick={abrirCrearPunto} disabled={!String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"var(--accent)":"var(--text5)",fontSize:12,cursor:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"pointer":"not-allowed"}}>
-              {buscarPuntoExacto(newStop.cliente_nombre || newStop.direccion) ? "Actualizar punto" : "Crear punto"}
+            <button type="button" onClick={abrirCrearPunto} disabled={!String(puntoQuery || newStop.direccion).trim()} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:String(puntoQuery || newStop.direccion).trim()?"var(--accent)":"var(--text5)",fontSize:12,cursor:String(puntoQuery || newStop.direccion).trim()?"pointer":"not-allowed"}}>
+              {buscarPuntoExacto(newStop.direccion || puntoQuery) ? "Actualizar punto" : "Guardar como punto"}
             </button>
             </div>
           )}

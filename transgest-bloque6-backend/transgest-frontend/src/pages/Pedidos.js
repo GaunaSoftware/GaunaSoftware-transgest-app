@@ -7530,7 +7530,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                 <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>Se anadira a Grupajes para combinarlo con otros pedidos</span>
               )}
             </div>
-            <div className="tg-pedido-form-grid-3">
+            <div className="tg-pedido-form-grid-2">
               <div style={{gridColumn:"1/-1"}}><label style={S.label}>Descripcion mercancia</label><input style={S.input} value={form.mercancia||""} onChange={f("mercancia")} placeholder="Pallets de ceramica, maquinaria..."/></div>
                 <div>
                   <label style={S.label}>Peso (kg)</label>
@@ -7574,18 +7574,6 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                     precio_unitario: v,
                   }));
                 }}/>
-              </div>
-              <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.22)",borderRadius:8,padding:"8px 10px"}}>
-                <label style={S.label}>EUR/km venta</label>
-                {(() => {
-                  const eurKm = precioKmPedidoInfo(form);
-                  return (
-                    <>
-                      <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:900,color:eurKm.value ? "var(--green)" : "var(--text5)"}}>{eurKm.label}</div>
-                      <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>{eurKm.hint}</div>
-                    </>
-                  );
-                })()}
               </div>
               {form.tipo_precio!=="viaje"&&<div><label style={S.label}>{form.tipo_precio==="kg"?"Peso kg":form.tipo_precio==="tonelada"?"Toneladas":form.tipo_precio==="km"?"Kilometros":form.tipo_precio==="palet"?"Palets":"Horas"}</label>
                 <input type="text" inputMode="decimal" style={S.input} value={compactNumberInput(form.cantidad)} onChange={e=>setForm(p=>syncPrecioClienteCol(syncPrecioColaboradorCalc({...p,cantidad:e.target.value})))}/>

@@ -39,6 +39,16 @@ function ensureSchema() {
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente_at TIMESTAMPTZ");
       await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_empresa_estado ON portal_solicitudes_cliente(empresa_id, estado, created_at DESC)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_cliente ON portal_solicitudes_cliente(cliente_id, created_at DESC)");
+      await db.query("CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_numero_portal ON pedidos(empresa_id, numero DESC)");
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS pedido_numero_counters (
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          year INTEGER NOT NULL,
+          last_num INTEGER NOT NULL DEFAULT 0,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (empresa_id, year)
+        )
+      `);
       await db.query(`
         CREATE TABLE IF NOT EXISTS portal_solicitud_eventos (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -68,6 +78,36 @@ function normalizeNumeric(value) {
   if (value === "" || value === undefined || value === null) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+async function nextPedidoNumero(client, empresaId) {
+  const year = new Date().getFullYear();
+  const prefix = `PED-${year}-`;
+  await client.query(
+    `INSERT INTO pedido_numero_counters (empresa_id, year, last_num)
+     VALUES (
+       $1,
+       $2,
+       COALESCE((
+         SELECT substring(numero from $3)::int
+           FROM pedidos
+          WHERE empresa_id=$1 AND numero LIKE $4
+          ORDER BY numero DESC
+          LIMIT 1
+       ), 0)
+     )
+     ON CONFLICT (empresa_id, year) DO NOTHING`,
+    [empresaId, year, `^${prefix}(\\d+)$`, `${prefix}%`]
+  );
+  const { rows } = await client.query(
+    `UPDATE pedido_numero_counters
+        SET last_num=last_num+1, updated_at=NOW()
+      WHERE empresa_id=$1 AND year=$2
+      RETURNING last_num`,
+    [empresaId, year]
+  );
+  const next = Number(rows[0]?.last_num || 1);
+  return `${prefix}${String(next).padStart(4, "0")}`;
 }
 
 function publicBaseUrl(req) {
@@ -1332,16 +1372,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
       }
     }
 
-    const year = new Date().getFullYear();
-    const { rows: last } = await client.query(
-      `SELECT numero FROM pedidos
-        WHERE empresa_id=$1 AND numero LIKE $2
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [eid, `PED-${year}-%`]
-    );
-    const lastNum = last[0] ? parseInt(String(last[0].numero).split("-").pop(), 10) || 0 : 0;
-    const numero = `PED-${year}-${String(lastNum + 1).padStart(4, "0")}`;
+    const numero = await nextPedidoNumero(client, eid);
     const notas = [
       sol.notas,
       `Solicitud portal cliente: ${sol.id}`,

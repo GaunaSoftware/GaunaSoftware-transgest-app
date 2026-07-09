@@ -370,7 +370,30 @@ export default function Solicitudes() {
       refreshSolicitudBadges();
       cargar().catch(() => {});
     } catch (e) {
-      notify(e.message, "error");
+      const msg = String(e?.message || "");
+      if (msg.toLowerCase().includes("tardado demasiado")) {
+        try {
+          notify("El servidor sigue procesando la aceptacion. Compruebo si el pedido se ha creado...", "warning");
+          let latest = [];
+          for (let i = 0; i < 3; i += 1) {
+            await new Promise(resolve => setTimeout(resolve, 1800));
+            latest = await getPortalSolicitudesAdmin();
+            const found = Array.isArray(latest) ? latest.find(item => String(item.id) === String(sol.id)) : null;
+            if (found?.estado === "convertida" || found?.pedido_id || found?.pedido_numero) {
+              setSols(latest);
+              notify(`Solicitud aceptada${found?.pedido_numero ? ` en pedido ${found.pedido_numero}` : ""}.`, "success");
+              refreshSolicitudBadges();
+              return;
+            }
+          }
+          if (Array.isArray(latest)) setSols(latest);
+          notify("La aceptacion se ha enviado, pero el servidor no ha confirmado a tiempo. Actualiza la bandeja en unos segundos antes de repetir.", "warning");
+        } catch (pollError) {
+          notify("La aceptacion puede seguir procesandose. Actualiza la bandeja antes de repetir.", "warning");
+        }
+      } else {
+        notify(e.message, "error");
+      }
     } finally {
       setTrabajando(null);
     }

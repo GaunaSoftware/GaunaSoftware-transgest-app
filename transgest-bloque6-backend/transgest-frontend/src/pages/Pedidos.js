@@ -5984,6 +5984,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [showCostes, setShowCostes] = useState(!!(editando?.coste_gasoil || editando?.coste_peajes || editando?.coste_dietas || editando?.coste_otros));
   const [poiDraft, setPoiDraft] = useState(null);
   const [managePointsOpen, setManagePointsOpen] = useState(false);
+  const [managePointsMode, setManagePointsMode] = useState("carga");
   const [notificandoColaborador, setNotificandoColaborador] = useState(false);
   const [previsualizandoColaborador, setPrevisualizandoColaborador] = useState(false);
   const [clienteRiesgo, setClienteRiesgo] = useState(null);
@@ -6226,7 +6227,7 @@ async function calcularKmRuta(origen, destino, puntos = null) {
   }
 }
 
-function GestionPuntosInteresModal({ onClose, onApply }) {
+function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId = "", modo = "carga" }) {
   const [puntos, setPuntos] = useState(getPuntosInteres);
   const [editing, setEditing] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -6259,6 +6260,97 @@ function GestionPuntosInteresModal({ onClose, onApply }) {
     setPuntos(next);
     onApply?.(next);
   }
+
+  function buildClientPointPayload(point, targetClienteId, clone = false) {
+    return {
+      ...(clone ? {} : { id: point.id }),
+      nombre: point.nombre || point.direccion || "",
+      cif: point.cif || "",
+      direccion: point.direccion || point.nombre || "",
+      codigo_postal: point.codigo_postal || "",
+      ciudad: point.ciudad || "",
+      provincia: point.provincia || "",
+      pais: point.pais || "EspaÃ±a",
+      lat: point.lat ?? point.latitud ?? null,
+      lng: point.lng ?? point.longitud ?? null,
+      tipo: point.tipo || modo || "ambos",
+      ventana: point.ventana || "",
+      contacto_nombre: point.contacto_nombre || "",
+      contacto_telefono: point.contacto_telefono || point.telefono || "",
+      email: point.email || "",
+      notas: point.notas || "",
+      google_maps_url: point.google_maps_url || point.metadata?.google_maps_url || "",
+      cliente_id: targetClienteId,
+      punto_general: false,
+      es_general: false,
+    };
+  }
+
+  async function ensurePointForClient(point) {
+    const targetClienteId = String(clienteId || "").trim();
+    if (!targetClienteId) {
+      notify("Selecciona primero un cliente para poder asociar el punto.", "warning");
+      return null;
+    }
+    if (String(point.cliente_id || "") === targetClienteId) return { point, changed: false };
+
+    const belongsToOtherClient = !!point.cliente_id && String(point.cliente_id) !== targetClienteId;
+    const isGeneralPoint = point.punto_general || point.es_general || !point.cliente_id;
+    const clone = belongsToOtherClient || isGeneralPoint;
+    const payload = buildClientPointPayload(point, targetClienteId, clone);
+    if (!payload.nombre || !payload.direccion) {
+      notify("El punto necesita nombre y direccion antes de poder seleccionarse.", "warning");
+      return null;
+    }
+
+    let saved = null;
+    try {
+      if (!clone && point.id && !String(point.id).startsWith("poi_")) {
+        saved = await editarPuntoInteres(point.id, payload);
+      } else {
+        saved = await crearPuntoInteres(payload);
+      }
+    } catch (e) {
+      saved = {
+        ...point,
+        ...payload,
+        id: clone ? `poi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : (point.id || `poi_${Date.now()}`),
+        synced: false,
+      };
+      notify(e.message || "No se pudo guardar el punto en servidor; se aplicara en local.", "warning");
+    }
+
+    const base = normalizePuntoInteresForForm(saved || payload);
+    const normalized = {
+      ...base,
+      id: base.id || `poi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      nombre: (base.nombre || base.direccion || "").trim(),
+      direccion: (base.direccion || base.nombre || "").trim(),
+      cliente_id: targetClienteId,
+      punto_general: false,
+      es_general: false,
+    };
+    const current = getPuntosInteres();
+    const next = setPuntosInteresCache([
+      ...current.filter(p => String(p.id) !== String(normalized.id)),
+      normalized,
+    ].slice(-250));
+    setPuntos(next);
+    onApply?.(next);
+    return { point: normalized, changed: true, cloned: clone };
+  }
+
+  async function selectPoint(point) {
+    const result = await ensurePointForClient(point);
+    if (!result?.point) return;
+    onSelectPoint?.(result.point);
+    if (result.changed) {
+      notify(result.cloned ? "Punto copiado al cliente y seleccionado." : "Punto asociado al cliente y seleccionado.", "success");
+    } else {
+      notify("Punto seleccionado.", "success");
+    }
+  }
+
   const qPoint = normalizePlaceText(pointSearch);
   const puntosFiltrados = qPoint
     ? puntos.filter(point => [
@@ -6325,7 +6417,10 @@ function GestionPuntosInteresModal({ onClose, onApply }) {
                       {point.google_maps_url && <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--accent)"}}>Google Maps</a>}
                     </div>
                   </div>
-                  <div style={{display:"flex",gap:8}}>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                    {onSelectPoint && (
+                      <button type="button" onClick={()=>selectPoint(point)} style={{...S.btn,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.28)",padding:"6px 10px"}}>Seleccionar</button>
+                    )}
                     <button type="button" onClick={()=>setEditing(point)} style={{...S.btn,background:"transparent",color:"var(--accent)",border:"1px solid var(--border2)",padding:"6px 10px"}}>Editar</button>
                     <button type="button" onClick={()=>removePoint(point)} style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",padding:"6px 10px"}}>Eliminar</button>
                   </div>
@@ -7212,7 +7307,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                     style={{...S.btn,background:"transparent",color:form.origen?.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
                     Guardar punto
                   </button>
-                  <button type="button" onClick={()=>setManagePointsOpen(true)}
+                  <button type="button" onClick={()=>{ setManagePointsMode("carga"); setManagePointsOpen(true); }}
                     style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
                     Puntos
                   </button>
@@ -7248,7 +7343,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                     style={{...S.btn,background:"transparent",color:form.destino?.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
                     Guardar punto
                   </button>
-                  <button type="button" onClick={()=>setManagePointsOpen(true)}
+                  <button type="button" onClick={()=>{ setManagePointsMode("descarga"); setManagePointsOpen(true); }}
                     style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
                     Puntos
                   </button>
@@ -8100,6 +8195,21 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
         <GestionPuntosInteresModal
           onClose={()=>setManagePointsOpen(false)}
           onApply={(next)=>setPuntosInteresCache(next)}
+          clienteId={form.cliente_id}
+          modo={managePointsMode}
+          onSelectPoint={(point)=>{
+            setForm(prev => managePointsMode === "descarga"
+              ? applyPuntoDescargaToDraft(prev, point)
+              : applyPuntoCargaToDraft(prev, point)
+            );
+            if (managePointsMode === "carga" && point?.cliente_id && String(point.cliente_id) === String(form.cliente_id || "")) {
+              setPuntosCargaClienteModal(prev => prev.some(p => String(p.id) === String(point.id))
+                ? prev.map(p => String(p.id) === String(point.id) ? point : p)
+                : [...prev, point]
+              );
+            }
+            setManagePointsOpen(false);
+          }}
         />
       )}
     </>

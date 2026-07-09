@@ -262,7 +262,7 @@ function portalClientePermission(req, res, next) {
     modulos["portal-cliente"]?.ver ||
     modulos["portal-cliente"]?.editar
   );
-  if (req.user?.cliente_id && hasPortalPermission && !req.path.startsWith("/admin/")) {
+  if (hasPortalPermission && !req.path.startsWith("/admin/")) {
     return next();
   }
   const modulo = req.path.startsWith("/admin/") ? "solicitudes" : "portal-cliente";

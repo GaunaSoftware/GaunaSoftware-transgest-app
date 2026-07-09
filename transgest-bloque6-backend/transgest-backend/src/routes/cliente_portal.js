@@ -189,7 +189,11 @@ async function requireCliente(req, res, next) {
       `SELECT id
          FROM clientes
         WHERE empresa_id=$1
-          AND LOWER(TRIM(COALESCE(email,'')))=LOWER(TRIM($2))
+          AND (
+            LOWER(TRIM(COALESCE(email,'')))=LOWER(TRIM($2))
+            OR LOWER(TRIM(COALESCE(email_facturacion,'')))=LOWER(TRIM($2))
+            OR POSITION(LOWER(TRIM($2)) IN LOWER(COALESCE(emails_albaranes,''))) > 0
+          )
           AND COALESCE(activo,true)=true
         ORDER BY created_at DESC NULLS LAST
         LIMIT 1`,

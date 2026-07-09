@@ -5817,45 +5817,11 @@ function buildPedidoMapPoints(pedido = {}, choferPasos = null) {
   }));
 }
 
-function projectPedidoMapPoint(point, bounds) {
-  const lngSpan = Math.max(0.0001, bounds.maxLng - bounds.minLng);
-  const latSpan = Math.max(0.0001, bounds.maxLat - bounds.minLat);
-  return {
-    x: Math.max(5, Math.min(95, ((point.lng - bounds.minLng) / lngSpan) * 100)),
-    y: Math.max(8, Math.min(92, (1 - ((point.lat - bounds.minLat) / latSpan)) * 100)),
-  };
-}
-
 function PedidoMapaOperativo({ pedido, choferPasos }) {
   const mapPoints = buildPedidoMapPoints(pedido, choferPasos);
   if (!mapPoints.length) return null;
-  const geoPoints = mapPoints.filter(p => Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)));
-  const hasAllGeo = geoPoints.length === mapPoints.length;
-  const minLat = geoPoints.length ? Math.min(...geoPoints.map(p => p.lat)) - 0.45 : 35.85;
-  const maxLat = geoPoints.length ? Math.max(...geoPoints.map(p => p.lat)) + 0.45 : 43.95;
-  const minLng = geoPoints.length ? Math.min(...geoPoints.map(p => p.lng)) - 0.65 : -9.75;
-  const maxLng = geoPoints.length ? Math.max(...geoPoints.map(p => p.lng)) + 0.65 : 4.45;
-  const bounds = { minLat, maxLat, minLng, maxLng };
-  const missingCarga = mapPoints.filter(p => p.tipo === "carga" && !p.hasGeo);
-  const missingDescarga = mapPoints.filter(p => p.tipo === "descarga" && !p.hasGeo);
-  const pointsProjected = mapPoints.map(point => {
-    if (point.hasGeo) return { ...point, screen:projectPedidoMapPoint(point, bounds) };
-    const bucket = point.tipo === "carga" ? missingCarga : missingDescarga;
-    const pos = Math.max(0, bucket.findIndex(p => p === point));
-    const total = Math.max(1, bucket.length);
-    return {
-      ...point,
-      screen:{
-        x: point.tipo === "carga" ? 26 : 74,
-        y: 40 + ((pos + 1) / (total + 1)) * 28,
-      },
-    };
-  });
-  const routePolyline = pointsProjected.map(p => `${p.screen.x},${p.screen.y}`).join(" ");
   const pasos = getPedidoMapaPasos(pedido, choferPasos);
   const estado = String(pedido?.estado || "pendiente").toLowerCase();
-  const routeColor = estado === "incidencia" ? "#ef4444" : ["entregado","facturado"].includes(estado) ? "#10b981" : estado === "descarga" ? "#f97316" : estado === "en_curso" ? "#3b82f6" : "rgba(100,116,139,.70)";
-  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${minLng.toFixed(6)},${minLat.toFixed(6)},${maxLng.toFixed(6)},${maxLat.toFixed(6)}&layer=mapnik`;
   const currentLabel = pasos.descarga_ok || ["entregado","facturado"].includes(estado)
     ? "Viaje entregado"
     : pasos.descarga_iniciada || estado === "descarga"
@@ -5866,69 +5832,30 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
           ? "En ruta"
           : pasos.carga_proceso || pasos.carga_iniciada
             ? "En carga"
-            : LABEL_ESTADO[estado] || estado;
+          : LABEL_ESTADO[estado] || estado;
   return (
     <div style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>
         <div>
-          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Mapa del pedido</div>
-          <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Puntos de carga y descarga marcados segun el estado operativo.</div>
+          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Puntos del pedido</div>
+          <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Mapa embebido desactivado para evitar errores de carga. Se mantienen puntos, estados y enlaces externos.</div>
         </div>
         <span style={{fontSize:10,fontWeight:900,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
           {currentLabel}
         </span>
-      </div>
-      <div style={{position:"relative",height:260,borderRadius:9,overflow:"hidden",border:"1px solid var(--border2)",background:"var(--bg3)"}}>
-        <iframe title={`Mapa pedido ${pedido?.numero || ""}`} src={src} style={{width:"100%",height:"100%",border:0}} loading="lazy" />
-        {!hasAllGeo && (
-          <div style={{position:"absolute",left:10,top:10,zIndex:5,maxWidth:330,border:"1px solid rgba(245,158,11,.38)",background:"rgba(255,251,235,.94)",color:"#92400e",borderRadius:8,padding:"7px 9px",fontSize:11,fontWeight:800,lineHeight:1.3}}>
-            Faltan coordenadas o enlace Maps en algun punto. El mapa se muestra orientativo hasta completar esos datos.
-          </div>
-        )}
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>
-          {pointsProjected.length > 1 && (
-            <polyline points={routePolyline} fill="none" stroke="rgba(255,255,255,.88)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-          )}
-          {pointsProjected.length > 1 && (
-            <polyline points={routePolyline} fill="none" stroke={routeColor} strokeWidth="1.05" strokeLinecap="round" strokeLinejoin="round" strokeDasharray={estado === "pendiente" || estado === "confirmado" ? "2 2" : "0"} />
-          )}
-        </svg>
-        {pointsProjected.map(point => (
-          <div
-            key={`${point.tipo}-${point.index}-${point.label}`}
-            title={`${point.title}: ${point.label || "-"} - ${point.tone.label}`}
-            style={{
-              position:"absolute",
-              left:`${point.screen.x}%`,
-              top:`${point.screen.y}%`,
-              transform:"translate(-50%,-50%)",
-              minWidth:34,
-              minHeight:34,
-              borderRadius:999,
-              border:`3px solid ${point.tone.border}`,
-              background:point.tone.bg,
-              color:point.tone.color,
-              boxShadow:"0 10px 24px rgba(15,23,42,.20)",
-              display:"flex",
-              alignItems:"center",
-              justifyContent:"center",
-              fontSize:12,
-              fontWeight:1000,
-              fontFamily:"'JetBrains Mono',monospace",
-              zIndex:4,
-              opacity:point.hasGeo ? 1 : .92,
-            }}
-          >
-            {point.tipo === "carga" ? "C" : "D"}{point.index + 1}
-          </div>
-        ))}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginTop:9}}>
         {mapPoints.map(point => (
           <div key={`card-${point.tipo}-${point.index}-${point.label}`} style={{border:`1px solid ${point.tone.border}`,borderRadius:8,padding:"8px 10px",background:point.tone.bg}}>
             <div style={{fontSize:10,color:point.tone.color,fontWeight:900,textTransform:"uppercase"}}>{point.title} - {point.tone.label}</div>
             <div style={{fontSize:12,color:"var(--text)",fontWeight:800,marginTop:2}}>{point.label || "-"}</div>
-            {!point.hasGeo && <div style={{fontSize:10,color:"#f59e0b",fontWeight:900,marginTop:3}}>Pendiente de coordenadas / enlace Maps</div>}
+            {point.google_maps_url ? (
+              <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{display:"inline-block",fontSize:10,color:"var(--accent)",fontWeight:900,marginTop:5}}>
+                Abrir punto externo
+              </a>
+            ) : (
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,marginTop:3}}>Sin enlace Maps guardado</div>
+            )}
           </div>
         ))}
       </div>

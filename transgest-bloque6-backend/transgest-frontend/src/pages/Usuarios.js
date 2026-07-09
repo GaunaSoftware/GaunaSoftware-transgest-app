@@ -100,14 +100,14 @@ const ROLE_PRESETS = {
   },
   mecanico: { ver: ["app_mecanico","mi_cuenta"], editar: ["app_mecanico","mi_cuenta"] },
   colaborador: {
-    ver: ["agenda","dashboard","control_tower","pedidos","plan_diario","gestion_trafico","clientes","rutas","vehiculos","choferes","hojas_ruta","informes","avisos","mi_cuenta"],
-    editar: ["mi_cuenta"],
+    ver: ["pedidos","documentos","mi_cuenta"],
+    editar: ["pedidos","documentos","mi_cuenta"],
   },
   visualizador: {
     ver: ["agenda","dashboard","control_tower","pedidos","plan_diario","gestion_trafico","clientes","rutas","vehiculos","choferes","hojas_ruta","informes","avisos","mi_cuenta"],
     editar: ["mi_cuenta"],
   },
-  chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","mi_cuenta"], editar: ["app_chofer","mi_cuenta"] },
+  chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","avisos","mi_cuenta"], editar: ["app_chofer","avisos","mi_cuenta"] },
   cliente: { ver: ["portal_cliente","mi_cuenta"], editar: ["portal_cliente","mi_cuenta"] },
 };
 

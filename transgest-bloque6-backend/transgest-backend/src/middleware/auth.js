@@ -142,7 +142,7 @@ const ROLE_PERMISSION_PRESETS = {
     ver: ["agenda","dashboard","pedidos","plan_diario","gestion_trafico","clientes","rutas","vehiculos","choferes","hojas_ruta","informes","documentos","avisos","mi_cuenta"],
     editar: ["mi_cuenta"],
   },
-  chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","mi_cuenta"], editar: ["app_chofer","mi_cuenta"] },
+  chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","avisos","mi_cuenta"], editar: ["app_chofer","avisos","mi_cuenta"] },
   cliente: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
   cliente_portal: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
   colaborador: { ver: ["pedidos","documentos","mi_cuenta"], editar: ["pedidos","documentos","mi_cuenta"] },
@@ -155,6 +155,7 @@ function isChoferPedidosOperationalPath(req) {
   if (method === "GET" && path === "/") return true;
   if (method === "POST" && path === "/chofer") return true;
   if (["GET", "POST"].includes(method) && /^\/chofer\/(clientes|rutas)(\/|$)/.test(path)) return true;
+  if (method === "GET" && /^\/chofer\/[^/]+\/historial-vehiculos$/.test(path)) return true;
   if (method === "GET" && /^\/[^/]+$/.test(path)) return true;
   if (["GET", "POST", "PATCH"].includes(method) && /^\/[^/]+\/(documento-control-digital|chofer-pasos|chofer-docs|estado|gps|firma)(\/|$)/.test(path)) return true;
   if (method === "GET" && /^\/[^/]+\/(eventos|carta-porte)$/.test(path)) return true;

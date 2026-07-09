@@ -3004,7 +3004,7 @@ export default function AppChofer(){
       setPedidos(arr);
       const jornada = await getChoferJornadaApp().catch(() => null);
       setJornadaInfo(jornada);
-      const puedeLeerAvisos = user?.rol !== "chofer" || user?.permisos?.avisos?.ver === true;
+      const puedeLeerAvisos = user?.rol !== "chofer" || user?.permisos?.modulos?.avisos?.ver === true || user?.permisos?.avisos?.ver === true;
       if (puedeLeerAvisos) {
         const avisos = await getNotificaciones(20).catch(() => ({ data: [] }));
         setRouteNotifications((Array.isArray(avisos?.data) ? avisos.data : [])
@@ -3026,7 +3026,7 @@ export default function AppChofer(){
       }
     }catch(e){ console.error(e); }
     finally{ setLoading(false); }
-  }, [user?.id, user?.chofer_id, user?.rol, user?.permisos?.avisos?.ver, isLitePlan]);
+  }, [user?.id, user?.chofer_id, user?.rol, user?.permisos?.modulos?.avisos?.ver, user?.permisos?.avisos?.ver, isLitePlan]);
 
   useEffect(()=>{ cargar(); },[cargar]);
 

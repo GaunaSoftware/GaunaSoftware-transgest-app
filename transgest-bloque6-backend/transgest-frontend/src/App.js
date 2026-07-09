@@ -396,17 +396,29 @@ const MODULOS_TRAFICO = [
 ];
 
 const MODULOS_COLABORADOR = [
+  { titulo:"Portal", items:[
+    { id:"pedidos", icon:IC.pedidos, label:"Peticiones viaje" },
+    { id:"documentos", icon:IC.docs, label:"Documentos" },
+    { id:"mi_cuenta", icon:IC.usuarios, label:"Mi cuenta" },
+  ]},
+];
+
+const MODULOS_VISUALIZADOR = [
   { titulo:"Consulta", items:[
+    { id:"dashboard", icon:IC.dashboard, label:"Dashboard" },
     { id:"agenda", icon:IC.agenda, label:"Agenda" },
-    { id:"plan_diario", icon:IC.cuadrante, label:"Plan diario" },
     { id:"pedidos", icon:IC.pedidos, label:"Pedidos" },
-    { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
+    { id:"plan_diario", icon:IC.cuadrante, label:"Plan diario" },
+    { id:"gestion_trafico", icon:IC.cuadrante, label:"Mesa de trafico" },
+    { id:"clientes", icon:IC.clientes, label:"Clientes" },
     { id:"rutas", icon:IC.rutas, label:"Rutas y Tarifas" },
     { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos", children:[
       { id:"vehiculos_tractoras", label:"Tractoras" },
       { id:"vehiculos_remolques", label:"Remolques" },
     ]},
-    { id:"choferes", icon:IC.choferes, label:"Chóferes" },
+    { id:"choferes", icon:IC.choferes, label:"Choferes" },
+    { id:"documentos", icon:IC.docs, label:"Documentos" },
+    { id:"mi_cuenta", icon:IC.usuarios, label:"Mi cuenta" },
   ]},
 ];
 
@@ -431,7 +443,7 @@ const MODULOS_POR_ROL = {
   responsable_taller:   MODULOS_RESPONSABLE_TALLER,
   mecanico:             MODULOS_RESPONSABLE_TALLER,
   colaborador:          MODULOS_COLABORADOR,
-  visualizador:         MODULOS_COLABORADOR,
+  visualizador:         MODULOS_VISUALIZADOR,
   chofer:               MODULOS_CHOFER,
   cliente:              MODULOS_CLIENTE,
   cliente_portal:       MODULOS_CLIENTE,

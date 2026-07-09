@@ -73,8 +73,8 @@ export function useAuth() {
 // ── Permisos por rol ──────────────────────────────────
 const PERMISOS = {
   chofer: {
-    ver:    ["agenda","pedidos","documentos","app_chofer","rutas_recomendadas_chofer"],
-    editar: ["agenda","pedidos"],
+    ver:    ["app_chofer","rutas_recomendadas_chofer","avisos","mi_cuenta"],
+    editar: ["app_chofer","avisos","mi_cuenta"],
   },
   cliente: {
     ver:    ["portal-cliente","pedidos","documentos","facturacion"],
@@ -97,8 +97,8 @@ const PERMISOS = {
     editar: ["agenda","control_tower","pedidos","plan_diario","gestion_trafico","rutas","rutas_recomendadas","clientes","vehiculos","choferes","colaboradores","documentos","avisos","hojas_ruta","palets","grupajes","solicitudes"],
   },
   administrativo: {
-    ver:    ["dashboard","agenda","clientes","vehiculos","choferes","facturacion","contabilidad","nominas","pedidos","documentos","informes","actividad","empresa"],
-    editar: ["agenda","clientes","facturacion","pedidos","documentos"],
+    ver:    ["dashboard","agenda","clientes","vehiculos","choferes","facturacion","contabilidad","nominas","pedidos","documentos","informes","actividad","empresa","avisos","mi_cuenta"],
+    editar: ["agenda","clientes","facturacion","pedidos","documentos","avisos","mi_cuenta"],
   },
   responsable_taller: {
     ver:    ["agenda","vehiculos","taller","avisos"],

@@ -1,11 +1,12 @@
 ﻿const { cacheMiddleware } = require("../services/cache");
 const express = require("express");
 const db = require("../services/db");
-const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
+const { authenticate, GERENTE_O_TRAFICO, requireRole } = require("../middleware/auth");
 const { resolveApiKey, recordApiUsage } = require("../services/apiKeys");
 
 const r1 = express.Router();
 r1.use(authenticate);
+const GERENTE_TRAFICO_O_CHOFER = requireRole("gerente", "trafico", "chofer");
 
 const GPS_PROVIDERS = {
   locatel: "Locatel",
@@ -1631,13 +1632,34 @@ r1.patch("/:id/reactivar", GERENTE_O_TRAFICO, async (req, res) => {
   res.json({ ok: true });
 });
 
-r1.patch("/:id/km", GERENTE_O_TRAFICO, async (req, res) => {
+r1.patch("/:id/km", GERENTE_TRAFICO_O_CHOFER, async (req, res) => {
   const { km_actuales } = req.body;
   if (!km_actuales || isNaN(km_actuales)) {
     return res.status(400).json({ error: "km_actuales requerido" });
   }
   const empresaId = req.empresaId || req.user?.empresa_id;
   try {
+    if (req.user?.rol === "chofer") {
+      const choferId = req.user?.chofer_id;
+      if (!choferId) return res.status(403).json({ error: "Chofer no vinculado al usuario." });
+      const permitido = await db.query(
+        `SELECT 1
+           FROM vehiculos v
+          WHERE v.id=$1 AND v.empresa_id=$2
+            AND (
+              v.chofer_id=$3 OR EXISTS (
+                SELECT 1 FROM pedidos p
+                 WHERE p.empresa_id=$2
+                   AND p.vehiculo_id=$1
+                   AND p.chofer_id=$3
+                   AND COALESCE(p.estado,'') NOT IN ('entregado','finalizado','cancelado')
+              )
+            )
+          LIMIT 1`,
+        [req.params.id, empresaId, choferId]
+      );
+      if (!permitido.rows[0]) return res.status(403).json({ error: "No puedes actualizar los kilometros de este vehiculo." });
+    }
     const { rows } = await db.query(
       `UPDATE vehiculos SET km_actuales=$1, updated_at=NOW()
        WHERE id=$2 AND empresa_id=$3 RETURNING id, matricula, km_actuales`,

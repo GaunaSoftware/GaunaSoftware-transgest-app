@@ -356,7 +356,7 @@ export default function Solicitudes() {
   async function convertir(sol) {
     setTrabajando(sol.id);
     try {
-      const r = await convertirPortalSolicitudAdmin(sol.id);
+      const r = await convertirPortalSolicitudAdmin(sol.id, { force: true, limpiar_bultos: true });
       const solicitudActualizada = r?.solicitud || {};
       const pedido = r?.pedido || {};
       setSols(prev => prev.map(item => String(item.id) === String(sol.id)

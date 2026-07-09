@@ -1338,9 +1338,10 @@ router.get("/admin/solicitudes/:id/eventos", requireGestion, async (req, res) =>
 router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res) => {
   await ensureSchema();
   const eid = empresaId(req);
+  const force = req.body?.force === true || req.body?.limpiar_bultos === true;
   let result;
   await db.transaction(async (client) => {
-    const { rows } = await client.query(
+    let { rows } = await client.query(
       `SELECT s.*, c.nombre AS cliente_nombre
          FROM portal_solicitudes_cliente s
          JOIN clientes c ON c.id=s.cliente_id AND c.empresa_id=s.empresa_id
@@ -1356,6 +1357,22 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
     if (["descartada", "rechazada"].includes(String(sol.estado || "").toLowerCase())) {
       result = { status: 400, body: { error: "No se puede convertir una solicitud rechazada" } };
       return;
+    }
+    if (force || Number(sol.bultos) <= 0) {
+      const cleaned = await client.query(
+        `UPDATE portal_solicitudes_cliente
+            SET bultos=NULL,
+                notas=CASE
+                  WHEN $1::boolean AND COALESCE(bultos,0) <= 0 AND COALESCE(notas,'') NOT LIKE '%Bultos invalidos limpiados%'
+                    THEN CONCAT(COALESCE(notas,''), CASE WHEN COALESCE(notas,'')='' THEN '' ELSE E'\n' END, 'Bultos invalidos limpiados al aceptar la solicitud.')
+                  ELSE notas
+                END,
+                updated_at=NOW()
+          WHERE id=$2 AND empresa_id=$3 AND (COALESCE(bultos,0) <= 0 OR $1::boolean)
+          RETURNING *`,
+        [force, sol.id, eid]
+      );
+      if (cleaned.rows[0]) Object.assign(sol, cleaned.rows[0]);
     }
     if (sol.pedido_id) {
       const pedidoExistente = await client.query(
@@ -1457,6 +1474,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
     await addSolicitudEvento(client, req, sol.id, "solicitud.convertida", {
       pedido_id: pedido.id,
       pedido_numero: pedido.numero,
+      bultos_limpiados: force || Number(sol.bultos) <= 0,
     });
     result = { status: 201, body: { ok: true, pedido, solicitud: updated.rows[0] } };
   });

@@ -672,7 +672,7 @@ export const getPortalPedidoEventos = (pedidoId) => apiFetch(`/portal-cliente/pe
 export const getPortalPedidoDocumentoControl = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/documento-control`);
 export const getPortalSolicitudesAdmin = (params={}) => apiFetch(`/portal-cliente/admin/solicitudes?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
 export const actualizarPortalSolicitudAdmin = (id, data) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
-export const convertirPortalSolicitudAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/convertir`, { method:"POST", body:{}, timeoutMs:60000 });
+export const convertirPortalSolicitudAdmin = (id, data={}) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/convertir`, { method:"POST", body:data, timeoutMs:60000 });
 export const getPortalSolicitudEventosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/eventos`);
 export const getInformeRutas= (desde,hasta) => apiFetch(`/informes/rutas?desde=${desde}&hasta=${hasta}`);
 export const getInformeChoferes=(desde,hasta)=>apiFetch(`/informes/choferes?desde=${desde}&hasta=${hasta}`);

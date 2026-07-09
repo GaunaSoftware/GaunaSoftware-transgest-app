@@ -2348,9 +2348,12 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     matricula_colaborador: "",
     remolque_matricula_colaborador: "",
     colaborador_id: "",
+    matricula_rapida: "",
     tipo_descarga: "trasera",
+    retorno: "no",
     fecha_carga: hoy,
     fecha_descarga: hoy,
+    fecha_finalizacion: hoy,
     hora_carga: "",
     hora_descarga: "",
     referencia_cliente: "",
@@ -2363,6 +2366,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     km_ruta: "",
     cargas_extra: "",
     descargas_extra: "",
+    observaciones: "",
   }));
   const [saving, setSaving] = useState(false);
   const [rutasCliente, setRutasCliente] = useState([]);
@@ -2375,6 +2379,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
   const riesgoConfirmadoRapidoRef = useRef(new Map());
   const f = k => e => setForm(p => ({ ...p, [k]: (k === "origen" || k === "destino") ? e.target.value.toUpperCase() : e.target.value }));
   const inp = { ...S.input, boxSizing:"border-box" };
+  const quickGrid = {display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10};
   const cleanCliente = form.cliente_nombre.trim();
   const matches = cleanCliente
     ? clientes.filter(c => (c.nombre || "").toLowerCase().includes(cleanCliente.toLowerCase())).slice(0, 5)
@@ -2400,6 +2405,9 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     return !esRemolque;
   });
   const vehiculoSeleccionado = vehiculos.find(v => v.id === form.vehiculo_id);
+  const vehiculoPorMatriculaRapida = form.matricula_rapida
+    ? vehiculosConjunto.find(v => String(v.matricula || "").replace(/[\s-]/g, "").toUpperCase() === String(form.matricula_rapida || "").replace(/[\s-]/g, "").toUpperCase())
+    : null;
   const choferAsignado = choferes.find(c => c.id === form.chofer_id);
   const colaboradorSeleccionado = colaboradores.find(c => c.id === form.colaborador_id);
   const labelConjunto = v => {
@@ -2446,7 +2454,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     const principal = {
       direccion: form.destino.trim().toUpperCase(),
       cliente_nombre: "",
-      fecha: form.fecha_descarga || form.fecha_carga || "",
+      fecha: form.fecha_descarga || form.fecha_finalizacion || form.fecha_carga || "",
       hora: form.hora_descarga || "",
       ventana: "",
       bultos: "",
@@ -2466,7 +2474,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         return {
           direccion: (direccion || `DESCARGA ${idx + 2}`).toUpperCase(),
           cliente_nombre: "",
-          fecha: fecha || form.fecha_descarga || form.fecha_carga || "",
+          fecha: fecha || form.fecha_descarga || form.fecha_finalizacion || form.fecha_carga || "",
           hora: hora || "",
           ventana: "",
           bultos: "",
@@ -2613,10 +2621,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       const rutasDisponibles = Array.isArray(rutasDisponiblesRaw)
         ? rutasDisponiblesRaw
         : Array.isArray(rutasDisponiblesRaw?.data) ? rutasDisponiblesRaw.data : [];
-      if (rutasDisponibles.length > 0 && !form.ruta_id) {
-        notify("Este cliente tiene tarifas guardadas. Selecciona una tarifa/ruta antes de crear el pedido rapido.", "warning");
-        return;
-      }
+      const tieneTarifasSinRuta = rutasDisponibles.length > 0 && !form.ruta_id;
       if (clienteRiesgoRapidoPedido?.requiere_confirmacion && !isRiskConfirmationFresh(riesgoConfirmadoRapidoRef, cliente.id, clienteRiesgoRapidoPedido)) {
         const money = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const ok = await confirmDialog({
@@ -2639,6 +2644,16 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       const matriculaColaborador = String(form.matricula_colaborador || "").trim().toUpperCase();
       const remolqueColaborador = String(form.remolque_matricula_colaborador || "").trim().toUpperCase();
       const colaboradorId = form.colaborador_id || "";
+      const vehiculoRapido = form.vehiculo_id
+        ? vehiculos.find(v => String(v.id) === String(form.vehiculo_id))
+        : vehiculoPorMatriculaRapida;
+      const vehiculoRapidoId = colaboradorId ? "" : (vehiculoRapido?.id || "");
+      const choferRapidoId = !colaboradorId && vehiculoRapidoId
+        ? (form.chofer_id || vehiculoRapido?.chofer_id || choferes.find(c => String(c.vehiculo_id) === String(vehiculoRapidoId))?.id || "")
+        : "";
+      const matriculaManualRapida = !vehiculoRapidoId && !colaboradorId
+        ? String(form.matricula_rapida || "").trim().toUpperCase()
+        : matriculaColaborador;
       const tipoPrecio = form.tipo_precio || ruta?.tarifa_tipo || "viaje";
       const kmRuta = toNullableNumber(form.km_ruta) ?? toNullableNumber(ruta?.km);
       const precioUnitario = toNullableNumber(form.precio_unitario) ?? toNullableNumber(ruta?.precio_base) ?? 0;
@@ -2665,10 +2680,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         : tipoPrecio === "viaje"
           ? precioColaboradorUnitario
           : Number(((tipoPrecio === "kg" ? unidadesColaborador / 100 : unidadesColaborador) * precioColaboradorUnitario).toFixed(2));
-      const conAsignacion = !!form.vehiculo_id || !!colaboradorId;
+      const conAsignacion = !!vehiculoRapidoId || !!colaboradorId || !!matriculaManualRapida;
       const aviso = conAsignacion
-        ? "Pedido rapido: completar precio, mercancia, peso, bultos, documentos y datos de facturacion."
-        : "Pedido rapido sin asignar: completar vehiculo o colaborador, chofer, precio, mercancia, peso, bultos, documentos y datos de facturacion.";
+        ? `Pedido rapido: completar ${tieneTarifasSinRuta ? "ruta/tarifa, " : ""}mercancia, peso, bultos, documentos y datos de facturacion.`
+        : `Pedido rapido sin asignar: completar ${tieneTarifasSinRuta ? "ruta/tarifa, " : ""}vehiculo o colaborador, chofer, precio, mercancia, peso, bultos, documentos y datos de facturacion.`;
       await crearPedido({
         cliente_id: cliente.id,
         ruta_id: ruta?.id || ruta?.ruta_id || null,
@@ -2683,15 +2698,15 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           puntos_carga: buildCargasRapidas(),
           puntos_descarga: buildDescargasRapidas(),
         }),
-        vehiculo_id: colaboradorId ? null : (form.vehiculo_id || null),
-        chofer_id: !colaboradorId && form.vehiculo_id ? (form.chofer_id || null) : null,
-        remolque_id_manual: colaboradorId ? null : (form.remolque_id_manual || null),
+        vehiculo_id: colaboradorId ? null : (vehiculoRapidoId || null),
+        chofer_id: !colaboradorId && vehiculoRapidoId ? (choferRapidoId || null) : null,
+        remolque_id_manual: colaboradorId ? null : (form.remolque_id_manual || vehiculoRapido?.remolque_id || null),
         colaborador_id: colaboradorId || null,
-        matricula_colaborador: matriculaColaborador || null,
+        matricula_colaborador: matriculaManualRapida || null,
         remolque_matricula_colaborador: remolqueColaborador || null,
         fecha_pedido: hoy,
         fecha_carga: form.fecha_carga,
-        fecha_descarga: form.fecha_descarga || null,
+        fecha_descarga: form.fecha_descarga || form.fecha_finalizacion || null,
         hora_carga: form.hora_carga || null,
         hora_descarga: form.hora_descarga || null,
         referencia_cliente: form.referencia_cliente || null,
@@ -2702,7 +2717,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         tipo_carga: "completa",
         carga_trasera: form.tipo_descarga === "trasera",
         carga_lateral: form.tipo_descarga === "lateral",
-        condiciones_adicionales: form.tipo_descarga ? `Tipo descarga: ${form.tipo_descarga}` : null,
+        condiciones_adicionales: [
+          form.tipo_descarga ? `Tipo descarga: ${form.tipo_descarga}` : "",
+          form.retorno === "si" ? "Retorno: si" : "Retorno: no",
+        ].filter(Boolean).join(" | ") || null,
         tipo_precio: tipoPrecio,
         precio_unitario: precioUnitario,
         cantidad: tarifaDraft.cantidad || null,
@@ -2716,7 +2734,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         coste_gasoil: colaboradorId ? 0 : undefined,
         pendiente_completar: true,
         aviso_completar: aviso,
-        notas: aviso,
+        notas: [aviso, form.observaciones].filter(Boolean).join("\n"),
       });
       onCreado();
     } catch(e) {
@@ -2731,10 +2749,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(860px,96vw)",maxHeight:"92vh",overflowY:"auto",boxSizing:"border-box"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:800,color:"var(--text)",marginBottom:4}}>Pedido rapido</div>
         <div style={{fontSize:12,color:"var(--text4)",marginBottom:14}}>
-          Entra en el cuadrante de trafico y queda marcado para completar mas tarde. Si no asignas conjunto, se crea pendiente.
+          Captura minima para crear el viaje en segundos. Queda marcado en amarillo para completar datos antes de asignar o cerrar.
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div style={quickGrid}>
           <div style={{gridColumn:"1/-1"}}>
             <label style={S.label}>Cliente *</label>
             <input list="clientes-pedido-rapido" style={inp} value={form.cliente_nombre} onChange={e=>{
@@ -2790,8 +2808,8 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                   <option value="">{rutasLoading ? "Cargando tarifas..." : rutasCliente.length ? "Selecciona tarifa del cliente" : "Sin tarifas guardadas"}</option>
                   {rutasCliente.map(r => <option key={r.id || r.ruta_id} value={r.id || r.ruta_id}>{formatRutaTarifaLabel(r)}</option>)}
                 </select>
-                <div style={{fontSize:11,color:rutasCliente.length ? "#fbbf24" : "var(--text5)",marginTop:4}}>
-                  {rutasCliente.length ? "Para este cliente la tarifa es obligatoria en pedido rapido." : "No hay tarifas guardadas; puedes completar el precio manualmente."}
+                <div style={{fontSize:11,color:rutasCliente.length ? "#f59e0b" : "var(--text5)",marginTop:4}}>
+                  {rutasCliente.length ? "Opcional: si no eliges tarifa, se creara marcado para revisar ruta/precio." : "No hay tarifas guardadas; puedes completar el precio manualmente."}
                 </div>
               </div>
               <div>
@@ -2824,6 +2842,35 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           )}
           <div><label style={S.label}>Origen *</label><input style={inp} value={form.origen} onChange={f("origen")} placeholder="MADRID"/></div>
           <div><label style={S.label}>Destino *</label><input style={inp} value={form.destino} onChange={f("destino")} placeholder="VALENCIA"/></div>
+          <div><label style={S.label}>Fecha *</label><input type="date" style={inp} value={form.fecha_carga} onChange={e=>setForm(p=>({...p,fecha_carga:e.target.value,fecha_descarga:p.fecha_descarga || e.target.value,fecha_finalizacion:p.fecha_finalizacion || e.target.value}))}/></div>
+          <div><label style={S.label}>Hora carga</label><input type="time" style={inp} value={form.hora_carga} onChange={f("hora_carga")}/></div>
+          <div><label style={S.label}>Hora descarga</label><input type="time" style={inp} value={form.hora_descarga} onChange={f("hora_descarga")}/></div>
+          <div><label style={S.label}>Fecha finalizacion</label><input type="date" style={inp} value={form.fecha_finalizacion} onChange={e=>setForm(p=>({...p,fecha_finalizacion:e.target.value,fecha_descarga:e.target.value || p.fecha_descarga}))}/></div>
+          <div>
+            <label style={S.label}>Matricula</label>
+            <input list="matriculas-pedido-rapido" style={inp} value={form.matricula_rapida} onChange={e=>{
+              const value = e.target.value.toUpperCase();
+              const match = vehiculosConjunto.find(v => String(v.matricula || "").replace(/[\s-]/g, "").toUpperCase() === value.replace(/[\s-]/g, "").toUpperCase());
+              setForm(p => ({
+                ...p,
+                matricula_rapida: value,
+                vehiculo_id: match?.id || p.vehiculo_id,
+                chofer_id: match?.chofer_id || p.chofer_id,
+                remolque_id_manual: match?.remolque_id || p.remolque_id_manual,
+                matricula_colaborador: match ? "" : p.matricula_colaborador,
+              }));
+            }} placeholder="1234ABC"/>
+            <datalist id="matriculas-pedido-rapido">
+              {vehiculosConjunto.map(v => <option key={v.id} value={v.matricula}>{labelConjunto(v)}</option>)}
+            </datalist>
+          </div>
+          <div>
+            <label style={S.label}>Retorno</label>
+            <select style={S.sel} value={form.retorno} onChange={f("retorno")}>
+              <option value="no">No</option>
+              <option value="si">Si</option>
+            </select>
+          </div>
           <div>
             <label style={S.label}>Matricula / conjunto</label>
             <select style={S.sel} value={form.vehiculo_id} onChange={e=>{
@@ -2905,10 +2952,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
               <option value="indiferente">Indiferente</option>
             </select>
           </div>
-          <div><label style={S.label}>Fecha carga *</label><input type="date" style={inp} value={form.fecha_carga} onChange={f("fecha_carga")}/></div>
           <div><label style={S.label}>Fecha descarga</label><input type="date" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")}/></div>
-          <div><label style={S.label}>Hora carga</label><input type="time" style={inp} value={form.hora_carga} onChange={f("hora_carga")}/></div>
-          <div><label style={S.label}>Hora descarga</label><input type="time" style={inp} value={form.hora_descarga} onChange={f("hora_descarga")}/></div>
           <div>
             <label style={S.label}>Tipo precio</label>
             <select style={S.sel} value={form.tipo_precio} onChange={e=>setForm(p=>syncCantidadRapida({...p,tipo_precio:e.target.value}, true))}>
@@ -2953,6 +2997,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
             })()}
           </div>
           <div style={{gridColumn:"1/-1"}}><label style={S.label}>Referencia de carga</label><input style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Referencia / carga / orden"/></div>
+          <div style={{gridColumn:"1/-1"}}>
+            <label style={S.label}>Observaciones</label>
+            <textarea style={{...inp,minHeight:58,resize:"vertical"}} value={form.observaciones} onChange={f("observaciones")} placeholder="Ej: levantar techo, llamar antes de cargar, traslado bobinas..." />
+          </div>
           <div style={{gridColumn:"1/-1"}}>
             <label style={S.label}>Cargas extra</label>
             <textarea
@@ -10347,10 +10395,13 @@ export default function Pedidos() {
                 estadoRow === "descarga" ? "rgba(167,139,250,.10)" :
                 estadoRow === "incidencia" ? "rgba(251,191,36,.12)" :
                 undefined;
+              const pendingCompleteBackground = p.pendiente_completar ? "rgba(251,191,36,.18)" : undefined;
               const rowBackground =
                 String(focusPedido?.pedido_id || "") === String(p.id)
                   ? "rgba(34,211,160,.10)"
-                  : priorityMeta.flags.overdueAssignment
+                  : pendingCompleteBackground
+                    ? pendingCompleteBackground
+                    : priorityMeta.flags.overdueAssignment
                     ? "rgba(239,68,68,.08)"
                     : priorityMeta.flags.urgentAssignment
                       ? "rgba(245,158,11,.07)"
@@ -10358,7 +10409,9 @@ export default function Pedidos() {
               const rowShadow =
                 String(focusPedido?.pedido_id || "") === String(p.id)
                   ? "inset 3px 0 0 var(--green)"
-                  : priorityMeta.flags.overdueAssignment
+                    : p.pendiente_completar
+                    ? "inset 3px 0 0 rgba(245,158,11,.8)"
+                    : priorityMeta.flags.overdueAssignment
                     ? "inset 3px 0 0 rgba(239,68,68,.85)"
                     : priorityMeta.flags.urgentAssignment
                       ? "inset 3px 0 0 rgba(245,158,11,.8)"

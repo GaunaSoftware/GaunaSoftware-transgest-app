@@ -1142,8 +1142,9 @@ function normalizeStopsForCopy(stops, fallbackAddress = "", tipo = "carga") {
     .map((stop, idx) => {
       const direccion = String(stop?.direccion || stop?.address || stop?.lugar || (idx === 0 ? fallbackAddress : "") || "").trim();
       const googleMapsUrl = cleanMapsUrl(stop?.google_maps_url || stop?.googleMapsUrl || stop?.maps_url || stop?.metadata?.google_maps_url || "");
-      const lat = stop?.lat ?? stop?.latitud ?? stop?.metadata?.lat ?? null;
-      const lng = stop?.lng ?? stop?.longitud ?? stop?.metadata?.lng ?? null;
+      const mapsCoords = coordsFromMapsUrl(googleMapsUrl);
+      const lat = stop?.lat ?? stop?.latitud ?? stop?.metadata?.lat ?? mapsCoords?.lat ?? null;
+      const lng = stop?.lng ?? stop?.longitud ?? stop?.metadata?.lng ?? mapsCoords?.lng ?? null;
       return { ...stop, direccion, google_maps_url: googleMapsUrl, lat, lng };
     })
     .filter(stop => stop.direccion || stop.google_maps_url || (stop.lat != null && stop.lng != null));
@@ -1257,6 +1258,29 @@ function cleanMapsUrl(value) {
   return isValidMapsUrl(raw) ? raw : "";
 }
 
+function coordsFromMapsUrl(value) {
+  const raw = String(value || "");
+  if (!raw) return null;
+  const decoded = (() => {
+    try { return decodeURIComponent(raw); } catch { return raw; }
+  })();
+  const patterns = [
+    /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
+    /[?&](?:q|ll|query)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
+    /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/,
+  ];
+  for (const pattern of patterns) {
+    const match = decoded.match(pattern);
+    if (!match) continue;
+    const lat = Number(match[1]);
+    const lng = Number(match[2]);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+      return { lat, lng };
+    }
+  }
+  return null;
+}
+
 function resolvePuntoInteresQuery(place, puntos = null) {
   const raw = typeof place === "object" && place !== null
     ? String(place.address || place.direccion || place.lugar || place.name || place.nombre || "").trim()
@@ -1285,6 +1309,8 @@ function savePuntoInteres(punto) {
   const nombre = (punto?.nombre || punto?.cliente_nombre || direccion).trim();
   if (!direccion) return getPuntosInteres();
   const id = punto?.id || `poi_${Date.now()}`;
+  const googleMapsUrl = cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || "");
+  const mapsCoords = coordsFromMapsUrl(googleMapsUrl);
   const normalizado = {
     id,
     nombre,
@@ -1304,9 +1330,9 @@ function savePuntoInteres(punto) {
     cliente_id: punto?.cliente_id || "",
     punto_general: punto?.punto_general ?? punto?.es_general ?? !punto?.cliente_id,
     es_general: punto?.es_general ?? punto?.punto_general ?? !punto?.cliente_id,
-    google_maps_url: cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || ""),
-    lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? null,
-    lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? null,
+    google_maps_url: googleMapsUrl,
+    lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? mapsCoords?.lat ?? null,
+    lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? mapsCoords?.lng ?? null,
   };
   const actuales = getPuntosInteres();
   const reemplazaPorId = actuales.some(p => String(p.id) === String(id));
@@ -1321,6 +1347,8 @@ function savePuntoInteres(punto) {
 }
 
 function puntoToStop(punto) {
+  const googleMapsUrl = cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || "");
+  const mapsCoords = coordsFromMapsUrl(googleMapsUrl);
   return {
     direccion: punto?.direccion || "",
     cliente_nombre: punto?.nombre || "",
@@ -1331,9 +1359,9 @@ function puntoToStop(punto) {
     email: punto?.email || "",
     provincia: punto?.provincia || "",
     pais: punto?.pais || "",
-    google_maps_url: cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || ""),
-    lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? null,
-    lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? null,
+    google_maps_url: googleMapsUrl,
+    lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? mapsCoords?.lat ?? null,
+    lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? mapsCoords?.lng ?? null,
   };
 }
 
@@ -1372,6 +1400,24 @@ function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos" } =
       return true;
     })
     .sort((a, b) => sortPuntosByClienteScope(a, b, clienteId));
+}
+
+function puntoEndpointVariants(punto = {}) {
+  return [
+    punto.nombre,
+    punto.direccion,
+    direccionCompletaPunto(punto),
+    [punto.nombre, punto.ciudad].filter(Boolean).join(" "),
+    [punto.nombre, punto.provincia].filter(Boolean).join(" "),
+    [punto.direccion, punto.ciudad].filter(Boolean).join(" "),
+  ].map(normalizePlaceText).filter(Boolean);
+}
+
+function findPuntoInteresForTypedEndpoint(text, clienteId = "", tipo = "ambos", puntos = null) {
+  const needle = normalizePlaceText(text);
+  if (!needle) return null;
+  const lista = filterPuntosForPedido(Array.isArray(puntos) ? puntos : getPuntosInteres(), { clienteId, tipo });
+  return lista.find(p => puntoEndpointVariants(p).some(v => v === needle)) || null;
 }
 
 function getPuntosCargaCliente(clienteId, puntos = null) {
@@ -5651,10 +5697,26 @@ function PedidoIncidenciaPanel({ pedido }) {
 
 function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   const isOrigen = side === "origen";
-  const sourceStop = stop || parseStops(isOrigen ? pedido.puntos_carga : pedido.puntos_descarga)[0] || {};
-  const lat = Number(sourceStop.lat || sourceStop.latitude || pedido[`${side}_lat`] || pedido[`${side}_latitude`]);
-  const lng = Number(sourceStop.lng || sourceStop.lon || sourceStop.longitude || pedido[`${side}_lng`] || pedido[`${side}_lon`] || pedido[`${side}_longitude`]);
-  const label = sourceStop.nombre || sourceStop.name || sourceStop.direccion || pedido[side] || "";
+  const rawStop = stop || parseStops(isOrigen ? pedido.puntos_carga : pedido.puntos_descarga)[0] || {};
+  const initialLabel = rawStop.nombre || rawStop.name || rawStop.cliente_nombre || rawStop.direccion || pedido[side] || "";
+  const tipo = isOrigen ? "carga" : "descarga";
+  const puntoGuardado = findPuntoInteresForStop(rawStop, initialLabel)
+    || findPuntoInteresForTypedEndpoint(initialLabel || pedido[side], pedido.cliente_id || "", tipo);
+  const puntoStop = puntoGuardado ? puntoToStop(puntoGuardado) : {};
+  const googleMapsUrl = rawStop.google_maps_url || rawStop.googleMapsUrl || puntoStop.google_maps_url || "";
+  const mapsCoords = coordsFromMapsUrl(googleMapsUrl);
+  const sourceStop = {
+    ...puntoStop,
+    ...rawStop,
+    lat: rawStop.lat ?? rawStop.latitud ?? rawStop.latitude ?? puntoStop.lat ?? puntoStop.latitud ?? mapsCoords?.lat ?? null,
+    lng: rawStop.lng ?? rawStop.longitud ?? rawStop.lon ?? rawStop.longitude ?? puntoStop.lng ?? puntoStop.longitud ?? mapsCoords?.lng ?? null,
+    google_maps_url: googleMapsUrl,
+    provincia: rawStop.provincia || rawStop.region || puntoStop.provincia || "",
+    pais: rawStop.pais || rawStop.country || puntoStop.pais || "",
+  };
+  const lat = Number(sourceStop.lat ?? sourceStop.latitude ?? pedido[`${side}_lat`] ?? pedido[`${side}_latitude`]);
+  const lng = Number(sourceStop.lng ?? sourceStop.lon ?? sourceStop.longitude ?? pedido[`${side}_lng`] ?? pedido[`${side}_lon`] ?? pedido[`${side}_longitude`]);
+  const label = sourceStop.nombre || sourceStop.name || sourceStop.cliente_nombre || sourceStop.direccion || pedido[side] || "";
   const provincia = sourceStop.provincia || pedido[`${side}_provincia`] || "";
   const pais = sourceStop.pais || pedido[`${side}_pais`] || "España";
   if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, label, hasGeo:true };
@@ -5935,6 +5997,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [previsualizandoColaborador, setPrevisualizandoColaborador] = useState(false);
   const [clienteRiesgo, setClienteRiesgo] = useState(null);
   const [clienteRiesgoLoading, setClienteRiesgoLoading] = useState(false);
+  const [puntosInteresModal, setPuntosInteresModal] = useState(getPuntosInteres);
   const [puntosCargaClienteModal, setPuntosCargaClienteModal] = useState([]);
   const [puntosCargaClienteLoading, setPuntosCargaClienteLoading] = useState(false);
   const [pendingDocs, setPendingDocs] = useState(() => Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
@@ -5959,6 +6022,17 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     if (!guidedActive || typeof onGuidedProgress !== "function") return;
     onGuidedProgress(form);
   }, [guidedActive, onGuidedProgress, form]);
+
+  useEffect(() => {
+    const refresh = () => setPuntosInteresModal(getPuntosInteres());
+    let alive = true;
+    syncPuntosInteresCache((next) => { if (alive) setPuntosInteresModal(next); });
+    window.addEventListener("tms:puntos-interes", refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener("tms:puntos-interes", refresh);
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -6083,6 +6157,10 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
         return requerido === "cualquiera" || tipoVehiculoDeTexto([v.clase,v.tipo,v.marca,v.modelo,v.notas_operacion].filter(Boolean).join(" ")) === requerido;
       })
     : [];
+  const puntosCargaSugeridosModal = filterPuntosForPedido(puntosInteresModal, { clienteId: form.cliente_id || "", tipo: "carga" });
+  const puntosDescargaSugeridosModal = filterPuntosForPedido(puntosInteresModal, { clienteId: form.cliente_id || "", tipo: "descarga" });
+  const cargaEndpointListId = `pedido-origen-puntos-${editando?.id || "nuevo"}`;
+  const descargaEndpointListId = `pedido-destino-puntos-${editando?.id || "nuevo"}`;
 
   useEffect(() => {
     if (editando?.id || !bloqueoClienteModal || !form.cliente_id) return;
@@ -6622,6 +6700,22 @@ async function guardar() {
   }
 }
 
+const aplicarEndpointText = (key, tipo) => (e) => {
+  const value = (key === "origen" || key === "destino") ? e.target.value.toUpperCase() : e.target.value;
+  setForm(p => {
+    const base = { ...p, [key]: value };
+    if (!["origen", "destino"].includes(key)) return base;
+    const punto = findPuntoInteresForTypedEndpoint(
+      value,
+      p.cliente_id || "",
+      tipo,
+      tipo === "carga" ? puntosCargaSugeridosModal : puntosDescargaSugeridosModal
+    );
+    if (!punto) return base;
+    return tipo === "carga" ? applyPuntoCargaToDraft(base, punto) : applyPuntoDescargaToDraft(base, punto);
+  });
+};
+
 const f = k => e => setForm(p => ({...p,[k]: (k==="origen"||k==="destino") ? e.target.value.toUpperCase() : e.target.value}));
 
 async function seleccionarDocsPendientes(e) {
@@ -7049,7 +7143,20 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
               <div><label style={S.label}>Referencia cliente</label><input style={S.input} value={form.referencia_cliente||""} onChange={f("referencia_cliente")} placeholder="Ref. pedido del cliente"/></div>
               <div>
                 <label style={S.label}>Origen (carga) *</label>
-                <input style={S.input} value={form.origen||""} onChange={f("origen")}/>
+                <input
+                  style={S.input}
+                  value={form.origen||""}
+                  onChange={aplicarEndpointText("origen", "carga")}
+                  list={cargaEndpointListId}
+                  placeholder="Escribe o elige un punto de carga"
+                />
+                <datalist id={cargaEndpointListId}>
+                  {puntosCargaSugeridosModal.map(p => (
+                    <option key={`${p.id}-carga`} value={p.nombre || p.direccion}>
+                      {direccionCompletaPunto(p) || p.direccion || p.nombre}
+                    </option>
+                  ))}
+                </datalist>
                 {form.cliente_id && (
                   <div style={{marginTop:6}}>
                     {puntosCargaClienteModal.length > 0 ? (
@@ -7088,7 +7195,20 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
               </div>
               <div>
                 <label style={S.label}>Destino (entrega) *</label>
-                <input style={S.input} value={form.destino||""} onChange={f("destino")}/>
+                <input
+                  style={S.input}
+                  value={form.destino||""}
+                  onChange={aplicarEndpointText("destino", "descarga")}
+                  list={descargaEndpointListId}
+                  placeholder="Escribe o elige un punto de descarga"
+                />
+                <datalist id={descargaEndpointListId}>
+                  {puntosDescargaSugeridosModal.map(p => (
+                    <option key={`${p.id}-descarga`} value={p.nombre || p.direccion}>
+                      {direccionCompletaPunto(p) || p.direccion || p.nombre}
+                    </option>
+                  ))}
+                </datalist>
                 <div className="tg-pedido-actions-row">
                   <PuntoInteresPicker
                     placeholder="Usar punto como destino"

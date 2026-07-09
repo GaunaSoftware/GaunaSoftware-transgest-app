@@ -267,22 +267,6 @@ function vehiculosPermissionUnlessChoferAlertas(req, res, next) {
   if (req.user?.rol === "chofer" && req.method === "PATCH" && /^\/[^/]+\/km$/.test(req.path || "")) return next();
   return requireModulePermission("vehiculos")(req, res, next);
 }
-function isPortalClienteDocumentExtraction(req) {
-  const rol = req.user?.rol;
-  const contexto = req.body?.contexto || {};
-  return ["cliente", "cliente_portal"].includes(rol) &&
-    String(req.method || "").toUpperCase() === "POST" &&
-    req.path === "/documento/extraer" &&
-    String(contexto.origen || "").toLowerCase() === "portal_cliente";
-}
-function iaPermissionUnlessPortalDocument(req, res, next) {
-  if (isPortalClienteDocumentExtraction(req)) return next();
-  return requireModulePermission("ia")(req, res, next);
-}
-function iaPlanUnlessPortalDocument(req, res, next) {
-  if (isPortalClienteDocumentExtraction(req)) return next();
-  return requirePlanFeature("ai")(req, res, next);
-}
 safeUse(`${api}/auth`,          authRoutes);
 safeUse(`${api}/gps`,           gpsWebhookRoutes);
 safeUse(`${api}/fiscal`,        fiscalWebhookRoutes);
@@ -309,7 +293,7 @@ safeUse(`${api}/palets`,        authenticate, requireModulePermission("palets"),
 safeUse(`${api}/puntos-interes`, authenticate, requireModulePermission("pedidos"), puntosInteresRoutes);
 safeUse(`${api}/geocoding`,     authenticate, requireModulePermission("pedidos"), geocodingRoutes);
 safeUse(`${api}/backup`,        authenticate, requireModulePermission("mi_cuenta"), backupRoutes);
-safeUse(`${api}/ia`,            authenticate, iaPermissionUnlessPortalDocument, iaPlanUnlessPortalDocument, iaRoutes);
+safeUse(`${api}/ia`,            authenticate, requireModulePermission("ia"), requirePlanFeature("ai"), iaRoutes);
 safeUse(`${api}/taller`,        authenticate, requireModulePermission("taller"), tallerRoutes);
 safeUse(`${api}/route-optimizer`, routeOptimizerAuthUnlessPublic, routeOptimizerPlanUnlessPublic, routeOptimizerRoutes);
 safeUse(`${api}/notificaciones`, authenticate, requireModulePermission("avisos"), notificacionesRoutes);

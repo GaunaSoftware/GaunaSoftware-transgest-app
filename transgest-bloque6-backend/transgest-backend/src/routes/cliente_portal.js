@@ -70,6 +70,42 @@ function normalizeNumeric(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function parseDocumentoSolicitudCliente(text = "") {
+  const src = String(text || "").replace(/\r/g, "\n").slice(0, 60000);
+  const find = (patterns) => {
+    for (const pattern of patterns) {
+      const match = src.match(pattern);
+      if (match?.[1]) return String(match[1]).trim().slice(0, 255);
+    }
+    return "";
+  };
+  const numberLike = (value) => {
+    if (!value) return "";
+    const n = Number(String(value).replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, ""));
+    return Number.isFinite(n) ? String(n) : "";
+  };
+  return {
+    ok: true,
+    modo: "portal_cliente_sin_ia",
+    resultado: {
+      tipo_documento: src.toLowerCase().includes("albar") ? "albaran" : "pedido",
+      confianza: 0.25,
+      referencia_cliente: find([/(?:referencia|ref\.?|pedido|orden)\s*[:\-]?\s*([A-Z0-9._/-]{3,})/i]),
+      origen: find([/(?:origen|carga|recogida|remitente)\s*[:\-]?\s*(.+)/i]),
+      destino: find([/(?:destino|descarga|entrega|destinatario)\s*[:\-]?\s*(.+)/i]),
+      fecha_carga: find([/(?:fecha\s*de\s*carga|carga)\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i, /(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/]),
+      hora_carga: find([/(?:hora\s*de\s*carga|h\.?\s*carga)\s*[:\-]?\s*([0-2]?\d:[0-5]\d)/i]),
+      fecha_descarga: find([/(?:fecha\s*de\s*descarga|descarga|entrega)\s*[:\-]?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i]),
+      hora_descarga: find([/(?:hora\s*de\s*descarga|h\.?\s*descarga)\s*[:\-]?\s*([0-2]?\d:[0-5]\d)/i]),
+      mercancia: find([/(?:mercancia|mercancía|producto|material)\s*[:\-]?\s*(.+)/i]),
+      peso_kg: numberLike(find([/(?:peso|kg)\s*[:\-]?\s*([0-9]+(?:[.,][0-9]{1,3})?)/i])),
+      bultos: numberLike(find([/(?:bultos|palets|pallets)\s*[:\-]?\s*([0-9]+)/i])),
+      observaciones: "Extraccion basica del portal cliente sin IA. Revisar los campos antes de enviar.",
+    },
+    avisos: ["El portal cliente no usa IA. Se ha realizado una lectura basica del texto aportado."],
+  };
+}
+
 function publicBaseUrl(req) {
   const envUrl = process.env.PUBLIC_APP_URL || process.env.APP_PUBLIC_URL || "";
   const reqUrl = req?.protocol && typeof req.get === "function" ? `${req.protocol}://${req.get("host")}` : "";
@@ -476,6 +512,21 @@ router.get("/resumen", requireCliente, async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message || "No se pudo cargar el resumen del portal cliente" });
+  }
+});
+
+router.post("/solicitudes/documento/extraer", requireCliente, async (req, res) => {
+  try {
+    const { texto = "", nombre = "" } = req.body || {};
+    const cleanText = String(texto || "").trim();
+    if (!cleanText) {
+      return res.status(400).json({ error: "Texto del documento requerido para crear la solicitud" });
+    }
+    const parsed = parseDocumentoSolicitudCliente(cleanText);
+    parsed.nombre = String(nombre || "").slice(0, 180);
+    res.json(parsed);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "No se pudo leer el documento" });
   }
 });
 

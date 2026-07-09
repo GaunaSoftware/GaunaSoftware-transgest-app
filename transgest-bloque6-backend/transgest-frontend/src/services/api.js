@@ -665,6 +665,7 @@ export const getPortalClienteIntegracionManifest = () => apiFetch("/portal-clien
 export const getPortalClienteIntegracionFeed = (days=90) => apiFetch(`/portal-cliente/integracion/feed?days=${encodeURIComponent(days)}`);
 export const solicitarPortalClienteIntegracion = (data={}) => apiFetch("/portal-cliente/integracion/solicitar", { method:"POST", body:data });
 export const crearPortalClienteSolicitud = (data) => apiFetch("/portal-cliente/solicitudes", { method:"POST", body:data });
+export const extraerPortalClienteSolicitudDocumento = (data) => apiFetch("/portal-cliente/solicitudes/documento/extraer", { method:"POST", body:data, silentSuccess:true });
 export const responderPortalClienteReprogramacion = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/reprogramacion`, { method:"POST", body:data });
 export const getPortalPedidoAlbaranes = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/albaranes`);
 export const getPortalPedidoEventos = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/eventos`);

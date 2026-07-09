@@ -16,7 +16,7 @@ import {
   getPortalPedidoEventos,
   responderPortalClienteReprogramacion,
   solicitarPortalClienteIntegracion,
-  extraerDocumentoIA,
+  extraerPortalClienteSolicitudDocumento,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
@@ -1345,25 +1345,16 @@ function SolicitudServicio({ onDone, setTab }) {
     if (!file) return;
     setAnalyzingDoc(true);
     try {
-      const isImage = String(file.type || "").startsWith("image/");
-      const texto = isImage ? "" : (await file.text()).slice(0, 60000);
-      const attachments = [];
-      if (isImage) {
-        const base64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        attachments.push({ base64, mediaType: file.type, name: file.name });
+      if (String(file.type || "").startsWith("image/")) {
+        notify("El portal cliente no usa IA. Para prellenar una solicitud, sube un documento con texto o rellena el formulario manualmente.", "warning");
+        return;
       }
-      const data = await extraerDocumentoIA({
+      const texto = (await file.text()).slice(0, 60000);
+      const data = await extraerPortalClienteSolicitudDocumento({
         tipo: "pedido",
         nombre: file.name,
         mime: file.type || "",
         texto,
-        attachments,
-        contexto: { origen: "portal_cliente", accion: "crear_solicitud_servicio" },
       });
       const r = data?.resultado || data || {};
       const next = {

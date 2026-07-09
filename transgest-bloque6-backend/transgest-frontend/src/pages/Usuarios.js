@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getUsuarios, crearUsuario, editarUsuario, resetPassword, getChoferes, getVehiculos } from "../services/api";
+import { getUsuarios, crearUsuario, editarUsuario, resetPassword, getChoferes, getVehiculos, getClientes } from "../services/api";
 import { notify, promptDialog } from "../services/notify";
 import { FormField, ModalShell, StatusBadge } from "../components/ui";
 
@@ -195,10 +195,11 @@ export default function Usuarios() {
   const [form,setForm]=useState({});
   const [choferes,setChoferes]=useState([]);
   const [vehiculos,setVehiculos]=useState([]);
+  const [clientes,setClientes]=useState([]);
   const [errors,setErrors]=useState({});
   const [saving,setSaving]=useState(false);
 
-  const cargar=async()=>{setLoading(true);try{const [d,c,v]=await Promise.all([getUsuarios(), getChoferes().catch(()=>[]), getVehiculos().catch(()=>[])]);setUsuarios(Array.isArray(d)?d:[]);setChoferes(Array.isArray(c)?c:[]);setVehiculos(Array.isArray(v)?v:[]);}catch(e){}finally{setLoading(false);}};
+  const cargar=async()=>{setLoading(true);try{const [d,c,v,cl]=await Promise.all([getUsuarios(), getChoferes().catch(()=>[]), getVehiculos().catch(()=>[]), getClientes("", "true", 1, 500, { silentError:true }).catch(()=>[])]);setUsuarios(Array.isArray(d)?d:[]);setChoferes(Array.isArray(c)?c:[]);setVehiculos(Array.isArray(v)?v:[]);setClientes(Array.isArray(cl?.data)?cl.data:Array.isArray(cl)?cl:[]);}catch(e){}finally{setLoading(false);}};
   useEffect(()=>{cargar();},[]);
   const f=k=>e=>{
     const value = e.target.value;
@@ -288,6 +289,7 @@ export default function Usuarios() {
     if(!editando && (form.modo_alta || "invitacion") === "invitacion" && !form.email) nextErrors.email = "Indica email para enviar la invitacion.";
     if(!editando && form.password && String(form.password).length < 8) nextErrors.password = "Minimo 8 caracteres.";
     if(form.rol === "chofer" && !form.chofer_id) nextErrors.chofer_id = "Vincula esta cuenta a una ficha de chofer.";
+    if(form.rol === "cliente" && !form.cliente_id) nextErrors.cliente_id = "Vincula esta cuenta a una ficha de cliente.";
     if(Object.keys(nextErrors).length){
       setErrors(nextErrors);
       notify("Revisa los campos marcados", "warning");
@@ -305,6 +307,7 @@ export default function Usuarios() {
         trafico_config: normalizarTraficoConfigUI(form.trafico_config),
         activo: form.activo !== false,
         chofer_id: form.rol === "chofer" ? (form.chofer_id || null) : null,
+        cliente_id: form.rol === "cliente" ? (form.cliente_id || null) : null,
       };
       if(!editando) {
         body.modo_alta = form.modo_alta || "invitacion";
@@ -362,6 +365,8 @@ export default function Usuarios() {
                 <td style={{...S.td,fontSize:12,color:"var(--text3)"}}>
                   {u.rol === "chofer"
                     ? (u.chofer_nombre ? `${u.chofer_nombre} ${u.chofer_apellidos || ""}`.trim() + (u.vehiculo_matricula ? ` - ${u.vehiculo_matricula}` : "") : <span style={{color:"#f59e0b"}}>Sin chofer vinculado</span>)
+                    : u.rol === "cliente"
+                    ? (u.cliente_nombre ? `${u.cliente_nombre}${u.cliente_cif ? ` - ${u.cliente_cif}` : ""}` : <span style={{color:"#f59e0b"}}>Sin cliente vinculado</span>)
                     : "-"}
                 </td>
                 <td style={{...S.td,fontSize:11,color:"var(--text3)",maxWidth:260}}>
@@ -430,6 +435,18 @@ export default function Usuarios() {
                   {choferes.map(c => (
                     <option key={c.id} value={c.id}>
                       {`${c.nombre || ""} ${c.apellidos || ""}`.trim() || "Chofer"}{c.vehiculo_matricula ? ` - ${c.vehiculo_matricula}` : " - sin matricula"}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+            )}
+            {form.rol === "cliente" && (
+              <FormField label="Cliente vinculado" required error={errors.cliente_id} hint="El portal mostrara solo viajes, facturas, documentos y solicitudes de esta ficha de cliente.">
+                <select value={form.cliente_id || ""} onChange={f("cliente_id")} style={{...S.sel,borderColor:errors.cliente_id?"#ef4444":"var(--border2)"}}>
+                  <option value="">Selecciona cliente...</option>
+                  {clientes.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre || "Cliente"}{c.cif ? ` - ${c.cif}` : ""}{c.email ? ` (${c.email})` : ""}
                     </option>
                   ))}
                 </select>

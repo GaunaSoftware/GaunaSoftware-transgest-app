@@ -153,10 +153,12 @@ router.get("/", async (req, res) => {
   const { rows } = await db.query(
     `SELECT u.id,u.nombre,u.email,u.username,u.perfil,u.permisos,u.trafico_config,u.rol,u.cliente_id,u.chofer_id,u.activo,u.ultimo_acceso,u.created_at,
             u.debe_cambiar_password,u.password_changed_at,
-            ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, v.matricula AS vehiculo_matricula
+            ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, v.matricula AS vehiculo_matricula,
+            c.nombre AS cliente_nombre, c.cif AS cliente_cif
      FROM usuarios u
      LEFT JOIN choferes ch ON ch.id=u.chofer_id AND ch.empresa_id=u.empresa_id
      LEFT JOIN vehiculos v ON v.id=ch.vehiculo_id AND v.empresa_id=ch.empresa_id
+     LEFT JOIN clientes c ON c.id=u.cliente_id AND c.empresa_id=u.empresa_id
      WHERE u.empresa_id=$1
      ORDER BY nombre`,
     [empresaId(req)]

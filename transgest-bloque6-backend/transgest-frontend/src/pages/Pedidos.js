@@ -3478,6 +3478,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const [puntosInteres, setPuntosInteres] = useState(getPuntosInteres);
   const emptyStop = { direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", referencia:"", notas:"", google_maps_url:"", pais:"España", provincia:"" };
   const [newStop, setNewStop] = useState(emptyStop);
+  const [newStopDetailsOpen, setNewStopDetailsOpen] = useState(false);
   const [puntoQuery, setPuntoQuery] = useState("");
   const [poiDraft, setPoiDraft] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);
@@ -3612,6 +3613,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const resetNewStop = () => {
     setNewStop(emptyStop);
     setPuntoQuery("");
+    setNewStopDetailsOpen(false);
   };
   const puntoToSelectableStop = (punto) => {
     const puntoStop = puntoToStop(punto);
@@ -3724,6 +3726,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     const resolvedStop = await resolveStopGeo({...newStop, direccion:newStop.direccion.trim(), es_adicional:true, es_principal:false}, 1);
     setStopsOrdenados([...stopsOrdenados, resolvedStop]);
     setNewStop(emptyStop);
+    setNewStopDetailsOpen(false);
     setAdding(false);
   }
   function updateStop(idx, patch) {
@@ -3908,7 +3911,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               </div>
             )}
           </div>
-          <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:6,marginBottom:6}}>
+          <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"minmax(220px,2fr) 150px 130px 150px",gap:8,marginBottom:8}}>
             {puntosFiltrados.length > 0 && (
               <select
                 style={{...inp,gridColumn:"1/-1"}}
@@ -3929,8 +3932,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             </datalist>
             <input
               list={puntosListId}
-              style={{...inp,gridColumn:"1/-1"}}
-              placeholder={`Buscar punto o direccion de ${label} *`}
+              style={inp}
+              placeholder={`Punto o direccion de ${label} *`}
               value={newStop.direccion}
               onChange={e=>{
                 const val = e.target.value;
@@ -3944,10 +3947,25 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 else completarNewStopGeo();
               }}
             />
-            <input style={{...inp,gridColumn:"1/-1"}} placeholder="Enlace Google Maps (opcional)" value={newStop.google_maps_url||""} onChange={e=>setNewStop(p=>({...p,google_maps_url:e.target.value}))}/>
             <datalist id={newStopRegionListId}>
               {newStopRegions.map(region => <option key={region} value={region} />)}
             </datalist>
+            <input type="date" style={inp} value={newStop.fecha} onChange={e=>setNewStop(p=>({...p,fecha:e.target.value}))}/>
+            <input type="time" style={inp} value={newStop.hora} onChange={e=>setNewStop(p=>({...p,hora:e.target.value}))}/>
+            <input style={inp} placeholder="Ventana" value={newStop.ventana} onChange={e=>setNewStop(p=>({...p,ventana:e.target.value}))}/>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
+            <button type="button" onClick={()=>setNewStopDetailsOpen(v=>!v)} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+              {newStopDetailsOpen ? "Ocultar detalles" : "Mas detalles"}
+            </button>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              <button type="button" onClick={addParada} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Anadir {label}</button>
+              <button type="button" onClick={()=>{ setAdding(false); resetNewStop(); }} style={{padding:"6px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+            </div>
+          </div>
+          {newStopDetailsOpen && (
+            <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:6,marginBottom:8,padding:10,border:"1px solid var(--border2)",borderRadius:8,background:"var(--bg2)"}}>
+            <input style={{...inp,gridColumn:"1/-1"}} placeholder="Enlace Google Maps (opcional)" value={newStop.google_maps_url||""} onChange={e=>setNewStop(p=>({...p,google_maps_url:e.target.value}))}/>
             <input
               list={countryListId}
               style={inp}
@@ -3981,24 +3999,16 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 else completarNewStopGeo();
               }}
             />
-            <input type="date" style={inp} value={newStop.fecha} onChange={e=>setNewStop(p=>({...p,fecha:e.target.value}))}/>
-            <input type="time" style={inp} value={newStop.hora} onChange={e=>setNewStop(p=>({...p,hora:e.target.value}))}/>
-            <input style={inp} placeholder="Ventana (ej: 08:00-14:00)" value={newStop.ventana} onChange={e=>setNewStop(p=>({...p,ventana:e.target.value}))}/>
-          </div>
-          <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
             <input type="number" style={inp} placeholder="Bultos" value={newStop.bultos} onChange={e=>setNewStop(p=>({...p,bultos:e.target.value}))}/>
             <input type="number" style={inp} placeholder="Peso kg" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))}/>
             <input type="number" step="0.01" style={inp} placeholder={`Precio ${label} EUR`} value={newStop.precio} onChange={e=>setNewStop(p=>({...p,precio:e.target.value}))}/>
             <input style={inp} placeholder={`Referencia ${label}`} value={newStop.referencia} onChange={e=>setNewStop(p=>({...p,referencia:e.target.value}))}/>
             <input style={{...inp,gridColumn:"1/-1"}} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>
-          </div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            <button type="button" onClick={addParada} style={{padding:"5px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Anadir {label}</button>
             <button type="button" onClick={abrirCrearPunto} disabled={!String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"var(--accent)":"var(--text5)",fontSize:12,cursor:String(puntoQuery || newStop.direccion || newStop.cliente_nombre || "").trim()?"pointer":"not-allowed"}}>
               {buscarPuntoExacto(newStop.cliente_nombre || newStop.direccion) ? "Actualizar punto" : "Crear punto"}
             </button>
-            <button type="button" onClick={()=>setAdding(false)} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
-          </div>
+            </div>
+          )}
         </div>
       ) : (
         <button type="button" onClick={()=>setAdding(true)} style={{padding:"8px 14px",borderRadius:7,border:"1px dashed var(--accent)",background:"rgba(20,184,166,.08)",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer",marginTop:4}}>

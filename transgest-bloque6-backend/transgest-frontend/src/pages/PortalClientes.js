@@ -5,8 +5,6 @@ import {
   getPortalClienteFactura,
   getPortalClienteFacturas,
   getPortalClienteDocumentosResumen,
-  getPortalClienteIntegracionFeed,
-  getPortalClienteIntegracionManifest,
   getPortalClientePedidos,
   getPortalClienteResumen,
   getPortalClienteSolicitudEventos,
@@ -15,7 +13,6 @@ import {
   getPortalPedidoDocumentoControl,
   getPortalPedidoEventos,
   responderPortalClienteReprogramacion,
-  solicitarPortalClienteIntegracion,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
@@ -343,8 +340,6 @@ export default function PortalClientes() {
   const [loadingPedidoEventos, setLoadingPedidoEventos] = useState(null);
   const [loadingSolicitudEventos, setLoadingSolicitudEventos] = useState(null);
   const [descargandoSolicitudAcuse, setDescargandoSolicitudAcuse] = useState(null);
-  const [descargandoFeed, setDescargandoFeed] = useState(false);
-  const [descargandoManifest, setDescargandoManifest] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("seguimiento");
   const [q, setQ] = useState("");
@@ -585,60 +580,6 @@ export default function PortalClientes() {
     }
   }
 
-  async function descargarFeedIntegracion() {
-    setDescargandoFeed(true);
-    try {
-      const data = await getPortalClienteIntegracionFeed(90);
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `feed-integracion-cliente-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      notify("Feed EDI/API descargado.", "success");
-    } catch (e) {
-      notify(e.message || "No se pudo descargar el feed de integracion.", "error");
-    } finally {
-      setDescargandoFeed(false);
-    }
-  }
-
-  async function descargarManifestIntegracion() {
-    setDescargandoManifest(true);
-    try {
-      const data = await getPortalClienteIntegracionManifest();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `manifest-integracion-cliente-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      notify("Manifiesto EDI/API descargado.", "success");
-    } catch (e) {
-      notify(e.message || "No se pudo descargar el manifiesto de integracion.", "error");
-    } finally {
-      setDescargandoManifest(false);
-    }
-  }
-
-  async function solicitarIntegracion() {
-    try {
-      await solicitarPortalClienteIntegracion({
-        canal: "edi_api",
-        notas: "Solicitud enviada desde el portal cliente para configurar intercambio automatico EDI/API.",
-      });
-      notify("Solicitud enviada. La empresa revisara la configuracion EDI/API.", "success");
-    } catch (e) {
-      notify(e.message || "No se pudo solicitar la integracion EDI/API.", "error");
-    }
-  }
-
   const S = {
     card: { background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: "14px 16px", marginBottom: 12 },
     th: { textAlign: "left", padding: "8px 12px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", borderBottom: "1px solid var(--border)" },
@@ -700,29 +641,6 @@ export default function PortalClientes() {
               <div>{empresa.email || "-"}</div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
-              <button
-                onClick={solicitarIntegracion}
-                style={{ ...S.btn, padding:"6px 10px", fontSize:11, background:"rgba(16,185,129,.12)", color:"#0f766e", borderColor:"rgba(16,185,129,.25)" }}
-                title="Pide a la empresa que active y configure credenciales EDI/API para tu cuenta."
-              >
-                Solicitar EDI/API
-              </button>
-              <button
-                onClick={descargarManifestIntegracion}
-                disabled={descargandoManifest}
-                title="Descarga la ficha tecnica de endpoints, campos y version del feed para integradores."
-                style={{ ...S.btn, padding:"6px 10px", fontSize:11, opacity:descargandoManifest ? .65 : 1 }}
-              >
-                {descargandoManifest ? "Preparando..." : "Ficha tecnica API"}
-              </button>
-              <button
-                onClick={descargarFeedIntegracion}
-                disabled={descargandoFeed}
-                title="Exporta un JSON con tus viajes, estados y documentos para pruebas de integracion."
-                style={{ ...S.btn, padding:"6px 10px", fontSize:11, opacity:descargandoFeed ? .65 : 1 }}
-              >
-                {descargandoFeed ? "Preparando..." : "Exportar datos API"}
-              </button>
               <button
                 onClick={logout}
                 style={{ ...S.btn, padding:"6px 10px", fontSize:11, color:"#ef4444", borderColor:"rgba(239,68,68,.25)", background:"rgba(239,68,68,.08)" }}

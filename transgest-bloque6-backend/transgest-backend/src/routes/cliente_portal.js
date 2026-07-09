@@ -184,6 +184,16 @@ async function addSolicitudEvento(client, req, solicitudId, tipo, detalle = {}) 
 }
 
 async function requireCliente(req, res, next) {
+  if (!req.user?.cliente_id && req.user?.id && req.user?.empresa_id) {
+    const { rows } = await db.query(
+      `SELECT cliente_id
+         FROM usuarios
+        WHERE id=$1 AND empresa_id=$2 AND cliente_id IS NOT NULL
+        LIMIT 1`,
+      [req.user.id, empresaId(req)]
+    ).catch(() => ({ rows: [] }));
+    if (rows[0]?.cliente_id) req.user.cliente_id = rows[0].cliente_id;
+  }
   if (!req.user?.cliente_id && req.user?.empresa_id && req.user?.email) {
     const { rows } = await db.query(
       `SELECT id

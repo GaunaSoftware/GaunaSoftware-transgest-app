@@ -90,14 +90,14 @@ function mergeResolvedGeo(draft = {}, geo = {}, fallbackCountry = "EspaÃ±a") {
     ...draft,
     ciudad: draft.ciudad || geo.municipio || geo.city || "",
     pais,
-    provincia: draft.provincia || geo.provincia || geo.region || geo.state || "",
+    provincia: geo.provincia || geo.region || geo.state || draft.provincia || "",
     lat: draft.lat ?? draft.latitud ?? geo.lat ?? null,
     lng: draft.lng ?? draft.longitud ?? geo.lng ?? null,
   };
 }
 
 async function resolveGeoDraft(draft = {}, fallbackCountry = "EspaÃ±a", ...extra) {
-  const local = inferPlaceGeo(draft, ...extra, draft.ciudad, draft.direccion, draft.nombre, draft.cliente_nombre, draft.provincia, draft.pais);
+  const local = inferPlaceGeo(draft, ...extra, draft.ciudad, draft.direccion, draft.nombre, draft.cliente_nombre, draft.pais);
   if (local?.provincia || local?.pais) return mergeResolvedGeo(draft, local, fallbackCountry);
   const q = placeQueryFromDraft(draft, ...extra);
   if (!q) return draft;
@@ -3440,11 +3440,11 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const fallbackPais = tipo === "carga" ? (form.origen_pais || "España") : (form.destino_pais || "España");
   const fallbackProvincia = tipo === "carga" ? (form.origen_provincia || "") : (form.destino_provincia || "");
   const inferStopGeo = (stop = {}, idx = 0) => {
-    const inferred = inferPlaceGeo(stop, stopAddress(stop), stop.cliente_nombre, stop.direccion, stop.provincia, stop.pais);
+    const inferred = inferPlaceGeo(stop, stopAddress(stop), stop.cliente_nombre, stop.direccion, stop.pais);
     return {
       ...stop,
       pais: stopCountryInputValue(stop, idx === 0 ? fallbackPais : "España") || canonicalCountry(inferred?.pais || "") || fallbackPais || "España",
-      provincia: stopRegion(stop) || inferred?.provincia || (idx === 0 ? fallbackProvincia : ""),
+      provincia: inferred?.provincia || stopRegion(stop) || (idx === 0 ? fallbackProvincia : ""),
     };
   };
   const resolveStopGeo = async (stop = {}, idx = 0) => {
@@ -3481,14 +3481,14 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     if (!mainLugar || !inferred?.provincia) return;
     setForm(p => {
       if (tipo === "carga") {
-        if (p.origen_provincia) return p;
+        if (p.origen_provincia && normalizePlaceText(p.origen_provincia) === normalizePlaceText(inferred.provincia)) return p;
         return {
           ...p,
           origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "España") || "España",
           origen_provincia: inferred.provincia,
         };
       }
-      if (p.destino_provincia) return p;
+      if (p.destino_provincia && normalizePlaceText(p.destino_provincia) === normalizePlaceText(inferred.provincia)) return p;
       return {
         ...p,
         destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "España") || "España",
@@ -3504,14 +3504,14 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       if (!alive || !inferred?.provincia) return;
       setForm(p => {
         if (tipo === "carga") {
-          if (p.origen_provincia) return p;
+          if (p.origen_provincia && normalizePlaceText(p.origen_provincia) === normalizePlaceText(inferred.provincia)) return p;
           return {
             ...p,
             origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "EspaÃ±a") || "EspaÃ±a",
             origen_provincia: inferred.provincia,
           };
         }
-        if (p.destino_provincia) return p;
+        if (p.destino_provincia && normalizePlaceText(p.destino_provincia) === normalizePlaceText(inferred.provincia)) return p;
         return {
           ...p,
           destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "EspaÃ±a") || "EspaÃ±a",
@@ -3953,8 +3953,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           </div>
         </div>
       ) : (
-        <button type="button" onClick={()=>setAdding(true)} style={{padding:"5px 14px",borderRadius:6,border:"1px dashed var(--border2)",background:"transparent",color:"var(--text5)",fontSize:12,cursor:"pointer",marginTop:4}}>
-          Buscar / crear punto de {label}
+        <button type="button" onClick={()=>setAdding(true)} style={{padding:"8px 14px",borderRadius:7,border:"1px dashed var(--accent)",background:"rgba(20,184,166,.08)",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer",marginTop:4}}>
+          + Añadir {label}
         </button>
       ))}
       {poiDraft && (
@@ -6162,6 +6162,35 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   }, [bloqueoClienteModal, editando?.id, form.cliente_id]);
 
 // ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Calcular km por carretera via OpenRouteService (gratuito) ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
+function routePointCoords(place = {}) {
+  const raw = typeof place === "object" && place !== null ? place : { name: String(place || ""), address: String(place || "") };
+  const lat = Number(raw.lat ?? raw.latitud);
+  const lng = Number(raw.lng ?? raw.longitud);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  const inferred = inferPlaceGeo(raw, raw.address, raw.direccion, raw.name, raw.nombre, raw.cliente_nombre);
+  if (inferred?.lat != null && inferred?.lng != null) return { lat:Number(inferred.lat), lng:Number(inferred.lng) };
+  return null;
+}
+
+function haversineKm(a, b) {
+  const toRad = deg => (deg * Math.PI) / 180;
+  const r = 6371;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * r * Math.asin(Math.sqrt(x));
+}
+
+function fallbackRouteKm(lugares = []) {
+  const coords = lugares.map(routePointCoords);
+  if (coords.length < 2 || coords.some(p => !p)) return null;
+  const directKm = coords.slice(1).reduce((sum, point, idx) => sum + haversineKm(coords[idx], point), 0);
+  const roadApprox = directKm * 1.22;
+  return Number.isFinite(roadApprox) && roadApprox > 0 ? Math.round(roadApprox) : null;
+}
+
 async function calcularKmRuta(origen, destino, puntos = null) {
   const lugares = Array.isArray(puntos) && puntos.length ? puntos : [origen, destino].filter(Boolean);
   if (lugares.length < 2) return null;
@@ -6185,6 +6214,11 @@ async function calcularKmRuta(origen, destino, puntos = null) {
     if (!km) throw new Error("No se pudo calcular distancia con las direcciones indicadas.");
     return Math.round(km);
   } catch(e) {
+    const fallbackKm = fallbackRouteKm(lugares);
+    if (fallbackKm) {
+      notify("No se pudo calcular la ruta exacta. Se ha aplicado una distancia orientativa por coordenadas conocidas.", "warning");
+      return fallbackKm;
+    }
     notify("No se pudieron calcular los km automaticamente. Revisa los enlaces/coordenadas o introduce los km manualmente.", "warning");
     return null;
   } finally {

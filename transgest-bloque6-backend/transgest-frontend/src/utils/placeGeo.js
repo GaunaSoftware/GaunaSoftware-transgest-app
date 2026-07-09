@@ -11,6 +11,17 @@ const KNOWN_PLACES = {
   madrid: { municipio:"Madrid", provincia:"Madrid", pais:"Espana", lat:40.4168, lng:-3.7038 },
   madrid_comunidad: { municipio:"Madrid", provincia:"Madrid", pais:"Espana", lat:40.4168, lng:-3.7038 },
   comunidad_de_madrid: { municipio:"Madrid", provincia:"Madrid", pais:"Espana", lat:40.4168, lng:-3.7038 },
+  barcelona: { municipio:"Barcelona", provincia:"Barcelona", pais:"Espana", lat:41.3874, lng:2.1686 },
+  valencia: { municipio:"Valencia", provincia:"Valencia", pais:"Espana", lat:39.4699, lng:-0.3763 },
+  alicante: { municipio:"Alicante", provincia:"Alicante", pais:"Espana", lat:38.3452, lng:-0.4810 },
+  malaga: { municipio:"Malaga", provincia:"Malaga", pais:"Espana", lat:36.7213, lng:-4.4214 },
+  sevilla: { municipio:"Sevilla", provincia:"Sevilla", pais:"Espana", lat:37.3891, lng:-5.9845 },
+  zaragoza: { municipio:"Zaragoza", provincia:"Zaragoza", pais:"Espana", lat:41.6488, lng:-0.8891 },
+  murcia: { municipio:"Murcia", provincia:"Murcia", pais:"Espana", lat:37.9922, lng:-1.1307 },
+  bilbao: { municipio:"Bilbao", provincia:"Bizkaia", pais:"Espana", lat:43.2630, lng:-2.9350 },
+  valladolid: { municipio:"Valladolid", provincia:"Valladolid", pais:"Espana", lat:41.6523, lng:-4.7245 },
+  burgos: { municipio:"Burgos", provincia:"Burgos", pais:"Espana", lat:42.3439, lng:-3.6969 },
+  torrelavega: { municipio:"Torrelavega", provincia:"Cantabria", pais:"Espana", lat:43.3494, lng:-4.0479 },
   gandia: { municipio:"Gandia", provincia:"Valencia", pais:"Espana", lat:38.9680, lng:-0.1845 },
   gandia_valencia: { municipio:"Gandia", provincia:"Valencia", pais:"Espana", lat:38.9680, lng:-0.1845 },
   minera_santa_marta: { municipio:"Munera", provincia:"Albacete", pais:"Espana", lat:39.0413, lng:-2.4803 },
@@ -39,7 +50,7 @@ export function inferPlaceGeo(...values) {
     .filter(Boolean)
     .flatMap(value => {
       if (typeof value === "object") {
-        return [value.nombre, value.name, value.direccion, value.address, value.municipio, value.provincia]
+        return [value.nombre, value.name, value.direccion, value.address, value.municipio, value.city, value.ciudad]
           .filter(Boolean)
           .map(normalizePlaceKey);
       }
@@ -51,7 +62,7 @@ export function inferPlaceGeo(...values) {
 
   for (const key of keys) {
     if (KNOWN_PLACES[key]) return KNOWN_PLACES[key];
-    const match = Object.keys(KNOWN_PLACES).find(k => key.includes(k) || k.includes(key));
+    const match = Object.keys(KNOWN_PLACES).find(k => key.length >= 4 && (key.includes(k) || k.includes(key)));
     if (match) return KNOWN_PLACES[match];
   }
   return null;

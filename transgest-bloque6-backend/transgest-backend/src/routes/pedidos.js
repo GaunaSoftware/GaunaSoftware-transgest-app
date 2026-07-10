@@ -1604,6 +1604,7 @@ async function savePedidoChoferPasos({
     else if (patch.descarga_iniciada || patch.posicionado_descarga || nextData.descarga_iniciada || nextData.posicionado_descarga) nextEstado = "descarga";
     else if (patch.viaje_iniciado || patch.carga_ok || nextData.viaje_iniciado || nextData.carga_ok) nextEstado = "en_curso";
     if (nextEstado && !["cancelado", "entregado"].includes(String(pedido.estado || "").toLowerCase())) {
+      await assertUnicoViajeActivoChofer({ pedido, empresaId, estadoDestino: nextEstado });
       addUpdate("estado", nextEstado);
     }
     if (patch.mercancia_confirmada || nextData.mercancia_confirmada) {
@@ -4902,6 +4903,36 @@ async function usuarioPuedeGestionarPedido(req, pedido) {
     || access.vehiculoIds.some(id => id === String(pedido.vehiculo_id || ""));
 }
 
+async function assertUnicoViajeActivoChofer({ pedido, empresaId, estadoDestino }) {
+  const estado = String(estadoDestino || "").toLowerCase();
+  if (!["en_curso", "descarga"].includes(estado)) return;
+  if (["en_curso", "descarga"].includes(String(pedido.estado || "").toLowerCase())) return;
+  const choferIds = [pedido.chofer_id, pedido.chofer2_id].filter(Boolean);
+  const vehiculoId = pedido.vehiculo_id || null;
+  if (!choferIds.length && !vehiculoId) return;
+  const { rows } = await db.query(
+    `SELECT id, numero, estado::text AS estado
+       FROM pedidos
+      WHERE empresa_id=$1
+        AND id<>$2
+        AND estado::text IN ('en_curso','descarga')
+        AND (
+          ($3::uuid[] IS NOT NULL AND (chofer_id = ANY($3::uuid[]) OR chofer2_id = ANY($3::uuid[])))
+          OR ($4::uuid IS NOT NULL AND vehiculo_id=$4)
+        )
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC
+      LIMIT 1`,
+    [empresaId, pedido.id, choferIds.length ? choferIds : null, vehiculoId]
+  );
+  if (rows[0]) {
+    const err = new Error(`Este chofer o vehiculo ya tiene un viaje activo (${rows[0].numero || "pedido sin numero"}). Finaliza o libera ese viaje antes de iniciar otro.`);
+    err.status = 409;
+    err.code = "CHOFER_VIAJE_ACTIVO";
+    err.pedido_activo = rows[0];
+    throw err;
+  }
+}
+
 router.get("/chofer/clientes", async (req, res) => {
   try {
     if (req.user?.rol !== "chofer") return res.status(403).json({ error: "Solo app chofer" });
@@ -6783,7 +6814,7 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
     });
     res.json({ ok: true, data: saved });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message, code: e.code || undefined, pedido_activo: e.pedido_activo || undefined });
   }
 });
 
@@ -7843,6 +7874,7 @@ router.patch("/:id/estado",
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
       return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
     }
+    await assertUnicoViajeActivoChofer({ pedido: rows[0], empresaId, estadoDestino: estado });
 
     await ensureColaboradorWorkflowSchema();
     const incidencia = typeof req.body.incidencia === "string" ? req.body.incidencia.trim() : "";
@@ -7957,6 +7989,9 @@ router.patch("/:id/estado",
 
     res.json({ ok: true, estado, facturacion_auto: estado === "entregado" });
     } catch (e) {
+      if (e.status === 409 && e.code === "CHOFER_VIAJE_ACTIVO") {
+        return res.status(409).json({ error: e.message, code: e.code, pedido_activo: e.pedido_activo || null });
+      }
       next(e);
     }
   }
@@ -8649,7 +8684,19 @@ router.post("/:id/firma", async (req, res) => {
     });
 
     res.json({ ok: true, firma_rol: firmaRol, repositorio_pendiente: true, ...rows[0] });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) {
+    logger.error("Error guardando firma de pedido:", {
+      message: e.message,
+      code: e.code,
+      pedido_id: req.params.id,
+      user_id: req.user?.id || null,
+      rol: req.user?.rol || null,
+    });
+    if (e.status) return res.status(e.status).json({ error: e.message, code: e.code || undefined });
+    if (e.code === "22001") return res.status(400).json({ error: "La firma o la evidencia generada supera el tamano permitido. Vuelve a firmar con un trazo mas simple.", code: e.code });
+    if (e.code === "22P02") return res.status(400).json({ error: "Alguno de los datos de firma no tiene formato valido. Refresca el viaje y vuelve a intentarlo.", code: e.code });
+    res.status(500).json({ error: e.message || "No se pudo guardar la firma del pedido" });
+  }
 });
 
 router.get("/:id/firma/evidencia", GERENTE_O_TRAFICO, async (req, res) => {

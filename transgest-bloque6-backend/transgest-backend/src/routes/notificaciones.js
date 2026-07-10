@@ -81,6 +81,18 @@ async function ensureAvisosOperativosSchema() {
     )
   `).catch(() => {});
   await db.query(`
+    CREATE TABLE IF NOT EXISTS pedido_chofer_pasos (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      pedido_id UUID NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+      empresa_id UUID NOT NULL,
+      chofer_id UUID,
+      data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (pedido_id)
+    )
+  `).catch(() => {});
+  await db.query(`
     CREATE TABLE IF NOT EXISTS avisos_operativos_ignorados (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       empresa_id UUID NOT NULL,
@@ -205,10 +217,93 @@ function buildColaboradorAlerts(row) {
   return alerts;
 }
 
+function minutesSinceIso(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+}
+
+function buildChoferAlert(row, kind, severity, title, detail, action, minutos) {
+  return {
+    key: `chofer:${row.id}:${kind}`,
+    kind,
+    severity,
+    pedido_id: row.id,
+    pedido_numero: row.numero,
+    estado: row.estado || "en_curso",
+    chofer_id: row.chofer_id,
+    chofer_nombre: row.chofer_nombre || "Chofer",
+    colaborador_id: null,
+    colaborador_nombre: row.chofer_nombre || "Chofer interno",
+    colaborador_email: "",
+    vehiculo_matricula: row.vehiculo_matricula || "",
+    fecha_carga: dateOnly(row.fecha_carga || row.fecha_pedido),
+    fecha_descarga: dateOnly(row.fecha_descarga || row.fecha_entrega),
+    title,
+    detail,
+    action,
+    minutos,
+  };
+}
+
+function buildChoferStaleAlerts(row) {
+  const data = row.pasos && typeof row.pasos === "object" ? row.pasos : {};
+  const alerts = [];
+  if (data.carga_proceso && !data.carga_ok) {
+    const mins = minutesSinceIso(data.carga_proceso_at || data.carga_iniciada_at);
+    if (mins && mins > 60) alerts.push(buildChoferAlert(
+      row,
+      "chofer_carga_bloqueada",
+      mins > 180 ? "alta" : "media",
+      `Carga bloqueada ${row.numero || ""}`.trim(),
+      `El chofer lleva ${mins} minutos en carga. Revisar posible paralizacion, cita o incidencia con el punto de carga.`,
+      "Contactar con chofer/cargador y valorar reclamacion por paralizacion.",
+      mins
+    ));
+  } else if (data.carga_iniciada && !data.carga_proceso && !data.carga_ok) {
+    const mins = minutesSinceIso(data.carga_iniciada_at);
+    if (mins && mins > 60) alerts.push(buildChoferAlert(
+      row,
+      "chofer_espera_carga",
+      mins > 180 ? "alta" : "media",
+      `Espera de carga ${row.numero || ""}`.trim(),
+      `El chofer esta posicionado en carga desde hace ${mins} minutos y no consta inicio de carga.`,
+      "Contactar con chofer/cargador y revisar cita.",
+      mins
+    ));
+  }
+
+  if (data.descarga_iniciada && !data.descarga_ok) {
+    const mins = minutesSinceIso(data.descarga_iniciada_at || data.posicionado_descarga_at);
+    if (mins && mins > 60) alerts.push(buildChoferAlert(
+      row,
+      "chofer_descarga_bloqueada",
+      mins > 180 ? "alta" : "media",
+      `Descarga bloqueada ${row.numero || ""}`.trim(),
+      `El chofer lleva ${mins} minutos en descarga. Revisar posible paralizacion o incidencia en destino.`,
+      "Contactar con chofer/destinatario y valorar reclamacion por paralizacion.",
+      mins
+    ));
+  } else if (data.posicionado_descarga && !data.descarga_iniciada && !data.descarga_ok) {
+    const mins = minutesSinceIso(data.posicionado_descarga_at);
+    if (mins && mins > 60) alerts.push(buildChoferAlert(
+      row,
+      "chofer_espera_descarga",
+      mins > 180 ? "alta" : "media",
+      `Espera de descarga ${row.numero || ""}`.trim(),
+      `El chofer esta en destino desde hace ${mins} minutos y no consta inicio de descarga.`,
+      "Contactar con chofer/destinatario y revisar cita.",
+      mins
+    ));
+  }
+  return alerts;
+}
+
 function filterAlertsByRole(items, rol) {
   if (rol === "gerente") return items;
   const roleKinds = {
-    trafico: new Set(["workflow_no_enviado", "precio_sin_confirmar", "carga_sin_confirmar", "camino_sin_confirmar", "descarga_sin_confirmar"]),
+    trafico: new Set(["workflow_no_enviado", "precio_sin_confirmar", "carga_sin_confirmar", "camino_sin_confirmar", "descarga_sin_confirmar", "chofer_carga_bloqueada", "chofer_espera_carga", "chofer_descarga_bloqueada", "chofer_espera_descarga"]),
     administrativo: new Set(["albaran_pendiente", "documentacion_pago_pendiente"]),
     contable: new Set(["albaran_pendiente", "documentacion_pago_pendiente"]),
   };
@@ -226,6 +321,7 @@ async function listarAvisosColaboradores(req) {
   if (!ROLES_OPERATIVOS.has(rol)) return { items: [], resumen: { total: 0 } };
 
   let rows = [];
+  let choferRows = [];
   try {
     const result = await db.query(
     `SELECT p.id, p.numero, p.estado, p.fecha_pedido, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
@@ -261,6 +357,23 @@ async function listarAvisosColaboradores(req) {
     [empresaId]
     );
     rows = result.rows || [];
+    const choferResult = await db.query(
+      `SELECT p.id, p.numero, p.estado::text AS estado, p.fecha_pedido, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
+              p.chofer_id, COALESCE(ch.nombre || ' ' || ch.apellidos, ch.nombre, 'Chofer') AS chofer_nombre,
+              v.matricula AS vehiculo_matricula,
+              s.data AS pasos, s.updated_at AS pasos_updated_at
+         FROM pedido_chofer_pasos s
+         JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
+         LEFT JOIN choferes ch ON ch.id=COALESCE(s.chofer_id,p.chofer_id) AND ch.empresa_id=p.empresa_id
+         LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+        WHERE p.empresa_id=$1
+          AND p.estado::text IN ('en_curso','descarga')
+          AND COALESCE(p.fecha_descarga,p.fecha_entrega,p.fecha_carga,p.fecha_pedido,p.created_at::date) >= CURRENT_DATE - INTERVAL '10 days'
+        ORDER BY COALESCE(p.fecha_carga,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
+        LIMIT 150`,
+      [empresaId]
+    );
+    choferRows = choferResult.rows || [];
   } catch (error) {
     if (["42703", "42P01", "42883"].includes(error.code)) {
       console.warn("[avisos_colaboradores] esquema incompleto; se omiten avisos operativos", error.message);
@@ -275,7 +388,9 @@ async function listarAvisosColaboradores(req) {
   ).catch(() => ({ rows: [] }));
   const ignoredKeys = new Set(ignored.rows.map(r => String(r.alert_key || "")));
   const items = filterAlertsByRole(
-    rows.flatMap(buildColaboradorAlerts).filter(a => !ignoredKeys.has(a.key)),
+    rows.flatMap(buildColaboradorAlerts)
+      .concat(choferRows.flatMap(buildChoferStaleAlerts))
+      .filter(a => !ignoredKeys.has(a.key)),
     rol
   ).slice(0, 80);
   const resumen = {

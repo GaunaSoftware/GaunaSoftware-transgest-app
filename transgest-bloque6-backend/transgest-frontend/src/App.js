@@ -7,7 +7,7 @@ import MojibakeFixer from "./components/MojibakeFixer";
 import Login  from "./pages/Login";
 import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
-import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
+import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, getAgendaEventos, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
 import { getEmpresaPlanLocal, normalizePlan } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
@@ -1054,6 +1054,71 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
   );
 }
 
+function dateKey(value) {
+  if (!value) return "";
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function addDaysKey(days) {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  d.setDate(d.getDate() + days);
+  return dateKey(d);
+}
+
+function StartupTasksPanel({ data, onClose, onOpenAgenda }) {
+  if (!data?.visible) return null;
+  const sections = [
+    ["pasadas", "Pasadas", data.pasadas || [], "#ef4444"],
+    ["hoy", "Hoy", data.hoy || [], "#0f766e"],
+    ["manana", "Mañana", data.manana || [], "#f59e0b"],
+  ].filter(([, , items]) => items.length);
+  if (!sections.length) return null;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:9200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"72px 16px 16px",background:"rgba(15,23,42,.22)",fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{width:"min(560px,100%)",maxHeight:"calc(100vh - 110px)",overflow:"auto",border:"1px solid var(--border)",borderRadius:14,background:"var(--bg2)",boxShadow:"0 22px 70px rgba(15,23,42,.22)"}}>
+        <div style={{position:"sticky",top:0,background:"var(--bg2)",borderBottom:"1px solid var(--border)",padding:"16px 18px",display:"flex",justifyContent:"space-between",gap:12,alignItems:"center"}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:900,color:"var(--text)"}}>Tareas pendientes</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Resumen operativo al iniciar sesión.</div>
+          </div>
+          <button onClick={onClose} style={{width:34,height:34,borderRadius:9,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontWeight:900,cursor:"pointer"}}>×</button>
+        </div>
+        <div style={{padding:16,display:"grid",gap:12}}>
+          {sections.map(([key, label, items, color]) => (
+            <div key={key} style={{border:"1px solid var(--border)",borderRadius:10,overflow:"hidden",background:"var(--bg)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid var(--border)"}}>
+                <span style={{fontSize:12,fontWeight:950,textTransform:"uppercase",letterSpacing:".05em",color}}>{label}</span>
+                <span style={{fontSize:11,fontWeight:900,color:"var(--text4)"}}>{items.length}</span>
+              </div>
+              <div style={{display:"grid"}}>
+                {items.slice(0, 6).map(ev => (
+                  <button key={ev.id || `${key}-${ev.titulo}-${ev.fecha_inicio}`} onClick={onOpenAgenda} style={{textAlign:"left",padding:"10px 12px",border:"none",borderBottom:"1px solid var(--border)",background:"transparent",cursor:"pointer"}}>
+                    <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>{ev.titulo || ev.title || "Tarea"}</div>
+                    <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>
+                      {dateKey(ev.fecha_inicio || ev.start || ev.fecha)} · {ev.estado || "pendiente"}{ev.asignado_nombre ? ` · ${ev.asignado_nombre}` : ""}
+                    </div>
+                  </button>
+                ))}
+                {items.length > 6 && <div style={{padding:"8px 12px",fontSize:11,color:"var(--text5)"}}>Y {items.length - 6} más en Agenda.</div>}
+              </div>
+            </div>
+          ))}
+          <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
+            <button onClick={onClose} style={{height:40,padding:"0 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontWeight:900,cursor:"pointer"}}>Cerrar</button>
+            <button onClick={onOpenAgenda} style={{height:40,padding:"0 16px",borderRadius:8,border:"1px solid #008577",background:"#008577",color:"#fff",fontWeight:900,cursor:"pointer"}}>Abrir agenda</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const DEMO_PLAN_META = {
   lite: {
     label: "TransGest Lite",
@@ -1348,6 +1413,7 @@ function AppInner() {
   const [colaboradoresPendientes, setColaboradoresPendientes] = useState(0);
   const [avisosOperativosColaboradores, setAvisosOperativosColaboradores] = useState({ items: [], resumen: {} });
   const [avisosOperativosOpen, setAvisosOperativosOpen] = useState(false);
+  const [startupTasks, setStartupTasks] = useState({ visible:false, pasadas:[], hoy:[], manana:[] });
   const [pedidoActionMenuOpen, setPedidoActionMenuOpen] = useState(false);
   const [guidedModule, setGuidedModule] = useState(null);
 
@@ -1463,6 +1529,35 @@ function AppInner() {
         })
         .catch(() => ({ items: [], resumen: {} }));
     }
+    function calcStartupTasks() {
+      if (!["gerente","trafico","administrativo","contable","responsable_taller"].includes(user?.rol)) return Promise.resolve(null);
+      const key = `tms_startup_tasks_seen_${user?.empresa_id || "empresa"}_${user?.id || "user"}_${dateKey(new Date())}`;
+      try {
+        if (window.sessionStorage.getItem(key) === "1") return Promise.resolve(null);
+      } catch {}
+      const desde = addDaysKey(-14);
+      const hasta = addDaysKey(1);
+      return getAgendaEventos({ desde, hasta, estado:"pendiente" })
+        .then(payload => {
+          const arr = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.eventos) ? payload.eventos : [];
+          const today = addDaysKey(0);
+          const tomorrow = addDaysKey(1);
+          const abiertas = arr.filter(ev => !["completada","cancelada","cerrada"].includes(String(ev.estado || "").toLowerCase()));
+          const next = {
+            visible: false,
+            pasadas: abiertas.filter(ev => dateKey(ev.fecha_inicio || ev.start || ev.fecha) && dateKey(ev.fecha_inicio || ev.start || ev.fecha) < today),
+            hoy: abiertas.filter(ev => dateKey(ev.fecha_inicio || ev.start || ev.fecha) === today),
+            manana: abiertas.filter(ev => dateKey(ev.fecha_inicio || ev.start || ev.fecha) === tomorrow),
+          };
+          next.visible = next.pasadas.length + next.hoy.length + next.manana.length > 0;
+          if (next.visible) {
+            setStartupTasks(next);
+            try { window.sessionStorage.setItem(key, "1"); } catch {}
+          }
+          return next;
+        })
+        .catch(() => null);
+    }
     function calcSolicitudesBadge() {
       if (!["gerente","trafico","administrativo","contable"].includes(user?.rol)) return Promise.resolve(0);
       return getPortalSolicitudesAdmin({ estado:"pendiente" })
@@ -1492,6 +1587,7 @@ function AppInner() {
       calcSolicitudesBadge();
       calcColaboradoresBadge();
       calcAvisosOperativosColaboradores();
+      calcStartupTasks();
     }, 6000);
 
     // Delay non-critical badge requests so they don't block page render
@@ -1703,6 +1799,14 @@ function AppInner() {
         })}
       />
     )}
+    <StartupTasksPanel
+      data={startupTasks}
+      onClose={() => setStartupTasks(prev => ({ ...prev, visible:false }))}
+      onOpenAgenda={() => {
+        setStartupTasks(prev => ({ ...prev, visible:false }));
+        if (modulosVisibles.has("agenda")) setVista("agenda");
+      }}
+    />
     <GlobalGuidedModulePanel
       mission={guidedModule}
       onOpenModule={(route) => {

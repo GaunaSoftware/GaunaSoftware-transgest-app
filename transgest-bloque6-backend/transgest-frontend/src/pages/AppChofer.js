@@ -3567,16 +3567,23 @@ export default function AppChofer(){
               {tab==="activos"?"No tienes viajes activos para esta fecha":"Sin historial para esta fecha"}
             </div>
           ):(
-            filtradosConProxima.map(p=><TarjetaViaje
-              key={p.id}
-              pedido={p}
-              onActualizar={cargar}
-              jornadaInfo={jornadaInfo}
-              onAbrirJornada={()=>setTab("jornada")}
-              expanded={String(expandedPedidoId || "") === String(p.id)}
-              onExpandedChange={(open)=>setExpandedPedidoId(open ? p.id : null)}
-              onFoto={()=>setCameraModal(p.id)}
-            />)
+            <>
+              {filtradosConProxima.filter(p => ["en_curso","descarga"].includes(String(p.estado || "").toLowerCase())).length > 1 && (
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:10,border:"1px solid rgba(239,68,68,.25)",background:"rgba(239,68,68,.08)",color:"#b91c1c",fontSize:12,fontWeight:800}}>
+                  Hay mas de un viaje activo asignado. Finaliza o corrige el viaje anterior antes de iniciar nuevos estados.
+                </div>
+              )}
+              {filtradosConProxima.map(p=><TarjetaViaje
+                key={p.id}
+                pedido={p}
+                onActualizar={cargar}
+                jornadaInfo={jornadaInfo}
+                onAbrirJornada={()=>setTab("jornada")}
+                expanded={String(expandedPedidoId || "") === String(p.id)}
+                onExpandedChange={(open)=>setExpandedPedidoId(open ? p.id : null)}
+                onFoto={()=>setCameraModal(p.id)}
+              />)}
+            </>
           )}
         </div>
       )}

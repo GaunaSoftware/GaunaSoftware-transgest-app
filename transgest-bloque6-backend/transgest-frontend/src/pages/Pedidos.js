@@ -170,6 +170,10 @@ function pedidoFechaOperativaKey(pedido) {
   return toDateInputValue(pedido?.fecha_carga || pedido?.fecha_pedido || pedido?.fecha_descarga || pedido?.fecha_entrega) || "sin-fecha";
 }
 
+function pedidoClienteOrdenKey(pedido) {
+  return String(pedido?.cliente_nombre || pedido?.cliente || "Sin cliente").trim();
+}
+
 function formatWeekdayLabel(dateIso) {
   if (!dateIso || dateIso === "sin-fecha") return "Sin fecha";
   const d = new Date(`${String(dateIso).slice(0, 10)}T00:00:00`);
@@ -233,6 +237,10 @@ function buildPedidoCalendarGroups(items, { desde, hasta, currentWeek = false } 
     const da = pedidoFechaOperativaKey(a.pedido);
     const db = pedidoFechaOperativaKey(b.pedido);
     if (da !== db) return String(da).localeCompare(String(db));
+    const ca = pedidoClienteOrdenKey(a.pedido);
+    const cb = pedidoClienteOrdenKey(b.pedido);
+    const clienteCmp = ca.localeCompare(cb, "es", { sensitivity: "base" });
+    if (clienteCmp !== 0) return clienteCmp;
     return String(a.pedido?.hora_carga || "").localeCompare(String(b.pedido?.hora_carga || ""));
   });
   sorted.forEach(item => {
@@ -9902,6 +9910,10 @@ export default function Pedidos() {
     const da = pedidoFechaOperativaKey(a?.pedido);
     const db = pedidoFechaOperativaKey(b?.pedido);
     if (da !== db) return String(da).localeCompare(String(db));
+    const ca = pedidoClienteOrdenKey(a?.pedido);
+    const cb = pedidoClienteOrdenKey(b?.pedido);
+    const clienteCmp = ca.localeCompare(cb, "es", { sensitivity: "base" });
+    if (clienteCmp !== 0) return clienteCmp;
     const ha = String(a?.pedido?.hora_carga || "");
     const hb = String(b?.pedido?.hora_carga || "");
     if (ha !== hb) return ha.localeCompare(hb);

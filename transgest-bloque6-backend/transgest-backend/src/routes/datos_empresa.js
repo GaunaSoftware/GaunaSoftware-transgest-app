@@ -1877,6 +1877,32 @@ router.get("/pedido-docs/:pedido_id/base64", async (req,res) => {
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 
+router.get("/pedido-docs/doc/:doc_id/archivo", async (req,res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id,nombre,file_base64,file_mime,file_size_kb
+         FROM pedido_docs
+        WHERE id=$1 AND empresa_id=$2
+        LIMIT 1`,
+      [req.params.doc_id, EID(req)]
+    );
+    const doc = rows[0];
+    if (!doc) return res.status(404).json({ error: "Documento no encontrado" });
+    if (!doc.file_base64) return res.status(404).json({ error: "El documento no tiene archivo adjunto" });
+
+    const mime = String(doc.file_mime || "application/octet-stream").split(";")[0] || "application/octet-stream";
+    const filename = String(doc.nombre || `documento-${doc.id}`).replace(/[\r\n"]/g, " ").slice(0, 180);
+    const cleanBase64 = String(doc.file_base64).includes(",")
+      ? String(doc.file_base64).split(",").pop()
+      : String(doc.file_base64);
+    const buffer = Buffer.from(cleanBase64, "base64");
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Length", buffer.length);
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(filename)}"`);
+    res.send(buffer);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
 router.post("/pedido-docs/:pedido_id", async (req,res) => {
   try {
     const {nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata} = req.body;

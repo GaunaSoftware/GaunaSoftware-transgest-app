@@ -1,5 +1,5 @@
 import { useDebounce } from "../hooks/useDebounce";
-import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia } from "../services/api";
+import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
 import { getLogoDataUrl } from "../services/logoHelper";
 import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
 import React, { useState, useEffect, useCallback, useRef } from "react";
@@ -5451,6 +5451,14 @@ function TabDocsPedido({ pedido }) {
     Pesaje:"#8b5cf6", Incidencia:"#ef4444", Otro:"#6b7280"
   };
 
+  async function verDoc(doc) {
+    try {
+      await verArchivoProtegido(`/empresa/pedido-docs/doc/${encodeURIComponent(doc.id)}/archivo`, doc.nombre || "documento");
+    } catch (err) {
+      notify(err.message || "No se pudo abrir el documento.", "error");
+    }
+  }
+
   return (
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -5482,6 +5490,7 @@ function TabDocsPedido({ pedido }) {
               <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:4,background:`${TIPO_COLOR[d.tipo]||"#6b7280"}20`,color:TIPO_COLOR[d.tipo]||"#6b7280",border:`1px solid ${TIPO_COLOR[d.tipo]||"#6b7280"}40`,flexShrink:0}}>
                 {d.tipo}
               </span>
+              <button onClick={()=>verDoc(d)} style={{border:"1px solid var(--border2)",background:"var(--bg)",color:"var(--accent)",borderRadius:7,padding:"5px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>Ver</button>
               <button onClick={async()=>{
                 const ok = await confirmDialog({
                   title: "Eliminar documento",

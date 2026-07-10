@@ -310,6 +310,63 @@ export async function descargarArchivoProtegido(path, fallbackName = "documento"
   return { filename, size: blob.size };
 }
 
+export async function verArchivoProtegido(path, fallbackName = "documento") {
+  const token = getToken();
+  let res;
+  try {
+    res = await fetch(apiUrl(path), {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  } catch (e) {
+    const message = friendlyApiError(e.message, 0, null, path);
+    notifyError(message);
+    throw new Error(message);
+  }
+
+  if (res.status === 401) {
+    removeToken();
+    window.location.href = "/";
+    return null;
+  }
+
+  if (!res.ok) {
+    const data = await parseApiResponse(res);
+    const requestId = extractRequestId(res, data);
+    const message = friendlyApiError(
+      data.error || data.message || data.mensaje || data.raw_text || `Error ${res.status}`,
+      res.status,
+      requestId,
+      path
+    );
+    rememberApiError({ status: res.status, path, request_id: requestId, error: data.error || data.message || data.mensaje || data.raw_text || null });
+    notifyError(message, res.status);
+    const err = new Error(message);
+    err.status = res.status;
+    err.data = data;
+    err.request_id = requestId;
+    throw err;
+  }
+
+  const blob = await res.blob();
+  const filename = filenameFromDisposition(res.headers.get("content-disposition")) || fallbackName || "documento";
+  const objectUrl = URL.createObjectURL(blob);
+  const opened = window.open(objectUrl, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  return { filename, size: blob.size };
+}
+
 export async function login(email, password) {
   const data = await apiFetch("/auth/login", {
     method: "POST",

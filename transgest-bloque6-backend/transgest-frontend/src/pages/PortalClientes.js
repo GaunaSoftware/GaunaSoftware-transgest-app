@@ -1056,6 +1056,7 @@ export default function PortalClientes() {
                     <Mini label="Mercancia" value={s.mercancia || "-"} />
                     <Mini label="Peso" value={s.peso_kg ? `${Number(s.peso_kg).toLocaleString("es-ES")} kg` : "-"} />
                     <Mini label="Bultos / palets" value={s.bultos || "-"} />
+                    <Mini label="Precio indicado" value={s.importe ? `${Number(s.importe).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : "-"} />
                     <Mini label="Descarga" value={s.fecha_descarga ? `${dateEs(s.fecha_descarga)} ${s.hora_descarga || ""}`.trim() : "-"} />
                   </div>
                   {(s.vehiculo_matricula || s.matricula_colaborador || s.remolque_matricula || s.remolque_matricula_colaborador) && (
@@ -1281,6 +1282,7 @@ function SolicitudServicio({ onDone, setTab }) {
     mercancia: "",
     peso_kg: "",
     bultos: "",
+    importe: "",
     notas: "",
   });
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
@@ -1292,6 +1294,7 @@ function SolicitudServicio({ onDone, setTab }) {
       ...source,
       peso_kg: source.peso_kg || null,
       bultos: source.bultos || null,
+      importe: source.importe === "" || source.importe === undefined || source.importe === null ? null : source.importe,
     };
   }
 
@@ -1310,7 +1313,7 @@ function SolicitudServicio({ onDone, setTab }) {
       } else {
         notify("Solicitud enviada. Trafico la revisara y la convertira en pedido.", "success");
       }
-      setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", notas: "" });
+      setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", importe: "", notas: "" });
       await onDone();
       setTab("solicitudes");
     } catch (e) {
@@ -1335,6 +1338,7 @@ function SolicitudServicio({ onDone, setTab }) {
         <div><label style={lbl}>Hora descarga</label><input style={inp} value={form.hora_descarga} onChange={f("hora_descarga")} placeholder="16:00 / Tarde / Cita previa" /></div>
         <div><label style={lbl}>Peso kg</label><input type="number" style={inp} value={form.peso_kg} onChange={f("peso_kg")} /></div>
         <div><label style={lbl}>Bultos / palets</label><input type="number" min="0" step="1" style={inp} value={form.bultos} onChange={e=>setForm(p=>({...p,bultos:Number(e.target.value) < 0 ? "" : e.target.value}))} /></div>
+        <div><label style={lbl}>Precio si lo conoces (EUR)</label><input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.importe} onChange={f("importe")} placeholder="Opcional" /></div>
         <div style={{ gridColumn: "1/-1" }}><label style={lbl}>Notas</label><textarea style={{ ...inp, minHeight: 86, resize: "vertical" }} value={form.notas} onChange={f("notas")} placeholder="Instrucciones de carga, contacto, horarios, observaciones..." /></div>
       </div>
       <button onClick={enviar} disabled={saving} style={{ marginTop: 16, width: "100%", padding: "12px 18px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", fontWeight: 900, cursor: "pointer", opacity: saving ? .65 : 1 }}>

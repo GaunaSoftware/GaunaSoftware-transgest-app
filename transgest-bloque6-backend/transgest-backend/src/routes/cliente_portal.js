@@ -37,6 +37,7 @@ function ensureSchema() {
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS hora_propuesta VARCHAR(20)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente VARCHAR(20)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente_at TIMESTAMPTZ");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe NUMERIC(12,2)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_empresa_estado ON portal_solicitudes_cliente(empresa_id, estado, created_at DESC)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_cliente ON portal_solicitudes_cliente(cliente_id, created_at DESC)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_numero_portal ON pedidos(empresa_id, numero DESC)");
@@ -76,7 +77,7 @@ function empresaId(req) {
 
 function normalizeNumeric(value) {
   if (value === "" || value === undefined || value === null) return null;
-  const n = Number(value);
+  const n = Number(String(value).replace(",", "."));
   return Number.isFinite(n) ? n : null;
 }
 
@@ -1203,8 +1204,8 @@ router.post("/solicitudes", requireCliente, async (req, res) => {
   const { rows } = await db.query(
     `INSERT INTO portal_solicitudes_cliente
       (empresa_id,cliente_id,solicitado_por,origen,destino,fecha_carga,hora_carga,fecha_descarga,hora_descarga,
-       mercancia,peso_kg,bultos,referencia_cliente,notas)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       mercancia,peso_kg,bultos,importe,referencia_cliente,notas)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      RETURNING *`,
     [
       empresaId(req),
@@ -1219,6 +1220,7 @@ router.post("/solicitudes", requireCliente, async (req, res) => {
       body.mercancia || null,
       body.peso_kg || body.peso || null,
       normalizePositiveInteger(body.bultos),
+      normalizeNumeric(body.importe || body.precio),
       body.referencia_cliente || null,
       body.notas || null,
     ]
@@ -1421,9 +1423,9 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
       const inserted = await client.query(
         `INSERT INTO pedidos
           (numero,cliente_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
-           mercancia,peso_kg,bultos,notas,empresa_id,referencia_cliente,fecha_descarga,hora_descarga,
+           mercancia,peso_kg,bultos,importe,notas,empresa_id,referencia_cliente,fecha_descarga,hora_descarga,
            pendiente_completar,aviso_completar,portal_solicitud_id)
-         VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,true,$16,$17)
+         VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18)
          RETURNING *`,
         [
           numero,
@@ -1436,6 +1438,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
           sol.mercancia,
           normalizeNumeric(sol.peso_kg),
           normalizePositiveInteger(sol.bultos),
+          normalizeNumeric(sol.importe),
           notas,
           eid,
           sol.referencia_cliente,
@@ -1451,8 +1454,8 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
       const inserted = await client.query(
         `INSERT INTO pedidos
           (numero,cliente_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
-           mercancia,peso_kg,bultos,notas,empresa_id)
-         VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12)
+           mercancia,peso_kg,bultos,importe,notas,empresa_id)
+         VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,$13)
          RETURNING *`,
         [
           numero,
@@ -1465,6 +1468,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
           sol.mercancia,
           normalizeNumeric(sol.peso_kg),
           normalizePositiveInteger(sol.bultos),
+          normalizeNumeric(sol.importe),
           notas,
           eid,
         ]

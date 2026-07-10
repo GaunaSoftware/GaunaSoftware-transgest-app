@@ -816,6 +816,11 @@ function avimStorageKey(user) {
   return `tms_avim_minimized:${scope}`;
 }
 
+function avimSeenStorageKey(user) {
+  const scope = user?.empresa_id || user?.empresaId || user?.id || user?.email || "global";
+  return `tms_avim_seen:${scope}`;
+}
+
 function readAvimMinimized(user) {
   if (typeof window === "undefined") return false;
   try { return window.localStorage.getItem(avimStorageKey(user)) === "1"; }
@@ -828,7 +833,29 @@ function writeAvimMinimized(user, value) {
   catch {}
 }
 
-function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove, hidden = false }) {
+function avimAlertKey(item = {}) {
+  return String(item.key || item.id || [item.kind, item.pedido_id, item.colaborador_id, item.fecha_carga, item.fecha_descarga].filter(Boolean).join(":"));
+}
+
+function readAvimSeen(user) {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(avimSeenStorageKey(user)) || "[]");
+    return new Set(Array.isArray(raw) ? raw.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeAvimSeen(user, keys) {
+  if (typeof window === "undefined") return;
+  try {
+    const unique = Array.from(new Set(Array.from(keys || []).map(String))).slice(-500);
+    window.localStorage.setItem(avimSeenStorageKey(user), JSON.stringify(unique));
+  } catch {}
+}
+
+function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove, onMarkRead, hidden = false }) {
   const items = Array.isArray(data?.items) ? data.items : [];
   const pageSize = 12;
   const minimizedKey = avimStorageKey(user);
@@ -962,6 +989,15 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
             style={{width:28,height:28,borderRadius:999,border:"1px solid rgba(255,255,255,.18)",background:"rgba(255,255,255,.08)",color:"#fff",fontWeight:900,fontSize:12,cursor:"pointer"}}
           >
             Av
+          </button>
+          <button
+            type="button"
+            title="Marcar avisos como leidos"
+            onPointerDown={e=>e.stopPropagation()}
+            onClick={() => onMarkRead?.(items)}
+            style={{height:28,padding:"0 8px",borderRadius:999,border:"1px solid rgba(255,255,255,.18)",background:"rgba(255,255,255,.08)",color:"#fff",fontWeight:900,fontSize:11,cursor:"pointer"}}
+          >
+            Leido
           </button>
           <span style={{minWidth:28,height:28,borderRadius:999,display:"inline-flex",alignItems:"center",justifyContent:"center",background:importantes.length?"#ef4444":"#f59e0b",color:"#fff",fontWeight:900,fontSize:12}}>
             {totalAvisos}
@@ -1420,7 +1456,9 @@ function AppInner() {
         .then(d => {
           const next = d && Array.isArray(d.items) ? d : { items: [], resumen: {} };
           setAvisosOperativosColaboradores(next);
-          if ((next.items || []).length > 0 && !readAvimMinimized(user)) setAvisosOperativosOpen(true);
+          const vistos = readAvimSeen(user);
+          const nuevos = (next.items || []).filter(item => !vistos.has(avimAlertKey(item)));
+          if (nuevos.length > 0 && !readAvimMinimized(user)) setAvisosOperativosOpen(true);
           return next;
         })
         .catch(() => ({ items: [], resumen: {} }));
@@ -1652,6 +1690,13 @@ function AppInner() {
         hidden={pedidoActionMenuOpen}
         onToggle={setAvisosOperativosOpen}
         onRefresh={() => getAvisosOperativosColaboradores().then(d => setAvisosOperativosColaboradores(d && Array.isArray(d.items) ? d : { items: [], resumen: {} })).catch(()=>{})}
+        onMarkRead={(items) => {
+          const next = readAvimSeen(user);
+          (Array.isArray(items) ? items : []).forEach(item => next.add(avimAlertKey(item)));
+          writeAvimSeen(user, next);
+          setAvisosOperativosOpen(false);
+          toast("Avisos marcados como leidos. El indicador pequeno se mantiene mientras haya avisos pendientes.", "success");
+        }}
         onRemove={(key) => setAvisosOperativosColaboradores(prev => {
           const items = (prev.items || []).filter(item => item.key !== key);
           return { ...prev, items, resumen:{ ...(prev.resumen || {}), total:items.length, alta:items.filter(i=>i.severity==="alta").length, media:items.filter(i=>i.severity==="media").length, albaranes_pendientes:items.filter(i=>i.kind==="albaran_pendiente").length } };

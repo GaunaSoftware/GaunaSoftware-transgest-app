@@ -8832,7 +8832,7 @@ export default function Pedidos() {
   const [filtroSinAsignacion, setFiltroSinAsignacion] = useState(false);
   const [filtroPendienteCompletar, setFiltroPendienteCompletar] = useState(false);
   const [filtroColaborador, setFiltroColaborador] = useState(false);
-  const [groupByCliente, setGroupByCliente] = useState(false);
+  const [groupByCliente, setGroupByCliente] = useState(true);
   const [vistaPedidos, setVistaPedidos] = useState("lista");
   const [collapsedClientes, setCollapsedClientes] = useState(() => loadPedidosCollapsedGroups());
   const [criticalPanelOpen, setCriticalPanelOpen] = useState(false);
@@ -9930,10 +9930,11 @@ export default function Pedidos() {
       )
         .map(([key, group]) => ({ key, ...group, items: [...group.items].sort(ordenarItemsPedidoPorFecha) }))
         .sort((a, b) => {
+          const label = String(a.label || "").localeCompare(String(b.label || ""), "es", { sensitivity: "base" });
+          if (label !== 0) return label;
           const da = pedidoFechaOperativaKey(a.items[0]?.pedido);
           const db = pedidoFechaOperativaKey(b.items[0]?.pedido);
-          if (da !== db) return String(da).localeCompare(String(db));
-          return String(a.label || "").localeCompare(String(b.label || ""));
+          return String(da).localeCompare(String(db));
         })
     : usarAgrupadoCalendario ? buildPedidoCalendarGroups(pedidosVisibles, {
         desde: filtroDesde || undefined,

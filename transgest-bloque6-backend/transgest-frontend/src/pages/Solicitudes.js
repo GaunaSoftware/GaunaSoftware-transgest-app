@@ -93,6 +93,7 @@ function resumenSolicitud(sol) {
     sol.mercancia ? `Mercancia: ${sol.mercancia}` : "",
     sol.peso_kg ? `Peso: ${Number(sol.peso_kg).toLocaleString("es-ES")} kg` : "",
     validBultos(sol.bultos) ? `Bultos: ${validBultos(sol.bultos)}` : "",
+    sol.importe ? `Precio indicado: ${Number(sol.importe).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : "",
     sol.notas ? `Notas: ${sol.notas}` : "",
     sol.pedido_numero ? `Pedido: ${sol.pedido_numero}` : "",
     sol.vehiculo_matricula || sol.matricula_colaborador ? `Tractora: ${sol.vehiculo_matricula || sol.matricula_colaborador}` : "",
@@ -435,7 +436,7 @@ export default function Solicitudes() {
       notify("No hay solicitudes para exportar", "warning");
       return;
     }
-    const headers = ["estado","cliente","referencia","origen","destino","fecha_carga","hora_carga","mercancia","peso_kg","bultos","pedido","recibida","antiguedad_horas","notas","respuesta"];
+    const headers = ["estado","cliente","referencia","origen","destino","fecha_carga","hora_carga","mercancia","peso_kg","bultos","precio_cliente","pedido","recibida","antiguedad_horas","notas","respuesta"];
     const rows = visibles.map(s => [
       s.estado,
       s.cliente_nombre,
@@ -447,6 +448,7 @@ export default function Solicitudes() {
       s.mercancia,
       s.peso_kg,
       validBultos(s.bultos),
+      s.importe,
       s.pedido_numero,
       s.created_at,
       ageHours(s.created_at),
@@ -616,6 +618,7 @@ export default function Solicitudes() {
               {sol.mercancia && <span>Mercancia: {sol.mercancia}</span>}
               {sol.peso_kg && <span>Peso: {Number(sol.peso_kg).toLocaleString("es-ES")} kg</span>}
               {validBultos(sol.bultos) && <span>Bultos: {validBultos(sol.bultos)}</span>}
+              {sol.importe && <span>Precio cliente: {Number(sol.importe).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR</span>}
               {Number(sol.bultos) < 0 && <span style={{color:"#f97316",fontWeight:900}}>Bultos a revisar: valor negativo corregido al aceptar</span>}
               {sol.fecha_descarga && <span>Descarga: {dateEs(sol.fecha_descarga)} {sol.hora_descarga || ""}</span>}
               {sol.pedido_numero && <span>Pedido: {sol.pedido_numero}</span>}

@@ -2455,6 +2455,16 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
   };
   const buildCargasRapidas = () => {
     const pais = canonicalCountry(form.origen_pais || "España") || "España";
+    const paradasGuardadas = parseStops(form.puntos_carga);
+    if (paradasGuardadas.length) return paradasGuardadas.map((stop, idx) => ({
+      ...stop,
+      direccion: (stopAddress(stop) || stop.direccion || form.origen || "").trim().toUpperCase(),
+      fecha: stop.fecha || (idx === 0 ? form.fecha_carga : "") || form.fecha_carga || "",
+      hora: stop.hora || (idx === 0 ? form.hora_carga : "") || "",
+      pais: stopCountry(stop, pais),
+      provincia: stopRegion(stop, idx === 0 ? form.origen_provincia || "" : ""),
+      notas: stop.notas || (idx === 0 ? "Pedido rapido" : "Carga adicional desde pedido rapido"),
+    }));
     const principal = {
       direccion: form.origen.trim().toUpperCase(),
       cliente_nombre: "",
@@ -2490,6 +2500,17 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
   };
   const buildDescargasRapidas = () => {
     const pais = canonicalCountry(form.destino_pais || "España") || "España";
+    const paradasGuardadas = parseStops(form.puntos_descarga);
+    if (paradasGuardadas.length) return paradasGuardadas.map((stop, idx) => ({
+      ...stop,
+      direccion: (stopAddress(stop) || stop.direccion || form.destino || "").trim().toUpperCase(),
+      fecha: stop.fecha || (idx === 0 ? form.fecha_descarga || form.fecha_finalizacion : "") || form.fecha_descarga || form.fecha_finalizacion || form.fecha_carga || "",
+      hora: stop.hora || (idx === 0 ? form.hora_descarga : "") || "",
+      pais: stopCountry(stop, pais),
+      provincia: stopRegion(stop, idx === 0 ? form.destino_provincia || "" : ""),
+      tipo_descarga: stop.tipo_descarga || form.tipo_descarga || "indiferente",
+      notas: stop.notas || (idx === 0 ? (form.tipo_descarga ? `Pedido rapido. Descarga ${form.tipo_descarga}` : "Pedido rapido") : "Descarga adicional desde pedido rapido"),
+    }));
     const principal = {
       direccion: form.destino.trim().toUpperCase(),
       cliente_nombre: "",
@@ -2709,16 +2730,6 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         extracostes_importe: 0,
       }, true);
       const importeCalculado = Number(calcImporte(tarifaDraft).toFixed(2));
-      const precioColaboradorUnitario = toNullableNumber(form.precio_colaborador);
-      const unidadesColaborador = Math.max(
-        toFiniteNumber(tarifaDraft.cantidad, 0),
-        tipoPrecio === "viaje" ? 0 : toFiniteNumber(tarifaDraft.minimo_unidades, 0)
-      );
-      const precioColaboradorTotal = precioColaboradorUnitario == null
-        ? null
-        : tipoPrecio === "viaje"
-          ? precioColaboradorUnitario
-          : Number(((tipoPrecio === "kg" ? unidadesColaborador / 100 : unidadesColaborador) * precioColaboradorUnitario).toFixed(2));
       const conAsignacion = !!vehiculoRapidoId || !!colaboradorId || !!matriculaManualRapida;
       const aviso = conAsignacion
         ? `Pedido rapido: completar ${tieneTarifasSinRuta ? "ruta/tarifa, " : ""}mercancia, peso, bultos, documentos y datos de facturacion.`
@@ -2767,9 +2778,9 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         minimo_unidades: tipoPrecio !== "viaje" ? toNullableNumber(tarifaDraft.minimo_unidades) : null,
         km_ruta: kmRuta,
         precio_cliente_col: colaboradorId ? importeCalculado : null,
-        precio_colaborador: colaboradorId ? precioColaboradorTotal : null,
-        precio_colaborador_unitario: colaboradorId && tipoPrecio !== "viaje" ? precioColaboradorUnitario : null,
-        minimo_colaborador_unidades: colaboradorId && tipoPrecio !== "viaje" ? toNullableNumber(tarifaDraft.minimo_unidades) : null,
+        precio_colaborador: null,
+        precio_colaborador_unitario: null,
+        minimo_colaborador_unidades: null,
         coste_gasoil: colaboradorId ? 0 : undefined,
         pendiente_completar: true,
         aviso_completar: aviso,
@@ -2881,10 +2892,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           )}
           <div><label style={S.label}>Origen *</label><input style={inp} value={form.origen} onChange={f("origen")} placeholder="MADRID"/></div>
           <div><label style={S.label}>Destino *</label><input style={inp} value={form.destino} onChange={f("destino")} placeholder="VALENCIA"/></div>
-          <div><label style={S.label}>Fecha *</label><input type="date" style={inp} value={form.fecha_carga} onChange={e=>setForm(p=>({...p,fecha_carga:e.target.value,fecha_descarga:p.fecha_descarga || e.target.value,fecha_finalizacion:p.fecha_finalizacion || e.target.value}))}/></div>
+          <div><label style={S.label}>Fecha carga *</label><input type="date" style={inp} value={form.fecha_carga} onChange={e=>setForm(p=>({...p,fecha_carga:e.target.value,fecha_descarga:p.fecha_descarga || e.target.value,fecha_finalizacion:p.fecha_finalizacion || e.target.value}))}/></div>
           <div><label style={S.label}>Hora carga</label><input type="time" style={inp} value={form.hora_carga} onChange={f("hora_carga")}/></div>
           <div><label style={S.label}>Hora descarga</label><input type="time" style={inp} value={form.hora_descarga} onChange={f("hora_descarga")}/></div>
-          <div><label style={S.label}>Fecha finalizacion</label><input type="date" style={inp} value={form.fecha_finalizacion} onChange={e=>setForm(p=>({...p,fecha_finalizacion:e.target.value,fecha_descarga:e.target.value || p.fecha_descarga}))}/></div>
+          <div><label style={S.label}>Fecha descarga</label><input type="date" style={inp} value={form.fecha_descarga || form.fecha_finalizacion || ""} onChange={e=>setForm(p=>({...p,fecha_descarga:e.target.value,fecha_finalizacion:e.target.value}))}/></div>
           <div>
             <label style={S.label}>Matricula</label>
             <input list="matriculas-pedido-rapido" style={inp} value={form.matricula_rapida} onChange={e=>{
@@ -2991,7 +3002,6 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
               <option value="indiferente">Indiferente</option>
             </select>
           </div>
-          <div><label style={S.label}>Fecha descarga</label><input type="date" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")}/></div>
           <div>
             <label style={S.label}>Tipo precio</label>
             <select style={S.sel} value={form.tipo_precio} onChange={e=>setForm(p=>syncCantidadRapida({...p,tipo_precio:e.target.value}, true))}>
@@ -3016,10 +3026,6 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
               placeholder="Si existe ruta, se cargara al crear"/>
           </div>
           <div>
-            <label style={S.label}>{form.tipo_precio==="tonelada" ? "Pago colaborador EUR/tn" : "Pago colaborador"}</label>
-            <input type="text" inputMode="decimal" style={inp} value={form.precio_colaborador} onChange={f("precio_colaborador")} placeholder="Opcional"/>
-          </div>
-          <div>
             <label style={S.label}>Km ruta</label>
             <input type="text" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Si existe ruta, se cargara al crear"/>
           </div>
@@ -3041,22 +3047,12 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
             <textarea style={{...inp,minHeight:58,resize:"vertical"}} value={form.observaciones} onChange={f("observaciones")} placeholder="Ej: levantar techo, llamar antes de cargar, traslado bobinas..." />
           </div>
           <div style={{gridColumn:"1/-1"}}>
-            <label style={S.label}>Cargas extra</label>
-            <textarea
-              style={{...inp,minHeight:72,resize:"vertical"}}
-              value={form.cargas_extra}
-              onChange={f("cargas_extra")}
-              placeholder={"Una carga adicional por linea\nFormato opcional: origen | YYYY-MM-DD | HH:MM"}
-            />
+            <div style={S.sec}>Puntos de carga</div>
+            <ParadasEditor tipo="carga" form={form} setForm={setForm} />
           </div>
           <div style={{gridColumn:"1/-1"}}>
-            <label style={S.label}>Descargas extra</label>
-            <textarea
-              style={{...inp,minHeight:84,resize:"vertical"}}
-              value={form.descargas_extra}
-              onChange={f("descargas_extra")}
-              placeholder={"Una descarga adicional por linea\nCon el destino basta; fecha y hora se pueden completar despues"}
-            />
+            <div style={S.sec}>Puntos de descarga</div>
+            <ParadasEditor tipo="descarga" form={form} setForm={setForm} />
           </div>
         </div>
 

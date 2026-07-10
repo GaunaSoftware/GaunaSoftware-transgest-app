@@ -2,18 +2,6 @@ import { useState } from "react";
 
 const BASE = process.env.REACT_APP_API_URL || "";
 
-// eslint-disable-next-line no-unused-vars
-const PLANES = [
-  { id:"lite",        nombre:"Lite",        precio:29,  veh:1,  usr:2,  color:"#0f766e",
-    features:["App chofer","Clientes, rutas y pedidos","DCD con QR"] },
-  { id:"basico",      nombre:"Básico",      precio:49,  veh:3,  usr:2,  color:"#6b7280",
-    features:["Pedidos y tráfico","Facturación básica","Hasta 3 vehículos","2 usuarios"] },
-  { id:"profesional", nombre:"Profesional", precio:149, veh:10, usr:5,  color:"#3b82f6", recommended:true,
-    features:["Todo lo del Básico","Chóferes y hojas de ruta","Informes avanzados","Tarifas y objetivos","Hasta 10 vehículos","5 usuarios"] },
-  { id:"enterprise",  nombre:"Enterprise",  precio:399, veh:50, usr:20, color:"#8b5cf6",
-    features:["Todo lo del Profesional","Nóminas automáticas","Portal de clientes","App chóferes","Soporte prioritario","50 vehículos · 20 usuarios"] },
-];
-
 const REGISTRO_PLANES = [
   { id:"lite",        nombre:"Lite",        precio:49,  veh:"DCD", usr:"2", color:"#0f766e",
     features:["App chofer","Clientes, rutas y pedidos","DCD con QR"] },

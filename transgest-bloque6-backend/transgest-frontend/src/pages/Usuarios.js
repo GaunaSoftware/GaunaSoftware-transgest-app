@@ -610,6 +610,7 @@ export default function Usuarios() {
           title="Credencial temporal creada"
           onClose={()=>setCredencialCreada(null)}
           width={520}
+          closeOnBackdrop={false}
           footer={<button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={()=>setCredencialCreada(null)}>He guardado la credencial</button>}
         >
           <div style={{fontSize:13,color:"var(--text3)",lineHeight:1.5,marginBottom:14}}>

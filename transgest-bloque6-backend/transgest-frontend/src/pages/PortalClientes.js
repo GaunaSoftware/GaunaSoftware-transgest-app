@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   cancelarPortalClienteSolicitud,
   crearPortalClienteSolicitud,
@@ -1307,6 +1307,8 @@ function FacturaPortalModal({ factura, onClose, empresa }) {
 function SolicitudServicio({ onDone, setTab }) {
   const [saving, setSaving] = useState(false);
   const [puntos, setPuntos] = useState([]);
+  const [puntosLoading, setPuntosLoading] = useState(true);
+  const [puntosError, setPuntosError] = useState("");
   const [form, setForm] = useState({
     referencia_cliente: "",
     origen: "",
@@ -1327,13 +1329,20 @@ function SolicitudServicio({ onDone, setTab }) {
   const inp = { background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", padding: "9px 12px", borderRadius: 8, fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   const lbl = { display: "block", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", margin: "12px 0 4px" };
 
-  useEffect(() => {
-    let alive = true;
-    getPortalClientePuntos()
-      .then(data => { if (alive) setPuntos(Array.isArray(data) ? data : []); })
-      .catch(() => { if (alive) setPuntos([]); });
-    return () => { alive = false; };
+  const cargarPuntos = useCallback(async () => {
+    setPuntosLoading(true);
+    setPuntosError("");
+    try {
+      const data = await getPortalClientePuntos();
+      setPuntos(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setPuntosError(error.message || "No se pudieron cargar los puntos guardados");
+    } finally {
+      setPuntosLoading(false);
+    }
   }, []);
+
+  useEffect(() => { cargarPuntos(); }, [cargarPuntos]);
 
   function pointText(point = {}) {
     const parts = [point.nombre, point.direccion, point.ciudad, point.provincia]
@@ -1395,6 +1404,13 @@ function SolicitudServicio({ onDone, setTab }) {
     <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 18 }}>
       <div style={{ fontWeight: 900, color: "var(--text)", fontSize: 16 }}>Solicitar nuevo servicio</div>
       <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 4 }}>La solicitud queda vinculada solo a tu empresa transportista y a tu ficha de cliente.</div>
+      {puntosLoading && <div style={{ marginTop:10, fontSize:12, color:"var(--text4)" }}>Cargando puntos guardados...</div>}
+      {puntosError && (
+        <div style={{ marginTop:10, display:"flex", gap:10, alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", padding:"9px 11px", border:"1px solid rgba(239,68,68,.28)", borderRadius:8, background:"rgba(239,68,68,.07)", color:"#ef4444", fontSize:12 }}>
+          <span>{puntosError}</span>
+          <button type="button" onClick={cargarPuntos} style={{ padding:"8px 12px", borderRadius:7, border:"1px solid rgba(239,68,68,.3)", background:"var(--bg3)", color:"#ef4444", fontWeight:800, cursor:"pointer" }}>Reintentar</button>
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: "0 14px", marginTop: 8 }}>
         <div><label style={lbl}>Referencia cliente</label><input style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Pedido, OC, referencia interna..." /></div>
         <div><label style={lbl}>Mercancia</label><input style={inp} value={form.mercancia} onChange={f("mercancia")} placeholder="Tipo de mercancia" /></div>

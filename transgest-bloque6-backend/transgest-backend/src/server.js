@@ -405,6 +405,7 @@ async function applyMigrations() {
     await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS hora_propuesta VARCHAR(20)").catch(() => {});
     await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente VARCHAR(20)").catch(() => {});
     await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente_at TIMESTAMPTZ").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe NUMERIC(12,2)").catch(() => {});
     await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe_contraoferta NUMERIC(12,2)").catch(() => {});
     await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio VARCHAR(20)").catch(() => {});
     await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio_at TIMESTAMPTZ").catch(() => {});
@@ -1035,6 +1036,7 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pendiente_completar BOOLEAN DEFAULT false").catch(()=>{});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS aviso_completar TEXT").catch(()=>{});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS portal_solicitud_id UUID").catch(()=>{});
+    await db.query("CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_numero_portal ON pedidos(empresa_id, numero DESC)").catch(()=>{});
     await db.query("CREATE INDEX IF NOT EXISTS idx_pedidos_portal_solicitud ON pedidos(empresa_id, portal_solicitud_id) WHERE portal_solicitud_id IS NOT NULL").catch(()=>{});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS importe_paralizacion NUMERIC(10,2) DEFAULT 0").catch(()=>{});
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS paralizacion_horas NUMERIC(6,2) DEFAULT 0").catch(()=>{});

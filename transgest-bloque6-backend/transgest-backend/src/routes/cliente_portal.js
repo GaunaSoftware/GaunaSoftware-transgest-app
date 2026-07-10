@@ -5,6 +5,7 @@ const { crearNotificacion } = require("../services/notificaciones");
 const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload } = require("../services/documentoControl");
 
 const router = express.Router();
+const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 let schemaReady = null;
 function ensureSchema() {
@@ -108,6 +109,13 @@ function normalizePositiveInteger(value) {
   return Math.round(n);
 }
 
+function resolveSolicitudImporte(solicitud = {}) {
+  const importe = solicitud.decision_precio === "aceptada"
+    ? normalizeNonNegativeNumeric(solicitud.importe_contraoferta)
+    : normalizeNonNegativeNumeric(solicitud.importe);
+  return importe ?? 0;
+}
+
 function normalizeTime(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
@@ -164,19 +172,14 @@ async function nextPedidoNumero(client, empresaId) {
   const prefix = `PED-${year}-`;
   await client.query(
     `INSERT INTO pedido_numero_counters (empresa_id, year, last_num)
-     VALUES (
-       $1,
-       $2,
-       COALESCE((
-         SELECT substring(numero from $3)::int
-           FROM pedidos
-          WHERE empresa_id=$1 AND numero LIKE $4
-          ORDER BY numero DESC
-          LIMIT 1
-       ), 0)
-     )
-     ON CONFLICT (empresa_id, year) DO NOTHING`,
-    [empresaId, year, `^${prefix}(\\d+)$`, `${prefix}%`]
+     SELECT $1, $2,
+            COALESCE(MAX(CASE WHEN numero ~ $3 THEN substring(numero from $3)::int ELSE 0 END), 0)
+       FROM pedidos
+      WHERE empresa_id=$1 AND numero LIKE $4
+     ON CONFLICT (empresa_id, year) DO UPDATE
+       SET last_num=GREATEST(pedido_numero_counters.last_num, EXCLUDED.last_num),
+           updated_at=NOW()`,
+    [empresaId, year, `^${prefix}([0-9]+)$`, `${prefix}%`]
   );
   const { rows } = await client.query(
     `UPDATE pedido_numero_counters
@@ -1179,7 +1182,7 @@ router.get("/pedidos/:id/documento-control", requireCliente, async (req, res) =>
   })));
 });
 
-router.get("/puntos", requireCliente, async (req, res) => {
+router.get("/puntos", requireCliente, asyncRoute(async (req, res) => {
   const { rows } = await db.query(
     `SELECT id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
             contacto_nombre,contacto_telefono,email,notas,cliente_id
@@ -1191,9 +1194,9 @@ router.get("/puntos", requireCliente, async (req, res) => {
     [empresaId(req), req.user.cliente_id]
   );
   res.json(rows.map(row => ({ ...row, es_general: !row.cliente_id })));
-});
+}));
 
-router.post("/puntos", requireCliente, async (req, res) => {
+router.post("/puntos", requireCliente, asyncRoute(async (req, res) => {
   const body = req.body || {};
   const tipo = ["carga", "descarga", "ambos"].includes(String(body.tipo || "").toLowerCase())
     ? String(body.tipo).toLowerCase()
@@ -1231,9 +1234,9 @@ router.post("/puntos", requireCliente, async (req, res) => {
     ]
   );
   res.status(201).json({ ...rows[0], es_general: false });
-});
+}));
 
-router.get("/solicitudes", requireCliente, async (req, res) => {
+router.get("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const { rows } = await db.query(
     `SELECT s.*, p.numero AS pedido_numero,
@@ -1259,9 +1262,9 @@ router.get("/solicitudes", requireCliente, async (req, res) => {
     [empresaId(req), req.user.cliente_id]
   );
   res.json(rows);
-});
+}));
 
-router.get("/solicitudes/:id/eventos", requireCliente, async (req, res) => {
+router.get("/solicitudes/:id/eventos", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const solicitud = await db.query(
     "SELECT id FROM portal_solicitudes_cliente WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3",
@@ -1277,9 +1280,9 @@ router.get("/solicitudes/:id/eventos", requireCliente, async (req, res) => {
     [req.params.id, empresaId(req)]
   );
   res.json(rows);
-});
+}));
 
-router.post("/solicitudes", requireCliente, async (req, res) => {
+router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const body = req.body || {};
   const [origenPunto, destinoPunto] = await Promise.all([
@@ -1358,9 +1361,9 @@ router.post("/solicitudes", requireCliente, async (req, res) => {
   }).catch(() => {});
   notificarNuevaSolicitud(req, solicitud).catch(() => {});
   res.status(201).json(solicitud);
-});
+}));
 
-router.post("/solicitudes/:id/reprogramacion", requireCliente, async (req, res) => {
+router.post("/solicitudes/:id/reprogramacion", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const decision = String(req.body?.decision || "").toLowerCase();
   if (!["aceptada", "rechazada"].includes(decision)) {
@@ -1409,9 +1412,9 @@ router.post("/solicitudes/:id/reprogramacion", requireCliente, async (req, res) 
     result = { status: 200, body: updated.rows[0] };
   });
   res.status(result.status).json(result.body);
-});
+}));
 
-router.post("/solicitudes/:id/precio", requireCliente, async (req, res) => {
+router.post("/solicitudes/:id/precio", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const decision = String(req.body?.decision || "").trim().toLowerCase();
   if (!["aceptada", "rechazada"].includes(decision)) {
@@ -1431,8 +1434,20 @@ router.post("/solicitudes/:id/precio", requireCliente, async (req, res) => {
       result = { status: 404, body: { error: "Solicitud no encontrada" } };
       return;
     }
+    if (["convertida", "rechazada", "descartada", "cancelada"].includes(String(solicitud.estado || "").toLowerCase())) {
+      result = { status: 409, body: { error: "La solicitud ya esta cerrada y no admite cambios de precio" } };
+      return;
+    }
     if (normalizeNonNegativeNumeric(solicitud.importe_contraoferta) === null) {
       result = { status: 400, body: { error: "No hay una contraoferta pendiente" } };
+      return;
+    }
+    if (solicitud.decision_precio === decision) {
+      result = { status: 200, body: solicitud };
+      return;
+    }
+    if (solicitud.decision_precio && solicitud.decision_precio !== "pendiente") {
+      result = { status: 409, body: { error: "Esta contraoferta ya fue respondida" } };
       return;
     }
 
@@ -1458,9 +1473,9 @@ router.post("/solicitudes/:id/precio", requireCliente, async (req, res) => {
     result = { status: 200, body: updated.rows[0] };
   });
   res.status(result.status).json(result.body);
-});
+}));
 
-router.post("/solicitudes/:id/cancelar", requireCliente, async (req, res) => {
+router.post("/solicitudes/:id/cancelar", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const motivo = String(req.body?.motivo || "").trim().slice(0, 500);
   let result;
@@ -1501,9 +1516,9 @@ router.post("/solicitudes/:id/cancelar", requireCliente, async (req, res) => {
     result = { status: 200, body: updated.rows[0] };
   });
   res.status(result.status).json(result.body);
-});
+}));
 
-router.get("/admin/solicitudes/:id/eventos", requireGestion, async (req, res) => {
+router.get("/admin/solicitudes/:id/eventos", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
   const solicitud = await db.query(
     "SELECT id FROM portal_solicitudes_cliente WHERE id=$1 AND empresa_id=$2",
@@ -1519,9 +1534,9 @@ router.get("/admin/solicitudes/:id/eventos", requireGestion, async (req, res) =>
     [req.params.id, empresaId(req)]
   );
   res.json(rows);
-});
+}));
 
-router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res) => {
+router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
   const eid = empresaId(req);
   const limpiarInvalidos = req.body?.force === true || req.body?.limpiar_bultos === true || req.body?.limpiar_invalidos === true;
@@ -1611,9 +1626,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
     const horaDescarga = normalizeTime(sol.hora_descarga);
     const puntosCarga = [portalPointStop(origenPunto, sol.origen, "carga", sol.fecha_carga, horaCarga)];
     const puntosDescarga = [portalPointStop(destinoPunto, sol.destino, "descarga", sol.fecha_descarga, horaDescarga)];
-    const importePedido = sol.decision_precio === "aceptada"
-      ? normalizeNonNegativeNumeric(sol.importe_contraoferta)
-      : normalizeNonNegativeNumeric(sol.importe);
+    const importePedido = resolveSolicitudImporte(sol);
 
     const inserted = await client.query(
       `INSERT INTO pedidos
@@ -1633,7 +1646,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
         sol.mercancia || null,
         normalizeNonNegativeNumeric(sol.peso_kg),
         normalizePositiveInteger(sol.bultos),
-        importePedido ?? 0,
+        importePedido,
         notas,
         eid,
         sol.referencia_cliente || null,
@@ -1667,9 +1680,9 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
     result = { status: 201, body: { ok: true, pedido, solicitud: updated.rows[0] } };
   });
   res.status(result.status).json(result.body);
-});
+}));
 
-router.get("/admin/solicitudes", requireGestion, async (req, res) => {
+router.get("/admin/solicitudes", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
   const { estado = "", cliente_id = "" } = req.query;
   const params = [empresaId(req)];
@@ -1706,9 +1719,9 @@ router.get("/admin/solicitudes", requireGestion, async (req, res) => {
     params
   );
   res.json(rows);
-});
+}));
 
-router.patch("/admin/solicitudes/:id", requireGestion, async (req, res) => {
+router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
   const { estado, pedido_id, respuesta, fecha_propuesta, hora_propuesta, decision_cliente, importe_contraoferta } = req.body || {};
   const eid = empresaId(req);
@@ -1723,12 +1736,16 @@ router.patch("/admin/solicitudes/:id", requireGestion, async (req, res) => {
   let result;
   await db.transaction(async (client) => {
     const current = await client.query(
-      "SELECT id, cliente_id FROM portal_solicitudes_cliente WHERE id=$1 AND empresa_id=$2 FOR UPDATE",
+      "SELECT id, cliente_id, estado, pedido_id FROM portal_solicitudes_cliente WHERE id=$1 AND empresa_id=$2 FOR UPDATE",
       [req.params.id, eid]
     );
     const solicitud = current.rows[0];
     if (!solicitud) {
       result = { status: 404, body: { error: "Solicitud no encontrada" } };
+      return;
+    }
+    if (contraofertaProvided && (solicitud.pedido_id || ["convertida", "rechazada", "descartada", "cancelada"].includes(String(solicitud.estado || "").toLowerCase()))) {
+      result = { status: 409, body: { error: "La solicitud ya esta cerrada y no admite una contraoferta" } };
       return;
     }
 
@@ -1791,6 +1808,15 @@ router.patch("/admin/solicitudes/:id", requireGestion, async (req, res) => {
     result = { status: 200, body: rows[0] };
   });
   res.status(result.status).json(result.body);
-});
+}));
 
 module.exports = router;
+module.exports._test = {
+  asyncRoute,
+  nextPedidoNumero,
+  normalizeNonNegativeNumeric,
+  normalizePositiveInteger,
+  portalPointLabel,
+  portalPointStop,
+  resolveSolicitudImporte,
+};

@@ -660,7 +660,7 @@ export const getPortalClienteFacturas = () => apiFetch("/portal-cliente/facturas
 export const getPortalClienteFactura = (id) => apiFetch(`/portal-cliente/facturas/${encodeURIComponent(id)}`);
 export const getPortalClienteSolicitudes = () => apiFetch("/portal-cliente/solicitudes", { silentError:true });
 export const getPortalClienteSolicitudEventos = (id) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/eventos`);
-export const getPortalClientePuntos = () => apiFetch("/portal-cliente/puntos", { silentError:true });
+export const getPortalClientePuntos = () => apiFetch("/portal-cliente/puntos");
 export const crearPortalClientePunto = (data) => apiFetch("/portal-cliente/puntos", { method:"POST", body:data });
 export const getPortalClienteDocumentosResumen = () => apiFetch("/portal-cliente/documentos-resumen", { silentError:true });
 export const getPortalClienteIntegracionManifest = () => apiFetch("/portal-cliente/integracion/manifest", { silentError:true });

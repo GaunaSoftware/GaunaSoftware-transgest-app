@@ -90,12 +90,12 @@ export function StatusBadge({ children, tone = "neutral" }) {
   );
 }
 
-export function ModalShell({ title, children, footer, onClose, width = 560 }) {
+export function ModalShell({ title, children, footer, onClose, width = 560, closeOnBackdrop = true }) {
   return (
     <div
       className="tg-modal-backdrop"
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
-      onMouseDown={e => e.target === e.currentTarget && onClose?.()}
+      onMouseDown={e => closeOnBackdrop && e.target === e.currentTarget && onClose?.()}
     >
       <div className="tg-modal-shell" style={{ background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 8, padding: 24, width: `min(${width}px,96vw)`, maxHeight: "90vh", overflowY: "auto", boxShadow: "var(--shadow)" }}>
         {title && <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 17, fontWeight: 800, marginBottom: 14, color: "var(--text)" }}>{title}</div>}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, actualizarKmVehiculo, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -1763,6 +1763,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
   const [gpsProviders, setGpsProviders] = useState([]);
   const [gpsStatus, setGpsStatus] = useState(null);
   const [gpsSyncProvider, setGpsSyncProvider] = useState("");
+  const backgroundRefreshInFlight = useRef(false);
   const recargarResumenGps = useCallback(async () => {
     try {
       const [r, status] = await Promise.all([
@@ -1778,14 +1779,16 @@ export default function Vehiculos({ initialTipo = "todos" }) {
     }, []);
   const [choferPicker, setChoferPicker] = useState(null); // {vehiculoId, estado} - para asignar chofer al cambiar estado
 
-  const cargar = useCallback(async (soloVehiculos=false) => {
-    setLoading(true);
+  const cargar = useCallback(async (soloVehiculos=false, silencioso=false) => {
+    if (silencioso && backgroundRefreshInFlight.current) return;
+    if (silencioso) backgroundRefreshInFlight.current = true;
+    else setLoading(true);
     try {
       const _t = (p,ms=8000)=>Promise.race([p, new Promise(r=>setTimeout(()=>r([]),ms))]);
       if (soloVehiculos) {
         // Quick reload: only vehicles (used after estado change)
         const d = await getVehiculos();
-        setVehiculos(Array.isArray(d) ? d : []);
+        if (Array.isArray(d)) setVehiculos(d);
       } else {
         // Full load: vehicles + pedidos + choferes desde backend
         const [d, p, ch] = await Promise.all([
@@ -1803,7 +1806,10 @@ export default function Vehiculos({ initialTipo = "todos" }) {
       }
     }
     catch(e) { console.error(e); }
-    finally { setLoading(false); }
+    finally {
+      if (silencioso) backgroundRefreshInFlight.current = false;
+      else setLoading(false);
+    }
   }, []);
 
   useEffect(() => { cargar(); }, [cargar]);
@@ -1828,7 +1834,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
   useEffect(() => {
     const refrescarLigero = () => {
       if (document.visibilityState === "hidden") return;
-      cargar(true);
+      cargar(true, true);
       recargarResumenGps();
     };
     const pollId = window.setInterval(refrescarLigero, 45000);

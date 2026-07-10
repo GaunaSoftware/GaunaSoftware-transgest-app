@@ -7,6 +7,7 @@ import {
   getPortalClienteFacturas,
   getPortalClienteDocumentosResumen,
   getPortalClientePedidos,
+  getPortalClientePuntos,
   getPortalClienteResumen,
   getPortalClienteSolicitudEventos,
   getPortalClienteSolicitudes,
@@ -14,10 +15,12 @@ import {
   getPortalPedidoDocumentoControl,
   getPortalPedidoEventos,
   responderPortalClienteReprogramacion,
+  responderPortalClientePrecio,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { notify } from "../services/notify";
+import PortalPointPicker from "../components/PortalPointPicker";
 
 const fmt2 = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -274,6 +277,9 @@ function solicitudEventoLabel(tipo) {
     "solicitud.convertida": "Convertida en pedido",
     "solicitud.rechazada": "Solicitud rechazada",
     "solicitud.cancelada.cliente": "Cancelada por cliente",
+    "solicitud.precio.propuesto": "Nuevo precio propuesto",
+    "solicitud.precio.aceptada": "Precio aceptado",
+    "solicitud.precio.rechazada": "Precio rechazado",
     "solicitud.actualizada": "Gestion actualizada",
   };
   return labels[tipo] || tipo || "Evento";
@@ -287,6 +293,7 @@ function solicitudEventoResumen(ev) {
   if (ev.tipo === "solicitud.convertida") return d.pedido_numero ? `Pedido ${d.pedido_numero}` : "Convertida en pedido.";
   if (ev.tipo === "solicitud.rechazada") return d.respuesta || "Solicitud rechazada por trafico.";
   if (ev.tipo === "solicitud.cancelada.cliente") return d.motivo ? `Motivo: ${d.motivo}` : "Cancelada desde el portal cliente.";
+  if (ev.tipo?.startsWith("solicitud.precio.")) return d.importe_contraoferta !== null && d.importe_contraoferta !== undefined ? `${Number(d.importe_contraoferta).toFixed(2)} EUR` : "Precio actualizado.";
   if (ev.tipo === "solicitud.actualizada") return d.estado ? `Estado: ${d.estado}` : "Gestion actualizada.";
   return "";
 }
@@ -422,6 +429,16 @@ export default function PortalClientes() {
     try {
       await responderPortalClienteReprogramacion(id, { decision });
       notify(decision === "aceptada" ? "Nueva fecha aceptada" : "Nueva fecha rechazada", "success");
+      await cargar();
+    } catch (e) {
+      notify(e.message, "error");
+    }
+  }
+
+  async function responderPrecio(id, decision) {
+    try {
+      await responderPortalClientePrecio(id, { decision });
+      notify(decision === "aceptada" ? "Precio aceptado" : "Precio rechazado", "success");
       await cargar();
     } catch (e) {
       notify(e.message, "error");
@@ -1059,6 +1076,24 @@ export default function PortalClientes() {
                     <Mini label="Precio indicado" value={s.importe ? `${Number(s.importe).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : "-"} />
                     <Mini label="Descarga" value={s.fecha_descarga ? `${dateEs(s.fecha_descarga)} ${s.hora_descarga || ""}`.trim() : "-"} />
                   </div>
+                  {s.importe_contraoferta !== null && s.importe_contraoferta !== undefined && (
+                    <div style={{ marginTop:10, padding:"10px 12px", borderRadius:8, background:"rgba(245,158,11,.08)", border:"1px solid rgba(245,158,11,.25)" }}>
+                      <div style={{ fontSize:12, fontWeight:900, color:"var(--text)" }}>
+                        Precio propuesto por trafico: {Number(s.importe_contraoferta).toLocaleString("es-ES", { minimumFractionDigits:2, maximumFractionDigits:2 })} EUR
+                      </div>
+                      <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>
+                        {s.decision_precio === "aceptada" && "Has aceptado este precio."}
+                        {s.decision_precio === "rechazada" && "Has rechazado este precio. Trafico revisara la solicitud."}
+                        {(!s.decision_precio || s.decision_precio === "pendiente") && "Revisa la contraoferta antes de que trafico convierta la solicitud en pedido."}
+                      </div>
+                      {(!s.decision_precio || s.decision_precio === "pendiente") && (
+                        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:9 }}>
+                          <button onClick={() => responderPrecio(s.id, "aceptada")} style={{ ...S.btn, background:"#10b981", color:"#fff", borderColor:"#10b981" }}>Aceptar precio</button>
+                          <button onClick={() => responderPrecio(s.id, "rechazada")} style={{ ...S.btn, color:"#ef4444", borderColor:"rgba(239,68,68,.25)" }}>Rechazar precio</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {(s.vehiculo_matricula || s.matricula_colaborador || s.remolque_matricula || s.remolque_matricula_colaborador) && (
                     <div style={{ marginTop:10, padding:"10px 12px", borderRadius:8, background:"rgba(16,185,129,.08)", border:"1px solid rgba(16,185,129,.18)", fontSize:12, color:"var(--text3)" }}>
                       Matrículas asignadas:
@@ -1271,6 +1306,7 @@ function FacturaPortalModal({ factura, onClose, empresa }) {
 
 function SolicitudServicio({ onDone, setTab }) {
   const [saving, setSaving] = useState(false);
+  const [puntos, setPuntos] = useState([]);
   const [form, setForm] = useState({
     referencia_cliente: "",
     origen: "",
@@ -1284,10 +1320,42 @@ function SolicitudServicio({ onDone, setTab }) {
     bultos: "",
     importe: "",
     notas: "",
+    origen_punto_id: "",
+    destino_punto_id: "",
   });
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
   const inp = { background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", padding: "9px 12px", borderRadius: 8, fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   const lbl = { display: "block", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", margin: "12px 0 4px" };
+
+  useEffect(() => {
+    let alive = true;
+    getPortalClientePuntos()
+      .then(data => { if (alive) setPuntos(Array.isArray(data) ? data : []); })
+      .catch(() => { if (alive) setPuntos([]); });
+    return () => { alive = false; };
+  }, []);
+
+  function pointText(point = {}) {
+    const parts = [point.nombre, point.direccion, point.ciudad, point.provincia]
+      .map(value => String(value || "").trim())
+      .filter((value, index, all) => value && all.indexOf(value) === index);
+    return parts.join(" - ");
+  }
+
+  function selectPoint(tipo, point) {
+    const idKey = tipo === "carga" ? "origen_punto_id" : "destino_punto_id";
+    const textKey = tipo === "carga" ? "origen" : "destino";
+    setForm(prev => ({
+      ...prev,
+      [idKey]: point?.id || "",
+      ...(point ? { [textKey]: pointText(point) } : {}),
+    }));
+  }
+
+  function addPoint(point) {
+    if (!point?.id) return;
+    setPuntos(prev => prev.some(item => String(item.id) === String(point.id)) ? prev : [...prev, point]);
+  }
 
   function cleanPayload(source = form) {
     return {
@@ -1313,7 +1381,7 @@ function SolicitudServicio({ onDone, setTab }) {
       } else {
         notify("Solicitud enviada. Trafico la revisara y la convertira en pedido.", "success");
       }
-      setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", importe: "", notas: "" });
+      setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", importe: "", notas: "", origen_punto_id: "", destino_punto_id: "" });
       await onDone();
       setTab("solicitudes");
     } catch (e) {
@@ -1330,8 +1398,16 @@ function SolicitudServicio({ onDone, setTab }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: "0 14px", marginTop: 8 }}>
         <div><label style={lbl}>Referencia cliente</label><input style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Pedido, OC, referencia interna..." /></div>
         <div><label style={lbl}>Mercancia</label><input style={inp} value={form.mercancia} onChange={f("mercancia")} placeholder="Tipo de mercancia" /></div>
-        <div><label style={lbl}>Origen *</label><input style={inp} value={form.origen} onChange={f("origen")} placeholder="Direccion completa de carga" /></div>
-        <div><label style={lbl}>Destino *</label><input style={inp} value={form.destino} onChange={f("destino")} placeholder="Direccion completa de descarga" /></div>
+        <div>
+          <label style={lbl}>Origen *</label>
+          <input style={inp} value={form.origen} onChange={event=>setForm(prev=>({...prev,origen:event.target.value,origen_punto_id:""}))} placeholder="Poblacion o direccion de carga" />
+          <PortalPointPicker tipo="carga" points={puntos} selectedId={form.origen_punto_id} onSelect={point=>selectPoint("carga", point)} onCreated={addPoint} />
+        </div>
+        <div>
+          <label style={lbl}>Destino *</label>
+          <input style={inp} value={form.destino} onChange={event=>setForm(prev=>({...prev,destino:event.target.value,destino_punto_id:""}))} placeholder="Poblacion de descarga" />
+          <PortalPointPicker tipo="descarga" points={puntos} selectedId={form.destino_punto_id} onSelect={point=>selectPoint("descarga", point)} onCreated={addPoint} />
+        </div>
         <div><label style={lbl}>Fecha carga</label><input type="date" style={inp} value={form.fecha_carga} onChange={f("fecha_carga")} /></div>
         <div><label style={lbl}>Hora carga</label><input style={inp} value={form.hora_carga} onChange={f("hora_carga")} placeholder="08:00 / Manana / Cita previa" /></div>
         <div><label style={lbl}>Fecha descarga</label><input type="date" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")} /></div>

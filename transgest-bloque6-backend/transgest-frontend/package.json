@@ -30,7 +30,7 @@
     "audit:confirms": "node scripts/audit_confirms.js",
     "audit:contrast": "node scripts/audit_filter_contrast.js",
     "audit:prompts": "node scripts/audit_prompts.js",
-    "check": "node --check src/App.js && node --check src/components/ToastProvider.js && node --check src/components/ErrorBoundary.js && node --check src/components/ui.js && node --check src/pages/Usuarios.js && node --check src/pages/SuperAdmin.js && node --check src/services/api.js && node --check src/services/incidents.js && node --check src/services/notify.js && node --check scripts/audit_alerts.js && node --check scripts/audit_confirms.js && node --check scripts/audit_filter_contrast.js && node --check scripts/audit_prompts.js && npm run audit:contrast"
+    "check": "node --check src/App.js && node --check src/components/ToastProvider.js && node --check src/components/ErrorBoundary.js && node --check src/components/ui.js && node --check src/components/PortalPointPicker.js && node --check src/pages/Clientes.js && node --check src/pages/PortalClientes.js && node --check src/pages/Solicitudes.js && node --check src/pages/Usuarios.js && node --check src/pages/SuperAdmin.js && node --check src/services/api.js && node --check src/services/incidents.js && node --check src/services/notify.js && node --check scripts/audit_alerts.js && node --check scripts/audit_confirms.js && node --check scripts/audit_filter_contrast.js && node --check scripts/audit_prompts.js && npm run audit:contrast"
   },
   "eslintConfig": {
     "extends": [

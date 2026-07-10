@@ -38,9 +38,24 @@ function ensureSchema() {
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente VARCHAR(20)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente_at TIMESTAMPTZ");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe NUMERIC(12,2)");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe_contraoferta NUMERIC(12,2)");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio VARCHAR(20)");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio_at TIMESTAMPTZ");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS contraoferta_at TIMESTAMPTZ");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS origen_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS destino_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS fecha_descarga DATE");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS hora_descarga TIME");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pendiente_completar BOOLEAN DEFAULT false");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS aviso_completar TEXT");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS portal_solicitud_id UUID");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS puntos_carga JSONB DEFAULT '[]'::jsonb");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS puntos_descarga JSONB DEFAULT '[]'::jsonb");
       await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_empresa_estado ON portal_solicitudes_cliente(empresa_id, estado, created_at DESC)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_cliente ON portal_solicitudes_cliente(cliente_id, created_at DESC)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_numero_portal ON pedidos(empresa_id, numero DESC)");
+      await db.query("CREATE INDEX IF NOT EXISTS idx_pedidos_portal_solicitud ON pedidos(empresa_id, portal_solicitud_id) WHERE portal_solicitud_id IS NOT NULL");
       await db.query(`
         CREATE TABLE IF NOT EXISTS pedido_numero_counters (
           empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
@@ -81,6 +96,11 @@ function normalizeNumeric(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeNonNegativeNumeric(value) {
+  const n = normalizeNumeric(value);
+  return n !== null && n >= 0 ? n : null;
+}
+
 function normalizePositiveInteger(value) {
   if (value === "" || value === undefined || value === null) return null;
   const n = Number(value);
@@ -99,6 +119,44 @@ function normalizeTime(value) {
   const compact = clean.match(/^([01]?\d|2[0-3])([0-5]\d)$/);
   if (compact) return `${compact[1].padStart(2, "0")}:${compact[2]}`;
   return null;
+}
+
+function portalPointLabel(point = {}, fallback = "") {
+  const parts = [point.nombre, point.direccion, point.ciudad, point.provincia]
+    .map(value => String(value || "").trim())
+    .filter((value, index, all) => value && all.indexOf(value) === index);
+  return parts.join(" - ") || String(fallback || "").trim();
+}
+
+function portalPointStop(point, fallback, tipo, fecha, hora) {
+  return {
+    punto_id: point?.id || null,
+    nombre: point?.nombre || String(fallback || "").trim(),
+    direccion: point?.direccion || String(fallback || "").trim(),
+    poblacion: point?.ciudad || "",
+    provincia: point?.provincia || "",
+    pais: point?.pais || "Espa\u00f1a",
+    lat: point?.lat ?? null,
+    lng: point?.lng ?? null,
+    ventana: point?.ventana || "",
+    fecha: fecha || "",
+    hora: hora || "",
+    tipo,
+  };
+}
+
+async function getPortalPoint(client, req, pointId, tipo, clienteId = req.user?.cliente_id) {
+  if (!pointId) return null;
+  const { rows } = await client.query(
+    `SELECT id,nombre,direccion,ciudad,provincia,pais,lat,lng,tipo,ventana,cliente_id
+       FROM puntos_interes
+      WHERE id=$1 AND empresa_id=$2 AND activo=true
+        AND (cliente_id=$3 OR cliente_id IS NULL)
+        AND (tipo=$4 OR tipo='ambos')
+      LIMIT 1`,
+    [pointId, empresaId(req), clienteId || null, tipo]
+  );
+  return rows[0] || null;
 }
 
 async function nextPedidoNumero(client, empresaId) {
@@ -1121,6 +1179,60 @@ router.get("/pedidos/:id/documento-control", requireCliente, async (req, res) =>
   })));
 });
 
+router.get("/puntos", requireCliente, async (req, res) => {
+  const { rows } = await db.query(
+    `SELECT id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
+            contacto_nombre,contacto_telefono,email,notas,cliente_id
+       FROM puntos_interes
+      WHERE empresa_id=$1 AND activo=true
+        AND (cliente_id=$2 OR cliente_id IS NULL)
+      ORDER BY CASE WHEN cliente_id=$2 THEN 0 ELSE 1 END, nombre ASC
+      LIMIT 250`,
+    [empresaId(req), req.user.cliente_id]
+  );
+  res.json(rows.map(row => ({ ...row, es_general: !row.cliente_id })));
+});
+
+router.post("/puntos", requireCliente, async (req, res) => {
+  const body = req.body || {};
+  const tipo = ["carga", "descarga", "ambos"].includes(String(body.tipo || "").toLowerCase())
+    ? String(body.tipo).toLowerCase()
+    : "ambos";
+  const direccion = String(body.direccion || body.ciudad || body.nombre || "").trim();
+  const nombre = String(body.nombre || body.ciudad || direccion).trim();
+  if (!nombre || !direccion) {
+    return res.status(400).json({ error: "Indica un nombre y una direccion o poblacion" });
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO puntos_interes
+      (empresa_id,cliente_id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
+       contacto_nombre,contacto_telefono,email,notas,metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'{}'::jsonb)
+     RETURNING id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
+               contacto_nombre,contacto_telefono,email,notas,cliente_id`,
+    [
+      empresaId(req),
+      req.user.cliente_id,
+      nombre,
+      direccion,
+      body.codigo_postal || null,
+      body.ciudad || null,
+      body.provincia || null,
+      body.pais || "Espa\u00f1a",
+      normalizeNumeric(body.lat),
+      normalizeNumeric(body.lng),
+      tipo,
+      body.ventana || null,
+      body.contacto_nombre || null,
+      body.contacto_telefono || null,
+      body.email || null,
+      body.notas || null,
+    ]
+  );
+  res.status(201).json({ ...rows[0], es_general: false });
+});
+
 router.get("/solicitudes", requireCliente, async (req, res) => {
   await ensureSchema();
   const { rows } = await db.query(
@@ -1170,7 +1282,15 @@ router.get("/solicitudes/:id/eventos", requireCliente, async (req, res) => {
 router.post("/solicitudes", requireCliente, async (req, res) => {
   await ensureSchema();
   const body = req.body || {};
-  if (!body.origen || !body.destino) return res.status(400).json({ error: "Origen y destino son obligatorios" });
+  const [origenPunto, destinoPunto] = await Promise.all([
+    getPortalPoint(db, req, body.origen_punto_id, "carga"),
+    getPortalPoint(db, req, body.destino_punto_id, "descarga"),
+  ]);
+  if (body.origen_punto_id && !origenPunto) return res.status(400).json({ error: "El punto de carga no pertenece a este cliente" });
+  if (body.destino_punto_id && !destinoPunto) return res.status(400).json({ error: "El punto de descarga no pertenece a este cliente" });
+  const origen = origenPunto ? portalPointLabel(origenPunto, body.origen) : String(body.origen || "").trim();
+  const destino = destinoPunto ? portalPointLabel(destinoPunto, body.destino) : String(body.destino || "").trim();
+  if (!origen || !destino) return res.status(400).json({ error: "Origen y destino son obligatorios" });
   const cliente = await db.query(
     "SELECT id,nombre FROM clientes WHERE id=$1 AND empresa_id=$2",
     [req.user.cliente_id, empresaId(req)]
@@ -1192,8 +1312,8 @@ router.post("/solicitudes", requireCliente, async (req, res) => {
     [
       empresaId(req),
       req.user.cliente_id,
-      String(body.origen || "").trim(),
-      String(body.destino || "").trim(),
+      origen,
+      destino,
       body.fecha_carga || body.fecha || null,
       body.referencia_cliente || null,
     ]
@@ -1204,25 +1324,27 @@ router.post("/solicitudes", requireCliente, async (req, res) => {
   const { rows } = await db.query(
     `INSERT INTO portal_solicitudes_cliente
       (empresa_id,cliente_id,solicitado_por,origen,destino,fecha_carga,hora_carga,fecha_descarga,hora_descarga,
-       mercancia,peso_kg,bultos,importe,referencia_cliente,notas)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       mercancia,peso_kg,bultos,importe,referencia_cliente,notas,origen_punto_id,destino_punto_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING *`,
     [
       empresaId(req),
       req.user.cliente_id,
       req.user.id,
-      String(body.origen || "").trim(),
-      String(body.destino || "").trim(),
+      origen,
+      destino,
       body.fecha_carga || body.fecha || null,
       normalizeTime(body.hora_carga),
       body.fecha_descarga || null,
       normalizeTime(body.hora_descarga),
       body.mercancia || null,
-      body.peso_kg || body.peso || null,
+      normalizeNonNegativeNumeric(body.peso_kg ?? body.peso),
       normalizePositiveInteger(body.bultos),
-      normalizeNumeric(body.importe || body.precio),
+      normalizeNonNegativeNumeric(body.importe ?? body.precio),
       body.referencia_cliente || null,
       body.notas || null,
+      origenPunto?.id || null,
+      destinoPunto?.id || null,
     ]
   );
   const solicitud = { ...rows[0], cliente_nombre: cliente.rows[0].nombre };
@@ -1283,6 +1405,55 @@ router.post("/solicitudes/:id/reprogramacion", requireCliente, async (req, res) 
       decision,
       fecha_propuesta: solicitud.fecha_propuesta,
       hora_propuesta: solicitud.hora_propuesta,
+    });
+    result = { status: 200, body: updated.rows[0] };
+  });
+  res.status(result.status).json(result.body);
+});
+
+router.post("/solicitudes/:id/precio", requireCliente, async (req, res) => {
+  await ensureSchema();
+  const decision = String(req.body?.decision || "").trim().toLowerCase();
+  if (!["aceptada", "rechazada"].includes(decision)) {
+    return res.status(400).json({ error: "Decision de precio no valida" });
+  }
+
+  let result;
+  await db.transaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT * FROM portal_solicitudes_cliente
+        WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3
+        FOR UPDATE`,
+      [req.params.id, empresaId(req), req.user.cliente_id]
+    );
+    const solicitud = rows[0];
+    if (!solicitud) {
+      result = { status: 404, body: { error: "Solicitud no encontrada" } };
+      return;
+    }
+    if (normalizeNonNegativeNumeric(solicitud.importe_contraoferta) === null) {
+      result = { status: 400, body: { error: "No hay una contraoferta pendiente" } };
+      return;
+    }
+
+    const accepted = decision === "aceptada";
+    const respuesta = accepted
+      ? `El cliente ha aceptado el precio propuesto de ${Number(solicitud.importe_contraoferta).toFixed(2)} EUR.`
+      : `El cliente ha rechazado el precio propuesto de ${Number(solicitud.importe_contraoferta).toFixed(2)} EUR.`;
+    const updated = await client.query(
+      `UPDATE portal_solicitudes_cliente
+          SET decision_precio=$1,
+              decision_precio_at=NOW(),
+              importe=CASE WHEN $1='aceptada' THEN importe_contraoferta ELSE importe END,
+              respuesta=$2,
+              updated_at=NOW()
+        WHERE id=$3 AND empresa_id=$4
+        RETURNING *`,
+      [decision, respuesta, solicitud.id, empresaId(req)]
+    );
+    await addSolicitudEvento(client, req, solicitud.id, `solicitud.precio.${decision}`, {
+      importe_cliente: normalizeNonNegativeNumeric(solicitud.importe),
+      importe_contraoferta: normalizeNonNegativeNumeric(solicitud.importe_contraoferta),
     });
     result = { status: 200, body: updated.rows[0] };
   });
@@ -1353,7 +1524,7 @@ router.get("/admin/solicitudes/:id/eventos", requireGestion, async (req, res) =>
 router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res) => {
   await ensureSchema();
   const eid = empresaId(req);
-  const force = req.body?.force === true || req.body?.limpiar_bultos === true;
+  const limpiarInvalidos = req.body?.force === true || req.body?.limpiar_bultos === true || req.body?.limpiar_invalidos === true;
   let result;
   await db.transaction(async (client) => {
     let { rows } = await client.query(
@@ -1373,26 +1544,40 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
       result = { status: 400, body: { error: "No se puede convertir una solicitud rechazada" } };
       return;
     }
-    if (force || Number(sol.bultos) <= 0) {
+    if (sol.decision_precio === "pendiente") {
+      result = { status: 409, body: { error: "El cliente todavia debe aceptar o rechazar la contraoferta" } };
+      return;
+    }
+    const bultosInvalidos = sol.bultos !== null && sol.bultos !== undefined && Number(sol.bultos) <= 0;
+    if (bultosInvalidos && limpiarInvalidos) {
       const cleaned = await client.query(
         `UPDATE portal_solicitudes_cliente
             SET bultos=NULL,
                 notas=CASE
-                  WHEN $1::boolean AND COALESCE(bultos,0) <= 0 AND COALESCE(notas,'') NOT LIKE '%Bultos invalidos limpiados%'
+                  WHEN COALESCE(notas,'') NOT LIKE '%Bultos invalidos limpiados%'
                     THEN CONCAT(COALESCE(notas,''), CASE WHEN COALESCE(notas,'')='' THEN '' ELSE E'\n' END, 'Bultos invalidos limpiados al aceptar la solicitud.')
                   ELSE notas
                 END,
                 updated_at=NOW()
-          WHERE id=$2 AND empresa_id=$3 AND (COALESCE(bultos,0) <= 0 OR $1::boolean)
+          WHERE id=$1 AND empresa_id=$2 AND COALESCE(bultos,0) <= 0
           RETURNING *`,
-        [force, sol.id, eid]
+        [sol.id, eid]
       );
       if (cleaned.rows[0]) Object.assign(sol, cleaned.rows[0]);
     }
-    if (sol.pedido_id) {
+    if (!String(sol.origen || "").trim() || !String(sol.destino || "").trim()) {
+      result = { status: 400, body: { error: "La solicitud no tiene origen y destino validos" } };
+      return;
+    }
+
+    if (sol.pedido_id || sol.id) {
       const pedidoExistente = await client.query(
-        "SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2",
-        [sol.pedido_id, eid]
+        `SELECT * FROM pedidos
+          WHERE empresa_id=$1
+            AND (($2::uuid IS NOT NULL AND id=$2::uuid) OR portal_solicitud_id=$3)
+          ORDER BY numero DESC
+          LIMIT 1`,
+        [eid, sol.pedido_id || null, sol.id]
       );
       if (pedidoExistente.rows[0]) {
         const updatedExisting = await client.query(
@@ -1418,63 +1603,49 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
       "Pedido creado desde portal de cliente. Revisar y completar planificación.",
     ].filter(Boolean).join("\n");
 
-    let pedido;
-    try {
-      const inserted = await client.query(
-        `INSERT INTO pedidos
-          (numero,cliente_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
-           mercancia,peso_kg,bultos,importe,notas,empresa_id,referencia_cliente,fecha_descarga,hora_descarga,
-           pendiente_completar,aviso_completar,portal_solicitud_id)
-         VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18)
-         RETURNING *`,
-        [
-          numero,
-          sol.cliente_id,
-          sol.origen,
-          sol.destino,
-          sol.fecha_carga,
-          normalizeTime(sol.hora_carga),
-          sol.fecha_descarga,
-          sol.mercancia,
-          normalizeNumeric(sol.peso_kg),
-          normalizePositiveInteger(sol.bultos),
-          normalizeNumeric(sol.importe),
-          notas,
-          eid,
-          sol.referencia_cliente,
-          sol.fecha_descarga,
-          normalizeTime(sol.hora_descarga),
-          "Creado desde solicitud de cliente. Completar precio, camion, chofer, costes y documentacion.",
-          sol.id,
-        ]
-      );
-      pedido = inserted.rows[0];
-    } catch (err) {
-      if (err.code !== "42703") throw err;
-      const inserted = await client.query(
-        `INSERT INTO pedidos
-          (numero,cliente_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
-           mercancia,peso_kg,bultos,importe,notas,empresa_id)
-         VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,$13)
-         RETURNING *`,
-        [
-          numero,
-          sol.cliente_id,
-          sol.origen,
-          sol.destino,
-          sol.fecha_carga,
-          normalizeTime(sol.hora_carga),
-          sol.fecha_descarga,
-          sol.mercancia,
-          normalizeNumeric(sol.peso_kg),
-          normalizePositiveInteger(sol.bultos),
-          normalizeNumeric(sol.importe),
-          notas,
-          eid,
-        ]
-      );
-      pedido = inserted.rows[0];
-    }
+    const [origenPunto, destinoPunto] = await Promise.all([
+      getPortalPoint(client, req, sol.origen_punto_id, "carga", sol.cliente_id),
+      getPortalPoint(client, req, sol.destino_punto_id, "descarga", sol.cliente_id),
+    ]);
+    const horaCarga = normalizeTime(sol.hora_carga);
+    const horaDescarga = normalizeTime(sol.hora_descarga);
+    const puntosCarga = [portalPointStop(origenPunto, sol.origen, "carga", sol.fecha_carga, horaCarga)];
+    const puntosDescarga = [portalPointStop(destinoPunto, sol.destino, "descarga", sol.fecha_descarga, horaDescarga)];
+    const importePedido = sol.decision_precio === "aceptada"
+      ? normalizeNonNegativeNumeric(sol.importe_contraoferta)
+      : normalizeNonNegativeNumeric(sol.importe);
+
+    const inserted = await client.query(
+      `INSERT INTO pedidos
+        (numero,cliente_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
+         mercancia,peso_kg,bultos,importe,notas,empresa_id,referencia_cliente,fecha_descarga,hora_descarga,
+         puntos_carga,puntos_descarga,pendiente_completar,aviso_completar,portal_solicitud_id)
+       VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,true,$19,$20)
+       RETURNING *`,
+      [
+        numero,
+        sol.cliente_id,
+        String(sol.origen).trim(),
+        String(sol.destino).trim(),
+        sol.fecha_carga,
+        horaCarga,
+        sol.fecha_descarga,
+        sol.mercancia || null,
+        normalizeNonNegativeNumeric(sol.peso_kg),
+        normalizePositiveInteger(sol.bultos),
+        importePedido ?? 0,
+        notas,
+        eid,
+        sol.referencia_cliente || null,
+        sol.fecha_descarga,
+        horaDescarga,
+        JSON.stringify(puntosCarga),
+        JSON.stringify(puntosDescarga),
+        "Creado desde solicitud de cliente. Completar precio, camion, chofer, costes y documentacion.",
+        sol.id,
+      ]
+    );
+    const pedido = inserted.rows[0];
 
     const updated = await client.query(
       `UPDATE portal_solicitudes_cliente
@@ -1491,7 +1662,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, async (req, res)
     await addSolicitudEvento(client, req, sol.id, "solicitud.convertida", {
       pedido_id: pedido.id,
       pedido_numero: pedido.numero,
-      bultos_limpiados: force || Number(sol.bultos) <= 0,
+      bultos_limpiados: bultosInvalidos && limpiarInvalidos,
     });
     result = { status: 201, body: { ok: true, pedido, solicitud: updated.rows[0] } };
   });
@@ -1539,12 +1710,15 @@ router.get("/admin/solicitudes", requireGestion, async (req, res) => {
 
 router.patch("/admin/solicitudes/:id", requireGestion, async (req, res) => {
   await ensureSchema();
-  const { estado, pedido_id, respuesta, fecha_propuesta, hora_propuesta, decision_cliente } = req.body || {};
+  const { estado, pedido_id, respuesta, fecha_propuesta, hora_propuesta, decision_cliente, importe_contraoferta } = req.body || {};
   const eid = empresaId(req);
   const estadoNormalizado = normalizeSolicitudEstado(estado);
   const decisionNormalizada = normalizeDecisionCliente(decision_cliente);
+  const contraofertaProvided = Object.prototype.hasOwnProperty.call(req.body || {}, "importe_contraoferta");
+  const contraofertaNormalizada = contraofertaProvided ? normalizeNonNegativeNumeric(importe_contraoferta) : null;
   if (estadoNormalizado === false) return res.status(400).json({ error: "Estado de solicitud no valido" });
   if (decisionNormalizada === false) return res.status(400).json({ error: "Decision de cliente no valida" });
+  if (contraofertaProvided && contraofertaNormalizada === null) return res.status(400).json({ error: "El precio propuesto no es valido" });
 
   let result;
   await db.transaction(async (client) => {
@@ -1578,8 +1752,12 @@ router.patch("/admin/solicitudes/:id", requireGestion, async (req, res) => {
               hora_propuesta=COALESCE($5,hora_propuesta),
               decision_cliente=COALESCE($6,decision_cliente),
               decision_cliente_at=CASE WHEN $6 IN ('aceptada','rechazada') THEN NOW() ELSE decision_cliente_at END,
+              importe_contraoferta=CASE WHEN $7::boolean THEN $8 ELSE importe_contraoferta END,
+              decision_precio=CASE WHEN $7::boolean THEN 'pendiente' ELSE decision_precio END,
+              decision_precio_at=CASE WHEN $7::boolean THEN NULL ELSE decision_precio_at END,
+              contraoferta_at=CASE WHEN $7::boolean THEN NOW() ELSE contraoferta_at END,
               updated_at=NOW()
-        WHERE id=$7 AND empresa_id=$8
+        WHERE id=$9 AND empresa_id=$10
         RETURNING *`,
       [
         estadoNormalizado,
@@ -1588,12 +1766,16 @@ router.patch("/admin/solicitudes/:id", requireGestion, async (req, res) => {
         fecha_propuesta || null,
         hora_propuesta || null,
         decisionNormalizada,
+        contraofertaProvided,
+        contraofertaNormalizada,
         req.params.id,
         eid,
       ]
     );
     const tipoEvento = estadoNormalizado === "rechazada"
       ? "solicitud.rechazada"
+      : contraofertaProvided
+        ? "solicitud.precio.propuesto"
       : fecha_propuesta
         ? "solicitud.reprogramacion.propuesta"
         : "solicitud.actualizada";
@@ -1604,6 +1786,7 @@ router.patch("/admin/solicitudes/:id", requireGestion, async (req, res) => {
       fecha_propuesta: fecha_propuesta || null,
       hora_propuesta: hora_propuesta || null,
       decision_cliente: decisionNormalizada,
+      importe_contraoferta: contraofertaProvided ? contraofertaNormalizada : null,
     });
     result = { status: 200, body: rows[0] };
   });

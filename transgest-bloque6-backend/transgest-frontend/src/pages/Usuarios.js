@@ -199,6 +199,7 @@ export default function Usuarios() {
   const [clientes,setClientes]=useState([]);
   const [errors,setErrors]=useState({});
   const [saving,setSaving]=useState(false);
+  const [credencialCreada,setCredencialCreada]=useState(null);
 
   const cargar=async()=>{setLoading(true);try{const [d,c,v,cl]=await Promise.all([getUsuarios(), getChoferes().catch(()=>[]), getVehiculos().catch(()=>[]), getClientes("", "true", 1, 500, { silentError:true }).catch(()=>[])]);setUsuarios(Array.isArray(d)?d:[]);setChoferes(Array.isArray(c)?c:[]);setVehiculos(Array.isArray(v)?v:[]);setClientes(Array.isArray(cl?.data)?cl.data:Array.isArray(cl)?cl:[]);}catch(e){}finally{setLoading(false);}};
   useEffect(()=>{cargar();},[]);
@@ -281,6 +282,15 @@ export default function Usuarios() {
     });
   }
 
+  async function copiarCredencial(text, label="Dato") {
+    try {
+      await window.navigator.clipboard.writeText(String(text || ""));
+      notify(`${label} copiado`, "success");
+    } catch {
+      notify("No se pudo copiar automaticamente. Selecciona el texto manualmente.", "warning");
+    }
+  }
+
   async function guardar(){
     const nextErrors = {};
     if(!String(form.nombre||"").trim()) nextErrors.nombre = "Indica el nombre del usuario.";
@@ -318,7 +328,13 @@ export default function Usuarios() {
       else {
         const creado = await crearUsuario(body);
         if (creado?.password_temporal) {
-          notify(`Usuario creado. Contrasena temporal: ${creado.password_temporal}`, "success");
+          setCredencialCreada({
+            nombre: creado.nombre || body.nombre,
+            username: creado.username || body.username,
+            email: creado.email || body.email || "",
+            password: creado.password_temporal,
+          });
+          notify("Usuario creado. Revisa y copia la credencial temporal.", "success");
         } else if (creado?.invitacion_enviada) {
           notify("Usuario creado. Invitacion enviada por email.", "success");
         } else if (creado?.invitacion_url) {
@@ -587,6 +603,38 @@ export default function Usuarios() {
                 </select>
               </FormField>
             </>}
+        </ModalShell>
+      )}
+      {credencialCreada && (
+        <ModalShell
+          title="Credencial temporal creada"
+          onClose={()=>setCredencialCreada(null)}
+          width={520}
+          footer={<button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={()=>setCredencialCreada(null)}>He guardado la credencial</button>}
+        >
+          <div style={{fontSize:13,color:"var(--text3)",lineHeight:1.5,marginBottom:14}}>
+            Esta contrasena solo se muestra ahora. El usuario tendra que cambiarla al iniciar sesion.
+          </div>
+          {[
+            ["Usuario", credencialCreada.username],
+            ["Email", credencialCreada.email || "Sin email"],
+            ["Contrasena temporal", credencialCreada.password],
+          ].map(([label,value]) => (
+            <div key={label} style={{marginBottom:10}}>
+              <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",color:"var(--text5)",marginBottom:4}}>{label}</div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <code style={{flex:1,minWidth:0,padding:"10px 12px",borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border2)",color:"var(--text)",fontSize:13,overflowWrap:"anywhere"}}>{value}</code>
+                {label !== "Email" && <button type="button" style={{...S.btn,background:"var(--bg4)",color:"var(--accent-xl)",border:"1px solid var(--border2)"}} onClick={()=>copiarCredencial(value,label)}>Copiar</button>}
+              </div>
+            </div>
+          ))}
+          <button
+            type="button"
+            style={{...S.btn,width:"100%",justifyContent:"center",marginTop:6,background:"rgba(20,184,166,.12)",color:"var(--accent-xl)",border:"1px solid rgba(20,184,166,.3)"}}
+            onClick={()=>copiarCredencial(`Usuario: ${credencialCreada.username}\nContrasena temporal: ${credencialCreada.password}`,"Credenciales")}
+          >
+            Copiar usuario y contrasena
+          </button>
         </ModalShell>
       )}
     </div>

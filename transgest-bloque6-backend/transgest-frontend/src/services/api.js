@@ -660,12 +660,15 @@ export const getPortalClienteFacturas = () => apiFetch("/portal-cliente/facturas
 export const getPortalClienteFactura = (id) => apiFetch(`/portal-cliente/facturas/${encodeURIComponent(id)}`);
 export const getPortalClienteSolicitudes = () => apiFetch("/portal-cliente/solicitudes", { silentError:true });
 export const getPortalClienteSolicitudEventos = (id) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/eventos`);
+export const getPortalClientePuntos = () => apiFetch("/portal-cliente/puntos", { silentError:true });
+export const crearPortalClientePunto = (data) => apiFetch("/portal-cliente/puntos", { method:"POST", body:data });
 export const getPortalClienteDocumentosResumen = () => apiFetch("/portal-cliente/documentos-resumen", { silentError:true });
 export const getPortalClienteIntegracionManifest = () => apiFetch("/portal-cliente/integracion/manifest", { silentError:true });
 export const getPortalClienteIntegracionFeed = (days=90) => apiFetch(`/portal-cliente/integracion/feed?days=${encodeURIComponent(days)}`, { silentError:true });
 export const solicitarPortalClienteIntegracion = (data={}) => apiFetch("/portal-cliente/integracion/solicitar", { method:"POST", body:data });
 export const crearPortalClienteSolicitud = (data) => apiFetch("/portal-cliente/solicitudes", { method:"POST", body:data });
 export const responderPortalClienteReprogramacion = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/reprogramacion`, { method:"POST", body:data });
+export const responderPortalClientePrecio = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/precio`, { method:"POST", body:data });
 export const cancelarPortalClienteSolicitud = (id, data={}) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/cancelar`, { method:"POST", body:data });
 export const getPortalPedidoAlbaranes = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/albaranes`);
 export const getPortalPedidoEventos = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/eventos`);

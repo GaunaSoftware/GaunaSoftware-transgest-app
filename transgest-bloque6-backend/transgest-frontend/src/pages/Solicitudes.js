@@ -301,6 +301,37 @@ export default function Solicitudes() {
     }
   }
 
+  async function modificarPrecio(sol) {
+    const value = await promptDialog({
+      title: sol.importe ? "Modificar precio / contraoferta" : "Proponer precio",
+      message: `Cliente: ${sol.cliente_nombre || "-"}\nPrecio indicado: ${sol.importe ? `${Number(sol.importe).toFixed(2)} EUR` : "sin precio"}`,
+      defaultValue: sol.importe_contraoferta ?? sol.importe ?? "",
+      placeholder: "Importe total en EUR",
+      confirmText: "Enviar propuesta",
+      inputType: "number",
+    });
+    if (value === null) return;
+    const precio = Number(String(value).replace(",", "."));
+    if (!Number.isFinite(precio) || precio < 0) {
+      notify("Indica un precio valido", "warning");
+      return;
+    }
+    setTrabajando(sol.id);
+    try {
+      await actualizarPortalSolicitudAdmin(sol.id, {
+        importe_contraoferta: precio,
+        respuesta: `Trafico propone un precio total de ${precio.toFixed(2)} EUR. Pendiente de respuesta del cliente.`,
+      });
+      notify("Contraoferta enviada al cliente", "success");
+      await cargar();
+      refreshSolicitudBadges();
+    } catch (e) {
+      notify(e.message, "error");
+    } finally {
+      setTrabajando(null);
+    }
+  }
+
   async function reprogramar(sol) {
     const fecha = await promptDialog({
       title: "Proponer nueva fecha de carga",
@@ -357,7 +388,7 @@ export default function Solicitudes() {
   async function convertir(sol) {
     setTrabajando(sol.id);
     try {
-      const r = await convertirPortalSolicitudAdmin(sol.id, { force: true, limpiar_bultos: true });
+      const r = await convertirPortalSolicitudAdmin(sol.id, { limpiar_invalidos: true });
       const solicitudActualizada = r?.solicitud || {};
       const pedido = r?.pedido || {};
       setSols(prev => prev.map(item => String(item.id) === String(sol.id)
@@ -579,7 +610,9 @@ export default function Solicitudes() {
       {!loading && visibles.map(sol => {
         const e = ESTADO[sol.estado] || ESTADO.pendiente;
         const rejected = isRejected(sol);
+        const pricePending = sol.decision_precio === "pendiente";
         const disabled = trabajando === sol.id || ["convertida", "rechazada", "descartada", "cancelada"].includes(sol.estado);
+        const conversionDisabled = disabled || pricePending;
         const aged = isAged(sol);
         return (
           <div key={sol.id} style={{ ...S.card, borderColor: aged ? "rgba(239,68,68,.55)" : sol.estado === "pendiente" ? "rgba(249,115,22,.35)" : "var(--border)" }}>
@@ -619,6 +652,12 @@ export default function Solicitudes() {
               {sol.peso_kg && <span>Peso: {Number(sol.peso_kg).toLocaleString("es-ES")} kg</span>}
               {validBultos(sol.bultos) && <span>Bultos: {validBultos(sol.bultos)}</span>}
               {sol.importe && <span>Precio cliente: {Number(sol.importe).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR</span>}
+              {sol.importe_contraoferta !== null && sol.importe_contraoferta !== undefined && (
+                <span style={{fontWeight:900,color:sol.decision_precio === "aceptada" ? "#10b981" : sol.decision_precio === "rechazada" ? "#ef4444" : "#f59e0b"}}>
+                  Propuesta: {Number(sol.importe_contraoferta).toLocaleString("es-ES", { minimumFractionDigits:2, maximumFractionDigits:2 })} EUR
+                  {sol.decision_precio === "aceptada" ? " - aceptada" : sol.decision_precio === "rechazada" ? " - rechazada" : " - pendiente del cliente"}
+                </span>
+              )}
               {Number(sol.bultos) < 0 && <span style={{color:"#f97316",fontWeight:900}}>Bultos a revisar: valor negativo corregido al aceptar</span>}
               {sol.fecha_descarga && <span>Descarga: {dateEs(sol.fecha_descarga)} {sol.hora_descarga || ""}</span>}
               {sol.pedido_numero && <span>Pedido: {sol.pedido_numero}</span>}
@@ -642,13 +681,18 @@ export default function Solicitudes() {
 
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               {!rejected && (
-                <button onClick={() => convertir(sol)} disabled={disabled} style={{ ...S.btn, background: "#10b981", color: "#fff", borderColor: "#10b981", opacity: disabled ? .55 : 1 }}>
-                  {trabajando === sol.id ? "Procesando..." : "Convertir en pedido"}
+                <button onClick={() => convertir(sol)} disabled={conversionDisabled} title={pricePending ? "Pendiente de respuesta del cliente a la contraoferta" : ""} style={{ ...S.btn, background: "#10b981", color: "#fff", borderColor: "#10b981", opacity: conversionDisabled ? .55 : 1 }}>
+                  {trabajando === sol.id ? "Procesando..." : pricePending ? "Esperando precio" : "Convertir en pedido"}
                 </button>
               )}
               {!rejected && (
                 <button onClick={() => reprogramar(sol)} disabled={disabled} style={{ ...S.btn, opacity: disabled ? .55 : 1 }}>
                   Reprogramar
+                </button>
+              )}
+              {!rejected && (
+                <button onClick={() => modificarPrecio(sol)} disabled={trabajando === sol.id || ["convertida","rechazada","descartada","cancelada"].includes(sol.estado)} style={{ ...S.btn, color:"#b45309", borderColor:"rgba(245,158,11,.35)" }}>
+                  {sol.importe ? "Modificar precio" : "Proponer precio"}
                 </button>
               )}
               {!rejected && (

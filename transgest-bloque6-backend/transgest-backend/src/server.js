@@ -376,6 +376,65 @@ async function applyMigrations() {
     await db.query("CREATE INDEX IF NOT EXISTS idx_ruta_precios_cliente_cliente ON ruta_precios_cliente(cliente_id)").catch(() => {});
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(() => {});
     await db.query("CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo = true").catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS portal_solicitudes_cliente (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        cliente_id UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+        solicitado_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+        origen TEXT NOT NULL,
+        destino TEXT NOT NULL,
+        fecha_carga DATE,
+        hora_carga VARCHAR(20),
+        fecha_descarga DATE,
+        hora_descarga VARCHAR(20),
+        mercancia TEXT,
+        peso_kg NUMERIC(12,2),
+        bultos INTEGER,
+        importe NUMERIC(12,2),
+        referencia_cliente VARCHAR(255),
+        notas TEXT,
+        estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+        pedido_id UUID REFERENCES pedidos(id) ON DELETE SET NULL,
+        respuesta TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `).catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS fecha_propuesta DATE").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS hora_propuesta VARCHAR(20)").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente VARCHAR(20)").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente_at TIMESTAMPTZ").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe_contraoferta NUMERIC(12,2)").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio VARCHAR(20)").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio_at TIMESTAMPTZ").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS contraoferta_at TIMESTAMPTZ").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS origen_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL").catch(() => {});
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS destino_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL").catch(() => {});
+    await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_empresa_estado ON portal_solicitudes_cliente(empresa_id, estado, created_at DESC)").catch(() => {});
+    await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_cliente ON portal_solicitudes_cliente(cliente_id, created_at DESC)").catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS portal_solicitud_eventos (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        solicitud_id UUID NOT NULL REFERENCES portal_solicitudes_cliente(id) ON DELETE CASCADE,
+        tipo VARCHAR(80) NOT NULL,
+        actor_tipo VARCHAR(40) NOT NULL DEFAULT 'usuario',
+        actor_id UUID,
+        detalle JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `).catch(() => {});
+    await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitud_eventos_solicitud ON portal_solicitud_eventos(solicitud_id, created_at DESC)").catch(() => {});
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS pedido_numero_counters (
+        empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        year INTEGER NOT NULL,
+        last_num INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (empresa_id, year)
+      )
+    `).catch(() => {});
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS tipo VARCHAR(60)").catch(() => {});
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS tipo_doc VARCHAR(60)").catch(() => {});

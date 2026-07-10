@@ -585,6 +585,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
   const [portalSols, setPortalSols] = useState([]);
   const [portalLoad, setPortalLoad] = useState(false);
   const [portalCreds, setPortalCreds] = useState(null);
+  const [portalCredsModal, setPortalCredsModal] = useState(null);
   const [portalSaving, setPortalSaving] = useState(false);
   const [integracionTokens, setIntegracionTokens] = useState([]);
   const [integracionTokenNuevo, setIntegracionTokenNuevo] = useState(null);
@@ -800,6 +801,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
       const res = await crearPortalUsuarioCliente(cliente.id, { reset_password: resetPassword });
       setPortalCreds(res);
       if (res?.password_temporal) {
+        setPortalCredsModal(res);
         notify(resetPassword ? "Contraseña temporal regenerada" : "Acceso de portal creado", "success");
       } else if (res?.exists) {
         notify("Este cliente ya tiene usuario de portal activo", "info");
@@ -809,6 +811,20 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
     } finally {
       setPortalSaving(false);
     }
+  }
+
+  async function copiarAccesoPortal(text, label="Dato") {
+    try {
+      await window.navigator.clipboard.writeText(String(text || ""));
+      notify(`${label} copiado`, "success");
+    } catch {
+      notify("No se pudo copiar automaticamente. Selecciona el texto manualmente.", "warning");
+    }
+  }
+
+  function cerrarAccesoPortal() {
+    setPortalCredsModal(null);
+    setPortalCreds(current => current ? { ...current, password_temporal: null } : current);
   }
 
   async function generarTokenIntegracion() {
@@ -1478,8 +1494,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                   borderRadius:8,padding:"10px 12px",fontSize:12,color:"var(--text3)"}}>
                   <b style={{color:"var(--green)"}}>Acceso portal:</b>{" "}
                   usuario <code style={{color:"var(--text)"}}>{portalCreds.usuario.username || portalCreds.usuario.email}</code>
-                  {portalCreds.password_temporal && <> - clave temporal <code style={{color:"var(--text)"}}>{portalCreds.password_temporal}</code></>}
-                  {!portalCreds.password_temporal && " - ya existe usuario activo"}
+                  {portalCreds.password_temporal ? " - credencial temporal pendiente de guardar" : " - usuario activo"}
                 </div>
               )}
               <div style={{marginTop:12,background:"rgba(139,92,246,.08)",border:"1px solid rgba(139,92,246,.22)",borderRadius:8,padding:"10px 12px"}}>
@@ -1706,6 +1721,30 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                 </div>
               )
             }
+          </div>
+        )}
+
+        {portalCredsModal?.password_temporal && (
+          <div style={{position:"fixed",inset:0,zIndex:180,display:"flex",alignItems:"center",justifyContent:"center",padding:18,background:"rgba(0,0,0,.72)"}}>
+            <div style={{width:"min(520px,96vw)",background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:22,boxShadow:"var(--shadow)"}}>
+              <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:900,color:"var(--text)",marginBottom:8}}>Acceso temporal del cliente</div>
+              <div style={{fontSize:13,color:"var(--text3)",lineHeight:1.5,marginBottom:14}}>Copia la credencial antes de cerrar. La contrasena solo se muestra en este momento.</div>
+              {[
+                ["Usuario", portalCredsModal.usuario?.username || portalCredsModal.usuario?.email || ""],
+                ["Contrasena temporal", portalCredsModal.password_temporal],
+              ].map(([label,value]) => (
+                <div key={label} style={{marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",color:"var(--text5)",marginBottom:4}}>{label}</div>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <code style={{flex:1,minWidth:0,padding:"10px 12px",borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border2)",color:"var(--text)",fontSize:13,overflowWrap:"anywhere"}}>{value}</code>
+                    <button type="button" style={{...S.btn,background:"var(--bg4)",color:"var(--accent)",border:"1px solid var(--border2)"}} onClick={()=>copiarAccesoPortal(value,label)}>Copiar</button>
+                  </div>
+                </div>
+              ))}
+              <button type="button" style={{...S.btn,width:"100%",justifyContent:"center",marginTop:4,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)"}}
+                onClick={()=>copiarAccesoPortal(`Usuario: ${portalCredsModal.usuario?.username || portalCredsModal.usuario?.email || ""}\nContrasena temporal: ${portalCredsModal.password_temporal}`,"Credenciales")}>Copiar todo</button>
+              <button type="button" style={{...S.btn,width:"100%",justifyContent:"center",marginTop:10,background:"var(--accent)",color:"#fff"}} onClick={cerrarAccesoPortal}>He guardado la credencial</button>
+            </div>
           </div>
         )}
 

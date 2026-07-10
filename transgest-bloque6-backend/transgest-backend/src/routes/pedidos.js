@@ -8641,6 +8641,16 @@ router.post("/:id/firma", async (req, res) => {
       destinatario: "firma_destinatario = $1, firma_nombre = $2, firma_fecha = $5, firma_hash = $7",
     }[firmaRol];
 
+    const firmaParams = [
+      firmaImagen,
+      evidencia.firmante.nombre || defaultNombre,
+      req.params.id,
+      empresaId,
+      firmadoAt,
+      JSON.stringify(evidenciaMulti),
+    ];
+    if (firmaRol === "destinatario") firmaParams.push(firmaHash);
+
     const { rows } = await db.query(`
       UPDATE pedidos
       SET ${roleSetSql},
@@ -8648,15 +8658,7 @@ router.post("/:id/firma", async (req, res) => {
           updated_at = NOW()
       WHERE id = $3 AND empresa_id = $4
       RETURNING id, numero, firma_fecha, firma_nombre, firma_hash, firma_cargador_fecha, firma_cargador_nombre, firma_chofer_fecha, firma_chofer_nombre, firma_evidencia
-    `, [
-      firmaImagen,
-      evidencia.firmante.nombre || defaultNombre,
-      req.params.id,
-      empresaId,
-      firmadoAt,
-      JSON.stringify(evidenciaMulti),
-      firmaHash,
-    ]);
+    `, firmaParams);
 
     await logPedidoEvento(req.params.id, empresaId, `firma.${firmaRol}_registrada`, {
       firma_rol: firmaRol,

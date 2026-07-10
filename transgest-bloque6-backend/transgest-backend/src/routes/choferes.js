@@ -592,7 +592,7 @@ router.post("/app/firma-base", requireChoferApp, async (req, res) => {
         RETURNING *`,
       [firma, nombre, chofer.id, empresaId]
     );
-    await crearNotificacion(
+    await notifyAsignacionConjunto(
       empresaId,
       "chofer_firma_base",
       "Firma de chofer registrada",

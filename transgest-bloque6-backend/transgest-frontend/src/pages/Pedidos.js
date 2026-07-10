@@ -2392,7 +2392,6 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     retorno: "no",
     fecha_carga: hoy,
     fecha_descarga: hoy,
-    fecha_finalizacion: hoy,
     hora_carga: "",
     hora_descarga: "",
     referencia_cliente: "",
@@ -2401,10 +2400,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     cantidad: "",
     importe_minimo: "",
     minimo_unidades: "",
-    precio_colaborador: "",
     km_ruta: "",
-    cargas_extra: "",
-    descargas_extra: "",
     observaciones: "",
   }));
   const [saving, setSaving] = useState(false);
@@ -2477,26 +2473,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       provincia: form.origen_provincia || "",
       notas: "Pedido rapido",
     };
-    const extras = String(form.cargas_extra || "")
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean)
-      .map((line, idx) => {
-        const [direccion, fecha = "", hora = ""] = line.split("|").map(x => x.trim());
-        return {
-          direccion: (direccion || `CARGA ${idx + 2}`).toUpperCase(),
-          cliente_nombre: "",
-          fecha: fecha || form.fecha_carga || "",
-          hora: hora || "",
-          ventana: "",
-          bultos: "",
-          peso_kg: "",
-          pais,
-          provincia: "",
-          notas: "Carga adicional desde pedido rapido",
-        };
-      });
-    return [principal, ...extras];
+    return [principal];
   };
   const buildDescargasRapidas = () => {
     const pais = canonicalCountry(form.destino_pais || "España") || "España";
@@ -2504,7 +2481,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     if (paradasGuardadas.length) return paradasGuardadas.map((stop, idx) => ({
       ...stop,
       direccion: (stopAddress(stop) || stop.direccion || form.destino || "").trim().toUpperCase(),
-      fecha: stop.fecha || (idx === 0 ? form.fecha_descarga || form.fecha_finalizacion : "") || form.fecha_descarga || form.fecha_finalizacion || form.fecha_carga || "",
+      fecha: stop.fecha || (idx === 0 ? form.fecha_descarga : "") || form.fecha_descarga || form.fecha_carga || "",
       hora: stop.hora || (idx === 0 ? form.hora_descarga : "") || "",
       pais: stopCountry(stop, pais),
       provincia: stopRegion(stop, idx === 0 ? form.destino_provincia || "" : ""),
@@ -2514,7 +2491,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     const principal = {
       direccion: form.destino.trim().toUpperCase(),
       cliente_nombre: "",
-      fecha: form.fecha_descarga || form.fecha_finalizacion || form.fecha_carga || "",
+      fecha: form.fecha_descarga || form.fecha_carga || "",
       hora: form.hora_descarga || "",
       ventana: "",
       bultos: "",
@@ -2525,28 +2502,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       tipo_descarga: form.tipo_descarga || "indiferente",
       notas: form.tipo_descarga ? `Pedido rapido. Descarga ${form.tipo_descarga}` : "Pedido rapido",
     };
-    const extras = String(form.descargas_extra || "")
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean)
-      .map((line, idx) => {
-        const [direccion, fecha = "", hora = ""] = line.split("|").map(x => x.trim());
-        return {
-          direccion: (direccion || `DESCARGA ${idx + 2}`).toUpperCase(),
-          cliente_nombre: "",
-          fecha: fecha || form.fecha_descarga || form.fecha_finalizacion || form.fecha_carga || "",
-          hora: hora || "",
-          ventana: "",
-          bultos: "",
-          peso_kg: "",
-          precio: "",
-          pais,
-          provincia: "",
-          tipo_descarga: form.tipo_descarga || "indiferente",
-          notas: "Descarga adicional desde pedido rapido",
-        };
-      });
-    return [principal, ...extras];
+    return [principal];
   };
 
   useEffect(() => {
@@ -2756,7 +2712,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         remolque_matricula_colaborador: remolqueColaborador || null,
         fecha_pedido: hoy,
         fecha_carga: form.fecha_carga,
-        fecha_descarga: form.fecha_descarga || form.fecha_finalizacion || null,
+        fecha_descarga: form.fecha_descarga || null,
         hora_carga: form.hora_carga || null,
         hora_descarga: form.hora_descarga || null,
         referencia_cliente: form.referencia_cliente || null,
@@ -2892,10 +2848,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           )}
           <div><label style={S.label}>Origen *</label><input style={inp} value={form.origen} onChange={f("origen")} placeholder="MADRID"/></div>
           <div><label style={S.label}>Destino *</label><input style={inp} value={form.destino} onChange={f("destino")} placeholder="VALENCIA"/></div>
-          <div><label style={S.label}>Fecha carga *</label><input type="date" style={inp} value={form.fecha_carga} onChange={e=>setForm(p=>({...p,fecha_carga:e.target.value,fecha_descarga:p.fecha_descarga || e.target.value,fecha_finalizacion:p.fecha_finalizacion || e.target.value}))}/></div>
+          <div><label style={S.label}>Fecha carga *</label><input type="date" style={inp} value={form.fecha_carga} onChange={e=>setForm(p=>({...p,fecha_carga:e.target.value,fecha_descarga:p.fecha_descarga || e.target.value}))}/></div>
           <div><label style={S.label}>Hora carga</label><input type="time" style={inp} value={form.hora_carga} onChange={f("hora_carga")}/></div>
           <div><label style={S.label}>Hora descarga</label><input type="time" style={inp} value={form.hora_descarga} onChange={f("hora_descarga")}/></div>
-          <div><label style={S.label}>Fecha descarga</label><input type="date" style={inp} value={form.fecha_descarga || form.fecha_finalizacion || ""} onChange={e=>setForm(p=>({...p,fecha_descarga:e.target.value,fecha_finalizacion:e.target.value}))}/></div>
+          <div><label style={S.label}>Fecha descarga</label><input type="date" style={inp} value={form.fecha_descarga || ""} onChange={f("fecha_descarga")}/></div>
           <div>
             <label style={S.label}>Matricula</label>
             <input list="matriculas-pedido-rapido" style={inp} value={form.matricula_rapida} onChange={e=>{

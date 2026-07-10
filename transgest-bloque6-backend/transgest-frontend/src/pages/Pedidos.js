@@ -8198,6 +8198,8 @@ function CartaPorteModal({ data, onClose }) {
   const destinoGeo = [stopRegion(descargaPrincipalGeo, data.destino_provincia || ""), stopCountry(descargaPrincipalGeo, data.destino_pais || "España")].filter(Boolean).join(", ");
   const origenPostalGeo = stopPostalLine(cargaPrincipalGeo, data.origen_provincia || "", data.origen_pais || "España");
   const destinoPostalGeo = stopPostalLine(descargaPrincipalGeo, data.destino_provincia || "", data.destino_pais || "España");
+  const documentosAnexos = Array.isArray(data.documentos_anexos) ? data.documentos_anexos : [];
+  const anexosConArchivo = documentosAnexos.filter(a => a?.data_url || a?.pdf_adjunto || a?.mime);
   const [firmaMode, setFirmaMode] = React.useState(null); // null | 'remitente' | 'destinatario' | 'chofer'
   const [firmas, setFirmas] = React.useState({
     remitente:    data.firma_cargador || null,
@@ -8268,6 +8270,25 @@ function CartaPorteModal({ data, onClose }) {
 
   function generarHTML() {
     const d = data;
+    const anexosHtml = anexosConArchivo.length ? `
+<div class="page-break"></div>
+<h1>Anexos de la carta de porte / DCD</h1>
+<div style="font-size:10px;color:#555;text-align:center;margin-bottom:12px">
+  Albaranes, POD o CMR subidos al viaje una vez firmados.
+</div>
+${anexosConArchivo.map((a, idx) => `
+  <div class="box anexo-box">
+    <h2>Anexo ${idx + 1}: ${a.etiqueta || a.tipo || "Documento adjunto"}</h2>
+    <div class="grid3" style="margin-bottom:8px">
+      <div><div class="lbl">Nombre</div><div class="val">${a.nombre || "-"}</div></div>
+      <div><div class="lbl">Tipo</div><div class="val">${a.tipo || "-"}</div></div>
+      <div><div class="lbl">Fecha subida</div><div class="val">${a.created_at ? new Date(a.created_at).toLocaleString("es-ES") : "-"}</div></div>
+    </div>
+    ${a.data_url
+      ? `<img src="${a.data_url}" class="anexo-img" alt="${a.nombre || "Anexo"}"/>`
+      : `<div class="anexo-pdf">PDF adjunto al expediente DCD: ${a.nombre || "Documento"}${a.size_kb ? ` (${a.size_kb} KB)` : ""}</div>`}
+  </div>
+`).join("")}` : "";
     return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>${documentoTitulo} - ${docNumero}</title>
 <style>
@@ -8298,6 +8319,10 @@ function CartaPorteModal({ data, onClose }) {
   .badge-warn{background:#fef3c7;color:#92400e}
   .cmr-note{border-color:#0f766e;background:#f0fdfa;margin-bottom:12px}
   .cmr-note h2{color:#0f766e;border-bottom-color:#0f766e}
+  .page-break{break-before:page;page-break-before:always}
+  .anexo-box{margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
+  .anexo-img{display:block;max-width:100%;max-height:920px;margin:10px auto 0;border:1px solid #ddd;object-fit:contain}
+  .anexo-pdf{border:1px dashed #999;border-radius:4px;padding:14px;background:#f8fafc;color:#334155;font-size:12px}
   @media print{@page{margin:1cm}body{padding:0}}
 </style></head><body>
 <div class="header">
@@ -8453,6 +8478,7 @@ ${d.notas?`<div class="box" style="margin-bottom:12px"><h2>Observaciones</h2><di
 <div style="text-align:center;margin-top:16px;font-size:9px;color:#999;border-top:1px solid #eee;padding-top:8px">
   Documento generado por TransGest TMS - ${new Date().toLocaleString("es-ES")}
 </div>
+${anexosHtml}
 </body></html>`;
   }
 
@@ -8526,6 +8552,19 @@ ${d.notas?`<div class="box" style="margin-bottom:12px"><h2>Observaciones</h2><di
             <div style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
               <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",color:"var(--text5)",marginBottom:4}}>Observaciones</div>
               <div style={{fontSize:12,color:"var(--text2)",whiteSpace:"pre-line"}}>{d.notas}</div>
+            </div>
+          )}
+          {anexosConArchivo.length > 0 && (
+            <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 14px",marginBottom:8}}>
+              <div style={{fontSize:9,fontWeight:800,textTransform:"uppercase",color:"var(--text5)",marginBottom:8}}>Anexos firmados adjuntos</div>
+              <div style={{display:"grid",gap:6}}>
+                {anexosConArchivo.map((a, idx) => (
+                  <div key={a.id || `${a.nombre}-${idx}`} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",fontSize:12,color:"var(--text2)"}}>
+                    <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.nombre || `Anexo ${idx + 1}`}</span>
+                    <span style={{fontSize:10,color:a.data_url ? "#10b981" : "var(--text5)",fontWeight:800}}>{a.data_url ? "Imagen embebida" : "PDF adjunto"}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           <div style={{fontSize:11,color:"var(--text4)",textAlign:"center",marginTop:8}}>

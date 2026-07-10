@@ -1898,10 +1898,25 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
 async function getPedidoDocumentoControlExpedienteData(pedidoId, empresaId) {
   const [docsRes, eventosRes] = await Promise.all([
     db.query(`
-      SELECT id, nombre, tipo, file_mime, file_size_kb, notas, created_at,
-             CASE WHEN file_mime ILIKE 'image/%' THEN file_base64 ELSE NULL END AS file_base64
+      SELECT id, nombre, tipo, file_mime, file_size_kb, notas, metadata, created_at,
+             CASE
+               WHEN file_mime ILIKE 'image/%' THEN file_base64
+               ELSE NULL
+             END AS file_base64,
+             CASE
+               WHEN file_mime ILIKE 'application/pdf%' THEN true
+               ELSE false
+             END AS es_pdf
         FROM pedido_docs
        WHERE pedido_id=$1 AND empresa_id=$2
+         AND (
+           LOWER(COALESCE(tipo,'')) LIKE '%albaran%'
+           OR LOWER(COALESCE(nombre,'')) LIKE '%albaran%'
+           OR LOWER(COALESCE(tipo,'')) LIKE '%pod%'
+           OR LOWER(COALESCE(nombre,'')) LIKE '%pod%'
+           OR LOWER(COALESCE(tipo,'')) LIKE '%cmr%'
+           OR LOWER(COALESCE(nombre,'')) LIKE '%cmr%'
+         )
        ORDER BY created_at DESC
        LIMIT 80
     `, [pedidoId, empresaId]).catch(() => ({ rows: [] })),
@@ -1928,11 +1943,18 @@ async function getPedidoDocumentoControlExpedienteData(pedidoId, empresaId) {
 
 function anexosDocumentoControl(documentos = []) {
   return (Array.isArray(documentos) ? documentos : []).map(doc => ({
+    id: doc.id || null,
     nombre: doc.nombre || "Documento adjunto",
     tipo: doc.tipo || "",
     mime: doc.file_mime || "",
     size_kb: doc.file_size_kb || null,
     created_at: doc.created_at || null,
+    firmado: Boolean(doc.metadata?.firmado || doc.metadata?.scanner || doc.metadata?.fase || String(doc.tipo || "").toLowerCase().includes("albaran")),
+    etiqueta: String(doc.tipo || doc.nombre || "").toLowerCase().includes("descarga") ? "Albaran/POD descarga" :
+      String(doc.tipo || doc.nombre || "").toLowerCase().includes("carga") ? "Albaran carga" :
+      String(doc.tipo || doc.nombre || "").toLowerCase().includes("cmr") ? "CMR adjunto" :
+      "Albaran/POD adjunto",
+    pdf_adjunto: Boolean(doc.es_pdf || String(doc.file_mime || "").toLowerCase().includes("pdf")),
     data_url: doc.file_base64 && String(doc.file_mime || "").startsWith("image/")
       ? `data:${doc.file_mime};base64,${doc.file_base64}`
       : "",
@@ -1944,6 +1966,11 @@ function attachDocumentoControlAnexos(payload, documentos = []) {
     payload.documento.documentos_anexos = anexosDocumentoControl(documentos);
   }
   return payload;
+}
+
+async function getPedidoDocumentoControlAnexos(pedidoId, empresaId) {
+  const expedienteData = await getPedidoDocumentoControlExpedienteData(pedidoId, empresaId);
+  return anexosDocumentoControl(expedienteData.documentos);
 }
 
 async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
@@ -8481,6 +8508,7 @@ router.get("/:id/carta-porte", async (req, res) => {
       perfilEmpresa.provincia,
       perfilEmpresa.pais,
     ].filter(Boolean).join(", ");
+    const documentosAnexos = await getPedidoDocumentoControlAnexos(req.params.id, empresaId).catch(() => []);
 
     res.json({
       ...rows[0],
@@ -8498,6 +8526,8 @@ router.get("/:id/carta-porte", async (req, res) => {
       emp_tel: perfilEmpresa.telefono || "",
       emp_email: perfilEmpresa.email || "",
       emp_logo: "",
+      documentos_anexos: documentosAnexos,
+      albaranes_adjuntos_count: documentosAnexos.length,
     });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });

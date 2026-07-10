@@ -340,6 +340,7 @@ function buildPedidoDuplicado(pedido = {}) {
 }
 
 const PEDIDOS_COLLAPSED_GROUPS_KEY = "tms_pedidos_collapsed_groups_v1";
+const PEDIDOS_GROUP_BY_CLIENT_KEY = "tms_pedidos_group_by_client_v1";
 
 function loadPedidosCollapsedGroups() {
   if (typeof window === "undefined") return {};
@@ -354,6 +355,27 @@ function loadPedidosCollapsedGroups() {
 function savePedidosCollapsedGroups(value) {
   if (typeof window === "undefined") return;
   try { localStorage.setItem(PEDIDOS_COLLAPSED_GROUPS_KEY, JSON.stringify(value || {})); } catch {}
+}
+
+function pedidosGroupByClientKey(user) {
+  const empresa = user?.empresa_id || user?.empresaId || "empresa";
+  const usuario = user?.id || user?.email || user?.rol || "usuario";
+  return `${PEDIDOS_GROUP_BY_CLIENT_KEY}:${empresa}:${usuario}`;
+}
+
+function loadPedidosGroupByClient(user) {
+  if (typeof window === "undefined") return false;
+  try {
+    const saved = localStorage.getItem(pedidosGroupByClientKey(user));
+    if (saved === "1") return true;
+    if (saved === "0") return false;
+  } catch {}
+  return false;
+}
+
+function savePedidosGroupByClient(user, value) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(pedidosGroupByClientKey(user), value ? "1" : "0"); } catch {}
 }
 
 function sumarDiasISO(fecha, dias) {
@@ -8763,7 +8785,10 @@ export default function Pedidos() {
   const [filtroSinAsignacion, setFiltroSinAsignacion] = useState(false);
   const [filtroPendienteCompletar, setFiltroPendienteCompletar] = useState(false);
   const [filtroColaborador, setFiltroColaborador] = useState(false);
-  const [groupByCliente, setGroupByCliente] = useState(true);
+  const [groupByCliente, setGroupByCliente] = useState(() => loadPedidosGroupByClient(user));
+  const groupByClienteKey = pedidosGroupByClientKey(user);
+  const groupByClienteLoadedKeyRef = useRef(groupByClienteKey);
+  const groupByClienteSkipSaveRef = useRef(false);
   const [vistaPedidos, setVistaPedidos] = useState("lista");
   const [collapsedClientes, setCollapsedClientes] = useState(() => loadPedidosCollapsedGroups());
   const [criticalPanelOpen, setCriticalPanelOpen] = useState(false);
@@ -8974,6 +8999,20 @@ export default function Pedidos() {
   // Reset to page 1 when filters change
   useEffect(() => { setPage(1); }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, filtroSinAsignacion, filtroPendienteCompletar, filtroColaborador]);
   useEffect(() => { setSelectedPedidoIds([]); }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, filtroSinAsignacion, filtroPendienteCompletar, filtroColaborador, soloCriticos, groupByCliente]);
+  useEffect(() => {
+    if (groupByClienteLoadedKeyRef.current === groupByClienteKey) return;
+    groupByClienteSkipSaveRef.current = true;
+    setGroupByCliente(loadPedidosGroupByClient(user));
+    groupByClienteLoadedKeyRef.current = groupByClienteKey;
+  }, [groupByClienteKey, user]);
+  useEffect(() => {
+    if (groupByClienteLoadedKeyRef.current !== groupByClienteKey) return;
+    if (groupByClienteSkipSaveRef.current) {
+      groupByClienteSkipSaveRef.current = false;
+      return;
+    }
+    savePedidosGroupByClient(user, groupByCliente);
+  }, [groupByClienteKey, user, groupByCliente]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {

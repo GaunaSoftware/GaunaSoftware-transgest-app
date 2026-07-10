@@ -3125,7 +3125,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const set = k => e => setForm(p => {
     const next = {...p, [k]: e.target.value};
-    return ["nombre", "direccion", "ciudad"].includes(k) ? inferPuntoGeoDraft(next) : next;
+    return next;
   });
   const setGeneral = e => {
     const checked = e.target.checked;

@@ -6803,7 +6803,8 @@ router.post("/:id/chofer-docs", async (req, res) => {
     const { nombre, tipo, file_base64, file_mime, file_size_kb, notas, metadata } = req.body || {};
     const tipoDoc = String(tipo || "").toLowerCase();
     if (!nombre || !file_base64) return res.status(400).json({ error: "Faltan nombre o archivo" });
-    if (!tipoDoc.includes("albaran")) return res.status(400).json({ error: "Desde la app del chofer solo se pueden adjuntar albaranes del viaje" });
+    const tipoPermitido = tipoDoc.includes("albaran") || ["pod", "foto_entrega", "documento_chofer", "incidencia_chofer"].includes(tipoDoc);
+    if (!tipoPermitido) return res.status(400).json({ error: "Desde la app del chofer solo se pueden adjuntar soportes del viaje" });
     const upload = validateBase64Upload({ data: file_base64, mime: file_mime, filename: nombre });
 
     const values = [
@@ -6835,6 +6836,18 @@ router.post("/:id/chofer-docs", async (req, res) => {
       rows[0].metadata = {};
     }
     await logPedidoEvento(req.params.id, empresaId, "chofer_doc.subido", { documento_id: rows[0].id, tipo: tipoDoc, metadata: rows[0].metadata || {} }, req.user?.rol === "chofer" ? "chofer" : "usuario", req.user?.id || null);
+    const pedidoId = req.params.id;
+    const actorId = req.user?.id || null;
+    const appBaseUrl = publicBaseUrl(req);
+    setImmediate(() => {
+      archivarDocumentoControlPedido({
+        pedidoId,
+        empresaId,
+        appBaseUrl,
+        userId: actorId,
+        motivo: `documento_chofer_${tipoDoc}`,
+      }).catch(repoErr => logger.warn("No se pudo actualizar el repositorio DCD tras documento de chofer:", repoErr.message));
+    });
     res.status(201).json(rows[0]);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
@@ -8620,23 +8633,22 @@ router.post("/:id/firma", async (req, res) => {
       source: evidencia.captura.source,
     }, req.user?.rol || "usuario", req.user?.id || null);
 
-    let repositorio = null;
-    try {
-      const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
-      if (ctx) {
-        repositorio = await archivarDocumentoControlPedido({
-          pedidoId: req.params.id,
+    const pedidoId = req.params.id;
+    const actorId = req.user?.id || null;
+    const appBaseUrl = publicBaseUrl(req);
+    setImmediate(() => {
+      getPedidoDocumentoControlContext(pedidoId, empresaId)
+        .then(ctx => ctx ? archivarDocumentoControlPedido({
+          pedidoId,
           empresaId,
-          appBaseUrl: publicBaseUrl(req),
-          userId: req.user?.id || null,
+          appBaseUrl,
+          userId: actorId,
           motivo: `firma_${firmaRol}`,
-        });
-      }
-    } catch (repoErr) {
-      logger.warn("No se pudo actualizar el repositorio DCD tras firma:", repoErr.message);
-    }
+        }) : null)
+        .catch(repoErr => logger.warn("No se pudo actualizar el repositorio DCD tras firma:", repoErr.message));
+    });
 
-    res.json({ ok: true, firma_rol: firmaRol, repositorio, ...rows[0] });
+    res.json({ ok: true, firma_rol: firmaRol, repositorio_pendiente: true, ...rows[0] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

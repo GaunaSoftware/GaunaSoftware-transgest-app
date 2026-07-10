@@ -247,6 +247,7 @@ function detectarRectanguloPapel(canvas) {
   const step = Math.max(3, Math.round(Math.min(w, h) / 260));
   const margin = Math.max(step * 2, Math.round(Math.min(w, h) * 0.02));
   let minX = w, minY = h, maxX = 0, maxY = 0, hits = 0;
+  let strongMinX = w, strongMinY = h, strongMaxX = 0, strongMaxY = 0, strongHits = 0;
   for (let y = margin; y < h - margin; y += step) {
     for (let x = margin; x < w - margin; x += step) {
       const i = (y * w + x) * 4;
@@ -256,17 +257,32 @@ function detectarRectanguloPapel(canvas) {
       const sat = max - min;
       const lum = r * 0.299 + g * 0.587 + b * 0.114;
       const edge = Math.max(Math.abs(lum - lumaAt(x + step, y)), Math.abs(lum - lumaAt(x, y + step)));
-      const looksPaper = (lum > 145 && sat < 70 && Math.abs(lum - bg) > 10) || (lum > 178 && sat < 92) || edge > 42;
+      const looksPaper = (lum > 142 && sat < 88 && Math.abs(lum - bg) > 8) || (lum > 188 && sat < 105) || edge > 46;
       if (!looksPaper) continue;
       hits += 1;
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
+      const strongPaper = lum > 166 && sat < 78 && Math.abs(lum - bg) > 14;
+      if (strongPaper) {
+        strongHits += 1;
+        if (x < strongMinX) strongMinX = x;
+        if (x > strongMaxX) strongMaxX = x;
+        if (y < strongMinY) strongMinY = y;
+        if (y > strongMaxY) strongMaxY = y;
+      }
     }
   }
   const hitRatio = hits / Math.max(1, ((w - margin * 2) / step) * ((h - margin * 2) / step));
   if (!hits || hitRatio < 0.015) return { x: 0, y: 0, w, h, detected: false };
+  const strongArea = strongHits ? ((strongMaxX - strongMinX) * (strongMaxY - strongMinY)) / Math.max(1, w * h) : 0;
+  if (strongHits > hits * 0.22 && strongArea > 0.18 && strongArea < 0.96) {
+    minX = strongMinX;
+    minY = strongMinY;
+    maxX = strongMaxX;
+    maxY = strongMaxY;
+  }
   const pad = Math.round(Math.min(w, h) * 0.025);
   minX = Math.max(0, minX - pad);
   minY = Math.max(0, minY - pad);
@@ -325,7 +341,7 @@ async function prepararArchivoEscaner(file) {
   }
 
   const img = await cargarImagen(dataUrl);
-  const maxSide = 1600;
+  const maxSide = 1350;
   const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(img.width * scale));
@@ -339,7 +355,12 @@ async function prepararArchivoEscaner(file) {
   const rect = detectarRectanguloPapel(canvas);
   const recortado = recortarCanvas(canvas, rect);
   const escaneado = limpiarCanvasComoEscaner(recortado);
-  const out = escaneado.toDataURL("image/jpeg", 0.88);
+  let quality = 0.82;
+  let out = escaneado.toDataURL("image/jpeg", quality);
+  while (out.length > 3600000 && quality > 0.58) {
+    quality -= 0.08;
+    out = escaneado.toDataURL("image/jpeg", quality);
+  }
   return {
     preview: out,
     base64: out.split(",")[1] || "",
@@ -347,6 +368,7 @@ async function prepararArchivoEscaner(file) {
     sizeKb: Math.max(1, Math.round((out.length * 0.75) / 1024)),
     scan_detected: rect.detected,
     scan_crop: { x: rect.x, y: rect.y, w: rect.w, h: rect.h },
+    scan_quality: Math.round(quality * 100) / 100,
   };
 }
 
@@ -667,8 +689,8 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
     setProcesando(true);
     try {
       const preparado = await prepararArchivoEscaner(file);
-      if (preparado.base64.length > 5000000) {
-        throw new Error("El archivo es demasiado grande. Haz la foto con menos zoom o usa una imagen mas ligera.");
+      if (preparado.base64.length > 4000000 || Number(preparado.sizeKb || 0) > 3072) {
+        throw new Error("El archivo es demasiado grande. Haz la foto con el documento mas cerca y buena luz, o usa una imagen mas ligera.");
       }
       setArchivo(file);
       setDoc(preparado);
@@ -676,6 +698,7 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
       setError(err.message || "No se pudo preparar el archivo");
     } finally {
       setProcesando(false);
+      try { e.target.value = ""; } catch {}
     }
   }
 
@@ -695,7 +718,15 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
         file_mime: doc.mime,
         file_size_kb: doc.sizeKb,
         notas: `Subido desde app chofer en fase ${faseLabel(fase)}\n${uploadEvidence.note}`,
-        metadata: uploadEvidence.evidence,
+        metadata: {
+          ...uploadEvidence.evidence,
+          scan: {
+            detected: !!doc.scan_detected,
+            crop: doc.scan_crop || null,
+            quality: doc.scan_quality || null,
+            size_kb: doc.sizeKb || null,
+          },
+        },
       };
       await subirPedidoDocChofer(pedido.id, uploadPayload);
       setArchivo(null);
@@ -1049,7 +1080,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
 
   async function albaranSubido(key) {
     await marcarPaso(key);
-    const fresh = await cargarDocumentoControl();
+    const fresh = await cargarDocumentoControl().catch(() => null);
     if (fresh) setDocControl(fresh);
     onActualizar();
   }
@@ -1075,7 +1106,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       mercancia_peso_kg: String(pesoNum),
       mercancia_referencia: String(mercanciaCarga.referencia || "").trim(),
     }, { silent: true });
-    const fresh = await cargarDocumentoControl();
+    const fresh = await cargarDocumentoControl().catch(() => null);
     if (fresh) setDocControl(fresh);
     notify("Datos de mercancia guardados.", "success");
     onActualizar();
@@ -1091,7 +1122,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     try {
       await guardarFirmaEntrega(pedido.id, firmaPayload);
       await persistirPasos({ firma_cargador:true, firma_cargador_at:new Date().toISOString() }, { silent:true });
-      const fresh = await cargarDocumentoControl();
+      const fresh = await cargarDocumentoControl().catch(() => null);
       if (fresh) setDocControl(fresh);
       setFirmandoCargador(false);
       notify("Firma del remitente registrada en el DCD.", "success");
@@ -1110,7 +1141,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
         onActualizar();
         return;
       }
-      notify(err.message, "error");
+      notify(err.message || "No se pudo registrar la firma del remitente.", "error");
     }
   }
 
@@ -1340,13 +1371,17 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       source: "app_chofer",
     };
     try{
-      // Save digital signature to backend
       await guardarFirmaEntrega(pedido.id, firmaPayload);
-      await cambiarEstadoPedido(pedido.id,"entregado");
+      try {
+        await cambiarEstadoPedido(pedido.id,"entregado");
+      } catch (estadoErr) {
+        notify(estadoErr.message || "Firma guardada, pero no se pudo marcar entregado automaticamente.", "warning");
+      }
       await persistirPasos({ descarga_ok:true, firma_entrega:true, firma_entrega_at:new Date().toISOString(), ...patchKmParaPaso("firma_entrega") }, { silent:true });
-      const fresh = await cargarDocumentoControl();
+      const fresh = await cargarDocumentoControl().catch(() => null);
       if (fresh) setDocControl(fresh);
       setFirmando(false);
+      notify("Firma de entrega registrada en el viaje.", "success");
       onActualizar();
     }catch(err){
       if (esErrorOffline(err)) {
@@ -1370,7 +1405,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
         onActualizar();
         return;
       }
-      notify(err.message, "error");
+      notify(err.message || "No se pudo completar la firma por un problema en el servidor.", "error");
     }
   }
 
@@ -2991,13 +3026,15 @@ export default function AppChofer(){
   const [firmaBaseForzada, setFirmaBaseForzada] = useState(false);
   const gpsSeguimientoRef = useRef({ lastSent: 0 });
   const offlineSyncRef = useRef(false);
+  const cargaInicialRef = useRef(false);
   const [gpsSeguimientoEstado, setGpsSeguimientoEstado] = useState({
     active: false,
     text: "Ubicacion en espera hasta iniciar jornada.",
   });
 
-  const cargar = useCallback(async () => {
-    setLoading(true);
+  const cargar = useCallback(async (options = {}) => {
+    const mostrarCarga = !!options.forceLoading || !cargaInicialRef.current;
+    if (mostrarCarga) setLoading(true);
     try{
       const p = await getPedidos({chofer_id:user?.chofer_id || user?.id});
       const arr = Array.isArray(p) ? p : Array.isArray(p?.data) ? p.data : [];
@@ -3024,8 +3061,9 @@ export default function AppChofer(){
         const vacacionesArr = Array.isArray(vacaciones) ? vacaciones : Array.isArray(vacaciones?.solicitudes) ? vacaciones.solicitudes : [];
         setVacacionesChofer(vacacionesArr.slice(0, 50));
       }
+      cargaInicialRef.current = true;
     }catch(e){ console.error(e); }
-    finally{ setLoading(false); }
+    finally{ if (mostrarCarga) setLoading(false); }
   }, [user?.id, user?.chofer_id, user?.rol, user?.permisos?.modulos?.avisos?.ver, user?.permisos?.avisos?.ver, isLitePlan]);
 
   useEffect(()=>{ cargar(); },[cargar]);
@@ -3602,12 +3640,32 @@ export default function AppChofer(){
             if (!file) { setCameraModal(null); return; }
             try {
               const preparado = await prepararArchivoEscaner(file);
-              await editarPedido(cameraModal, { foto_entrega: `data:${preparado.mime};base64,${preparado.base64}` });
+              const location = await capturarUbicacionActual().catch(() => null);
+              const uploadEvidence = buildUploadEvidence("foto_entrega", location);
+              await subirPedidoDocChofer(cameraModal, {
+                nombre: `Foto entrega/incidencia ${new Date().toLocaleString("es-ES")}`,
+                tipo: "foto_entrega",
+                file_base64: preparado.base64,
+                file_mime: preparado.mime,
+                file_size_kb: preparado.sizeKb,
+                notas: `Subido desde app chofer\n${uploadEvidence.note}`,
+                metadata: {
+                  ...uploadEvidence.evidence,
+                  scan: {
+                    detected: !!preparado.scan_detected,
+                    crop: preparado.scan_crop || null,
+                    quality: preparado.scan_quality || null,
+                    size_kb: preparado.sizeKb || null,
+                  },
+                },
+              });
+              await editarPedido(cameraModal, { foto_entrega: `data:${preparado.mime};base64,${preparado.base64}` }).catch(() => {});
               notify("Foto guardada en el viaje.", "success");
               cargar();
             } catch(err) {
               notify(err.message || "Foto no guardada", "error");
             } finally {
+              try { e.target.value = ""; } catch {}
               setCameraModal(null);
             }
           }}

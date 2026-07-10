@@ -1745,13 +1745,22 @@ function routePlaceKey(place) {
 function stopToRoutePlace(stop, fallback = "", type = "Parada") {
   const source = stop || {};
   const { nombre, direccion } = stopDisplayParts(source, fallback);
+  const punto = findPuntoInteresForStop(source, fallback);
+  const routeAddress = direccionCompletaPunto(punto) || [
+    direccion,
+    source.codigo_postal || source.cp || source.postal_code,
+    source.ciudad || source.poblacion || source.localidad || source.municipio,
+    source.provincia || source.region || source.state,
+    stopCountry(source, source.pais || "España"),
+  ].map(x => String(x || "").trim()).filter(Boolean).join(", ");
+  const mapsCoords = coordsFromMapsUrl(source.google_maps_url || source.googleMapsUrl || source.maps_url || source.metadata?.google_maps_url || punto?.google_maps_url || punto?.metadata?.google_maps_url || "");
   return {
     type,
-    name: nombre,
-    address: direccion,
-    google_maps_url: cleanMapsUrl(source.google_maps_url || source.googleMapsUrl || source.maps_url || source.metadata?.google_maps_url || ""),
-    lat: source.lat ?? source.latitud ?? source.metadata?.lat ?? null,
-    lng: source.lng ?? source.longitud ?? source.metadata?.lng ?? null,
+    name: nombre || punto?.nombre || routeAddress,
+    address: routeAddress || direccion,
+    google_maps_url: cleanMapsUrl(source.google_maps_url || source.googleMapsUrl || source.maps_url || source.metadata?.google_maps_url || punto?.google_maps_url || punto?.metadata?.google_maps_url || ""),
+    lat: source.lat ?? source.latitud ?? source.metadata?.lat ?? punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? mapsCoords?.lat ?? null,
+    lng: source.lng ?? source.longitud ?? source.metadata?.lng ?? punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? mapsCoords?.lng ?? null,
   };
 }
 
@@ -3077,7 +3086,10 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     return {
       ...draft,
       pais: draft.pais || canonicalCountry(inferred.pais || "España") || "España",
-      provincia: draft.provincia || inferred.provincia || "",
+      provincia: inferred.provincia || draft.provincia || "",
+      ciudad: draft.ciudad || inferred.municipio || "",
+      lat: draft.lat || inferred.lat || "",
+      lng: draft.lng || inferred.lng || "",
     };
   }
   async function completarPuntoGeo(draft = form) {
@@ -6054,14 +6066,18 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [puntosCargaClienteLoading, setPuntosCargaClienteLoading] = useState(false);
   const [pendingDocs, setPendingDocs] = useState(() => Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
   const initialFormRef = React.useRef(JSON.stringify(form));
+  const hydratedPedidoKeyRef = React.useRef(editando?.id || (editando ? "draft" : "new"));
   const rutasCreadasRef = React.useRef(new Set());
   const riesgoConfirmadoRef = React.useRef(new Map());
   const bloqueoClienteNoticeRef = React.useRef("");
 
   useEffect(() => {
+    const editandoKey = editando?.id || (editando ? "draft" : "new");
+    if (hydratedPedidoKeyRef.current === editandoKey) return;
     const nextForm = editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({ ...editando, remolque_id_manual: editando.remolque_id || "" }))
       : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, intercambio_palets:false, requiere_cinchas:true });
+    hydratedPedidoKeyRef.current = editandoKey;
     setForm(nextForm);
     setColaboradorBusqueda("");
     setPendingDocs(Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
@@ -6259,7 +6275,9 @@ async function calcularKmRuta(origen, destino, puntos = null) {
   try {
     const stops = lugares.map((place, idx) => {
       const raw = typeof place === "object" && place !== null ? place : { name: String(place || "").trim(), address: String(place || "").trim() };
-      const address = resolvePuntoInteresQuery(raw.address || raw.direccion || raw.name || raw.nombre || "");
+      const hasCoords = Number.isFinite(Number(raw.lat ?? raw.latitud)) && Number.isFinite(Number(raw.lng ?? raw.longitud));
+      const rawAddress = raw.address || raw.direccion || raw.name || raw.nombre || "";
+      const address = hasCoords ? String(rawAddress || "").trim() : resolvePuntoInteresQuery(rawAddress);
       return {
         type: raw.type || raw.tipo || (idx === 0 ? "Carga" : idx === lugares.length - 1 ? "Descarga" : "Parada"),
         name: raw.name || raw.nombre || raw.cliente_nombre || address,

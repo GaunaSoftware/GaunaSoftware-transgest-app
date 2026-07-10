@@ -142,6 +142,58 @@ const CLASES_VEHICULO = [
   "Semirremolque", "Dolly / Balleston", "Otro",
 ];
 
+const MARCAS_TRACTORAS = [
+  "DAF", "Ford Trucks", "Iveco", "MAN", "Mercedes-Benz", "Renault Trucks",
+  "Scania", "Volvo Trucks", "Isuzu", "Mitsubishi Fuso", "Nissan Trucks",
+];
+
+const MARCAS_REMOLQUES = [
+  "Schmitz Cargobull", "Krone", "Lecitrailer", "Leciñena", "Kögel", "Guillén",
+  "Sor Ibérica", "Chereau", "Fruehauf", "Benalu", "Tisvol", "Granalu",
+  "Fliegl", "Faymonville", "Goldhofer", "Nooteboom", "Broshuis",
+];
+
+const CARROCERIAS_REMOLQUE = [
+  "Tautliner / lona", "Frigorifico", "Cisterna", "Bañera / volquete",
+  "Portacontenedores", "Portacoches", "Plataforma", "Piso movil",
+  "Gondola / lowboy", "Cerrado", "Otro",
+];
+
+function esClaseRemolque(clase = "") {
+  const c = String(clase || "").toLowerCase();
+  return c.includes("remolque") || c.includes("semirremolque") || c.includes("dolly");
+}
+
+function marcasPorClase(clase = "") {
+  return esClaseRemolque(clase) ? MARCAS_REMOLQUES : MARCAS_TRACTORAS;
+}
+
+function normalizeVehiculoForClase(data = {}) {
+  const next = { ...data };
+  if (esClaseRemolque(next.clase)) {
+    next.combustible = "";
+    next.potencia_cv = "";
+    next.cilindrada = "";
+    next.numero_motor = "";
+    next.plazas = "";
+    next.velocidad_max_kmh = "";
+    next.homologacion_co2 = "";
+    next.remolque_id = "";
+    next.chofer_id = "";
+  } else {
+    next.tipo_carroceria = "";
+    next.apertura_lateral = "";
+    next.techo_elevable = "";
+    next.temperatura_min_c = "";
+    next.temperatura_max_c = "";
+    next.capacidad_palets = "";
+    next.volumen_m3 = "";
+    next.lateral_bajo = false;
+    next.piso_movil = false;
+  }
+  return next;
+}
+
 const TIPO_COMBUSTIBLE = ["Diesel","AdBlue/Diesel","GNL (Gas Natural)","GNC","Electrico","Hibrido","Gasolina"];
 
 const GPS_PROVIDER_LABELS = {
@@ -942,13 +994,13 @@ function ModalChoferPicker({ vehiculoId, matricula, estado, choferes, onConfirm,
   );
 }
 
-function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], onVehiculoActualizado = null, onGpsRefresh = null }) {
+function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, choferes=[], vehiculos=[], onVehiculoActualizado = null, onGpsRefresh = null }) {
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("vehiculos");
   const [tab,    setTab]    = useState("identificacion");
   const [form,   setForm]   = useState(editando ? { ...editando } : {
     // Identificacion
-    matricula:"", clase:"Tractora", marca:"", modelo:"", anio:"",
+    matricula:"", clase:initialClase || "Tractora", marca:"", modelo:"", anio:"",
     color:"", numero_bastidor:"", numero_motor:"",
     // Estado
     estado:"disponible", km_actuales:0, ubicacion_actual:"", ubicacion_fuente:"manual", gps_provider:"manual", gps_external_id:"",
@@ -957,6 +1009,9 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
     potencia_cv:"", cilindrada:"", combustible:"Diesel",
     longitud_mm:"", anchura_mm:"", altura_mm:"", ejes:"",
     velocidad_max_kmh:"", homologacion_co2:"",
+    tipo_carroceria:"", apertura_lateral:"", techo_elevable:false,
+    temperatura_min_c:"", temperatura_max_c:"", capacidad_palets:"", volumen_m3:"",
+    lateral_bajo:false, piso_movil:false,
     // Compra / Venta
     fecha_compra:"", valor_compra:"", financiacion:"",
     concesionario:"", numero_pedido_compra:"",
@@ -1030,7 +1085,13 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
     }
   }
 
-  const f = k => e => setForm(p => ({ ...p, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value }));
+  const f = k => e => {
+    const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    setForm(p => {
+      const next = { ...p, [k]: value };
+      return k === "clase" ? normalizeVehiculoForClase(next) : next;
+    });
+  };
 
   async function guardar() {
     if (!form.matricula?.trim()) { setError("La matricula es obligatoria"); return; }
@@ -1049,7 +1110,10 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
     try {
       let savedId = editando?.id;
       let savedVehiculo = null;
-      const formToSave = {...form, plataformas: normalizePlatformDocuments(form.plataformas ?? editando?.plataformas ?? [])};
+      const formToSave = normalizeVehiculoForClase({
+        ...form,
+        plataformas: normalizePlatformDocuments(form.plataformas ?? editando?.plataformas ?? []),
+      });
       if (editando?.id) {
         try {
           savedVehiculo = await editarVehiculo(editando.id, formToSave);
@@ -1067,7 +1131,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
         savedVehiculo = created;
         savedId = created?.id || created?.data?.id;
       }
-      if (savedId && form.remolque_id !== undefined) {
+      if (!esClaseRemolque(formToSave.clase) && savedId && form.remolque_id !== undefined) {
         try {
           await asignarRemolque(savedId, form.remolque_id || null);
         } catch(e) {
@@ -1086,7 +1150,9 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
     } finally { setSaving(false); }
   }
 
-  const esRemolque = form.clase?.includes("Remolque") || form.clase?.includes("Semi") || form.clase?.includes("Dolly");
+  const esRemolque = esClaseRemolque(form.clase);
+  const marcasSugeridas = marcasPorClase(form.clase);
+  const marcaListId = `vehiculo-marcas-${esRemolque ? "remolque" : "tractora"}`;
 
   const TABS = [
     { id:"identificacion", l:"Identificacion" },
@@ -1108,7 +1174,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
         <div style={{ padding:"14px 20px", borderBottom:"1px solid var(--border)", display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
           <div style={{ flex:1 }}>
             <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:15, color:"var(--text)" }}>
-              {editando ? form.matricula : "Nuevo vehiculo"}
+              {editando ? form.matricula : (esRemolque ? "Nuevo remolque" : "Nueva tractora")}
             </div>
             {form.marca && <div style={{ fontSize:11, color:"var(--text4)", fontFamily:"'DM Sans',sans-serif" }}>
               {form.clase} - {form.marca} {form.modelo} {form.anio ? `(${form.anio})` : ""}
@@ -1170,11 +1236,20 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                 </div>
                 <div>
                   <label style={S.lbl}>Marca</label>
-                  <input style={S.inp} value={form.marca||""} onChange={f("marca")} placeholder="Volvo, DAF, Schmitz..."/>
+                  <input
+                    list={marcaListId}
+                    style={S.inp}
+                    value={form.marca||""}
+                    onChange={f("marca")}
+                    placeholder={esRemolque ? "Schmitz, Krone, Lecitrailer..." : "Volvo, DAF, Scania..."}
+                  />
+                  <datalist id={marcaListId}>
+                    {marcasSugeridas.map(m => <option key={m} value={m} />)}
+                  </datalist>
                 </div>
                 <div>
                   <label style={S.lbl}>Modelo</label>
-                  <input style={S.inp} value={form.modelo||""} onChange={f("modelo")} placeholder="FH 460, XF 480..."/>
+                  <input style={S.inp} value={form.modelo||""} onChange={f("modelo")} placeholder={esRemolque ? "Tautliner, frigorifico, bañera..." : "FH 460, XF 480..."}/>
                 </div>
                 <div>
                   <label style={S.lbl}>Ano de fabricacion</label>
@@ -1188,10 +1263,12 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                   <label style={S.lbl}>No. de bastidor (VIN)</label>
                   <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={form.numero_bastidor||""} onChange={f("numero_bastidor")} placeholder="WDB9634032L123456"/>
                 </div>
-                <div>
-                  <label style={S.lbl}>No. de motor</label>
-                  <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={form.numero_motor||""} onChange={f("numero_motor")}/>
-                </div>
+                {!esRemolque && (
+                  <div>
+                    <label style={S.lbl}>No. de motor</label>
+                    <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={form.numero_motor||""} onChange={f("numero_motor")}/>
+                  </div>
+                )}
               </div>
 
               <div style={S.sec}>Estado operativo</div>
@@ -1322,37 +1399,92 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                 </div>
               </div>
 
-              <div style={S.sec}>Motor y mecanica</div>
-              <div style={S.grid3}>
-                <div>
-                  <label style={S.lbl}>Combustible</label>
-                  <select value={form.combustible||"Diesel"} onChange={f("combustible")} style={S.sel}>
-                    {TIPO_COMBUSTIBLE.map(c=><option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={S.lbl}>Potencia (CV)</label>
-                  <input type="number" style={S.inp} value={form.potencia_cv||""} onChange={f("potencia_cv")} placeholder="460"/>
-                </div>
-                <div>
-                  <label style={S.lbl}>Cilindrada (cm3)</label>
-                  <input type="number" style={S.inp} value={form.cilindrada||""} onChange={f("cilindrada")} placeholder="12900"/>
-                </div>
-                <div>
-                  <label style={S.lbl}>Velocidad max (km/h)</label>
-                  <input type="number" style={S.inp} value={form.velocidad_max_kmh||""} onChange={f("velocidad_max_kmh")} placeholder="90"/>
-                </div>
-                <div>
-                  <label style={S.lbl}>No. de ejes</label>
-                  <input type="number" min="1" max="10" style={S.inp} value={form.ejes||""} onChange={f("ejes")} placeholder="2"/>
-                </div>
-                {!esRemolque && (
-                  <div>
-                    <label style={S.lbl}>Plazas (incluido conductor)</label>
-                    <input type="number" min="1" style={S.inp} value={form.plazas||""} onChange={f("plazas")} placeholder="1"/>
+              {!esRemolque ? (
+                <>
+                  <div style={S.sec}>Motor y mecanica de la tractora</div>
+                  <div style={S.grid3}>
+                    <div>
+                      <label style={S.lbl}>Combustible</label>
+                      <select value={form.combustible||"Diesel"} onChange={f("combustible")} style={S.sel}>
+                        {TIPO_COMBUSTIBLE.map(c=><option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>Potencia (CV)</label>
+                      <input type="number" style={S.inp} value={form.potencia_cv||""} onChange={f("potencia_cv")} placeholder="460"/>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>Cilindrada (cm3)</label>
+                      <input type="number" style={S.inp} value={form.cilindrada||""} onChange={f("cilindrada")} placeholder="12900"/>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>Velocidad max (km/h)</label>
+                      <input type="number" style={S.inp} value={form.velocidad_max_kmh||""} onChange={f("velocidad_max_kmh")} placeholder="90"/>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>No. de ejes</label>
+                      <input type="number" min="1" max="10" style={S.inp} value={form.ejes||""} onChange={f("ejes")} placeholder="2"/>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>Plazas (incluido conductor)</label>
+                      <input type="number" min="1" style={S.inp} value={form.plazas||""} onChange={f("plazas")} placeholder="1"/>
+                    </div>
                   </div>
-                )}
-              </div>
+                </>
+              ) : (
+                <>
+                  <div style={S.sec}>Carroceria y operativa del remolque</div>
+                  <div style={S.grid3}>
+                    <div>
+                      <label style={S.lbl}>Tipo de carroceria</label>
+                      <select value={form.tipo_carroceria||""} onChange={f("tipo_carroceria")} style={S.sel}>
+                        <option value="">Sin especificar</option>
+                        {CARROCERIAS_REMOLQUE.map(c=><option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>Apertura / carga</label>
+                      <input style={S.inp} value={form.apertura_lateral||""} onChange={f("apertura_lateral")} placeholder="Lateral, trasera, techo, superior..."/>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>No. de ejes</label>
+                      <input type="number" min="1" max="10" style={S.inp} value={form.ejes||""} onChange={f("ejes")} placeholder="3"/>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>Capacidad palets</label>
+                      <input type="number" min="0" style={S.inp} value={form.capacidad_palets||""} onChange={f("capacidad_palets")} placeholder="33"/>
+                    </div>
+                    <div>
+                      <label style={S.lbl}>Volumen (m3)</label>
+                      <input type="number" min="0" step="0.01" style={S.inp} value={form.volumen_m3||""} onChange={f("volumen_m3")} placeholder="90"/>
+                    </div>
+                    <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>
+                      <input type="checkbox" checked={!!form.techo_elevable} onChange={f("techo_elevable")}/>
+                      Techo elevable
+                    </label>
+                    <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>
+                      <input type="checkbox" checked={!!form.lateral_bajo} onChange={f("lateral_bajo")}/>
+                      Lateral bajo / lowboy
+                    </label>
+                    <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>
+                      <input type="checkbox" checked={!!form.piso_movil} onChange={f("piso_movil")}/>
+                      Piso movil
+                    </label>
+                  </div>
+                  {String(form.tipo_carroceria || "").toLowerCase().includes("frigor") && (
+                    <div style={{...S.grid3, marginTop:10}}>
+                      <div>
+                        <label style={S.lbl}>Temperatura minima (C)</label>
+                        <input type="number" style={S.inp} value={form.temperatura_min_c||""} onChange={f("temperatura_min_c")} placeholder="-20"/>
+                      </div>
+                      <div>
+                        <label style={S.lbl}>Temperatura maxima (C)</label>
+                        <input type="number" style={S.inp} value={form.temperatura_max_c||""} onChange={f("temperatura_max_c")} placeholder="8"/>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
 
               <div style={S.sec}>Dimensiones</div>
               <div style={S.grid3}>
@@ -1370,13 +1502,17 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
                 </div>
               </div>
 
-              <div style={S.sec}>Emisiones</div>
-              <div style={S.grid2}>
-                <div>
-                  <label style={S.lbl}>Homologacion CO2 / Euro</label>
-                  <input style={S.inp} value={form.homologacion_co2||""} onChange={f("homologacion_co2")} placeholder="Euro 6, Euro 5..."/>
-                </div>
-              </div>
+              {!esRemolque && (
+                <>
+                  <div style={S.sec}>Emisiones</div>
+                  <div style={S.grid2}>
+                    <div>
+                      <label style={S.lbl}>Homologacion CO2 / Euro</label>
+                      <input style={S.inp} value={form.homologacion_co2||""} onChange={f("homologacion_co2")} placeholder="Euro 6, Euro 5..."/>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1547,16 +1683,22 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
         {tab === "conjunto" && (
           <div>
             {/* Chofer asignado */}
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:8,textTransform:"uppercase",letterSpacing:".06em"}}>Chofer asignado</div>
-              <select value={form.chofer_id||""} onChange={e=>setForm(p=>({...p,chofer_id:e.target.value}))}
-                style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 10px",borderRadius:7,width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>
-                <option value="">Sin chofer asignado</option>
-                {choferes.filter(ch=>ch.activo).map(ch=>(
-                  <option key={ch.id} value={ch.id}>{ch.nombre} {ch.apellidos||""}</option>
-                ))}
-              </select>
-            </div>
+            {!esRemolque ? (
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:8,textTransform:"uppercase",letterSpacing:".06em"}}>Chofer asignado</div>
+                <select value={form.chofer_id||""} onChange={e=>setForm(p=>({...p,chofer_id:e.target.value}))}
+                  style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 10px",borderRadius:7,width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:13}}>
+                  <option value="">Sin chofer asignado</option>
+                  {choferes.filter(ch=>ch.activo).map(ch=>(
+                    <option key={ch.id} value={ch.id}>{ch.nombre} {ch.apellidos||""}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div style={{marginBottom:16,padding:"12px 14px",background:"rgba(139,92,246,.07)",border:"1px solid rgba(139,92,246,.2)",borderRadius:9,fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
+                El remolque se vincula a una tractora desde la ficha de la tractora o desde la app del chofer al formar el conjunto.
+              </div>
+            )}
 
             {/* Remolque del conjunto */}
             {(form.clase?.toLowerCase().includes("tractora")||form.clase?.toLowerCase().includes("camion")||form.clase?.toLowerCase().includes("furgon")) && (
@@ -1578,7 +1720,7 @@ function ModalVehiculo({ editando, onClose, onSaved, choferes=[], vehiculos=[], 
             )}
 
             {/* Resumen conjunto actual */}
-            {(form.chofer_id||form.remolque_id) && (
+            {!esRemolque && (form.chofer_id||form.remolque_id) && (
               <div style={{padding:"12px 14px",background:"rgba(139,92,246,.07)",border:"1px solid rgba(139,92,246,.2)",borderRadius:9,fontSize:12}}>
                 <div style={{fontWeight:700,color:"#a78bfa",marginBottom:8}}>Resumen del conjunto</div>
                 <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:"4px 12px",fontSize:12,color:"var(--text3)"}}>
@@ -1614,6 +1756,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
   const [loading,   setLoading]   = useState(true);
   const [modal,     setModal]     = useState(false);
   const [editando,  setEditando]  = useState(null);
+  const [initialClaseModal, setInitialClaseModal] = useState("Tractora");
   const [filtroTipo,   setFiltroTipo]   = useState(initialTipo || "todos");
   const [filtroEstado, setFiltroEstado] = useState("todos");
   const [gpsSyncing, setGpsSyncing] = useState(false);
@@ -1777,6 +1920,12 @@ export default function Vehiculos({ initialTipo = "todos" }) {
     ["En taller", tallerActual.length, detalleAcumuladoReal(impactoTaller), tallerActual.length ? "#f97316" : "#10b981"],
     ["Paradas", inmovilizadas.length, detalleDiaReal(impactoParadas), inmovilizadas.length ? "#ef4444" : "#10b981"],
   ];
+  const claseNuevaSegunFiltro = filtroTipo === "remolques" ? "Remolque - Tautliner (lona)" : "Tractora";
+  const abrirNuevoVehiculo = (clase = claseNuevaSegunFiltro) => {
+    setEditando(null);
+    setInitialClaseModal(clase);
+    setModal(true);
+  };
 
   return (
     <div className="tg-responsive-page" style={S.page}>
@@ -1836,10 +1985,20 @@ export default function Vehiculos({ initialTipo = "todos" }) {
 
         {/* Boton nuevo - al final */}
         {canEdit && (
-          <button style={{ ...S.btn, background:"linear-gradient(135deg,#0f766e,#0d9488)", color:"#fff", border:"1px solid #0f766e", marginLeft:"auto" }}
-            onClick={() => { setEditando(null); setModal(true); }}>
-            + Nuevo vehiculo
-          </button>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginLeft:"auto"}}>
+            {filtroTipo !== "remolques" && (
+              <button style={{ ...S.btn, background:"linear-gradient(135deg,#0f766e,#0d9488)", color:"#fff", border:"1px solid #0f766e" }}
+                onClick={() => abrirNuevoVehiculo("Tractora")}>
+                + Nueva tractora
+              </button>
+            )}
+            {filtroTipo !== "tractoras" && (
+              <button style={{ ...S.btn, background:"rgba(139,92,246,.12)", color:"#7c3aed", border:"1px solid rgba(139,92,246,.28)" }}
+                onClick={() => abrirNuevoVehiculo("Remolque - Tautliner (lona)")}>
+                + Nuevo remolque
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -1916,8 +2075,10 @@ export default function Vehiculos({ initialTipo = "todos" }) {
                     <span style={{ background:esRemolque?"rgba(139,92,246,.10)":"rgba(20,184,166,.10)", color:esRemolque?"#8b5cf6":"#0f766e", padding:"3px 9px", borderRadius:10, border:`1px solid ${esRemolque?"rgba(139,92,246,.25)":"rgba(20,184,166,.25)"}`, fontWeight:800 }}>
                       {esRemolque ? "Remolque" : "Tractora"}
                     </span>
-                    {v.combustible && <span style={{ color:"var(--text5)" }}>{v.combustible}</span>}
-                    {v.potencia_cv && <span style={{ color:"var(--text5)" }}>{v.potencia_cv} CV</span>}
+                    {!esRemolque && v.combustible && <span style={{ color:"var(--text5)" }}>{v.combustible}</span>}
+                    {!esRemolque && v.potencia_cv && <span style={{ color:"var(--text5)" }}>{v.potencia_cv} CV</span>}
+                    {esRemolque && v.tipo_carroceria && <span style={{ color:"var(--text5)" }}>{v.tipo_carroceria}</span>}
+                    {esRemolque && v.capacidad_palets && <span style={{ color:"var(--text5)" }}>{v.capacidad_palets} palets</span>}
                   </div>
 
                   <div style={{marginBottom:8,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -2135,6 +2296,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
       {modal && (
         <ModalVehiculo
           editando={editando}
+          initialClase={initialClaseModal}
           choferes={choferes}
           vehiculos={vehiculos}
           onClose={() => { setModal(false); setEditando(null); }}

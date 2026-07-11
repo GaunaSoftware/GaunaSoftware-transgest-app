@@ -192,18 +192,32 @@ async function ensureUser(empresaId, { nombre, email, rol, choferId = null }) {
   if (existing) {
     return one(
       `UPDATE usuarios
+          SET empresa_id=$2, nombre=$3, email=$4, username=$4, password_hash=$5, rol=$6, activo=true, chofer_id=$7,
+              debe_cambiar_password=false, password_changed_at=NOW(),
+              login_failed_count=0, login_locked_until=NULL
+        WHERE id=$1
+        RETURNING *`,
+      [existing.id, empresaId, nombre, email, passwordHash, rol, choferId]
+    ).catch(() => one(
+      // Fallback si alguna columna de política de login aún no existe en este entorno.
+      `UPDATE usuarios
           SET empresa_id=$2, nombre=$3, email=$4, username=$4, password_hash=$5, rol=$6, activo=true, chofer_id=$7
         WHERE id=$1
         RETURNING *`,
       [existing.id, empresaId, nombre, email, passwordHash, rol, choferId]
-    );
+    ));
   }
   return one(
+    `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,chofer_id,debe_cambiar_password)
+     VALUES ($1,$2,$2,$3,$4,$5,true,$6,false)
+     RETURNING *`,
+    [nombre, email, passwordHash, rol, empresaId, choferId]
+  ).catch(() => one(
     `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,chofer_id)
      VALUES ($1,$2,$2,$3,$4,$5,true,$6)
      RETURNING *`,
     [nombre, email, passwordHash, rol, empresaId, choferId]
-  );
+  ));
 }
 
 async function ensureCliente(empresaId, data) {

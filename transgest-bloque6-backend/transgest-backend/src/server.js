@@ -1258,6 +1258,7 @@ async function startServer() {
   await applyMigrations();
   await authRoutes.initializeSchema?.();
   await choferesRoutes.initializeSchema?.();
+  await geocodingRoutes.initializeSchema?.();
   httpServer = app.listen(PORT, () => {
     logger.info("TransGest API lista en puerto " + PORT + " - " + process.env.NODE_ENV);
     if (process.env.ALLOW_DEMO_SEED === "true") setTimeout(autoSeedIfEmpty, 5000);

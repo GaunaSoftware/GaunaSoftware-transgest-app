@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { notify } from "../services/notify";
+import { calcularDistanciaGeo } from "../services/api";
 
 const PRECIO_GASOIL = 1.45;
 const COSTE_KM_BASE = 0.48; // coste operativo: conductor, amortizacion, mantenimiento y seguros
@@ -47,25 +48,16 @@ export default function CalculadorPortes() {
     if (!origen.trim() || !destino.trim()) return;
     setCalcKm(true);
     try {
-      const geo = async (place) => {
-        for (const q of [`${place}, España`, place]) {
-          const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`);
-          const d = await r.json();
-          if (d[0]) return [parseFloat(d[0].lon), parseFloat(d[0].lat)];
-        }
-        return null;
-      };
-      const [o, d] = await Promise.all([geo(origen), geo(destino)]);
-      if (!o || !d) {
-        notify("No se encontro alguna de las poblaciones. Introducelas manualmente.", "warning");
+      const route = await calcularDistanciaGeo(origen.trim(), destino.trim());
+      const calculatedKm = Number(route?.km);
+      if (!route?.ok || !Number.isFinite(calculatedKm) || calculatedKm <= 0) {
+        notify("No se pudo calcular una distancia fiable. Revisa las poblaciones.", "warning");
         return;
       }
-      const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${o[0]},${o[1]};${d[0]},${d[1]}?overview=false`);
-      const data = await r.json();
-      if (data.code === "Ok") setKm(Math.round(data.routes[0].distance / 1000));
-      else notify("No se pudo calcular la distancia.", "warning");
+      setKm(Math.round(calculatedKm));
+      if (route.warning) notify(route.warning, route.provider === "estimate" ? "warning" : "info");
     } catch (e) {
-      notify("Error: " + e.message, "error");
+      notify(e.message || "No se pudo calcular la distancia.", "error");
     } finally {
       setCalcKm(false);
     }

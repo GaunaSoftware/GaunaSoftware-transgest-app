@@ -17,6 +17,7 @@ import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../service
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo } from "../utils/placeGeo";
+import RutaMapa from "../components/RutaMapa";
 
 let puntosInteresCache = [];
 const AI_INBOX_MAX_FILE_BYTES = 6 * 1024 * 1024;
@@ -5824,11 +5825,36 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   const label = sourceStop.nombre || sourceStop.name || sourceStop.cliente_nombre || sourceStop.direccion || pedido[side] || "";
   const provincia = sourceStop.provincia || pedido[`${side}_provincia`] || "";
   const pais = sourceStop.pais || pedido[`${side}_pais`] || "España";
-  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, label, hasGeo:true };
+  const pointDetails = {
+    google_maps_url: googleMapsUrl,
+    provincia,
+    pais,
+  };
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, label, hasGeo:true, ...pointDetails };
   const geo = inferPlaceGeo(sourceStop, label, pedido[`${side}_provincia`], pedido[`${side}_pais`]);
-  if (geo) return { lat: geo.lat, lng: geo.lng, label: label || geo.municipio || `${side} ${idx + 1}`, hasGeo:true };
+  if (geo) return { lat: geo.lat, lng: geo.lng, label: label || geo.municipio || `${side} ${idx + 1}`, hasGeo:true, ...pointDetails };
   const fallbackLabel = [label, provincia, pais].filter(Boolean).join(", ");
-  return fallbackLabel ? { lat:null, lng:null, label:fallbackLabel, hasGeo:false } : null;
+  return fallbackLabel ? { lat:null, lng:null, label:fallbackLabel, hasGeo:false, ...pointDetails } : null;
+}
+
+function getPedidoVehiclePosition(pedido = {}) {
+  const candidates = [
+    [pedido.gps_lat, pedido.gps_lng],
+    [pedido.vehiculo_gps_lat, pedido.vehiculo_gps_lng],
+    [pedido.ultima_latitud, pedido.ultima_longitud],
+    [pedido.vehiculo_latitud, pedido.vehiculo_longitud],
+  ];
+  for (const [rawLat, rawLng] of candidates) {
+    const lat = Number(rawLat);
+    const lng = Number(rawLng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  }
+  const text = String(pedido.ultima_posicion || pedido.ubicacion_actual || "");
+  const match = text.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const lat = Number(match[1]);
+  const lng = Number(match[2]);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
 }
 
 function getPedidoMapaPasos(pedido = {}, choferPasos = null) {
@@ -5899,13 +5925,14 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
     <div style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>
         <div>
-          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Puntos del pedido</div>
-          <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Mapa embebido desactivado para evitar errores de carga. Se mantienen puntos, estados y enlaces externos.</div>
+          <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Ruta operativa</div>
+          <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Ruta, paradas y posicion conocida del vehiculo.</div>
         </div>
         <span style={{fontSize:10,fontWeight:900,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
           {currentLabel}
         </span>
       </div>
+      <RutaMapa points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} />
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginTop:9}}>
         {mapPoints.map(point => (
           <div key={`card-${point.tipo}-${point.index}-${point.label}`} style={{border:`1px solid ${point.tone.border}`,borderRadius:8,padding:"8px 10px",background:point.tone.bg}}>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { notify } from "../services/notify";
+import { calcularDistanciaGeo } from "../services/api";
 
 const PRECIO_GASOIL = 1.45;
 const COSTE_KM_BASE = 0.48; // coste operativo: conductor, amortizacion, mantenimiento y seguros
@@ -47,25 +48,20 @@ export default function CalculadorPortes() {
     if (!origen.trim() || !destino.trim()) return;
     setCalcKm(true);
     try {
-      const geo = async (place) => {
-        for (const q of [`${place}, España`, place]) {
-          const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`);
-          const d = await r.json();
-          if (d[0]) return [parseFloat(d[0].lon), parseFloat(d[0].lat)];
+      // Cálculo robusto vía backend: caché + geocoder externo + diccionario
+      // local de respaldo + OSRM con estimación por línea recta si falla.
+      const data = await calcularDistanciaGeo({ origen: origen.trim(), destino: destino.trim() });
+      const kmCalc = Number(data?.km);
+      if (data?.ok && Number.isFinite(kmCalc) && kmCalc > 0) {
+        setKm(Math.round(kmCalc));
+        if (data.source === "estimacion") {
+          notify("Distancia estimada (el enrutador de carretera no respondió). Revisa el valor.", "warning");
         }
-        return null;
-      };
-      const [o, d] = await Promise.all([geo(origen), geo(destino)]);
-      if (!o || !d) {
-        notify("No se encontro alguna de las poblaciones. Introducelas manualmente.", "warning");
-        return;
+      } else {
+        notify(data?.error || "No se encontró alguna población. Introdúcelas manualmente.", "warning");
       }
-      const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${o[0]},${o[1]};${d[0]},${d[1]}?overview=false`);
-      const data = await r.json();
-      if (data.code === "Ok") setKm(Math.round(data.routes[0].distance / 1000));
-      else notify("No se pudo calcular la distancia.", "warning");
-    } catch (e) {
-      notify("Error: " + e.message, "error");
+    } catch {
+      notify("No se pudo calcular la distancia. Introduce los kilómetros manualmente.", "error");
     } finally {
       setCalcKm(false);
     }

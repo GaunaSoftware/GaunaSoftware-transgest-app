@@ -17,6 +17,7 @@ import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../service
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo } from "../utils/placeGeo";
+import RutaMapa from "../components/RutaMapa";
 
 let puntosInteresCache = [];
 const AI_INBOX_MAX_FILE_BYTES = 6 * 1024 * 1024;
@@ -5891,12 +5892,13 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>
         <div>
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Puntos del pedido</div>
-          <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Mapa embebido desactivado para evitar errores de carga. Se mantienen puntos, estados y enlaces externos.</div>
+          <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Ruta prevista del viaje. Los puntos se localizan automaticamente sobre el mapa.</div>
         </div>
         <span style={{fontSize:10,fontWeight:900,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
           {currentLabel}
         </span>
       </div>
+      <RutaMapa puntos={mapPoints} />
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginTop:9}}>
         {mapPoints.map(point => (
           <div key={`card-${point.tipo}-${point.index}-${point.label}`} style={{border:`1px solid ${point.tone.border}`,borderRadius:8,padding:"8px 10px",background:point.tone.bg}}>

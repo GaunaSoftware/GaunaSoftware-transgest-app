@@ -959,4 +959,22 @@ export const actualizarGpsPedido = (id, data) =>
 export const registrarGpsChoferApp = (data) =>
   apiFetch("/choferes/app/gps", { method: "POST", body: data, timeoutMs: 15000, silentSuccess: true, silentError: true });
 
+// ── Geocodificacion / ruta (mapa de pedidos y calculador de km) ──
+// Robusto en backend: cache + HERE/Nominatim + diccionario local + OSRM con fallback.
+export const calcularRutaGeo = ({ origen, destino, waypoints, puntos, country } = {}) => {
+  // GET para que el mapa (solo lectura) requiera permiso "ver", no "editar".
+  const params = new URLSearchParams();
+  if (origen) params.set("origen", origen);
+  if (destino) params.set("destino", destino);
+  if (country) params.set("country", country);
+  if (Array.isArray(waypoints) && waypoints.length) params.set("waypoints", JSON.stringify(waypoints));
+  if (Array.isArray(puntos) && puntos.length) params.set("puntos", JSON.stringify(puntos));
+  return apiFetch(`/geocoding/route?${params.toString()}`, { silentError: true, timeoutMs: 20000 });
+};
+export const calcularDistanciaGeo = ({ origen, destino, country } = {}) => {
+  const params = new URLSearchParams({ origen: origen || "", destino: destino || "" });
+  if (country) params.set("country", country);
+  return apiFetch(`/geocoding/distance?${params.toString()}`, { silentError: true, timeoutMs: 20000 });
+};
+
 

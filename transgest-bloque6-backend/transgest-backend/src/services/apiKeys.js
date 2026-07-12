@@ -13,9 +13,15 @@ const PROVIDER_ENV = {
   gps_generic: "GPS_API_KEY",
 };
 
-function encryptionKey() {
-  const seed = process.env.API_KEYS_ENCRYPTION_SECRET || process.env.JWT_SECRET || "transgest-local-dev-key";
+function encryptionKey(seed = process.env.API_KEYS_ENCRYPTION_SECRET || process.env.JWT_SECRET || "transgest-local-dev-key") {
   return crypto.createHash("sha256").update(seed).digest();
+}
+
+function decryptionKeys() {
+  return [...new Set([
+    process.env.API_KEYS_ENCRYPTION_SECRET || process.env.JWT_SECRET || "transgest-local-dev-key",
+    process.env.API_KEYS_ENCRYPTION_LEGACY_SECRET,
+  ].map(value => String(value || "").trim()).filter(Boolean))].map(encryptionKey);
 }
 
 function encryptSecret(value) {
@@ -31,12 +37,20 @@ function decryptSecret(value) {
   if (!value) return "";
   if (!String(value).startsWith("v1:")) return value;
   const [, ivB64, tagB64, dataB64] = String(value).split(":");
-  const decipher = crypto.createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(ivB64, "base64"));
-  decipher.setAuthTag(Buffer.from(tagB64, "base64"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(dataB64, "base64")),
-    decipher.final(),
-  ]).toString("utf8");
+  let lastError = null;
+  for (const key of decryptionKeys()) {
+    try {
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64"));
+      decipher.setAuthTag(Buffer.from(tagB64, "base64"));
+      return Buffer.concat([
+        decipher.update(Buffer.from(dataB64, "base64")),
+        decipher.final(),
+      ]).toString("utf8");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error("No se pudo descifrar la clave API con las claves activa o legacy", { cause: lastError });
 }
 
 function maskSecret(value) {

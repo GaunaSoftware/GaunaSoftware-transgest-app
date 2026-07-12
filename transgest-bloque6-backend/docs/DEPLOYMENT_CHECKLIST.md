@@ -3,7 +3,7 @@
 ## Antes de arrancar
 
 - Copiar `transgest-backend/.env.example` a `transgest-backend/.env`.
-- Configurar `JWT_SECRET` con una clave larga y aleatoria.
+- Configurar `JWT_SECRET`, `USER_JWT_SECRET`, `SUPERADMIN_JWT_SECRET`, `ACCOUNTING_SSO_JWT_SECRET`, `API_KEYS_ENCRYPTION_SECRET` y `DOC_CONTROL_SECRET` con claves largas, aleatorias y distintas.
 - Configurar `DB_*` con usuario propio de PostgreSQL.
 - Configurar `CORS_ORIGINS` con los dominios reales.
 - Configurar `PUBLIC_APP_URL` para enlaces de invitacion y colaborador.
@@ -55,7 +55,7 @@ npm run functional
 ## Puntos que no deben quedar para produccion
 
 - `CORS_ORIGINS` vacio si el backend esta publico.
-- `JWT_SECRET` por defecto o corto.
+- Secretos por defecto, cortos o reutilizados entre usuarios, superadmin, contabilidad, claves API y documentos publicos.
 - SMTP sin probar si se usan colaboradores, invitaciones o facturas por email.
 - Backups sin probar. En produccion, evitar depender solo del fallback JSON.
 - Stripe sin webhook validado.
@@ -65,7 +65,8 @@ npm run functional
 
 - Frontend: Vercel (`https://app.gauna.es`). Debe desplegar `transgest-frontend/vercel.json` y conservar `REACT_APP_API_URL=https://transgest-backend.onrender.com`.
 - API: Render (`https://transgest-backend.onrender.com`). Configurar `CORS_ORIGINS=https://app.gauna.es,https://gauna.es` y `PUBLIC_APP_URL=https://app.gauna.es`.
-- Usar `DB_PASSWORD` de al menos 20 caracteres, `JWT_SECRET` aleatorio de al menos 32 caracteres y `ALLOW_DEMO_SEED=false`.
+- Usar `DB_PASSWORD` de al menos 20 caracteres y secretos aleatorios de al menos 32 caracteres. Mantener `ALLOW_DEMO_SEED=false`.
+- Antes de activar claves especializadas por primera vez, copiar el antiguo `JWT_SECRET` a `API_KEYS_ENCRYPTION_LEGACY_SECRET` y `DOC_CONTROL_LEGACY_SECRET`. Asi siguen funcionando las integraciones cifradas y los QR DCD ya emitidos; las nuevas claves se usan solo para datos y documentos nuevos.
 - Si se ejecuta `superadmin:ensure` en produccion, `SUPERADMIN_EMAIL` y `SUPERADMIN_PASSWORD` deben estar definidos expresamente.
 - Montar un disco persistente para `BACKUP_DIR`; ademas, replicar backups fuera de Render (S3/B2 u otro proveedor) y probar una restauracion periodicamente.
 

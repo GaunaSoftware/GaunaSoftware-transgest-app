@@ -340,21 +340,29 @@ function buildCodigoControl({ empresaId, pedidoId }) {
   return crypto.createHash("sha1").update(`${empresaId}:${pedidoId}`).digest("hex").slice(0, 12).toUpperCase();
 }
 
-function buildPublicToken({ empresaId, pedidoId }) {
-  const secret = process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+function currentDocumentSecret() {
+  return process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+}
+
+function documentVerificationSecrets() {
+  return [...new Set([
+    currentDocumentSecret(),
+    process.env.DOC_CONTROL_LEGACY_SECRET,
+  ].map(value => String(value || "").trim()).filter(Boolean))];
+}
+
+function buildPublicToken({ empresaId, pedidoId, secret = currentDocumentSecret() }) {
   return crypto
     .createHmac("sha256", secret)
     .update(`${empresaId}:${pedidoId}`)
     .digest("hex");
 }
 
-function buildLegacyPublicToken({ empresaId, pedidoId }) {
-  const secret = process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+function buildLegacyPublicToken({ empresaId, pedidoId, secret = currentDocumentSecret() }) {
   return crypto.createHash("sha256").update(`${empresaId}:${pedidoId}:${secret}`).digest("hex");
 }
 
-function buildPublicVerificationCode({ empresaId, pedidoId }) {
-  const secret = process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+function buildPublicVerificationCode({ empresaId, pedidoId, secret = currentDocumentSecret() }) {
   return crypto
     .createHmac("sha256", secret)
     .update(`verify:${empresaId}:${pedidoId}`)
@@ -377,15 +385,18 @@ function safeTextEqual(expected, received) {
 
 function verifyPublicToken({ empresaId, pedidoId, token }) {
   if (!token) return false;
-  return (
-    safeTokenEqual(buildPublicToken({ empresaId, pedidoId }), token) ||
-    safeTokenEqual(buildLegacyPublicToken({ empresaId, pedidoId }), token)
-  );
+  return documentVerificationSecrets().some(secret => (
+    safeTokenEqual(buildPublicToken({ empresaId, pedidoId, secret }), token) ||
+    safeTokenEqual(buildLegacyPublicToken({ empresaId, pedidoId, secret }), token)
+  ));
 }
 
 function verifyPublicVerificationCode({ empresaId, pedidoId, code }) {
   if (!code) return true;
-  return safeTextEqual(buildPublicVerificationCode({ empresaId, pedidoId }), String(code).trim().toUpperCase());
+  return documentVerificationSecrets().some(secret => safeTextEqual(
+    buildPublicVerificationCode({ empresaId, pedidoId, secret }),
+    String(code).trim().toUpperCase()
+  ));
 }
 
 function isLocalhostBase(value) {

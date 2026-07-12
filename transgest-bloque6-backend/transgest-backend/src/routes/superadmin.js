@@ -385,6 +385,17 @@ async function buildIntegracionesSalud() {
   const gpsWithWebhook = empresasSalud.filter(e => e.gps_webhook_activo).length;
   const gpsDuplicatedCompanies = empresasSalud.filter(e => e.gps_ids_duplicados > 0).length;
   const gpsStaleCompanies = empresasSalud.filter(e => e.gps_sin_senal_reciente > 0).length;
+  const securitySecretNames = [
+    "USER_JWT_SECRET",
+    "SUPERADMIN_JWT_SECRET",
+    "ACCOUNTING_SSO_JWT_SECRET",
+    "API_KEYS_ENCRYPTION_SECRET",
+    "DOC_CONTROL_SECRET",
+  ];
+  const securitySecrets = securitySecretNames.map(name => String(process.env[name] || ""));
+  const securitySecretsReady = securitySecrets.every(value => value.length >= 32)
+    && new Set(securitySecrets).size === securitySecrets.length
+    && securitySecrets.every(value => value !== String(process.env.JWT_SECRET || ""));
 
   const checks = [
     integrationCheck({
@@ -465,15 +476,21 @@ async function buildIntegracionesSalud() {
       key: "secrets",
       area: "Seguridad",
       label: "Claves y tokens",
-      ok: String(process.env.JWT_SECRET || "").length >= 32 && String(process.env.SUPERADMIN_JWT_SECRET || process.env.JWT_SECRET || "").length >= 32,
+      ok: securitySecretsReady,
+      required: true,
       warnings: [
         !process.env.API_KEYS_ENCRYPTION_SECRET ? "API_KEYS_ENCRYPTION_SECRET no esta definido; el cifrado cae a JWT_SECRET." : "",
+        !process.env.DOC_CONTROL_SECRET ? "DOC_CONTROL_SECRET no esta definido; los documentos publicos caen a JWT_SECRET." : "",
         !process.env.USER_JWT_SECRET ? "USER_JWT_SECRET no esta definido; usuarios caen a JWT_SECRET." : "",
         !process.env.SUPERADMIN_JWT_SECRET ? "SUPERADMIN_JWT_SECRET no esta definido; superadmin cae a JWT_SECRET." : "",
+        !process.env.ACCOUNTING_SSO_JWT_SECRET ? "ACCOUNTING_SSO_JWT_SECRET no esta definido; SSO contable cae a JWT_SECRET." : "",
+        securitySecrets.filter(Boolean).length === securitySecretNames.length && new Set(securitySecrets).size !== securitySecrets.length
+          ? "Hay secretos especializados reutilizados entre dominios."
+          : "",
         process.env.NODE_ENV === "production" && !process.env.CORS_ORIGINS ? "CORS_ORIGINS no esta fijado explicitamente en produccion." : "",
       ],
-      detail: "Usuarios, superadmin y SSO contable pueden usar secretos JWT separados; el navegador recibe solo mascaras/estado.",
-      action: "Configurar USER_JWT_SECRET, SUPERADMIN_JWT_SECRET, ACCOUNTING_SSO_JWT_SECRET y API_KEYS_ENCRYPTION_SECRET largos y distintos en produccion.",
+      detail: "Usuarios, superadmin, SSO contable, cifrado de APIs y documentos publicos usan dominios criptograficos separados.",
+      action: "Configurar USER_JWT_SECRET, SUPERADMIN_JWT_SECRET, ACCOUNTING_SSO_JWT_SECRET, API_KEYS_ENCRYPTION_SECRET y DOC_CONTROL_SECRET largos y distintos en produccion.",
     }),
   ];
 

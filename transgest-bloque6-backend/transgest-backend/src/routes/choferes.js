@@ -1,5 +1,6 @@
 const express = require("express");
 const db      = require("../services/db");
+const logger  = require("../services/logger");
 const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
 const { crearNotificacion } = require("../services/notificaciones");
 const { validateBase64Upload } = require("../services/uploadValidation");
@@ -7,23 +8,28 @@ const router  = express.Router();
 router.use(authenticate);
 
 let schemaReady = false;
+function failChoferSchema(error) {
+  logger.error("Chofer schema no disponible: " + error.message);
+  throw error;
+}
+
 async function ensureChoferesTransparencySchema() {
   if (schemaReady) return;
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS sexo VARCHAR(30)").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS puesto_valor VARCHAR(120)").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS estado VARCHAR(40) NOT NULL DEFAULT 'disponible'").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS avisos JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_alta DATE").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_baja DATE").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS motivo_baja TEXT").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base TEXT").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_nombre VARCHAR(180)").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_fecha TIMESTAMPTZ").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_nombre TEXT").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_mime VARCHAR(120)").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_base64 TEXT").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS historial_laboral JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS plataformas JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS sexo VARCHAR(30)").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS puesto_valor VARCHAR(120)").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS estado VARCHAR(40) NOT NULL DEFAULT 'disponible'").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS avisos JSONB NOT NULL DEFAULT '[]'::jsonb").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_alta DATE").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_baja DATE").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS motivo_baja TEXT").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base TEXT").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_nombre VARCHAR(180)").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_fecha TIMESTAMPTZ").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_nombre TEXT").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_mime VARCHAR(120)").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_base64 TEXT").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS historial_laboral JSONB NOT NULL DEFAULT '[]'::jsonb").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS plataformas JSONB NOT NULL DEFAULT '[]'::jsonb").catch(failChoferSchema);
   schemaReady = true;
 }
 
@@ -67,8 +73,8 @@ async function ensureChoferJornadaSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_abierta ON chofer_jornadas(empresa_id, chofer_id, estado) WHERE estado='abierta'").catch(() => {});
-  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_fecha ON chofer_jornadas(empresa_id, chofer_id, inicio_at DESC)").catch(() => {});
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_abierta ON chofer_jornadas(empresa_id, chofer_id, estado) WHERE estado='abierta'").catch(failChoferSchema);
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_fecha ON chofer_jornadas(empresa_id, chofer_id, inicio_at DESC)").catch(failChoferSchema);
   jornadaSchemaReady = true;
 }
 
@@ -97,8 +103,8 @@ async function ensureChoferVacacionesSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_empresa_estado ON chofer_vacaciones_solicitudes(empresa_id, estado, fecha_inicio)").catch(() => {});
-  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_chofer ON chofer_vacaciones_solicitudes(empresa_id, chofer_id, fecha_inicio DESC)").catch(() => {});
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_empresa_estado ON chofer_vacaciones_solicitudes(empresa_id, estado, fecha_inicio)").catch(failChoferSchema);
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_chofer ON chofer_vacaciones_solicitudes(empresa_id, chofer_id, fecha_inicio DESC)").catch(failChoferSchema);
   vacacionesSchemaReady = true;
 }
 
@@ -1278,4 +1284,10 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
     res.json(rows[0]);
   } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });
+router.initializeSchema = async function initializeChoferesSchema() {
+  await ensureChoferesTransparencySchema();
+  await ensureChoferJornadaSchema();
+  await ensureChoferVacacionesSchema();
+};
+
 module.exports = router;

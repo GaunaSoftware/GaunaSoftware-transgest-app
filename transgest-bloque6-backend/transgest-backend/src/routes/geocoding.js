@@ -357,6 +357,34 @@ function routeInputFromQuery(query = {}) {
   return input;
 }
 
+// Cache de rutas calculadas (km + geometria) por empresa, para que el mapa
+// cargue al instante en visitas repetidas y dependa menos de OSRM/geocoders.
+let routeCacheReady = false;
+async function ensureRouteCacheSchema() {
+  if (routeCacheReady) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS geo_route_cache (
+      empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      route_key VARCHAR(64) NOT NULL,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (empresa_id, route_key)
+    )
+  `);
+  routeCacheReady = true;
+}
+
+function routeCacheKey(country, points) {
+  const norm = points.map(p => ({
+    q: normalizeKey(p.q || ""),
+    lat: p.lat != null ? Number(p.lat).toFixed(4) : null,
+    lng: p.lng != null ? Number(p.lng).toFixed(4) : null,
+    r: p.role || "",
+  }));
+  return crypto.createHash("sha1").update(JSON.stringify({ c: normalizeKey(country), p: norm })).digest("hex");
+}
+
 async function handleRoute(req, res, next) {
   try {
     const empresaId = req.user?.empresa_id || req.empresaId;
@@ -386,6 +414,18 @@ async function handleRoute(req, res, next) {
     }
 
     const country = cleanText(body.country || body.pais || "");
+
+    // Cache-hit: si ya calculamos esta misma ruta (< 30 dias), la devolvemos ya.
+    const cacheKey = routeCacheKey(country, cleanPoints);
+    await ensureRouteCacheSchema().catch(() => {});
+    const cached = await db.query(
+      "SELECT payload FROM geo_route_cache WHERE empresa_id=$1 AND route_key=$2 AND updated_at > NOW() - INTERVAL '30 days' LIMIT 1",
+      [empresaId, cacheKey]
+    ).catch(() => ({ rows: [] }));
+    if (cached.rows[0]?.payload) {
+      return res.json({ ...cached.rows[0].payload, source: "cache" });
+    }
+
     const puntos = [];
     const noLocalizados = [];
     for (const p of cleanPoints) {
@@ -422,7 +462,7 @@ async function handleRoute(req, res, next) {
       warning = `${warning ? warning + " " : ""}Distancia estimada (el enrutador de carretera no respondio); validar antes de ejecutar.`;
     }
 
-    res.json({
+    const response = {
       ok: true,
       km: osrm.km,
       duration_min: osrm.duration_min,
@@ -430,7 +470,20 @@ async function handleRoute(req, res, next) {
       geometry: osrm.geometry,
       source,
       warning,
-    });
+    };
+
+    // Solo cacheamos rutas reales por carretera (no estimaciones), asi si OSRM
+    // estaba caido se reintenta la proxima vez en lugar de servir una estimacion vieja.
+    if (source === "osrm" && osrm.km) {
+      db.query(
+        `INSERT INTO geo_route_cache (empresa_id, route_key, payload, updated_at)
+         VALUES ($1,$2,$3::jsonb,NOW())
+         ON CONFLICT (empresa_id, route_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()`,
+        [empresaId, cacheKey, JSON.stringify(response)]
+      ).catch(() => {});
+    }
+
+    res.json(response);
   } catch (err) {
     next(err);
   }

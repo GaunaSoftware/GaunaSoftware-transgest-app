@@ -26,6 +26,8 @@ import {
   downloadMaturitiesCsv,
   downloadPartiesCsv,
   downloadProfitLossCsv,
+  getVatSummary,
+  downloadVatSummaryCsv,
   downloadTrialBalanceCsv,
   exchangeSsoToken,
   getAdvisorPackage,
@@ -721,6 +723,7 @@ export default function App() {
   });
   const [balanceSheet, setBalanceSheet] = useState(null);
   const [profitLoss, setProfitLoss] = useState(null);
+  const [vatSummary, setVatSummary] = useState(null);
   const [chartTemplates, setChartTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templateStatus, setTemplateStatus] = useState(null);
@@ -1233,16 +1236,19 @@ export default function App() {
     setReportsLoading(true);
     setReportsStatus(null);
     try {
-      const [balanceResult, profitLossResult] = await Promise.all([
+      const [balanceResult, profitLossResult, vatResult] = await Promise.all([
         getBalanceSheet(nextFilters),
         getProfitLoss(nextFilters),
+        getVatSummary(nextFilters),
       ]);
       setBalanceSheet(balanceResult.data || null);
       setProfitLoss(profitLossResult.data || null);
+      setVatSummary(vatResult.data || null);
       setReportsFilters(prev => ({ ...prev, ...nextFilters }));
     } catch (err) {
       setBalanceSheet(null);
       setProfitLoss(null);
+      setVatSummary(null);
       setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
     } finally {
       setReportsLoading(false);
@@ -2773,6 +2779,21 @@ export default function App() {
     }
   }
 
+  async function handleExportVatSummaryCsv() {
+    if (!reportsFilters.fiscal_year_id) return;
+    setReportsExporting(true);
+    setReportsStatus(null);
+    try {
+      const result = await downloadVatSummaryCsv(reportsFilters);
+      saveBlob(result.blob, result.filename || "liquidacion-iva.csv");
+      setReportsStatus({ tone: "ok", text: "CSV de liquidacion de IVA generado y auditado." });
+    } catch (err) {
+      setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setReportsExporting(false);
+    }
+  }
+
   async function handleCreateJournalDraft(event) {
     event.preventDefault();
     setJournalStatus(null);
@@ -4229,7 +4250,23 @@ export default function App() {
                       { label: "Gastos", rows: profitLoss?.sections?.expenses || [] },
                     ]}
                   />
+                  <StatementPanel
+                    title="Liquidacion de IVA"
+                    subtitle="Modelo 303 preliminar (cuentas 472/477)"
+                    exporting={reportsExporting || !vatSummary}
+                    onExport={handleExportVatSummaryCsv}
+                    totals={[
+                      { label: "IVA devengado", value: vatSummary?.liquidacion?.iva_devengado },
+                      { label: "IVA deducible", value: vatSummary?.liquidacion?.iva_deducible },
+                      { label: vatSummary?.liquidacion?.sentido === "a_compensar" ? "Resultado (a compensar)" : vatSummary?.liquidacion?.sentido === "a_ingresar" ? "Resultado (a ingresar)" : "Resultado", value: vatSummary?.liquidacion?.resultado },
+                    ]}
+                    sections={[
+                      { label: "IVA repercutido (477)", rows: (vatSummary?.repercutido?.rows || []).map(r => ({ code: r.code, name: r.name, amount: r.cuota })) },
+                      { label: "IVA soportado (472)", rows: (vatSummary?.soportado?.rows || []).map(r => ({ code: r.code, name: r.name, amount: r.cuota })) },
+                    ]}
+                  />
                 </div>
+                <div className="scope-note">Liquidacion de IVA preliminar calculada desde las cuentas 472 (soportado) y 477 (repercutido). No sustituye el modelo 303 oficial de la AEAT.</div>
               </>
             )}
           </section>

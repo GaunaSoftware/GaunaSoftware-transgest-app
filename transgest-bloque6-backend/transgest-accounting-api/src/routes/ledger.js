@@ -385,4 +385,148 @@ router.get("/reports/profit-loss", requirePermission("ledger.read"), async (req,
   }
 });
 
+// ── Liquidacion de IVA / Modelo 303 preliminar ──────────────────────────────
+// Deriva el IVA de las cuentas del PGC: 477* (repercutido/devengado) y
+// 472* (soportado/deducible). No sustituye el modelo oficial de la AEAT.
+function detectVatRate(code, name) {
+  const text = `${code || ""} ${name || ""}`;
+  const pct = text.match(/(\d{1,2}(?:[.,]\d)?)\s*%/);
+  if (pct) {
+    const rate = Number(String(pct[1]).replace(",", "."));
+    if (Number.isFinite(rate) && rate > 0 && rate <= 100) return rate;
+  }
+  return null;
+}
+
+function estimateBaseUnits(cuotaUnits, rate) {
+  if (!rate || rate <= 0) return null;
+  // base = cuota / (rate/100); cuotaUnits ya viene en micro-unidades.
+  const absCuota = cuotaUnits < 0n ? -cuotaUnits : cuotaUnits;
+  const baseAbs = (absCuota * 100n) / BigInt(Math.round(rate * 100)) * 100n;
+  const base = cuotaUnits < 0n ? -baseAbs : baseAbs;
+  return base;
+}
+
+router.get("/reports/vat-summary", requirePermission("ledger.read"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const filters = normalizeFinancialStatementQuery(req.query);
+    const params = [selected.company_id, filters.fiscal_year_id];
+    const joinFilters = ["je.id=jl.journal_entry_id", "je.status='posted'"];
+    if (filters.period_id) {
+      params.push(filters.period_id);
+      joinFilters.push(`je.period_id=$${params.length}`);
+    }
+    if (filters.date_from) {
+      params.push(filters.date_from);
+      joinFilters.push(`je.entry_date >= $${params.length}`);
+    }
+    if (filters.date_to) {
+      params.push(filters.date_to);
+      joinFilters.push(`je.entry_date <= $${params.length}`);
+    }
+
+    const rows = await db.transaction(async client => {
+      await assertPeriodInFiscalYear(client, selected, filters.period_id, filters.fiscal_year_id);
+      const result = await client.query(
+        `SELECT a.code, a.name,
+                COALESCE(SUM(CASE WHEN je.id IS NOT NULL THEN jl.debit_amount ELSE 0 END), 0)::text AS total_debit,
+                COALESCE(SUM(CASE WHEN je.id IS NOT NULL THEN jl.credit_amount ELSE 0 END), 0)::text AS total_credit
+           FROM ${q("accounts")} a
+           LEFT JOIN ${q("journal_lines")} jl ON jl.account_id=a.id AND jl.company_id=a.company_id
+           LEFT JOIN ${q("journal_entries")} je ON ${joinFilters.join(" AND ")}
+          WHERE a.company_id=$1 AND a.fiscal_year_id=$2
+            AND (a.code LIKE '472%' OR a.code LIKE '477%')
+          GROUP BY a.id
+          ORDER BY a.code`,
+        params
+      );
+      if (filters.format === "csv") {
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'ledger.vat_summary_csv_exported','vat_summary',$4,$5,$6::jsonb)`,
+          [
+            selected.tenant_id,
+            selected.company_id,
+            req.accountingUser.id,
+            filters.fiscal_year_id,
+            req.id || null,
+            JSON.stringify({ fiscal_year_id: filters.fiscal_year_id, filters: compactFilters(filters), row_count: result.rows.length }),
+          ]
+        );
+      }
+      return result.rows;
+    });
+
+    const build = (row, sign) => {
+      const debit = decimalToUnits(row.total_debit);
+      const credit = decimalToUnits(row.total_credit);
+      const cuotaUnits = sign === "repercutido" ? credit - debit : debit - credit;
+      const rate = detectVatRate(row.code, row.name);
+      const baseUnits = estimateBaseUnits(cuotaUnits, rate);
+      return {
+        code: row.code,
+        name: row.name,
+        rate,
+        base: baseUnits === null ? null : unitsToDecimal(baseUnits),
+        base_estimated: baseUnits !== null,
+        cuota: unitsToDecimal(cuotaUnits),
+        _cuotaUnits: cuotaUnits,
+      };
+    };
+
+    const repercutidoRows = rows.filter(r => String(r.code).startsWith("477")).map(r => build(r, "repercutido"));
+    const soportadoRows = rows.filter(r => String(r.code).startsWith("472")).map(r => build(r, "soportado"));
+    const visible = list => list.filter(r => filters.include_empty || r._cuotaUnits !== 0n).map(({ _cuotaUnits, ...rest }) => rest);
+    const sumCuota = list => list.reduce((acc, r) => acc + r._cuotaUnits, 0n);
+
+    const devengadaUnits = sumCuota(repercutidoRows);
+    const deducibleUnits = sumCuota(soportadoRows);
+    const resultadoUnits = devengadaUnits - deducibleUnits;
+    const sentido = resultadoUnits > 0n ? "a_ingresar" : resultadoUnits < 0n ? "a_compensar" : "neutro";
+
+    const data = {
+      repercutido: { rows: visible(repercutidoRows), total_cuota: unitsToDecimal(devengadaUnits) },
+      soportado: { rows: visible(soportadoRows), total_cuota: unitsToDecimal(deducibleUnits) },
+      liquidacion: {
+        iva_devengado: unitsToDecimal(devengadaUnits),
+        iva_deducible: unitsToDecimal(deducibleUnits),
+        resultado: unitsToDecimal(resultadoUnits),
+        sentido,
+      },
+      modelo_303: {
+        casilla_27_cuota_devengada: unitsToDecimal(devengadaUnits),
+        casilla_45_cuota_deducible: unitsToDecimal(deducibleUnits),
+        casilla_71_resultado: unitsToDecimal(resultadoUnits),
+      },
+      note: "Liquidacion preliminar calculada desde cuentas 472/477 de asientos contabilizados. No sustituye el modelo 303 oficial de la AEAT ni la revision de un asesor.",
+    };
+
+    if (filters.format === "csv") {
+      const csvRows = [
+        ...data.repercutido.rows.map(r => ({ bloque: "IVA repercutido", code: r.code, name: r.name, rate: r.rate ?? "", base: r.base ?? "", cuota: r.cuota })),
+        { bloque: "Total IVA devengado", code: "", name: "", rate: "", base: "", cuota: data.liquidacion.iva_devengado },
+        ...data.soportado.rows.map(r => ({ bloque: "IVA soportado", code: r.code, name: r.name, rate: r.rate ?? "", base: r.base ?? "", cuota: r.cuota })),
+        { bloque: "Total IVA deducible", code: "", name: "", rate: "", base: "", cuota: data.liquidacion.iva_deducible },
+        { bloque: "Resultado liquidacion", code: "", name: "", rate: "", base: "", cuota: data.liquidacion.resultado },
+      ];
+      const csv = buildCsv([
+        { key: "bloque", label: "Bloque" },
+        { key: "code", label: "Cuenta" },
+        { key: "name", label: "Nombre" },
+        { key: "rate", label: "Tipo %" },
+        { key: "base", label: "Base estimada" },
+        { key: "cuota", label: "Cuota" },
+      ], csvRows);
+      return sendCsv(res, `liquidacion-iva-${filters.fiscal_year_id}.csv`, csv);
+    }
+
+    res.json({ data, filters });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

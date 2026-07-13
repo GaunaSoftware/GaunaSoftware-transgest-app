@@ -429,6 +429,23 @@ export function downloadProfitLossCsv(filters = {}) {
   return downloadFile(`/reports/profit-loss?${params.toString()}`);
 }
 
+export function getVatSummary(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/reports/vat-summary${suffix}`);
+}
+
+export function downloadVatSummaryCsv(filters = {}) {
+  const params = new URLSearchParams({ format: "csv" });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  return downloadFile(`/reports/vat-summary?${params.toString()}`);
+}
+
 export function getAuditLog(filters = {}) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {

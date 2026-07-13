@@ -582,7 +582,7 @@ async function main(options = {}) {
     empresa_id: empresaId,
     demo_mode: true,
     usuarios: DEMO_EMAILS,
-    password: DEMO_PASSWORD,
+    password_configurada: true,
     resumen: {
       clientes: clientes.length,
       choferes: choferes.length,

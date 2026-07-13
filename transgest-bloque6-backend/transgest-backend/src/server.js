@@ -1210,6 +1210,12 @@ async function applyMigrations() {
 
 
 // ── Auto-seed: carga datos demo si la BD está vacía ──
+function redactStartupOutput(value) {
+  return String(value || "")
+    .replace(/("(?:password|password_hash|token|secret)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
+    .replace(/((?:password|token|secret)\s*[=:]\s*)[^\s,;]+/gi, "$1[REDACTED]");
+}
+
 function runStartupScript(scriptName, label) {
   const { execFile } = require("child_process");
   const path = require("path");
@@ -1220,7 +1226,7 @@ function runStartupScript(scriptName, label) {
       if (stderr) logger.warn(String(stderr).slice(0, 800));
       return;
     }
-    logger.info(`${label} completado:\n${String(stdout || "").slice(0, 800)}`);
+    logger.info(`${label} completado:\n${redactStartupOutput(stdout).slice(0, 800)}`);
   });
 }
 

@@ -1037,7 +1037,9 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
           + '<label>Apellidos<input data-driver-field="apellidos" value="' + escapeHtml(pedido.conductor_efectivo_apellidos || '') + '" autocomplete="family-name"></label>'
           + '<label>DNI / NIE<input data-driver-field="dni" value="' + escapeHtml(pedido.conductor_efectivo_dni || '') + '" autocomplete="off"></label>'
           + '<label>Telefono<input data-driver-field="telefono" value="' + escapeHtml(pedido.conductor_efectivo_telefono || '') + '" inputmode="tel" autocomplete="tel"></label>'
-          + '</div><button type="button" class="btn btn-primary" data-action="save-driver" data-pedido-id="' + escapeHtml(tripId) + '">Guardar conductor</button>'
+          + '<label>Matricula tractora<input data-driver-field="matricula" value="' + escapeHtml(pedido.matricula_colaborador || '') + '" autocomplete="off"></label>'
+          + '<label>Matricula remolque<input data-driver-field="remolque" value="' + escapeHtml(pedido.remolque_matricula_colaborador || '') + '" autocomplete="off"></label>'
+          + '</div><button type="button" class="btn btn-primary" data-action="save-driver" data-pedido-id="' + escapeHtml(tripId) + '">Guardar datos del viaje</button>'
           + '</div>';
         box.innerHTML = '<div class="trip-badges" style="margin-bottom:12px"><span class="' + statusClass(workflow.status) + '">' + escapeHtml(String(workflow.status || "pendiente").replace("_"," ")) + '</span><span class="badge badge-neutral">' + escapeHtml(String(pedido.estado || "pendiente").replace("_"," ")) + '</span></div>'
           + driverForm
@@ -1095,7 +1097,10 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'guardar_conductor',
-            conductor: { nombre: read('nombre'), apellidos: read('apellidos'), dni: read('dni'), telefono: read('telefono') }
+            conductor: {
+              nombre: read('nombre'), apellidos: read('apellidos'), dni: read('dni'), telefono: read('telefono'),
+              matricula: read('matricula'), remolque: read('remolque')
+            }
           })
         });
         const data = await res.json().catch(() => ({}));
@@ -1304,6 +1309,8 @@ async function getLiquidacionPublicData(tokenValue) {
         conductor_efectivo_apellidos: row.conductor_efectivo_apellidos,
         conductor_efectivo_dni: row.conductor_efectivo_dni,
         conductor_efectivo_telefono: row.conductor_efectivo_telefono,
+        matricula_colaborador: row.matricula_colaborador,
+        remolque_matricula_colaborador: row.remolque_matricula_colaborador,
       }))
     : viajes.rows;
   return {
@@ -1436,6 +1443,7 @@ async function getPortalProveedorPedido(tokenValue, pedidoId) {
             p.peso_kg, p.bultos, p.km_ruta AS km, p.km_ruta, p.precio_colaborador,
             p.conductor_efectivo_nombre, p.conductor_efectivo_apellidos,
             p.conductor_efectivo_dni, p.conductor_efectivo_telefono,
+            p.matricula_colaborador, p.remolque_matricula_colaborador,
             c.nombre AS cliente_nombre,
             co.nombre AS colaborador_nombre
        FROM pedidos p
@@ -1590,6 +1598,8 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
     const apellidos = String(conductor.apellidos || "").trim().slice(0, 180);
     const dni = String(conductor.dni || "").trim().toUpperCase().slice(0, 40);
     const telefono = String(conductor.telefono || "").trim().slice(0, 40);
+    const matricula = String(conductor.matricula || "").trim().toUpperCase().slice(0, 60);
+    const remolque = String(conductor.remolque || "").trim().toUpperCase().slice(0, 60);
     if (!nombre || !apellidos || !dni) {
       throw Object.assign(new Error("Indica nombre, apellidos y DNI/NIE del conductor efectivo."), { status: 400 });
     }
@@ -1599,16 +1609,20 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
               conductor_efectivo_apellidos=$2,
               conductor_efectivo_dni=$3,
               conductor_efectivo_telefono=$4,
+              matricula_colaborador=$5,
+              remolque_matricula_colaborador=$6,
               updated_at=NOW()
-        WHERE id=$5 AND empresa_id=$6 AND colaborador_id=$7
+        WHERE id=$7 AND empresa_id=$8 AND colaborador_id=$9
         RETURNING *`,
-      [nombre, apellidos, dni, telefono || null, pedido.id, pedido.empresa_id, ctx?.token?.colaborador_id]
+      [nombre, apellidos, dni, telefono || null, matricula || null, remolque || null, pedido.id, pedido.empresa_id, ctx?.token?.colaborador_id]
     );
     if (!rows[0]) throw Object.assign(new Error("No se pudo guardar el conductor del viaje."), { status: 404 });
     await logPedidoEventoPortal(pedido.id, pedido.empresa_id, "colaborador_portal.conductor_actualizado", {
       colaborador_id: ctx?.token?.colaborador_id || null,
       conductor_nombre: `${nombre} ${apellidos}`.trim(),
       conductor_dni: dni,
+      matricula: matricula || null,
+      remolque: remolque || null,
     });
     const pasosGuardados = await getPortalProveedorChoferPasos(pedido.id, pedido.empresa_id);
     return {
@@ -2124,6 +2138,11 @@ router.get("/public/portal/:token/pedidos/:pedidoId/operativa", async (req, res)
       pedido: ctx.pedido,
       pasos,
       workflow: buildPortalProveedorOperativa(ctx.pedido, pasos),
+      acceso: ctx.token.pedido_id ? {
+        tipo: "conductor_invitado",
+        alcance: "pedido",
+        permisos: { operativa: true, dcd: true, albaranes: true, vacaciones: false, tacografo: false, flota: false },
+      } : { tipo: "portal_colaborador", alcance: "colaborador" },
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -2743,6 +2762,9 @@ router.post("/:id/liquidacion-token", GERENTE_O_TRAFICO, async (req,res) => {
       pedido_id: pedidoId,
       pedido_numero: pedidoScope?.numero || null,
       alcance: pedidoId ? "viaje" : "portal_colaborador",
+      permisos: pedidoId
+        ? { operativa: true, dcd: true, albaranes: true, vacaciones: false, tacografo: false, flota: false }
+        : null,
       url: `${publicBaseUrl(req)}/api/v1/colaboradores/public/liquidacion/${token}`,
       portal_url: `${publicBaseUrl(req)}/api/v1/colaboradores/public/portal/${token}`,
       operativa_url: `${publicBaseUrl(req)}/api/v1/colaboradores/public/portal/${token}/operativa`,

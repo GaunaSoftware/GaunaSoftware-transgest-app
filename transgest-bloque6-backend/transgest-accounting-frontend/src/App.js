@@ -32,6 +32,7 @@ import {
   downloadSepaCreditTransfer,
   getModel347,
   downloadModel347Csv,
+  downloadModel347File,
   getTaxModels,
   downloadTaxModelsCsv,
   downloadSepaDirectDebit,
@@ -2989,6 +2990,21 @@ export default function App() {
     }
   }
 
+  async function handleExportModel347File() {
+    if (!reportsFilters.fiscal_year_id) return;
+    setReportsExporting(true);
+    setReportsStatus(null);
+    try {
+      const result = await downloadModel347File(reportsFilters);
+      saveBlob(result.blob, result.filename || "347.txt");
+      setReportsStatus({ tone: "ok", text: "Fichero oficial del modelo 347 generado. Valídalo en la Sede de la AEAT antes de presentar." });
+    } catch (err) {
+      setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setReportsExporting(false);
+    }
+  }
+
   async function handleExportTaxModelsCsv() {
     if (!reportsFilters.fiscal_year_id) return;
     setReportsExporting(true);
@@ -4534,7 +4550,9 @@ export default function App() {
                     ? `${model347.ventas.count} tercero(s) en ventas/ingresos y ${model347.compras.count} en compras/gastos superan 3.005,06 EUR.`
                     : "Sin datos para el ejercicio."}{" "}
                   <button type="button" className="link-button" disabled={reportsExporting || !model347} onClick={handleExportModel347Csv}>Descargar Modelo 347 preliminar (CSV)</button>
-                  <div style={{ marginTop: 4 }}>Aproximacion desde la cartera de vencimientos; no sustituye el modelo 347 oficial de la AEAT.</div>
+                  {" · "}
+                  <button type="button" className="link-button" disabled={reportsExporting} onClick={handleExportModel347File}>Descargar fichero oficial AEAT (.txt)</button>
+                  <div style={{ marginTop: 4 }}>Aproximacion desde la cartera de vencimientos. El fichero oficial usa el diseno de registro de la AEAT (revisa el codigo de provincia de cada tercero y validalo en la Sede antes de presentar).</div>
                 </div>
                 <div className="scope-note" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
                   <div><strong>Modelo 111</strong><div>Retenciones: {formatMoney(taxModels?.modelo_111?.retenciones || 0)} EUR</div></div>

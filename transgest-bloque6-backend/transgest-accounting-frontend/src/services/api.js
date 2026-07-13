@@ -479,6 +479,15 @@ export function downloadModel347Csv(filters = {}) {
   return downloadFile(`/reports/model-347?${params.toString()}`);
 }
 
+export function downloadModel347File(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return downloadFile(`/reports/model-347/file${suffix}`);
+}
+
 export function getTaxModels(filters = {}) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {

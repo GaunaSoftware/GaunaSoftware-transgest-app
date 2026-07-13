@@ -4,6 +4,7 @@ const config = require("../services/config");
 const db = require("../services/db");
 const { authenticate, requirePermission } = require("../middleware/auth");
 const { buildCsv, buildFinancialStatements, normalizeFinancialStatementQuery, normalizeLedgerQuery, normalizeTrialBalanceQuery } = require("../domain/ledger");
+const { buildModel347File } = require("../domain/aeat347");
 
 const router = express.Router();
 
@@ -717,6 +718,80 @@ router.get("/reports/model-347", requirePermission("ledger.read"), async (req, r
     }
 
     res.json({ data, filters });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Modelo 347: fichero oficial AEAT (diseño de registro) ───────────────────
+router.get("/reports/model-347/file", requirePermission("ledger.read"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const filters = normalizeFinancialStatementQuery(req.query);
+
+    const built = await db.transaction(async client => {
+      const fy = await client.query(
+        `SELECT year_label, start_date, end_date FROM ${q("fiscal_years")} WHERE id=$1 AND company_id=$2 LIMIT 1`,
+        [filters.fiscal_year_id, selected.company_id]
+      );
+      if (!fy.rows.length) throw httpError("Ejercicio no encontrado para la empresa seleccionada", 404);
+      const ejercicio = String(fy.rows[0].year_label).replace(/[^0-9]/g, "").slice(0, 4) || String(new Date(fy.rows[0].start_date).getFullYear());
+      const start = filters.date_from || String(fy.rows[0].start_date).slice(0, 10);
+      const end = filters.date_to || String(fy.rows[0].end_date).slice(0, 10);
+
+      const company = await client.query(
+        `SELECT legal_name, tax_id FROM ${q("accounting_companies")} WHERE id=$1 LIMIT 1`,
+        [selected.company_id]
+      );
+      if (!company.rows[0]?.tax_id) throw httpError("La empresa declarante no tiene NIF configurado", 422);
+
+      const rows = await client.query(
+        `SELECT p.id AS party_id, p.legal_name, p.tax_id, m.direction,
+                EXTRACT(QUARTER FROM COALESCE(m.issue_date, m.due_date))::int AS quarter,
+                SUM(m.amount)::text AS total
+           FROM ${q("accounting_maturities")} m
+           JOIN ${q("accounting_parties")} p ON p.id=m.party_id
+          WHERE m.company_id=$1 AND m.status <> 'cancelled'
+            AND COALESCE(m.issue_date, m.due_date) BETWEEN $2 AND $3
+          GROUP BY p.id, p.legal_name, p.tax_id, m.direction, quarter`,
+        [selected.company_id, start, end]
+      );
+
+      const byKey = new Map();
+      for (const row of rows.rows) {
+        if (!row.tax_id) continue; // sin NIF no se puede declarar
+        const key = `${row.party_id}|${row.direction}`;
+        if (!byKey.has(key)) {
+          byKey.set(key, { nif: row.tax_id, nombre: row.legal_name, provincia: "", clave: row.direction === "receivable" ? "B" : "A", totalCents: 0, quartersCents: [0, 0, 0, 0] });
+        }
+        const entry = byKey.get(key);
+        const [w, f = ""] = String(row.total).split(".");
+        const cents = (Number(w || "0") * 100) + Number((f + "00").slice(0, 2));
+        const qi = Math.min(Math.max(Number(row.quarter) || 1, 1), 4) - 1;
+        entry.quartersCents[qi] += cents;
+        entry.totalCents += cents;
+      }
+
+      const file = buildModel347File({
+        ejercicio,
+        declarante: { nif: company.rows[0].tax_id, nombre: company.rows[0].legal_name, telefono: "", contacto: company.rows[0].legal_name },
+        records: [...byKey.values()],
+      });
+
+      await client.query(
+        `INSERT INTO ${q("audit_log")}
+           (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+         VALUES ($1,$2,'user',$3,'ledger.model_347_file_generated','model_347',$4,$5,$6::jsonb)`,
+        [selected.tenant_id, selected.company_id, req.accountingUser.id, filters.fiscal_year_id, req.id || null,
+         JSON.stringify({ ejercicio, num_declarados: file.numDeclarados, id_declaracion: file.idDeclaracion })]
+      );
+      return { ejercicio, ...file };
+    });
+
+    res.setHeader("Content-Type", "text/plain; charset=iso-8859-1");
+    res.setHeader("Content-Disposition", `attachment; filename="347_${built.ejercicio}.txt"`);
+    res.send(Buffer.from(built.content, "latin1"));
   } catch (error) {
     next(error);
   }

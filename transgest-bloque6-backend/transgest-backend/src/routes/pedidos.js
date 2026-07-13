@@ -585,12 +585,35 @@ async function ensureColaboradorWorkflowSchema() {
   await colaboradorWorkflowSchemaPromise;
 }
 
+async function optionalPedidoQuery(queryClient, sql, params, warning) {
+  if (queryClient === db) {
+    return queryClient.query(sql, params).catch(error => {
+      logger.warn(warning, error.message);
+      return { rows: [] };
+    });
+  }
+  const savepoint = "pedido_optional_query";
+  await queryClient.query(`SAVEPOINT ${savepoint}`);
+  try {
+    const result = await queryClient.query(sql, params);
+    await queryClient.query(`RELEASE SAVEPOINT ${savepoint}`);
+    return result;
+  } catch (error) {
+    await queryClient.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+    await queryClient.query(`RELEASE SAVEPOINT ${savepoint}`);
+    logger.warn(warning, error.message);
+    return { rows: [] };
+  }
+}
+
 async function logPedidoEvento(pedidoId, empresaId, tipo, detalle = {}, actorTipo = "sistema", actorId = null, queryClient = db) {
-  await queryClient.query(
+  await optionalPedidoQuery(
+    queryClient,
     `INSERT INTO pedido_eventos (pedido_id,empresa_id,tipo,actor_tipo,actor_id,detalle)
      VALUES ($1,$2,$3,$4,$5,$6)`,
-    [pedidoId, empresaId, tipo, actorTipo, actorId, JSON.stringify(detalle)]
-  ).catch(e => logger.warn("No se pudo registrar evento de pedido:", e.message));
+    [pedidoId, empresaId, tipo, actorTipo, actorId, JSON.stringify(detalle)],
+    "No se pudo registrar evento de pedido:"
+  );
 }
 
 function summarizePedidoChanges(before = {}, after = {}, fieldNames = []) {
@@ -4333,10 +4356,12 @@ async function inferKmRutaPedido(queryClient, empresaId, payload = {}) {
   if (Number.isFinite(current) && current > 0) return current;
   const rutaId = normalizePedidoUuid(payload.ruta_id);
   if (rutaId) {
-    const { rows } = await queryClient.query(
+    const { rows } = await optionalPedidoQuery(
+      queryClient,
       "SELECT km FROM rutas WHERE id=$1 AND activa=true AND (empresa_id=$2 OR empresa_id IS NULL) LIMIT 1",
-      [rutaId, empresaId]
-    ).catch(() => ({ rows: [] }));
+      [rutaId, empresaId],
+      "No se pudieron inferir los kilometros desde la ruta seleccionada:"
+    );
     const km = Number(rows[0]?.km || 0);
     if (Number.isFinite(km) && km > 0) return km;
   }
@@ -4344,7 +4369,8 @@ async function inferKmRutaPedido(queryClient, empresaId, payload = {}) {
   const destino = String(payload.destino || "").trim();
   const clienteId = normalizePedidoUuid(payload.cliente_id);
   if (!origen || !destino || !clienteId) return null;
-  const { rows } = await queryClient.query(
+  const { rows } = await optionalPedidoQuery(
+    queryClient,
     `SELECT r.km
        FROM rutas r
        LEFT JOIN ruta_precios_cliente rpc ON rpc.ruta_id=r.id
@@ -4353,10 +4379,11 @@ async function inferKmRutaPedido(queryClient, empresaId, payload = {}) {
         AND (r.cliente_id=$2 OR rpc.cliente_id=$2)
         AND LOWER(TRIM(r.origen))=LOWER(TRIM($3))
         AND LOWER(TRIM(r.destino))=LOWER(TRIM($4))
-      ORDER BY CASE WHEN r.cliente_id=$2 THEN 0 ELSE 1 END, r.updated_at DESC
+      ORDER BY CASE WHEN r.cliente_id=$2 THEN 0 ELSE 1 END, r.created_at DESC
       LIMIT 1`,
-    [empresaId, clienteId, origen, destino]
-  ).catch(() => ({ rows: [] }));
+    [empresaId, clienteId, origen, destino],
+    "No se pudieron inferir los kilometros desde las rutas del cliente:"
+  );
   const km = Number(rows[0]?.km || 0);
   return Number.isFinite(km) && km > 0 ? km : null;
 }

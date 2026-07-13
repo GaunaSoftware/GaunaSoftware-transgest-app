@@ -4767,21 +4767,31 @@ async function confirmarPedidoPorAsignacionSiProcede(pedido, empresaId, actor = 
 
 async function updateExistingPedidoFields(client, fields, pedidoId, empresaId) {
   const pending = fields.map(([field, value]) => [field, normalizePedidoValue(field, value)]);
+  const transactionalClient = client !== db;
+  let attempt = 0;
   while (pending.length) {
     const setClauses = pending.map(([k], i) => `${k}=$${i + 1}`).join(", ");
     const values = pending.map(([, v]) => v);
     values.push(pedidoId, empresaId);
+    const savepoint = `pedido_optional_fields_${attempt++}`;
+    if (transactionalClient) await client.query(`SAVEPOINT ${savepoint}`);
     try {
       const { rows } = await client.query(
         `UPDATE pedidos SET ${setClauses} WHERE id=$${values.length - 1} AND empresa_id=$${values.length} RETURNING *`,
         values
       );
+      if (transactionalClient) await client.query(`RELEASE SAVEPOINT ${savepoint}`);
       return rows[0] || null;
     } catch (error) {
+      if (transactionalClient) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+      }
       const missingColumn = getMissingColumn(error);
       if (!missingColumn) throw error;
       const next = pending.filter(([field]) => field !== missingColumn);
       if (next.length === pending.length) throw error;
+      logger.warn(`Pedidos: columna opcional ausente en el esquema; se omite ${missingColumn}.`);
       pending.length = 0;
       pending.push(...next);
     }
@@ -7626,40 +7636,33 @@ router.post("/", GERENTE_O_TRAFICO,
       let remolque_mat = null;
 
       if (vehiculo_id) {
+        await client.query("SAVEPOINT pedido_vehicle_lookup");
         try {
-          // Try to get remolque_id (may not exist if migration not run)
           const { rows: veh } = await client.query(
-            "SELECT matricula, clase FROM vehiculos WHERE id=$1 AND empresa_id=$2",
+            "SELECT matricula, clase, remolque_id FROM vehiculos WHERE id=$1 AND empresa_id=$2",
             [vehiculo_id, empresaId]
           );
           const tractora = veh[0];
+          const currentRemolqueId = tractora?.remolque_id;
 
-          // Try to get remolque_id separately (column may not exist)
-          try {
-            const { rows: remRows } = await client.query(
-              "SELECT remolque_id FROM vehiculos WHERE id=$1 AND empresa_id=$2", [vehiculo_id, empresaId]
+          if (remolqueSolicitado && remolqueSolicitado !== currentRemolqueId) {
+            await client.query(
+              "UPDATE vehiculos SET remolque_id=$1 WHERE id=$2 AND empresa_id=$3",
+              [remolqueSolicitado, vehiculo_id, empresaId]
             );
-            const currentRemolqueId = remRows[0]?.remolque_id;
-
-            if (remolqueSolicitado && remolqueSolicitado !== currentRemolqueId) {
-              await client.query(
-                "UPDATE vehiculos SET remolque_id=$1 WHERE id=$2 AND empresa_id=$3",
-                [remolqueSolicitado, vehiculo_id, empresaId]
-              );
-              const { rows: rm } = await client.query("SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2", [remolqueSolicitado, empresaId]);
-              remolque_mat = rm[0]?.matricula;
-              remolque_id_efectivo = remolqueSolicitado;
-            } else if (!remolque_id_manual && currentRemolqueId) {
-              remolque_id_efectivo = currentRemolqueId;
-              const { rows: rem } = await client.query("SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2", [currentRemolqueId, empresaId]);
-              remolque_mat = rem[0]?.matricula;
-            }
-          } catch(remErr) {
-            // remolque_id column does not exist yet - skip silently
-            if (remolqueSolicitado) remolque_id_efectivo = remolqueSolicitado;
+            const { rows: rm } = await client.query("SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2", [remolqueSolicitado, empresaId]);
+            remolque_mat = rm[0]?.matricula;
+            remolque_id_efectivo = remolqueSolicitado;
+          } else if (!remolque_id_manual && currentRemolqueId) {
+            remolque_id_efectivo = currentRemolqueId;
+            const { rows: rem } = await client.query("SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2", [currentRemolqueId, empresaId]);
+            remolque_mat = rem[0]?.matricula;
           }
+          await client.query("RELEASE SAVEPOINT pedido_vehicle_lookup");
         } catch(vehErr) {
-          // ignore vehicle lookup errors
+          await client.query("ROLLBACK TO SAVEPOINT pedido_vehicle_lookup");
+          await client.query("RELEASE SAVEPOINT pedido_vehicle_lookup");
+          logger.warn(`Pedidos: no se pudo resolver el conjunto asignado; se conserva la seleccion recibida. ${vehErr.message}`);
         }
       }
 
@@ -7667,6 +7670,7 @@ router.post("/", GERENTE_O_TRAFICO,
 
       // Check if remolque columns exist (migration may not have run)
       let pedido;
+      await client.query("SAVEPOINT pedido_insert_with_trailer");
       try {
         const r = await client.query(`
           INSERT INTO pedidos (numero, cliente_id, ruta_id, vehiculo_id, chofer_id,
@@ -7680,9 +7684,13 @@ router.post("/", GERENTE_O_TRAFICO,
            remolque_id_efectivo, remolque_mat]
         );
         pedido = r.rows[0];
+        await client.query("RELEASE SAVEPOINT pedido_insert_with_trailer");
       } catch(colErr) {
+        await client.query("ROLLBACK TO SAVEPOINT pedido_insert_with_trailer");
+        await client.query("RELEASE SAVEPOINT pedido_insert_with_trailer");
         // Fallback: insert without remolque columns if migration not run
         if (colErr.code === '42703') {
+          logger.warn("Pedidos: esquema sin columnas de remolque; se usa alta compatible.");
           const r = await client.query(`
             INSERT INTO pedidos (numero, cliente_id, ruta_id, vehiculo_id, chofer_id,
               origen, destino, fecha_pedido, fecha_carga, hora_carga, fecha_entrega,

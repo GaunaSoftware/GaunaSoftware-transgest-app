@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { borrarAgendaEvento, crearAgendaEvento, editarAgendaEvento, getAgendaEventos, getAgendaUsuarios, getAvisosOperativosIgnorados } from "../services/api";
+import { borrarAgendaEvento, completarAgendaEvento, crearAgendaEvento, editarAgendaEvento, getAgendaEventos, getAgendaUsuarios, getAvisosOperativosIgnorados, posponerAgendaEvento } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -26,6 +26,29 @@ const STATE_LABEL = {
   hecha: "Hecha",
   cancelada: "Cancelada",
 };
+const SNOOZE_OPTIONS = [
+  ["15", "15 min"],
+  ["60", "1 hora"],
+  ["180", "3 horas"],
+  ["tomorrow", "Ma\u00f1ana a las 09:00"],
+];
+
+function snoozePayload(value) {
+  if (value === "tomorrow") {
+    const until = new Date();
+    until.setDate(until.getDate() + 1);
+    until.setHours(9, 0, 0, 0);
+    return { hasta: until.toISOString() };
+  }
+  return { minutos: Number(value) };
+}
+
+function postponedUntil(evento) {
+  const value = evento?.metadata?.recordatorio_pospuesto_hasta;
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) || date.getTime() <= Date.now() ? null : date;
+}
 
 function monthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
@@ -429,6 +452,34 @@ export default function Agenda() {
     await cargar();
   }
 
+  async function completarEvento(evento) {
+    await completarAgendaEvento(evento.id);
+    notify("Tarea marcada como completada.", "success");
+    await cargar();
+  }
+
+  async function cambiarEstadoEvento(evento, nextState) {
+    const metadata = { ...(evento.metadata || {}) };
+    delete metadata.recordatorio_pospuesto_hasta;
+    delete metadata.recordatorio_pospuesto_at;
+    delete metadata.recordatorio_pospuesto_por;
+    if (nextState === "pendiente") {
+      delete metadata.completada_at;
+      delete metadata.completada_por;
+    }
+    await editarAgendaEvento(evento.id, { estado:nextState, metadata });
+    notify(nextState === "en_progreso" ? "Tarea iniciada." : "Tarea reabierta.", "success");
+    await cargar();
+  }
+
+  async function posponerEvento(evento, value) {
+    if (!value) return;
+    const actualizado = await posponerAgendaEvento(evento.id, snoozePayload(value));
+    const until = postponedUntil(actualizado);
+    notify(until ? `Recordatorio pospuesto hasta ${until.toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}.` : "Recordatorio pospuesto.", "success");
+    await cargar();
+  }
+
   return (
     <div className="tg-agenda-page tg-responsive-page" style={S.page}>
       <div className="tg-agenda-title" style={S.title}>Agenda y tareas</div>
@@ -551,13 +602,27 @@ export default function Agenda() {
                       </span>
                     </div>
                     {ev.descripcion && <div style={{ fontSize:12, color:"var(--text3)", marginTop:8, lineHeight:1.45 }}>{ev.descripcion}</div>}
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, marginTop:10 }}>
+                    {postponedUntil(ev) && (
+                      <div style={{ marginTop:8, fontSize:11, fontWeight:800, color:"#b45309", background:"rgba(245,158,11,.10)", border:"1px solid rgba(245,158,11,.24)", borderRadius:7, padding:"6px 8px" }}>
+                        Recordatorio pospuesto hasta {postponedUntil(ev).toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}
+                      </div>
+                    )}
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", gap:10, marginTop:10, flexWrap:"wrap" }}>
                       <div style={{ fontSize:11, color:"var(--text5)" }}>
                         {ev.asignado_a_nombre ? `Asignado a ${ev.asignado_a_nombre}` : "Sin asignación específica"}
                         {ev.visibilidad === "equipo" ? " · equipo" : " · personal"}
                       </div>
                       {canEdit && (
-                        <div style={{ display:"flex", gap:6 }}>
+                        <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+                          {ev.estado === "pendiente" && <button style={{ ...S.btn, padding:"5px 9px", background:"rgba(59,130,246,.10)", color:"#3b82f6", border:"1px solid rgba(59,130,246,.25)" }} onClick={()=>cambiarEstadoEvento(ev, "en_progreso")}>Iniciar</button>}
+                          {["pendiente", "en_progreso"].includes(ev.estado) && (
+                            <select aria-label={`Posponer ${ev.titulo}`} value="" onChange={e=>posponerEvento(ev, e.target.value)} style={{ ...S.input, width:138, padding:"5px 8px", fontSize:11, fontWeight:800 }}>
+                              <option value="">Posponer...</option>
+                              {SNOOZE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                            </select>
+                          )}
+                          {["pendiente", "en_progreso"].includes(ev.estado) && <button style={{ ...S.btn, padding:"5px 9px", background:"rgba(16,185,129,.12)", color:"#059669", border:"1px solid rgba(16,185,129,.28)" }} onClick={()=>completarEvento(ev)}>Completar</button>}
+                          {! ["pendiente", "en_progreso"].includes(ev.estado) && <button style={{ ...S.btn, padding:"5px 9px", background:"rgba(59,130,246,.10)", color:"#3b82f6", border:"1px solid rgba(59,130,246,.25)" }} onClick={()=>cambiarEstadoEvento(ev, "pendiente")}>Reabrir</button>}
                           <button style={{ ...S.btn, padding:"5px 9px", background:"var(--bg4)", color:"var(--text3)", border:"1px solid var(--border2)" }} onClick={()=>setModal(ev)}>Editar</button>
                           <button style={{ ...S.btn, padding:"5px 9px", background:"rgba(239,68,68,.12)", color:"#ef4444", border:"1px solid rgba(239,68,68,.25)" }} onClick={()=>eliminarEvento(ev.id)}>Eliminar</button>
                         </div>

@@ -222,6 +222,61 @@ router.patch("/:id", PUEDE_EDITAR, async (req, res) => {
   res.json(rows[0]);
 });
 
+router.post("/:id/posponer", PUEDE_EDITAR, async (req, res) => {
+  if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  await ensureOwnerOrManager(req, req.params.id);
+
+  const minutos = Number(req.body?.minutos);
+  const hastaSolicitado = cleanText(req.body?.hasta);
+  let hasta = hastaSolicitado ? new Date(hastaSolicitado) : null;
+  if (!hastaSolicitado) {
+    if (!Number.isFinite(minutos) || minutos < 5 || minutos > 10080) {
+      return res.status(400).json({ error: "El aplazamiento debe estar entre 5 minutos y 7 dias" });
+    }
+    hasta = new Date(Date.now() + minutos * 60 * 1000);
+  }
+  if (!hasta || Number.isNaN(hasta.getTime()) || hasta.getTime() <= Date.now()) {
+    return res.status(400).json({ error: "Indica una fecha futura para posponer el recordatorio" });
+  }
+
+  const reminderMeta = {
+    recordatorio_pospuesto_hasta: hasta.toISOString(),
+    recordatorio_pospuesto_at: new Date().toISOString(),
+    recordatorio_pospuesto_por: req.user.id,
+  };
+  const { rows } = await db.query(
+    `UPDATE agenda_eventos
+        SET metadata=COALESCE(metadata,'{}'::jsonb) || $1::jsonb,
+            updated_at=NOW()
+      WHERE id=$2 AND empresa_id=$3
+        AND estado IN ('pendiente','en_progreso')
+      RETURNING *`,
+    [reminderMeta, req.params.id, empresaId(req)]
+  );
+  if (!rows[0]) return res.status(409).json({ error: "Solo se pueden posponer tareas pendientes o en progreso" });
+  res.json(rows[0]);
+});
+
+router.post("/:id/completar", PUEDE_EDITAR, async (req, res) => {
+  if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
+  await ensureOwnerOrManager(req, req.params.id);
+
+  const completionMeta = {
+    completada_at: new Date().toISOString(),
+    completada_por: req.user.id,
+  };
+  const { rows } = await db.query(
+    `UPDATE agenda_eventos
+        SET estado='hecha',
+            metadata=(COALESCE(metadata,'{}'::jsonb) - 'recordatorio_pospuesto_hasta') || $1::jsonb,
+            updated_at=NOW()
+      WHERE id=$2 AND empresa_id=$3
+      RETURNING *`,
+    [completionMeta, req.params.id, empresaId(req)]
+  );
+  res.json(rows[0]);
+});
+
 router.delete("/:id", PUEDE_EDITAR, async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   await ensureOwnerOrManager(req, req.params.id);

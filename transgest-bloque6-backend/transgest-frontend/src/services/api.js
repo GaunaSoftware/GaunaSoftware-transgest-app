@@ -710,6 +710,8 @@ export const getAgendaUsuarios = () => apiFetch("/agenda/usuarios", { silentSucc
 export const getAgendaEventos = (params={}) => apiFetch(`/agenda?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
 export const crearAgendaEvento = (data) => apiFetch("/agenda", { method:"POST", body:data });
 export const editarAgendaEvento = (id, data) => apiFetch(`/agenda/${id}`, { method:"PATCH", body:data });
+export const posponerAgendaEvento = (id, data) => apiFetch(`/agenda/${id}/posponer`, { method:"POST", body:data });
+export const completarAgendaEvento = (id) => apiFetch(`/agenda/${id}/completar`, { method:"POST", body:{} });
 export const borrarAgendaEvento = (id) => apiFetch(`/agenda/${id}`, { method:"DELETE" });
 export const getPortalClienteResumen = () => apiFetch("/portal-cliente/resumen", { silentError:true });
 export const getPortalClientePedidos = () => apiFetch("/portal-cliente/pedidos", { silentError:true });

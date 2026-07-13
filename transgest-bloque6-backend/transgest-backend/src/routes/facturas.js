@@ -3,6 +3,7 @@ const { body, param, query, validationResult } = require("express-validator");
 const db      = require("../services/db");
 const logger  = require("../services/logger");
 const { authenticate, GERENTE_O_CONTABLE, SOLO_GERENTE, PUEDE_CAMBIAR_ESTADO_FACTURA } = require("../middleware/auth");
+const { pushFacturaToAccounting } = require("../services/accountingSync");
 const { enviarEmail } = require("../services/email");
 const { ensureFacturaFiscalRecord, getEmpresaFiscalConfig, buildFiscalStatus, sanitizeFiscalConfigForClient, buildFiscalXml } = require("../services/fiscal");
 const { processPendingFiscalQueue } = require("../services/fiscalProcessor");
@@ -1036,6 +1037,10 @@ router.post("/", GERENTE_O_CONTABLE,
 
       res.status(201).json(fac);
       logger.info(`Factura creada: ${numero} por ${req.user.email}`);
+      // Sincroniza con contabilidad (libro de IVA por factura), best-effort.
+      if ((fac.estado || "").toLowerCase() !== "borrador") {
+        pushFacturaToAccounting({ empresaId, factura: fac, clienteId: cliente_id }).catch(() => {});
+      }
     });
   }
 );
@@ -1099,6 +1104,9 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
     });
 
     logger.info(`Estado factura ${factura.numero}: ${estadoAntes} → ${estado} por ${req.user.email}`);
+    if ((estado || "").toLowerCase() !== "borrador") {
+      pushFacturaToAccounting({ empresaId, factura, clienteId: factura.cliente_id }).catch(() => {});
+    }
     res.json({
       ok: true,
       estado_anterior: estadoAntes,

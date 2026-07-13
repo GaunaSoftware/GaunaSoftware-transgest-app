@@ -723,6 +723,98 @@ router.get("/reports/model-347", requirePermission("ledger.read"), async (req, r
   }
 });
 
+// ── Libro registro de IVA por factura (desde la facturacion del TMS) ────────
+// Lee accounting_vat_entries (base, tipo, cuota y tercero por factura),
+// alimentado por /invoices/ingest. Es el libro de IVA "real" (no derivado de
+// saldos de cuentas). Si no hay facturas ingeridas, devuelve lista vacia.
+router.get("/reports/vat-ledger", requirePermission("ledger.read"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const filters = normalizeFinancialStatementQuery(req.query);
+    const rawType = String(req.query.type || "all").trim().toLowerCase();
+    const type = ["repercutido", "soportado", "all"].includes(rawType) ? rawType : "all";
+
+    const result = await db.transaction(async client => {
+      const fy = await client.query(
+        `SELECT start_date, end_date FROM ${q("fiscal_years")} WHERE id=$1 AND company_id=$2 LIMIT 1`,
+        [filters.fiscal_year_id, selected.company_id]
+      );
+      if (!fy.rows.length) throw httpError("Ejercicio no encontrado para la empresa seleccionada", 404);
+      const start = filters.date_from || String(fy.rows[0].start_date).slice(0, 10);
+      const end = filters.date_to || String(fy.rows[0].end_date).slice(0, 10);
+
+      const params = [selected.company_id, start, end];
+      let typeFilter = "";
+      if (type !== "all") { params.push(type); typeFilter = `AND direction=$${params.length}`; }
+      const rows = await client.query(
+        `SELECT entry_date, direction, party_tax_id, party_name, invoice_number,
+                base::text, iva_rate::text, iva_amount::text, irpf_amount::text, total::text
+           FROM ${q("accounting_vat_entries")}
+          WHERE company_id=$1 AND entry_date BETWEEN $2 AND $3 ${typeFilter}
+          ORDER BY entry_date ASC, invoice_number ASC
+          LIMIT 5000`,
+        params
+      );
+      if (filters.format === "csv") {
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'ledger.vat_ledger_csv_exported','vat_ledger',$4,$5,$6::jsonb)`,
+          [selected.tenant_id, selected.company_id, req.accountingUser.id, filters.fiscal_year_id, req.id || null,
+           JSON.stringify({ start, end, type, row_count: rows.rows.length })]
+        );
+      }
+      return rows.rows;
+    });
+
+    let baseDevengada = 0n, ivaDevengada = 0n, baseDeducible = 0n, ivaDeducible = 0n;
+    const mapped = result.map(row => {
+      const baseUnits = decimalToUnits(row.base);
+      const ivaUnits = decimalToUnits(row.iva_amount);
+      if (row.direction === "repercutido") { baseDevengada += baseUnits; ivaDevengada += ivaUnits; }
+      else { baseDeducible += baseUnits; ivaDeducible += ivaUnits; }
+      return {
+        entry_date: row.entry_date,
+        tipo: row.direction,
+        party_tax_id: row.party_tax_id || "",
+        party_name: row.party_name || "",
+        invoice_number: row.invoice_number || "",
+        base: row.base,
+        iva_rate: row.iva_rate,
+        iva_amount: row.iva_amount,
+        total: row.total,
+      };
+    });
+
+    const summary = {
+      repercutido: { base: unitsToDecimal(baseDevengada), cuota: unitsToDecimal(ivaDevengada) },
+      soportado: { base: unitsToDecimal(baseDeducible), cuota: unitsToDecimal(ivaDeducible) },
+      resultado: unitsToDecimal(ivaDevengada - ivaDeducible),
+      row_count: mapped.length,
+    };
+
+    if (filters.format === "csv") {
+      const csv = buildCsv([
+        { key: "entry_date", label: "Fecha" },
+        { key: "tipo", label: "Tipo" },
+        { key: "party_tax_id", label: "NIF tercero" },
+        { key: "party_name", label: "Tercero" },
+        { key: "invoice_number", label: "Factura" },
+        { key: "base", label: "Base" },
+        { key: "iva_rate", label: "Tipo IVA %" },
+        { key: "iva_amount", label: "Cuota IVA" },
+        { key: "total", label: "Total" },
+      ], mapped);
+      return sendCsv(res, `libro-iva-facturas-${filters.fiscal_year_id}.csv`, csv);
+    }
+
+    res.json({ data: mapped, summary, filters: { ...filters, type } });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ── Modelo 347: fichero oficial AEAT (diseño de registro) ───────────────────
 router.get("/reports/model-347/file", requirePermission("ledger.read"), async (req, res, next) => {
   try {

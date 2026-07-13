@@ -454,6 +454,23 @@ export function downloadVatBookCsv(filters = {}) {
   return downloadFile(`/reports/vat-book?${params.toString()}`);
 }
 
+export function getVatLedger(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/reports/vat-ledger${suffix}`);
+}
+
+export function downloadVatLedgerCsv(filters = {}) {
+  const params = new URLSearchParams({ format: "csv" });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  return downloadFile(`/reports/vat-ledger?${params.toString()}`);
+}
+
 export function downloadSepaCreditTransfer(bankAccountId, filters = {}) {
   const params = new URLSearchParams({ bank_account_id: bankAccountId });
   Object.entries(filters).forEach(([key, value]) => {

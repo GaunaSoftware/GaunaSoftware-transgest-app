@@ -25,6 +25,7 @@ const outboxRoutes = require("./routes/outbox");
 const partiesRoutes = require("./routes/parties");
 const periodsRoutes = require("./routes/periods");
 const sepaRoutes = require("./routes/sepa");
+const invoicesRoutes = require("./routes/invoices");
 
 function createApp() {
   const app = express();
@@ -77,6 +78,7 @@ function createApp() {
   app.use("/api/v1", outboxRoutes);
   app.use("/api/v1", periodsRoutes);
   app.use("/api/v1", sepaRoutes);
+  app.use("/api/v1", invoicesRoutes);
 
   app.use((req, res) => {
     res.status(404).json({ error: `Ruta no encontrada: ${req.method} ${req.path}` });

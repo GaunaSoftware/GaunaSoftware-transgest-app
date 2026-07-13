@@ -29,6 +29,8 @@ import {
   getVatSummary,
   downloadVatSummaryCsv,
   downloadVatBookCsv,
+  getVatLedger,
+  downloadVatLedgerCsv,
   downloadSepaCreditTransfer,
   getModel347,
   downloadModel347Csv,
@@ -810,6 +812,7 @@ export default function App() {
   const [vatSummary, setVatSummary] = useState(null);
   const [model347, setModel347] = useState(null);
   const [taxModels, setTaxModels] = useState(null);
+  const [vatLedger, setVatLedger] = useState(null);
   const [chartTemplates, setChartTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templateStatus, setTemplateStatus] = useState(null);
@@ -1334,6 +1337,7 @@ export default function App() {
       setVatSummary(vatResult.data || null);
       setModel347(model347Result.data || null);
       setTaxModels(taxModelsResult.data || null);
+      getVatLedger(nextFilters).then(r => setVatLedger(r.summary || null)).catch(() => setVatLedger(null));
       setReportsFilters(prev => ({ ...prev, ...nextFilters }));
     } catch (err) {
       setBalanceSheet(null);
@@ -1341,6 +1345,7 @@ export default function App() {
       setVatSummary(null);
       setModel347(null);
       setTaxModels(null);
+      setVatLedger(null);
       setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
     } finally {
       setReportsLoading(false);
@@ -2992,6 +2997,21 @@ export default function App() {
     }
   }
 
+  async function handleExportVatLedgerCsv() {
+    if (!reportsFilters.fiscal_year_id) return;
+    setReportsExporting(true);
+    setReportsStatus(null);
+    try {
+      const result = await downloadVatLedgerCsv(reportsFilters);
+      saveBlob(result.blob, result.filename || "libro-iva-facturas.csv");
+      setReportsStatus({ tone: "ok", text: "Libro de IVA por factura generado y auditado." });
+    } catch (err) {
+      setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setReportsExporting(false);
+    }
+  }
+
   async function handleExportModel347Csv() {
     if (!reportsFilters.fiscal_year_id) return;
     setReportsExporting(true);
@@ -4562,6 +4582,12 @@ export default function App() {
                 <div className="scope-note">
                   Liquidacion de IVA preliminar calculada desde las cuentas 472 (soportado) y 477 (repercutido). No sustituye el modelo 303 oficial de la AEAT.{" "}
                   <button type="button" className="link-button" disabled={reportsExporting} onClick={handleExportVatBookCsv}>Descargar Libro registro de IVA (CSV)</button>
+                  {vatLedger && vatLedger.row_count > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      <strong>Libro de IVA por factura:</strong> {vatLedger.row_count} factura(s) sincronizadas desde el TMS (base repercutida {formatMoney(vatLedger.repercutido?.base || 0)} EUR).{" "}
+                      <button type="button" className="link-button" disabled={reportsExporting} onClick={handleExportVatLedgerCsv}>Descargar libro de IVA por factura (CSV)</button>
+                    </div>
+                  )}
                 </div>
                 <div className="scope-note">
                   <strong>Modelo 347 preliminar{model347?.year_label ? ` (${model347.year_label})` : ""}:</strong>{" "}

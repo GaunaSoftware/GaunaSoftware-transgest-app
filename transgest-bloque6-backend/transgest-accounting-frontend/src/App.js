@@ -97,6 +97,20 @@ const TRANSGEST_FRONTEND_URL = process.env.REACT_APP_TRANSGEST_FRONTEND_URL || "
 // tipo de IVA, generan las lineas cuadradas usando codigos del PGC. El usuario
 // revisa el borrador antes de contabilizar. Las cuentas se resuelven por
 // prefijo de codigo contra el plan contable del ejercicio.
+// Códigos de provincia AEAT (modelo 347).
+const PROVINCIAS_AEAT = [
+  ["01", "Araba/Álava"], ["02", "Albacete"], ["03", "Alicante/Alacant"], ["04", "Almería"], ["05", "Ávila"],
+  ["06", "Badajoz"], ["07", "Illes Balears"], ["08", "Barcelona"], ["09", "Burgos"], ["10", "Cáceres"],
+  ["11", "Cádiz"], ["12", "Castellón/Castelló"], ["13", "Ciudad Real"], ["14", "Córdoba"], ["15", "Coruña, A"],
+  ["16", "Cuenca"], ["17", "Girona"], ["18", "Granada"], ["19", "Guadalajara"], ["20", "Gipuzkoa"],
+  ["21", "Huelva"], ["22", "Huesca"], ["23", "Jaén"], ["24", "León"], ["25", "Lleida"], ["26", "Rioja, La"],
+  ["27", "Lugo"], ["28", "Madrid"], ["29", "Málaga"], ["30", "Murcia"], ["31", "Navarra"], ["32", "Ourense"],
+  ["33", "Asturias"], ["34", "Palencia"], ["35", "Palmas, Las"], ["36", "Pontevedra"], ["37", "Salamanca"],
+  ["38", "S.C. Tenerife"], ["39", "Cantabria"], ["40", "Segovia"], ["41", "Sevilla"], ["42", "Soria"],
+  ["43", "Tarragona"], ["44", "Teruel"], ["45", "Toledo"], ["46", "Valencia/València"], ["47", "Valladolid"],
+  ["48", "Bizkaia"], ["49", "Zamora"], ["50", "Zaragoza"], ["51", "Ceuta"], ["52", "Melilla"],
+];
+
 const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
 const JOURNAL_TEMPLATES = [
   {
@@ -654,6 +668,7 @@ export default function App() {
     swift_bic: "",
     mandate_ref: "",
     mandate_date: "",
+    province_code: "",
   });
   const [partyEditAction, setPartyEditAction] = useState(null);
   const [partyStatusAction, setPartyStatusAction] = useState(null);
@@ -2117,7 +2132,7 @@ export default function App() {
         default_account_id: partyForm.default_account_id || null,
       });
       setPartyStatus({ tone: "ok", text: `Tercero ${result.party.legal_name} creado y auditado.` });
-      setPartyForm(prev => ({ ...prev, legal_name: "", tax_id: "", email: "", phone: "", notes: "", iban: "", swift_bic: "", mandate_ref: "", mandate_date: "" }));
+      setPartyForm(prev => ({ ...prev, legal_name: "", tax_id: "", email: "", phone: "", notes: "", iban: "", swift_bic: "", mandate_ref: "", mandate_date: "", province_code: "" }));
       await refreshParties();
     } catch (err) {
       setPartyStatus({ tone: err.status === 409 ? "warning" : "danger", text: err.message });
@@ -2140,6 +2155,7 @@ export default function App() {
       swift_bic: party.swift_bic || "",
       mandate_ref: party.mandate_ref || "",
       mandate_date: party.mandate_date ? String(party.mandate_date).slice(0, 10) : "",
+      province_code: party.province_code || "",
     });
   }
 
@@ -2160,6 +2176,7 @@ export default function App() {
         swift_bic: partyEditAction.swift_bic,
         mandate_ref: partyEditAction.mandate_ref,
         mandate_date: partyEditAction.mandate_date,
+        province_code: partyEditAction.province_code,
       });
       setPartyStatus({ tone: "ok", text: `Tercero ${result.party.legal_name} actualizado y auditado.` });
       setPartyEditAction(null);
@@ -3484,6 +3501,7 @@ export default function App() {
                     <label><span>BIC/SWIFT</span><input maxLength={20} value={partyForm.swift_bic} onChange={e => setPartyForm(prev => ({ ...prev, swift_bic: e.target.value }))} placeholder="Opcional" /></label>
                     <label><span>Ref. mandato SEPA</span><input maxLength={35} value={partyForm.mandate_ref} onChange={e => setPartyForm(prev => ({ ...prev, mandate_ref: e.target.value }))} placeholder="Para adeudos (opcional)" /></label>
                     <label><span>Fecha firma mandato</span><input type="date" value={partyForm.mandate_date} onChange={e => setPartyForm(prev => ({ ...prev, mandate_date: e.target.value }))} /></label>
+                    <label><span>Provincia (modelo 347)</span><select value={partyForm.province_code} onChange={e => setPartyForm(prev => ({ ...prev, province_code: e.target.value }))}><option value="">Sin especificar</option>{PROVINCIAS_AEAT.map(([code, name]) => <option key={code} value={code}>{code} - {name}</option>)}</select></label>
                     <button type="submit">Crear tercero</button>
                   </form>
                 )}
@@ -3522,6 +3540,7 @@ export default function App() {
                     <label><span>BIC/SWIFT</span><input maxLength={20} value={partyEditAction.swift_bic} onChange={e => setPartyEditAction(prev => ({ ...prev, swift_bic: e.target.value }))} placeholder="Opcional" /></label>
                     <label><span>Ref. mandato SEPA</span><input maxLength={35} value={partyEditAction.mandate_ref} onChange={e => setPartyEditAction(prev => ({ ...prev, mandate_ref: e.target.value }))} placeholder="Para adeudos (opcional)" /></label>
                     <label><span>Fecha firma mandato</span><input type="date" value={partyEditAction.mandate_date} onChange={e => setPartyEditAction(prev => ({ ...prev, mandate_date: e.target.value }))} /></label>
+                    <label><span>Provincia (modelo 347)</span><select value={partyEditAction.province_code} onChange={e => setPartyEditAction(prev => ({ ...prev, province_code: e.target.value }))}><option value="">Sin especificar</option>{PROVINCIAS_AEAT.map(([code, name]) => <option key={code} value={code}>{code} - {name}</option>)}</select></label>
                     <div className="form-buttons"><button type="submit">Guardar cambios</button><button type="button" className="secondary" onClick={() => setPartyEditAction(null)}>Cancelar</button></div>
                   </form>
                 )}

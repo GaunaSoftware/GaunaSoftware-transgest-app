@@ -48,6 +48,13 @@ function normalizeMandateDate(value) {
   return raw;
 }
 
+function normalizeProvinceCode(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (!/^\d{2}$/.test(raw)) throw inputError("province_code debe ser un codigo de 2 digitos");
+  return raw;
+}
+
 function normalizePartyInput(input = {}) {
   const partyType = String(input.party_type || "").trim();
   const legalName = String(input.legal_name || "").trim();
@@ -77,6 +84,7 @@ function normalizePartyInput(input = {}) {
     swift_bic: normalizeBic(input.swift_bic),
     mandate_ref: normalizeMandateRef(input.mandate_ref),
     mandate_date: normalizeMandateDate(input.mandate_date),
+    province_code: normalizeProvinceCode(input.province_code),
   };
 }
 

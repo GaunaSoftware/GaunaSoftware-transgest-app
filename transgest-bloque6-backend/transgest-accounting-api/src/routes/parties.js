@@ -68,7 +68,7 @@ async function loadPartyRows(client, companyId, filters) {
     `SELECT p.id, p.tenant_id, p.company_id, p.source_system, p.source_party_id,
             p.party_type, p.legal_name, p.tax_id, p.email, p.phone,
             p.default_account_id, a.code AS default_account_code, a.name AS default_account_name,
-            p.iban, p.swift_bic, p.mandate_ref, p.mandate_date,
+            p.iban, p.swift_bic, p.mandate_ref, p.mandate_date, p.province_code,
             p.notes, p.is_active, p.created_at, p.updated_at
        FROM ${q("accounting_parties")} p
        LEFT JOIN ${q("accounts")} a ON a.id=p.default_account_id
@@ -136,8 +136,8 @@ router.post("/parties", requirePermission("parties.write"), async (req, res, nex
       const { rows } = await client.query(
         `INSERT INTO ${q("accounting_parties")}
            (tenant_id, company_id, source_system, source_party_id, party_type, legal_name,
-            tax_id, email, phone, default_account_id, notes, iban, swift_bic, mandate_ref, mandate_date, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+            tax_id, email, phone, default_account_id, notes, iban, swift_bic, mandate_ref, mandate_date, province_code, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
          RETURNING *`,
         [
           selected.tenant_id,
@@ -155,6 +155,7 @@ router.post("/parties", requirePermission("parties.write"), async (req, res, nex
           input.swift_bic,
           input.mandate_ref,
           input.mandate_date,
+          input.province_code,
           req.accountingUser.id,
         ]
       ).catch(error => {
@@ -225,8 +226,8 @@ router.put("/parties/:id", requirePermission("parties.write"), async (req, res, 
         `UPDATE ${q("accounting_parties")}
             SET party_type=$1, legal_name=$2, tax_id=$3, email=$4, phone=$5,
                 default_account_id=$6, notes=$7, iban=$8, swift_bic=$9,
-                mandate_ref=$10, mandate_date=$11, updated_at=NOW()
-          WHERE id=$12
+                mandate_ref=$10, mandate_date=$11, province_code=$12, updated_at=NOW()
+          WHERE id=$13
           RETURNING *`,
         [
           input.party_type,
@@ -240,6 +241,7 @@ router.put("/parties/:id", requirePermission("parties.write"), async (req, res, 
           input.swift_bic,
           input.mandate_ref,
           input.mandate_date,
+          input.province_code,
           req.params.id,
         ]
       );

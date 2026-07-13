@@ -747,14 +747,14 @@ router.get("/reports/model-347/file", requirePermission("ledger.read"), async (r
       if (!company.rows[0]?.tax_id) throw httpError("La empresa declarante no tiene NIF configurado", 422);
 
       const rows = await client.query(
-        `SELECT p.id AS party_id, p.legal_name, p.tax_id, m.direction,
+        `SELECT p.id AS party_id, p.legal_name, p.tax_id, p.province_code, m.direction,
                 EXTRACT(QUARTER FROM COALESCE(m.issue_date, m.due_date))::int AS quarter,
                 SUM(m.amount)::text AS total
            FROM ${q("accounting_maturities")} m
            JOIN ${q("accounting_parties")} p ON p.id=m.party_id
           WHERE m.company_id=$1 AND m.status <> 'cancelled'
             AND COALESCE(m.issue_date, m.due_date) BETWEEN $2 AND $3
-          GROUP BY p.id, p.legal_name, p.tax_id, m.direction, quarter`,
+          GROUP BY p.id, p.legal_name, p.tax_id, p.province_code, m.direction, quarter`,
         [selected.company_id, start, end]
       );
 
@@ -763,7 +763,7 @@ router.get("/reports/model-347/file", requirePermission("ledger.read"), async (r
         if (!row.tax_id) continue; // sin NIF no se puede declarar
         const key = `${row.party_id}|${row.direction}`;
         if (!byKey.has(key)) {
-          byKey.set(key, { nif: row.tax_id, nombre: row.legal_name, provincia: "", clave: row.direction === "receivable" ? "B" : "A", totalCents: 0, quartersCents: [0, 0, 0, 0] });
+          byKey.set(key, { nif: row.tax_id, nombre: row.legal_name, provincia: row.province_code || "", clave: row.direction === "receivable" ? "B" : "A", totalCents: 0, quartersCents: [0, 0, 0, 0] });
         }
         const entry = byKey.get(key);
         const [w, f = ""] = String(row.total).split(".");

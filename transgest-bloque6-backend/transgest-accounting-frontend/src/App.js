@@ -86,6 +86,61 @@ import {
 
 const TRANSGEST_FRONTEND_URL = process.env.REACT_APP_TRANSGEST_FRONTEND_URL || "http://localhost";
 
+// Asientos predefinidos (tipo Contasol/Factusol): dado un importe base y un
+// tipo de IVA, generan las lineas cuadradas usando codigos del PGC. El usuario
+// revisa el borrador antes de contabilizar. Las cuentas se resuelven por
+// prefijo de codigo contra el plan contable del ejercicio.
+const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
+const JOURNAL_TEMPLATES = [
+  {
+    id: "venta", label: "Venta con IVA repercutido", hasVat: true,
+    build: (base, rate) => {
+      const iva = round2(base * rate / 100);
+      return [
+        { code: "430", side: "debit", amount: round2(base + iva), description: "Cliente" },
+        { code: "700", side: "credit", amount: base, description: "Venta de mercaderias/servicios" },
+        { code: "477", side: "credit", amount: iva, description: `IVA repercutido ${rate}%` },
+      ];
+    },
+  },
+  {
+    id: "compra", label: "Compra con IVA soportado", hasVat: true,
+    build: (base, rate) => {
+      const iva = round2(base * rate / 100);
+      return [
+        { code: "600", side: "debit", amount: base, description: "Compra de mercaderias" },
+        { code: "472", side: "debit", amount: iva, description: `IVA soportado ${rate}%` },
+        { code: "400", side: "credit", amount: round2(base + iva), description: "Proveedor" },
+      ];
+    },
+  },
+  {
+    id: "gasto", label: "Gasto/servicio con IVA", hasVat: true,
+    build: (base, rate) => {
+      const iva = round2(base * rate / 100);
+      return [
+        { code: "629", side: "debit", amount: base, description: "Servicio exterior" },
+        { code: "472", side: "debit", amount: iva, description: `IVA soportado ${rate}%` },
+        { code: "410", side: "credit", amount: round2(base + iva), description: "Acreedor" },
+      ];
+    },
+  },
+  {
+    id: "cobro", label: "Cobro de cliente (banco)", hasVat: false,
+    build: (base) => [
+      { code: "572", side: "debit", amount: base, description: "Cobro en banco" },
+      { code: "430", side: "credit", amount: base, description: "Cliente" },
+    ],
+  },
+  {
+    id: "pago", label: "Pago a proveedor (banco)", hasVat: false,
+    build: (base) => [
+      { code: "400", side: "debit", amount: base, description: "Proveedor" },
+      { code: "572", side: "credit", amount: base, description: "Pago desde banco" },
+    ],
+  },
+];
+
 const tabs = [
   { id: "overview", label: "Resumen" },
   { id: "accounts", label: "Plan contable" },
@@ -696,6 +751,7 @@ export default function App() {
       { account_id: "", side: "credit", amount: "", description: "" },
     ],
   }));
+  const [journalTemplateForm, setJournalTemplateForm] = useState({ id: "", base: "", rate: "21" });
   const [ledgerAccounts, setLedgerAccounts] = useState([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerStatus, setLedgerStatus] = useState(null);
@@ -2632,6 +2688,43 @@ export default function App() {
     setJournalForm(prev => ({ ...prev, lines: prev.lines.filter((_, lineIndex) => lineIndex !== index) }));
   }
 
+  function resolveJournalAccountId(codePrefix) {
+    const prefix = String(codePrefix || "");
+    const exact = journalAccounts.find(account => String(account.code) === prefix);
+    if (exact) return exact.id;
+    const matches = journalAccounts
+      .filter(account => String(account.code).startsWith(prefix))
+      .sort((a, b) => String(a.code).length - String(b.code).length);
+    return matches[0]?.id || "";
+  }
+
+  function applyJournalTemplate() {
+    const template = JOURNAL_TEMPLATES.find(item => item.id === journalTemplateForm.id);
+    if (!template) return;
+    const base = round2(String(journalTemplateForm.base).replace(",", "."));
+    if (!Number.isFinite(base) || base <= 0) {
+      setJournalStatus({ tone: "warning", text: "Indica un importe base valido para aplicar la plantilla." });
+      return;
+    }
+    const rate = template.hasVat ? Number(journalTemplateForm.rate) || 21 : 0;
+    const missing = [];
+    const lines = template.build(base, rate).map(row => {
+      const account_id = resolveJournalAccountId(row.code);
+      if (!account_id) missing.push(row.code);
+      return { account_id, side: row.side, amount: row.amount.toFixed(2), description: row.description };
+    });
+    setJournalForm(prev => ({
+      ...prev,
+      description: prev.description || template.label,
+      lines,
+    }));
+    if (missing.length) {
+      setJournalStatus({ tone: "warning", text: `Plantilla aplicada. No hay cuenta en el plan para: ${missing.join(", ")}. Selecciona la cuenta manualmente antes de guardar.` });
+    } else {
+      setJournalStatus({ tone: "ok", text: "Plantilla aplicada. Revisa las cuentas e importes y guarda el borrador." });
+    }
+  }
+
   async function startJournalEdit(entry) {
     setJournalStatus(null);
     setJournalCancelAction(null);
@@ -3967,6 +4060,29 @@ export default function App() {
                       <div className="scope-note">El ejercicio seleccionado necesita cuentas activas que admitan movimientos antes de crear asientos.</div>
                     ) : (
                       <>
+                        <div className="journal-header-fields journal-template-fields">
+                          <label><span>Asiento predefinido</span>
+                            <select value={journalTemplateForm.id} onChange={e => setJournalTemplateForm(prev => ({ ...prev, id: e.target.value }))}>
+                              <option value="">— Manual (sin plantilla) —</option>
+                              {JOURNAL_TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                            </select>
+                          </label>
+                          {journalTemplateForm.id && (
+                            <label><span>Importe base</span>
+                              <input inputMode="decimal" pattern="[0-9]+([.,][0-9]{1,2})?" value={journalTemplateForm.base} onChange={e => setJournalTemplateForm(prev => ({ ...prev, base: e.target.value }))} placeholder="0,00" />
+                            </label>
+                          )}
+                          {JOURNAL_TEMPLATES.find(t => t.id === journalTemplateForm.id)?.hasVat && (
+                            <label><span>IVA %</span>
+                              <select value={journalTemplateForm.rate} onChange={e => setJournalTemplateForm(prev => ({ ...prev, rate: e.target.value }))}>
+                                <option value="21">21%</option><option value="10">10%</option><option value="4">4%</option>
+                              </select>
+                            </label>
+                          )}
+                          {journalTemplateForm.id && (
+                            <button type="button" className="secondary" onClick={applyJournalTemplate}>Aplicar plantilla</button>
+                          )}
+                        </div>
                         <div className="journal-lines">
                           <div className="journal-line head"><span>Cuenta</span><span>Debe / Haber</span><span>Importe</span><span>Detalle</span><span></span></div>
                           {journalForm.lines.map((line, index) => (

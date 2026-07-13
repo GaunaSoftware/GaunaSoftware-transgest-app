@@ -664,3 +664,6 @@ dd { margin: 0; word-break: break-word; }
   font: inherit;
 }
 .link-button:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+
+.journal-template-fields { background: rgba(15, 118, 110, 0.06); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; align-items: end; }
+.journal-template-fields > button { height: 38px; border: 0; border-radius: 6px; padding: 0 14px; background: var(--accent); color: #fff; font-weight: 800; cursor: pointer; }

@@ -3,11 +3,18 @@ const crypto = require("crypto");
 const db = require("../services/db");
 const { resolveApiKey, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
 const { fallbackPlaceForAddress } = require("../services/geoFallback");
+const {
+  countryCodeFor,
+  parsePlaceRequest,
+  searchQueryFor,
+  selectBestPlaceCandidate,
+} = require("../services/geoPlaceMatch");
 
 const router = express.Router();
 const ROUTE_CACHE_DAYS = Math.max(1, Number(process.env.GEO_ROUTE_CACHE_DAYS || 30));
 const EXTERNAL_TIMEOUT_MS = Math.max(2500, Number(process.env.GEO_EXTERNAL_TIMEOUT_MS || 9000));
 const MAX_ROUTE_POINTS = 12;
+const PLACE_CACHE_VERSION = "v2";
 let schemaPromise = null;
 let lastNominatimAt = 0;
 let nominatimQueue = Promise.resolve();
@@ -167,59 +174,70 @@ async function withNominatimThrottle(task) {
   return run;
 }
 
-async function geocodeHere(empresaId, q, country, region) {
+async function geocodeHere(empresaId, request) {
   const resolved = await resolveApiKey(empresaId, "here");
   if (!resolved.key) return null;
   await assertApiUsageAllowed(empresaId, "here");
   const url = new URL("https://geocode.search.hereapi.com/v1/geocode");
-  url.searchParams.set("q", buildQuery(q, country, region));
-  url.searchParams.set("limit", "1");
+  url.searchParams.set("q", buildQuery(searchQueryFor(request), request.country, request.region));
+  url.searchParams.set("limit", "6");
   url.searchParams.set("lang", "es-ES");
   url.searchParams.set("apiKey", resolved.key);
   const data = await fetchJson(url, { retries: 1 });
-  const item = Array.isArray(data.items) ? data.items[0] : null;
-  if (!item) return null;
-  const address = item.address || {};
   await recordApiUsage(empresaId, "here", 1);
-  return {
-    provider: "here",
-    ...formatPlace({
-      municipio: address.city || address.district || address.county,
-      provincia: address.county || address.state,
-      pais: address.countryName,
-      lat: item.position?.lat,
-      lng: item.position?.lng,
-      label: item.title || address.label,
-    }),
-  };
+  const candidates = (Array.isArray(data.items) ? data.items : []).map(item => {
+    const address = item.address || {};
+    return {
+      provider: "here",
+      ...formatPlace({
+        municipio: address.city || address.district || address.county,
+        provincia: address.county || address.state,
+        pais: address.countryName,
+        lat: item.position?.lat,
+        lng: item.position?.lng,
+        label: item.title || address.label,
+      }),
+      country_code: String(address.countryCode || "").slice(0, 2).toLowerCase(),
+      result_type: item.resultType || item.localityType || "",
+      quality: Number(item.scoring?.queryScore || item.scoring?.fieldScore?.city || 0),
+    };
+  });
+  return selectBestPlaceCandidate(request, candidates);
 }
 
-async function geocodeNominatim(q, country, region) {
+async function geocodeNominatim(request) {
   return withNominatimThrottle(async () => {
     const url = new URL("https://nominatim.openstreetmap.org/search");
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("addressdetails", "1");
-    url.searchParams.set("limit", "1");
+    url.searchParams.set("namedetails", "1");
+    url.searchParams.set("limit", "8");
     url.searchParams.set("accept-language", "es");
-    url.searchParams.set("q", buildQuery(q, country, region));
+    url.searchParams.set("q", buildQuery(searchQueryFor(request), request.country, request.region));
+    const countryCode = countryCodeFor(request.country);
+    if (countryCode) url.searchParams.set("countrycodes", countryCode);
     const data = await fetchJson(url, {
       retries: 1,
       headers: { "User-Agent": "TransGestTMS/1.0 (https://app.gauna.es; soporte@gauna.es)" },
     });
-    const item = Array.isArray(data) ? data[0] : null;
-    if (!item) return null;
-    const address = item.address || {};
-    return {
-      provider: "nominatim",
-      ...formatPlace({
-        municipio: pickAddressPart(address, ["city", "town", "village", "municipality", "hamlet", "suburb"]),
-        provincia: pickAddressPart(address, ["province", "state", "region", "county"]),
-        pais: address.country,
-        lat: item.lat,
-        lng: item.lon,
-        label: item.display_name,
-      }),
-    };
+    const candidates = (Array.isArray(data) ? data : []).map(item => {
+      const address = item.address || {};
+      return {
+        provider: "nominatim",
+        ...formatPlace({
+          municipio: pickAddressPart(address, ["city", "town", "village", "municipality", "hamlet", "suburb"]),
+          provincia: pickAddressPart(address, ["province", "state", "region", "county"]),
+          pais: address.country,
+          lat: item.lat,
+          lng: item.lon,
+          label: item.display_name,
+        }),
+        country_code: String(address.country_code || "").toLowerCase(),
+        result_type: item.addresstype || item.type || "",
+        quality: Number(item.importance || 0),
+      };
+    });
+    return selectBestPlaceCandidate(request, candidates);
   });
 }
 
@@ -238,25 +256,39 @@ async function cachePlace(empresaId, queryKey, q, country, region, resolved) {
 async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} }) {
   const direct = directCoordinates(raw);
   if (direct) return { provider: "coordinates", ...formatPlace({ ...raw, ...direct, label: raw.label || q }) };
-  const query = cleanText(q);
+  const request = parsePlaceRequest(cleanText(q), country, region);
+  const query = request.query;
   if (query.length < 2) throw Object.assign(new Error("Indica una poblacion o direccion"), { status: 400 });
-  const queryKey = normalizeKey([query, country, region].filter(Boolean).join("|"));
+  const queryKey = normalizeKey([PLACE_CACHE_VERSION, query, request.country, request.region].filter(Boolean).join("|"));
   const cached = await db.query(
     "SELECT result, provider FROM geo_place_cache WHERE empresa_id=$1 AND query_key=$2 LIMIT 1",
     [empresaId, queryKey]
   );
-  if (cached.rows[0]?.result) return { provider: cached.rows[0].provider || "cache", ...formatPlace(cached.rows[0].result) };
+  if (cached.rows[0]?.result) {
+    const cachedPlace = { ...formatPlace(cached.rows[0].result), provider: cached.rows[0].provider || "cache" };
+    const validCached = selectBestPlaceCandidate(request, [cachedPlace]);
+    if (validCached) return validCached;
+  }
 
-  let resolved = await geocodeHere(empresaId, query, country, region).catch(() => null);
-  if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeNominatim(query, country, region).catch(() => null);
-  if (resolved?.lat == null || resolved?.lng == null) {
-    const fallback = fallbackPlaceForAddress(buildQuery(query, country, region));
-    if (fallback) resolved = { provider: "local", ...formatPlace(fallback) };
+  let resolved = null;
+  if (request.localityOnly) {
+    resolved = await geocodeNominatim(request).catch(() => null);
+    if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeHere(empresaId, request).catch(() => null);
+  } else {
+    resolved = await geocodeHere(empresaId, request).catch(() => null);
+    if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeNominatim(request).catch(() => null);
   }
   if (resolved?.lat == null || resolved?.lng == null) {
-    throw Object.assign(new Error(`No se pudo localizar: ${query}`), { status: 404 });
+    const fallback = fallbackPlaceForAddress(buildQuery(query, request.country, request.region));
+    resolved = selectBestPlaceCandidate(request, fallback ? [{ provider: "local", ...formatPlace(fallback) }] : []);
   }
-  const result = await cachePlace(empresaId, queryKey, query, country, region, resolved);
+  if (resolved?.lat == null || resolved?.lng == null) {
+    throw Object.assign(
+      new Error(`No se pudo localizar con seguridad "${query}". Indica la provincia o selecciona un punto guardado.`),
+      { status: 422 }
+    );
+  }
+  const result = await cachePlace(empresaId, queryKey, query, request.country, request.region, resolved);
   return { provider: resolved.provider || "local", ...result };
 }
 
@@ -264,11 +296,12 @@ function normalizeRoutePoint(raw, index, total) {
   const point = typeof raw === "string" ? { label: raw } : (raw || {});
   const role = cleanText(point.role || point.tipo || (index === 0 ? "origen" : index === total - 1 ? "destino" : "parada"));
   const label = cleanText(point.label || point.nombre || point.name || point.address || point.direccion || point.query);
+  const query = cleanText(point.query || point.address || point.direccion || label);
   return {
     ...point,
     role,
     label,
-    query: label,
+    query,
     country: cleanText(point.country || point.pais),
     region: cleanText(point.region || point.provincia || point.state),
   };

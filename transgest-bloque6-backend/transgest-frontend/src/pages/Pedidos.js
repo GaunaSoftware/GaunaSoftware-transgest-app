@@ -1422,6 +1422,9 @@ function puntoToStop(punto) {
   return {
     direccion: punto?.direccion || "",
     cliente_nombre: punto?.nombre || "",
+    punto_interes_id: punto?.id || punto?.punto_interes_id || null,
+    ciudad: punto?.ciudad || punto?.poblacion || punto?.localidad || punto?.municipio || "",
+    codigo_postal: punto?.codigo_postal || punto?.cp || punto?.postal_code || "",
     ventana: punto?.ventana || "",
     notas: punto?.notas || "",
     cif: punto?.cif || "",
@@ -5825,10 +5828,16 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   const label = sourceStop.nombre || sourceStop.name || sourceStop.cliente_nombre || sourceStop.direccion || pedido[side] || "";
   const provincia = sourceStop.provincia || pedido[`${side}_provincia`] || "";
   const pais = sourceStop.pais || pedido[`${side}_pais`] || "España";
+  const localidad = sourceStop.ciudad || sourceStop.poblacion || sourceStop.localidad || sourceStop.municipio || "";
+  const direccion = sourceStop.direccion || sourceStop.address || "";
+  const direccionEsSoloNombre = normalizePlaceText(direccion) && normalizePlaceText(direccion) === normalizePlaceText(label);
+  const query = [!direccionEsSoloNombre ? direccion : "", localidad].filter(Boolean).join(", ")
+    || localidad || direccion || label;
   const pointDetails = {
     google_maps_url: googleMapsUrl,
     provincia,
     pais,
+    query,
   };
   if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, label, hasGeo:true, ...pointDetails };
   const geo = inferPlaceGeo(sourceStop, label, pedido[`${side}_provincia`], pedido[`${side}_pais`]);
@@ -6836,10 +6845,70 @@ const aplicarEndpointText = (key, tipo) => (e) => {
       tipo,
       tipo === "carga" ? puntosCargaSugeridosModal : puntosDescargaSugeridosModal
     );
-    if (!punto) return base;
+    if (!punto) {
+      const stopsKey = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
+      const regionKey = tipo === "carga" ? "origen_provincia" : "destino_provincia";
+      const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
+      const { extras } = splitPrimaryAndAdditionalStops(p[stopsKey], p[key] || "");
+      base[regionKey] = "";
+      base[stopsKey] = value.trim() ? [{
+        direccion: value,
+        es_principal: true,
+        pais: p[countryKey] || "España",
+        provincia: "",
+        ciudad: "",
+        codigo_postal: "",
+        cliente_nombre: "",
+        punto_interes_id: null,
+        google_maps_url: "",
+        lat: null,
+        lng: null,
+      }, ...extras] : extras;
+      return base;
+    }
     return tipo === "carga" ? applyPuntoCargaToDraft(base, punto) : applyPuntoDescargaToDraft(base, punto);
   });
 };
+
+async function resolverEndpointEnFormulario(key, tipo) {
+  const value = String(form[key] || "").trim();
+  if (value.length < 2) return;
+  const suggestions = tipo === "carga" ? puntosCargaSugeridosModal : puntosDescargaSugeridosModal;
+  if (findPuntoInteresForTypedEndpoint(value, form.cliente_id || "", tipo, suggestions)) return;
+  const regionKey = tipo === "carga" ? "origen_provincia" : "destino_provincia";
+  const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
+  const stopsKey = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
+  try {
+    const geo = await resolveGeoPlace({
+      q: value,
+      country: form[countryKey] || "España",
+      region: form[regionKey] || "",
+    });
+    if (!Number.isFinite(Number(geo?.lat)) || !Number.isFinite(Number(geo?.lng))) return;
+    setForm(current => {
+      if (normalizePlaceText(current[key]) !== normalizePlaceText(value)) return current;
+      const { primary, extras } = splitPrimaryAndAdditionalStops(current[stopsKey], current[key] || "");
+      const pais = canonicalCountry(geo.pais || current[countryKey] || "España") || geo.pais || current[countryKey] || "España";
+      return {
+        ...current,
+        [regionKey]: geo.provincia || current[regionKey] || "",
+        [countryKey]: pais,
+        [stopsKey]: [{
+          ...(primary || {}),
+          direccion: value,
+          es_principal: true,
+          ciudad: geo.municipio || primary?.ciudad || "",
+          provincia: geo.provincia || primary?.provincia || "",
+          pais,
+          lat: Number(geo.lat),
+          lng: Number(geo.lng),
+        }, ...extras],
+      };
+    });
+  } catch {
+    // El mapa muestra el aviso contextual y el usuario puede corregir el texto.
+  }
+}
 
 const f = k => e => setForm(p => ({...p,[k]: (k==="origen"||k==="destino") ? e.target.value.toUpperCase() : e.target.value}));
 
@@ -6945,7 +7014,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
           <style>{`
             .tg-pedido-modal, .tg-pedido-modal * { box-sizing:border-box; min-width:0; }
             .tg-pedido-modal input, .tg-pedido-modal select, .tg-pedido-modal textarea, .tg-pedido-modal button { max-width:100%; }
-            .tg-pedido-modal-header { position:sticky; top:-28px; z-index:30; margin:-28px -28px 16px; padding:18px 28px 12px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; }
+            .tg-pedido-modal-header { position:sticky; top:0; z-index:1200; isolation:isolate; margin:-28px -28px 16px; padding:18px 28px 12px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; }
             .tg-pedido-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
             .tg-pedido-form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
             .tg-pedido-form-grid-4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px; }
@@ -6953,7 +7022,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
             @media (max-width: 760px) {
               .tg-pedido-modal-overlay { align-items:flex-start !important; justify-content:center !important; padding:8px !important; overflow:auto !important; }
               .tg-pedido-modal { width:100% !important; max-width:calc(100vw - 16px) !important; max-height:calc(100dvh - 16px) !important; padding:16px 14px 18px !important; border-radius:12px !important; overflow-x:hidden !important; }
-              .tg-pedido-modal-header { top:-16px !important; margin:-16px -14px 12px !important; padding:12px 14px 10px !important; }
+              .tg-pedido-modal-header { top:0 !important; margin:-16px -14px 12px !important; padding:12px 14px 10px !important; }
               .tg-pedido-form-grid-2, .tg-pedido-form-grid-3, .tg-pedido-form-grid-4 { grid-template-columns:1fr !important; }
               .tg-pedido-form-grid-2 > *, .tg-pedido-form-grid-3 > *, .tg-pedido-form-grid-4 > * { grid-column:1/-1 !important; }
               .tg-pedido-actions-row { display:grid !important; grid-template-columns:1fr !important; }
@@ -6994,7 +7063,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                 onClick={requestClose}
                 title="Cerrar pedido"
                 aria-label="Cerrar pedido"
-                style={{width:34,height:34,borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:20,lineHeight:"20px",cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:800}}
+                style={{position:"relative",zIndex:1,flex:"0 0 36px",width:36,height:36,borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:20,lineHeight:"20px",cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:800}}
               >
                 x
               </button>
@@ -7272,6 +7341,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                   style={S.input}
                   value={form.origen||""}
                   onChange={aplicarEndpointText("origen", "carga")}
+                  onBlur={()=>resolverEndpointEnFormulario("origen", "carga")}
                   list={cargaEndpointListId}
                   placeholder="Escribe o elige un punto de carga"
                 />
@@ -7324,6 +7394,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                   style={S.input}
                   value={form.destino||""}
                   onChange={aplicarEndpointText("destino", "descarga")}
+                  onBlur={()=>resolverEndpointEnFormulario("destino", "descarga")}
                   list={descargaEndpointListId}
                   placeholder="Escribe o elige un punto de descarga"
                 />

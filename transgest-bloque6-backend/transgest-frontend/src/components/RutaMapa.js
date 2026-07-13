@@ -15,6 +15,7 @@ function normalizedPoint(point = {}, index = 0) {
   const lng = safeCoordinate(point.lng ?? point.lon ?? point.longitude ?? point.longitud, -180, 180);
   return {
     label: String(point.label || point.nombre || point.direccion || `Parada ${index + 1}`).trim(),
+    query: String(point.query || point.address || point.direccion || point.label || point.nombre || "").trim(),
     role: point.tipo || point.role || (index === 0 ? "origen" : "parada"),
     country: point.pais || point.country || "",
     region: point.provincia || point.region || "",
@@ -110,24 +111,31 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
     let active = true;
     if (routePoints.length < 2) {
       setRoute(null);
+      setLoading(false);
       setError("El pedido necesita al menos un origen y un destino.");
       return () => { active = false; };
     }
     setLoading(true);
+    setRoute(null);
     setError("");
-    calcularRutaGeo(routePoints)
-      .then(data => {
-        if (!active) return;
-        if (!data?.ok) throw new Error(data?.error || "No se pudo calcular la ruta");
-        setRoute(data);
-      })
-      .catch(err => {
-        if (!active) return;
-        setRoute(null);
-        setError(err?.message || "No se pudo calcular la ruta.");
-      })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    const timer = window.setTimeout(() => {
+      calcularRutaGeo(routePoints)
+        .then(data => {
+          if (!active) return;
+          if (!data?.ok) throw new Error(data?.error || "No se pudo calcular la ruta");
+          setRoute(data);
+        })
+        .catch(err => {
+          if (!active) return;
+          setRoute(null);
+          setError(err?.message || "No se pudo calcular la ruta.");
+        })
+        .finally(() => { if (active) setLoading(false); });
+    }, 450);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
   }, [pointKey, retry, routePoints]);
 
   useEffect(() => {
@@ -175,8 +183,8 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
   }, [route, routePoints, vehiclePosition?.lat, vehiclePosition?.lng]);
 
   return (
-    <div style={{ border: "1px solid var(--border2)", borderRadius: 8, overflow: "hidden", background: "var(--bg3)" }}>
-      <div ref={containerRef} role="img" aria-label="Ruta y puntos operativos del pedido" style={{ width: "100%", height: "clamp(280px, 38vh, 440px)", background: "var(--bg3)" }} />
+    <div style={{ position:"relative", zIndex:0, isolation:"isolate", border: "1px solid var(--border2)", borderRadius: 8, overflow: "hidden", background: "var(--bg3)" }}>
+      <div ref={containerRef} role="img" aria-label="Ruta y puntos operativos del pedido" style={{ position:"relative", zIndex:0, width: "100%", height: "clamp(280px, 38vh, 440px)", background: "var(--bg3)" }} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 11px", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 11, color: "var(--text4)" }}>
           {loading && <strong style={{ color: "var(--accent)" }}>Calculando ruta...</strong>}

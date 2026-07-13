@@ -38,6 +38,8 @@ const KNOWN_PLACES = {
   riba_roja: { municipio:"Riba-roja de Turia", provincia:"Valencia", pais:"Espana", lat:39.5450, lng:-0.5708 },
   torrent: { municipio:"Torrent", provincia:"Valencia", pais:"Espana", lat:39.4371, lng:-0.4655 },
   abanilla: { municipio:"Abanilla", provincia:"Murcia", pais:"Espana", lat:38.2056, lng:-1.0414 },
+  albalate_de_zorita: { municipio:"Albalate de Zorita", provincia:"Guadalajara", pais:"Espana", lat:40.3087, lng:-2.8427 },
+  albalate_de_la_zorita: { municipio:"Albalate de Zorita", provincia:"Guadalajara", pais:"Espana", lat:40.3087, lng:-2.8427 },
   lorqui: { municipio:"Lorqui", provincia:"Murcia", pais:"Espana", lat:38.0819, lng:-1.2510 },
   alcala_de_henares: { municipio:"Alcala de Henares", provincia:"Madrid", pais:"Espana", lat:40.4819, lng:-3.3635 },
   arganda_del_rey: { municipio:"Arganda del Rey", provincia:"Madrid", pais:"Espana", lat:40.3069, lng:-3.4477 },

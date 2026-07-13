@@ -1021,6 +1021,7 @@ export const registrarGpsChoferApp = (data) =>
 export const calcularRutaGeo = (points = []) => {
   const compactPoints = points.map(point => ({
     label: point.label || point.nombre || point.direccion || "",
+    query: point.query || point.address || point.direccion || point.label || point.nombre || "",
     role: point.role || point.tipo || "parada",
     country: point.country || point.pais || "",
     region: point.region || point.provincia || "",

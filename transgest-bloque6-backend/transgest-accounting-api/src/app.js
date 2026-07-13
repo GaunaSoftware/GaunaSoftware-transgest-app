@@ -24,6 +24,7 @@ const maturitiesRoutes = require("./routes/maturities");
 const outboxRoutes = require("./routes/outbox");
 const partiesRoutes = require("./routes/parties");
 const periodsRoutes = require("./routes/periods");
+const sepaRoutes = require("./routes/sepa");
 
 function createApp() {
   const app = express();
@@ -75,6 +76,7 @@ function createApp() {
   app.use("/api/v1", auditRoutes);
   app.use("/api/v1", outboxRoutes);
   app.use("/api/v1", periodsRoutes);
+  app.use("/api/v1", sepaRoutes);
 
   app.use((req, res) => {
     res.status(404).json({ error: `Ruta no encontrada: ${req.method} ${req.path}` });

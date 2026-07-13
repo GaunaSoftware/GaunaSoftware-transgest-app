@@ -29,6 +29,7 @@ import {
   getVatSummary,
   downloadVatSummaryCsv,
   downloadVatBookCsv,
+  downloadSepaCreditTransfer,
   downloadTrialBalanceCsv,
   exchangeSsoToken,
   getAdvisorPackage,
@@ -643,9 +644,12 @@ export default function App() {
     phone: "",
     default_account_id: "",
     notes: "",
+    iban: "",
+    swift_bic: "",
   });
   const [partyEditAction, setPartyEditAction] = useState(null);
   const [partyStatusAction, setPartyStatusAction] = useState(null);
+  const [sepaForm, setSepaForm] = useState({ bank_account_id: "", due_before: "" });
   const [maturities, setMaturities] = useState([]);
   const [maturitiesLoading, setMaturitiesLoading] = useState(false);
   const [maturitiesExporting, setMaturitiesExporting] = useState(false);
@@ -1606,6 +1610,10 @@ export default function App() {
     if (activeTab === "maturities" || activeTab === "overview") {
       refreshMaturities();
     }
+    if (activeTab === "maturities") {
+      // Carga ligera de cuentas ordenantes para la remesa SEPA (best-effort).
+      getBankAccounts({ limit: 500 }).then(result => setBankAccounts(result.data || [])).catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, selectedCompanyId, canReadMaturities]);
 
@@ -2093,7 +2101,7 @@ export default function App() {
         default_account_id: partyForm.default_account_id || null,
       });
       setPartyStatus({ tone: "ok", text: `Tercero ${result.party.legal_name} creado y auditado.` });
-      setPartyForm(prev => ({ ...prev, legal_name: "", tax_id: "", email: "", phone: "", notes: "" }));
+      setPartyForm(prev => ({ ...prev, legal_name: "", tax_id: "", email: "", phone: "", notes: "", iban: "", swift_bic: "" }));
       await refreshParties();
     } catch (err) {
       setPartyStatus({ tone: err.status === 409 ? "warning" : "danger", text: err.message });
@@ -2112,6 +2120,8 @@ export default function App() {
       phone: party.phone || "",
       default_account_id: party.default_account_id || "",
       notes: party.notes || "",
+      iban: party.iban || "",
+      swift_bic: party.swift_bic || "",
     });
   }
 
@@ -2128,6 +2138,8 @@ export default function App() {
         phone: partyEditAction.phone,
         default_account_id: partyEditAction.default_account_id || null,
         notes: partyEditAction.notes,
+        iban: partyEditAction.iban,
+        swift_bic: partyEditAction.swift_bic,
       });
       setPartyStatus({ tone: "ok", text: `Tercero ${result.party.legal_name} actualizado y auditado.` });
       setPartyEditAction(null);
@@ -2160,6 +2172,24 @@ export default function App() {
   async function handleMaturityFilter(event) {
     event.preventDefault();
     await refreshMaturities(maturityFilters);
+  }
+
+  async function handleGenerateSepaRemittance() {
+    if (!sepaForm.bank_account_id) {
+      setMaturityStatus({ tone: "warning", text: "Selecciona la cuenta bancaria ordenante para generar la remesa." });
+      return;
+    }
+    setMaturitiesExporting(true);
+    setMaturityStatus(null);
+    try {
+      const result = await downloadSepaCreditTransfer(sepaForm.bank_account_id, { due_before: sepaForm.due_before });
+      saveBlob(result.blob, result.filename || "remesa-sepa.xml");
+      setMaturityStatus({ tone: "ok", text: "Remesa SEPA de pagos generada. Valida el fichero con tu banco antes de enviarlo." });
+    } catch (err) {
+      setMaturityStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setMaturitiesExporting(false);
+    }
   }
 
   async function handleExportMaturitiesCsv() {
@@ -3363,6 +3393,8 @@ export default function App() {
                     <label><span>Email</span><input type="email" maxLength={180} value={partyForm.email} onChange={e => setPartyForm(prev => ({ ...prev, email: e.target.value }))} placeholder="Opcional" /></label>
                     <label><span>Telefono</span><input maxLength={60} value={partyForm.phone} onChange={e => setPartyForm(prev => ({ ...prev, phone: e.target.value }))} placeholder="Opcional" /></label>
                     <label><span>Cuenta por defecto</span><select value={partyForm.default_account_id} onChange={e => setPartyForm(prev => ({ ...prev, default_account_id: e.target.value }))}><option value="">Sin cuenta</option>{accounts.filter(account => account.is_postable && account.is_active).map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}</select></label>
+                    <label><span>IBAN</span><input maxLength={34} value={partyForm.iban} onChange={e => setPartyForm(prev => ({ ...prev, iban: e.target.value }))} placeholder="Para remesas SEPA (opcional)" /></label>
+                    <label><span>BIC/SWIFT</span><input maxLength={20} value={partyForm.swift_bic} onChange={e => setPartyForm(prev => ({ ...prev, swift_bic: e.target.value }))} placeholder="Opcional" /></label>
                     <button type="submit">Crear tercero</button>
                   </form>
                 )}
@@ -3397,6 +3429,8 @@ export default function App() {
                     <label><span>Email</span><input type="email" maxLength={180} value={partyEditAction.email} onChange={e => setPartyEditAction(prev => ({ ...prev, email: e.target.value }))} /></label>
                     <label><span>Telefono</span><input maxLength={60} value={partyEditAction.phone} onChange={e => setPartyEditAction(prev => ({ ...prev, phone: e.target.value }))} /></label>
                     <label><span>Cuenta por defecto</span><select value={partyEditAction.default_account_id} onChange={e => setPartyEditAction(prev => ({ ...prev, default_account_id: e.target.value }))}><option value="">Sin cuenta</option>{accounts.filter(account => account.is_postable && account.is_active).map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}</select></label>
+                    <label><span>IBAN</span><input maxLength={34} value={partyEditAction.iban} onChange={e => setPartyEditAction(prev => ({ ...prev, iban: e.target.value }))} placeholder="Para remesas SEPA (opcional)" /></label>
+                    <label><span>BIC/SWIFT</span><input maxLength={20} value={partyEditAction.swift_bic} onChange={e => setPartyEditAction(prev => ({ ...prev, swift_bic: e.target.value }))} placeholder="Opcional" /></label>
                     <div className="form-buttons"><button type="submit">Guardar cambios</button><button type="button" className="secondary" onClick={() => setPartyEditAction(null)}>Cancelar</button></div>
                   </form>
                 )}
@@ -3443,6 +3477,19 @@ export default function App() {
                   <button type="button" className="secondary" onClick={clearMaturityFilters}>Limpiar</button>
                   <button type="button" className="secondary" onClick={handleExportMaturitiesCsv} disabled={maturitiesExporting || !maturities.length}>CSV</button>
                 </form>
+                <div className="journal-template-fields sepa-remittance">
+                  <label><span>Remesa SEPA · cuenta ordenante</span>
+                    <select value={sepaForm.bank_account_id} onChange={e => setSepaForm(prev => ({ ...prev, bank_account_id: e.target.value }))}>
+                      <option value="">Selecciona cuenta bancaria</option>
+                      {bankAccounts.filter(account => account.iban).map(account => <option key={account.id} value={account.id}>{account.name} · {account.iban}</option>)}
+                    </select>
+                  </label>
+                  <label><span>Vencimientos hasta</span>
+                    <input type="date" value={sepaForm.due_before} onChange={e => setSepaForm(prev => ({ ...prev, due_before: e.target.value }))} />
+                  </label>
+                  <button type="button" disabled={maturitiesExporting || !sepaForm.bank_account_id} onClick={handleGenerateSepaRemittance}>Generar remesa de pagos (XML)</button>
+                  <span className="scope-note" style={{ flexBasis: "100%" }}>Incluye los vencimientos pagaderos pendientes cuyo tercero tenga IBAN. Valida el fichero con tu banco antes de enviarlo.</span>
+                </div>
                 {canWriteMaturities && (
                   <div className="workspace-actions">
                     <button type="button" onClick={() => toggleWorkspacePanel("maturity-create")}>

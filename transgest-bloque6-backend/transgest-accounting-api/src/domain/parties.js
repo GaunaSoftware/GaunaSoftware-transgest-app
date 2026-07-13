@@ -20,6 +20,20 @@ function normalizeOptionalText(value, maxLength, field) {
   return text || null;
 }
 
+function normalizeIban(value) {
+  const raw = String(value || "").replace(/\s+/g, "").toUpperCase();
+  if (!raw) return null;
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(raw)) throw inputError("iban no tiene un formato valido");
+  return raw;
+}
+
+function normalizeBic(value) {
+  const raw = String(value || "").replace(/\s+/g, "").toUpperCase();
+  if (!raw) return null;
+  if (!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(raw)) throw inputError("swift_bic no tiene un formato valido");
+  return raw;
+}
+
 function normalizePartyInput(input = {}) {
   const partyType = String(input.party_type || "").trim();
   const legalName = String(input.legal_name || "").trim();
@@ -45,6 +59,8 @@ function normalizePartyInput(input = {}) {
     phone: normalizeOptionalText(input.phone, 60, "phone"),
     default_account_id: defaultAccountId,
     notes: normalizeOptionalText(input.notes, 1000, "notes"),
+    iban: normalizeIban(input.iban),
+    swift_bic: normalizeBic(input.swift_bic),
   };
 }
 

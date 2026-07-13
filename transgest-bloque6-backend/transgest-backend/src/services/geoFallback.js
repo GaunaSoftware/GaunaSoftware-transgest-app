@@ -45,6 +45,7 @@ const PLACES = [
   ["Toledo", "Toledo", "Espana", 39.8628, -4.0273],
   ["Guadalajara", "Guadalajara", "Espana", 40.6332, -3.1665],
   ["Albalate de Zorita", "Guadalajara", "Espana", 40.3087, -2.8427, ["Albalate de la Zorita"]],
+  ["Valderrobres", "Teruel", "Espana", 40.8734, 0.1551, ["Valderrobles", "Vall-de-roures", "Vall de Roures"]],
   ["A Coruna", "A Coruna", "Espana", 43.3623, -8.4115, ["Coruna"]],
   ["Vigo", "Pontevedra", "Espana", 42.2406, -8.7207],
   ["Lisboa", "Lisboa", "Portugal", 38.7223, -9.1393, ["Lisbon"]],

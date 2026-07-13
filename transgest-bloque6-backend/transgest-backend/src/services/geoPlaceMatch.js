@@ -89,7 +89,36 @@ function fuzzyEquals(left = "", right = "") {
   const a = localityKey(left);
   const b = localityKey(right);
   if (!a || !b) return false;
-  return a === b || (a.length >= 5 && b.length >= 5 && (a.includes(b) || b.includes(a)));
+  if (a === b || (a.length >= 5 && b.length >= 5 && (a.includes(b) || b.includes(a)))) return true;
+  if (Math.min(a.length, b.length) < 7 || Math.abs(a.length - b.length) > 1) return false;
+  return editDistanceAtMost(a, b, 1);
+}
+
+function editDistanceAtMost(left = "", right = "", limit = 1) {
+  if (Math.abs(left.length - right.length) > limit) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    const current = [i];
+    let rowMinimum = current[0];
+    for (let j = 1; j <= right.length; j += 1) {
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1)
+      );
+      rowMinimum = Math.min(rowMinimum, current[j]);
+    }
+    if (rowMinimum > limit) return false;
+    previous = current;
+  }
+  return previous[right.length] <= limit;
+}
+
+function isCountryOnlyQuery(query = "", country = "") {
+  const normalizedQuery = normalizeGeoText(query);
+  if (!normalizedQuery) return false;
+  if (countryCodeFor(normalizedQuery)) return true;
+  return !!country && normalizedQuery === normalizeGeoText(country);
 }
 
 function significantTokens(value = "") {
@@ -113,13 +142,17 @@ function scorePlaceCandidate(request, candidate = {}) {
 
   const requestedLocality = localityKey(request.query);
   const candidateLocality = localityKey(candidate.municipio || candidate.city || candidate.locality);
-  const candidateLabel = localityKey(candidate.label);
+  const candidateAliases = (Array.isArray(candidate.aliases) ? candidate.aliases : [])
+    .map(localityKey)
+    .filter(Boolean);
   const exactLocality = requestedLocality && candidateLocality && requestedLocality === candidateLocality;
   const compatibleLocality = requestedLocality && candidateLocality && fuzzyEquals(requestedLocality, candidateLocality);
+  const compatibleAlias = requestedLocality && candidateAliases.some(alias => fuzzyEquals(requestedLocality, alias));
   let score = 0;
 
   if (exactLocality) score += 130;
   else if (compatibleLocality) score += 105;
+  else if (compatibleAlias) score += 100;
   else if (request.localityOnly) return -1;
   else {
     const queryTokens = significantTokens(request.query);
@@ -153,6 +186,7 @@ module.exports = {
   countryCodeFor,
   localityKey,
   normalizeGeoText,
+  isCountryOnlyQuery,
   parsePlaceRequest,
   scorePlaceCandidate,
   searchQueryFor,

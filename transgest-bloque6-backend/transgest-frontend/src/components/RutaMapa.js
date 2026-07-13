@@ -13,9 +13,10 @@ function safeCoordinate(value, min, max) {
 function normalizedPoint(point = {}, index = 0) {
   const lat = safeCoordinate(point.lat ?? point.latitude ?? point.latitud, -90, 90);
   const lng = safeCoordinate(point.lng ?? point.lon ?? point.longitude ?? point.longitud, -180, 180);
+  const hasExplicitQuery = Object.prototype.hasOwnProperty.call(point, "query");
   return {
     label: String(point.label || point.nombre || point.direccion || `Parada ${index + 1}`).trim(),
-    query: String(point.query || point.address || point.direccion || point.label || point.nombre || "").trim(),
+    query: String(hasExplicitQuery ? (point.query || "") : (point.address || point.direccion || point.label || point.nombre || "")).trim(),
     role: point.tipo || point.role || (index === 0 ? "origen" : "parada"),
     country: point.pais || point.country || "",
     region: point.provincia || point.region || "",
@@ -25,6 +26,31 @@ function normalizedPoint(point = {}, index = 0) {
     lat,
     lng,
   };
+}
+
+function normalizeRouteText(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const COUNTRY_ONLY_VALUES = new Set([
+  "alemania", "austria", "belgica", "bulgaria", "chequia", "chipre", "croacia", "dinamarca",
+  "eslovaquia", "eslovenia", "espana", "estonia", "finlandia", "francia", "grecia", "hungria",
+  "irlanda", "islandia", "italia", "letonia", "lituania", "luxemburgo", "malta", "noruega",
+  "paises bajos", "polonia", "portugal", "reino unido", "rumania", "suecia", "suiza",
+  "spain", "france", "germany", "italy", "united kingdom",
+]);
+
+function isRoutePointReady(point = {}) {
+  if (safeCoordinate(point.lat, -90, 90) !== null && safeCoordinate(point.lng, -180, 180) !== null) return true;
+  const query = normalizeRouteText(point.query);
+  const country = normalizeRouteText(point.country);
+  return query.length >= 2 && query !== country && !COUNTRY_ONLY_VALUES.has(query);
 }
 
 function markerIcon(number, color, label) {
@@ -76,13 +102,18 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const overlayRef = useRef(null);
-  const [route, setRoute] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [routeState, setRouteState] = useState({ key: "", data: null });
+  const [loadingKey, setLoadingKey] = useState("");
+  const [errorState, setErrorState] = useState({ key: "", message: "" });
   const [retry, setRetry] = useState(0);
+  const requestIdRef = useRef(0);
 
   const pointKey = JSON.stringify(points.map((point, index) => normalizedPoint(point, index)));
   const routePoints = useMemo(() => JSON.parse(pointKey), [pointKey]);
+  const routeReady = routePoints.length >= 2 && routePoints.every(isRoutePointReady);
+  const route = routeState.key === pointKey ? routeState.data : null;
+  const loading = loadingKey === pointKey;
+  const error = errorState.key === pointKey ? errorState.message : "";
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return undefined;
@@ -109,34 +140,38 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
 
   useEffect(() => {
     let active = true;
-    if (routePoints.length < 2) {
-      setRoute(null);
-      setLoading(false);
-      setError("El pedido necesita al menos un origen y un destino.");
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    if (!routeReady) {
+      setRouteState({ key: pointKey, data: null });
+      setLoadingKey("");
+      setErrorState({ key: pointKey, message: "" });
       return () => { active = false; };
     }
-    setLoading(true);
-    setRoute(null);
-    setError("");
+    setLoadingKey(pointKey);
+    setRouteState({ key: "", data: null });
+    setErrorState({ key: pointKey, message: "" });
     const timer = window.setTimeout(() => {
       calcularRutaGeo(routePoints)
         .then(data => {
-          if (!active) return;
+          if (!active || requestIdRef.current !== requestId) return;
           if (!data?.ok) throw new Error(data?.error || "No se pudo calcular la ruta");
-          setRoute(data);
+          setRouteState({ key: pointKey, data });
         })
         .catch(err => {
-          if (!active) return;
-          setRoute(null);
-          setError(err?.message || "No se pudo calcular la ruta.");
+          if (!active || requestIdRef.current !== requestId) return;
+          setRouteState({ key: pointKey, data: null });
+          setErrorState({ key: pointKey, message: err?.message || "No se pudo calcular la ruta." });
         })
-        .finally(() => { if (active) setLoading(false); });
+        .finally(() => {
+          if (active && requestIdRef.current === requestId) setLoadingKey("");
+        });
     }, 450);
     return () => {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [pointKey, retry, routePoints]);
+  }, [pointKey, retry, routePoints, routeReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -188,6 +223,7 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 11px", flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 11, color: "var(--text4)" }}>
           {loading && <strong style={{ color: "var(--accent)" }}>Calculando ruta...</strong>}
+          {!routeReady && <span>Completa origen y destino para mostrar la ruta.</span>}
           {!loading && route && <strong style={{ color: "var(--text)" }}>{providerLabel(route)}</strong>}
           {Number(route?.km) > 0 && <span>{Number(route.km).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km</span>}
           {Number(route?.duration_min) > 0 && <span>{Math.floor(route.duration_min / 60)} h {route.duration_min % 60} min</span>}

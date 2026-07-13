@@ -5,6 +5,7 @@ const { resolveApiKey, assertApiUsageAllowed, recordApiUsage } = require("../ser
 const { fallbackPlaceForAddress } = require("../services/geoFallback");
 const {
   countryCodeFor,
+  isCountryOnlyQuery,
   parsePlaceRequest,
   searchQueryFor,
   selectBestPlaceCandidate,
@@ -14,7 +15,7 @@ const router = express.Router();
 const ROUTE_CACHE_DAYS = Math.max(1, Number(process.env.GEO_ROUTE_CACHE_DAYS || 30));
 const EXTERNAL_TIMEOUT_MS = Math.max(2500, Number(process.env.GEO_EXTERNAL_TIMEOUT_MS || 9000));
 const MAX_ROUTE_POINTS = 12;
-const PLACE_CACHE_VERSION = "v2";
+const PLACE_CACHE_VERSION = "v3";
 let schemaPromise = null;
 let lastNominatimAt = 0;
 let nominatimQueue = Promise.resolve();
@@ -233,6 +234,7 @@ async function geocodeNominatim(request) {
           label: item.display_name,
         }),
         country_code: String(address.country_code || "").toLowerCase(),
+        aliases: Object.values(item.namedetails || {}).filter(value => typeof value === "string"),
         result_type: item.addresstype || item.type || "",
         quality: Number(item.importance || 0),
       };
@@ -259,6 +261,9 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} 
   const request = parsePlaceRequest(cleanText(q), country, region);
   const query = request.query;
   if (query.length < 2) throw Object.assign(new Error("Indica una poblacion o direccion"), { status: 400 });
+  if (isCountryOnlyQuery(query, request.country)) {
+    throw Object.assign(new Error("Indica una poblacion o direccion, no solo el pais"), { status: 400 });
+  }
   const queryKey = normalizeKey([PLACE_CACHE_VERSION, query, request.country, request.region].filter(Boolean).join("|"));
   const cached = await db.query(
     "SELECT result, provider FROM geo_place_cache WHERE empresa_id=$1 AND query_key=$2 LIMIT 1",
@@ -296,7 +301,8 @@ function normalizeRoutePoint(raw, index, total) {
   const point = typeof raw === "string" ? { label: raw } : (raw || {});
   const role = cleanText(point.role || point.tipo || (index === 0 ? "origen" : index === total - 1 ? "destino" : "parada"));
   const label = cleanText(point.label || point.nombre || point.name || point.address || point.direccion || point.query);
-  const query = cleanText(point.query || point.address || point.direccion || label);
+  const hasExplicitQuery = Object.prototype.hasOwnProperty.call(point, "query");
+  const query = cleanText(hasExplicitQuery ? point.query : (point.address || point.direccion || label));
   return {
     ...point,
     role,

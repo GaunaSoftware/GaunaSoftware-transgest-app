@@ -1019,16 +1019,19 @@ export const registrarGpsChoferApp = (data) =>
   apiFetch("/choferes/app/gps", { method: "POST", body: data, timeoutMs: 15000, silentSuccess: true, silentError: true });
 
 export const calcularRutaGeo = (points = []) => {
-  const compactPoints = points.map(point => ({
-    label: point.label || point.nombre || point.direccion || "",
-    query: point.query || point.address || point.direccion || point.label || point.nombre || "",
-    role: point.role || point.tipo || "parada",
-    country: point.country || point.pais || "",
-    region: point.region || point.provincia || "",
-    google_maps_url: point.google_maps_url || "",
-    lat: point.lat ?? point.latitude ?? point.latitud ?? null,
-    lng: point.lng ?? point.lon ?? point.longitude ?? point.longitud ?? null,
-  }));
+  const compactPoints = points.map(point => {
+    const hasExplicitQuery = Object.prototype.hasOwnProperty.call(point, "query");
+    return {
+      label: point.label || point.nombre || point.direccion || "",
+      query: hasExplicitQuery ? (point.query || "") : (point.address || point.direccion || point.label || point.nombre || ""),
+      role: point.role || point.tipo || "parada",
+      country: point.country || point.pais || "",
+      region: point.region || point.provincia || "",
+      google_maps_url: point.google_maps_url || "",
+      lat: point.lat ?? point.latitude ?? point.latitud ?? null,
+      lng: point.lng ?? point.lon ?? point.longitude ?? point.longitud ?? null,
+    };
+  });
   return apiFetch(`/geocoding/route?points=${encodeURIComponent(JSON.stringify(compactPoints))}`, {
     timeoutMs: 35000,
     silentSuccess: true,

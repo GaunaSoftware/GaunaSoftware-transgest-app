@@ -5842,6 +5842,7 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, label, hasGeo:true, ...pointDetails };
   const geo = inferPlaceGeo(sourceStop, label, pedido[`${side}_provincia`], pedido[`${side}_pais`]);
   if (geo) return { lat: geo.lat, lng: geo.lng, label: label || geo.municipio || `${side} ${idx + 1}`, hasGeo:true, ...pointDetails };
+  if (!query && !provincia) return null;
   const fallbackLabel = [label, provincia, pais].filter(Boolean).join(", ");
   return fallbackLabel ? { lat:null, lng:null, label:fallbackLabel, hasGeo:false, ...pointDetails } : null;
 }
@@ -6851,6 +6852,10 @@ const aplicarEndpointText = (key, tipo) => (e) => {
       const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
       const { extras } = splitPrimaryAndAdditionalStops(p[stopsKey], p[key] || "");
       base[regionKey] = "";
+      ["lat", "lng", "lon", "latitude", "longitude", "google_maps_url"].forEach(suffix => {
+        const staleKey = `${key}_${suffix}`;
+        if (Object.prototype.hasOwnProperty.call(p, staleKey)) base[staleKey] = null;
+      });
       base[stopsKey] = value.trim() ? [{
         direccion: value,
         es_principal: true,
@@ -6870,8 +6875,14 @@ const aplicarEndpointText = (key, tipo) => (e) => {
   });
 };
 
-async function resolverEndpointEnFormulario(key, tipo) {
-  const value = String(form[key] || "").trim();
+function isSimpleMunicipalityInput(value = "") {
+  const text = String(value || "").trim();
+  if (!text || /\d|[,;]/.test(text)) return false;
+  return !/\b(?:autovia|autopista|avenida|calle|camino|carretera|ctra|km|paseo|plaza|poligono|ronda|ruta|via)\b/i.test(text);
+}
+
+async function resolverEndpointEnFormulario(key, tipo, rawValue = null) {
+  const value = String(rawValue != null ? rawValue : (form[key] || "")).trim();
   if (value.length < 2) return;
   const suggestions = tipo === "carga" ? puntosCargaSugeridosModal : puntosDescargaSugeridosModal;
   if (findPuntoInteresForTypedEndpoint(value, form.cliente_id || "", tipo, suggestions)) return;
@@ -6889,13 +6900,17 @@ async function resolverEndpointEnFormulario(key, tipo) {
       if (normalizePlaceText(current[key]) !== normalizePlaceText(value)) return current;
       const { primary, extras } = splitPrimaryAndAdditionalStops(current[stopsKey], current[key] || "");
       const pais = canonicalCountry(geo.pais || current[countryKey] || "España") || geo.pais || current[countryKey] || "España";
+      const canonicalEndpoint = isSimpleMunicipalityInput(value) && geo.municipio
+        ? String(geo.municipio).toUpperCase()
+        : value;
       return {
         ...current,
+        [key]: canonicalEndpoint,
         [regionKey]: geo.provincia || current[regionKey] || "",
         [countryKey]: pais,
         [stopsKey]: [{
           ...(primary || {}),
-          direccion: value,
+          direccion: canonicalEndpoint,
           es_principal: true,
           ciudad: geo.municipio || primary?.ciudad || "",
           provincia: geo.provincia || primary?.provincia || "",
@@ -7341,7 +7356,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                   style={S.input}
                   value={form.origen||""}
                   onChange={aplicarEndpointText("origen", "carga")}
-                  onBlur={()=>resolverEndpointEnFormulario("origen", "carga")}
+                  onBlur={e=>resolverEndpointEnFormulario("origen", "carga", e.currentTarget.value)}
                   list={cargaEndpointListId}
                   placeholder="Escribe o elige un punto de carga"
                 />
@@ -7394,7 +7409,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                   style={S.input}
                   value={form.destino||""}
                   onChange={aplicarEndpointText("destino", "descarga")}
-                  onBlur={()=>resolverEndpointEnFormulario("destino", "descarga")}
+                  onBlur={e=>resolverEndpointEnFormulario("destino", "descarga", e.currentTarget.value)}
                   list={descargaEndpointListId}
                   placeholder="Escribe o elige un punto de descarga"
                 />

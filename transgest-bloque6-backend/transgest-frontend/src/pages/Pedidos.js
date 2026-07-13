@@ -3779,12 +3779,35 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   return (
     <div className="tg-stop-editor">
       <style>{`
+        .tg-stop-editor { container-type:inline-size; }
         .tg-stop-editor, .tg-stop-editor * { box-sizing:border-box; min-width:0; }
         .tg-stop-editor input, .tg-stop-editor select, .tg-stop-editor textarea, .tg-stop-editor button { max-width:100%; }
+        @container (max-width: 700px) {
+          .tg-stop-add-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+          .tg-stop-add-grid > select, .tg-stop-address, .tg-stop-add-grid > [style*="grid-column:1/-1"] { grid-column:1/-1 !important; }
+          .tg-stop-card { display:grid !important; grid-template-columns:auto minmax(0,1fr) !important; align-items:start !important; }
+          .tg-stop-card-body { width:100% !important; }
+          .tg-stop-card-actions { grid-column:1/-1; justify-self:end; max-width:100%; flex-wrap:wrap; }
+          .tg-stop-footer { align-items:stretch !important; }
+          .tg-stop-footer-group { display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); flex:1 1 260px; }
+          .tg-stop-footer-group > button { width:100%; }
+        }
+        @container (max-width: 460px) {
+          .tg-stop-add-grid, .tg-stop-mini-grid { grid-template-columns:1fr !important; }
+          .tg-stop-add-grid > * { grid-column:1/-1 !important; }
+          .tg-stop-card { grid-template-columns:1fr !important; }
+          .tg-stop-card > span { display:none; }
+          .tg-stop-card-actions { grid-column:1; justify-self:stretch; justify-content:flex-end; }
+          .tg-stop-footer { display:grid !important; grid-template-columns:1fr !important; }
+          .tg-stop-footer-group { width:100%; }
+        }
         @media (max-width: 760px) {
           .tg-stop-add-grid, .tg-stop-mini-grid { grid-template-columns:1fr !important; }
-          .tg-stop-editor [draggable="true"] { align-items:flex-start !important; flex-wrap:wrap !important; }
-          .tg-stop-editor [draggable="true"] > div { flex:1 1 100% !important; }
+          .tg-stop-add-grid > * { grid-column:1/-1 !important; }
+          .tg-stop-card { align-items:flex-start !important; flex-wrap:wrap !important; }
+          .tg-stop-card-body { flex:1 1 100% !important; }
+          .tg-stop-footer { display:grid !important; grid-template-columns:1fr !important; }
+          .tg-stop-footer-group { width:100%; }
         }
       `}</style>
       <datalist id={countryListId}>
@@ -3805,6 +3828,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             const stopRegionListId = `regiones-${tipo}-${pedidoId || "nuevo"}-${i}`;
             return (
             <div
+              className="tg-stop-card"
               key={`${key}-${i}-${stopAddress(d) || d.cliente_nombre || "stop"}`}
               draggable={!disabled && stopsOrdenados.length > 1}
               onDragStart={e=>{ setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
@@ -3824,7 +3848,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               }}
             >
               <span style={{fontFamily:"monospace",fontSize:11,fontWeight:700,color:isPrimary?"var(--green)":"var(--accent)",minWidth:20}}>{i+1}</span>
-              <div style={{flex:1}}>
+              <div className="tg-stop-card-body" style={{flex:1}}>
                 <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                   <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{stopAddress(d)}</span>
                   <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:isPrimary?"var(--green)":"var(--text5)"}}>
@@ -3872,7 +3896,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 </div>
               </div>
               {!disabled && (
-                <div style={{display:"flex",gap:2,alignItems:"center"}}>
+                <div className="tg-stop-card-actions" style={{display:"flex",gap:2,alignItems:"center"}}>
                   <span title="Arrastra para reordenar" style={{color:"var(--text5)",fontSize:14,padding:"0 3px"}}>::</span>
                   <button type="button" onClick={() => moveStop(i, -1)} disabled={i===0} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===0?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Subir</button>
                   <button type="button" onClick={() => moveStop(i, 1)} disabled={i===stopsOrdenados.length-1} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===stopsOrdenados.length-1?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Bajar</button>
@@ -3920,7 +3944,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               </div>
             )}
           </div>
-          <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"minmax(220px,2fr) 150px 130px 150px",gap:8,marginBottom:8}}>
+          <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"minmax(200px,2fr) repeat(3,minmax(110px,1fr))",gap:8,marginBottom:8}}>
             {puntosFiltrados.length > 0 && (
               <select
                 style={{...inp,gridColumn:"1/-1"}}
@@ -3940,6 +3964,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               ))}
             </datalist>
             <input
+              className="tg-stop-address"
               list={puntosListId}
               style={inp}
               placeholder={tipo === "carga" ? "Poblacion o punto de carga *" : "Poblacion o punto de descarga *"}
@@ -3963,8 +3988,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             <input type="time" style={inp} value={newStop.hora} onChange={e=>setNewStop(p=>({...p,hora:e.target.value}))}/>
             <input style={inp} placeholder="Ventana" value={newStop.ventana} onChange={e=>setNewStop(p=>({...p,ventana:e.target.value}))}/>
           </div>
-          <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <div className="tg-stop-footer" style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
+            <div className="tg-stop-footer-group" style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               <button type="button" onClick={()=>setNewStopDetailsOpen(v=>!v)} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,fontWeight:800,cursor:"pointer"}}>
                 {newStopDetailsOpen ? "Ocultar detalles" : "Mas detalles"}
               </button>
@@ -3972,7 +3997,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 Guardar como punto
               </button>
             </div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            <div className="tg-stop-footer-group" style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               <button type="button" onClick={addParada} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Anadir {label}</button>
               <button type="button" onClick={()=>{ setAdding(false); resetNewStop(); }} style={{padding:"6px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
             </div>

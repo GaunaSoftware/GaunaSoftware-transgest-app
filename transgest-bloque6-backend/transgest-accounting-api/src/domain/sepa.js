@@ -119,4 +119,82 @@ function buildCreditTransferXml(input = {}) {
   return { xml, nbOfTxs, ctrlSum };
 }
 
-module.exports = { buildCreditTransferXml, amountToCents, centsToAmount, sepaText };
+// Remesa SEPA de adeudos directos (Direct Debit, pain.008.001.02).
+// El acreedor (nuestra empresa) cobra de los deudores con mandato firmado.
+function buildDirectDebitXml(input = {}) {
+  const payments = (Array.isArray(input.payments) ? input.payments : [])
+    .map((p, idx) => ({
+      endToEndId: sepaText(p.endToEndId || `E2E${idx + 1}`, 35) || `E2E${idx + 1}`,
+      cents: amountToCents(p.amount),
+      debtorName: sepaText(p.debtorName, 70) || "DEUDOR",
+      debtorIban: cleanIban(p.debtorIban),
+      debtorBic: p.debtorBic || "",
+      mandateId: sepaText(p.mandateId, 35),
+      mandateDate: String(p.mandateDate || "").slice(0, 10),
+      remittanceInfo: sepaText(p.remittanceInfo, 140),
+    }))
+    .filter(p => p.debtorIban && p.cents > 0n && p.mandateId && /^\d{4}-\d{2}-\d{2}$/.test(p.mandateDate));
+
+  if (!payments.length) {
+    const error = new Error("No hay cobros con IBAN, mandato y fecha de firma válidos para generar la remesa de adeudos");
+    error.status = 422;
+    throw error;
+  }
+
+  const creditorIban = cleanIban(input.creditorIban);
+  const creditorId = sepaText(input.creditorId, 35);
+  if (!creditorIban) { const e = new Error("La cuenta bancaria del acreedor no tiene IBAN"); e.status = 422; throw e; }
+  if (!creditorId) { const e = new Error("Falta el identificador de acreedor SEPA (creditor identifier)"); e.status = 422; throw e; }
+
+  const nbOfTxs = payments.length;
+  const ctrlCents = payments.reduce((sum, p) => sum + p.cents, 0n);
+  const ctrlSum = centsToAmount(ctrlCents);
+  const creationDateTime = input.creationDateTime || new Date().toISOString().replace(/\.\d{3}Z$/, "");
+  const messageId = sepaText(input.messageId || `DD${Date.now()}`, 35);
+  const paymentInfoId = sepaText(input.paymentInfoId || messageId, 35);
+  const collectionDate = input.requestedCollectionDate || new Date().toISOString().slice(0, 10);
+  const creditorName = sepaText(input.creditorName, 70) || "EMPRESA";
+  const sequenceType = ["FRST", "RCUR", "OOFF", "FNAL"].includes(input.sequenceType) ? input.sequenceType : "OOFF";
+
+  const txXml = payments.map(p => `
+      <DrctDbtTxInf>
+        <PmtId><EndToEndId>${xmlEscape(p.endToEndId)}</EndToEndId></PmtId>
+        <InstdAmt Ccy="EUR">${centsToAmount(p.cents)}</InstdAmt>
+        <DrctDbtTx><MndtRltdInf><MndtId>${xmlEscape(p.mandateId)}</MndtId><DtOfSgntr>${xmlEscape(p.mandateDate)}</DtOfSgntr></MndtRltdInf></DrctDbtTx>
+        <DbtrAgt>${agentXml(p.debtorBic)}</DbtrAgt>
+        <Dbtr><Nm>${xmlEscape(p.debtorName)}</Nm></Dbtr>
+        <DbtrAcct><Id><IBAN>${xmlEscape(p.debtorIban)}</IBAN></Id></DbtrAcct>
+        ${p.remittanceInfo ? `<RmtInf><Ustrd>${xmlEscape(p.remittanceInfo)}</Ustrd></RmtInf>` : ""}
+      </DrctDbtTxInf>`).join("");
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.001.02" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CstmrDrctDbtInitn>
+    <GrpHdr>
+      <MsgId>${xmlEscape(messageId)}</MsgId>
+      <CreDtTm>${xmlEscape(creationDateTime)}</CreDtTm>
+      <NbOfTxs>${nbOfTxs}</NbOfTxs>
+      <CtrlSum>${ctrlSum}</CtrlSum>
+      <InitgPty><Nm>${xmlEscape(creditorName)}</Nm></InitgPty>
+    </GrpHdr>
+    <PmtInf>
+      <PmtInfId>${xmlEscape(paymentInfoId)}</PmtInfId>
+      <PmtMtd>DD</PmtMtd>
+      <BtchBookg>true</BtchBookg>
+      <NbOfTxs>${nbOfTxs}</NbOfTxs>
+      <CtrlSum>${ctrlSum}</CtrlSum>
+      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>CORE</Cd></LclInstrm><SeqTp>${sequenceType}</SeqTp></PmtTpInf>
+      <ReqdColltnDt>${xmlEscape(collectionDate)}</ReqdColltnDt>
+      <Cdtr><Nm>${xmlEscape(creditorName)}</Nm></Cdtr>
+      <CdtrAcct><Id><IBAN>${xmlEscape(creditorIban)}</IBAN></Id></CdtrAcct>
+      <CdtrAgt>${agentXml(input.creditorBic)}</CdtrAgt>
+      <ChrgBr>SLEV</ChrgBr>
+      <CdtrSchmeId><Id><PrvtId><Othr><Id>${xmlEscape(creditorId)}</Id><SchmeNm><Prtry>SEPA</Prtry></SchmeNm></Othr></PrvtId></Id></CdtrSchmeId>${txXml}
+    </PmtInf>
+  </CstmrDrctDbtInitn>
+</Document>`;
+
+  return { xml, nbOfTxs, ctrlSum };
+}
+
+module.exports = { buildCreditTransferXml, buildDirectDebitXml, amountToCents, centsToAmount, sepaText };

@@ -32,6 +32,9 @@ import {
   downloadSepaCreditTransfer,
   getModel347,
   downloadModel347Csv,
+  getTaxModels,
+  downloadTaxModelsCsv,
+  downloadSepaDirectDebit,
   downloadTrialBalanceCsv,
   exchangeSsoToken,
   getAdvisorPackage,
@@ -648,10 +651,12 @@ export default function App() {
     notes: "",
     iban: "",
     swift_bic: "",
+    mandate_ref: "",
+    mandate_date: "",
   });
   const [partyEditAction, setPartyEditAction] = useState(null);
   const [partyStatusAction, setPartyStatusAction] = useState(null);
-  const [sepaForm, setSepaForm] = useState({ bank_account_id: "", due_before: "" });
+  const [sepaForm, setSepaForm] = useState({ bank_account_id: "", due_before: "", creditor_id: "" });
   const [maturities, setMaturities] = useState([]);
   const [maturitiesLoading, setMaturitiesLoading] = useState(false);
   const [maturitiesExporting, setMaturitiesExporting] = useState(false);
@@ -788,6 +793,7 @@ export default function App() {
   const [profitLoss, setProfitLoss] = useState(null);
   const [vatSummary, setVatSummary] = useState(null);
   const [model347, setModel347] = useState(null);
+  const [taxModels, setTaxModels] = useState(null);
   const [chartTemplates, setChartTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templateStatus, setTemplateStatus] = useState(null);
@@ -1300,22 +1306,25 @@ export default function App() {
     setReportsLoading(true);
     setReportsStatus(null);
     try {
-      const [balanceResult, profitLossResult, vatResult, model347Result] = await Promise.all([
+      const [balanceResult, profitLossResult, vatResult, model347Result, taxModelsResult] = await Promise.all([
         getBalanceSheet(nextFilters),
         getProfitLoss(nextFilters),
         getVatSummary(nextFilters),
         getModel347(nextFilters),
+        getTaxModels(nextFilters),
       ]);
       setBalanceSheet(balanceResult.data || null);
       setProfitLoss(profitLossResult.data || null);
       setVatSummary(vatResult.data || null);
       setModel347(model347Result.data || null);
+      setTaxModels(taxModelsResult.data || null);
       setReportsFilters(prev => ({ ...prev, ...nextFilters }));
     } catch (err) {
       setBalanceSheet(null);
       setProfitLoss(null);
       setVatSummary(null);
       setModel347(null);
+      setTaxModels(null);
       setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
     } finally {
       setReportsLoading(false);
@@ -2107,7 +2116,7 @@ export default function App() {
         default_account_id: partyForm.default_account_id || null,
       });
       setPartyStatus({ tone: "ok", text: `Tercero ${result.party.legal_name} creado y auditado.` });
-      setPartyForm(prev => ({ ...prev, legal_name: "", tax_id: "", email: "", phone: "", notes: "", iban: "", swift_bic: "" }));
+      setPartyForm(prev => ({ ...prev, legal_name: "", tax_id: "", email: "", phone: "", notes: "", iban: "", swift_bic: "", mandate_ref: "", mandate_date: "" }));
       await refreshParties();
     } catch (err) {
       setPartyStatus({ tone: err.status === 409 ? "warning" : "danger", text: err.message });
@@ -2128,6 +2137,8 @@ export default function App() {
       notes: party.notes || "",
       iban: party.iban || "",
       swift_bic: party.swift_bic || "",
+      mandate_ref: party.mandate_ref || "",
+      mandate_date: party.mandate_date ? String(party.mandate_date).slice(0, 10) : "",
     });
   }
 
@@ -2146,6 +2157,8 @@ export default function App() {
         notes: partyEditAction.notes,
         iban: partyEditAction.iban,
         swift_bic: partyEditAction.swift_bic,
+        mandate_ref: partyEditAction.mandate_ref,
+        mandate_date: partyEditAction.mandate_date,
       });
       setPartyStatus({ tone: "ok", text: `Tercero ${result.party.legal_name} actualizado y auditado.` });
       setPartyEditAction(null);
@@ -2191,6 +2204,28 @@ export default function App() {
       const result = await downloadSepaCreditTransfer(sepaForm.bank_account_id, { due_before: sepaForm.due_before });
       saveBlob(result.blob, result.filename || "remesa-sepa.xml");
       setMaturityStatus({ tone: "ok", text: "Remesa SEPA de pagos generada. Valida el fichero con tu banco antes de enviarlo." });
+    } catch (err) {
+      setMaturityStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setMaturitiesExporting(false);
+    }
+  }
+
+  async function handleGenerateSepaDirectDebit() {
+    if (!sepaForm.bank_account_id) {
+      setMaturityStatus({ tone: "warning", text: "Selecciona la cuenta bancaria del acreedor." });
+      return;
+    }
+    if (!sepaForm.creditor_id) {
+      setMaturityStatus({ tone: "warning", text: "Indica el identificador de acreedor SEPA para generar los adeudos." });
+      return;
+    }
+    setMaturitiesExporting(true);
+    setMaturityStatus(null);
+    try {
+      const result = await downloadSepaDirectDebit(sepaForm.bank_account_id, { due_before: sepaForm.due_before, creditor_id: sepaForm.creditor_id });
+      saveBlob(result.blob, result.filename || "remesa-adeudos-sepa.xml");
+      setMaturityStatus({ tone: "ok", text: "Remesa SEPA de adeudos generada. Valida el fichero con tu banco antes de enviarlo." });
     } catch (err) {
       setMaturityStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
     } finally {
@@ -2954,6 +2989,21 @@ export default function App() {
     }
   }
 
+  async function handleExportTaxModelsCsv() {
+    if (!reportsFilters.fiscal_year_id) return;
+    setReportsExporting(true);
+    setReportsStatus(null);
+    try {
+      const result = await downloadTaxModelsCsv(reportsFilters);
+      saveBlob(result.blob, result.filename || "modelos-fiscales.csv");
+      setReportsStatus({ tone: "ok", text: "Modelos fiscales preliminares generados y auditados." });
+    } catch (err) {
+      setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setReportsExporting(false);
+    }
+  }
+
   async function handleCreateJournalDraft(event) {
     event.preventDefault();
     setJournalStatus(null);
@@ -3416,6 +3466,8 @@ export default function App() {
                     <label><span>Cuenta por defecto</span><select value={partyForm.default_account_id} onChange={e => setPartyForm(prev => ({ ...prev, default_account_id: e.target.value }))}><option value="">Sin cuenta</option>{accounts.filter(account => account.is_postable && account.is_active).map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}</select></label>
                     <label><span>IBAN</span><input maxLength={34} value={partyForm.iban} onChange={e => setPartyForm(prev => ({ ...prev, iban: e.target.value }))} placeholder="Para remesas SEPA (opcional)" /></label>
                     <label><span>BIC/SWIFT</span><input maxLength={20} value={partyForm.swift_bic} onChange={e => setPartyForm(prev => ({ ...prev, swift_bic: e.target.value }))} placeholder="Opcional" /></label>
+                    <label><span>Ref. mandato SEPA</span><input maxLength={35} value={partyForm.mandate_ref} onChange={e => setPartyForm(prev => ({ ...prev, mandate_ref: e.target.value }))} placeholder="Para adeudos (opcional)" /></label>
+                    <label><span>Fecha firma mandato</span><input type="date" value={partyForm.mandate_date} onChange={e => setPartyForm(prev => ({ ...prev, mandate_date: e.target.value }))} /></label>
                     <button type="submit">Crear tercero</button>
                   </form>
                 )}
@@ -3452,6 +3504,8 @@ export default function App() {
                     <label><span>Cuenta por defecto</span><select value={partyEditAction.default_account_id} onChange={e => setPartyEditAction(prev => ({ ...prev, default_account_id: e.target.value }))}><option value="">Sin cuenta</option>{accounts.filter(account => account.is_postable && account.is_active).map(account => <option key={account.id} value={account.id}>{account.code} - {account.name}</option>)}</select></label>
                     <label><span>IBAN</span><input maxLength={34} value={partyEditAction.iban} onChange={e => setPartyEditAction(prev => ({ ...prev, iban: e.target.value }))} placeholder="Para remesas SEPA (opcional)" /></label>
                     <label><span>BIC/SWIFT</span><input maxLength={20} value={partyEditAction.swift_bic} onChange={e => setPartyEditAction(prev => ({ ...prev, swift_bic: e.target.value }))} placeholder="Opcional" /></label>
+                    <label><span>Ref. mandato SEPA</span><input maxLength={35} value={partyEditAction.mandate_ref} onChange={e => setPartyEditAction(prev => ({ ...prev, mandate_ref: e.target.value }))} placeholder="Para adeudos (opcional)" /></label>
+                    <label><span>Fecha firma mandato</span><input type="date" value={partyEditAction.mandate_date} onChange={e => setPartyEditAction(prev => ({ ...prev, mandate_date: e.target.value }))} /></label>
                     <div className="form-buttons"><button type="submit">Guardar cambios</button><button type="button" className="secondary" onClick={() => setPartyEditAction(null)}>Cancelar</button></div>
                   </form>
                 )}
@@ -3508,8 +3562,12 @@ export default function App() {
                   <label><span>Vencimientos hasta</span>
                     <input type="date" value={sepaForm.due_before} onChange={e => setSepaForm(prev => ({ ...prev, due_before: e.target.value }))} />
                   </label>
-                  <button type="button" disabled={maturitiesExporting || !sepaForm.bank_account_id} onClick={handleGenerateSepaRemittance}>Generar remesa de pagos (XML)</button>
-                  <span className="scope-note" style={{ flexBasis: "100%" }}>Incluye los vencimientos pagaderos pendientes cuyo tercero tenga IBAN. Valida el fichero con tu banco antes de enviarlo.</span>
+                  <label><span>Ident. acreedor SEPA (adeudos)</span>
+                    <input maxLength={35} value={sepaForm.creditor_id} onChange={e => setSepaForm(prev => ({ ...prev, creditor_id: e.target.value }))} placeholder="ES..ZZZ.. (para cobros)" />
+                  </label>
+                  <button type="button" disabled={maturitiesExporting || !sepaForm.bank_account_id} onClick={handleGenerateSepaRemittance}>Remesa de pagos (XML)</button>
+                  <button type="button" disabled={maturitiesExporting || !sepaForm.bank_account_id || !sepaForm.creditor_id} onClick={handleGenerateSepaDirectDebit}>Remesa de cobros/adeudos (XML)</button>
+                  <span className="scope-note" style={{ flexBasis: "100%" }}>Pagos: vencimientos pagaderos con IBAN del tercero. Cobros: vencimientos por cobrar con IBAN + mandato SEPA del tercero. Valida el fichero con tu banco antes de enviarlo.</span>
                 </div>
                 {canWriteMaturities && (
                   <div className="workspace-actions">
@@ -4477,6 +4535,16 @@ export default function App() {
                     : "Sin datos para el ejercicio."}{" "}
                   <button type="button" className="link-button" disabled={reportsExporting || !model347} onClick={handleExportModel347Csv}>Descargar Modelo 347 preliminar (CSV)</button>
                   <div style={{ marginTop: 4 }}>Aproximacion desde la cartera de vencimientos; no sustituye el modelo 347 oficial de la AEAT.</div>
+                </div>
+                <div className="scope-note" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
+                  <div><strong>Modelo 111</strong><div>Retenciones: {formatMoney(taxModels?.modelo_111?.retenciones || 0)} EUR</div></div>
+                  <div><strong>Modelo 115</strong><div>Retenciones: {formatMoney(taxModels?.modelo_115?.retenciones || 0)} EUR</div></div>
+                  <div><strong>Modelo 130</strong><div>Rendimiento: {formatMoney(taxModels?.modelo_130?.rendimiento || 0)} EUR</div><div>Pago fracc. (20%): {formatMoney(taxModels?.modelo_130?.pago_fraccionado_estimado || 0)} EUR</div></div>
+                  <div><strong>Modelo 390</strong><div>IVA devengado: {formatMoney(taxModels?.modelo_390?.iva_devengado || 0)} EUR</div><div>IVA deducible: {formatMoney(taxModels?.modelo_390?.iva_deducible || 0)} EUR</div><div>Resultado: {formatMoney(taxModels?.modelo_390?.resultado || 0)} EUR</div></div>
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <button type="button" className="link-button" disabled={reportsExporting || !taxModels} onClick={handleExportTaxModelsCsv}>Descargar modelos fiscales 111/115/130/390 (CSV)</button>
+                    <div style={{ marginTop: 4 }}>Preliminares desde saldos de cuentas (4751/4752, 6/7, 472/477); no sustituyen los modelos oficiales de la AEAT.</div>
+                  </div>
                 </div>
               </>
             )}

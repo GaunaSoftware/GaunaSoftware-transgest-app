@@ -479,6 +479,31 @@ export function downloadModel347Csv(filters = {}) {
   return downloadFile(`/reports/model-347?${params.toString()}`);
 }
 
+export function getTaxModels(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/reports/tax-models${suffix}`);
+}
+
+export function downloadTaxModelsCsv(filters = {}) {
+  const params = new URLSearchParams({ format: "csv" });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  return downloadFile(`/reports/tax-models?${params.toString()}`);
+}
+
+export function downloadSepaDirectDebit(bankAccountId, filters = {}) {
+  const params = new URLSearchParams({ bank_account_id: bankAccountId });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  return downloadFile(`/sepa/direct-debit?${params.toString()}`);
+}
+
 export function getAuditLog(filters = {}) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {

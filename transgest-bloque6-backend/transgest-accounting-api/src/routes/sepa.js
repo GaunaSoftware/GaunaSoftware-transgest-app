@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const config = require("../services/config");
 const db = require("../services/db");
 const { authenticate, requirePermission } = require("../middleware/auth");
-const { buildCreditTransferXml } = require("../domain/sepa");
+const { buildCreditTransferXml, buildDirectDebitXml } = require("../domain/sepa");
 
 const router = express.Router();
 
@@ -110,6 +110,94 @@ router.get("/sepa/credit-transfer", requirePermission("maturities.read"), async 
         ]
       );
 
+      return { ...built, messageId };
+    });
+
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${result.messageId}.xml"`);
+    res.send(result.xml);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /sepa/direct-debit ── Remesa SEPA de adeudos (pain.008.001.02) ──
+// Cobra de los deudores (vencimientos por cobrar) con IBAN y mandato firmado.
+// Requiere el identificador de acreedor SEPA (creditor_id). Validar con el banco.
+router.get("/sepa/direct-debit", requirePermission("maturities.read"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+
+    const bankAccountId = String(req.query.bank_account_id || "").trim();
+    if (!/^[0-9a-fA-F-]{36}$/.test(bankAccountId)) {
+      return res.status(400).json({ error: "bank_account_id es obligatorio" });
+    }
+    const creditorId = String(req.query.creditor_id || "").trim();
+    if (!creditorId) return res.status(400).json({ error: "creditor_id (identificador de acreedor SEPA) es obligatorio" });
+    const dueBefore = normalizeDate(req.query.due_before, "due_before");
+    const collectionDate = normalizeDate(req.query.collection_date, "collection_date");
+    const sequenceType = String(req.query.sequence_type || "OOFF").trim().toUpperCase();
+
+    const result = await db.transaction(async client => {
+      const company = await client.query(
+        `SELECT legal_name FROM ${q("accounting_companies")} WHERE id=$1 LIMIT 1`,
+        [selected.company_id]
+      );
+      const bank = await client.query(
+        `SELECT name, iban, swift_bic FROM ${q("accounting_bank_accounts")}
+          WHERE id=$1 AND company_id=$2 AND is_active=true LIMIT 1`,
+        [bankAccountId, selected.company_id]
+      );
+      if (!bank.rows.length) { const e = new Error("Cuenta bancaria del acreedor no encontrada o inactiva"); e.status = 404; throw e; }
+      if (!bank.rows[0].iban) { const e = new Error("La cuenta bancaria del acreedor no tiene IBAN"); e.status = 422; throw e; }
+
+      const params = [selected.company_id];
+      let dueFilter = "";
+      if (dueBefore) { params.push(dueBefore); dueFilter = `AND m.due_date <= $${params.length}`; }
+      const maturities = await client.query(
+        `SELECT m.id, m.open_amount::text AS open_amount, m.description, m.document_ref,
+                p.legal_name AS party_name, p.iban AS party_iban, p.swift_bic AS party_bic,
+                p.mandate_ref, p.mandate_date::text AS mandate_date
+           FROM ${q("accounting_maturities")} m
+           JOIN ${q("accounting_parties")} p ON p.id=m.party_id
+          WHERE m.company_id=$1 AND m.direction='receivable' AND m.status='pending'
+            AND m.open_amount > 0
+            AND p.iban IS NOT NULL AND p.iban <> ''
+            AND p.mandate_ref IS NOT NULL AND p.mandate_ref <> '' AND p.mandate_date IS NOT NULL
+            ${dueFilter}
+          ORDER BY m.due_date ASC, p.legal_name ASC`,
+        params
+      );
+
+      const messageId = `COB${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+      const built = buildDirectDebitXml({
+        messageId,
+        creditorName: company.rows[0]?.legal_name || bank.rows[0].name,
+        creditorIban: bank.rows[0].iban,
+        creditorBic: bank.rows[0].swift_bic || "",
+        creditorId,
+        requestedCollectionDate: collectionDate || undefined,
+        sequenceType,
+        payments: maturities.rows.map(row => ({
+          endToEndId: row.document_ref || String(row.id).slice(0, 35),
+          amount: row.open_amount,
+          debtorName: row.party_name,
+          debtorIban: row.party_iban,
+          debtorBic: row.party_bic || "",
+          mandateId: row.mandate_ref,
+          mandateDate: row.mandate_date,
+          remittanceInfo: row.description || row.document_ref || "",
+        })),
+      });
+
+      await client.query(
+        `INSERT INTO ${q("audit_log")}
+           (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+         VALUES ($1,$2,'user',$3,'sepa.direct_debit_generated','sepa_remittance',$4,$5,$6::jsonb)`,
+        [selected.tenant_id, selected.company_id, req.accountingUser.id, bankAccountId, req.id || null,
+         JSON.stringify({ message_id: messageId, nb_of_txs: built.nbOfTxs, ctrl_sum: built.ctrlSum })]
+      );
       return { ...built, messageId };
     });
 

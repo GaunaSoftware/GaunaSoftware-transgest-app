@@ -722,4 +722,102 @@ router.get("/reports/model-347", requirePermission("ledger.read"), async (req, r
   }
 });
 
+// ── Modelos fiscales preliminares (111, 115, 130, 390) ──────────────────────
+// Derivados de saldos de cuentas de asientos contabilizados. Preliminares:
+// no sustituyen los modelos oficiales de la AEAT.
+router.get("/reports/tax-models", requirePermission("ledger.read"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const filters = normalizeFinancialStatementQuery(req.query);
+    const params = [selected.company_id, filters.fiscal_year_id];
+    const joinFilters = ["je.id=jl.journal_entry_id", "je.status='posted'"];
+    if (filters.period_id) { params.push(filters.period_id); joinFilters.push(`je.period_id=$${params.length}`); }
+    if (filters.date_from) { params.push(filters.date_from); joinFilters.push(`je.entry_date >= $${params.length}`); }
+    if (filters.date_to) { params.push(filters.date_to); joinFilters.push(`je.entry_date <= $${params.length}`); }
+
+    const rows = await db.transaction(async client => {
+      await assertPeriodInFiscalYear(client, selected, filters.period_id, filters.fiscal_year_id);
+      const result = await client.query(
+        `SELECT a.code, a.account_type,
+                COALESCE(SUM(CASE WHEN je.id IS NOT NULL THEN jl.debit_amount ELSE 0 END), 0)::text AS total_debit,
+                COALESCE(SUM(CASE WHEN je.id IS NOT NULL THEN jl.credit_amount ELSE 0 END), 0)::text AS total_credit
+           FROM ${q("accounts")} a
+           LEFT JOIN ${q("journal_lines")} jl ON jl.account_id=a.id AND jl.company_id=a.company_id
+           LEFT JOIN ${q("journal_entries")} je ON ${joinFilters.join(" AND ")}
+          WHERE a.company_id=$1 AND a.fiscal_year_id=$2
+            AND (a.account_type IN ('income','expense')
+                 OR a.code LIKE '472%' OR a.code LIKE '477%' OR a.code LIKE '475%')
+          GROUP BY a.id`,
+        params
+      );
+      if (filters.format === "csv") {
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'ledger.tax_models_csv_exported','tax_models',$4,$5,$6::jsonb)`,
+          [selected.tenant_id, selected.company_id, req.accountingUser.id, filters.fiscal_year_id, req.id || null,
+           JSON.stringify({ fiscal_year_id: filters.fiscal_year_id, filters: compactFilters(filters) })]
+        );
+      }
+      return result.rows;
+    });
+
+    let incomeUnits = 0n, expenseUnits = 0n, devengadaUnits = 0n, deducibleUnits = 0n, ret111Units = 0n, ret115Units = 0n;
+    for (const row of rows) {
+      const debit = decimalToUnits(row.total_debit);
+      const credit = decimalToUnits(row.total_credit);
+      const code = String(row.code);
+      if (row.account_type === "income") incomeUnits += credit - debit;
+      else if (row.account_type === "expense") expenseUnits += debit - credit;
+      if (code.startsWith("477")) devengadaUnits += credit - debit;
+      else if (code.startsWith("472")) deducibleUnits += debit - credit;
+      if (code.startsWith("4751")) ret111Units += credit - debit;
+      else if (code.startsWith("4752")) ret115Units += credit - debit;
+    }
+    const resultadoUnits = incomeUnits - expenseUnits;
+    const pagoFraccUnits = resultadoUnits > 0n ? (resultadoUnits * 20n) / 100n : 0n;
+    const ivaResultUnits = devengadaUnits - deducibleUnits;
+
+    const data = {
+      modelo_390: {
+        iva_devengado: unitsToDecimal(devengadaUnits),
+        iva_deducible: unitsToDecimal(deducibleUnits),
+        resultado: unitsToDecimal(ivaResultUnits),
+      },
+      modelo_130: {
+        ingresos: unitsToDecimal(incomeUnits),
+        gastos: unitsToDecimal(expenseUnits),
+        rendimiento: unitsToDecimal(resultadoUnits),
+        pago_fraccionado_estimado: unitsToDecimal(pagoFraccUnits),
+      },
+      modelo_111: { retenciones: unitsToDecimal(ret111Units) },
+      modelo_115: { retenciones: unitsToDecimal(ret115Units) },
+      note: "Modelos preliminares derivados de saldos de cuentas (7/6, 477/472, 4751/4752). No sustituyen los modelos oficiales de la AEAT. El 390 refleja el IVA del rango seleccionado (usar el ejercicio completo).",
+    };
+
+    if (filters.format === "csv") {
+      const csvRows = [
+        { modelo: "111 Retenciones trabajo/profesionales", concepto: "Retenciones practicadas (4751)", importe: data.modelo_111.retenciones },
+        { modelo: "115 Retenciones alquileres", concepto: "Retenciones practicadas (4752)", importe: data.modelo_115.retenciones },
+        { modelo: "130 Pago fraccionado IRPF", concepto: "Rendimiento (ingresos - gastos)", importe: data.modelo_130.rendimiento },
+        { modelo: "130 Pago fraccionado IRPF", concepto: "Pago fraccionado estimado (20%)", importe: data.modelo_130.pago_fraccionado_estimado },
+        { modelo: "390 Resumen anual IVA", concepto: "IVA devengado", importe: data.modelo_390.iva_devengado },
+        { modelo: "390 Resumen anual IVA", concepto: "IVA deducible", importe: data.modelo_390.iva_deducible },
+        { modelo: "390 Resumen anual IVA", concepto: "Resultado", importe: data.modelo_390.resultado },
+      ];
+      const csv = buildCsv([
+        { key: "modelo", label: "Modelo" },
+        { key: "concepto", label: "Concepto" },
+        { key: "importe", label: "Importe" },
+      ], csvRows);
+      return sendCsv(res, `modelos-fiscales-${filters.fiscal_year_id}.csv`, csv);
+    }
+
+    res.json({ data, filters });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

@@ -34,6 +34,20 @@ function normalizeBic(value) {
   return raw;
 }
 
+function normalizeMandateRef(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (raw.length > 35) throw inputError("mandate_ref no puede superar 35 caracteres");
+  return raw;
+}
+
+function normalizeMandateDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw inputError("mandate_date debe usar formato YYYY-MM-DD");
+  return raw;
+}
+
 function normalizePartyInput(input = {}) {
   const partyType = String(input.party_type || "").trim();
   const legalName = String(input.legal_name || "").trim();
@@ -61,6 +75,8 @@ function normalizePartyInput(input = {}) {
     notes: normalizeOptionalText(input.notes, 1000, "notes"),
     iban: normalizeIban(input.iban),
     swift_bic: normalizeBic(input.swift_bic),
+    mandate_ref: normalizeMandateRef(input.mandate_ref),
+    mandate_date: normalizeMandateDate(input.mandate_date),
   };
 }
 

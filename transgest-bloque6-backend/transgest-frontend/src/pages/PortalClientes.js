@@ -823,7 +823,8 @@ export default function PortalClientes() {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 8, marginTop: 14 }}>
                     <Mini label="Carga" value={`${dateEs(p.fecha_carga)} ${p.hora_carga || ""}`.trim()} />
                     <Mini label="Descarga" value={`${dateEs(p.fecha_descarga || p.fecha_entrega)} ${p.hora_descarga || ""}`.trim()} />
-                    <Mini label="Vehiculo" value={p.vehiculo_matricula || "Pendiente"} />
+                    <Mini label="Tractora" value={p.vehiculo_matricula || p.matricula_colaborador || "Pendiente"} />
+                    <Mini label="Remolque" value={p.remolque_matricula || p.remolque_matricula_colaborador || "Pendiente"} />
                     <Mini label="Ubicacion" value={p.ubicacion_actual || p.ultima_posicion || "Pendiente de GPS"} />
                   </div>
                   <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap", alignItems:"center" }}>

@@ -667,11 +667,15 @@ router.get("/pedidos", requireCliente, async (req, res) => {
             p.fecha_descarga,p.hora_descarga,p.fecha_entrega,p.mercancia,p.peso_kg,p.bultos,
             p.estado,p.ultima_posicion,p.posicion_ts,p.notas,
             v.matricula AS vehiculo_matricula,
+            r.matricula AS remolque_matricula,
+            COALESCE(p.matricula_colaborador,'') AS matricula_colaborador,
+            COALESCE(p.remolque_matricula_colaborador,'') AS remolque_matricula_colaborador,
             COALESCE(v.ubicacion_actual, p.ultima_posicion) AS ubicacion_actual,
             v.gps_provider,
             ch.nombre AS chofer_nombre
        FROM pedidos p
        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+       LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
        LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
       WHERE p.empresa_id=$1 AND p.cliente_id=$2
       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date) DESC, p.created_at DESC
@@ -1249,7 +1253,7 @@ router.get("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
        FROM portal_solicitudes_cliente s
        LEFT JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
-       LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
+       LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
        LEFT JOIN (
          SELECT solicitud_id, empresa_id, COUNT(*) AS eventos_count, MAX(created_at) AS ultimo_evento_at
            FROM portal_solicitud_eventos
@@ -1595,6 +1599,14 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
         [eid, sol.pedido_id || null, sol.id]
       );
       if (pedidoExistente.rows[0]) {
+        const pedidoConfirmado = await client.query(
+          `UPDATE pedidos
+              SET estado='confirmado', updated_at=NOW()
+            WHERE id=$1 AND empresa_id=$2 AND estado::text='pendiente'
+            RETURNING *`,
+          [pedidoExistente.rows[0].id, eid]
+        );
+        const pedidoActual = pedidoConfirmado.rows[0] || pedidoExistente.rows[0];
         const updatedExisting = await client.query(
           `UPDATE portal_solicitudes_cliente
               SET estado='convertida',
@@ -1604,9 +1616,9 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
                   updated_at=NOW()
             WHERE id=$2 AND empresa_id=$3
             RETURNING *`,
-          [`Solicitud aceptada. Pedido ${pedidoExistente.rows[0].numero} creado.`, sol.id, eid]
+          [`Solicitud aceptada. Pedido ${pedidoActual.numero} creado.`, sol.id, eid]
         );
-        result = { status: 200, body: { ok: true, pedido: pedidoExistente.rows[0], solicitud: updatedExisting.rows[0] || sol, ya_convertida: true } };
+        result = { status: 200, body: { ok: true, pedido: pedidoActual, solicitud: updatedExisting.rows[0] || sol, ya_convertida: true } };
         return;
       }
     }
@@ -1631,9 +1643,9 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
     const inserted = await client.query(
       `INSERT INTO pedidos
         (numero,cliente_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
-         mercancia,peso_kg,bultos,importe,notas,empresa_id,referencia_cliente,fecha_descarga,hora_descarga,
+         mercancia,peso_kg,bultos,importe,notas,estado,empresa_id,referencia_cliente,fecha_descarga,hora_descarga,
          puntos_carga,puntos_descarga,pendiente_completar,aviso_completar,portal_solicitud_id)
-       VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,true,$19,$20)
+       VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,'confirmado',$13,$14,$15,$16,$17::jsonb,$18::jsonb,true,$19,$20)
        RETURNING *`,
       [
         numero,
@@ -1675,6 +1687,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
     await addSolicitudEvento(client, req, sol.id, "solicitud.convertida", {
       pedido_id: pedido.id,
       pedido_numero: pedido.numero,
+      estado_pedido: "confirmado",
       bultos_limpiados: bultosInvalidos && limpiarInvalidos,
     });
     result = { status: 201, body: { ok: true, pedido, solicitud: updated.rows[0] } };
@@ -1707,7 +1720,7 @@ router.get("/admin/solicitudes", requireGestion, asyncRoute(async (req, res) => 
        JOIN clientes c ON c.id=s.cliente_id AND c.empresa_id=s.empresa_id
        LEFT JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
-       LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
+       LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
        LEFT JOIN LATERAL (
          SELECT COUNT(*) AS eventos_count, MAX(created_at) AS ultimo_evento_at
            FROM portal_solicitud_eventos e

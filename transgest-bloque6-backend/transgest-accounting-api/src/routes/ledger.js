@@ -529,4 +529,94 @@ router.get("/reports/vat-summary", requirePermission("ledger.read"), async (req,
   }
 });
 
+// ── Libro Registro de IVA (detalle linea a linea) ───────────────────────────
+// Lista los movimientos de las cuentas 472/477 de asientos contabilizados.
+router.get("/reports/vat-book", requirePermission("ledger.read"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const filters = normalizeFinancialStatementQuery(req.query);
+    const rawType = String(req.query.type || "all").trim().toLowerCase();
+    const type = ["repercutido", "soportado", "all"].includes(rawType) ? rawType : "all";
+
+    const params = [selected.company_id, filters.fiscal_year_id];
+    const where = ["jl.company_id=$1", "je.fiscal_year_id=$2", "je.status='posted'"];
+    if (type === "repercutido") where.push("a.code LIKE '477%'");
+    else if (type === "soportado") where.push("a.code LIKE '472%'");
+    else where.push("(a.code LIKE '472%' OR a.code LIKE '477%')");
+    if (filters.period_id) { params.push(filters.period_id); where.push(`je.period_id=$${params.length}`); }
+    if (filters.date_from) { params.push(filters.date_from); where.push(`je.entry_date >= $${params.length}`); }
+    if (filters.date_to) { params.push(filters.date_to); where.push(`je.entry_date <= $${params.length}`); }
+
+    const rows = await db.transaction(async client => {
+      await assertPeriodInFiscalYear(client, selected, filters.period_id, filters.fiscal_year_id);
+      const result = await client.query(
+        `SELECT je.entry_date, je.entry_number, je.description AS entry_description,
+                a.code, a.name, jl.description AS line_description,
+                jl.debit_amount::text AS debit, jl.credit_amount::text AS credit
+           FROM ${q("journal_lines")} jl
+           JOIN ${q("journal_entries")} je ON je.id=jl.journal_entry_id
+           JOIN ${q("accounts")} a ON a.id=jl.account_id
+          WHERE ${where.join(" AND ")}
+          ORDER BY je.entry_date, je.entry_number, jl.line_number
+          LIMIT 5000`,
+        params
+      );
+      if (filters.format === "csv") {
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'ledger.vat_book_csv_exported','vat_book',$4,$5,$6::jsonb)`,
+          [selected.tenant_id, selected.company_id, req.accountingUser.id, filters.fiscal_year_id, req.id || null,
+           JSON.stringify({ fiscal_year_id: filters.fiscal_year_id, filters: compactFilters(filters), type, row_count: result.rows.length })]
+        );
+      }
+      return result.rows;
+    });
+
+    let devengadaUnits = 0n;
+    let deducibleUnits = 0n;
+    const mapped = rows.map(row => {
+      const debit = decimalToUnits(row.debit);
+      const credit = decimalToUnits(row.credit);
+      const isRepercutido = String(row.code).startsWith("477");
+      const cuotaUnits = isRepercutido ? credit - debit : debit - credit;
+      if (isRepercutido) devengadaUnits += cuotaUnits; else deducibleUnits += cuotaUnits;
+      return {
+        entry_date: row.entry_date,
+        entry_number: row.entry_number,
+        tipo: isRepercutido ? "repercutido" : "soportado",
+        code: row.code,
+        name: row.name,
+        concepto: row.line_description || row.entry_description || "",
+        cuota: unitsToDecimal(cuotaUnits),
+      };
+    });
+
+    const summary = {
+      iva_devengado: unitsToDecimal(devengadaUnits),
+      iva_deducible: unitsToDecimal(deducibleUnits),
+      resultado: unitsToDecimal(devengadaUnits - deducibleUnits),
+      row_count: mapped.length,
+    };
+
+    if (filters.format === "csv") {
+      const csv = buildCsv([
+        { key: "entry_date", label: "Fecha" },
+        { key: "entry_number", label: "Asiento" },
+        { key: "tipo", label: "Tipo" },
+        { key: "code", label: "Cuenta" },
+        { key: "name", label: "Nombre cuenta" },
+        { key: "concepto", label: "Concepto" },
+        { key: "cuota", label: "Cuota" },
+      ], mapped);
+      return sendCsv(res, `libro-iva-${filters.fiscal_year_id}.csv`, csv);
+    }
+
+    res.json({ data: mapped, summary, filters: { ...filters, type } });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

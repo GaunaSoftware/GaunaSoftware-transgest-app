@@ -28,6 +28,7 @@ import {
   downloadProfitLossCsv,
   getVatSummary,
   downloadVatSummaryCsv,
+  downloadVatBookCsv,
   downloadTrialBalanceCsv,
   exchangeSsoToken,
   getAdvisorPackage,
@@ -2794,6 +2795,21 @@ export default function App() {
     }
   }
 
+  async function handleExportVatBookCsv() {
+    if (!reportsFilters.fiscal_year_id) return;
+    setReportsExporting(true);
+    setReportsStatus(null);
+    try {
+      const result = await downloadVatBookCsv(reportsFilters);
+      saveBlob(result.blob, result.filename || "libro-iva.csv");
+      setReportsStatus({ tone: "ok", text: "Libro registro de IVA generado y auditado." });
+    } catch (err) {
+      setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setReportsExporting(false);
+    }
+  }
+
   async function handleCreateJournalDraft(event) {
     event.preventDefault();
     setJournalStatus(null);
@@ -4266,7 +4282,10 @@ export default function App() {
                     ]}
                   />
                 </div>
-                <div className="scope-note">Liquidacion de IVA preliminar calculada desde las cuentas 472 (soportado) y 477 (repercutido). No sustituye el modelo 303 oficial de la AEAT.</div>
+                <div className="scope-note">
+                  Liquidacion de IVA preliminar calculada desde las cuentas 472 (soportado) y 477 (repercutido). No sustituye el modelo 303 oficial de la AEAT.{" "}
+                  <button type="button" className="link-button" disabled={reportsExporting} onClick={handleExportVatBookCsv}>Descargar Libro registro de IVA (CSV)</button>
+                </div>
               </>
             )}
           </section>

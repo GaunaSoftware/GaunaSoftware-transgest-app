@@ -446,6 +446,14 @@ export function downloadVatSummaryCsv(filters = {}) {
   return downloadFile(`/reports/vat-summary?${params.toString()}`);
 }
 
+export function downloadVatBookCsv(filters = {}) {
+  const params = new URLSearchParams({ format: "csv" });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  return downloadFile(`/reports/vat-book?${params.toString()}`);
+}
+
 export function getAuditLog(filters = {}) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {

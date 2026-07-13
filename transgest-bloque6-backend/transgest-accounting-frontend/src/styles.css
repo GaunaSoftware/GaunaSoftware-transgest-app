@@ -652,3 +652,15 @@ dd { margin: 0; word-break: break-word; }
   .row.head { display: none; }
   .row { min-width: 0; }
 }
+
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+.link-button:disabled { color: var(--muted); cursor: default; text-decoration: none; }

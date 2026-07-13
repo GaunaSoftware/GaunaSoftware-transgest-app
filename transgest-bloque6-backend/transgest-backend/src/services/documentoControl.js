@@ -1009,7 +1009,9 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     cargador_contractual: cargador,
     transportista_efectivo: transportista,
     colaborador: esColaborador ? transportista : null,
-    transportistas_sucesivos: esColaborador ? [transportista].filter(t => hasText(t.nombre)) : [],
+    // La subcontratacion no convierte por si sola al transportista efectivo en
+    // transportista sucesivo ni justifica repetirlo en las casillas 16 y 17.
+    transportistas_sucesivos: [],
     empresa: {
       nombre: companyName(empresa),
       cif: empresa?.cif || "",

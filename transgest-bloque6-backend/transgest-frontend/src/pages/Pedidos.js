@@ -1183,6 +1183,45 @@ function parseStops(value) {
   } catch { return []; }
 }
 
+function formatPedidoListDate(value) {
+  if (!value) return "";
+  const raw = String(value).slice(0, 10);
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00`) : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? raw : parsed.toLocaleDateString("es-ES");
+}
+
+function formatPedidoListTime(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})/);
+  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : raw;
+}
+
+function pedidoStopsForList(pedido = {}, tipo = "carga") {
+  const isCarga = tipo === "carga";
+  const parsed = parseStops(isCarga ? pedido.puntos_carga : pedido.puntos_descarga);
+  const fallback = {
+    direccion: isCarga ? pedido.origen : pedido.destino,
+    fecha: isCarga ? pedido.fecha_carga : (pedido.fecha_descarga || pedido.fecha_entrega),
+    hora: isCarga ? pedido.hora_carga : pedido.hora_descarga,
+    ventana: isCarga ? pedido.ventana_carga : pedido.ventana_descarga,
+  };
+  if (!parsed.length) return [fallback];
+  return parsed.map((stop, index) => ({
+    ...stop,
+    direccion: stopAddress(stop) || (index === 0 ? fallback.direccion : ""),
+    fecha: stop.fecha || stop.fecha_carga || stop.fecha_descarga || (index === 0 ? fallback.fecha : ""),
+    hora: stop.hora || stop.hora_carga || stop.hora_descarga || (index === 0 ? fallback.hora : ""),
+    ventana: stop.ventana || stop.ventana_carga || stop.ventana_descarga || (index === 0 ? fallback.ventana : ""),
+  }));
+}
+
+function pedidoStopMeta(stop = {}) {
+  const fecha = formatPedidoListDate(stop.fecha);
+  const hora = formatPedidoListTime(stop.hora);
+  const ventana = String(stop.ventana || "").trim();
+  return [fecha, hora, ventana ? `Ventana ${ventana}` : ""].filter(Boolean).join(" | ");
+}
+
 function normalizeStopsForCopy(stops, fallbackAddress = "", tipo = "carga") {
   const parsed = parseStops(stops)
     .map((stop, idx) => {
@@ -10603,6 +10642,12 @@ export default function Pedidos() {
                 );
               }
               const { pedido: p, priorityMeta } = entry;
+              const cargasPedido = pedidoStopsForList(p, "carga");
+              const descargasPedido = pedidoStopsForList(p, "descarga");
+              const cargaPrincipal = cargasPedido[0] || {};
+              const descargaPrincipal = descargasPedido[0] || {};
+              const cargasAdicionales = cargasPedido.slice(1);
+              const descargasAdicionales = descargasPedido.slice(1);
               const estadoRow = String(p.estado || "").toLowerCase();
               const estadoBackground =
                 estadoRow === "en_curso" ? "rgba(34,211,238,.12)" :
@@ -10682,11 +10727,35 @@ export default function Pedidos() {
                   )}
                 </td>
                 <td style={{...S.td,fontWeight:600,fontSize:12}}>{p.cliente_nombre||"-"}</td>
-                <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>{p.origen&&p.destino?`${p.origen} -> ${p.destino}`:"-"}</td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"-"}</td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.hora_carga||"-"}</td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.fecha_descarga?new Date(p.fecha_descarga).toLocaleDateString("es-ES"):"-"}</td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.hora_descarga||"-"}</td>
+                <td style={{...S.td,fontSize:12,color:"var(--text2)",minWidth:190}}>
+                  <div>{p.origen&&p.destino?`${p.origen} -> ${p.destino}`:"-"}</div>
+                  {(cargasAdicionales.length > 0 || descargasAdicionales.length > 0) && (
+                    <div style={{display:"grid",gap:3,marginTop:6,paddingTop:6,borderTop:"1px solid var(--border)"}}>
+                      {cargasAdicionales.map((stop, index) => (
+                        <div key={`carga-${index}-${stop.direccion || "parada"}`} style={{fontSize:10,lineHeight:1.35,color:"var(--text4)"}}>
+                          <strong style={{color:"#0f9f95"}}>Carga {index + 2}:</strong> {stop.direccion || "Sin poblacion"}
+                          {pedidoStopMeta(stop) && <div style={{color:"var(--text5)"}}>{pedidoStopMeta(stop)}</div>}
+                        </div>
+                      ))}
+                      {descargasAdicionales.map((stop, index) => (
+                        <div key={`descarga-${index}-${stop.direccion || "parada"}`} style={{fontSize:10,lineHeight:1.35,color:"var(--text4)"}}>
+                          <strong style={{color:"#f59e0b"}}>Descarga {index + 2}:</strong> {stop.direccion || "Sin poblacion"}
+                          {pedidoStopMeta(stop) && <div style={{color:"var(--text5)"}}>{pedidoStopMeta(stop)}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </td>
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{formatPedidoListDate(cargaPrincipal.fecha)||"-"}</td>
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>
+                  <div>{formatPedidoListTime(cargaPrincipal.hora)||"-"}</div>
+                  {cargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:3,fontFamily:"'DM Sans',sans-serif"}}>Ventana {cargaPrincipal.ventana}</div>}
+                </td>
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{formatPedidoListDate(descargaPrincipal.fecha)||"-"}</td>
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>
+                  <div>{formatPedidoListTime(descargaPrincipal.hora)||"-"}</div>
+                  {descargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:3,fontFamily:"'DM Sans',sans-serif"}}>Ventana {descargaPrincipal.ventana}</div>}
+                </td>
                 <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>
                   {p.colaborador_id ? (
                     <div>

@@ -812,12 +812,16 @@ async function ensurePasswordResetRequestsSchema() {
   `).catch(() => {});
 }
 
+const SUPERADMIN_DUMMY_HASH = bcrypt.hashSync("superadmin-invalid-login-probe", 12);
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: "Email y contraseña requeridos" });
   try {
     const { rows } = await db.query("SELECT * FROM superadmins WHERE email=$1 AND activo=true", [email]);
-    if (!rows[0]) return res.status(401).json({ error: "Credenciales incorrectas" });
+    if (!rows[0]) {
+      await bcrypt.compare(password, SUPERADMIN_DUMMY_HASH);
+      return res.status(401).json({ error: "Credenciales incorrectas" });
+    }
     const valid = await bcrypt.compare(password, rows[0].password_hash);
     if (!valid) return res.status(401).json({ error: "Credenciales incorrectas" });
     const token = jwt.sign({ superadmin: true, id: rows[0].id, email, rol: rows[0].rol || "superadmin" }, superadminJwtSecret(), { expiresIn: "4h" });

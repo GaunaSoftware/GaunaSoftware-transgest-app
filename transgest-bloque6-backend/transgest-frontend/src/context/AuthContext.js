@@ -56,8 +56,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   // Guards de rol
-  const puedeVer    = (modulo) => checkPermiso(user, modulo, "ver");
-  const puedeEditar = (modulo) => checkPermiso(user, modulo, "editar");
+  const puedeVer = useCallback((modulo) => checkPermiso(user, modulo, "ver"), [user]);
+  const puedeEditar = useCallback((modulo) => checkPermiso(user, modulo, "editar"), [user]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, puedeVer, puedeEditar }}>

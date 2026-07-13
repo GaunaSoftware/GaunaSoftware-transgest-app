@@ -1459,7 +1459,7 @@ function PasswordChangeRequired({ user, onChanged, onLogout }) {
 }
 
 function AppInner() {
-  const { user, loading, refreshUser, logout } = useAuth();
+  const { user, loading, refreshUser, logout, puedeVer } = useAuth();
   const [vista, setVista] = useState(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [avisosCriticos,   setAvisosCriticos]   = useState(0);
@@ -1548,6 +1548,7 @@ function AppInner() {
     if (isChoferAppOnly) return;
     // Badges: defer 3s so dashboard renders first, then load in background
     function calcTallerBadge() {
+      if (!puedeVer("taller")) return Promise.resolve(0);
       getTallerEstado().then(t => {
         const solicitudes = Array.isArray(t?.solicitudes_mecanico) ? t.solicitudes_mecanico : [];
         const tareas = Array.isArray(t?.tareas_mecanicos) ? t.tareas_mecanicos : [];
@@ -1562,6 +1563,11 @@ function AppInner() {
       }).catch(()=>{});
     }
     function calcNotificacionesBadge(extraAvisos = null) {
+      if (!puedeVer("avisos")) {
+        setNotificacionesNoLeidas(0);
+        setAvisosCriticos(0);
+        return Promise.resolve(0);
+      }
       return getNotificaciones(20)
         .then(d => {
           const noLeidas = Number(d?.no_leidas || 0);
@@ -1572,7 +1578,7 @@ function AppInner() {
         .catch(() => 0);
     }
     function calcColaboradoresBadge() {
-      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol)) return Promise.resolve(0);
+      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol) || !puedeVer("colaboradores")) return Promise.resolve(0);
       return getColaboradoresPendientesRevision()
         .then(d => {
           const count = Number(d?.count || 0);
@@ -1582,7 +1588,7 @@ function AppInner() {
         .catch(() => 0);
     }
     function calcAvisosOperativosColaboradores() {
-      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol)) return Promise.resolve({ items: [], resumen: {} });
+      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol) || !puedeVer("avisos")) return Promise.resolve({ items: [], resumen: {} });
       return getAvisosOperativosColaboradores()
         .then(d => {
           const next = d && Array.isArray(d.items) ? d : { items: [], resumen: {} };
@@ -1595,7 +1601,7 @@ function AppInner() {
         .catch(() => ({ items: [], resumen: {} }));
     }
     function calcStartupTasks() {
-      if (!["gerente","trafico","administrativo","contable","responsable_taller"].includes(user?.rol)) return Promise.resolve(null);
+      if (!["gerente","trafico","administrativo","contable","responsable_taller"].includes(user?.rol) || !puedeVer("agenda")) return Promise.resolve(null);
       const key = `tms_startup_tasks_seen_${user?.empresa_id || "empresa"}_${user?.id || "user"}_${dateKey(new Date())}`;
       try {
         if (window.sessionStorage.getItem(key) === "1") return Promise.resolve(null);
@@ -1624,7 +1630,7 @@ function AppInner() {
         .catch(() => null);
     }
     function calcSolicitudesBadge() {
-      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol)) return Promise.resolve(0);
+      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol) || !puedeVer("solicitudes")) return Promise.resolve(0);
       return getPortalSolicitudesAdmin({ estado:"pendiente" })
         .then(d => {
           const count = Array.isArray(d) ? d.length : 0;
@@ -1633,8 +1639,8 @@ function AppInner() {
         })
         .catch(() => 0);
     }
-    const puedeVerBadgeTaller = ["gerente","contable","responsable_taller","trafico"].includes(user?.rol);
-    const puedeVerAlertasVehiculos = ["gerente","trafico","responsable_taller","contable"].includes(user?.rol);
+    const puedeVerBadgeTaller = ["gerente","contable","responsable_taller","trafico"].includes(user?.rol) && puedeVer("taller");
+    const puedeVerAlertasVehiculos = ["gerente","trafico","responsable_taller","contable"].includes(user?.rol) && puedeVer("vehiculos");
     calcNotificacionesBadge();
     const notifRefresh = () => calcNotificacionesBadge();
     const solicitudesRefresh = () => calcSolicitudesBadge();
@@ -1659,7 +1665,7 @@ function AppInner() {
     const badgeTimer = setTimeout(() => {
       // Single combined fetch for alertas (docs + vehiculos)
       Promise.all([
-        getDocsProximosVencer().catch(()=>[]),
+        puedeVer("documentos") ? getDocsProximosVencer().catch(()=>[]) : Promise.resolve([]),
         puedeVerAlertasVehiculos ? getAlertasDocVehiculos().catch(()=>[]) : Promise.resolve([]),
       ]).then(([docs, alertasVeh]) => {
         const docsCount = Array.isArray(docs)
@@ -1671,10 +1677,12 @@ function AppInner() {
       }).catch(()=>{});
 
       // Clientes pendientes (solo gerente/contable)
-      if (["gerente","contable"].includes(user?.rol)) {
+      if (["gerente","contable"].includes(user?.rol) && puedeVer("clientes")) {
         getClientesPendientesRevision()
           .then(d => setClientesPendientes(d?.count || 0))
           .catch(() => {});
+      }
+      if (["gerente","contable"].includes(user?.rol) && puedeVer("excepciones")) {
         getExcepcionesOperativas()
           .then(d => setExcepcionesPendientes(Number(d?.resumen?.critica || 0) + Number(d?.resumen?.alta || 0)))
           .catch(() => {});
@@ -1694,9 +1702,11 @@ function AppInner() {
       calcSolicitudesBadge();
       calcColaboradoresBadge();
       calcAvisosOperativosColaboradores();
-      if (["gerente","contable"].includes(user?.rol)) {
+      if (["gerente","contable"].includes(user?.rol) && puedeVer("clientes")) {
         getClientesPendientesRevision()
           .then(d => setClientesPendientes(d?.count || 0)).catch(()=>{});
+      }
+      if (["gerente","contable"].includes(user?.rol) && puedeVer("excepciones")) {
         getExcepcionesOperativas()
           .then(d => setExcepcionesPendientes(Number(d?.resumen?.critica || 0) + Number(d?.resumen?.alta || 0)))
           .catch(()=>{});
@@ -1714,7 +1724,7 @@ function AppInner() {
       if (tallerIv) clearInterval(tallerIv);
       clearInterval(refreshIv);
     };
-  }, [user]);
+  }, [user, puedeVer]);
 
   useEffect(() => {
     if (!user) {

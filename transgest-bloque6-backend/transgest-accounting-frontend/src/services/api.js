@@ -462,6 +462,23 @@ export function downloadSepaCreditTransfer(bankAccountId, filters = {}) {
   return downloadFile(`/sepa/credit-transfer?${params.toString()}`);
 }
 
+export function getModel347(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch(`/reports/model-347${suffix}`);
+}
+
+export function downloadModel347Csv(filters = {}) {
+  const params = new URLSearchParams({ format: "csv" });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
+  });
+  return downloadFile(`/reports/model-347?${params.toString()}`);
+}
+
 export function getAuditLog(filters = {}) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {

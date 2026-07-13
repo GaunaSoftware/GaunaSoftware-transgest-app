@@ -619,4 +619,107 @@ router.get("/reports/vat-book", requirePermission("ledger.read"), async (req, re
   }
 });
 
+// ── Modelo 347 preliminar (operaciones con terceros > 3.005,06 €) ───────────
+// Derivado de los vencimientos (accounting_maturities) agrupados por tercero,
+// direccion (ventas/compras) y trimestre. Aproximacion: el 347 oficial parte
+// de facturas; aqui usamos los importes de cartera. No sustituye el modelo AEAT.
+const MODELO_347_UMBRAL_UNITS = 3005060000n; // 3.005,06 € en micro-unidades
+
+router.get("/reports/model-347", requirePermission("ledger.read"), async (req, res, next) => {
+  try {
+    const selected = selectedContext(req);
+    if (!selected) return res.status(403).json({ error: "Empresa contable no autorizada" });
+    const filters = normalizeFinancialStatementQuery(req.query);
+
+    const result = await db.transaction(async client => {
+      const fy = await client.query(
+        `SELECT year_label, start_date, end_date FROM ${q("fiscal_years")} WHERE id=$1 AND company_id=$2 LIMIT 1`,
+        [filters.fiscal_year_id, selected.company_id]
+      );
+      if (!fy.rows.length) throw httpError("Ejercicio no encontrado para la empresa seleccionada", 404);
+      const start = filters.date_from || String(fy.rows[0].start_date).slice(0, 10);
+      const end = filters.date_to || String(fy.rows[0].end_date).slice(0, 10);
+
+      const rows = await client.query(
+        `SELECT p.id AS party_id, p.legal_name, p.tax_id, m.direction,
+                EXTRACT(QUARTER FROM COALESCE(m.issue_date, m.due_date))::int AS quarter,
+                SUM(m.amount)::text AS total
+           FROM ${q("accounting_maturities")} m
+           JOIN ${q("accounting_parties")} p ON p.id=m.party_id
+          WHERE m.company_id=$1 AND m.status <> 'cancelled'
+            AND COALESCE(m.issue_date, m.due_date) BETWEEN $2 AND $3
+          GROUP BY p.id, p.legal_name, p.tax_id, m.direction, quarter`,
+        [selected.company_id, start, end]
+      );
+      if (filters.format === "csv") {
+        await client.query(
+          `INSERT INTO ${q("audit_log")}
+             (tenant_id, company_id, actor_type, actor_id, action, entity_type, entity_id, request_id, detail)
+           VALUES ($1,$2,'user',$3,'ledger.model_347_csv_exported','model_347',$4,$5,$6::jsonb)`,
+          [selected.tenant_id, selected.company_id, req.accountingUser.id, filters.fiscal_year_id, req.id || null,
+           JSON.stringify({ fiscal_year_id: filters.fiscal_year_id, start, end, row_count: rows.rows.length })]
+        );
+      }
+      return { year_label: fy.rows[0].year_label, start, end, rows: rows.rows };
+    });
+
+    const byParty = new Map();
+    for (const row of result.rows) {
+      const key = `${row.party_id}|${row.direction}`;
+      if (!byParty.has(key)) {
+        byParty.set(key, { party_name: row.legal_name, tax_id: row.tax_id || "", direction: row.direction, q: [0n, 0n, 0n, 0n], totalUnits: 0n });
+      }
+      const entry = byParty.get(key);
+      const units = decimalToUnits(row.total);
+      const qIdx = Math.min(Math.max(Number(row.quarter) || 1, 1), 4) - 1;
+      entry.q[qIdx] += units;
+      entry.totalUnits += units;
+    }
+
+    const toRow = entry => ({
+      party_name: entry.party_name,
+      tax_id: entry.tax_id,
+      q1: unitsToDecimal(entry.q[0]),
+      q2: unitsToDecimal(entry.q[1]),
+      q3: unitsToDecimal(entry.q[2]),
+      q4: unitsToDecimal(entry.q[3]),
+      total: unitsToDecimal(entry.totalUnits),
+    });
+    const declarables = [...byParty.values()].filter(e => e.totalUnits > MODELO_347_UMBRAL_UNITS);
+    const ventas = declarables.filter(e => e.direction === "receivable").sort((a, b) => a.party_name.localeCompare(b.party_name));
+    const compras = declarables.filter(e => e.direction === "payable").sort((a, b) => a.party_name.localeCompare(b.party_name));
+    const sum = list => unitsToDecimal(list.reduce((acc, e) => acc + e.totalUnits, 0n));
+
+    const data = {
+      year_label: result.year_label,
+      umbral: "3005.06",
+      ventas: { rows: ventas.map(toRow), total: sum(ventas), count: ventas.length },
+      compras: { rows: compras.map(toRow), total: sum(compras), count: compras.length },
+      note: "Modelo 347 preliminar derivado de la cartera de vencimientos (no de facturas). No sustituye el modelo 347 oficial de la AEAT.",
+    };
+
+    if (filters.format === "csv") {
+      const csvRows = [
+        ...data.ventas.rows.map(r => ({ bloque: "Ventas/ingresos", ...r })),
+        ...data.compras.rows.map(r => ({ bloque: "Compras/gastos", ...r })),
+      ];
+      const csv = buildCsv([
+        { key: "bloque", label: "Bloque" },
+        { key: "party_name", label: "Tercero" },
+        { key: "tax_id", label: "NIF/CIF" },
+        { key: "q1", label: "1T" },
+        { key: "q2", label: "2T" },
+        { key: "q3", label: "3T" },
+        { key: "q4", label: "4T" },
+        { key: "total", label: "Total anual" },
+      ], csvRows);
+      return sendCsv(res, `modelo-347-${filters.fiscal_year_id}.csv`, csv);
+    }
+
+    res.json({ data, filters });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

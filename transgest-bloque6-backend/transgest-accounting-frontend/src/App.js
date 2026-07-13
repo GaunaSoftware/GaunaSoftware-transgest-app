@@ -30,6 +30,8 @@ import {
   downloadVatSummaryCsv,
   downloadVatBookCsv,
   downloadSepaCreditTransfer,
+  getModel347,
+  downloadModel347Csv,
   downloadTrialBalanceCsv,
   exchangeSsoToken,
   getAdvisorPackage,
@@ -785,6 +787,7 @@ export default function App() {
   const [balanceSheet, setBalanceSheet] = useState(null);
   const [profitLoss, setProfitLoss] = useState(null);
   const [vatSummary, setVatSummary] = useState(null);
+  const [model347, setModel347] = useState(null);
   const [chartTemplates, setChartTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templateStatus, setTemplateStatus] = useState(null);
@@ -1297,19 +1300,22 @@ export default function App() {
     setReportsLoading(true);
     setReportsStatus(null);
     try {
-      const [balanceResult, profitLossResult, vatResult] = await Promise.all([
+      const [balanceResult, profitLossResult, vatResult, model347Result] = await Promise.all([
         getBalanceSheet(nextFilters),
         getProfitLoss(nextFilters),
         getVatSummary(nextFilters),
+        getModel347(nextFilters),
       ]);
       setBalanceSheet(balanceResult.data || null);
       setProfitLoss(profitLossResult.data || null);
       setVatSummary(vatResult.data || null);
+      setModel347(model347Result.data || null);
       setReportsFilters(prev => ({ ...prev, ...nextFilters }));
     } catch (err) {
       setBalanceSheet(null);
       setProfitLoss(null);
       setVatSummary(null);
+      setModel347(null);
       setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
     } finally {
       setReportsLoading(false);
@@ -2933,6 +2939,21 @@ export default function App() {
     }
   }
 
+  async function handleExportModel347Csv() {
+    if (!reportsFilters.fiscal_year_id) return;
+    setReportsExporting(true);
+    setReportsStatus(null);
+    try {
+      const result = await downloadModel347Csv(reportsFilters);
+      saveBlob(result.blob, result.filename || "modelo-347.csv");
+      setReportsStatus({ tone: "ok", text: "Modelo 347 preliminar generado y auditado." });
+    } catch (err) {
+      setReportsStatus({ tone: err.status === 403 ? "danger" : "warning", text: err.message });
+    } finally {
+      setReportsExporting(false);
+    }
+  }
+
   async function handleCreateJournalDraft(event) {
     event.preventDefault();
     setJournalStatus(null);
@@ -4448,6 +4469,14 @@ export default function App() {
                 <div className="scope-note">
                   Liquidacion de IVA preliminar calculada desde las cuentas 472 (soportado) y 477 (repercutido). No sustituye el modelo 303 oficial de la AEAT.{" "}
                   <button type="button" className="link-button" disabled={reportsExporting} onClick={handleExportVatBookCsv}>Descargar Libro registro de IVA (CSV)</button>
+                </div>
+                <div className="scope-note">
+                  <strong>Modelo 347 preliminar{model347?.year_label ? ` (${model347.year_label})` : ""}:</strong>{" "}
+                  {model347
+                    ? `${model347.ventas.count} tercero(s) en ventas/ingresos y ${model347.compras.count} en compras/gastos superan 3.005,06 EUR.`
+                    : "Sin datos para el ejercicio."}{" "}
+                  <button type="button" className="link-button" disabled={reportsExporting || !model347} onClick={handleExportModel347Csv}>Descargar Modelo 347 preliminar (CSV)</button>
+                  <div style={{ marginTop: 4 }}>Aproximacion desde la cartera de vencimientos; no sustituye el modelo 347 oficial de la AEAT.</div>
                 </div>
               </>
             )}

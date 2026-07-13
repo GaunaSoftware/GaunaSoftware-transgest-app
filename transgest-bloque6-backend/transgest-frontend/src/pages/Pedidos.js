@@ -91,7 +91,8 @@ function mergeResolvedGeo(draft = {}, geo = {}, fallbackCountry = "EspaÃ±a") {
     ...draft,
     ciudad: draft.ciudad || geo.municipio || geo.city || "",
     pais,
-    provincia: geo.provincia || geo.region || geo.state || draft.provincia || "",
+    // La provincia escrita o corregida por el usuario siempre prevalece.
+    provincia: draft.provincia || geo.provincia || geo.region || geo.state || "",
     lat: draft.lat ?? draft.latitud ?? geo.lat ?? null,
     lng: draft.lng ?? draft.longitud ?? geo.lng ?? null,
   };
@@ -685,7 +686,7 @@ const S = {
   input:{background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box"},
   sel:{background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 14px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",width:"100%",boxSizing:"border-box"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
-  mbox:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:"clamp(14px,3vw,28px)",width:"100%",maxWidth:720,boxSizing:"border-box",maxHeight:"92vh",overflowY:"auto",overflowX:"hidden",position:"relative"},
+  mbox:{background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border2)",borderRadius:8,padding:"clamp(14px,3vw,28px)",width:"100%",maxWidth:720,boxSizing:"border-box",maxHeight:"92vh",overflowY:"auto",overflowX:"hidden",overflowAnchor:"none",position:"relative"},
   label:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:5,marginTop:12},
   sec:{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent)",marginTop:20,marginBottom:8,paddingBottom:6,borderBottom:"1px solid var(--border)"},
 };
@@ -3044,22 +3045,40 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
 
 function PuntoInteresModal({ initial, onClose, onSave }) {
   const initialPoint = normalizePuntoInteresForForm(initial || {});
+  const geoRequestRef = React.useRef(0);
   function inferPuntoGeoDraft(draft = {}) {
     const inferred = inferPlaceGeo(draft, draft.ciudad, draft.direccion, draft.nombre);
     if (!inferred) return draft;
     return {
       ...draft,
       pais: draft.pais || canonicalCountry(inferred.pais || "España") || "España",
-      provincia: inferred.provincia || draft.provincia || "",
+      provincia: draft.provincia || inferred.provincia || "",
       ciudad: draft.ciudad || inferred.municipio || "",
       lat: draft.lat || inferred.lat || "",
       lng: draft.lng || inferred.lng || "",
     };
   }
   async function completarPuntoGeo(draft = form) {
+    const requestId = geoRequestRef.current + 1;
+    geoRequestRef.current = requestId;
     const next = await resolveGeoDraft(draft, draft.pais || "EspaÃ±a", draft.ciudad, draft.direccion, draft.nombre);
-    setForm(next);
-    return next;
+    let merged = next;
+    setForm(current => {
+      if (requestId !== geoRequestRef.current) {
+        merged = current;
+        return current;
+      }
+      merged = {
+        ...current,
+        ciudad: current.ciudad || next.ciudad || "",
+        pais: current.pais || next.pais || "España",
+        provincia: current.provincia || next.provincia || "",
+        lat: current.lat || next.lat || "",
+        lng: current.lng || next.lng || "",
+      };
+      return merged;
+    });
+    return merged;
   }
   const [form, setForm] = useState(() => ({
     id: initialPoint.id || "",
@@ -6050,6 +6069,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""}))
       : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
   );
+  const [mapPedidoDraft, setMapPedidoDraft] = useState(() => form);
   const [saving,     setSaving]     = useState(false);
   const [nombreBusqueda, setNombreBusqueda]= useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -6091,6 +6111,11 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     setShowCostes(!!(nextForm.coste_gasoil || nextForm.coste_peajes || nextForm.coste_dietas || nextForm.coste_otros));
     initialFormRef.current = JSON.stringify(nextForm);
   }, [editando]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMapPedidoDraft(form), 550);
+    return () => window.clearTimeout(timer);
+  }, [form]);
 
   useEffect(() => {
     if (!guidedActive || typeof onGuidedProgress !== "function") return;
@@ -7125,7 +7150,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
             )}
 
             <PedidoIncidenciaPanel pedido={form || editando} />
-            <PedidoMapaOperativo pedido={form || editando} choferPasos={choferPasosMapa} />
+            <PedidoMapaOperativo pedido={mapPedidoDraft || editando} choferPasos={choferPasosMapa} />
 
             <div style={S.sec}>Cliente y ruta</div>
             <div className="tg-pedido-form-grid-2">

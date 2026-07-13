@@ -1674,4 +1674,49 @@ r1.patch("/:id/km", GERENTE_TRAFICO_O_CHOFER, async (req, res) => {
   }
 });
 
+
+// -- Poller automatico de posiciones (solo proveedores pull: Movildata) ------
+// Desactivado por defecto. Se activa con GPS_POLL_INTERVAL_MIN=<minutos>.
+let gpsPollTimer = null;
+async function pollMovildataCompanies() {
+  const logger = require("../services/logger");
+  let empresas = [];
+  try {
+    const { rows } = await db.query(
+      `SELECT c.empresa_id
+         FROM empresa_api_configs c
+         JOIN empresas e ON e.id=c.empresa_id
+        WHERE c.provider='movildata' AND c.activo=true AND e.estado='activo'`
+    );
+    empresas = rows;
+  } catch (e) {
+    logger.warn("GPS poll: no se pudieron listar empresas Movildata: " + e.message);
+    return;
+  }
+  for (const row of empresas) {
+    try {
+      const resolved = await resolveApiKey(row.empresa_id, "movildata");
+      if (!resolved.key) continue;
+      await syncMovildataPositions(row.empresa_id, resolved.key);
+      await recordApiUsage(row.empresa_id, "movildata", 1).catch(() => {});
+    } catch (e) {
+      logger.debug("GPS poll Movildata empresa " + row.empresa_id + ": " + e.message);
+    }
+  }
+}
+function startGpsScheduler() {
+  const logger = require("../services/logger");
+  const minutes = Number(process.env.GPS_POLL_INTERVAL_MIN || 0);
+  if (!Number.isFinite(minutes) || minutes < 1) {
+    logger.info("GPS poller desactivado (define GPS_POLL_INTERVAL_MIN para activarlo).");
+    return;
+  }
+  if (gpsPollTimer) clearInterval(gpsPollTimer);
+  gpsPollTimer = setInterval(() => {
+    pollMovildataCompanies().catch(e => require("../services/logger").warn("GPS poll: " + e.message));
+  }, minutes * 60 * 1000);
+  logger.info("GPS poller activo cada " + minutes + " min (Movildata).");
+}
+r1.startGpsScheduler = startGpsScheduler;
+
 module.exports = r1;

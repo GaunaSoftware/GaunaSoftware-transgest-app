@@ -2197,6 +2197,7 @@ function IntegracionesAdmin({ saFetchFn }) {
           </div>
         </div>
 
+        {gpsProvider === "movildata" ? (<div style={{display:"block",marginTop:12,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12,fontSize:12,color:"#94a3b8",lineHeight:1.5}}><b style={{color:"#e2e8f0"}}>Sin webhook (proveedor pull).</b> Movildata no envia posiciones por webhook: TransGest las consulta a su API (pull), con el boton Sincronizar de la ficha de vehiculos o con el poller automatico (variable GPS_POLL_INTERVAL_MIN).</div>) : (
         <div style={{display:"block",marginTop:12,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
             <div>
@@ -2222,6 +2223,7 @@ function IntegracionesAdmin({ saFetchFn }) {
             </div>
           )}
         </div>
+        )}
         {testMsg && (
           <div style={{
             marginTop:10,

@@ -1254,6 +1254,7 @@ async function startServer() {
     try { fiscalScheduler.startScheduler(); } catch (e) { logger.warn("Fiscal: " + e.message); }
     try { pedidosRoutes.startAlbaranesReminderScheduler?.(); } catch (e) { logger.warn("Albaranes: " + e.message); }
     try { billingReminders.startScheduler(); } catch (e) { logger.warn("Billing: " + e.message); }
+    try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
   });
   } catch (e) {
     logger.error("Startup abortado: " + e.message);

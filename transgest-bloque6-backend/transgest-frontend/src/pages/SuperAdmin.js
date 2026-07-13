@@ -690,7 +690,7 @@ function IntegracionesAdmin({ saFetchFn }) {
       api_key: "",
       limite_mensual: cfgEmpresa?.limite_mensual || 0,
     });
-  }, [cfgEmpresa?.empresa_id, cfgEmpresa?.provider, cfgEmpresa?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [empresaId, provider, cfgEmpresa?.empresa_id, cfgEmpresa?.provider, cfgEmpresa?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (gpsForm.api_key) return;
     if (gpsActivoEmpresa && gpsActivoEmpresa !== gpsProvider) setGpsProvider(gpsActivoEmpresa);
@@ -705,7 +705,7 @@ function IntegracionesAdmin({ saFetchFn }) {
       api_key: "",
       limite_mensual: cfgGpsLimite,
     });
-  }, [cfgGpsEmpresaId, cfgGpsProvider, cfgGpsUseGlobal, cfgGpsLimite, cfgGpsUpdatedAt]);
+  }, [empresaId, gpsProvider, cfgGpsEmpresaId, cfgGpsProvider, cfgGpsUseGlobal, cfgGpsLimite, cfgGpsUpdatedAt]);
   useEffect(() => {
     setFiscalTestMsg(null);
     setFiscalQueueSummary(null);

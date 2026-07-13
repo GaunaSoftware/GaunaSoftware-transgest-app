@@ -10449,11 +10449,11 @@ export default function Pedidos() {
             <th style={{...S.th,width:42}}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
             </th>
-            {["N. Pedido","Cliente","Origen -> Destino","F. Carga","H. Carga","F. Descarga","Vehiculo","Estado","Importe","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}
+            {["N. Pedido","Cliente","Origen -> Destino","F. Carga","H. Carga","F. Descarga","H. Descarga","Vehiculo","Estado","Importe","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}
           </tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
-            : loadError ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",padding:26}}>
+            {loading ? <tr><td colSpan={12} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
+            : loadError ? <tr><td colSpan={12} style={{...S.td,textAlign:"center",padding:26}}>
               <div style={{display:"grid",justifyItems:"center",gap:9}}>
                 <div style={{fontSize:13,fontWeight:900,color:"#ef4444"}}>No se pudieron cargar los viajes.</div>
                 <div style={{fontSize:12,color:"var(--text4)",maxWidth:520,lineHeight:1.45}}>
@@ -10468,7 +10468,7 @@ export default function Pedidos() {
                 </button>
               </div>
             </td></tr>
-            : pedidosVisibles.length===0 ? <tr><td colSpan={11} style={{...S.td,textAlign:"center",color:"var(--text4)",padding:26}}>
+            : pedidosVisibles.length===0 ? <tr><td colSpan={12} style={{...S.td,textAlign:"center",color:"var(--text4)",padding:26}}>
               {soloCriticos ? "No hay pedidos criticos con los filtros actuales." : (
                 <div style={{display:"grid",justifyItems:"center",gap:8}}>
                   <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>No hay viajes disponibles con los filtros actuales.</div>
@@ -10491,7 +10491,7 @@ export default function Pedidos() {
                 const isWeek = entry.type === "week";
                 return (
                   <tr key={`group-${entry.key}`} style={{background:isMonth ? "var(--bg4)" : isWeek ? "var(--bg3)" : "var(--bg2)"}}>
-                    <td colSpan={11} style={{...S.td,padding:isMonth ? "16px 18px" : isWeek ? "19px 22px" : "12px 18px 12px 56px",borderTop:(isMonth || isWeek) ? "1px solid var(--border)" : S.td.borderTop}}>
+                    <td colSpan={12} style={{...S.td,padding:isMonth ? "16px 18px" : isWeek ? "19px 22px" : "12px 18px 12px 56px",borderTop:(isMonth || isWeek) ? "1px solid var(--border)" : S.td.borderTop}}>
                       <button
                         onClick={() => setCollapsedClientes(prev => ({ ...prev, [entry.key]: !prev[entry.key] }))}
                         style={{display:"flex",alignItems:"center",gap:16,width:"100%",background:"transparent",border:"none",color:"var(--text)",cursor:"pointer",padding:0,fontFamily:"'DM Sans',sans-serif"}}
@@ -10589,6 +10589,7 @@ export default function Pedidos() {
                 <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"-"}</td>
                 <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.hora_carga||"-"}</td>
                 <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.fecha_descarga?new Date(p.fecha_descarga).toLocaleDateString("es-ES"):"-"}</td>
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{p.hora_descarga||"-"}</td>
                 <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>
                   {p.colaborador_id ? (
                     <div>

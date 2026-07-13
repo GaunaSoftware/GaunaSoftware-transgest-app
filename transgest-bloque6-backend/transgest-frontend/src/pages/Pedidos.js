@@ -3783,6 +3783,11 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
         .tg-stop-editor { container-type:inline-size; }
         .tg-stop-editor, .tg-stop-editor * { box-sizing:border-box; min-width:0; }
         .tg-stop-editor input, .tg-stop-editor select, .tg-stop-editor textarea, .tg-stop-editor button { max-width:100%; }
+        .tg-stop-add-card { width:100%; max-width:100%; overflow:hidden; }
+        .tg-stop-add-grid { width:100%; max-width:100%; }
+        .tg-stop-schedule-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+        .tg-stop-details-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+        .tg-stop-grid-wide { grid-column:1/-1 !important; }
         @container (max-width: 700px) {
           .tg-stop-add-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
           .tg-stop-add-grid > select, .tg-stop-address, .tg-stop-add-grid > [style*="grid-column:1/-1"] { grid-column:1/-1 !important; }
@@ -3794,7 +3799,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           .tg-stop-footer-group > button { width:100%; }
         }
         @container (max-width: 460px) {
-          .tg-stop-add-grid, .tg-stop-mini-grid { grid-template-columns:1fr !important; }
+          .tg-stop-add-grid, .tg-stop-mini-grid, .tg-stop-schedule-grid, .tg-stop-details-grid { grid-template-columns:minmax(0,1fr) !important; }
           .tg-stop-add-grid > * { grid-column:1/-1 !important; }
           .tg-stop-card { grid-template-columns:1fr !important; }
           .tg-stop-card > span { display:none; }
@@ -3803,7 +3808,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           .tg-stop-footer-group { width:100%; }
         }
         @media (max-width: 760px) {
-          .tg-stop-add-grid, .tg-stop-mini-grid { grid-template-columns:1fr !important; }
+          .tg-stop-add-grid, .tg-stop-mini-grid, .tg-stop-schedule-grid, .tg-stop-details-grid { grid-template-columns:minmax(0,1fr) !important; }
           .tg-stop-add-grid > * { grid-column:1/-1 !important; }
           .tg-stop-card { align-items:flex-start !important; flex-wrap:wrap !important; }
           .tg-stop-card-body { flex:1 1 100% !important; }
@@ -3910,7 +3915,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       )}
 
       {!disabled && (adding ? (
-        <div style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:12,marginTop:6}}>
+        <div className="tg-stop-add-card" style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:12,marginTop:6}}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,padding:10,marginBottom:10}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:8,flexWrap:"wrap"}}>
               <div>
@@ -3945,7 +3950,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               </div>
             )}
           </div>
-          <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"minmax(200px,2fr) repeat(3,minmax(110px,1fr))",gap:8,marginBottom:8}}>
+          <div className="tg-stop-add-grid tg-stop-schedule-grid" style={{display:"grid",gap:8,marginBottom:8}}>
             {puntosFiltrados.length > 0 && (
               <select
                 style={{...inp,gridColumn:"1/-1"}}
@@ -4004,8 +4009,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             </div>
           </div>
           {newStopDetailsOpen && (
-            <div className="tg-stop-add-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:6,marginBottom:8,padding:10,border:"1px solid var(--border2)",borderRadius:8,background:"var(--bg2)"}}>
-            <input style={{...inp,gridColumn:"1/-1"}} placeholder="Enlace Google Maps (opcional)" value={newStop.google_maps_url||""} onChange={e=>setNewStop(p=>({...p,google_maps_url:e.target.value}))}/>
+            <div className="tg-stop-add-grid tg-stop-details-grid" style={{display:"grid",gap:6,marginBottom:8,padding:10,border:"1px solid var(--border2)",borderRadius:8,background:"var(--bg2)"}}>
+            <input className="tg-stop-grid-wide" style={inp} placeholder="Enlace Google Maps (opcional)" value={newStop.google_maps_url||""} onChange={e=>setNewStop(p=>({...p,google_maps_url:e.target.value}))}/>
             <input
               list={countryListId}
               style={inp}
@@ -4026,7 +4031,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             <input type="number" style={inp} placeholder="Peso kg" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))}/>
             <input type="number" step="0.01" style={inp} placeholder={`Precio ${label} EUR`} value={newStop.precio} onChange={e=>setNewStop(p=>({...p,precio:e.target.value}))}/>
             <input style={inp} placeholder={`Referencia ${label}`} value={newStop.referencia} onChange={e=>setNewStop(p=>({...p,referencia:e.target.value}))}/>
-            <input style={{...inp,gridColumn:"1/-1"}} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>
+            <input className="tg-stop-grid-wide" style={inp} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>
             <button type="button" onClick={abrirCrearPunto} disabled={!String(puntoQuery || newStop.direccion).trim()} style={{padding:"5px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:String(puntoQuery || newStop.direccion).trim()?"var(--accent)":"var(--text5)",fontSize:12,cursor:String(puntoQuery || newStop.direccion).trim()?"pointer":"not-allowed"}}>
               {buscarPuntoExacto(newStop.direccion || puntoQuery) ? "Actualizar punto" : "Guardar como punto"}
             </button>

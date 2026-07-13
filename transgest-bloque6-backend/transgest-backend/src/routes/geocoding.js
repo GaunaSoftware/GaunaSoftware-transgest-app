@@ -92,6 +92,36 @@ const SPAIN_CITIES = [
   ["Algeciras", 36.1408, -5.4562],
   ["Jerez", 36.6850, -6.1261, ["jerez de la frontera"]],
   ["Gandia", 38.9680, -0.1845],
+  ["Abanilla", 38.2067, -1.0413],
+  ["Albalate de la Zorita", 40.3131, -2.8790],
+  ["Yecla", 38.6136, -1.1149],
+  ["Jumilla", 38.4776, -1.3252],
+  ["Lorca", 37.6710, -1.7018],
+  ["Villarrobledo", 39.2683, -2.6019],
+  ["Almansa", 38.8686, -1.0975],
+  ["Manzanares", 38.9987, -3.3689],
+  ["Puertollano", 38.6871, -4.1073],
+  ["Talavera de la Reina", 39.9635, -4.8306],
+  ["Ponferrada", 42.5461, -6.5960],
+  ["Merida", 38.9165, -6.3436],
+  ["Motril", 36.7500, -3.5187],
+  ["Linares", 38.0951, -3.6367],
+  ["Sagunto", 39.6795, -0.2680],
+  ["Vinaros", 40.4695, 0.4726],
+  ["Tortosa", 40.8126, 0.5214],
+  ["Reus", 41.1560, 1.1069],
+  ["Manresa", 41.7230, 1.8265],
+  ["Elche", 38.2655, -0.6981, ["elx"]],
+  ["Elda", 38.4783, -0.7912],
+  ["Orihuela", 38.0848, -0.9445],
+  ["Torrevieja", 37.9784, -0.6822],
+  ["Aranda de Duero", 41.6704, -3.6892],
+  ["Miranda de Ebro", 42.6866, -2.9469],
+  ["Antequera", 37.0179, -4.5610],
+  ["Ubeda", 38.0138, -3.3706],
+  ["Aviles", 43.5560, -5.9247],
+  ["Torrejon de Ardoz", 40.4587, -3.4796],
+  ["Getxo", 43.3568, -3.0100],
 ].map(([name, lat, lng, aliases = []]) => ({
   name,
   lat,
@@ -238,7 +268,29 @@ async function geocodeNominatim(q, country, region) {
   return null;
 }
 
-// ── Resolucion robusta: cache -> HERE -> Nominatim -> diccionario local ──
+// Genera variantes de consulta cada vez mas simples, para tolerar etiquetas
+// con nombre de empresa, provincia erronea o formato "Pueblo - Detalle".
+// Ej: "ALBALATE DE LA ZORITA, Cadiz, España" -> tambien prueba "Albalate de la
+// Zorita, España" y "Albalate de la Zorita", que si se encuentran.
+function placeVariants(label) {
+  const raw = cleanText(label);
+  const segs = raw.split(/\s*[,–]\s*|\s+-\s+/).map(s => cleanText(s)).filter(Boolean);
+  const town = segs[0] || raw;
+  const out = [];
+  const seen = new Set();
+  const add = (v) => {
+    const c = cleanText(v);
+    const k = normalizeKey(c);
+    if (c.length >= 2 && k && !seen.has(k)) { seen.add(k); out.push(c); }
+  };
+  add(raw);
+  if (segs.length >= 3) add(`${town}, ${segs[1]}, España`);
+  add(`${town}, España`);
+  add(town);
+  return out;
+}
+
+// ── Resolucion robusta: cache -> HERE -> Nominatim (variantes) -> local ──
 async function resolvePlace(empresaId, q, country, region) {
   const cleaned = cleanText(q);
   if (cleaned.length < 2) return null;
@@ -253,12 +305,19 @@ async function resolvePlace(empresaId, q, country, region) {
     return { source: "cache", provider: cached.rows[0].provider, ...cached.rows[0].result };
   }
 
+  const variants = placeVariants(cleaned);
+  // HERE una sola vez con la etiqueta completa (evita gastar cuota de pago).
   let resolved = await geocodeHere(empresaId, cleaned, country, region).catch(() => null);
+  // Nominatim probando variantes cada vez mas simples hasta encontrar una.
   if (!resolved || resolved.lat == null) {
-    resolved = await geocodeNominatim(cleaned, country, region).catch(() => null);
+    for (const v of variants) {
+      resolved = await geocodeNominatim(v, "", "").catch(() => null);
+      if (resolved && resolved.lat != null) break;
+    }
   }
+  // Ultimo recurso: diccionario local sobre etiqueta completa o solo pueblo.
   if (!resolved || resolved.lat == null) {
-    const local = localCityLookup(cleaned);
+    const local = localCityLookup(cleaned) || localCityLookup(variants[variants.length - 1] || "");
     if (local) resolved = local;
   }
   if (!resolved || resolved.lat == null) return null;

@@ -160,16 +160,28 @@ export default function RutaMapa({ puntos = [], altura = 260 }) {
 
   if (estado === "vacio") return null;
 
+  // Si no se puede trazar, no mostramos un recuadro de error grande: solo una
+  // nota discreta. Las tarjetas de puntos (origen/destino) se mantienen aparte.
+  if (estado === "error") {
+    return (
+      <div style={{ marginBottom: 10, fontSize: 11, color: "var(--text5)", fontStyle: "italic" }}>
+        No se pudo situar esta ruta en el mapa. Comprueba que origen y destino tengan población y provincia.
+      </div>
+    );
+  }
+
   return (
-    <div style={{ marginBottom: 12 }}>
+    // isolation + zIndex crean un contexto de apilamiento propio para que los
+    // controles de Leaflet (z-index 1000) no tapen la cruz de cerrar del modal.
+    <div style={{ marginBottom: 12, position: "relative", zIndex: 0, isolation: "isolate" }}>
       <div style={{ position: "relative", borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
         <div ref={containerRef} style={{ height: altura, width: "100%", background: "var(--bg3)" }} />
-        {estado !== "ok" && (
+        {estado === "cargando" && (
           <div style={{
             position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
             background: "var(--bg3)", color: "var(--text4)", fontSize: 12, textAlign: "center", padding: 12,
           }}>
-            {estado === "cargando" ? "Cargando mapa de la ruta…" : (info?.error || "No se pudo mostrar el mapa.")}
+            Cargando mapa de la ruta…
           </div>
         )}
       </div>

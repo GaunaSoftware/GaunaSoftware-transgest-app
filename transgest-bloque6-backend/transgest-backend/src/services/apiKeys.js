@@ -241,10 +241,14 @@ async function recordApiUsage(empresaId, provider, amount = 1) {
 async function resolveApiKey(empresaId, provider) {
   const company = empresaId ? await getCompanyApiConfig(empresaId, provider) : null;
   if (company && company.activo === false) return { key: "", source: "disabled", config: company };
-  if (company && !company.use_global && company.encrypted_key) {
+  // La clave propia de la empresa manda siempre, exista o no clave global y sea
+  // cual sea el flag use_global. La global queda solo como respaldo.
+  if (company && company.encrypted_key) {
     return { key: decryptSecret(company.encrypted_key), source: "company", config: company };
   }
-  if (company && !company.use_global && !company.encrypted_key) {
+  // Sin clave propia y con use_global desactivado: la empresa ha optado
+  // explicitamente por no usar la global (queda bloqueada hasta poner clave).
+  if (company && !company.use_global) {
     return { key: "", source: "company_missing", config: company };
   }
   const global = await getGlobalApiKey(provider);

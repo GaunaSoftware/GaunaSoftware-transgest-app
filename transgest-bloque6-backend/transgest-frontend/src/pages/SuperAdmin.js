@@ -1050,16 +1050,18 @@ function IntegracionesAdmin({ saFetchFn }) {
   const companyProviderOptions = (data?.providers || []).filter(p => !gpsProviders.includes(p));
   const providerGlobalStatus = data?.global?.[provider] || {};
   const providerGlobalOk = !!providerGlobalStatus.global_configured;
-  const providerReady = form.use_global === false ? !!cfgEmpresa?.key_mask : providerGlobalOk;
-  const providerEffectiveSource = form.use_global === false
-    ? (cfgEmpresa?.key_mask ? "Clave propia de empresa" : "Falta clave propia")
-    : (providerGlobalOk ? "Fallback global" : "Sin clave de respaldo");
+  // Regla real (coincide con el backend): la clave propia manda siempre; la
+  // global es solo respaldo cuando la empresa no tiene clave propia activa.
+  const providerReady = cfgEmpresa?.key_mask ? true : (form.use_global ? providerGlobalOk : false);
+  const providerEffectiveSource = cfgEmpresa?.key_mask
+    ? "Clave propia de empresa"
+    : (form.use_global ? (providerGlobalOk ? "Fallback global" : "Sin clave de respaldo") : "Falta clave propia");
   const gpsGlobalStatus = data?.global?.[gpsProvider] || {};
   const gpsGlobalOk = !!gpsGlobalStatus.global_configured;
-  const gpsReady = gpsForm.use_global === false ? !!cfgGps?.key_mask : gpsGlobalOk;
-  const gpsEffectiveSource = gpsForm.use_global === false
-    ? (cfgGps?.key_mask ? "Clave propia de empresa" : "Falta clave propia")
-    : (gpsGlobalOk ? "Fallback global" : "Sin clave de respaldo");
+  const gpsReady = cfgGps?.key_mask ? true : (gpsForm.use_global ? gpsGlobalOk : false);
+  const gpsEffectiveSource = cfgGps?.key_mask
+    ? "Clave propia de empresa"
+    : (gpsForm.use_global ? (gpsGlobalOk ? "Fallback global" : "Sin clave de respaldo") : "Falta clave propia");
   const gpsActiveLabel = gpsActivoEmpresa ? (labels[gpsActivoEmpresa] || gpsActivoEmpresa) : "Sin GPS activo";
   const visibleGpsProviders = showGpsProviderPicker
     ? gpsProviders
@@ -2077,7 +2079,7 @@ function IntegracionesAdmin({ saFetchFn }) {
               </select>
             </div>
             <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45}}>
-              <strong style={{color:"#e2e8f0"}}>Regla:</strong> clave propia por empresa si existe y esta activa. La global queda como comodin para demo o para no bloquear una integracion mientras se configura.
+              <strong style={{color:"#e2e8f0"}}>Regla:</strong> si esta empresa tiene clave propia activa, <strong style={{color:"#e2e8f0"}}>se usa siempre</strong> (no necesita la global). El selector de respaldo solo decide que hacer cuando la empresa <em>no</em> tiene clave propia: usar la global o quedar bloqueada.
             </div>
           </div>
         </div>
@@ -2099,14 +2101,14 @@ function IntegracionesAdmin({ saFetchFn }) {
                 </select>
               </div>
               <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave a usar</label>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Respaldo si no hay clave propia</label>
                 <select style={input} value={form.use_global ? "global" : "propia"} onChange={e=>setForm(p=>({...p,use_global:e.target.value==="global"}))}>
-                  <option value="propia">Clave propia de esta empresa</option>
-                  <option value="global">Fallback global (demo / si no hay propia)</option>
+                  <option value="global">Usar respaldo global</option>
+                  <option value="propia">Solo clave propia (sin respaldo)</option>
                 </select>
               </div>
               <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave propia</label>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave propia {cfgEmpresa?.key_mask ? "- se usa siempre" : ""}</label>
                 <input type="password" style={input} value={form.api_key} onChange={e=>setForm(p=>({...p,api_key:e.target.value}))} placeholder={cfgEmpresa?.key_mask ? `Actual: ${cfgEmpresa.key_mask}` : "Pegar clave de esta empresa"} />
               </div>
               <div>
@@ -2148,14 +2150,14 @@ function IntegracionesAdmin({ saFetchFn }) {
                 </button>
               </div>
               <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave a usar</label>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Respaldo si no hay clave propia</label>
                 <select style={input} value={gpsForm.use_global ? "global" : "propia"} onChange={e=>setGpsForm(p=>({...p,use_global:e.target.value==="global"}))}>
-                  <option value="propia">Clave propia de esta empresa</option>
-                  <option value="global">Fallback global (demo / si no hay propia)</option>
+                  <option value="global">Usar respaldo global</option>
+                  <option value="propia">Solo clave propia (sin respaldo)</option>
                 </select>
               </div>
               <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave GPS propia</label>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave GPS propia {cfgGps?.key_mask ? "- se usa siempre" : ""}</label>
                 <input type="password" style={input} value={gpsForm.api_key} onChange={e=>setGpsForm(p=>({...p,api_key:e.target.value}))} placeholder={cfgGps?.key_mask ? `Actual: ${cfgGps.key_mask}` : "Pegar clave GPS de esta empresa"} />
               </div>
               <div>

@@ -9331,9 +9331,12 @@ export default function Pedidos() {
     return () => window.dispatchEvent(new CustomEvent("tms:pedido-action-menu", { detail: { open: false } }));
   }, [openActionMenuPedidoId]);
 
-  const cargar = useCallback(async () => {
-    setLoading(true);
-    setLoadError("");
+  const cargar = useCallback(async (options = {}) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      setLoading(true);
+      setLoadError("");
+    }
     let listadoCargado = false;
     try {
       const params = {};
@@ -9372,7 +9375,7 @@ export default function Pedidos() {
         setTotalCount(pedidosData.length);
       }
       listadoCargado = true;
-      setLoading(false);
+      if (!silent) setLoading(false);
 
       Promise.allSettled([
         getClientes(),
@@ -9415,14 +9418,18 @@ export default function Pedidos() {
       }).catch((e) => { console.error(e); });
       } catch(e) {
         console.error(e);
-        setLoadError(e.message || "No se pudieron cargar los viajes.");
+        if (!silent) setLoadError(e.message || "No se pudieron cargar los viajes.");
       }
-    finally { if (!listadoCargado) setLoading(false); }
+    finally { if (!listadoCargado && !silent) setLoading(false); }
   }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {
-    const sync = () => { cargar(); };
+    const sync = event => {
+      const source = String(event?.detail?.source || "");
+      if (event?.type === "tms:pedidos-changed" && source.startsWith("pedidos-")) return;
+      cargar({ silent: true });
+    };
     window.addEventListener("tms:facturas-changed", sync);
     window.addEventListener("tms:pedidos-changed", sync);
     return () => {

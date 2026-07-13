@@ -22,6 +22,7 @@ const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetti
 const { validateBase64Upload } = require("../services/uploadValidation");
 
 const router = express.Router();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let colaboradorWorkflowSchemaPromise = null;
 let pedidoOrdenCargaSchemaPromise = null;
 let pedidoCartaPorteSchemaPromise = null;
@@ -34,6 +35,11 @@ function htmlEscape(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function optionalUuid(value) {
+  const normalized = String(value || "").trim();
+  return UUID_RE.test(normalized) ? normalized : null;
 }
 
 function stableJson(value) {
@@ -422,6 +428,9 @@ async function ensureColaboradorWorkflowSchema() {
   if (!colaboradorWorkflowSchemaPromise) {
     colaboradorWorkflowSchemaPromise = (async () => {
       await db.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"').catch(() => {});
+      await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'incidencia'").catch(error => {
+        logger.warn("No se pudo asegurar el estado incidencia en pedidos:", error.message);
+      });
       await db.query("ALTER TABLE pedidos ALTER COLUMN ventana_carga TYPE VARCHAR(80)").catch(() => {});
       await db.query("ALTER TABLE pedidos ALTER COLUMN ventana_descarga TYPE VARCHAR(80)").catch(() => {});
       await db.query(`
@@ -7970,6 +7979,7 @@ router.patch("/:id/estado",
     await assertUnicoViajeActivoChofer({ pedido: rows[0], empresaId, estadoDestino: estado });
 
     await ensureColaboradorWorkflowSchema();
+    const actorUsuarioId = optionalUuid(req.user?.id);
     const incidencia = typeof req.body.incidencia === "string" ? req.body.incidencia.trim() : "";
     const incidenciaTipo = typeof req.body.incidencia_tipo === "string" && req.body.incidencia_tipo.trim()
       ? req.body.incidencia_tipo.trim().slice(0, 80)
@@ -7994,9 +8004,9 @@ router.patch("/:id/estado",
              incidencia_creada_por=$7,
              incidencia_creada_at=NOW(),
              incidencia_automatica=false,
-             notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $2))
+             notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $8))
          WHERE id=$3 AND empresa_id=$4`,
-        [estado, `INCIDENCIA: ${incidencia}`, req.params.id, empresaId, incidenciaTipo, req.user?.rol === "chofer" ? "chofer" : "trafico", req.user?.id || null]
+        [estado, incidencia, req.params.id, empresaId, incidenciaTipo, req.user?.rol === "chofer" ? "chofer" : "trafico", actorUsuarioId, `INCIDENCIA: ${incidencia}`]
       );
     } else if (estado === "cancelado") {
       await db.query(
@@ -8010,7 +8020,7 @@ router.patch("/:id/estado",
                ELSE TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $4::text))
              END
          WHERE id=$5 AND empresa_id=$6`,
-        [estado, motivoCancelacion || null, req.user?.id || null, `CANCELACION: ${motivoCancelacion}`, req.params.id, empresaId]
+        [estado, motivoCancelacion || null, actorUsuarioId, `CANCELACION: ${motivoCancelacion}`, req.params.id, empresaId]
       );
     } else {
       await db.query(
@@ -8031,7 +8041,7 @@ router.patch("/:id/estado",
       estado,
       incidencia: incidencia || null,
       motivo_cancelacion: motivoCancelacion || null,
-    }, req.user?.rol || "usuario", req.user?.id || null);
+    }, req.user?.rol || "usuario", actorUsuarioId);
 
     if (estado === "incidencia") {
       const origenIncidencia = req.user?.rol === "chofer" ? "chofer" : "trafico";
@@ -8051,12 +8061,12 @@ router.patch("/:id/estado",
           ruta: `${rows[0].origen || ""} -> ${rows[0].destino || ""}`,
           dedupe_key: `incidencia:${req.params.id}:${crypto.randomUUID()}`,
         },
-        req.user?.id || null
+        actorUsuarioId
       ).catch(e => logger.warn("No se pudo notificar incidencia de pedido:", e.message));
     }
 
     if (estado === "entregado") {
-      await aplicarAutomatismosEntrega(req.params.id, empresaId, req.user?.id || null, { appBaseUrl: publicBaseUrl(req) });
+      await aplicarAutomatismosEntrega(req.params.id, empresaId, actorUsuarioId, { appBaseUrl: publicBaseUrl(req) });
     }
 
     if (estado === "confirmado" || estado === "entregado") {

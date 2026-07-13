@@ -488,6 +488,10 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_chofer TEXT").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_chofer_nombre VARCHAR(180)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_chofer_fecha TIMESTAMPTZ").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_nombre VARCHAR(120)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_apellidos VARCHAR(180)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_dni VARCHAR(40)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_telefono VARCHAR(40)").catch(() => {});
       await db.query(`
         CREATE TABLE IF NOT EXISTS pedido_docs (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -7726,6 +7730,10 @@ router.post("/", GERENTE_O_TRAFICO,
         referencia_cliente: req.body.referencia_cliente ?? null,
         matricula_colaborador: req.body.matricula_colaborador !== undefined ? (req.body.matricula_colaborador ? String(req.body.matricula_colaborador).trim().toUpperCase() : null) : undefined,
         remolque_matricula_colaborador: req.body.remolque_matricula_colaborador !== undefined ? (req.body.remolque_matricula_colaborador ? String(req.body.remolque_matricula_colaborador).trim().toUpperCase() : null) : undefined,
+        conductor_efectivo_nombre: req.body.conductor_efectivo_nombre !== undefined ? String(req.body.conductor_efectivo_nombre || "").trim().slice(0, 120) || null : undefined,
+        conductor_efectivo_apellidos: req.body.conductor_efectivo_apellidos !== undefined ? String(req.body.conductor_efectivo_apellidos || "").trim().slice(0, 180) || null : undefined,
+        conductor_efectivo_dni: req.body.conductor_efectivo_dni !== undefined ? String(req.body.conductor_efectivo_dni || "").trim().toUpperCase().slice(0, 40) || null : undefined,
+        conductor_efectivo_telefono: req.body.conductor_efectivo_telefono !== undefined ? String(req.body.conductor_efectivo_telefono || "").trim().slice(0, 40) || null : undefined,
         pendiente_completar: req.body.pendiente_completar ?? false,
         aviso_completar: req.body.aviso_completar ?? null,
         tipo_carga: req.body.tipo_carga ?? null,
@@ -8149,6 +8157,10 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     referencia_cliente: body.referencia_cliente ?? null,
     matricula_colaborador: body.matricula_colaborador !== undefined ? (body.matricula_colaborador ? String(body.matricula_colaborador).trim().toUpperCase() : null) : undefined,
     remolque_matricula_colaborador: body.remolque_matricula_colaborador !== undefined ? (body.remolque_matricula_colaborador ? String(body.remolque_matricula_colaborador).trim().toUpperCase() : null) : undefined,
+    conductor_efectivo_nombre: body.conductor_efectivo_nombre !== undefined ? String(body.conductor_efectivo_nombre || "").trim().slice(0, 120) || null : undefined,
+    conductor_efectivo_apellidos: body.conductor_efectivo_apellidos !== undefined ? String(body.conductor_efectivo_apellidos || "").trim().slice(0, 180) || null : undefined,
+    conductor_efectivo_dni: body.conductor_efectivo_dni !== undefined ? String(body.conductor_efectivo_dni || "").trim().toUpperCase().slice(0, 40) || null : undefined,
+    conductor_efectivo_telefono: body.conductor_efectivo_telefono !== undefined ? String(body.conductor_efectivo_telefono || "").trim().slice(0, 40) || null : undefined,
     pendiente_completar: body.pendiente_completar ?? false,
     aviso_completar: body.aviso_completar ?? null,
     tipo_carga: body.tipo_carga ?? null,

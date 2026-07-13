@@ -1052,6 +1052,10 @@ async function applyMigrations() {
           await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_colaborador NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS matricula_colaborador VARCHAR(60)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_colaborador VARCHAR(60)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_nombre VARCHAR(120)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_apellidos VARCHAR(180)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_dni VARCHAR(40)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_telefono VARCHAR(40)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_precio_confirmado BOOLEAN DEFAULT false").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_precio_confirmado_at TIMESTAMPTZ").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_carga_confirmada_at TIMESTAMPTZ").catch(captureStartupMigrationError);
@@ -1072,6 +1076,8 @@ async function applyMigrations() {
     `).catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_colaborador_tokens_hash ON colaborador_pedido_tokens(token_hash)").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_colaborador_tokens_pedido ON colaborador_pedido_tokens(pedido_id)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE colaborador_liquidacion_tokens ADD COLUMN IF NOT EXISTS pedido_id UUID REFERENCES pedidos(id) ON DELETE CASCADE").catch(captureStartupMigrationError);
+    await db.query("CREATE INDEX IF NOT EXISTS idx_colaborador_liq_tokens_pedido ON colaborador_liquidacion_tokens(pedido_id) WHERE pedido_id IS NOT NULL").catch(captureStartupMigrationError);
     // nominas_emitidas table
     await db.query(`
       CREATE TABLE IF NOT EXISTS nominas_emitidas (

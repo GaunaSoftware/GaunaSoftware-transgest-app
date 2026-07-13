@@ -7,6 +7,7 @@ import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRuta
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
+         crearColaboradorLiquidacionToken,
          getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta, resolveGeoPlace,
          getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos } from "../services/api";
 import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
@@ -6110,6 +6111,8 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [managePointsMode, setManagePointsMode] = useState("carga");
   const [notificandoColaborador, setNotificandoColaborador] = useState(false);
   const [previsualizandoColaborador, setPrevisualizandoColaborador] = useState(false);
+  const [generandoAccesoTemporal, setGenerandoAccesoTemporal] = useState(false);
+  const [accesoTemporalColaborador, setAccesoTemporalColaborador] = useState(null);
   const [clienteRiesgo, setClienteRiesgo] = useState(null);
   const [clienteRiesgoLoading, setClienteRiesgoLoading] = useState(false);
   const [puntosInteresModal, setPuntosInteresModal] = useState(getPuntosInteres);
@@ -6131,6 +6134,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     hydratedPedidoKeyRef.current = editandoKey;
     setForm(nextForm);
     setColaboradorBusqueda("");
+    setAccesoTemporalColaborador(null);
     setPendingDocs(Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
     setShowColaboradorSuggestions(false);
     setShowCostes(!!(nextForm.coste_gasoil || nextForm.coste_peajes || nextForm.coste_dietas || nextForm.coste_otros));
@@ -6750,6 +6754,37 @@ async function previsualizarColaborador() {
     notify(e.message || "No se pudo previsualizar el enlace del colaborador.", "error");
   } finally {
     setPrevisualizandoColaborador(false);
+  }
+}
+
+async function generarAccesoTemporalColaborador() {
+  if (!editando?.id || !form.colaborador_id) {
+    notify("Guarda el pedido y asigna un colaborador antes de generar el acceso temporal.", "warning");
+    return;
+  }
+  setGenerandoAccesoTemporal(true);
+  try {
+    const data = await crearColaboradorLiquidacionToken(form.colaborador_id, {
+      pedido_id: editando.id,
+      dias: 7,
+    });
+    setAccesoTemporalColaborador(data);
+    notify("Acceso temporal de conductor generado para este viaje.", "success");
+  } catch (e) {
+    notify(e.message || "No se pudo generar el acceso temporal.", "error");
+  } finally {
+    setGenerandoAccesoTemporal(false);
+  }
+}
+
+async function copiarAccesoTemporalColaborador() {
+  const url = accesoTemporalColaborador?.operativa_url || "";
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    notify("Enlace temporal copiado.", "success");
+  } catch {
+    notify("No se pudo copiar automaticamente. Selecciona el enlace y copialo.", "warning");
   }
 }
 
@@ -8031,6 +8066,19 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
               )}
 
               {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Colaborador ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+              <div style={{gridColumn:"1/-1",background:"rgba(15,118,110,.06)",border:"1px solid rgba(15,118,110,.2)",borderRadius:9,padding:"12px 14px"}}>
+                <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--accent)",marginBottom:4}}>Conductor efectivo para DCD</div>
+                <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45,marginBottom:10}}>
+                  Si hay un chofer de plantilla se usan los datos de su ficha. Completa estos campos para un conductor externo o para una correccion puntual del documento.
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
+                  <div><label style={S.label}>Nombre</label><input style={S.input} value={form.conductor_efectivo_nombre||""} onChange={f("conductor_efectivo_nombre")} placeholder="Nombre" /></div>
+                  <div><label style={S.label}>Apellidos</label><input style={S.input} value={form.conductor_efectivo_apellidos||""} onChange={f("conductor_efectivo_apellidos")} placeholder="Apellidos" /></div>
+                  <div><label style={S.label}>DNI / NIE</label><input style={S.input} value={form.conductor_efectivo_dni||""} onChange={e=>setForm(p=>({...p,conductor_efectivo_dni:e.target.value.toUpperCase()}))} placeholder="Documento de identidad" /></div>
+                  <div><label style={S.label}>Telefono</label><input type="tel" style={S.input} value={form.conductor_efectivo_telefono||""} onChange={f("conductor_efectivo_telefono")} placeholder="Telefono" /></div>
+                </div>
+              </div>
+
               <div style={{gridColumn:"1/-1",background:"rgba(139,92,246,.05)",border:"1px solid rgba(139,92,246,.15)",borderRadius:9,padding:"12px 14px",marginTop:4}}>
                 <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#a78bfa",marginBottom:10}}>Colaborador (transporte subcontratado)</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
@@ -8183,6 +8231,24 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                           {notificandoColaborador ? "Enviando..." : editando?.id ? "Enviar/Reenviar enlace" : "Guarda para enviar"}
                         </button>
                       </div>
+                    </div>
+                    <div style={{gridColumn:"1/-1",background:"rgba(37,99,235,.07)",border:"1px solid rgba(37,99,235,.2)",borderRadius:8,padding:"10px 12px"}}>
+                      <div style={{display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
+                        <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.45,flex:"1 1 360px"}}>
+                          <strong>Acceso temporal de conductor.</strong> Da acceso solo a este viaje para completar conductor, estados, albaranes y DCD. Caduca al entregar o cancelar el viaje.
+                        </div>
+                        <button type="button" disabled={generandoAccesoTemporal || !editando?.id} onClick={generarAccesoTemporalColaborador}
+                          style={{...S.btn,background:"#2563eb",color:"#fff",opacity:(generandoAccesoTemporal || !editando?.id)?0.6:1}}>
+                          {generandoAccesoTemporal ? "Generando..." : editando?.id ? "Generar acceso temporal" : "Guarda para generar"}
+                        </button>
+                      </div>
+                      {accesoTemporalColaborador?.operativa_url&&(
+                        <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginTop:10}}>
+                          <input readOnly value={accesoTemporalColaborador.operativa_url} onFocus={e=>e.target.select()} style={{...S.input,minWidth:0,flex:"1 1 260px",fontSize:11}} />
+                          <button type="button" onClick={copiarAccesoTemporalColaborador} style={{...S.btn,whiteSpace:"nowrap"}}>Copiar</button>
+                          <button type="button" onClick={()=>window.open(accesoTemporalColaborador.operativa_url,"_blank","noopener,noreferrer")} style={{...S.btn,whiteSpace:"nowrap"}}>Abrir</button>
+                        </div>
+                      )}
                     </div>
                     <div style={{gridColumn:"1/-1",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)",borderRadius:8,padding:"10px 12px"}}>
                       <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--accent)",marginBottom:4}}>Forma de pago al colaborador</div>

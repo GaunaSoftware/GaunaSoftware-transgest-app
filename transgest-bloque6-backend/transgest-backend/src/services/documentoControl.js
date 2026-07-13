@@ -917,7 +917,7 @@ function buildDocumentoControlSignatures(pedido = {}) {
       imagen: pedido?.firma_cargador || "",
     }),
     chofer: pick("chofer", {
-      nombre: pedido?.firma_chofer_nombre || pedido?.chofer_firma_base_nombre || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim(),
+      nombre: pedido?.firma_chofer_nombre || pedido?.chofer_firma_base_nombre || [pedido?.conductor_efectivo_nombre, pedido?.conductor_efectivo_apellidos].filter(Boolean).join(" ").trim() || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim(),
       fecha: pedido?.firma_chofer_fecha || pedido?.chofer_firma_base_fecha || "",
       imagen: pedido?.firma_chofer || pedido?.chofer_firma_base || "",
     }),
@@ -987,7 +987,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   const cmrTipo = String(pedido?.cmr_tipo || "").toLowerCase() === "internacional" || shouldUseInternationalCmr(origenPais, destinoPais)
     ? "internacional"
     : "nacional";
-  const choferNombre = [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim();
+  const choferNombre = [pedido?.conductor_efectivo_nombre, pedido?.conductor_efectivo_apellidos].filter(Boolean).join(" ").trim()
+    || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim();
   const firmas = buildDocumentoControlSignatures(pedido);
 
   const documento = {
@@ -1028,8 +1029,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     },
     chofer: {
       nombre: choferNombre || firmas.chofer.nombre || "",
-      dni: pedido?.chofer_dni || "",
-      telefono: pedido?.chofer_telefono || pedido?.chofer_tel || "",
+      dni: pedido?.conductor_efectivo_dni || pedido?.chofer_dni || "",
+      telefono: pedido?.conductor_efectivo_telefono || pedido?.chofer_telefono || pedido?.chofer_tel || "",
       email: pedido?.chofer_email || "",
     },
     firmas,
@@ -1168,6 +1169,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     { key: "hora_descarga", ok: hasText(documento.horarios.hora_descarga) || hasText(documento.horarios.ventana_descarga), label: "Hora o ventana de descarga", category: "operativa" },
     { key: "vehiculo", ok: hasText(documento.vehiculo.tractora), label: "Matricula del vehiculo tractor", category: "vehiculo" },
     { key: "remolque", ok: hasText(documento.vehiculo.remolque), label: "Matricula de remolque si aplica", category: "vehiculo", required: false },
+    { key: "chofer_nombre", ok: hasText(documento.chofer.nombre), label: "Conductor efectivo identificado", category: "vehiculo", required: false },
+    { key: "chofer_dni", ok: hasText(documento.chofer.dni), label: "DNI/NIE del conductor efectivo", category: "vehiculo", required: false },
     { key: "operativa_carga", ok: Array.isArray(documento.condiciones.operativa_carga), label: "Operativa de carga documentada", category: "condiciones", required: false },
     { key: "ecmr_internacional", ok: documento.cmr_tipo !== "internacional" || buildEcmrConsignmentNote(documento).missing_fields.length === 0, label: "eCMR internacional con datos CMR minimos", category: "interoperabilidad" },
     { key: "firma_avanzada", ok: false, label: "Proveedor de firma avanzada eIDAS integrado", category: "firma", required: false },

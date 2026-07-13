@@ -4925,6 +4925,31 @@ async function nextPedidoNumero(client, empresaId, prefix = "DCD") {
   return `${prefix}-${anio}-${String(lastNum + 1).padStart(4, "0")}`;
 }
 
+async function nextGestionPedidoNumero(client, empresaId) {
+  const year = new Date().getFullYear();
+  const prefix = `PED-${year}-`;
+  await client.query(
+    `INSERT INTO pedido_numero_counters (empresa_id, year, last_num)
+     SELECT $1, $2,
+            COALESCE(MAX(CASE WHEN numero ~ $3 THEN substring(numero from $3)::int ELSE 0 END), 0)
+       FROM pedidos
+      WHERE empresa_id=$1 AND numero LIKE $4
+     ON CONFLICT (empresa_id, year) DO UPDATE
+       SET last_num=GREATEST(pedido_numero_counters.last_num, EXCLUDED.last_num),
+           updated_at=NOW()`,
+    [empresaId, year, `^${prefix}([0-9]+)$`, `${prefix}%`]
+  );
+  const { rows } = await client.query(
+    `UPDATE pedido_numero_counters
+        SET last_num=last_num+1, updated_at=NOW()
+      WHERE empresa_id=$1 AND year=$2
+      RETURNING last_num`,
+    [empresaId, year]
+  );
+  const next = Number(rows[0]?.last_num || 1);
+  return `${prefix}${String(next).padStart(4, "0")}`;
+}
+
 async function usuarioPuedeGestionarPedido(req, pedido) {
   if (ROLES_GESTION_PEDIDOS.has(req.user?.rol)) return true;
   if (req.user?.rol !== "chofer") return false;
@@ -7638,17 +7663,7 @@ router.post("/", GERENTE_O_TRAFICO,
         }
       }
 
-      // Generar numero
-      const anio = new Date().getFullYear();
-      const { rows: last } = await client.query(
-        `SELECT numero FROM pedidos
-         WHERE empresa_id=$1
-           AND numero LIKE $2
-         ORDER BY created_at DESC LIMIT 1`,
-        [empresaId, `PED-${anio}-%`]
-      );
-      const lastNum = last[0] ? parseInt(last[0].numero.split("-").pop()) || 0 : 0;
-      const numero  = `PED-${anio}-${String(lastNum + 1).padStart(4, "0")}`;
+      const numero = await nextGestionPedidoNumero(client, empresaId);
 
       // Check if remolque columns exist (migration may not have run)
       let pedido;
@@ -7864,6 +7879,12 @@ router.post("/", GERENTE_O_TRAFICO,
         .catch(e => logger.warn("No se pudo notificar planificacion ida-retorno:", e.message));
     }
     } catch (e) {
+      if (e.code === "23505" && String(e.constraint || "").includes("pedidos_numero")) {
+        return res.status(409).json({
+          error: "No se pudo reservar el numero del pedido. Actualiza la pantalla y vuelve a guardarlo.",
+          code: "PEDIDO_NUMERO_DUPLICADO",
+        });
+      }
       if (e.code === "22001") {
         return res.status(400).json({ error: "Alguno de los textos del pedido supera la longitud permitida. Revisa ventanas horarias, matriculas o referencias." });
       }

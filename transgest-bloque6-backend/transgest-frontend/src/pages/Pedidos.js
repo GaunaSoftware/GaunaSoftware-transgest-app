@@ -2520,7 +2520,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     }
     let alive = true;
     setRutasLoading(true);
-    getRutasCliente(clienteSeleccionadoRapido.id)
+    getRutasCliente(clienteSeleccionadoRapido.id, { silentError: true })
       .then(d => {
         if (!alive) return;
         const lista = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
@@ -2529,7 +2529,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       .catch(() => { if (alive) setRutasCliente([]); })
       .finally(() => { if (alive) setRutasLoading(false); });
     setClienteRiesgoLoadingRapido(true);
-    getClienteRiesgoOperativo(clienteSeleccionadoRapido.id)
+    getClienteRiesgoOperativo(clienteSeleccionadoRapido.id, { silentError: true })
       .then(d => { if (alive) setClienteRiesgoRapido(d || null); })
       .catch(() => { if (alive) setClienteRiesgoRapido(null); })
       .finally(() => { if (alive) setClienteRiesgoLoadingRapido(false); });
@@ -2584,7 +2584,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       const selected = rutasCliente.find(r => String(r.id || r.ruta_id || "") === String(form.ruta_id));
       if (selected) return selected;
     }
-    const data = await getRutasCliente(cliente.id).catch(() => []);
+    const data = await getRutasCliente(cliente.id, { silentError: true }).catch(() => []);
     const lista = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
     if (form.ruta_id) return lista.find(r => String(r.ruta_id || r.id || "") === String(form.ruta_id)) || null;
     return null;
@@ -2639,7 +2639,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         notify(bloqueo.message, "error");
         return;
       }
-      const rutasDisponiblesRaw = rutasCliente.length ? rutasCliente : await getRutasCliente(cliente.id).catch(() => []);
+      const rutasDisponiblesRaw = rutasCliente.length ? rutasCliente : await getRutasCliente(cliente.id, { silentError: true }).catch(() => []);
       const rutasDisponibles = Array.isArray(rutasDisponiblesRaw)
         ? rutasDisponiblesRaw
         : Array.isArray(rutasDisponiblesRaw?.data) ? rutasDisponiblesRaw.data : [];
@@ -6168,7 +6168,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
       setRutas([]);
       return undefined;
     }
-    getRutasCliente(form.cliente_id)
+    getRutasCliente(form.cliente_id, { silentError: true })
       .then(d => {
         if (!alive) return;
         const arr = Array.isArray(d) ? d : [];
@@ -6220,7 +6220,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
       return undefined;
     }
     setClienteRiesgoLoading(true);
-    getClienteRiesgoOperativo(form.cliente_id)
+    getClienteRiesgoOperativo(form.cliente_id, { silentError: true })
       .then(d => {
         if (alive) setClienteRiesgo(d || null);
       })
@@ -6604,7 +6604,7 @@ async function maybeCrearRutaClienteDesdePedido() {
   if (rutasCreadasRef.current.has(routeKey)) return;
   let rutasClienteActualizadas = rutas;
   try {
-    const fresh = await getRutasCliente(form.cliente_id);
+    const fresh = await getRutasCliente(form.cliente_id, { silentError: true });
     if (Array.isArray(fresh)) {
       rutasClienteActualizadas = fresh.map(r => ({
         ...r,
@@ -6655,7 +6655,7 @@ async function maybeCrearRutaClienteDesdePedido() {
     minimo_facturable: form.tipo_precio === "viaje" ? toNullableNumber(form.importe_minimo) : null,
     minimo_unidades: form.tipo_precio !== "viaje" ? toNullableNumber(form.minimo_unidades) : null,
     notas: "Creada automaticamente desde pedido",
-  });
+  }, { silentError: true });
   setRutas(prev => prev.some(r => r.id === nueva.ruta_id || (
     matchEndpointRuta(origenRuta, r.origen) &&
     matchEndpointRuta(destinoRuta, r.destino) &&
@@ -6890,6 +6890,7 @@ async function guardar() {
       rutaAutoId = await maybeCrearRutaClienteDesdePedido();
     } catch (e) {
       console.warn("No se pudo crear la ruta:", e.message);
+      notify("El pedido se ha guardado, pero la ruta no pudo anadirse al cliente. Puedes crearla despues desde su ficha.", "warning");
     }
 
     if (pedidoId && rutaAutoId && !payload.ruta_id) {

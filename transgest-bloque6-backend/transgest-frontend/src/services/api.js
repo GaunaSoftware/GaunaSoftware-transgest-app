@@ -414,7 +414,7 @@ export async function cambiarPassword(password_actual, password_nuevo) {
 // ── Clientes ──────────────────────────────────────────
 export const getClientes  = (q = "", activo = "true", page = 1, limit = 100, options = {}) => apiFetch(`/clientes?q=${encodeURIComponent(q)}&activo=${activo}&page=${page}&limit=${limit}`, options);
 export const getCliente   = (id)      => apiFetch(`/clientes/${id}`);
-export const getClienteRiesgoOperativo = (id) => apiFetch(`/clientes/${id}/riesgo-operativo`);
+export const getClienteRiesgoOperativo = (id, options = {}) => apiFetch(`/clientes/${id}/riesgo-operativo`, options);
 export const crearCliente = (data)    => apiFetch("/clientes", { method:"POST", body:data, timeoutMs:30000, silentSuccess:true });
 export const editarCliente= (id,data) => apiFetch(`/clientes/${id}`, { method:"PUT", body:data, timeoutMs:30000, silentSuccess:true });
 export const borrarCliente= (id)      => apiFetch(`/clientes/${id}`, { method:"DELETE" });
@@ -771,9 +771,9 @@ export const getLoginBrand = async (identifier) => {
 };
 
 // ── Rutas por cliente ─────────────────────────────────
-export const getRutasCliente   = (cid)        => apiFetch(`/clientes/${cid}/rutas`);
+export const getRutasCliente   = (cid, options = {}) => apiFetch(`/clientes/${cid}/rutas`, options);
 export const getRutasClienteSalud = (cid)     => apiFetch(`/clientes/${cid}/rutas/salud`);
-export const crearRutaCliente  = (cid, data)  => apiFetch(`/clientes/${cid}/rutas`, { method:"POST", body:data });
+export const crearRutaCliente  = (cid, data, options = {}) => apiFetch(`/clientes/${cid}/rutas`, { method:"POST", body:data, ...options });
 export const editarRutaCliente = (cid,rid,data)=>apiFetch(`/clientes/${cid}/rutas/${rid}`, { method:"PUT", body:data });
 export const borrarRutaCliente = (cid, rid)   => apiFetch(`/clientes/${cid}/rutas/${rid}`, { method:"DELETE" });
 

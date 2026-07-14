@@ -54,6 +54,27 @@ const ESTADOS = {
   revisada: { l: "En revision", c: "#3b82f6" },
 };
 
+const ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE = new Set([
+  "en_curso",
+  "enruta",
+  "ruta",
+  "descarga",
+  "descargando",
+  "entregado",
+  "finalizado",
+  "cerrado",
+  "facturado",
+]);
+
+function normalizarEstadoPedidoPortal(estado) {
+  return String(estado || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function pedidoNoAnulablePorCliente(estado) {
+  const normalizado = normalizarEstadoPedidoPortal(estado);
+  return ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE.has(normalizado) || ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE.has(normalizado.replace(/_/g, ""));
+}
+
 const TIPOS_PRECIO = [
   { v: "viaje", l: "Precio por viaje (EUR fijo)" },
   { v: "kg", l: "Por kg (EUR/100kg)" },
@@ -586,6 +607,10 @@ export default function PortalClientes() {
     if (!solicitud?.id) return;
     const convertida = !!solicitud.pedido_id || String(solicitud.estado || "").toLowerCase() === "convertida";
     if (convertida) {
+      if (pedidoNoAnulablePorCliente(solicitud.pedido_estado)) {
+        notify("El pedido ya esta en ruta, descarga o finalizado. Contacta con trafico para cualquier cambio.", "warning");
+        return;
+      }
       const ok = window.confirm(`Esta solicitud ya tiene pedido${solicitud.pedido_numero ? ` ${solicitud.pedido_numero}` : ""}. Si continuas, el pedido quedara cancelado con motivo "Cancela cliente". ¿Quieres anularlo?`);
       if (!ok) return;
     }
@@ -1333,7 +1358,7 @@ export default function PortalClientes() {
                         </button>
                       </>
                     )}
-                    {(s.pedido_id || String(s.estado || "").toLowerCase() === "convertida") && !["cancelado", "facturado"].includes(String(s.pedido_estado || "").toLowerCase()) && (
+                    {(s.pedido_id || String(s.estado || "").toLowerCase() === "convertida") && !pedidoNoAnulablePorCliente(s.pedido_estado) && (
                       <button
                         style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(239,68,68,.08)", color: "#ef4444", borderColor: "rgba(239,68,68,.25)" }}
                         onClick={() => cancelarSolicitud(s)}

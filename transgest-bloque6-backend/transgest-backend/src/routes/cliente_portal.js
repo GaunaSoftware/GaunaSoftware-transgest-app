@@ -13,6 +13,26 @@ const { validateBase64Upload } = require("../services/uploadValidation");
 
 const router = express.Router();
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+const ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE = new Set([
+  "en_curso",
+  "enruta",
+  "ruta",
+  "descarga",
+  "descargando",
+  "entregado",
+  "finalizado",
+  "cerrado",
+  "facturado",
+]);
+
+function normalizarEstadoPedidoPortal(estado) {
+  return String(estado || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function pedidoNoAnulablePorCliente(estado) {
+  const normalizado = normalizarEstadoPedidoPortal(estado);
+  return ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE.has(normalizado) || ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE.has(normalizado.replace(/_/g, ""));
+}
 
 let schemaReady = null;
 function ensureSchema() {
@@ -2196,8 +2216,8 @@ router.post("/solicitudes/:id/cancelar", requireCliente, asyncRoute(async (req, 
         result = { status: 404, body: { error: "Pedido asociado no encontrado" } };
         return;
       }
-      if (["facturado"].includes(String(pedido.estado || "").toLowerCase())) {
-        result = { status: 409, body: { error: "El pedido ya esta facturado y no puede anularse desde el portal. Contacta con administracion." } };
+      if (pedidoNoAnulablePorCliente(pedido.estado)) {
+        result = { status: 409, body: { error: "El pedido ya esta en ruta, descarga, finalizado o facturado. No puede anularse desde el portal; contacta con trafico." } };
         return;
       }
       if (String(pedido.estado || "").toLowerCase() !== "cancelado") {

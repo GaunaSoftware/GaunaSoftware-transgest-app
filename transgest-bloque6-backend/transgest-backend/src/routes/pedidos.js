@@ -1180,7 +1180,7 @@ function buildRepositioningPlan({ vehicle, originCoord, previousTrip, targetPedi
   const travelMin = estimateTruckTravelMinutes(distance);
   const departureBase = previousFinishAt && previousFinishAt > now ? previousFinishAt : now;
   const arrivalAt = travelMin !== null ? new Date(departureBase.getTime() + travelMin * 60000) : null;
-  const targetLoadAt = combinePedidoDateTime(targetPedido?.fecha_carga || targetPedido?.fecha_pedido, targetPedido?.hora_carga);
+  const targetLoadAt = combinePedidoDateTime(targetPedido?.fecha_carga, targetPedido?.hora_carga);
   return {
     source,
     source_label: previousCoord
@@ -1603,7 +1603,7 @@ async function aplicarKmVacioDesdePasos({ pedidoId, empresaId, patch = {}, actor
     [
       pedido.vehiculo_id,
       empresaId,
-      pedido.fecha_carga || pedido.fecha_pedido || null,
+      pedido.fecha_carga || null,
       kmVacio,
       prev.destino || "Descarga anterior",
       pedido.origen || "Carga siguiente",
@@ -4370,7 +4370,7 @@ function isValidMapsUrl(value) {
   return /^(https?:\/\/|geo:)/i.test(raw);
 }
 
-function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCountry = "España", fallbackRegion = "") {
+function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCountry = "España", fallbackRegion = "", fallbackSchedule = {}) {
   const parsed = normalizePedidoJsonList(value);
   const seen = new Set();
   return parsed.map((stop, idx) => {
@@ -4388,6 +4388,9 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCou
       provincia: String(source.provincia || source.region || source.state || (idx === 0 ? fallbackRegion : "") || "").trim(),
       google_maps_url: cleanMaps,
       notas: notas || "",
+      fecha: source.fecha || source.fecha_carga || source.fecha_descarga || (idx === 0 ? fallbackSchedule.fecha || "" : ""),
+      hora: source.hora || source.hora_carga || source.hora_descarga || (idx === 0 ? fallbackSchedule.hora || "" : ""),
+      ventana: source.ventana || source.ventana_carga || source.ventana_descarga || (idx === 0 ? fallbackSchedule.ventana || "" : ""),
       lat: source.lat ?? source.latitud ?? source.metadata?.lat ?? null,
       lng: source.lng ?? source.longitud ?? source.metadata?.lng ?? null,
     };
@@ -4403,6 +4406,15 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCou
     seen.add(key);
     return true;
   });
+}
+
+function mergePrimaryStopScheduleForStorage(stops = [], schedule = {}) {
+  return normalizePedidoJsonList(stops).map((stop, idx) => idx === 0 ? {
+    ...stop,
+    fecha: stop.fecha || stop.fecha_carga || stop.fecha_descarga || schedule.fecha || "",
+    hora: stop.hora || stop.hora_carga || stop.hora_descarga || schedule.hora || "",
+    ventana: stop.ventana || stop.ventana_carga || stop.ventana_descarga || schedule.ventana || "",
+  } : stop);
 }
 
 function derivePedidoGeoFromStops(cargas = [], descargas = [], fallback = {}) {
@@ -5122,7 +5134,7 @@ router.get("/chofer/clientes", async (req, res) => {
       const { rows } = await db.query(
         `SELECT c.id, c.nombre, c.cif, c.direccion, c.ciudad, c.pais,
                 COUNT(p.id)::int AS cargas_total,
-                MAX(COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date)) AS ultima_carga,
+                MAX(p.fecha_carga) AS ultima_carga,
                 TRUE AS acceso_rapido
            FROM pedidos p
            JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
@@ -5131,7 +5143,7 @@ router.get("/chofer/clientes", async (req, res) => {
             AND p.cliente_id IS NOT NULL
             AND (${ownClauses.join(" OR ")})
           GROUP BY c.id
-          ORDER BY COUNT(p.id) DESC, MAX(COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date)) DESC NULLS LAST, c.nombre ASC
+          ORDER BY COUNT(p.id) DESC, MAX(p.fecha_carga) DESC NULLS LAST, c.nombre ASC
           LIMIT 8`,
         ownParams
       );
@@ -5142,7 +5154,7 @@ router.get("/chofer/clientes", async (req, res) => {
     const { rows } = await db.query(
       `SELECT c.id, c.nombre, c.cif, c.direccion, c.ciudad, c.pais,
               COUNT(p.id)::int AS cargas_total,
-              MAX(COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date)) AS ultima_carga,
+              MAX(p.fecha_carga) AS ultima_carga,
               FALSE AS acceso_rapido
          FROM clientes c
          LEFT JOIN pedidos p ON p.cliente_id=c.id AND p.empresa_id=c.empresa_id
@@ -5393,8 +5405,8 @@ router.get("/", async (req, res) => {
       params.push(scope.tipos_viaje);
     }
   }
-  if (desde)      { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) >= $${i++}`);  params.push(desde); }
-  if (hasta)      { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) <= $${i++}`);  params.push(hasta); }
+  if (desde)      { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) >= $${i++}`);  params.push(desde); }
+  if (hasta)      { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) <= $${i++}`);  params.push(hasta); }
   if (pendiente_completar === "true")  { where.push("p.pendiente_completar IS TRUE"); }
   if (pendiente_completar === "false") { where.push("COALESCE(p.pendiente_completar,false) IS FALSE"); }
   if (tipo_carga) { where.push(`COALESCE(p.tipo_carga,'') = $${i++}`); params.push(tipo_carga); }
@@ -5424,7 +5436,7 @@ router.get("/", async (req, res) => {
       SELECT p.* -- empresa_id filtrado en where dinamico
         FROM pedidos p
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
        LIMIT $${i++} OFFSET $${i++}
     )
     SELECT p.*,
@@ -5459,13 +5471,13 @@ router.get("/", async (req, res) => {
         FROM pedido_docs d
        WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
     ) docs ON true
-    ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+    ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
   `, `
     WITH filtered AS (
       SELECT p.* -- empresa_id filtrado en where dinamico
         FROM pedidos p
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
        LIMIT $${i - 2} OFFSET $${i - 1}
     )
     SELECT p.*,
@@ -5499,7 +5511,7 @@ router.get("/", async (req, res) => {
         FROM pedido_docs d
        WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
     ) docs ON true
-    ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+    ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
   `, [...params, limit, offset]);
 
   // Get total count for pagination (params already excludes limit/offset)
@@ -5580,8 +5592,8 @@ router.get("/resumen-lista", async (req, res) => {
         params.push(scope.tipos_viaje);
       }
     }
-    if (desde) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) >= $${i++}`); params.push(desde); }
-    if (hasta) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) <= $${i++}`); params.push(hasta); }
+    if (desde) { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) >= $${i++}`); params.push(desde); }
+    if (hasta) { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) <= $${i++}`); params.push(hasta); }
     if (pendiente_completar === "true") where.push("p.pendiente_completar IS TRUE");
     if (pendiente_completar === "false") where.push("COALESCE(p.pendiente_completar,false) IS FALSE");
     if (tipo_carga) { where.push(`COALESCE(p.tipo_carga,'') = $${i++}`); params.push(tipo_carga); }
@@ -5635,7 +5647,7 @@ router.get("/resumen-lista", async (req, res) => {
         LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
         LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
        LIMIT $${i++} OFFSET $${i++}
     `, `
       SELECT p.id, p.numero, p.empresa_id, p.cliente_id, p.colaborador_id,
@@ -5665,7 +5677,7 @@ router.get("/resumen-lista", async (req, res) => {
         LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
         LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
        LIMIT $${i - 2} OFFSET $${i - 1}
     `, [...params, limitN, offset]);
 
@@ -6288,7 +6300,7 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
 
     const originCoord = firstPedidoStopWithCoords(pedido);
     const originText = originCoord?.text || pedido.origen || "";
-    const fechaCarga = dateOnly(pedido.fecha_carga || pedido.fecha_pedido);
+    const fechaCarga = dateOnly(pedido.fecha_carga);
     const fechaDesde = fechaCarga ? new Date(`${fechaCarga}T00:00:00.000Z`) : null;
     const fechaHasta = fechaDesde ? new Date(fechaDesde.getTime() + 36 * 60 * 60 * 1000) : null;
 
@@ -7578,14 +7590,22 @@ router.post("/chofer", async (req, res) => {
         fecha: fechaCargaNorm,
         hora: horaCargaNorm || "",
         pais: origenPais,
-      }], origen, origenPais, req.body?.origen_provincia || "");
+      }], origen, origenPais, req.body?.origen_provincia || "", {
+        fecha: fechaCargaNorm,
+        hora: horaCargaNorm || "",
+        ventana: req.body?.ventana_carga || "",
+      });
       const puntosDescarga = normalizePedidoStopsForStorage(req.body?.puntos_descarga || [{
         nombre: req.body?.destino_nombre || destino,
         direccion: destino,
         fecha: fechaDescargaNorm,
         hora: horaDescargaNorm || "",
         pais: destinoPais,
-      }], destino, destinoPais, req.body?.destino_provincia || "");
+      }], destino, destinoPais, req.body?.destino_provincia || "", {
+        fecha: fechaDescargaNorm,
+        hora: horaDescargaNorm || "",
+        ventana: req.body?.ventana_descarga || "",
+      });
       const geoPedido = derivePedidoGeoFromStops(puntosCarga, puntosDescarga, {
         origen_pais: origenPais,
         destino_pais: destinoPais,
@@ -7818,10 +7838,18 @@ router.post("/", GERENTE_O_TRAFICO,
       const origenPaisFallback = normalizePaisPedido(req.body.origen_pais || req.body.pais_origen || "España");
       const destinoPaisFallback = normalizePaisPedido(req.body.destino_pais || req.body.pais_destino || "España");
       const puntosCargaNorm = req.body.puntos_carga !== undefined
-        ? normalizePedidoStopsForStorage(req.body.puntos_carga, origen, origenPaisFallback, req.body.origen_provincia || req.body.provincia_origen || "")
+        ? normalizePedidoStopsForStorage(req.body.puntos_carga, origen, origenPaisFallback, req.body.origen_provincia || req.body.provincia_origen || "", {
+            fecha: fechaCargaNorm || "",
+            hora: horaCargaNorm || "",
+            ventana: req.body.ventana_carga || "",
+          })
         : null;
       const puntosDescargaNorm = req.body.puntos_descarga !== undefined
-        ? normalizePedidoStopsForStorage(req.body.puntos_descarga, destino, destinoPaisFallback, req.body.destino_provincia || req.body.provincia_destino || "")
+        ? normalizePedidoStopsForStorage(req.body.puntos_descarga, destino, destinoPaisFallback, req.body.destino_provincia || req.body.provincia_destino || "", {
+            fecha: fechaDescargaNorm || fechaEntregaNorm || "",
+            hora: horaDescargaNorm || "",
+            ventana: req.body.ventana_descarga || "",
+          })
         : null;
       const geoPedido = derivePedidoGeoFromStops(puntosCargaNorm || [], puntosDescargaNorm || [], {
         ...req.body,
@@ -7884,8 +7912,16 @@ router.post("/", GERENTE_O_TRAFICO,
         minimo_unidades: req.body.minimo_unidades !== undefined ? (parseLocaleNumber(req.body.minimo_unidades) || 0) : undefined,
         importe_paralizacion: req.body.importe_paralizacion !== undefined ? (parseLocaleNumber(req.body.importe_paralizacion) || 0) : undefined,
         paralizacion_horas: req.body.paralizacion_horas !== undefined ? (parseLocaleNumber(req.body.paralizacion_horas) || 0) : undefined,
-        puntos_carga: puntosCargaNorm !== null ? JSON.stringify(puntosCargaNorm) : undefined,
-        puntos_descarga: puntosDescargaNorm !== null ? JSON.stringify(puntosDescargaNorm) : undefined,
+        puntos_carga: puntosCargaNorm !== null ? JSON.stringify(mergePrimaryStopScheduleForStorage(puntosCargaNorm, {
+          fecha: fechaCargaNorm || "",
+          hora: horaCargaNorm || "",
+          ventana: req.body.ventana_carga || "",
+        })) : undefined,
+        puntos_descarga: puntosDescargaNorm !== null ? JSON.stringify(mergePrimaryStopScheduleForStorage(puntosDescargaNorm, {
+          fecha: fechaDescargaNorm || fechaEntregaNorm || "",
+          hora: horaDescargaNorm || "",
+          ventana: req.body.ventana_descarga || "",
+        })) : undefined,
       };
       const requestedRutaId = normalizePedidoUuid(req.body.ruta_id);
       let rutaIncompatibleDesvinculada = false;
@@ -8334,8 +8370,18 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     minimo_unidades:        body.minimo_unidades        !== undefined ? (parseLocaleNumber(body.minimo_unidades) || 0) : undefined,
     importe_paralizacion:   body.importe_paralizacion   !== undefined ? (parseLocaleNumber(body.importe_paralizacion) || 0) : undefined,
     paralizacion_horas:     body.paralizacion_horas     !== undefined ? (parseLocaleNumber(body.paralizacion_horas) || 0) : undefined,
-    puntos_carga:           body.puntos_carga           !== undefined ? JSON.stringify(puntosCargaNormUpdate) : undefined,
-    puntos_descarga:        body.puntos_descarga        !== undefined ? JSON.stringify(puntosDescargaNormUpdate) : undefined,
+    puntos_carga:           body.puntos_carga           !== undefined ? JSON.stringify(mergePrimaryStopScheduleForStorage(puntosCargaNormUpdate, {
+      fecha: body.fecha_carga !== undefined ? normalizePedidoDate(body.fecha_carga) : normalizePedidoDate(pedidoActualRows[0].fecha_carga),
+      hora: body.hora_carga !== undefined ? normalizePedidoTime(body.hora_carga) : (pedidoActualRows[0].hora_carga || ""),
+      ventana: body.ventana_carga !== undefined ? body.ventana_carga || "" : (pedidoActualRows[0].ventana_carga || ""),
+    })) : undefined,
+    puntos_descarga:        body.puntos_descarga        !== undefined ? JSON.stringify(mergePrimaryStopScheduleForStorage(puntosDescargaNormUpdate, {
+      fecha: body.fecha_descarga !== undefined
+        ? normalizePedidoDate(body.fecha_descarga)
+        : (body.fecha_entrega !== undefined ? normalizePedidoDate(body.fecha_entrega) : normalizePedidoDate(pedidoActualRows[0].fecha_descarga || pedidoActualRows[0].fecha_entrega)),
+      hora: body.hora_descarga !== undefined ? normalizePedidoTime(body.hora_descarga) : (pedidoActualRows[0].hora_descarga || ""),
+      ventana: body.ventana_descarga !== undefined ? body.ventana_descarga || "" : (pedidoActualRows[0].ventana_descarga || ""),
+    })) : undefined,
   };
   const inferPayload = { ...pedidoActualRows[0] };
   for (const [key, value] of Object.entries(fieldMap)) {

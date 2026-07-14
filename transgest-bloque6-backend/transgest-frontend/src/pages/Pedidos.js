@@ -170,7 +170,7 @@ function addDaysLocal(dateIso, days) {
 }
 
 function pedidoFechaOperativaKey(pedido) {
-  return toDateInputValue(pedido?.fecha_carga || pedido?.fecha_pedido || pedido?.fecha_descarga || pedido?.fecha_entrega) || "sin-fecha";
+  return toDateInputValue(pedido?.fecha_carga || pedido?.fecha_descarga || pedido?.fecha_entrega) || "sin-fecha";
 }
 
 function pedidoClienteOrdenKey(pedido) {
@@ -554,7 +554,7 @@ function buildPedidoCopyPayload(basePedido = {}, overrides = {}) {
 }
 
 function buildPedidoReschedulePayload(basePedido = {}, offsetDays = 1, overrides = {}) {
-  const fechaCargaBase = basePedido?.fecha_carga || basePedido?.fecha_pedido || new Date().toISOString().slice(0, 10);
+  const fechaCargaBase = basePedido?.fecha_carga || new Date().toISOString().slice(0, 10);
   const fechaDescargaBase = basePedido?.fecha_descarga || fechaCargaBase;
   const cargaNorm = String(fechaCargaBase).slice(0, 10);
   const descargaNorm = String(fechaDescargaBase).slice(0, 10);
@@ -582,6 +582,17 @@ function buildPedidoReschedulePayload(basePedido = {}, offsetDays = 1, overrides
   });
 }
 
+function mergePrimaryStopSchedule(stops, { fecha, hora, ventana } = {}) {
+  const parsed = parseStops(stops);
+  if (!parsed.length) return parsed;
+  return parsed.map((stop, idx) => idx === 0 ? {
+    ...stop,
+    fecha: stop.fecha || fecha || "",
+    hora: stop.hora || hora || "",
+    ventana: stop.ventana || ventana || "",
+  } : stop);
+}
+
 function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   const merged = normalizePedidoTarifaDraft({ ...basePedido, ...overrides });
   const geoMerged = withPedidoGeoDefaults(merged);
@@ -606,8 +617,16 @@ function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
     cmr_tipo: cmrTypeForPedidoStops(geoMerged),
     importe: calcImporte(merged),
     precio_colaborador: merged.colaborador_id ? (importeColaboradorCalculado(merged) || merged.precio_colaborador || null) : merged.precio_colaborador,
-    puntos_carga: parseStops(geoMerged.puntos_carga),
-    puntos_descarga: parseStops(geoMerged.puntos_descarga),
+    puntos_carga: mergePrimaryStopSchedule(geoMerged.puntos_carga, {
+      fecha: geoMerged.fecha_carga,
+      hora: geoMerged.hora_carga,
+      ventana: geoMerged.ventana_carga,
+    }),
+    puntos_descarga: mergePrimaryStopSchedule(geoMerged.puntos_descarga, {
+      fecha: geoMerged.fecha_descarga || geoMerged.fecha_entrega,
+      hora: geoMerged.hora_descarga,
+      ventana: geoMerged.ventana_descarga,
+    }),
     extracostes_importe: toFiniteNumber(merged.extracostes ?? merged.extracostes_importe, 0),
     importe_revision_combustible: calcRevisionCombustible(merged),
     importe_minimo: merged.tipo_precio === "viaje" ? toNullableNumber(merged.importe_minimo) : null,
@@ -704,7 +723,7 @@ function toDateInputValue(value) {
 }
 
 function buildPedidoCargaDate(pedido) {
-  const fecha = toDateInputValue(pedido?.fecha_carga || pedido?.fecha_pedido);
+  const fecha = toDateInputValue(pedido?.fecha_carga);
   if (!fecha) return null;
   const hora = String(pedido?.hora_carga || "00:00").slice(0, 5);
   const dt = new Date(`${fecha}T${hora}:00`);
@@ -729,7 +748,7 @@ function getPedidoStateValidationIssues(pedido, targetEstado = "") {
   const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
   const needsOperationalData = ["confirmado", "en_curso", "descarga", "entregado"].includes(estado);
   const needsDeliveryData = ["descarga", "entregado"].includes(estado);
-  if (!toDateInputValue(pedido?.fecha_carga || pedido?.fecha_pedido)) issues.push("Falta fecha de carga");
+  if (!toDateInputValue(pedido?.fecha_carga)) issues.push("Falta fecha de carga");
   if (needsOperationalData) {
     if (!String(pedido?.origen || "").trim()) issues.push("Falta origen");
     if (!String(pedido?.destino || "").trim()) issues.push("Falta destino");
@@ -2527,6 +2546,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       direccion: (stopAddress(stop) || stop.direccion || form.origen || "").trim().toUpperCase(),
       fecha: stop.fecha || (idx === 0 ? form.fecha_carga : "") || form.fecha_carga || "",
       hora: stop.hora || (idx === 0 ? form.hora_carga : "") || "",
+      ventana: stop.ventana || (idx === 0 ? form.ventana_carga : "") || "",
       pais: stopCountry(stop, pais),
       provincia: stopRegion(stop, idx === 0 ? form.origen_provincia || "" : ""),
       notas: stop.notas || (idx === 0 ? "Pedido rapido" : "Carga adicional desde pedido rapido"),
@@ -2536,7 +2556,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       cliente_nombre: "",
       fecha: form.fecha_carga || "",
       hora: form.hora_carga || "",
-      ventana: "",
+      ventana: form.ventana_carga || "",
       bultos: "",
       peso_kg: "",
       pais,
@@ -2553,6 +2573,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       direccion: (stopAddress(stop) || stop.direccion || form.destino || "").trim().toUpperCase(),
       fecha: stop.fecha || (idx === 0 ? form.fecha_descarga : "") || form.fecha_descarga || form.fecha_carga || "",
       hora: stop.hora || (idx === 0 ? form.hora_descarga : "") || "",
+      ventana: stop.ventana || (idx === 0 ? form.ventana_descarga : "") || "",
       pais: stopCountry(stop, pais),
       provincia: stopRegion(stop, idx === 0 ? form.destino_provincia || "" : ""),
       tipo_descarga: stop.tipo_descarga || form.tipo_descarga || "indiferente",
@@ -2563,7 +2584,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       cliente_nombre: "",
       fecha: form.fecha_descarga || form.fecha_carga || "",
       hora: form.hora_descarga || "",
-      ventana: "",
+      ventana: form.ventana_descarga || "",
       bultos: "",
       peso_kg: "",
       precio: "",
@@ -6662,7 +6683,7 @@ async function calcularKmVacio(vehiculoId, nuevoOrigen) {
     .filter(p => p.vehiculo_id === vehiculoId && 
                  (p.estado === "entregado" || p.estado === "facturado") &&
                  p.destino)
-    .sort((a,b) => new Date(b.fecha_carga||b.fecha_pedido) - new Date(a.fecha_carga||a.fecha_pedido));
+    .sort((a,b) => new Date(b.fecha_descarga || b.fecha_entrega || b.fecha_carga || 0) - new Date(a.fecha_descarga || a.fecha_entrega || a.fecha_carga || 0));
   const ultimoDestino = ultimos[0]?.destino;
   if (!ultimoDestino) return null;
   const km = await calcularKmRuta(ultimoDestino, nuevoOrigen);
@@ -8976,14 +8997,14 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
     String(c.vehiculo_id || "") === String(vehiculo?.id || "") ||
     String(c.matricula || "").toUpperCase() === String(vehiculo?.matricula || "").toUpperCase()
   );
-  const fechaCarga = toDateInputValue(defaults.fecha_carga || defaults.fecha_pedido) || new Date().toISOString().slice(0, 10);
+  const fechaCarga = toDateInputValue(defaults.fecha_carga) || "";
   const fechaDescarga = toDateInputValue(defaults.fecha_descarga || fechaCarga) || fechaCarga;
   const remolqueId = defaults.remolque_id || vehiculo?.remolque_id || "";
 
   return withPedidoGeoDefaults({
     estado: "pendiente",
     tipo_precio: "viaje",
-    fecha_pedido: toDateInputValue(defaults.fecha_pedido) || fechaCarga,
+    fecha_pedido: toDateInputValue(defaults.fecha_pedido) || new Date().toISOString().slice(0, 10),
     fecha_carga: fechaCarga,
     fecha_descarga: fechaDescarga,
     vehiculo_id: vehiculoId,
@@ -9087,7 +9108,7 @@ function openPedidoInTrafico(pedido) {
   setRuntimeFocus("tms_trafico_focus", {
     pedido_id: pedido.id,
     numero: pedido.numero || "",
-    fecha_carga: toDateInputValue(pedido.fecha_carga || pedido.fecha_pedido),
+    fecha_carga: toDateInputValue(pedido.fecha_carga),
     source: "pedidos",
   });
   window.dispatchEvent(new CustomEvent("tms:navegar", { detail: "gestion_trafico" }));
@@ -9923,10 +9944,10 @@ export default function Pedidos() {
           if (fetched?.id) pedidoBase = fetched;
         }
         const payload = buildPedidoCopyPayload(pedidoBase, {
-          fecha_carga: sumarDiasISO(pedidoBase?.fecha_carga || pedidoBase?.fecha_pedido, 7),
+          fecha_carga: sumarDiasISO(pedidoBase?.fecha_carga, 7),
           fecha_descarga: pedidoBase?.fecha_descarga
             ? sumarDiasISO(pedidoBase.fecha_descarga, 7)
-            : sumarDiasISO(pedidoBase?.fecha_carga || pedidoBase?.fecha_pedido, 7),
+            : sumarDiasISO(pedidoBase?.fecha_carga, 7),
           pendiente_completar: true,
           aviso_completar: "Viaje copiado desde pedidos: revisar fechas, asignacion y precio antes de cerrar.",
           estado: "pendiente",
@@ -10012,10 +10033,10 @@ export default function Pedidos() {
           if (fetched?.id) pedidoBase = fetched;
         }
         await crearPedido(buildPedidoCopyPayload(pedidoBase, {
-          fecha_carga: sumarDiasISO(pedidoBase?.fecha_carga || pedidoBase?.fecha_pedido, 7),
+          fecha_carga: sumarDiasISO(pedidoBase?.fecha_carga, 7),
           fecha_descarga: pedidoBase?.fecha_descarga
             ? sumarDiasISO(pedidoBase.fecha_descarga, 7)
-            : sumarDiasISO(pedidoBase?.fecha_carga || pedidoBase?.fecha_pedido, 7),
+            : sumarDiasISO(pedidoBase?.fecha_carga, 7),
           pendiente_completar: true,
           aviso_completar: "Viaje copiado desde seleccion multiple: revisar fechas, asignacion y precio antes de cerrar.",
           estado: "pendiente",

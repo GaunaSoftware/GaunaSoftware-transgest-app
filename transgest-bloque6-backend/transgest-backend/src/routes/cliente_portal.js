@@ -1,7 +1,13 @@
 const express = require("express");
 const crypto = require("crypto");
 const db = require("../services/db");
-const { crearNotificacion } = require("../services/notificaciones");
+const {
+  crearNotificacion,
+  listarNotificaciones,
+  marcarLeida,
+  marcarTodasLeidas,
+  notificarUsuariosCliente,
+} = require("../services/notificaciones");
 const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload } = require("../services/documentoControl");
 
 const router = express.Router();
@@ -461,6 +467,33 @@ async function notificarNuevaSolicitud(req, solicitud) {
   }).catch(() => null)));
 }
 
+async function notificarGestionSolicitudCliente(req, solicitud, tipoEvento = "solicitud.actualizada") {
+  if (!solicitud?.cliente_id) return [];
+  const route = `${solicitud.origen || "Origen"} -> ${solicitud.destino || "Destino"}`;
+  const config = tipoEvento === "solicitud.convertida"
+    ? { tipo: "portal_cliente_solicitud_aceptada", titulo: "Solicitud aceptada", mensaje: solicitud.respuesta || `Tu solicitud ${route} se ha convertido en pedido.` }
+    : tipoEvento === "solicitud.rechazada"
+      ? { tipo: "portal_cliente_solicitud_rechazada", titulo: "Solicitud rechazada", mensaje: solicitud.respuesta || `Tu solicitud ${route} ha sido rechazada.` }
+      : tipoEvento === "solicitud.reprogramacion.propuesta"
+        ? { tipo: "portal_cliente_reprogramacion", titulo: "Nueva propuesta de fecha", mensaje: solicitud.respuesta || `Trafico ha propuesto una nueva fecha para ${route}.` }
+        : tipoEvento === "solicitud.precio.propuesto"
+          ? { tipo: "portal_cliente_precio", titulo: "Nueva propuesta economica", mensaje: solicitud.respuesta || `Trafico ha propuesto un precio para ${route}.` }
+          : { tipo: "portal_cliente_respuesta", titulo: "Respuesta a tu solicitud", mensaje: solicitud.respuesta || `Trafico ha actualizado tu solicitud ${route}.` };
+  return notificarUsuariosCliente({
+    empresa_id: empresaId(req),
+    cliente_id: solicitud.cliente_id,
+    ...config,
+    data: {
+      solicitud_id: solicitud.id,
+      pedido_id: solicitud.pedido_id || null,
+      tab: "solicitudes",
+      view: "portal_cliente",
+      dedupe_key: `${config.tipo}:${solicitud.id}:${solicitud.updated_at || Date.now()}`,
+    },
+    created_by: req.user?.id || null,
+  });
+}
+
 async function notificarSolicitudIntegracion(req, detalle = {}) {
   const { rows } = await db.query(
     `SELECT id
@@ -482,6 +515,25 @@ async function notificarSolicitudIntegracion(req, detalle = {}) {
     created_by: req.user?.id || null,
   }).catch(() => null)));
 }
+
+router.get("/notificaciones", requireCliente, asyncRoute(async (req, res) => {
+  const result = await listarNotificaciones(empresaId(req), req.user.id, {
+    limit: req.query.limit || 20,
+    includeRead: req.query.include_read,
+  });
+  res.json(result);
+}));
+
+router.patch("/notificaciones/:id/leida", requireCliente, asyncRoute(async (req, res) => {
+  const item = await marcarLeida(empresaId(req), req.user.id, req.params.id);
+  if (!item) return res.status(404).json({ error: "Notificacion no encontrada" });
+  res.json({ ok: true, data: item });
+}));
+
+router.post("/notificaciones/leer-todas", requireCliente, asyncRoute(async (req, res) => {
+  const actualizadas = await marcarTodasLeidas(empresaId(req), req.user.id);
+  res.json({ ok: true, actualizadas });
+}));
 
 router.get("/resumen", requireCliente, async (req, res) => {
   try {
@@ -1243,7 +1295,7 @@ router.post("/puntos", requireCliente, asyncRoute(async (req, res) => {
 router.get("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const { rows } = await db.query(
-    `SELECT s.*, p.numero AS pedido_numero,
+    `SELECT s.*, p.numero AS pedido_numero, p.estado::text AS pedido_estado, p.updated_at AS pedido_updated_at,
             v.matricula AS vehiculo_matricula,
             r.matricula AS remolque_matricula,
             COALESCE(p.matricula_colaborador,'') AS matricula_colaborador,
@@ -1618,6 +1670,12 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
             RETURNING *`,
           [`Solicitud aceptada. Pedido ${pedidoActual.numero} creado.`, sol.id, eid]
         );
+        await addSolicitudEvento(client, req, sol.id, "solicitud.convertida", {
+          pedido_id: pedidoActual.id,
+          pedido_numero: pedidoActual.numero,
+          estado_pedido: pedidoActual.estado,
+          ya_convertida: true,
+        });
         result = { status: 200, body: { ok: true, pedido: pedidoActual, solicitud: updatedExisting.rows[0] || sol, ya_convertida: true } };
         return;
       }
@@ -1692,6 +1750,9 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
     });
     result = { status: 201, body: { ok: true, pedido, solicitud: updated.rows[0] } };
   });
+  if ([200, 201].includes(result?.status) && result.body?.solicitud?.id) {
+    await notificarGestionSolicitudCliente(req, result.body.solicitud, "solicitud.convertida").catch(() => {});
+  }
   res.status(result.status).json(result.body);
 }));
 
@@ -1747,6 +1808,7 @@ router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, re
   if (contraofertaProvided && contraofertaNormalizada === null) return res.status(400).json({ error: "El precio propuesto no es valido" });
 
   let result;
+  let notificationEvent = "solicitud.actualizada";
   await db.transaction(async (client) => {
     const current = await client.query(
       "SELECT id, cliente_id, estado, pedido_id FROM portal_solicitudes_cliente WHERE id=$1 AND empresa_id=$2 FOR UPDATE",
@@ -1809,6 +1871,7 @@ router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, re
       : fecha_propuesta
         ? "solicitud.reprogramacion.propuesta"
         : "solicitud.actualizada";
+    notificationEvent = tipoEvento;
     await addSolicitudEvento(client, req, rows[0].id, tipoEvento, {
       estado: estadoNormalizado,
       pedido_id: pedido_id || null,
@@ -1820,6 +1883,9 @@ router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, re
     });
     result = { status: 200, body: rows[0] };
   });
+  if (result?.status === 200 && result.body?.id) {
+    await notificarGestionSolicitudCliente(req, result.body, notificationEvent).catch(() => {});
+  }
   res.status(result.status).json(result.body);
 }));
 

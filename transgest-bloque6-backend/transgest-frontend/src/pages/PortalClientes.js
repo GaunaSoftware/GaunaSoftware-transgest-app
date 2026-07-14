@@ -6,6 +6,7 @@ import {
   getPortalClienteFactura,
   getPortalClienteFacturas,
   getPortalClienteDocumentosResumen,
+  getPortalClienteNotificaciones,
   getPortalClientePedidos,
   getPortalClientePuntos,
   getPortalClienteResumen,
@@ -14,6 +15,8 @@ import {
   getPortalPedidoAlbaranes,
   getPortalPedidoDocumentoControl,
   getPortalPedidoEventos,
+  marcarPortalClienteNotificacionLeida,
+  marcarTodasPortalClienteNotificacionesLeidas,
   responderPortalClienteReprogramacion,
   responderPortalClientePrecio,
 } from "../services/api";
@@ -366,28 +369,81 @@ export default function PortalClientes() {
   const [solicitudEventosAbierta, setSolicitudEventosAbierta] = useState(null);
   const [facturaSel, setFacturaSel] = useState(null);
   const [loadingFactura, setLoadingFactura] = useState(null);
+  const [portalNotificaciones, setPortalNotificaciones] = useState([]);
+  const [portalNotificacionesNoLeidas, setPortalNotificacionesNoLeidas] = useState(0);
 
-  const cargar = async () => {
-    setLoading(true);
+  const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    if (!silencioso) setLoading(true);
     try {
-      const [p, f, s, dr] = await Promise.all([
+      if (silencioso) {
+        const [p, s, n] = await Promise.all([
+          getPortalClientePedidos().catch(() => null),
+          getPortalClienteSolicitudes().catch(() => null),
+          getPortalClienteNotificaciones(20).catch(() => null),
+        ]);
+        if (Array.isArray(p)) setPedidos(p);
+        if (Array.isArray(s)) setSolicitudes(s);
+        if (n && Array.isArray(n.data)) {
+          setPortalNotificaciones(n.data);
+          setPortalNotificacionesNoLeidas(Number(n.no_leidas || 0));
+        }
+        return;
+      }
+      const [p, f, s, dr, resumen, n] = await Promise.all([
         getPortalClientePedidos().catch(() => []),
         getPortalClienteFacturas().catch(() => []),
         getPortalClienteSolicitudes().catch(() => []),
         getPortalClienteDocumentosResumen().catch(() => null),
+        getPortalClienteResumen().catch(() => null),
+        getPortalClienteNotificaciones(20).catch(() => null),
       ]);
-      const resumen = await getPortalClienteResumen().catch(() => null);
       setPedidos(Array.isArray(p) ? p : []);
       setFacturas(Array.isArray(f) ? f : []);
       setSolicitudes(Array.isArray(s) ? s : []);
       setPortalResumen(resumen && typeof resumen === "object" ? resumen : null);
       setDocumentosResumen(dr && Array.isArray(dr.pedidos) ? dr : { pedidos: [], total: 0, con_albaran: 0, sin_albaran: 0, documentos_total: 0 });
+      setPortalNotificaciones(n && Array.isArray(n.data) ? n.data : []);
+      setPortalNotificacionesNoLeidas(Number(n?.no_leidas || 0));
     } finally {
-      setLoading(false);
+      if (!silencioso) setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => {
+    cargar();
+    const interval = window.setInterval(() => cargar({ silencioso: true }), 15000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") cargar({ silencioso: true });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [cargar]);
+
+  async function abrirNovedadCliente(item) {
+    const targetTab = item?.data?.tab === "solicitudes" ? "solicitudes" : "seguimiento";
+    setTab(targetTab);
+    if (!item?.id) return;
+    try {
+      await marcarPortalClienteNotificacionLeida(item.id);
+      setPortalNotificaciones(prev => prev.filter(n => n.id !== item.id));
+      setPortalNotificacionesNoLeidas(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      notify(error.message || "No se pudo marcar la novedad como leida", "error");
+    }
+  }
+
+  async function marcarNovedadesClienteLeidas() {
+    try {
+      await marcarTodasPortalClienteNotificacionesLeidas();
+      setPortalNotificaciones([]);
+      setPortalNotificacionesNoLeidas(0);
+    } catch (error) {
+      notify(error.message || "No se pudieron marcar las novedades como leidas", "error");
+    }
+  }
 
   const solicitudesAbiertas = solicitudes.filter(s => ["pendiente", "revisada"].includes(s.estado));
   const solicitudesConvertidas = solicitudes.filter(s => s.estado === "convertida");
@@ -740,6 +796,34 @@ export default function PortalClientes() {
           </div>
         </div>
 
+        {portalNotificacionesNoLeidas > 0 && portalNotificaciones.length > 0 && (
+          <section style={{ ...S.card, marginBottom:16, border:"1px solid rgba(59,130,246,.35)", background:"rgba(59,130,246,.07)" }} aria-label="Novedades de tus solicitudes y viajes">
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap", marginBottom:10 }}>
+              <div>
+                <div style={{ fontWeight:900, color:"var(--text)" }}>Novedades para ti</div>
+                <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>
+                  {portalNotificacionesNoLeidas} actualizacion{portalNotificacionesNoLeidas === 1 ? "" : "es"} sin leer de trafico o gerencia.
+                </div>
+              </div>
+              <button type="button" style={S.btn} onClick={marcarNovedadesClienteLeidas}>Marcar todas como leidas</button>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,240px),1fr))", gap:8 }}>
+              {portalNotificaciones.slice(0, 3).map(item => (
+                <button
+                  type="button"
+                  key={item.id}
+                  onClick={() => abrirNovedadCliente(item)}
+                  style={{ textAlign:"left", border:"1px solid rgba(59,130,246,.25)", background:"var(--bg3)", borderRadius:8, padding:"11px 12px", cursor:"pointer", minWidth:0 }}
+                >
+                  <div style={{ fontSize:13, fontWeight:900, color:"var(--text)", overflowWrap:"anywhere" }}>{item.titulo || "Actualizacion"}</div>
+                  <div style={{ fontSize:12, color:"var(--text4)", marginTop:4, lineHeight:1.4, overflowWrap:"anywhere" }}>{item.mensaje || "Consulta el detalle actualizado."}</div>
+                  <div style={{ fontSize:10, color:"var(--text5)", marginTop:7 }}>{item.created_at ? new Date(item.created_at).toLocaleString("es-ES") : ""}</div>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         {accionesPortal.length > 0 && (
           <div style={{ ...S.card, marginBottom: 16 }}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
@@ -1056,6 +1140,7 @@ export default function PortalClientes() {
             )}
             {solicitudesFiltradas.length === 0 ? <Empty text={q ? "No hay solicitudes que coincidan con la busqueda." : "No has enviado solicitudes."} /> : solicitudesFiltradas.map(s => {
               const e = ESTADOS[s.estado] || ESTADOS.pendiente;
+              const pedidoEstado = s.pedido_estado ? (ESTADOS[s.pedido_estado] || { l:s.pedido_estado, c:"#64748b" }) : null;
               return (
                 <div key={s.id} style={{ borderBottom: "1px solid var(--border2)", padding: "11px 0" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -1068,7 +1153,14 @@ export default function PortalClientes() {
                         Movimientos: {Number(s.eventos_count || 0)}{s.ultimo_evento_at ? ` - ultimo ${new Date(s.ultimo_evento_at).toLocaleString("es-ES")}` : ""}
                       </div>
                     </div>
-                    <span style={{ alignSelf: "flex-start", padding: "3px 10px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 11, fontWeight: 800 }}>{e.l}</span>
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
+                      <span style={{ alignSelf: "flex-start", padding: "3px 10px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 11, fontWeight: 800 }}>{e.l}</span>
+                      {pedidoEstado && (
+                        <span style={{ alignSelf:"flex-start", padding:"3px 10px", borderRadius:20, color:pedidoEstado.c, background:`${pedidoEstado.c}18`, border:`1px solid ${pedidoEstado.c}30`, fontSize:11, fontWeight:800 }}>
+                          Viaje: {pedidoEstado.l}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:8, marginTop:10 }}>
                     <Mini label="Mercancia" value={s.mercancia || "-"} />

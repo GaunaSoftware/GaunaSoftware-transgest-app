@@ -7,7 +7,7 @@ const zlib = require("zlib");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
-const { crearNotificacion } = require("../services/notificaciones");
+const { crearNotificacion, notificarUsuariosCliente } = require("../services/notificaciones");
 const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload, buildDocumentoControlExpediente, buildDocumentoControlStructuredExport, buildDocumentoControlSignaturePackage, buildDocumentoControlQrDataUrl, buildDocumentoControlHtml, generateDocumentoControlPdf, buildDocumentoControlFilename, buildDocumentoControlExportFilename, verifyPublicToken, verifyPublicVerificationCode } = require("../services/documentoControl");
 const {
   syncPedidoRegulatoryCore,
@@ -920,6 +920,38 @@ async function notificarGestionPedido(empresaId, tipo, titulo, mensaje, data = {
     data: { ...data, dedupe_key: key },
     created_by: createdBy,
   }).catch(() => null)));
+}
+
+async function notificarClienteEstadoPedido(pedido, estadoAnterior, estadoNuevo, createdBy = null) {
+  if (!pedido?.empresa_id || !pedido?.cliente_id || !estadoNuevo || String(estadoAnterior || "") === String(estadoNuevo)) return [];
+  const labels = {
+    pendiente: "Pendiente",
+    confirmado: "Confirmado",
+    en_curso: "En ruta",
+    descarga: "En descarga",
+    entregado: "Entregado",
+    cancelado: "Cancelado",
+    incidencia: "Con incidencia",
+    facturado: "Facturado",
+  };
+  const label = labels[estadoNuevo] || estadoNuevo;
+  return notificarUsuariosCliente({
+    empresa_id: pedido.empresa_id,
+    cliente_id: pedido.cliente_id,
+    tipo: "portal_cliente_pedido_estado",
+    titulo: `Viaje ${pedido.numero || "actualizado"}: ${label}`,
+    mensaje: `El viaje ${pedido.origen || "Origen"} -> ${pedido.destino || "Destino"} ha cambiado a ${label.toLowerCase()}.`,
+    data: {
+      pedido_id: pedido.id,
+      pedido_numero: pedido.numero || null,
+      estado_anterior: estadoAnterior || null,
+      estado: estadoNuevo,
+      tab: "seguimiento",
+      view: "portal_cliente",
+      dedupe_key: `portal-pedido-estado:${pedido.id}:${estadoNuevo}`,
+    },
+    created_by: createdBy,
+  });
 }
 
 async function notificarGerenciaPedido(empresaId, tipo, titulo, mensaje, data = {}, createdBy = null) {
@@ -8042,6 +8074,8 @@ router.patch("/:id/estado",
       incidencia: incidencia || null,
       motivo_cancelacion: motivoCancelacion || null,
     }, req.user?.rol || "usuario", actorUsuarioId);
+    await notificarClienteEstadoPedido(rows[0], rows[0].estado, estado, actorUsuarioId)
+      .catch(e => logger.warn("No se pudo notificar el estado al cliente:", e.message));
 
     if (estado === "incidencia") {
       const origenIncidencia = req.user?.rol === "chofer" ? "chofer" : "trafico";
@@ -8352,6 +8386,8 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
       await logPedidoEvento(pedidoActualizado.id, empresaId, "pedido.editado_estado", {
         estado: pedidoActualizado.estado,
       }, req.user?.rol || "usuario", req.user?.id || null);
+      await notificarClienteEstadoPedido(pedidoActualRows[0], pedidoActualRows[0].estado, pedidoActualizado.estado, req.user?.id || null)
+        .catch(error => logger.warn("No se pudo notificar el estado al cliente:", error.message));
     }
     const cambiosPedido = summarizePedidoChanges(pedidoActualRows[0], pedidoActualizado, fields.map(([k]) => k));
     if (cambiosPedido.length) {
@@ -8404,6 +8440,8 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
         await logPedidoEvento(updatedPedido.id, empresaId, "pedido.editado_estado", {
           estado: updatedPedido.estado,
         }, req.user?.rol || "usuario", req.user?.id || null);
+        await notificarClienteEstadoPedido(pedidoActualRows[0], pedidoActualRows[0].estado, updatedPedido.estado, req.user?.id || null)
+          .catch(error => logger.warn("No se pudo notificar el estado al cliente:", error.message));
       }
       const cambiosPedido = summarizePedidoChanges(pedidoActualRows[0], updatedPedido, fields.map(([k]) => k));
       if (cambiosPedido.length) {

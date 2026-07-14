@@ -1476,6 +1476,14 @@ function AppInner() {
   const startupSnoozeTimersRef = useRef(new Set());
   const [pedidoActionMenuOpen, setPedidoActionMenuOpen] = useState(false);
   const [guidedModule, setGuidedModule] = useState(null);
+  const isInternalOfficeUser = ["gerente", "trafico", "administrativo", "contable"].includes(user?.rol);
+
+  useEffect(() => {
+    setAvisosOperativosColaboradores({ items: [], resumen: {} });
+    setAvisosOperativosOpen(false);
+    setNotificacionesNoLeidas(0);
+    setAvisosCriticos(0);
+  }, [user?.id, user?.rol]);
 
   useEffect(() => () => {
     startupSnoozeTimersRef.current.forEach(timer => window.clearTimeout(timer));
@@ -1652,6 +1660,12 @@ function AppInner() {
     window.addEventListener("tms:agenda-refresh", avisosOperativosRefresh);
     window.addEventListener("tms:pedidos-changed", avisosOperativosRefresh);
     const tallerIv = puedeVerBadgeTaller ? setInterval(calcTallerBadge, 30000) : null;
+    const solicitudesIv = isInternalOfficeUser
+      ? setInterval(() => {
+          calcNotificacionesBadge();
+          calcSolicitudesBadge();
+        }, 30000)
+      : null;
 
     const earlyBadgeTimer = setTimeout(() => {
       if (puedeVerBadgeTaller) calcTallerBadge();
@@ -1722,9 +1736,10 @@ function AppInner() {
       window.removeEventListener("tms:agenda-refresh", avisosOperativosRefresh);
       window.removeEventListener("tms:pedidos-changed", avisosOperativosRefresh);
       if (tallerIv) clearInterval(tallerIv);
+      if (solicitudesIv) clearInterval(solicitudesIv);
       clearInterval(refreshIv);
     };
-  }, [user, puedeVer]);
+  }, [user, puedeVer, isInternalOfficeUser]);
 
   useEffect(() => {
     if (!user) {
@@ -1885,7 +1900,7 @@ function AppInner() {
         {contenido}
       </Suspense>
     </Layout>
-    {user?.rol !== "chofer" && (
+    {isInternalOfficeUser && (
       <OperativeAlertsPanel
         user={user}
         data={avisosOperativosColaboradores}

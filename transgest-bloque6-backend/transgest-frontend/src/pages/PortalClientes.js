@@ -43,6 +43,30 @@ const ESTADOS = {
   revisada: { l: "En revision", c: "#3b82f6" },
 };
 
+const TIPOS_PRECIO = [
+  { v: "viaje", l: "Precio por viaje (EUR fijo)" },
+  { v: "kg", l: "Por kg (EUR/100kg)" },
+  { v: "tonelada", l: "Por toneladas (EUR/tn)" },
+  { v: "km", l: "Por kilometro (EUR/km)" },
+  { v: "hora", l: "Por hora (EUR/h)" },
+  { v: "palet", l: "Por palet (EUR/palet)" },
+];
+
+function precioSolicitudLabel(item = {}) {
+  const tipo = String(item.tipo_precio || "viaje");
+  const unit = Number(item.precio_unitario ?? item.importe ?? 0);
+  const cantidad = Number(item.cantidad || 0);
+  const importe = Number(item.importe || 0);
+  if (!unit && !importe) return "-";
+  if (tipo === "viaje") return `${(importe || unit).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`;
+  const units = { kg: "EUR/100kg", tonelada: "EUR/tn", km: "EUR/km", hora: "EUR/h", palet: "EUR/palet" };
+  return [
+    `${unit.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${units[tipo] || "EUR"}`,
+    cantidad ? `${cantidad.toLocaleString("es-ES", { maximumFractionDigits: 3 })} ${tipo === "tonelada" ? "tn" : tipo === "hora" ? "h" : tipo === "palet" ? "palets" : tipo}` : "",
+    importe ? `total ${importe.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : "",
+  ].filter(Boolean).join(" - ");
+}
+
 function estadoClienteSurface(estado) {
   const key = String(estado || "").toLowerCase();
   const styles = {
@@ -1200,7 +1224,7 @@ export default function PortalClientes() {
                     <Mini label="Mercancia" value={s.mercancia || "-"} />
                     <Mini label="Peso" value={s.peso_kg ? `${Number(s.peso_kg).toLocaleString("es-ES")} kg` : "-"} />
                     <Mini label="Bultos / palets" value={s.bultos || "-"} />
-                    <Mini label="Precio indicado" value={s.importe ? `${Number(s.importe).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : "-"} />
+                    <Mini label="Precio indicado" value={precioSolicitudLabel(s)} />
                     <Mini label="Descarga" value={s.fecha_descarga ? `${dateEs(s.fecha_descarga)} ${s.hora_descarga || ""}`.trim() : "-"} />
                   </div>
                   {s.importe_contraoferta !== null && s.importe_contraoferta !== undefined && (
@@ -1448,6 +1472,12 @@ function SolicitudServicio({ onDone, setTab }) {
     peso_kg: "",
     bultos: "",
     importe: "",
+    tipo_precio: "viaje",
+    precio_unitario: "",
+    cantidad: "",
+    importe_minimo: "",
+    minimo_unidades: "",
+    km_ruta: "",
     notas: "",
     origen_punto_id: "",
     destino_punto_id: "",
@@ -1494,11 +1524,23 @@ function SolicitudServicio({ onDone, setTab }) {
   }
 
   function cleanPayload(source = form) {
+    const tipo = source.tipo_precio || "viaje";
+    let cantidad = source.cantidad;
+    if (!cantidad && tipo === "km") cantidad = source.km_ruta;
+    if (!cantidad && tipo === "palet") cantidad = source.bultos;
+    if (!cantidad && tipo === "tonelada" && Number(source.peso_kg) > 0) cantidad = String(Number(source.peso_kg) / 1000);
+    if (!cantidad && tipo === "kg") cantidad = source.peso_kg;
     return {
       ...source,
       peso_kg: source.peso_kg || null,
       bultos: source.bultos || null,
       importe: source.importe === "" || source.importe === undefined || source.importe === null ? null : source.importe,
+      tipo_precio: source.tipo_precio || "viaje",
+      precio_unitario: source.precio_unitario === "" || source.precio_unitario === undefined || source.precio_unitario === null ? null : source.precio_unitario,
+      cantidad: cantidad === "" || cantidad === undefined || cantidad === null ? null : cantidad,
+      importe_minimo: source.importe_minimo === "" || source.importe_minimo === undefined || source.importe_minimo === null ? null : source.importe_minimo,
+      minimo_unidades: source.minimo_unidades === "" || source.minimo_unidades === undefined || source.minimo_unidades === null ? null : source.minimo_unidades,
+      km_ruta: source.km_ruta === "" || source.km_ruta === undefined || source.km_ruta === null ? null : source.km_ruta,
     };
   }
 
@@ -1517,7 +1559,7 @@ function SolicitudServicio({ onDone, setTab }) {
       } else {
         notify("Solicitud enviada. Trafico la revisara y la convertira en pedido.", "success");
       }
-      setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", importe: "", notas: "", origen_punto_id: "", destino_punto_id: "" });
+      setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", importe: "", tipo_precio: "viaje", precio_unitario: "", cantidad: "", importe_minimo: "", minimo_unidades: "", km_ruta: "", notas: "", origen_punto_id: "", destino_punto_id: "" });
       await onDone();
       setTab("solicitudes");
     } catch (e) {
@@ -1557,7 +1599,27 @@ function SolicitudServicio({ onDone, setTab }) {
         <div><label style={lbl}>Hora descarga</label><input style={inp} value={form.hora_descarga} onChange={f("hora_descarga")} placeholder="16:00 / Tarde / Cita previa" /></div>
         <div><label style={lbl}>Peso kg</label><input type="number" style={inp} value={form.peso_kg} onChange={f("peso_kg")} /></div>
         <div><label style={lbl}>Bultos / palets</label><input type="number" min="0" step="1" style={inp} value={form.bultos} onChange={e=>setForm(p=>({...p,bultos:Number(e.target.value) < 0 ? "" : e.target.value}))} /></div>
-        <div><label style={lbl}>Precio si lo conoces (EUR)</label><input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.importe} onChange={f("importe")} placeholder="Opcional" /></div>
+        <div>
+          <label style={lbl}>Tipo de precio</label>
+          <select style={inp} value={form.tipo_precio} onChange={e=>setForm(p=>({...p,tipo_precio:e.target.value,precio_unitario:"",cantidad:"",importe:"",importe_minimo:"",minimo_unidades:""}))}>
+            {TIPOS_PRECIO.map(tipo => <option key={tipo.v} value={tipo.v}>{tipo.l}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={lbl}>{form.tipo_precio === "viaje" ? "Precio viaje si lo conoces (EUR)" : form.tipo_precio === "kg" ? "Precio unitario (EUR/100kg)" : form.tipo_precio === "tonelada" ? "Precio unitario (EUR/tn)" : form.tipo_precio === "km" ? "Precio unitario (EUR/km)" : form.tipo_precio === "palet" ? "Precio unitario (EUR/palet)" : "Precio unitario (EUR/h)"}</label>
+          <input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.precio_unitario} onChange={e=>setForm(p=>({...p,precio_unitario:e.target.value,importe:p.tipo_precio === "viaje" ? e.target.value : p.importe}))} placeholder="Opcional" />
+        </div>
+        {form.tipo_precio !== "viaje" && (
+          <div>
+            <label style={lbl}>{form.tipo_precio === "kg" ? "Peso facturable (kg)" : form.tipo_precio === "tonelada" ? "Toneladas" : form.tipo_precio === "km" ? "Kilometros" : form.tipo_precio === "palet" ? "Palets" : "Horas"}</label>
+            <input type="number" min="0" step="0.001" inputMode="decimal" style={inp} value={form.cantidad} onChange={f("cantidad")} placeholder="Opcional" />
+          </div>
+        )}
+        <div>
+          <label style={lbl}>{form.tipo_precio === "viaje" ? "Minimo EUR" : "Minimo facturable"}</label>
+          <input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.tipo_precio === "viaje" ? form.importe_minimo : form.minimo_unidades} onChange={e=>setForm(p=>({...p,[p.tipo_precio === "viaje" ? "importe_minimo" : "minimo_unidades"]:e.target.value}))} placeholder="Opcional" />
+        </div>
+        <div><label style={lbl}>Km ruta estimados</label><input type="number" min="0" step="0.1" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Opcional" /></div>
         <div style={{ gridColumn: "1/-1" }}><label style={lbl}>Notas</label><textarea style={{ ...inp, minHeight: 86, resize: "vertical" }} value={form.notas} onChange={f("notas")} placeholder="Instrucciones de carga, contacto, horarios, observaciones..." /></div>
       </div>
       <button onClick={enviar} disabled={saving} style={{ marginTop: 16, width: "100%", padding: "12px 18px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", fontWeight: 900, cursor: "pointer", opacity: saving ? .65 : 1 }}>

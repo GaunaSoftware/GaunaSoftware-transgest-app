@@ -45,6 +45,12 @@ function ensureSchema() {
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente VARCHAR(20)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente_at TIMESTAMPTZ");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe NUMERIC(12,2)");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS tipo_precio VARCHAR(20) DEFAULT 'viaje'");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(12,4)");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS cantidad NUMERIC(12,3)");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe_minimo NUMERIC(12,2)");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC(12,3)");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS km_ruta NUMERIC(12,2)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe_contraoferta NUMERIC(12,2)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio VARCHAR(20)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio_at TIMESTAMPTZ");
@@ -59,6 +65,12 @@ function ensureSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS portal_solicitud_id UUID");
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS puntos_carga JSONB DEFAULT '[]'::jsonb");
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS puntos_descarga JSONB DEFAULT '[]'::jsonb");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_precio VARCHAR(20) DEFAULT 'viaje'");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(12,4)");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cantidad NUMERIC(12,3)");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS importe_minimo NUMERIC(12,2)");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC(12,3)");
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS km_ruta NUMERIC(12,2)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_empresa_estado ON portal_solicitudes_cliente(empresa_id, estado, created_at DESC)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_cliente ON portal_solicitudes_cliente(cliente_id, created_at DESC)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_numero_portal ON pedidos(empresa_id, numero DESC)");
@@ -108,6 +120,28 @@ function normalizeNonNegativeNumeric(value) {
   return n !== null && n >= 0 ? n : null;
 }
 
+const TIPOS_PRECIO_SOLICITUD = new Set(["viaje", "kg", "tonelada", "km", "hora", "palet"]);
+
+function normalizeTipoPrecio(value) {
+  const tipo = String(value || "viaje").trim().toLowerCase();
+  return TIPOS_PRECIO_SOLICITUD.has(tipo) ? tipo : "viaje";
+}
+
+function calcImporteSolicitud(source = {}) {
+  const tipo = normalizeTipoPrecio(source.tipo_precio);
+  const precio = normalizeNonNegativeNumeric(source.precio_unitario ?? source.importe ?? source.precio);
+  const cantidad = normalizeNonNegativeNumeric(source.cantidad);
+  const importeMinimo = normalizeNonNegativeNumeric(source.importe_minimo);
+  const minimoUnidades = normalizeNonNegativeNumeric(source.minimo_unidades);
+  const extra = 0;
+  if (precio === null) return normalizeNonNegativeNumeric(source.importe ?? source.precio);
+  if (tipo === "viaje") return Math.max(precio, importeMinimo || 0) + extra;
+  if (cantidad === null) return normalizeNonNegativeNumeric(source.importe ?? source.precio);
+  const unidades = Math.max(cantidad, minimoUnidades || 0);
+  const base = tipo === "kg" ? (unidades / 100) * precio : unidades * precio;
+  return Math.round((base + extra) * 100) / 100;
+}
+
 function normalizePositiveInteger(value) {
   if (value === "" || value === undefined || value === null) return null;
   const n = Number(value);
@@ -118,7 +152,7 @@ function normalizePositiveInteger(value) {
 function resolveSolicitudImporte(solicitud = {}) {
   const importe = solicitud.decision_precio === "aceptada"
     ? normalizeNonNegativeNumeric(solicitud.importe_contraoferta)
-    : normalizeNonNegativeNumeric(solicitud.importe);
+    : calcImporteSolicitud(solicitud);
   return importe ?? 0;
 }
 
@@ -1383,8 +1417,9 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
   const { rows } = await db.query(
     `INSERT INTO portal_solicitudes_cliente
       (empresa_id,cliente_id,solicitado_por,origen,destino,fecha_carga,hora_carga,fecha_descarga,hora_descarga,
-       mercancia,peso_kg,bultos,importe,referencia_cliente,notas,origen_punto_id,destino_punto_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+       mercancia,peso_kg,bultos,importe,tipo_precio,precio_unitario,cantidad,importe_minimo,minimo_unidades,km_ruta,
+       referencia_cliente,notas,origen_punto_id,destino_punto_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
      RETURNING *`,
     [
       empresaId(req),
@@ -1399,7 +1434,13 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
       body.mercancia || null,
       normalizeNonNegativeNumeric(body.peso_kg ?? body.peso),
       normalizePositiveInteger(body.bultos),
-      normalizeNonNegativeNumeric(body.importe ?? body.precio),
+      calcImporteSolicitud(body),
+      normalizeTipoPrecio(body.tipo_precio),
+      normalizeNonNegativeNumeric(body.precio_unitario ?? body.importe ?? body.precio),
+      normalizeNonNegativeNumeric(body.cantidad),
+      normalizeNonNegativeNumeric(body.importe_minimo),
+      normalizeNonNegativeNumeric(body.minimo_unidades),
+      normalizeNonNegativeNumeric(body.km_ruta ?? body.km),
       body.referencia_cliente || null,
       body.notas || null,
       origenPunto?.id || null,
@@ -1413,6 +1454,10 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
       destino: solicitud.destino,
       fecha_carga: solicitud.fecha_carga,
       referencia_cliente: solicitud.referencia_cliente,
+      tipo_precio: solicitud.tipo_precio,
+      precio_unitario: solicitud.precio_unitario,
+      cantidad: solicitud.cantidad,
+      importe: solicitud.importe,
     });
   }).catch(() => {});
   notificarNuevaSolicitud(req, solicitud).catch(() => {});
@@ -1697,13 +1742,20 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
     const puntosCarga = [portalPointStop(origenPunto, sol.origen, "carga", sol.fecha_carga, horaCarga)];
     const puntosDescarga = [portalPointStop(destinoPunto, sol.destino, "descarga", sol.fecha_descarga, horaDescarga)];
     const importePedido = resolveSolicitudImporte(sol);
+    const tipoPrecioPedido = normalizeTipoPrecio(sol.tipo_precio);
+    const precioUnitarioPedido = normalizeNonNegativeNumeric(sol.precio_unitario ?? importePedido);
+    const cantidadPedido = normalizeNonNegativeNumeric(sol.cantidad);
+    const importeMinimoPedido = normalizeNonNegativeNumeric(sol.importe_minimo);
+    const minimoUnidadesPedido = normalizeNonNegativeNumeric(sol.minimo_unidades);
+    const kmRutaPedido = normalizeNonNegativeNumeric(sol.km_ruta);
 
     const inserted = await client.query(
       `INSERT INTO pedidos
         (numero,cliente_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
          mercancia,peso_kg,bultos,importe,notas,estado,empresa_id,referencia_cliente,fecha_descarga,hora_descarga,
-         puntos_carga,puntos_descarga,pendiente_completar,aviso_completar,portal_solicitud_id)
-       VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,'confirmado',$13,$14,$15,$16,$17::jsonb,$18::jsonb,true,$19,$20)
+         puntos_carga,puntos_descarga,pendiente_completar,aviso_completar,portal_solicitud_id,
+         tipo_precio,precio_unitario,cantidad,importe_minimo,minimo_unidades,km_ruta)
+       VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,'confirmado',$13,$14,$15,$16,$17::jsonb,$18::jsonb,true,$19,$20,$21,$22,$23,$24,$25,$26)
        RETURNING *`,
       [
         numero,
@@ -1726,6 +1778,12 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
         JSON.stringify(puntosDescarga),
         "Creado desde solicitud de cliente. Completar precio, camion, chofer, costes y documentacion.",
         sol.id,
+        tipoPrecioPedido,
+        precioUnitarioPedido,
+        cantidadPedido,
+        tipoPrecioPedido === "viaje" ? importeMinimoPedido : null,
+        tipoPrecioPedido !== "viaje" ? minimoUnidadesPedido : null,
+        kmRutaPedido,
       ]
     );
     const pedido = inserted.rows[0];

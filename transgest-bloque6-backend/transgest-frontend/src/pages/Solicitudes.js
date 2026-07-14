@@ -56,6 +56,21 @@ function validBultos(value) {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : "";
 }
 
+function precioSolicitudLabel(sol = {}) {
+  const tipo = String(sol.tipo_precio || "viaje");
+  const unit = Number(sol.precio_unitario ?? sol.importe ?? 0);
+  const cantidad = Number(sol.cantidad || 0);
+  const importe = Number(sol.importe || 0);
+  if (!unit && !importe) return "";
+  if (tipo === "viaje") return `${(importe || unit).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`;
+  const units = { kg: "EUR/100kg", tonelada: "EUR/tn", km: "EUR/km", hora: "EUR/h", palet: "EUR/palet" };
+  return [
+    `${unit.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${units[tipo] || "EUR"}`,
+    cantidad ? `${cantidad.toLocaleString("es-ES", { maximumFractionDigits: 3 })} ${tipo === "tonelada" ? "tn" : tipo === "hora" ? "h" : tipo === "palet" ? "palets" : tipo}` : "",
+    importe ? `total ${importe.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : "",
+  ].filter(Boolean).join(" - ");
+}
+
 function isAged(sol) {
   return isOpen(sol) && ageHours(sol.created_at) >= 24;
 }
@@ -93,7 +108,7 @@ function resumenSolicitud(sol) {
     sol.mercancia ? `Mercancia: ${sol.mercancia}` : "",
     sol.peso_kg ? `Peso: ${Number(sol.peso_kg).toLocaleString("es-ES")} kg` : "",
     validBultos(sol.bultos) ? `Bultos: ${validBultos(sol.bultos)}` : "",
-    sol.importe ? `Precio indicado: ${Number(sol.importe).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR` : "",
+    precioSolicitudLabel(sol) ? `Precio indicado: ${precioSolicitudLabel(sol)}` : "",
     sol.notas ? `Notas: ${sol.notas}` : "",
     sol.pedido_numero ? `Pedido: ${sol.pedido_numero}` : "",
     sol.vehiculo_matricula || sol.matricula_colaborador ? `Tractora: ${sol.vehiculo_matricula || sol.matricula_colaborador}` : "",
@@ -651,7 +666,7 @@ export default function Solicitudes() {
               {sol.mercancia && <span>Mercancia: {sol.mercancia}</span>}
               {sol.peso_kg && <span>Peso: {Number(sol.peso_kg).toLocaleString("es-ES")} kg</span>}
               {validBultos(sol.bultos) && <span>Bultos: {validBultos(sol.bultos)}</span>}
-              {sol.importe && <span>Precio cliente: {Number(sol.importe).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR</span>}
+              {precioSolicitudLabel(sol) && <span>Precio cliente: {precioSolicitudLabel(sol)}</span>}
               {sol.importe_contraoferta !== null && sol.importe_contraoferta !== undefined && (
                 <span style={{fontWeight:900,color:sol.decision_precio === "aceptada" ? "#10b981" : sol.decision_precio === "rechazada" ? "#ef4444" : "#f59e0b"}}>
                   Propuesta: {Number(sol.importe_contraoferta).toLocaleString("es-ES", { minimumFractionDigits:2, maximumFractionDigits:2 })} EUR

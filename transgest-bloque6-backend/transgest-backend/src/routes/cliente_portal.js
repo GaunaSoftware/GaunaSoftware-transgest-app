@@ -57,6 +57,7 @@ function ensureSchema() {
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS contraoferta_at TIMESTAMPTZ");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS origen_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS destino_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS ruta_id UUID REFERENCES rutas(id) ON DELETE SET NULL");
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)");
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS fecha_descarga DATE");
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS hora_descarga TIME");
@@ -208,6 +209,150 @@ function portalPointLabel(point = {}, fallback = "") {
     .map(value => String(value || "").trim())
     .filter((value, index, all) => value && all.indexOf(value) === index);
   return parts.join(" - ") || String(fallback || "").trim();
+}
+
+function routeMatchKey(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(s\.?l\.?u?|s\.?a\.?u?|s\.?l\.?|s\.?a\.?|slu|sau|sl|sa)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function pointRouteCandidates(point = {}, fallback = "") {
+  const values = [
+    fallback,
+    point.nombre,
+    point.direccion,
+    point.ciudad,
+    point.provincia,
+    [point.nombre, point.ciudad].filter(Boolean).join(" "),
+    [point.direccion, point.ciudad].filter(Boolean).join(" "),
+  ];
+  String(fallback || "").split(/\s+-\s+/).forEach(part => values.push(part));
+  return [...new Set(values.map(routeMatchKey).filter(Boolean))];
+}
+
+function routeTextScore(routeText = "", candidates = []) {
+  const routeKey = routeMatchKey(routeText);
+  if (!routeKey || !candidates.length) return 0;
+  let best = 0;
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (routeKey === candidate) best = Math.max(best, 100);
+    else if (routeKey.includes(candidate) || candidate.includes(routeKey)) {
+      const ratio = Math.min(routeKey.length, candidate.length) / Math.max(routeKey.length, candidate.length);
+      best = Math.max(best, ratio >= 0.42 ? 70 + Math.round(ratio * 20) : 35);
+    }
+  }
+  return best;
+}
+
+function routeTarifaDefaults(route = {}, source = {}) {
+  if (!route) return null;
+  const tipo = normalizeTipoPrecio(route.tarifa_tipo);
+  const precio = normalizeNonNegativeNumeric(route.precio_base);
+  const km = normalizeNonNegativeNumeric(route.km);
+  const minimoFacturable = normalizeNonNegativeNumeric(route.minimo_facturable);
+  const minimoUnidades = normalizeNonNegativeNumeric(route.minimo_unidades);
+  const cantidad = normalizeNonNegativeNumeric(source.cantidad)
+    ?? (tipo === "km" ? km : normalizeNonNegativeNumeric(source.peso_kg ?? source.peso));
+  return {
+    ruta_id: route.id,
+    tipo_precio: tipo,
+    precio_unitario: precio,
+    km_ruta: km,
+    cantidad,
+    importe_minimo: tipo === "viaje" ? minimoFacturable : null,
+    minimo_unidades: tipo !== "viaje" ? minimoUnidades : null,
+  };
+}
+
+function mergeTarifaSolicitud(source = {}, route = null) {
+  const defaults = routeTarifaDefaults(route, source) || {};
+  const precioClienteRaw = normalizeNonNegativeNumeric(source.precio_unitario ?? source.importe ?? source.precio);
+  const precioCliente = precioClienteRaw && precioClienteRaw > 0 ? precioClienteRaw : null;
+  const tipo = precioCliente !== null ? normalizeTipoPrecio(source.tipo_precio) : normalizeTipoPrecio(defaults.tipo_precio || source.tipo_precio);
+  const precioUnitario = precioCliente ?? normalizeNonNegativeNumeric(defaults.precio_unitario);
+  const kmRuta = normalizeNonNegativeNumeric(source.km_ruta ?? source.km) ?? normalizeNonNegativeNumeric(defaults.km_ruta);
+  const cantidad = normalizeNonNegativeNumeric(source.cantidad) ?? (tipo === "km" ? kmRuta : normalizeNonNegativeNumeric(defaults.cantidad));
+  const importeMinimo = normalizeNonNegativeNumeric(source.importe_minimo) ?? normalizeNonNegativeNumeric(defaults.importe_minimo);
+  const minimoUnidades = normalizeNonNegativeNumeric(source.minimo_unidades) ?? normalizeNonNegativeNumeric(defaults.minimo_unidades);
+  const importeManualRaw = normalizeNonNegativeNumeric(source.importe ?? source.precio);
+  const importeManual = importeManualRaw && importeManualRaw > 0 ? importeManualRaw : null;
+  const importe = importeManual ?? calcImporteSolicitud({
+    ...source,
+    tipo_precio: tipo,
+    precio_unitario: precioUnitario,
+    cantidad,
+    importe_minimo: importeMinimo,
+    minimo_unidades: minimoUnidades,
+  });
+  return {
+    ruta_id: route?.id || source.ruta_id || null,
+    importe,
+    tipo_precio: tipo,
+    precio_unitario: precioUnitario,
+    cantidad,
+    importe_minimo: importeMinimo,
+    minimo_unidades: minimoUnidades,
+    km_ruta: kmRuta,
+    tarifa_aplicada: Boolean(route?.id && precioCliente === null),
+  };
+}
+
+async function resolvePortalRutaTarifa(client, eid, clienteId, origen, destino, origenPoint, destinoPoint) {
+  if (!clienteId) return null;
+  const origenCandidates = pointRouteCandidates(origenPoint, origen);
+  const destinoCandidates = pointRouteCandidates(destinoPoint, destino);
+  if (!origenCandidates.length || !destinoCandidates.length) return null;
+  const { rows } = await client.query(
+    `SELECT r.id,r.origen,r.destino,r.km,
+            COALESCE(rpc.precio, r.precio_base, 0) AS precio_base,
+            COALESCE(rpc.tarifa_tipo, r.tarifa_tipo, 'viaje') AS tarifa_tipo,
+            COALESCE(rpc.minimo_facturable, r.minimo_facturable) AS minimo_facturable,
+            COALESCE(rpc.minimo_unidades, r.minimo_unidades) AS minimo_unidades,
+            CASE WHEN r.cliente_id=$2 THEN 0 ELSE 1 END AS prioridad
+       FROM rutas r
+       LEFT JOIN ruta_precios_cliente rpc ON rpc.ruta_id=r.id AND rpc.cliente_id=$2
+      WHERE COALESCE(r.activa,true)=true
+        AND (r.empresa_id=$1 OR r.empresa_id IS NULL)
+        AND (r.cliente_id=$2 OR rpc.cliente_id=$2)
+      ORDER BY prioridad ASC, r.created_at DESC
+      LIMIT 350`,
+    [eid, clienteId]
+  );
+  let best = null;
+  for (const route of rows) {
+    const originScore = routeTextScore(route.origen, origenCandidates);
+    const destinationScore = routeTextScore(route.destino, destinoCandidates);
+    if (originScore < 55 || destinationScore < 55) continue;
+    const score = originScore + destinationScore - Number(route.prioridad || 0) * 8;
+    if (!best || score > best.score) best = { ...route, score };
+  }
+  return best;
+}
+
+async function getPortalRutaTarifaById(client, eid, clienteId, rutaId) {
+  if (!rutaId || !clienteId) return null;
+  const { rows } = await client.query(
+    `SELECT r.id,r.origen,r.destino,r.km,
+            COALESCE(rpc.precio, r.precio_base, 0) AS precio_base,
+            COALESCE(rpc.tarifa_tipo, r.tarifa_tipo, 'viaje') AS tarifa_tipo,
+            COALESCE(rpc.minimo_facturable, r.minimo_facturable) AS minimo_facturable,
+            COALESCE(rpc.minimo_unidades, r.minimo_unidades) AS minimo_unidades
+       FROM rutas r
+       LEFT JOIN ruta_precios_cliente rpc ON rpc.ruta_id=r.id AND rpc.cliente_id=$3
+      WHERE r.id=$1
+        AND COALESCE(r.activa,true)=true
+        AND (r.empresa_id=$2 OR r.empresa_id IS NULL)
+        AND (r.cliente_id=$3 OR rpc.cliente_id=$3)
+      LIMIT 1`,
+    [rutaId, eid, clienteId]
+  );
+  return rows[0] || null;
 }
 
 function portalPointStop(point, fallback, tipo, fecha, hora) {
@@ -1431,6 +1576,16 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
     [req.user.cliente_id, empresaId(req)]
   );
   if (!cliente.rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
+  const rutaMatch = await resolvePortalRutaTarifa(
+    db,
+    empresaId(req),
+    req.user.cliente_id,
+    origen,
+    destino,
+    origenPunto,
+    destinoPunto
+  );
+  const tarifaSolicitud = mergeTarifaSolicitud(body, rutaMatch);
   const duplicada = await db.query(
     `SELECT s.*, p.numero AS pedido_numero
        FROM portal_solicitudes_cliente s
@@ -1460,8 +1615,8 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
     `INSERT INTO portal_solicitudes_cliente
       (empresa_id,cliente_id,solicitado_por,origen,destino,fecha_carga,hora_carga,fecha_descarga,hora_descarga,
        mercancia,peso_kg,bultos,importe,tipo_precio,precio_unitario,cantidad,importe_minimo,minimo_unidades,km_ruta,
-       referencia_cliente,notas,origen_punto_id,destino_punto_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+       referencia_cliente,notas,origen_punto_id,destino_punto_id,ruta_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
      RETURNING *`,
     [
       empresaId(req),
@@ -1476,17 +1631,18 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
       body.mercancia || null,
       normalizeNonNegativeNumeric(body.peso_kg ?? body.peso),
       normalizePositiveInteger(body.bultos),
-      calcImporteSolicitud(body),
-      normalizeTipoPrecio(body.tipo_precio),
-      normalizeNonNegativeNumeric(body.precio_unitario ?? body.importe ?? body.precio),
-      normalizeNonNegativeNumeric(body.cantidad),
-      normalizeNonNegativeNumeric(body.importe_minimo),
-      normalizeNonNegativeNumeric(body.minimo_unidades),
-      normalizeNonNegativeNumeric(body.km_ruta ?? body.km),
+      tarifaSolicitud.importe,
+      tarifaSolicitud.tipo_precio,
+      tarifaSolicitud.precio_unitario,
+      tarifaSolicitud.cantidad,
+      tarifaSolicitud.importe_minimo,
+      tarifaSolicitud.minimo_unidades,
+      tarifaSolicitud.km_ruta,
       body.referencia_cliente || null,
       body.notas || null,
       origenPunto?.id || null,
       destinoPunto?.id || null,
+      tarifaSolicitud.ruta_id,
     ]
   );
   const solicitud = { ...rows[0], cliente_nombre: cliente.rows[0].nombre };
@@ -1500,6 +1656,8 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
       precio_unitario: solicitud.precio_unitario,
       cantidad: solicitud.cantidad,
       importe: solicitud.importe,
+      ruta_id: solicitud.ruta_id,
+      tarifa_aplicada: tarifaSolicitud.tarifa_aplicada,
     });
   }).catch(() => {});
   notificarNuevaSolicitud(req, solicitud).catch(() => {});
@@ -1783,25 +1941,33 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
     const horaDescarga = normalizeTime(sol.hora_descarga);
     const puntosCarga = [portalPointStop(origenPunto, sol.origen, "carga", sol.fecha_carga, horaCarga)];
     const puntosDescarga = [portalPointStop(destinoPunto, sol.destino, "descarga", sol.fecha_descarga, horaDescarga)];
-    const importePedido = resolveSolicitudImporte(sol);
-    const tipoPrecioPedido = normalizeTipoPrecio(sol.tipo_precio);
-    const precioUnitarioPedido = normalizeNonNegativeNumeric(sol.precio_unitario ?? importePedido);
-    const cantidadPedido = normalizeNonNegativeNumeric(sol.cantidad);
-    const importeMinimoPedido = normalizeNonNegativeNumeric(sol.importe_minimo);
-    const minimoUnidadesPedido = normalizeNonNegativeNumeric(sol.minimo_unidades);
-    const kmRutaPedido = normalizeNonNegativeNumeric(sol.km_ruta);
+    const rutaMatch = await getPortalRutaTarifaById(client, eid, sol.cliente_id, sol.ruta_id)
+      || await resolvePortalRutaTarifa(client, eid, sol.cliente_id, sol.origen, sol.destino, origenPunto, destinoPunto);
+    const tarifaPedido = mergeTarifaSolicitud(sol, rutaMatch);
+    const importePedido = resolveSolicitudImporte({ ...sol, ...tarifaPedido });
+    const tipoPrecioPedido = tarifaPedido.tipo_precio;
+    const precioUnitarioPedido = tarifaPedido.precio_unitario ?? normalizeNonNegativeNumeric(importePedido);
+    const cantidadPedido = tarifaPedido.cantidad;
+    const importeMinimoPedido = tarifaPedido.importe_minimo;
+    const minimoUnidadesPedido = tarifaPedido.minimo_unidades;
+    const kmRutaPedido = tarifaPedido.km_ruta;
+    const avisoCompletar = [
+      "Creado desde solicitud de cliente. Completar camion, chofer, costes y documentacion.",
+      rutaMatch?.id ? `Tarifa/ruta aplicada: ${rutaMatch.origen} -> ${rutaMatch.destino}.` : "No se encontro una tarifa/ruta compatible; revisar precio y kilometros.",
+    ].join(" ");
 
     const inserted = await client.query(
       `INSERT INTO pedidos
-        (numero,cliente_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
+        (numero,cliente_id,ruta_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
          mercancia,peso_kg,bultos,importe,notas,estado,empresa_id,referencia_cliente,fecha_descarga,hora_descarga,
          puntos_carga,puntos_descarga,pendiente_completar,aviso_completar,portal_solicitud_id,
          tipo_precio,precio_unitario,cantidad,importe_minimo,minimo_unidades,km_ruta)
-       VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10,$11,$12,'confirmado',$13,$14,$15,$16,$17::jsonb,$18::jsonb,true,$19,$20,$21,$22,$23,$24,$25,$26)
+       VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,$12,$13,'confirmado',$14,$15,$16,$17,$18::jsonb,$19::jsonb,true,$20,$21,$22,$23,$24,$25,$26,$27)
        RETURNING *`,
       [
         numero,
         sol.cliente_id,
+        tarifaPedido.ruta_id,
         String(sol.origen).trim(),
         String(sol.destino).trim(),
         sol.fecha_carga,
@@ -1818,7 +1984,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
         horaDescarga,
         JSON.stringify(puntosCarga),
         JSON.stringify(puntosDescarga),
-        "Creado desde solicitud de cliente. Completar precio, camion, chofer, costes y documentacion.",
+        avisoCompletar,
         sol.id,
         tipoPrecioPedido,
         precioUnitarioPedido,
@@ -1835,18 +2001,21 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
           SET estado='convertida',
               pedido_id=$1,
               respuesta=$2,
+              ruta_id=COALESCE(ruta_id,$5),
               decision_cliente='aceptada',
               decision_cliente_at=NOW(),
               updated_at=NOW()
         WHERE id=$3 AND empresa_id=$4
         RETURNING *`,
-      [pedido.id, `Solicitud aceptada. Pedido ${pedido.numero} creado.`, sol.id, eid]
+      [pedido.id, `Solicitud aceptada. Pedido ${pedido.numero} creado.`, sol.id, eid, tarifaPedido.ruta_id]
     );
     await addSolicitudEvento(client, req, sol.id, "solicitud.convertida", {
       pedido_id: pedido.id,
       pedido_numero: pedido.numero,
       estado_pedido: "confirmado",
       bultos_limpiados: bultosInvalidos && limpiarInvalidos,
+      ruta_id: tarifaPedido.ruta_id,
+      tarifa_aplicada: Boolean(rutaMatch?.id),
     });
     result = { status: 201, body: { ok: true, pedido, solicitud: updated.rows[0] } };
   });
@@ -2003,5 +2172,7 @@ module.exports._test = {
   normalizePositiveInteger,
   portalPointLabel,
   portalPointStop,
+  mergeTarifaSolicitud,
+  resolvePortalRutaTarifa,
   resolveSolicitudImporte,
 };

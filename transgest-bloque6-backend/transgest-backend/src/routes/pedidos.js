@@ -4439,6 +4439,47 @@ function derivePedidoGeoFromStops(cargas = [], descargas = [], fallback = {}) {
   };
 }
 
+function routeMatchKeyPedido(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(s\.?l\.?u?|s\.?a\.?u?|s\.?l\.?|s\.?a\.?|slu|sau|sl|sa)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function routeCandidatesPedido(text = "", stops = []) {
+  const values = [text];
+  normalizePedidoJsonList(stops).forEach(stop => {
+    values.push(
+      stop.nombre,
+      stop.direccion,
+      stop.poblacion,
+      stop.ciudad,
+      stop.provincia,
+      [stop.nombre, stop.poblacion || stop.ciudad].filter(Boolean).join(" "),
+      [stop.direccion, stop.poblacion || stop.ciudad].filter(Boolean).join(" ")
+    );
+  });
+  String(text || "").split(/\s+-\s+/).forEach(part => values.push(part));
+  return [...new Set(values.map(routeMatchKeyPedido).filter(Boolean))];
+}
+
+function routeTextScorePedido(routeText = "", candidates = []) {
+  const routeKey = routeMatchKeyPedido(routeText);
+  if (!routeKey || !candidates.length) return 0;
+  let best = 0;
+  for (const candidate of candidates) {
+    if (routeKey === candidate) best = Math.max(best, 100);
+    else if (routeKey.includes(candidate) || candidate.includes(routeKey)) {
+      const ratio = Math.min(routeKey.length, candidate.length) / Math.max(routeKey.length, candidate.length);
+      best = Math.max(best, ratio >= 0.42 ? 70 + Math.round(ratio * 20) : 35);
+    }
+  }
+  return best;
+}
+
 async function inferKmRutaPedido(queryClient, empresaId, payload = {}) {
   const current = parseLocaleNumber(payload.km_ruta);
   if (Number.isFinite(current) && current > 0) return current;
@@ -4459,20 +4500,29 @@ async function inferKmRutaPedido(queryClient, empresaId, payload = {}) {
   if (!origen || !destino || !clienteId) return null;
   const { rows } = await optionalPedidoQuery(
     queryClient,
-    `SELECT r.km
+    `SELECT r.km,r.origen,r.destino,
+            CASE WHEN r.cliente_id=$2 THEN 0 ELSE 1 END AS prioridad
        FROM rutas r
        LEFT JOIN ruta_precios_cliente rpc ON rpc.ruta_id=r.id
       WHERE r.activa=true
         AND (r.empresa_id=$1 OR r.empresa_id IS NULL)
         AND (r.cliente_id=$2 OR rpc.cliente_id=$2)
-        AND LOWER(TRIM(r.origen))=LOWER(TRIM($3))
-        AND LOWER(TRIM(r.destino))=LOWER(TRIM($4))
       ORDER BY CASE WHEN r.cliente_id=$2 THEN 0 ELSE 1 END, r.created_at DESC
-      LIMIT 1`,
-    [empresaId, clienteId, origen, destino],
+      LIMIT 350`,
+    [empresaId, clienteId],
     "No se pudieron inferir los kilometros desde las rutas del cliente:"
   );
-  const km = Number(rows[0]?.km || 0);
+  const origenCandidates = routeCandidatesPedido(origen, payload.puntos_carga || payload.cargas || []);
+  const destinoCandidates = routeCandidatesPedido(destino, payload.puntos_descarga || payload.descargas || []);
+  let best = null;
+  for (const route of rows) {
+    const originScore = routeTextScorePedido(route.origen, origenCandidates);
+    const destinationScore = routeTextScorePedido(route.destino, destinoCandidates);
+    if (originScore < 55 || destinationScore < 55) continue;
+    const score = originScore + destinationScore - Number(route.prioridad || 0) * 8;
+    if (!best || score > best.score) best = { ...route, score };
+  }
+  const km = Number(best?.km || 0);
   return Number.isFinite(km) && km > 0 ? km : null;
 }
 

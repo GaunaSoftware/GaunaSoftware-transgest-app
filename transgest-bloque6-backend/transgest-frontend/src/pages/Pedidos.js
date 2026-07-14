@@ -6200,7 +6200,7 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
             ? "En carga"
           : LABEL_ESTADO[estado] || estado;
   return (
-    <div style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
+    <div className="tg-pedido-map-section" style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>
         <div>
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Ruta operativa</div>
@@ -7367,7 +7367,13 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
           <style>{`
             .tg-pedido-modal, .tg-pedido-modal * { box-sizing:border-box; min-width:0; }
             .tg-pedido-modal input, .tg-pedido-modal select, .tg-pedido-modal textarea, .tg-pedido-modal button { max-width:100%; }
-            .tg-pedido-modal-header { position:sticky; top:0; z-index:1200; isolation:isolate; margin:-28px -28px 16px; padding:18px 28px 12px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; }
+            .tg-pedido-modal-header { position:sticky; top:0; z-index:5000; isolation:isolate; margin:-28px -28px 16px; padding:18px 28px 12px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; max-width:100%; overflow:hidden; }
+            .tg-pedido-modal-title { min-width:0; overflow-wrap:anywhere; word-break:break-word; line-height:1.25; }
+            .tg-pedido-map-section { max-width:100%; min-width:0; overflow:hidden; isolation:isolate; position:relative; z-index:0; }
+            .tg-pedido-map-section .leaflet-container { max-width:100%; z-index:0; }
+            .tg-pedido-map-section .leaflet-pane,
+            .tg-pedido-map-section .leaflet-top,
+            .tg-pedido-map-section .leaflet-bottom { z-index:1; }
             .tg-pedido-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
             .tg-pedido-form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
             .tg-pedido-form-grid-4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px; }
@@ -7375,7 +7381,10 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
             @media (max-width: 760px) {
               .tg-pedido-modal-overlay { align-items:flex-start !important; justify-content:center !important; padding:8px !important; overflow:auto !important; }
               .tg-pedido-modal { width:100% !important; max-width:calc(100vw - 16px) !important; max-height:calc(100dvh - 16px) !important; padding:16px 14px 18px !important; border-radius:12px !important; overflow-x:hidden !important; }
-              .tg-pedido-modal-header { top:0 !important; margin:-16px -14px 12px !important; padding:12px 14px 10px !important; }
+              .tg-pedido-modal-header { top:0 !important; margin:-16px -14px 12px !important; padding:12px 14px 10px !important; align-items:flex-start !important; }
+              .tg-pedido-modal-title { font-size:15px !important; padding-top:7px !important; }
+              .tg-pedido-map-section { padding:10px !important; border-radius:10px !important; margin-bottom:12px !important; }
+              .tg-pedido-map-section [style*="grid-template-columns"] { grid-template-columns:1fr !important; }
               .tg-pedido-form-grid-2, .tg-pedido-form-grid-3, .tg-pedido-form-grid-4 { grid-template-columns:1fr !important; }
               .tg-pedido-form-grid-2 > *, .tg-pedido-form-grid-3 > *, .tg-pedido-form-grid-4 > * { grid-column:1/-1 !important; }
               .tg-pedido-actions-row { display:grid !important; grid-template-columns:1fr !important; }
@@ -7402,7 +7411,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
           `}</style>
           <div className="tg-pedido-modal" style={S.mbox}>
             <div className="tg-pedido-modal-header">
-              <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,color:"var(--text)",flex:1}}>
+              <div className="tg-pedido-modal-title" style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,color:"var(--text)",flex:1}}>
                 {editando?._readonly
                   ? editando.numero
                   : editando?._duplicado

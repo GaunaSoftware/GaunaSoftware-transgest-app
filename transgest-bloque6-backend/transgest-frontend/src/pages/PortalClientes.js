@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  actualizarPortalClienteSolicitud,
   cancelarPortalClienteSolicitud,
   crearPortalClienteSolicitud,
   descargarArchivoProtegido,
@@ -355,6 +356,7 @@ function solicitudEventoLabel(tipo) {
     "solicitud.convertida": "Convertida en pedido",
     "solicitud.rechazada": "Solicitud rechazada",
     "solicitud.cancelada.cliente": "Cancelada por cliente",
+    "solicitud.editada.cliente": "Solicitud editada",
     "solicitud.precio.propuesto": "Nuevo precio propuesto",
     "solicitud.precio.aceptada": "Precio aceptado",
     "solicitud.precio.rechazada": "Precio rechazado",
@@ -371,6 +373,7 @@ function solicitudEventoResumen(ev) {
   if (ev.tipo === "solicitud.convertida") return d.pedido_numero ? `Pedido ${d.pedido_numero}` : "Convertida en pedido.";
   if (ev.tipo === "solicitud.rechazada") return d.respuesta || "Solicitud rechazada por trafico.";
   if (ev.tipo === "solicitud.cancelada.cliente") return d.motivo ? `Motivo: ${d.motivo}` : "Cancelada desde el portal cliente.";
+  if (ev.tipo === "solicitud.editada.cliente") return [d.origen, d.destino].filter(Boolean).join(" -> ") || "Datos actualizados por el cliente.";
   if (ev.tipo?.startsWith("solicitud.precio.")) return d.importe_contraoferta !== null && d.importe_contraoferta !== undefined ? `${Number(d.importe_contraoferta).toFixed(2)} EUR` : "Precio actualizado.";
   if (ev.tipo === "solicitud.actualizada") return d.estado ? `Estado: ${d.estado}` : "Gestion actualizada.";
   return "";
@@ -443,6 +446,7 @@ export default function PortalClientes() {
   const [pedidoEventosAbierto, setPedidoEventosAbierto] = useState(null);
   const [solicitudEventosAbierta, setSolicitudEventosAbierta] = useState(null);
   const [facturaSel, setFacturaSel] = useState(null);
+  const [solicitudEditando, setSolicitudEditando] = useState(null);
   const [loadingFactura, setLoadingFactura] = useState(null);
   const [portalNotificaciones, setPortalNotificaciones] = useState([]);
   const [portalNotificacionesNoLeidas, setPortalNotificacionesNoLeidas] = useState(0);
@@ -1311,12 +1315,20 @@ export default function PortalClientes() {
                       {loadingSolicitudEventos === s.id ? "Cargando historial..." : solicitudEventosAbierta === s.id ? "Ocultar historial" : "Ver historial"}
                     </button>
                     {["pendiente", "revisada"].includes(String(s.estado || "").toLowerCase()) && !s.pedido_id && (
-                      <button
-                        style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(239,68,68,.08)", color: "#ef4444", borderColor: "rgba(239,68,68,.25)" }}
-                        onClick={() => cancelarSolicitud(s)}
-                      >
-                        Cancelar solicitud
-                      </button>
+                      <>
+                        <button
+                          style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(20,184,166,.10)", color: "var(--accent)", borderColor: "rgba(20,184,166,.25)" }}
+                          onClick={() => setSolicitudEditando(s)}
+                        >
+                          Editar solicitud
+                        </button>
+                        <button
+                          style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(239,68,68,.08)", color: "#ef4444", borderColor: "rgba(239,68,68,.25)" }}
+                          onClick={() => cancelarSolicitud(s)}
+                        >
+                          Cancelar solicitud
+                        </button>
+                      </>
                     )}
                     <button
                       style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(16,185,129,.12)", color: "#10b981", borderColor: "rgba(16,185,129,.25)" }}
@@ -1348,6 +1360,17 @@ export default function PortalClientes() {
         )}
       </div>
       {facturaSel && <FacturaPortalModal factura={facturaSel} onClose={() => setFacturaSel(null)} empresa={empresa} />}
+      {solicitudEditando && (
+        <PortalSolicitudEditModal
+          solicitud={solicitudEditando}
+          onClose={() => setSolicitudEditando(null)}
+          onDone={async () => {
+            setSolicitudEditando(null);
+            await cargar();
+            setTab("solicitudes");
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1480,34 +1503,56 @@ function FacturaPortalModal({ factura, onClose, empresa }) {
   );
 }
 
-function SolicitudServicio({ onDone, setTab }) {
+function solicitudToPortalForm(s = {}) {
+  return {
+    referencia_cliente: s.referencia_cliente || "",
+    origen: s.origen || "",
+    destino: s.destino || "",
+    fecha_carga: String(s.fecha_carga || "").slice(0, 10),
+    hora_carga: s.hora_carga || "",
+    fecha_descarga: String(s.fecha_descarga || "").slice(0, 10),
+    hora_descarga: s.hora_descarga || "",
+    mercancia: s.mercancia || "",
+    peso_kg: s.peso_kg || "",
+    bultos: s.bultos || "",
+    importe: s.importe || "",
+    tipo_precio: s.tipo_precio || "viaje",
+    precio_unitario: s.precio_unitario || "",
+    cantidad: s.cantidad || "",
+    importe_minimo: s.importe_minimo || "",
+    minimo_unidades: s.minimo_unidades || "",
+    km_ruta: s.km_ruta || "",
+    notas: s.notas || "",
+    origen_punto_id: s.origen_punto_id || "",
+    destino_punto_id: s.destino_punto_id || "",
+  };
+}
+
+function PortalSolicitudEditModal({ solicitud, onClose, onDone }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,.45)", zIndex:3000, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"24px 14px", overflow:"auto" }}>
+      <div style={{ width:"min(980px,100%)", background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, boxShadow:"0 24px 70px rgba(0,0,0,.28)", padding:16 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", marginBottom:10 }}>
+          <div>
+            <div style={{ fontSize:18, fontWeight:900, color:"var(--text)" }}>Editar solicitud</div>
+            <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>Puedes corregir los datos mientras la solicitud no se haya convertido en pedido.</div>
+          </div>
+          <button type="button" onClick={onClose} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text)", fontWeight:900, cursor:"pointer" }}>X</button>
+        </div>
+        <SolicitudServicio initial={solicitud} onDone={onDone} setTab={() => {}} onCancel={onClose} />
+      </div>
+    </div>
+  );
+}
+
+function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null }) {
   const [saving, setSaving] = useState(false);
   const [puntos, setPuntos] = useState([]);
   const [puntosLoading, setPuntosLoading] = useState(true);
   const [puntosError, setPuntosError] = useState("");
   const [ordenesCarga, setOrdenesCarga] = useState([]);
-  const [form, setForm] = useState({
-    referencia_cliente: "",
-    origen: "",
-    destino: "",
-    fecha_carga: "",
-    hora_carga: "",
-    fecha_descarga: "",
-    hora_descarga: "",
-    mercancia: "",
-    peso_kg: "",
-    bultos: "",
-    importe: "",
-    tipo_precio: "viaje",
-    precio_unitario: "",
-    cantidad: "",
-    importe_minimo: "",
-    minimo_unidades: "",
-    km_ruta: "",
-    notas: "",
-    origen_punto_id: "",
-    destino_punto_id: "",
-  });
+  const isEditing = !!initial?.id;
+  const [form, setForm] = useState(() => solicitudToPortalForm(initial || {}));
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
   const inp = { background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", padding: "9px 12px", borderRadius: 8, fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   const lbl = { display: "block", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", margin: "12px 0 4px" };
@@ -1581,9 +1626,10 @@ function SolicitudServicio({ onDone, setTab }) {
     }
     setSaving(true);
     try {
-      const res = await crearPortalClienteSolicitud({
-        ...cleanPayload(form),
-      });
+      const payload = cleanPayload(form);
+      const res = isEditing
+        ? await actualizarPortalClienteSolicitud(initial.id, payload)
+        : await crearPortalClienteSolicitud(payload);
       const solicitudId = res?.id;
       if (solicitudId && ordenesCarga.length) {
         let subidos = 0;
@@ -1604,17 +1650,19 @@ function SolicitudServicio({ onDone, setTab }) {
         }
         if (subidos) notify(`${subidos} orden(es) de carga adjuntada(s).`, "success");
       }
-      if (res?.duplicada) {
+      if (isEditing) {
+        notify("Solicitud actualizada. Trafico vera los cambios.", "success");
+      } else if (res?.duplicada) {
         notify("Ya existe una solicitud pendiente similar. La hemos abierto como referencia.", "warning");
       } else if (res?.pedido_confirmado_existente) {
         notify(`Ya hay un pedido confirmado${res?.pedido_numero ? ` (${res.pedido_numero})` : ""}. Trafico revisara la nueva orden o cambios enviados.`, "warning", 7000);
       } else {
         notify("Solicitud enviada. Trafico la revisara y la convertira en pedido.", "success");
       }
-      setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", importe: "", tipo_precio: "viaje", precio_unitario: "", cantidad: "", importe_minimo: "", minimo_unidades: "", km_ruta: "", notas: "", origen_punto_id: "", destino_punto_id: "" });
+      if (!isEditing) setForm(solicitudToPortalForm({}));
       setOrdenesCarga([]);
       await onDone();
-      setTab("solicitudes");
+      if (!isEditing) setTab("solicitudes");
     } catch (e) {
       notify(e.message, "error");
     } finally {
@@ -1624,8 +1672,8 @@ function SolicitudServicio({ onDone, setTab }) {
 
   return (
     <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 18 }}>
-      <div style={{ fontWeight: 900, color: "var(--text)", fontSize: 16 }}>Solicitar nuevo servicio</div>
-      <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 4 }}>La solicitud queda vinculada solo a tu empresa transportista y a tu ficha de cliente.</div>
+      <div style={{ fontWeight: 900, color: "var(--text)", fontSize: 16 }}>{isEditing ? "Actualizar solicitud" : "Solicitar nuevo servicio"}</div>
+      <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 4 }}>{isEditing ? "Los cambios quedaran registrados y visibles para trafico." : "La solicitud queda vinculada solo a tu empresa transportista y a tu ficha de cliente."}</div>
       {puntosLoading && <div style={{ marginTop:10, fontSize:12, color:"var(--text4)" }}>Cargando puntos guardados...</div>}
       {puntosError && (
         <div style={{ marginTop:10, display:"flex", gap:10, alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", padding:"9px 11px", border:"1px solid rgba(239,68,68,.28)", borderRadius:8, background:"rgba(239,68,68,.07)", color:"#ef4444", fontSize:12 }}>
@@ -1697,9 +1745,16 @@ function SolicitudServicio({ onDone, setTab }) {
           )}
         </div>
       </div>
-      <button onClick={enviar} disabled={saving} style={{ marginTop: 16, width: "100%", padding: "12px 18px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", fontWeight: 900, cursor: "pointer", opacity: saving ? .65 : 1 }}>
-        {saving ? "Enviando..." : "Enviar solicitud"}
-      </button>
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:16 }}>
+        {onCancel && (
+          <button type="button" onClick={onCancel} style={{ flex:"0 0 auto", padding:"12px 18px", borderRadius:8, border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text)", fontWeight:900, cursor:"pointer" }}>
+            Cancelar
+          </button>
+        )}
+        <button onClick={enviar} disabled={saving} style={{ flex:"1 1 240px", padding: "12px 18px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", fontWeight: 900, cursor: "pointer", opacity: saving ? .65 : 1 }}>
+          {saving ? (isEditing ? "Guardando..." : "Enviando...") : (isEditing ? "Guardar cambios" : "Enviar solicitud")}
+        </button>
+      </div>
     </div>
   );
 }

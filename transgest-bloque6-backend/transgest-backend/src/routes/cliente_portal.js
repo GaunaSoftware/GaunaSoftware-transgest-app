@@ -1904,6 +1904,149 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
   res.status(201).json(solicitud);
 }));
 
+router.patch("/solicitudes/:id", requireCliente, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  const body = req.body || {};
+  let fechaCargaNorm;
+  let fechaDescargaNorm;
+  try {
+    fechaCargaNorm = ensureValidDateOnly(body.fecha_carga || body.fecha || null, "Fecha de carga");
+    fechaDescargaNorm = ensureValidDateOnly(body.fecha_descarga || null, "Fecha de descarga");
+  } catch (dateErr) {
+    return res.status(dateErr.status || 400).json({ error: dateErr.message });
+  }
+  const [origenPunto, destinoPunto] = await Promise.all([
+    getPortalPoint(db, req, body.origen_punto_id, "carga"),
+    getPortalPoint(db, req, body.destino_punto_id, "descarga"),
+  ]);
+  if (body.origen_punto_id && !origenPunto) return res.status(400).json({ error: "El punto de carga no pertenece a este cliente" });
+  if (body.destino_punto_id && !destinoPunto) return res.status(400).json({ error: "El punto de descarga no pertenece a este cliente" });
+  const origen = origenPunto ? portalPointLabel(origenPunto, body.origen) : String(body.origen || "").trim();
+  const destino = destinoPunto ? portalPointLabel(destinoPunto, body.destino) : String(body.destino || "").trim();
+  if (!origen || !destino) return res.status(400).json({ error: "Origen y destino son obligatorios" });
+
+  const rutaMatch = await resolvePortalRutaTarifa(
+    db,
+    empresaId(req),
+    req.user.cliente_id,
+    origen,
+    destino,
+    origenPunto,
+    destinoPunto
+  );
+  const tarifaSolicitud = mergeTarifaSolicitud(body, rutaMatch);
+  let updated;
+  await db.transaction(async (client) => {
+    const current = await client.query(
+      `SELECT s.*, c.nombre AS cliente_nombre
+         FROM portal_solicitudes_cliente s
+         JOIN clientes c ON c.id=s.cliente_id AND c.empresa_id=s.empresa_id
+        WHERE s.id=$1 AND s.empresa_id=$2 AND s.cliente_id=$3
+        FOR UPDATE`,
+      [req.params.id, empresaId(req), req.user.cliente_id]
+    );
+    const solicitud = current.rows[0];
+    if (!solicitud) {
+      updated = { status: 404, body: { error: "Solicitud no encontrada" } };
+      return;
+    }
+    if (solicitud.pedido_id || !["pendiente", "revisada"].includes(String(solicitud.estado || "").toLowerCase())) {
+      updated = { status: 409, body: { error: "Esta solicitud ya no admite edicion desde el portal. Crea una nueva solicitud o contacta con trafico." } };
+      return;
+    }
+    const result = await client.query(
+      `UPDATE portal_solicitudes_cliente
+          SET origen=$1,
+              destino=$2,
+              fecha_carga=$3,
+              hora_carga=$4,
+              fecha_descarga=$5,
+              hora_descarga=$6,
+              mercancia=$7,
+              peso_kg=$8,
+              bultos=$9,
+              importe=$10,
+              tipo_precio=$11,
+              precio_unitario=$12,
+              cantidad=$13,
+              importe_minimo=$14,
+              minimo_unidades=$15,
+              km_ruta=$16,
+              referencia_cliente=$17,
+              notas=$18,
+              origen_punto_id=$19,
+              destino_punto_id=$20,
+              ruta_id=$21,
+              estado='pendiente',
+              respuesta=NULL,
+              decision_precio=NULL,
+              decision_precio_at=NULL,
+              updated_at=NOW()
+        WHERE id=$22 AND empresa_id=$23 AND cliente_id=$24
+        RETURNING *`,
+      [
+        origen,
+        destino,
+        fechaCargaNorm,
+        normalizeTime(body.hora_carga),
+        fechaDescargaNorm,
+        normalizeTime(body.hora_descarga),
+        body.mercancia || null,
+        normalizeNonNegativeNumeric(body.peso_kg ?? body.peso),
+        normalizePositiveInteger(body.bultos),
+        tarifaSolicitud.importe,
+        tarifaSolicitud.tipo_precio,
+        tarifaSolicitud.precio_unitario,
+        tarifaSolicitud.cantidad,
+        tarifaSolicitud.importe_minimo,
+        tarifaSolicitud.minimo_unidades,
+        tarifaSolicitud.km_ruta,
+        body.referencia_cliente || null,
+        body.notas || null,
+        origenPunto?.id || null,
+        destinoPunto?.id || null,
+        tarifaSolicitud.ruta_id,
+        req.params.id,
+        empresaId(req),
+        req.user.cliente_id,
+      ]
+    );
+    updated = { status: 200, body: { ...result.rows[0], cliente_nombre: solicitud.cliente_nombre } };
+    await addSolicitudEvento(client, req, req.params.id, "solicitud.editada.cliente", {
+      origen,
+      destino,
+      fecha_carga: fechaCargaNorm,
+      fecha_descarga: fechaDescargaNorm,
+      referencia_cliente: body.referencia_cliente || null,
+      tipo_precio: tarifaSolicitud.tipo_precio,
+      precio_unitario: tarifaSolicitud.precio_unitario,
+      importe: tarifaSolicitud.importe,
+      ruta_id: tarifaSolicitud.ruta_id,
+    });
+  });
+  if (updated?.status !== 200) return res.status(updated?.status || 500).json(updated?.body || { error: "No se pudo actualizar la solicitud" });
+  const solicitud = updated.body;
+  const gestores = await db.query(
+    `SELECT id
+       FROM usuarios
+      WHERE empresa_id=$1
+        AND activo IS DISTINCT FROM false
+        AND rol::text IN ('gerente','trafico','administrativo')
+      LIMIT 20`,
+    [empresaId(req)]
+  ).catch(() => ({ rows: [] }));
+  await Promise.all((gestores.rows || []).map(u => crearNotificacion({
+    empresa_id: empresaId(req),
+    usuario_id: u.id,
+    tipo: "portal_cliente_solicitud_editada",
+    titulo: "Solicitud de cliente actualizada",
+    mensaje: `${solicitud.cliente_nombre || "Cliente"} ha modificado ${solicitud.origen} -> ${solicitud.destino}`,
+    data: { solicitud_id: solicitud.id, view: "solicitudes" },
+    created_by: req.user?.id || null,
+  }).catch(() => null)));
+  res.json(solicitud);
+}));
+
 router.post("/solicitudes/:id/reprogramacion", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const decision = String(req.body?.decision || "").toLowerCase();

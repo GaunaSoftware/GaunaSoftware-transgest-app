@@ -731,6 +731,7 @@ export const solicitarPortalClienteIntegracion = (data={}) => apiFetch("/portal-
 export const crearPortalClienteSolicitud = (data) => apiFetch("/portal-cliente/solicitudes", { method:"POST", body:data });
 export const getPortalClienteSolicitudDocumentos = (id) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/documentos`);
 export const subirPortalClienteSolicitudDocumento = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/documentos`, { method:"POST", body:data });
+export const actualizarPortalClienteSolicitud = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
 export const responderPortalClienteReprogramacion = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/reprogramacion`, { method:"POST", body:data });
 export const responderPortalClientePrecio = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/precio`, { method:"POST", body:data });
 export const cancelarPortalClienteSolicitud = (id, data={}) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/cancelar`, { method:"POST", body:data });

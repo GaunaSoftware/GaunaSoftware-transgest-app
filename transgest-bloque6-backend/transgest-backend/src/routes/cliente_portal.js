@@ -1950,7 +1950,8 @@ router.patch("/solicitudes/:id", requireCliente, asyncRoute(async (req, res) => 
       updated = { status: 404, body: { error: "Solicitud no encontrada" } };
       return;
     }
-    if (solicitud.pedido_id || !["pendiente", "revisada"].includes(String(solicitud.estado || "").toLowerCase())) {
+    const estadoSolicitud = String(solicitud.estado || "").toLowerCase();
+    if (solicitud.pedido_id || ["convertida", "cancelada", "rechazada", "descartada"].includes(estadoSolicitud)) {
       updated = { status: 409, body: { error: "Esta solicitud ya no admite edicion desde el portal. Crea una nueva solicitud o contacta con trafico." } };
       return;
     }
@@ -2176,15 +2177,61 @@ router.post("/solicitudes/:id/cancelar", requireCliente, asyncRoute(async (req, 
       result = { status: 404, body: { error: "Solicitud no encontrada" } };
       return;
     }
-    if (solicitud.pedido_id || solicitud.estado === "convertida") {
-      result = { status: 409, body: { error: "Esta solicitud ya esta convertida en pedido. Contacta con trafico para cancelarla." } };
-      return;
-    }
     if (["cancelada", "descartada", "rechazada"].includes(String(solicitud.estado || "").toLowerCase())) {
       result = { status: 200, body: solicitud };
       return;
     }
-    const respuesta = motivo ? `Cancelada por el cliente. Motivo: ${motivo}` : "Cancelada por el cliente.";
+    const converted = !!solicitud.pedido_id || String(solicitud.estado || "").toLowerCase() === "convertida";
+    let pedidoCancelado = null;
+    if (converted) {
+      const pedidoRes = await client.query(
+        `SELECT id, numero, estado::text AS estado
+           FROM pedidos
+          WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3
+          FOR UPDATE`,
+        [solicitud.pedido_id, empresaId(req), req.user.cliente_id]
+      );
+      const pedido = pedidoRes.rows[0];
+      if (!pedido) {
+        result = { status: 404, body: { error: "Pedido asociado no encontrado" } };
+        return;
+      }
+      if (["facturado"].includes(String(pedido.estado || "").toLowerCase())) {
+        result = { status: 409, body: { error: "El pedido ya esta facturado y no puede anularse desde el portal. Contacta con administracion." } };
+        return;
+      }
+      if (String(pedido.estado || "").toLowerCase() !== "cancelado") {
+        const pedidoUpdated = await client.query(
+          `UPDATE pedidos
+              SET estado='cancelado',
+                  motivo_cancelacion=$1,
+                  cancelado_at=NOW(),
+                  cancelado_by=$2,
+                  updated_at=NOW()
+            WHERE id=$3 AND empresa_id=$4
+            RETURNING id, numero, estado::text AS estado`,
+          [motivo || "Cancela cliente", req.user?.id || "cliente_portal", pedido.id, empresaId(req)]
+        );
+        pedidoCancelado = pedidoUpdated.rows[0] || pedido;
+        await client.query(
+          `INSERT INTO pedido_eventos (pedido_id,empresa_id,tipo,actor_tipo,actor_id,detalle)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [
+            pedido.id,
+            empresaId(req),
+            "pedido.cancelado.cliente",
+            "cliente_portal",
+            req.user?.id || null,
+            JSON.stringify({ motivo: motivo || "Cancela cliente", solicitud_id: solicitud.id }),
+          ]
+        ).catch(() => {});
+      } else {
+        pedidoCancelado = pedido;
+      }
+    }
+    const respuesta = converted
+      ? `Pedido cancelado por el cliente. Motivo: ${motivo || "Cancela cliente"}`
+      : (motivo ? `Cancelada por el cliente. Motivo: ${motivo}` : "Cancelada por el cliente.");
     const updated = await client.query(
       `UPDATE portal_solicitudes_cliente
           SET estado='cancelada',
@@ -2196,9 +2243,36 @@ router.post("/solicitudes/:id/cancelar", requireCliente, asyncRoute(async (req, 
         RETURNING *`,
       [respuesta, solicitud.id, empresaId(req)]
     );
-    await addSolicitudEvento(client, req, solicitud.id, "solicitud.cancelada.cliente", { motivo });
-    result = { status: 200, body: updated.rows[0] };
+    await addSolicitudEvento(client, req, solicitud.id, converted ? "solicitud.pedido.cancelado.cliente" : "solicitud.cancelada.cliente", {
+      motivo: motivo || (converted ? "Cancela cliente" : ""),
+      pedido_id: pedidoCancelado?.id || solicitud.pedido_id || null,
+      pedido_numero: pedidoCancelado?.numero || null,
+    });
+    result = { status: 200, body: { ...updated.rows[0], pedido_estado: pedidoCancelado?.estado || null, pedido_numero: pedidoCancelado?.numero || null } };
   });
+  if (result?.status === 200) {
+    const solicitud = result.body || {};
+    const gestores = await db.query(
+      `SELECT id
+         FROM usuarios
+        WHERE empresa_id=$1
+          AND activo IS DISTINCT FROM false
+          AND rol::text IN ('gerente','trafico','administrativo')
+        LIMIT 20`,
+      [empresaId(req)]
+    ).catch(() => ({ rows: [] }));
+    await Promise.all((gestores.rows || []).map(u => crearNotificacion({
+      empresa_id: empresaId(req),
+      usuario_id: u.id,
+      tipo: solicitud.pedido_numero ? "portal_cliente_pedido_cancelado" : "portal_cliente_solicitud_cancelada",
+      titulo: solicitud.pedido_numero ? "Pedido anulado por cliente" : "Solicitud cancelada por cliente",
+      mensaje: solicitud.pedido_numero
+        ? `El cliente ha anulado el pedido ${solicitud.pedido_numero}. Motivo: ${motivo || "Cancela cliente"}`
+        : `El cliente ha cancelado ${solicitud.origen || "origen"} -> ${solicitud.destino || "destino"}.`,
+      data: { solicitud_id: solicitud.id, pedido_id: solicitud.pedido_id || null, view: "solicitudes" },
+      created_by: req.user?.id || null,
+    }).catch(() => null)));
+  }
   res.status(result.status).json(result.body);
 }));
 

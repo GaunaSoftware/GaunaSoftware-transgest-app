@@ -356,6 +356,7 @@ function solicitudEventoLabel(tipo) {
     "solicitud.convertida": "Convertida en pedido",
     "solicitud.rechazada": "Solicitud rechazada",
     "solicitud.cancelada.cliente": "Cancelada por cliente",
+    "solicitud.pedido.cancelado.cliente": "Pedido anulado por cliente",
     "solicitud.editada.cliente": "Solicitud editada",
     "solicitud.precio.propuesto": "Nuevo precio propuesto",
     "solicitud.precio.aceptada": "Precio aceptado",
@@ -373,6 +374,7 @@ function solicitudEventoResumen(ev) {
   if (ev.tipo === "solicitud.convertida") return d.pedido_numero ? `Pedido ${d.pedido_numero}` : "Convertida en pedido.";
   if (ev.tipo === "solicitud.rechazada") return d.respuesta || "Solicitud rechazada por trafico.";
   if (ev.tipo === "solicitud.cancelada.cliente") return d.motivo ? `Motivo: ${d.motivo}` : "Cancelada desde el portal cliente.";
+  if (ev.tipo === "solicitud.pedido.cancelado.cliente") return d.pedido_numero ? `Pedido ${d.pedido_numero} cancelado. Motivo: ${d.motivo || "Cancela cliente"}` : `Pedido cancelado. Motivo: ${d.motivo || "Cancela cliente"}`;
   if (ev.tipo === "solicitud.editada.cliente") return [d.origen, d.destino].filter(Boolean).join(" -> ") || "Datos actualizados por el cliente.";
   if (ev.tipo?.startsWith("solicitud.precio.")) return d.importe_contraoferta !== null && d.importe_contraoferta !== undefined ? `${Number(d.importe_contraoferta).toFixed(2)} EUR` : "Precio actualizado.";
   if (ev.tipo === "solicitud.actualizada") return d.estado ? `Estado: ${d.estado}` : "Gestion actualizada.";
@@ -582,14 +584,15 @@ export default function PortalClientes() {
 
   async function cancelarSolicitud(solicitud) {
     if (!solicitud?.id) return;
-    if (solicitud.pedido_id || solicitud.estado === "convertida") {
-      notify("Esta solicitud ya esta convertida en pedido. Contacta con trafico para cancelarla.", "warning");
-      return;
+    const convertida = !!solicitud.pedido_id || String(solicitud.estado || "").toLowerCase() === "convertida";
+    if (convertida) {
+      const ok = window.confirm(`Esta solicitud ya tiene pedido${solicitud.pedido_numero ? ` ${solicitud.pedido_numero}` : ""}. Si continuas, el pedido quedara cancelado con motivo "Cancela cliente". ¿Quieres anularlo?`);
+      if (!ok) return;
     }
-    const motivo = window.prompt("Motivo de cancelacion para trafico (opcional):") || "";
+    const motivo = convertida ? "Cancela cliente" : (window.prompt("Motivo de cancelacion para trafico (opcional):") || "");
     try {
       await cancelarPortalClienteSolicitud(solicitud.id, { motivo });
-      notify("Solicitud cancelada.", "success");
+      notify(convertida ? "Pedido cancelado por solicitud del cliente." : "Solicitud cancelada.", "success");
       await cargar();
       setTab("solicitudes");
     } catch (e) {
@@ -1314,7 +1317,7 @@ export default function PortalClientes() {
                     >
                       {loadingSolicitudEventos === s.id ? "Cargando historial..." : solicitudEventosAbierta === s.id ? "Ocultar historial" : "Ver historial"}
                     </button>
-                    {["pendiente", "revisada"].includes(String(s.estado || "").toLowerCase()) && !s.pedido_id && (
+                    {!s.pedido_id && !["convertida", "cancelada", "rechazada", "descartada"].includes(String(s.estado || "").toLowerCase()) && (
                       <>
                         <button
                           style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(20,184,166,.10)", color: "var(--accent)", borderColor: "rgba(20,184,166,.25)" }}
@@ -1329,6 +1332,14 @@ export default function PortalClientes() {
                           Cancelar solicitud
                         </button>
                       </>
+                    )}
+                    {(s.pedido_id || String(s.estado || "").toLowerCase() === "convertida") && !["cancelado", "facturado"].includes(String(s.pedido_estado || "").toLowerCase()) && (
+                      <button
+                        style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(239,68,68,.08)", color: "#ef4444", borderColor: "rgba(239,68,68,.25)" }}
+                        onClick={() => cancelarSolicitud(s)}
+                      >
+                        Anular pedido
+                      </button>
                     )}
                     <button
                       style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(16,185,129,.12)", color: "#10b981", borderColor: "rgba(16,185,129,.25)" }}

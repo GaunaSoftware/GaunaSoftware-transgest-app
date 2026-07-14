@@ -106,6 +106,21 @@ function dateEs(v) {
   return new Date(v).toLocaleDateString("es-ES");
 }
 
+function isValidDateInput(value) {
+  if (!value) return true;
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 2000 || year > 2100) return false;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day;
+}
+
 async function downloadDoc(doc) {
   if (doc?.download_url) {
     try {
@@ -1549,6 +1564,10 @@ function SolicitudServicio({ onDone, setTab }) {
       notify("Origen y destino son obligatorios", "warning");
       return;
     }
+    if (!isValidDateInput(form.fecha_carga) || !isValidDateInput(form.fecha_descarga)) {
+      notify("Revisa las fechas. Usa el selector de fecha o el formato AAAA-MM-DD.", "warning");
+      return;
+    }
     setSaving(true);
     try {
       const res = await crearPortalClienteSolicitud({
@@ -1593,9 +1612,9 @@ function SolicitudServicio({ onDone, setTab }) {
           <input style={inp} value={form.destino} onChange={event=>setForm(prev=>({...prev,destino:event.target.value,destino_punto_id:""}))} placeholder="Poblacion de descarga" />
           <PortalPointPicker tipo="descarga" points={puntos} selectedId={form.destino_punto_id} onSelect={point=>selectPoint("descarga", point)} onCreated={addPoint} />
         </div>
-        <div><label style={lbl}>Fecha carga</label><input type="date" style={inp} value={form.fecha_carga} onChange={f("fecha_carga")} /></div>
+        <div><label style={lbl}>Fecha carga</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_carga} onChange={f("fecha_carga")} /></div>
         <div><label style={lbl}>Hora carga</label><input style={inp} value={form.hora_carga} onChange={f("hora_carga")} placeholder="08:00 / Manana / Cita previa" /></div>
-        <div><label style={lbl}>Fecha descarga</label><input type="date" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")} /></div>
+        <div><label style={lbl}>Fecha descarga</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")} /></div>
         <div><label style={lbl}>Hora descarga</label><input style={inp} value={form.hora_descarga} onChange={f("hora_descarga")} placeholder="16:00 / Tarde / Cita previa" /></div>
         <div><label style={lbl}>Peso kg</label><input type="number" style={inp} value={form.peso_kg} onChange={f("peso_kg")} /></div>
         <div><label style={lbl}>Bultos / palets</label><input type="number" min="0" step="1" style={inp} value={form.bultos} onChange={e=>setForm(p=>({...p,bultos:Number(e.target.value) < 0 ? "" : e.target.value}))} /></div>

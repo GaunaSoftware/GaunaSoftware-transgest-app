@@ -1030,6 +1030,36 @@ const DATE_PEDIDO_FIELDS = new Set(["fecha_pedido", "fecha_carga", "fecha_entreg
 const TIME_PEDIDO_FIELDS = new Set(["hora_carga", "hora_descarga"]);
 const UUID_PEDIDO_FIELDS = new Set(["cliente_id", "ruta_id", "vehiculo_id", "chofer_id", "chofer2_id", "colaborador_id", "remolque_id"]);
 
+function normalizeStrictDateInput(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 2000 || year > 2100) return false;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) return false;
+  return raw;
+}
+
+function isValidPedidoDateInput(value) {
+  return normalizeStrictDateInput(value) !== false;
+}
+
+function assertValidPedidoDates(source = {}) {
+  for (const field of DATE_PEDIDO_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(source, field) && !isValidPedidoDateInput(source[field])) {
+      throw new Error("Revisa las fechas. Usa el selector de fecha o el formato AAAA-MM-DD.");
+    }
+  }
+}
+
 function normalizePesoKgInput(value) {
   if (value === null || value === undefined) return value;
   const raw = String(value).trim().replace(/\s+/g, "");
@@ -1112,14 +1142,9 @@ function sanitizePedidoPayload(payload) {
       return;
     }
     if (DATE_PEDIDO_FIELDS.has(key) && value !== null && value !== undefined) {
-      const raw = String(value).trim();
-      const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-      if (match) {
-        out[key] = match[1];
-      } else {
-        const parsed = new Date(raw);
-        out[key] = Number.isNaN(parsed.getTime()) ? value : parsed.toISOString().slice(0, 10);
-      }
+      const normalizedDate = normalizeStrictDateInput(value);
+      if (normalizedDate === false) throw new Error("Revisa las fechas. Usa el selector de fecha o el formato AAAA-MM-DD.");
+      out[key] = normalizedDate;
       return;
     }
     if (TIME_PEDIDO_FIELDS.has(key) && value !== null && value !== undefined) {
@@ -2665,6 +2690,12 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
     if (!form.origen.trim()) { notify("Indica el origen.", "warning"); return; }
     if (!form.destino.trim()) { notify("Indica el destino.", "warning"); return; }
     if (!form.fecha_carga) { notify("Indica la fecha de carga para que aparezca en el cuadrante.", "warning"); return; }
+    try {
+      assertValidPedidoDates({ fecha_carga: form.fecha_carga, fecha_descarga: form.fecha_descarga });
+    } catch (dateErr) {
+      notify(dateErr.message, "warning");
+      return;
+    }
     if (descargaAntesQueCarga(form.fecha_carga, form.fecha_descarga)) {
       notify("La fecha de descarga no puede ser anterior a la fecha de carga.", "warning");
       return;
@@ -2893,10 +2924,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           )}
           <div><label style={S.label}>Origen *</label><input style={inp} value={form.origen} onChange={f("origen")} placeholder="MADRID"/></div>
           <div><label style={S.label}>Destino *</label><input style={inp} value={form.destino} onChange={f("destino")} placeholder="VALENCIA"/></div>
-          <div><label style={S.label}>Fecha carga *</label><input type="date" style={inp} value={form.fecha_carga} onChange={e=>setForm(p=>({...p,fecha_carga:e.target.value,fecha_descarga:p.fecha_descarga || e.target.value}))}/></div>
+          <div><label style={S.label}>Fecha carga *</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_carga} onChange={e=>setForm(p=>({...p,fecha_carga:e.target.value,fecha_descarga:p.fecha_descarga || e.target.value}))}/></div>
           <div><label style={S.label}>Hora carga</label><input type="time" style={inp} value={form.hora_carga} onChange={f("hora_carga")}/></div>
           <div><label style={S.label}>Hora descarga</label><input type="time" style={inp} value={form.hora_descarga} onChange={f("hora_descarga")}/></div>
-          <div><label style={S.label}>Fecha descarga</label><input type="date" style={inp} value={form.fecha_descarga || ""} onChange={f("fecha_descarga")}/></div>
+          <div><label style={S.label}>Fecha descarga</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_descarga || ""} onChange={f("fecha_descarga")}/></div>
           <div>
             <label style={S.label}>Matricula</label>
             <input list="matriculas-pedido-rapido" style={inp} value={form.matricula_rapida} onChange={e=>{
@@ -3312,11 +3343,11 @@ function FacturarConcepto({ pedido, onConfirm, onCancel, saving = false }) {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 10px"}}>
             <div>
               <label style={lbl}>Desde</label>
-              <input type="date" style={inp} value={fechaDesde} onChange={e=>{setFechaDesde(e.target.value);actualizarConcepto(e.target.value,fechaHasta);}}/>
+              <input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={fechaDesde} onChange={e=>{setFechaDesde(e.target.value);actualizarConcepto(e.target.value,fechaHasta);}}/>
             </div>
             <div>
               <label style={lbl}>Hasta</label>
-              <input type="date" style={inp} value={fechaHasta} onChange={e=>{setFechaHasta(e.target.value);actualizarConcepto(fechaDesde,e.target.value);}}/>
+              <input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={fechaHasta} onChange={e=>{setFechaHasta(e.target.value);actualizarConcepto(fechaDesde,e.target.value);}}/>
             </div>
           </div>
           <label style={lbl}>Concepto de la factura</label>
@@ -4029,7 +4060,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             <datalist id={newStopRegionListId}>
               {newStopRegions.map(region => <option key={region} value={region} />)}
             </datalist>
-            <input type="date" style={inp} value={newStop.fecha} onChange={e=>setNewStop(p=>({...p,fecha:e.target.value}))}/>
+            <input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={newStop.fecha} onChange={e=>setNewStop(p=>({...p,fecha:e.target.value}))}/>
             <input type="time" style={inp} value={newStop.hora} onChange={e=>setNewStop(p=>({...p,hora:e.target.value}))}/>
             <input style={inp} placeholder="Ventana" value={newStop.ventana} onChange={e=>setNewStop(p=>({...p,ventana:e.target.value}))}/>
           </div>
@@ -6835,6 +6866,18 @@ async function copiarAccesoTemporalColaborador() {
 async function guardar() {
   if (!form.cliente_id) { notify("Selecciona un cliente", "warning"); return; }
   if (!form.fecha_carga) { notify("La fecha de carga es obligatoria.", "warning"); return; }
+  try {
+    assertValidPedidoDates({
+      fecha_pedido: form.fecha_pedido,
+      fecha_carga: form.fecha_carga,
+      fecha_descarga: form.fecha_descarga,
+      fecha_entrega: form.fecha_entrega,
+      firma_fecha: form.firma_fecha,
+    });
+  } catch (dateErr) {
+    notify(dateErr.message, "warning");
+    return;
+  }
   if (descargaAntesQueCarga(form.fecha_carga, form.fecha_descarga || form.fecha_entrega)) {
     notify("La fecha de descarga no puede ser anterior a la fecha de carga.", "warning");
     return;
@@ -7574,11 +7617,11 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
 
             <div style={S.sec}>Planificacion</div>
             <div className="tg-pedido-form-grid-4">
-              <div><label style={S.label}>Fecha pedido</label><input type="date" style={S.input} value={form.fecha_pedido||""} onChange={f("fecha_pedido")}/></div>
-              <div><label style={S.label}>Fecha carga</label><input type="date" style={S.input} value={form.fecha_carga||""} onChange={f("fecha_carga")}/></div>
+              <div><label style={S.label}>Fecha pedido</label><input type="date" min="2000-01-01" max="2100-12-31" style={S.input} value={form.fecha_pedido||""} onChange={f("fecha_pedido")}/></div>
+              <div><label style={S.label}>Fecha carga</label><input type="date" min="2000-01-01" max="2100-12-31" style={S.input} value={form.fecha_carga||""} onChange={f("fecha_carga")}/></div>
               <div><label style={S.label}>Hora carga</label><input type="time" style={S.input} value={form.hora_carga||""} onChange={f("hora_carga")}/></div>
               <div><label style={S.label}>Ventana carga</label><input style={S.input} value={form.ventana_carga||""} onChange={f("ventana_carga")} placeholder="08:00-14:00"/></div>
-              <div><label style={S.label}>Fecha descarga</label><input type="date" style={S.input} value={form.fecha_descarga||""} onChange={f("fecha_descarga")}/></div>
+              <div><label style={S.label}>Fecha descarga</label><input type="date" min="2000-01-01" max="2100-12-31" style={S.input} value={form.fecha_descarga||""} onChange={f("fecha_descarga")}/></div>
               <div><label style={S.label}>Hora descarga</label><input type="time" style={S.input} value={form.hora_descarga||""} onChange={f("hora_descarga")}/></div>
               <div><label style={S.label}>Ventana descarga</label><input style={S.input} value={form.ventana_descarga||""} onChange={f("ventana_descarga")} placeholder="07:00-17:00"/></div>
               <div><label style={S.label}>Estado</label>
@@ -10409,9 +10452,9 @@ export default function Pedidos() {
           style={{...S.btn,background:filtroSemanaActualActivo?"rgba(245,158,11,.12)":"#fff",color:filtroSemanaActualActivo?"#f59e0b":"#475569",border:filtroSemanaActualActivo?"1px solid rgba(245,158,11,.26)":"1px solid #dbe5ec"}}>
           {filtroSemanaActualActivo ? "Quitar semana" : "Semana actual"}
         </button>
-        <input type="date" value={filtroDesde} onChange={e=>{setFiltroFechasCustom(true);setFiltroDesde(e.target.value);}}
+        <input type="date" min="2000-01-01" max="2100-12-31" value={filtroDesde} onChange={e=>{setFiltroFechasCustom(true);setFiltroDesde(e.target.value);}}
           style={{...S.input,width:132}} title="Desde"/>
-        <input type="date" value={filtroHasta} onChange={e=>{setFiltroFechasCustom(true);setFiltroHasta(e.target.value);}}
+        <input type="date" min="2000-01-01" max="2100-12-31" value={filtroHasta} onChange={e=>{setFiltroFechasCustom(true);setFiltroHasta(e.target.value);}}
           style={{...S.input,width:132}} title="Hasta"/>
         <select value={filtroEst} onChange={e=>setFiltroEst(e.target.value)} style={{...S.input,width:150}}>
           <option value="activos">Activos</option>
@@ -11072,6 +11115,8 @@ export default function Pedidos() {
                 <label style={S.lbl}>Fecha primera copia</label>
                 <input
                   type="date"
+                  min="2000-01-01"
+                  max="2100-12-31"
                   style={S.inp}
                   value={copyPlan.fecha_carga || ""}
                   onChange={e=>setCopyPlan(prev=>({...prev, fecha_carga:e.target.value, fechas_copia:normalizarFechasCopia(e.target.value, prev?.copias || 1, prev?.fechas_copia)}))}
@@ -11093,6 +11138,8 @@ export default function Pedidos() {
                   <label style={S.lbl}>{(Number(copyPlan.copias || 1) > 1) ? `Fecha copia ${idx + 1}` : "Fecha de copia"}</label>
                   <input
                     type="date"
+                    min="2000-01-01"
+                    max="2100-12-31"
                     style={S.inp}
                     value={fecha || ""}
                     onChange={e=>setCopyPlan(prev=>{

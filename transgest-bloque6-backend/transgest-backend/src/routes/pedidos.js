@@ -326,13 +326,45 @@ function renderColaboradorMapsBox(pedido) {
   `;
 }
 
+const PEDIDO_DATE_FIELDS = new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga", "firma_fecha"]);
+
 function normalizePedidoDate(value) {
   if (!value) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    const year = value.getUTCFullYear();
+    if (year < 2000 || year > 2100) return null;
+    return value.toISOString().slice(0, 10);
+  }
   const raw = String(value).trim();
-  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (match) return match[1];
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 2000 || year > 2100) return null;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) return null;
+  return raw;
+}
+
+function isInvalidPedidoDateInput(value) {
+  return value !== "" && value !== null && value !== undefined && !normalizePedidoDate(value);
+}
+
+function assertPedidoDateInputs(source = {}, fields = PEDIDO_DATE_FIELDS) {
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(source, field) && isInvalidPedidoDateInput(source[field])) {
+      const err = new Error("Formato de fecha no valido. Usa el selector de fecha o el formato AAAA-MM-DD.");
+      err.status = 400;
+      err.field = field;
+      throw err;
+    }
+  }
 }
 
 function assertPedidoDateOrder(fechaCarga, fechaDescarga) {
@@ -3710,6 +3742,7 @@ function shouldUseInternationalCmr(origenPais = "España", destinoPais = "Españ
 function normalizePedidoValue(field, value) {
   if (value === "") return null;
   if (UUID_PEDIDO_FIELDS.has(field)) return normalizePedidoUuid(value);
+  if (PEDIDO_DATE_FIELDS.has(field)) return normalizePedidoDate(value);
   if (!NUMERIC_PEDIDO_FIELDS.has(field) || value === null || value === undefined) return value;
   let normalizedValue = value;
   if (typeof normalizedValue === "string") {
@@ -7653,6 +7686,11 @@ router.post("/", GERENTE_O_TRAFICO,
             remolque_id_manual, remolque_id } = req.body; // remolque_id_manual si se especifica uno distinto al del conjunto
 
     const empresaId = req.empresaId||req.user.empresa_id;
+    try {
+      assertPedidoDateInputs(req.body, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga"]));
+    } catch (dateErr) {
+      return res.status(dateErr.status || 400).json({ error: dateErr.message, field: dateErr.field });
+    }
     let rutaIdNorm = normalizePedidoUuid(ruta_id);
     if (ruta_id && !rutaIdNorm) {
       return res.status(400).json({ error: "La ruta indicada no es valida." });
@@ -8144,6 +8182,11 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     [req.params.id, empresaId]
   );
   if (!pedidoActualRows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+  try {
+    assertPedidoDateInputs(body || {}, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga", "firma_fecha"]));
+  } catch (dateErr) {
+    return res.status(dateErr.status || 400).json({ error: dateErr.message, field: dateErr.field });
+  }
   if (
     Object.prototype.hasOwnProperty.call(body || {}, "estado") &&
     String(pedidoActualRows[0].estado || "").toLowerCase() === "entregado" &&

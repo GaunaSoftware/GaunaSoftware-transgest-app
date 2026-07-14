@@ -169,6 +169,40 @@ function normalizeTime(value) {
   return null;
 }
 
+function normalizeDateOnly(value) {
+  if (value === "" || value === undefined || value === null) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return false;
+    const year = value.getUTCFullYear();
+    if (year < 2000 || year > 2100) return false;
+    return value.toISOString().slice(0, 10);
+  }
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 2000 || year > 2100) return false;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) return false;
+  return raw;
+}
+
+function ensureValidDateOnly(value, label = "fecha") {
+  const normalized = normalizeDateOnly(value);
+  if (normalized === false) {
+    const err = new Error(`${label} no valida. Usa el selector de fecha o el formato AAAA-MM-DD.`);
+    err.status = 400;
+    throw err;
+  }
+  return normalized;
+}
+
 function portalPointLabel(point = {}, fallback = "") {
   const parts = [point.nombre, point.direccion, point.ciudad, point.provincia]
     .map(value => String(value || "").trim())
@@ -1375,6 +1409,14 @@ router.get("/solicitudes/:id/eventos", requireCliente, asyncRoute(async (req, re
 router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const body = req.body || {};
+  let fechaCargaNorm;
+  let fechaDescargaNorm;
+  try {
+    fechaCargaNorm = ensureValidDateOnly(body.fecha_carga || body.fecha || null, "Fecha de carga");
+    fechaDescargaNorm = ensureValidDateOnly(body.fecha_descarga || null, "Fecha de descarga");
+  } catch (dateErr) {
+    return res.status(dateErr.status || 400).json({ error: dateErr.message });
+  }
   const [origenPunto, destinoPunto] = await Promise.all([
     getPortalPoint(db, req, body.origen_punto_id, "carga"),
     getPortalPoint(db, req, body.destino_punto_id, "descarga"),
@@ -1407,7 +1449,7 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
       req.user.cliente_id,
       origen,
       destino,
-      body.fecha_carga || body.fecha || null,
+      fechaCargaNorm,
       body.referencia_cliente || null,
     ]
   );
@@ -1427,9 +1469,9 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
       req.user.id,
       origen,
       destino,
-      body.fecha_carga || body.fecha || null,
+      fechaCargaNorm,
       normalizeTime(body.hora_carga),
-      body.fecha_descarga || null,
+      fechaDescargaNorm,
       normalizeTime(body.hora_descarga),
       body.mercancia || null,
       normalizeNonNegativeNumeric(body.peso_kg ?? body.peso),
@@ -1856,6 +1898,12 @@ router.get("/admin/solicitudes", requireGestion, asyncRoute(async (req, res) => 
 router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
   const { estado, pedido_id, respuesta, fecha_propuesta, hora_propuesta, decision_cliente, importe_contraoferta } = req.body || {};
+  let fechaPropuestaNorm = null;
+  try {
+    fechaPropuestaNorm = ensureValidDateOnly(fecha_propuesta || null, "Fecha propuesta");
+  } catch (dateErr) {
+    return res.status(dateErr.status || 400).json({ error: dateErr.message });
+  }
   const eid = empresaId(req);
   const estadoNormalizado = normalizeSolicitudEstado(estado);
   const decisionNormalizada = normalizeDecisionCliente(decision_cliente);
@@ -1913,7 +1961,7 @@ router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, re
         estadoNormalizado,
         pedido_id || null,
         respuesta || null,
-        fecha_propuesta || null,
+        fechaPropuestaNorm,
         hora_propuesta || null,
         decisionNormalizada,
         contraofertaProvided,

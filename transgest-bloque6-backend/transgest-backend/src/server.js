@@ -882,6 +882,7 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS km_ruta NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS km_vacio NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS volumen NUMERIC(10,2)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metros_lineales NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_precio VARCHAR(50) DEFAULT 'viaje'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_iva NUMERIC(5,2) NOT NULL DEFAULT 21").catch(captureStartupMigrationError);

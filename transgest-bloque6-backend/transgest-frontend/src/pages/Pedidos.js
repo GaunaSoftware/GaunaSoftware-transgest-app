@@ -1036,7 +1036,7 @@ function formatRutaTarifaLabel(ruta = {}) {
 }
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
-  "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen",
+  "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
   "cantidad", "precio_unitario", "extracostes_importe",
   "tipo_iva",
   "precio_base_sin_combustible", "recargo_combustible_pct", "importe_revision_combustible",
@@ -2830,6 +2830,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         importe_minimo: tipoPrecio === "viaje" ? toNullableNumber(tarifaDraft.importe_minimo) : null,
         minimo_unidades: tipoPrecio !== "viaje" ? toNullableNumber(tarifaDraft.minimo_unidades) : null,
         km_ruta: kmRuta,
+        metros_lineales: form.metros_lineales || null,
         precio_cliente_col: colaboradorId ? importeCalculado : null,
         precio_colaborador: null,
         precio_colaborador_unitario: null,
@@ -3081,6 +3082,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           <div>
             <label style={S.label}>Km ruta</label>
             <input type="text" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Si existe ruta, se cargara al crear"/>
+          </div>
+          <div>
+            <label style={S.label}>ML</label>
+            <input type="text" inputMode="decimal" style={inp} value={form.metros_lineales || ""} onChange={f("metros_lineales")} placeholder="Metros lineales"/>
           </div>
           <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.22)",borderRadius:8,padding:"8px 10px"}}>
             <label style={S.label}>EUR/km venta</label>
@@ -4472,6 +4477,7 @@ ${!esCol ? bloqueEmailsAlbaranes : ""}
     <div class="f"><div class="fl">Peso (kg)</div><div class="fv">${pedido.peso_kg||pedido.kg||"-"}</div></div>
     <div class="f"><div class="fl">Bultos/Palets</div><div class="fv">${pedido.bultos||"-"}</div></div>
     <div class="f"><div class="fl">Volumen (m3)</div><div class="fv">${pedido.volumen||"-"}</div></div>
+    <div class="f"><div class="fl">ML</div><div class="fv">${pedido.metros_lineales||"-"}</div></div>
   </div>
 </div>
 ${esCol ? `
@@ -5126,7 +5132,7 @@ ${esCol ? `
               ["Hora descarga",pedido.hora_descarga||"-"],
               ["Ventana descarga",pedido.ventana_descarga||"-"],
               ["Estado",pedido.estado],
-              ["Peso (kg)",pedido.peso_kg||pedido.kg||"-"],["Bultos",pedido.bultos||"-"],
+              ["Peso (kg)",pedido.peso_kg||pedido.kg||"-"],["Bultos",pedido.bultos||"-"],["ML",pedido.metros_lineales||"-"],
             esColaborador?["Colaborador",pedido.colaborador_nombre]:["Vehiculo",pedido.vehiculo_matricula||pedido.matricula||"-"],
             esColaborador?["Vehiculo colaborador",pedido.matricula_colaborador||"(pendiente del colaborador)"]:["Chofer",pedido.chofer_nombre||"-"],
             ...(esColaborador?[["Remolque colaborador",pedido.remolque_matricula_colaborador||"-"]]:[]),
@@ -7803,6 +7809,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
               </div>
               <div><label style={S.label}>Bultos / Palets</label><input type="text" inputMode="decimal" style={S.input} value={form.bultos||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,bultos:e.target.value})))}/></div>
               <div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>
+              <div><label style={S.label}>ML</label><input type="text" inputMode="decimal" style={S.input} value={form.metros_lineales||""} onChange={f("metros_lineales")} placeholder="Metros lineales"/></div>
             </div>
 
             <div style={S.sec}>Precio</div>
@@ -8741,13 +8748,14 @@ ${isCmrInternacional ? `<div class="box cmr-note">
 <table>
   <thead><tr>
     <th style="width:40%">Descripcion</th><th>Bultos</th><th>Peso (kg)</th>
-    <th>Volumen (m3)</th><th>Tipo carga</th><th>Valor</th>
+    <th>Volumen (m3)</th><th>ML</th><th>Tipo carga</th><th>Valor</th>
   </tr></thead>
   <tbody><tr>
     <td>${d.mercancia||"-"}</td>
     <td>${d.bultos||"-"}</td>
     <td>${d.peso_kg?Number(d.peso_kg).toLocaleString("es-ES")+" kg":"-"}</td>
     <td>${d.volumen||"-"}</td>
+    <td>${d.metros_lineales||"-"}</td>
     <td>${d.tipo_carga||"-"}</td>
     <td>${d.importe?Number(d.importe).toLocaleString("es-ES",{minimumFractionDigits:2})+" EUR":"-"}</td>
   </tr></tbody>

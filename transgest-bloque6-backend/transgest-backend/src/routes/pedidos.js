@@ -487,6 +487,7 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_provincia VARCHAR(120)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_provincia VARCHAR(120)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metros_lineales NUMERIC(10,2)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cmr_tipo VARCHAR(30) DEFAULT 'nacional'").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motivo_cancelacion TEXT").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ").catch(() => {});
@@ -3138,6 +3139,7 @@ function renderColaboradorPedidoBox(data, { mostrarPrecio = false } = {}) {
         <div class="f"><div class="fl">Descarga</div><div class="fv">${htmlEscape([data.fecha_descarga || data.fecha_entrega, data.hora_descarga || data.ventana_descarga].filter(Boolean).join(" ") || "-")}</div></div>
         <div class="f"><div class="fl">Mercancia</div><div class="fv">${htmlEscape(data.mercancia || "-")}</div></div>
         <div class="f"><div class="fl">Peso / bultos</div><div class="fv">${htmlEscape([data.peso_kg ? `${data.peso_kg} kg` : "", data.bultos ? `${data.bultos} bultos` : ""].filter(Boolean).join(" - ") || "-")}</div></div>
+        <div class="f"><div class="fl">M3 / ML</div><div class="fv">${htmlEscape([data.volumen ? `${data.volumen} m3` : "", data.metros_lineales ? `${data.metros_lineales} ML` : ""].filter(Boolean).join(" - ") || "-")}</div></div>
         <div class="f"><div class="fl">Tractora</div><div class="fv">${htmlEscape(data.matricula_colaborador || "Pendiente")}</div></div>
         <div class="f"><div class="fl">Remolque</div><div class="fv">${htmlEscape(data.remolque_matricula_colaborador || "-")}</div></div>
         ${precioRow}
@@ -3634,7 +3636,7 @@ function getMissingColumn(error) {
 }
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
-  "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen",
+  "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
   "cantidad", "precio_unitario", "extracostes_importe",
   "tipo_iva",
   "km_vacio_enlace",
@@ -7653,6 +7655,7 @@ router.post("/chofer", async (req, res) => {
         ["cmr_tipo", cmrTipoPedido(geoPedido.origen_pais, geoPedido.destino_pais, req.body?.cmr_tipo)],
         ["referencia_cliente", req.body?.referencia_cliente || null],
         ["tipo_carga", req.body?.tipo_carga || null],
+        ["metros_lineales", normalizePedidoValue("metros_lineales", req.body?.metros_lineales)],
         ["puntos_carga", JSON.stringify(puntosCarga)],
         ["puntos_descarga", JSON.stringify(puntosDescarga)],
         ["remolque_id", normalizePedidoUuid(req.body?.remolque_id) || chofer.remolque_id || null],
@@ -7870,6 +7873,7 @@ router.post("/", GERENTE_O_TRAFICO,
         km_ruta: req.body.km_ruta ?? null,
         km_vacio: req.body.km_vacio ?? null,
         volumen: req.body.volumen ?? null,
+        metros_lineales: req.body.metros_lineales ?? null,
         tipo_precio: req.body.tipo_precio ?? "viaje",
         cantidad: req.body.cantidad !== undefined ? (req.body.cantidad ?? null) : undefined,
         precio_unitario: req.body.precio_unitario ?? null,
@@ -8316,6 +8320,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     peso_kg: body.peso_kg ?? null,
     bultos: body.bultos ?? null,
     volumen: body.volumen ?? null,
+    metros_lineales: body.metros_lineales ?? null,
     importe: body.importe,
     notas: body.notas ?? null,
     km_ruta: body.km_ruta ?? null,

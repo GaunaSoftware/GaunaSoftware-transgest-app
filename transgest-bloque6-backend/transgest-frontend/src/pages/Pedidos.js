@@ -648,6 +648,34 @@ function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   return payload;
 }
 
+function normalizePedidoDraftForDirty(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map(normalizePedidoDraftForDirty)
+      .filter(item => item !== "" && item !== null && item !== undefined);
+  }
+  if (value && typeof value === "object") {
+    return Object.keys(value)
+      .filter(key => !key.startsWith("_"))
+      .sort()
+      .reduce((acc, key) => {
+        const normalized = normalizePedidoDraftForDirty(value[key]);
+        if (normalized === "" || normalized === null || normalized === undefined) return acc;
+        if (Array.isArray(normalized) && normalized.length === 0) return acc;
+        if (normalized && typeof normalized === "object" && !Array.isArray(normalized) && Object.keys(normalized).length === 0) return acc;
+        acc[key] = normalized;
+        return acc;
+      }, {});
+  }
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value.trim();
+  return value;
+}
+
+function pedidoDraftSignature(draft = {}) {
+  return JSON.stringify(normalizePedidoDraftForDirty(draft));
+}
+
 const PEDIDOS_CRITICAL_ALERTS_STORAGE_KEY = "tms_pedidos_critical_alerts_read";
 
 function loadReadPedidoAlerts() {
@@ -687,6 +715,18 @@ const COLOR_ESTADO = {
   pendiente:"#fb8c3a", confirmado:"#3b6ef5", en_curso:"#22d3ee",
   descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#f05252", incidencia:"#fbbf24"
 };
+const INCIDENCIA_TIPOS_PEDIDO = [
+  { v:"taller", l:"Camion en taller" },
+  { v:"carga", l:"Problema en carga" },
+  { v:"descarga", l:"Problema en descarga" },
+  { v:"retraso", l:"Retraso" },
+  { v:"documentacion", l:"Documentacion / albaran / DCD" },
+  { v:"cliente", l:"Cliente" },
+  { v:"colaborador", l:"Colaborador / subcontratado" },
+  { v:"gps", l:"GPS / localizacion" },
+  { v:"paralizacion", l:"Paralizacion / espera" },
+  { v:"operativa", l:"Otra operativa" },
+];
 const TIPOS_PRECIO = [
   { v:"viaje",    l:"Precio por viaje (EUR fijo)" },
   { v:"kg",       l:"Por kg (EUR/100kg)" },
@@ -6221,7 +6261,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [puntosCargaClienteModal, setPuntosCargaClienteModal] = useState([]);
   const [puntosCargaClienteLoading, setPuntosCargaClienteLoading] = useState(false);
   const [pendingDocs, setPendingDocs] = useState(() => Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
-  const initialFormRef = React.useRef(JSON.stringify(form));
+  const initialFormRef = React.useRef(pedidoDraftSignature(form));
   const hydratedPedidoKeyRef = React.useRef(editando?.id || (editando ? "draft" : "new"));
   const rutasCreadasRef = React.useRef(new Set());
   const riesgoConfirmadoRef = React.useRef(new Map());
@@ -6240,7 +6280,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     setPendingDocs(Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
     setShowColaboradorSuggestions(false);
     setShowCostes(!!(nextForm.coste_gasoil || nextForm.coste_peajes || nextForm.coste_dietas || nextForm.coste_otros));
-    initialFormRef.current = JSON.stringify(nextForm);
+    initialFormRef.current = pedidoDraftSignature(nextForm);
   }, [editando]);
 
   useEffect(() => {
@@ -6796,7 +6836,7 @@ function pedidoTieneContenidoReal(draft = {}) {
 async function requestClose() {
   if (saving) return;
   if (editando?._readonly && !desvinculado) { onClose(); return; }
-  const changed = JSON.stringify(form) !== initialFormRef.current;
+  const changed = pedidoDraftSignature(form) !== initialFormRef.current;
   if (!editando && !pedidoTieneContenidoReal(form)) { onClose(); return; }
   if (editando && !changed) { onClose(); return; }
   const guardarAntes = await confirmDialog({
@@ -6995,6 +7035,7 @@ async function guardar() {
         enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
       }
       notify("Pedido creado correctamente.", "success");
+      initialFormRef.current = pedidoDraftSignature(form);
       onSaved();
       return;
     }
@@ -7027,6 +7068,7 @@ async function guardar() {
       enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
     }
 
+    initialFormRef.current = pedidoDraftSignature(form);
     onSaved();
   } catch (e) {
     notify(e.message, "error");
@@ -9668,9 +9710,16 @@ export default function Pedidos() {
     }
     const incidenciaTexto = String(extra.incidencia || "").trim();
     if (estado === "incidencia" && !incidenciaTexto) {
-      const motivo = window.prompt("Describe la incidencia del pedido", "");
+      const opciones = INCIDENCIA_TIPOS_PEDIDO.map((item, idx) => `${idx + 1}. ${item.l}`).join("\n");
+      const motivo = window.prompt(`Selecciona motivo de incidencia o escribe el detalle:\n\n${opciones}`, "1");
       if (!motivo || !motivo.trim()) return;
-      extra = { ...extra, incidencia: motivo.trim(), incidencia_tipo: "operativa" };
+      const trimmed = motivo.trim();
+      const selected = INCIDENCIA_TIPOS_PEDIDO[Number(trimmed) - 1]
+        || INCIDENCIA_TIPOS_PEDIDO.find(item => item.v === trimmed.toLowerCase())
+        || INCIDENCIA_TIPOS_PEDIDO.find(item => item.l.toLowerCase() === trimmed.toLowerCase());
+      extra = selected
+        ? { ...extra, incidencia: selected.l, incidencia_tipo: selected.v }
+        : { ...extra, incidencia: trimmed, incidencia_tipo: "operativa" };
     }
     // Optimistic update - UI responds instantly
     setPedidos(prev => prev.map(x => x.id===id ? {

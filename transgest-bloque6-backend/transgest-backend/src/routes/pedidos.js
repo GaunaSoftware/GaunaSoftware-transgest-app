@@ -42,6 +42,52 @@ function optionalUuid(value) {
   return UUID_RE.test(normalized) ? normalized : null;
 }
 
+const INCIDENCIA_PEDIDO_TIPOS = {
+  taller: "Camion en taller",
+  carga: "Problema en carga",
+  descarga: "Problema en descarga",
+  retraso: "Retraso",
+  documentacion: "Documentacion",
+  cliente: "Cliente",
+  colaborador: "Colaborador",
+  trafico: "Trafico",
+  paralizacion: "Paralizacion",
+  gps: "GPS / localizacion",
+  otro: "Otro",
+  operativa: "Operativa",
+};
+
+function normalizePedidoIncidenciaTipo(value) {
+  const raw = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  if (["camion_taller", "vehiculo_taller", "averia", "taller"].includes(raw)) return "taller";
+  if (["problema_carga", "carga"].includes(raw)) return "carga";
+  if (["problema_descarga", "descarga"].includes(raw)) return "descarga";
+  if (["retraso", "demora"].includes(raw)) return "retraso";
+  if (["documentacion", "documento", "albaran", "dcd"].includes(raw)) return "documentacion";
+  if (["cliente"].includes(raw)) return "cliente";
+  if (["colaborador", "proveedor", "subcontratado"].includes(raw)) return "colaborador";
+  if (["trafico", "planificacion"].includes(raw)) return "trafico";
+  if (["paralizacion", "espera"].includes(raw)) return "paralizacion";
+  if (["gps", "localizacion", "ubicacion"].includes(raw)) return "gps";
+  if (["otro", "otros"].includes(raw)) return "otro";
+  return "operativa";
+}
+
+function buildPedidoIncidenciaInput(body = {}, fallbackPedido = {}, actorRol = "") {
+  const tipo = normalizePedidoIncidenciaTipo(body.incidencia_tipo || body.tipo_incidencia || fallbackPedido.incidencia_tipo);
+  const descripcionRaw = String(
+    body.incidencia
+    ?? body.incidencia_descripcion
+    ?? body.descripcion_incidencia
+    ?? fallbackPedido.incidencia_descripcion
+    ?? ""
+  ).trim();
+  const label = INCIDENCIA_PEDIDO_TIPOS[tipo] || INCIDENCIA_PEDIDO_TIPOS.operativa;
+  const descripcion = descripcionRaw || label;
+  const origen = actorRol === "chofer" ? "chofer" : "trafico";
+  return { tipo, label, descripcion, origen };
+}
+
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -8140,10 +8186,9 @@ router.patch("/:id/estado",
 
     await ensureColaboradorWorkflowSchema();
     const actorUsuarioId = optionalUuid(req.user?.id);
-    const incidencia = typeof req.body.incidencia === "string" ? req.body.incidencia.trim() : "";
-    const incidenciaTipo = typeof req.body.incidencia_tipo === "string" && req.body.incidencia_tipo.trim()
-      ? req.body.incidencia_tipo.trim().slice(0, 80)
-      : "operativa";
+    const incidenciaData = buildPedidoIncidenciaInput(req.body || {}, rows[0], req.user?.rol);
+    const incidencia = incidenciaData.descripcion;
+    const incidenciaTipo = incidenciaData.tipo;
     const motivoCancelacion = typeof req.body.motivo_cancelacion === "string"
       ? req.body.motivo_cancelacion.trim()
       : typeof req.body.motivo === "string" ? req.body.motivo.trim() : "";
@@ -8154,7 +8199,7 @@ router.patch("/:id/estado",
         return res.status(400).json({ error: "Indica el motivo de cancelacion para cancelar este pedido.", code: "MOTIVO_CANCELACION_REQUERIDO" });
       }
     }
-    if (estado === "incidencia" && incidencia) {
+    if (estado === "incidencia") {
       await db.query(
         `UPDATE pedidos
          SET estado=$1,
@@ -8166,7 +8211,7 @@ router.patch("/:id/estado",
              incidencia_automatica=false,
              notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $8))
          WHERE id=$3 AND empresa_id=$4`,
-        [estado, incidencia, req.params.id, empresaId, incidenciaTipo, req.user?.rol === "chofer" ? "chofer" : "trafico", actorUsuarioId, `INCIDENCIA: ${incidencia}`]
+        [estado, incidencia, req.params.id, empresaId, incidenciaTipo, incidenciaData.origen, actorUsuarioId, `INCIDENCIA: ${incidenciaData.label} - ${incidencia}`]
       );
     } else if (estado === "cancelado") {
       await db.query(
@@ -8217,9 +8262,10 @@ router.patch("/:id/estado",
         {
           pedido_id: req.params.id,
           pedido_numero: rows[0].numero || null,
-          origen: origenIncidencia,
+          origen: incidenciaData.origen || origenIncidencia,
           incidencia_tipo: incidenciaTipo,
           incidencia: incidencia || null,
+          incidencia_label: incidenciaData.label,
           ruta: `${rows[0].origen || ""} -> ${rows[0].destino || ""}`,
           dedupe_key: `incidencia:${req.params.id}:${crypto.randomUUID()}`,
         },
@@ -8407,6 +8453,18 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     intercambio_palets: body.intercambio_palets ?? false,
     requiere_cinchas: body.requiere_cinchas ?? true,
     estado: body.estado ?? undefined,
+    incidencia_tipo: body.estado === "incidencia" || body.incidencia_tipo !== undefined || body.incidencia_descripcion !== undefined || body.incidencia !== undefined
+      ? buildPedidoIncidenciaInput(body || {}, pedidoActualRows[0], req.user?.rol).tipo
+      : undefined,
+    incidencia_descripcion: body.estado === "incidencia" || body.incidencia_descripcion !== undefined || body.incidencia !== undefined
+      ? buildPedidoIncidenciaInput(body || {}, pedidoActualRows[0], req.user?.rol).descripcion
+      : undefined,
+    incidencia_origen: body.estado === "incidencia"
+      ? buildPedidoIncidenciaInput(body || {}, pedidoActualRows[0], req.user?.rol).origen
+      : undefined,
+    incidencia_creada_por: body.estado === "incidencia" ? optionalUuid(req.user?.id) : undefined,
+    incidencia_creada_at: body.estado === "incidencia" ? new Date() : undefined,
+    incidencia_automatica: body.estado === "incidencia" ? false : undefined,
     // Costes reales por viaje
     coste_gasoil:  body.coste_gasoil  !== undefined ? (body.coste_gasoil  ?? 0) : undefined,
     coste_peajes:  body.coste_peajes  !== undefined ? (body.coste_peajes  ?? 0) : undefined,
@@ -8496,7 +8554,15 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
       (k === "ruta_id" && rutaIncompatibleDesvinculada) ||
       (k === "km_ruta" && normalizedFieldMap.km_ruta && !body.km_ruta) ||
       (k === "cantidad" && normalizedFieldMap.cantidad !== fieldMap.cantidad) ||
-      (k === "minimo_unidades" && normalizedFieldMap.minimo_unidades !== fieldMap.minimo_unidades)
+      (k === "minimo_unidades" && normalizedFieldMap.minimo_unidades !== fieldMap.minimo_unidades) ||
+      (String(body.estado || "").toLowerCase() === "incidencia" && [
+        "incidencia_tipo",
+        "incidencia_descripcion",
+        "incidencia_origen",
+        "incidencia_creada_por",
+        "incidencia_creada_at",
+        "incidencia_automatica",
+      ].includes(k))
     ))
     .map(([k, v]) => [k, normalizePedidoValue(k, v)]);
   if (fields.length === 0) return res.status(400).json({ error: "No hay campos para actualizar" });

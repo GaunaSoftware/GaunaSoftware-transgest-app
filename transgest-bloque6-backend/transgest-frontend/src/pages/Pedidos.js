@@ -1847,6 +1847,65 @@ function stopDisplayParts(stop = {}, fallback = "") {
   return { nombre, direccion };
 }
 
+function cleanListPlace(value = "") {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s+->\s+/g, " -> ")
+    .trim();
+}
+
+function likelyTownFromListText(value = "") {
+  const raw = cleanListPlace(value);
+  if (!raw) return "";
+  const stop = new Set(["S.L.", "SL", "S.L.U.", "SLU", "S.A.", "SA", "S.A.U.", "SAU", "SCL", "POL", "POLIGONO", "PARCELA", "NAVE"]);
+  const parts = raw
+    .split(/\s+->\s+|,| - |–|;/)
+    .map(part => cleanListPlace(part))
+    .filter(Boolean)
+    .filter(part => !stop.has(part.toUpperCase()))
+    .filter(part => !/^\d+$/.test(part))
+    .filter(part => part.length >= 3 && part.length <= 42);
+  const preferred = [...parts].reverse().find(part => !/\d/.test(part)) || [...parts].reverse()[0] || raw;
+  return cleanListPlace(preferred).toUpperCase();
+}
+
+function stopTownLabel(stop = {}, fallback = "") {
+  const punto = findPuntoInteresForStop(stop, fallback);
+  const source = { ...(punto || {}), ...(stop || {}) };
+  const town = cleanListPlace(source.ciudad || source.poblacion || source.localidad || source.municipio || "");
+  if (town) return town.toUpperCase();
+  const address = cleanListPlace(stopAddress(stop) || source.direccion || fallback || "");
+  if (!address) return "";
+  return likelyTownFromListText(address);
+}
+
+function stopPointNameLabel(stop = {}, fallback = "") {
+  const punto = findPuntoInteresForStop(stop, fallback);
+  const source = { ...(punto || {}), ...(stop || {}) };
+  const name = cleanListPlace(source.cliente_nombre || source.nombre || source.name || punto?.nombre || "");
+  const town = stopTownLabel(stop, fallback);
+  if (!name) return town;
+  if (!town || normalizePlaceText(name) === normalizePlaceText(town)) return name.toUpperCase();
+  return `${name.toUpperCase()} - ${town}`;
+}
+
+function pedidoRouteDisplayForList(pedido = {}, cargaPrincipal = {}, descargaPrincipal = {}) {
+  const origenTown = stopTownLabel(cargaPrincipal, pedido.origen) || cleanListPlace(pedido.origen || "").toUpperCase();
+  const destinoTown = stopTownLabel(descargaPrincipal, pedido.destino) || cleanListPlace(pedido.destino || "").toUpperCase();
+  const origenPoint = stopPointNameLabel(cargaPrincipal, pedido.origen);
+  const destinoPoint = stopPointNameLabel(descargaPrincipal, pedido.destino);
+  const main = origenTown && destinoTown ? `${origenTown} -> ${destinoTown}` : cleanListPlace(`${pedido.origen || ""}${pedido.destino ? ` -> ${pedido.destino}` : ""}`) || "-";
+  const detail = origenPoint && destinoPoint && (
+    normalizePlaceText(origenPoint) !== normalizePlaceText(origenTown) ||
+    normalizePlaceText(destinoPoint) !== normalizePlaceText(destinoTown)
+  ) ? `${origenPoint} -> ${destinoPoint}` : "";
+  return { main, detail };
+}
+
+function pedidoStopListLabel(stop = {}, fallback = "") {
+  return stopPointNameLabel(stop, fallback) || stopTownLabel(stop, fallback) || cleanListPlace(stopAddress(stop) || fallback || "Sin poblacion");
+}
+
 function stopPostalLine(stop = {}, fallbackProvincia = "", fallbackPais = "España") {
   const punto = findPuntoInteresForStop(stop, stopAddress(stop));
   const source = { ...(punto || {}), ...(stop || {}) };
@@ -10822,6 +10881,7 @@ export default function Pedidos() {
               const descargaPrincipal = descargasPedido[0] || {};
               const cargasAdicionales = cargasPedido.slice(1);
               const descargasAdicionales = descargasPedido.slice(1);
+              const routeDisplay = pedidoRouteDisplayForList(p, cargaPrincipal, descargaPrincipal);
               const estadoRow = String(p.estado || "").toLowerCase();
               const estadoBackground =
                 estadoRow === "en_curso" ? "rgba(34,211,238,.12)" :
@@ -10902,18 +10962,21 @@ export default function Pedidos() {
                 </td>
                 <td style={{...S.td,fontWeight:600,fontSize:12}}>{p.cliente_nombre||"-"}</td>
                 <td style={{...S.td,fontSize:12,color:"var(--text2)",minWidth:190}}>
-                  <div>{p.origen&&p.destino?`${p.origen} -> ${p.destino}`:"-"}</div>
+                  <div style={{fontWeight:800,color:"var(--text)"}}>{routeDisplay.main}</div>
+                  {routeDisplay.detail && (
+                    <div style={{fontSize:10,lineHeight:1.35,color:"var(--text4)",marginTop:3}}>{routeDisplay.detail}</div>
+                  )}
                   {(cargasAdicionales.length > 0 || descargasAdicionales.length > 0) && (
                     <div style={{display:"grid",gap:3,marginTop:6,paddingTop:6,borderTop:"1px solid var(--border)"}}>
                       {cargasAdicionales.map((stop, index) => (
                         <div key={`carga-${index}-${stop.direccion || "parada"}`} style={{fontSize:10,lineHeight:1.35,color:"var(--text4)"}}>
-                          <strong style={{color:"#0f9f95"}}>Carga {index + 2}:</strong> {stop.direccion || "Sin poblacion"}
+                          <strong style={{color:"#0f9f95"}}>Carga {index + 2}:</strong> {pedidoStopListLabel(stop, p.origen)}
                           {pedidoStopMeta(stop) && <div style={{color:"var(--text5)"}}>{pedidoStopMeta(stop)}</div>}
                         </div>
                       ))}
                       {descargasAdicionales.map((stop, index) => (
                         <div key={`descarga-${index}-${stop.direccion || "parada"}`} style={{fontSize:10,lineHeight:1.35,color:"var(--text4)"}}>
-                          <strong style={{color:"#f59e0b"}}>Descarga {index + 2}:</strong> {stop.direccion || "Sin poblacion"}
+                          <strong style={{color:"#f59e0b"}}>Descarga {index + 2}:</strong> {pedidoStopListLabel(stop, p.destino)}
                           {pedidoStopMeta(stop) && <div style={{color:"var(--text5)"}}>{pedidoStopMeta(stop)}</div>}
                         </div>
                       ))}

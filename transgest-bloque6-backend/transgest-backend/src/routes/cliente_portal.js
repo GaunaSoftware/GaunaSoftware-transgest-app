@@ -1018,7 +1018,9 @@ router.get("/pedidos", requireCliente, async (req, res) => {
             COALESCE(p.remolque_matricula_colaborador,'') AS remolque_matricula_colaborador,
             COALESCE(v.ubicacion_actual, p.ultima_posicion) AS ubicacion_actual,
             v.gps_provider,
-            ch.nombre AS chofer_nombre
+            COALESCE(NULLIF(CONCAT_WS(' ', ch.nombre, ch.apellidos), ''), p.conductor_efectivo_nombre) AS chofer_nombre,
+            COALESCE(ch.dni, p.conductor_efectivo_dni) AS chofer_dni,
+            COALESCE(ch.telefono, p.conductor_efectivo_telefono) AS chofer_telefono
        FROM pedidos p
        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
        LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
@@ -1592,6 +1594,9 @@ router.get("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
     `SELECT s.*, p.numero AS pedido_numero, p.estado::text AS pedido_estado, p.updated_at AS pedido_updated_at,
             v.matricula AS vehiculo_matricula,
             r.matricula AS remolque_matricula,
+            COALESCE(NULLIF(CONCAT_WS(' ', ch.nombre, ch.apellidos), ''), p.conductor_efectivo_nombre) AS chofer_nombre,
+            COALESCE(ch.dni, p.conductor_efectivo_dni) AS chofer_dni,
+            COALESCE(ch.telefono, p.conductor_efectivo_telefono) AS chofer_telefono,
             COALESCE(p.matricula_colaborador,'') AS matricula_colaborador,
             COALESCE(p.remolque_matricula_colaborador,'') AS remolque_matricula_colaborador,
             COALESCE(ev.eventos_count,0)::int AS eventos_count,
@@ -1601,6 +1606,7 @@ router.get("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
        LEFT JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
        LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
+       LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
        LEFT JOIN (
          SELECT solicitud_id, empresa_id, COUNT(*) AS eventos_count, MAX(created_at) AS ultimo_evento_at
            FROM portal_solicitud_eventos
@@ -1927,34 +1933,47 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
 router.patch("/solicitudes/:id", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const body = req.body || {};
+  const modeCheck = await db.query(
+    "SELECT id, pedido_id FROM portal_solicitudes_cliente WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3 LIMIT 1",
+    [req.params.id, empresaId(req), req.user.cliente_id]
+  );
+  if (!modeCheck.rows[0]) return res.status(404).json({ error: "Solicitud no encontrada" });
+  const limitedPedidoEdit = !!modeCheck.rows[0].pedido_id;
   let fechaCargaNorm;
   let fechaDescargaNorm;
-  try {
-    fechaCargaNorm = ensureValidDateOnly(body.fecha_carga || body.fecha || null, "Fecha de carga");
-    fechaDescargaNorm = ensureValidDateOnly(body.fecha_descarga || null, "Fecha de descarga");
-  } catch (dateErr) {
-    return res.status(dateErr.status || 400).json({ error: dateErr.message });
-  }
-  const [origenPunto, destinoPunto] = await Promise.all([
-    getPortalPoint(db, req, body.origen_punto_id, "carga"),
-    getPortalPoint(db, req, body.destino_punto_id, "descarga"),
-  ]);
-  if (body.origen_punto_id && !origenPunto) return res.status(400).json({ error: "El punto de carga no pertenece a este cliente" });
-  if (body.destino_punto_id && !destinoPunto) return res.status(400).json({ error: "El punto de descarga no pertenece a este cliente" });
-  const origen = origenPunto ? portalPointLabel(origenPunto, body.origen) : String(body.origen || "").trim();
-  const destino = destinoPunto ? portalPointLabel(destinoPunto, body.destino) : String(body.destino || "").trim();
-  if (!origen || !destino) return res.status(400).json({ error: "Origen y destino son obligatorios" });
+  let origenPunto = null;
+  let destinoPunto = null;
+  let origen = String(body.origen || "").trim();
+  let destino = String(body.destino || "").trim();
+  let tarifaSolicitud = mergeTarifaSolicitud(body, null);
+  if (!limitedPedidoEdit) {
+    try {
+      fechaCargaNorm = ensureValidDateOnly(body.fecha_carga || body.fecha || null, "Fecha de carga");
+      fechaDescargaNorm = ensureValidDateOnly(body.fecha_descarga || null, "Fecha de descarga");
+    } catch (dateErr) {
+      return res.status(dateErr.status || 400).json({ error: dateErr.message });
+    }
+    [origenPunto, destinoPunto] = await Promise.all([
+      getPortalPoint(db, req, body.origen_punto_id, "carga"),
+      getPortalPoint(db, req, body.destino_punto_id, "descarga"),
+    ]);
+    if (body.origen_punto_id && !origenPunto) return res.status(400).json({ error: "El punto de carga no pertenece a este cliente" });
+    if (body.destino_punto_id && !destinoPunto) return res.status(400).json({ error: "El punto de descarga no pertenece a este cliente" });
+    origen = origenPunto ? portalPointLabel(origenPunto, body.origen) : origen;
+    destino = destinoPunto ? portalPointLabel(destinoPunto, body.destino) : destino;
+    if (!origen || !destino) return res.status(400).json({ error: "Origen y destino son obligatorios" });
 
-  const rutaMatch = await resolvePortalRutaTarifa(
-    db,
-    empresaId(req),
-    req.user.cliente_id,
-    origen,
-    destino,
-    origenPunto,
-    destinoPunto
-  );
-  const tarifaSolicitud = mergeTarifaSolicitud(body, rutaMatch);
+    const rutaMatch = await resolvePortalRutaTarifa(
+      db,
+      empresaId(req),
+      req.user.cliente_id,
+      origen,
+      destino,
+      origenPunto,
+      destinoPunto
+    );
+    tarifaSolicitud = mergeTarifaSolicitud(body, rutaMatch);
+  }
   let updated;
   await db.transaction(async (client) => {
     const current = await client.query(
@@ -1970,8 +1989,64 @@ router.patch("/solicitudes/:id", requireCliente, asyncRoute(async (req, res) => 
       updated = { status: 404, body: { error: "Solicitud no encontrada" } };
       return;
     }
+    if (solicitud.pedido_id) {
+      const pedidoRes = await client.query(
+        `SELECT id, numero, estado::text AS estado
+           FROM pedidos
+          WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3
+          FOR UPDATE`,
+        [solicitud.pedido_id, empresaId(req), req.user.cliente_id]
+      );
+      const pedido = pedidoRes.rows[0];
+      if (!pedido) {
+        updated = { status: 404, body: { error: "Pedido asociado no encontrado" } };
+        return;
+      }
+      if (["cancelado", "facturado", "cerrado"].includes(normalizarEstadoPedidoPortal(pedido.estado))) {
+        updated = { status: 409, body: { error: "El pedido ya esta cerrado y no admite cambios desde el portal." } };
+        return;
+      }
+      const soft = {
+        mercancia: body.mercancia || null,
+        peso_kg: normalizeNonNegativeNumeric(body.peso_kg ?? body.peso),
+        bultos: normalizePositiveInteger(body.bultos),
+        referencia_cliente: body.referencia_cliente || null,
+        notas: body.notas || null,
+      };
+      const solicitudUpdated = await client.query(
+        `UPDATE portal_solicitudes_cliente
+            SET mercancia=$1,
+                peso_kg=$2,
+                bultos=$3,
+                referencia_cliente=$4,
+                notas=$5,
+                respuesta='Datos no criticos actualizados por el cliente.',
+                updated_at=NOW()
+          WHERE id=$6 AND empresa_id=$7 AND cliente_id=$8
+          RETURNING *`,
+        [soft.mercancia, soft.peso_kg, soft.bultos, soft.referencia_cliente, soft.notas, req.params.id, empresaId(req), req.user.cliente_id]
+      );
+      await client.query(
+        `UPDATE pedidos
+            SET mercancia=$1,
+                peso_kg=$2,
+                bultos=$3,
+                referencia_cliente=$4,
+                notas=$5,
+                updated_at=NOW()
+          WHERE id=$6 AND empresa_id=$7 AND cliente_id=$8`,
+        [soft.mercancia, soft.peso_kg, soft.bultos, soft.referencia_cliente, soft.notas, pedido.id, empresaId(req), req.user.cliente_id]
+      );
+      await addSolicitudEvento(client, req, req.params.id, "solicitud.pedido.editado.cliente", {
+        pedido_id: pedido.id,
+        pedido_numero: pedido.numero,
+        ...soft,
+      });
+      updated = { status: 200, body: { ...solicitudUpdated.rows[0], cliente_nombre: solicitud.cliente_nombre, pedido_numero: pedido.numero, pedido_estado: pedido.estado } };
+      return;
+    }
     const estadoSolicitud = String(solicitud.estado || "").toLowerCase();
-    if (solicitud.pedido_id || ["convertida", "cancelada", "rechazada", "descartada"].includes(estadoSolicitud)) {
+    if (["convertida", "cancelada", "rechazada", "descartada"].includes(estadoSolicitud)) {
       updated = { status: 409, body: { error: "Esta solicitud ya no admite edicion desde el portal. Crea una nueva solicitud o contacta con trafico." } };
       return;
     }

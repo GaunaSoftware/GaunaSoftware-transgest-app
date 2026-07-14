@@ -379,6 +379,7 @@ function solicitudEventoLabel(tipo) {
     "solicitud.cancelada.cliente": "Cancelada por cliente",
     "solicitud.pedido.cancelado.cliente": "Pedido anulado por cliente",
     "solicitud.editada.cliente": "Solicitud editada",
+    "solicitud.pedido.editado.cliente": "Datos del pedido actualizados",
     "solicitud.precio.propuesto": "Nuevo precio propuesto",
     "solicitud.precio.aceptada": "Precio aceptado",
     "solicitud.precio.rechazada": "Precio rechazado",
@@ -397,6 +398,7 @@ function solicitudEventoResumen(ev) {
   if (ev.tipo === "solicitud.cancelada.cliente") return d.motivo ? `Motivo: ${d.motivo}` : "Cancelada desde el portal cliente.";
   if (ev.tipo === "solicitud.pedido.cancelado.cliente") return d.pedido_numero ? `Pedido ${d.pedido_numero} cancelado. Motivo: ${d.motivo || "Cancela cliente"}` : `Pedido cancelado. Motivo: ${d.motivo || "Cancela cliente"}`;
   if (ev.tipo === "solicitud.editada.cliente") return [d.origen, d.destino].filter(Boolean).join(" -> ") || "Datos actualizados por el cliente.";
+  if (ev.tipo === "solicitud.pedido.editado.cliente") return d.pedido_numero ? `Pedido ${d.pedido_numero}: mercancia, referencia, peso, bultos o notas actualizados.` : "Datos no criticos actualizados por el cliente.";
   if (ev.tipo?.startsWith("solicitud.precio.")) return d.importe_contraoferta !== null && d.importe_contraoferta !== undefined ? `${Number(d.importe_contraoferta).toFixed(2)} EUR` : "Precio actualizado.";
   if (ev.tipo === "solicitud.actualizada") return d.estado ? `Estado: ${d.estado}` : "Gestion actualizada.";
   return "";
@@ -551,7 +553,7 @@ export default function PortalClientes() {
   const solicitudesConvertidas = solicitudes.filter(s => s.estado === "convertida");
   const reprogramacionesPendientes = solicitudes.filter(s => s.fecha_propuesta && (!s.decision_cliente || s.decision_cliente === "pendiente"));
   const movimientosSolicitudes = solicitudes.reduce((sum, s) => sum + Number(s.eventos_count || 0), 0);
-  const pedidosFiltrados = pedidos.filter(p => matchesSearch(p, q, ["numero", "referencia_cliente", "origen", "destino", "mercancia", "vehiculo_matricula", "estado"]));
+  const pedidosFiltrados = pedidos.filter(p => matchesSearch(p, q, ["numero", "referencia_cliente", "origen", "destino", "mercancia", "vehiculo_matricula", "estado", "chofer_nombre", "chofer_dni", "chofer_telefono"]));
   const facturasFiltradas = facturas.filter(f => matchesSearch(f, q, ["numero", "estado", "forma_pago"]));
   const solicitudesFiltradas = solicitudes.filter(s => matchesSearch(s, q, [
     "referencia_cliente",
@@ -565,6 +567,9 @@ export default function PortalClientes() {
     "matricula_colaborador",
     "remolque_matricula",
     "remolque_matricula_colaborador",
+    "chofer_nombre",
+    "chofer_dni",
+    "chofer_telefono",
   ]));
 
   async function verAlbaranes(pedidoId) {
@@ -1017,6 +1022,7 @@ export default function PortalClientes() {
                     <Mini label="Descarga" value={`${dateEs(p.fecha_descarga || p.fecha_entrega)} ${p.hora_descarga || ""}`.trim()} />
                     <Mini label="Tractora" value={p.vehiculo_matricula || p.matricula_colaborador || "Pendiente"} />
                     <Mini label="Remolque" value={p.remolque_matricula || p.remolque_matricula_colaborador || "Pendiente"} />
+                    <Mini label="Chofer" value={[p.chofer_nombre, p.chofer_dni ? `DNI ${p.chofer_dni}` : "", p.chofer_telefono ? `Tel. ${p.chofer_telefono}` : ""].filter(Boolean).join(" - ") || "Pendiente"} />
                     <Mini label="Ubicacion" value={p.ubicacion_actual || p.ultima_posicion || "Pendiente de GPS"} />
                   </div>
                   <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap", alignItems:"center" }}>
@@ -1311,6 +1317,13 @@ export default function PortalClientes() {
                       )}
                     </div>
                   )}
+                  {(s.chofer_nombre || s.chofer_dni || s.chofer_telefono) && (
+                    <div style={{ marginTop:8, padding:"10px 12px", borderRadius:8, background:"rgba(59,130,246,.07)", border:"1px solid rgba(59,130,246,.18)", fontSize:12, color:"var(--text3)", display:"flex", gap:12, flexWrap:"wrap" }}>
+                      <span>Chofer: <strong style={{ color:"var(--text)" }}>{s.chofer_nombre || "Asignado"}</strong></span>
+                      {s.chofer_dni && <span>DNI: <strong style={{ color:"var(--text)" }}>{s.chofer_dni}</strong></span>}
+                      {s.chofer_telefono && <span>Telefono: <strong style={{ color:"var(--text)" }}>{s.chofer_telefono}</strong></span>}
+                    </div>
+                  )}
                   {s.respuesta && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text3)" }}>{s.respuesta}</div>}
                   {s.fecha_propuesta && (
                     <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(59,130,246,.2)", background: "rgba(59,130,246,.08)" }}>
@@ -1357,6 +1370,14 @@ export default function PortalClientes() {
                           Cancelar solicitud
                         </button>
                       </>
+                    )}
+                    {s.pedido_id && !["cancelado", "facturado", "cerrado"].includes(normalizarEstadoPedidoPortal(s.pedido_estado)) && (
+                      <button
+                        style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(20,184,166,.10)", color: "var(--accent)", borderColor: "rgba(20,184,166,.25)" }}
+                        onClick={() => setSolicitudEditando(s)}
+                      >
+                        Editar datos
+                      </button>
                     )}
                     {(s.pedido_id || String(s.estado || "").toLowerCase() === "convertida") && !pedidoNoAnulablePorCliente(s.pedido_estado) && (
                       <button
@@ -1565,23 +1586,26 @@ function solicitudToPortalForm(s = {}) {
 }
 
 function PortalSolicitudEditModal({ solicitud, onClose, onDone }) {
+  const limitada = !!solicitud?.pedido_id;
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,.45)", zIndex:3000, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"24px 14px", overflow:"auto" }}>
       <div style={{ width:"min(980px,100%)", background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, boxShadow:"0 24px 70px rgba(0,0,0,.28)", padding:16 }}>
         <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", marginBottom:10 }}>
           <div>
             <div style={{ fontSize:18, fontWeight:900, color:"var(--text)" }}>Editar solicitud</div>
-            <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>Puedes corregir los datos mientras la solicitud no se haya convertido en pedido.</div>
+            <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>
+              {limitada ? "El pedido ya esta creado: solo puedes corregir referencia, mercancia, peso, bultos y notas." : "Puedes corregir los datos mientras la solicitud no se haya convertido en pedido."}
+            </div>
           </div>
           <button type="button" onClick={onClose} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text)", fontWeight:900, cursor:"pointer" }}>X</button>
         </div>
-        <SolicitudServicio initial={solicitud} onDone={onDone} setTab={() => {}} onCancel={onClose} />
+        <SolicitudServicio initial={solicitud} onDone={onDone} setTab={() => {}} onCancel={onClose} limitedEdit={limitada} />
       </div>
     </div>
   );
 }
 
-function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null }) {
+function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, limitedEdit = false }) {
   const [saving, setSaving] = useState(false);
   const [puntos, setPuntos] = useState([]);
   const [puntosLoading, setPuntosLoading] = useState(true);
@@ -1652,11 +1676,11 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null }) 
   }
 
   async function enviar() {
-    if (!form.origen || !form.destino) {
+    if (!limitedEdit && (!form.origen || !form.destino)) {
       notify("Origen y destino son obligatorios", "warning");
       return;
     }
-    if (!isValidDateInput(form.fecha_carga) || !isValidDateInput(form.fecha_descarga)) {
+    if (!limitedEdit && (!isValidDateInput(form.fecha_carga) || !isValidDateInput(form.fecha_descarga))) {
       notify("Revisa las fechas. Usa el selector de fecha o el formato AAAA-MM-DD.", "warning");
       return;
     }
@@ -1709,7 +1733,7 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null }) 
   return (
     <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 18 }}>
       <div style={{ fontWeight: 900, color: "var(--text)", fontSize: 16 }}>{isEditing ? "Actualizar solicitud" : "Solicitar nuevo servicio"}</div>
-      <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 4 }}>{isEditing ? "Los cambios quedaran registrados y visibles para trafico." : "La solicitud queda vinculada solo a tu empresa transportista y a tu ficha de cliente."}</div>
+      <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 4 }}>{limitedEdit ? "Solo se actualizan datos informativos. La ruta, fechas, precio y estado del pedido no cambian." : isEditing ? "Los cambios quedaran registrados y visibles para trafico." : "La solicitud queda vinculada solo a tu empresa transportista y a tu ficha de cliente."}</div>
       {puntosLoading && <div style={{ marginTop:10, fontSize:12, color:"var(--text4)" }}>Cargando puntos guardados...</div>}
       {puntosError && (
         <div style={{ marginTop:10, display:"flex", gap:10, alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", padding:"9px 11px", border:"1px solid rgba(239,68,68,.28)", borderRadius:8, background:"rgba(239,68,68,.07)", color:"#ef4444", fontSize:12 }}>
@@ -1720,45 +1744,45 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null }) 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: "0 14px", marginTop: 8 }}>
         <div><label style={lbl}>Referencia cliente</label><input style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Pedido, OC, referencia interna..." /></div>
         <div><label style={lbl}>Mercancia</label><input style={inp} value={form.mercancia} onChange={f("mercancia")} placeholder="Tipo de mercancia" /></div>
-        <div>
+        {!limitedEdit && <div>
           <label style={lbl}>Origen *</label>
           <input style={inp} value={form.origen} onChange={event=>setForm(prev=>({...prev,origen:event.target.value,origen_punto_id:""}))} placeholder="Poblacion o direccion de carga" />
           <PortalPointPicker tipo="carga" points={puntos} selectedId={form.origen_punto_id} onSelect={point=>selectPoint("carga", point)} onCreated={addPoint} />
-        </div>
-        <div>
+        </div>}
+        {!limitedEdit && <div>
           <label style={lbl}>Destino *</label>
           <input style={inp} value={form.destino} onChange={event=>setForm(prev=>({...prev,destino:event.target.value,destino_punto_id:""}))} placeholder="Poblacion de descarga" />
           <PortalPointPicker tipo="descarga" points={puntos} selectedId={form.destino_punto_id} onSelect={point=>selectPoint("descarga", point)} onCreated={addPoint} />
-        </div>
-        <div><label style={lbl}>Fecha carga</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_carga} onChange={f("fecha_carga")} /></div>
-        <div><label style={lbl}>Hora carga</label><input style={inp} value={form.hora_carga} onChange={f("hora_carga")} placeholder="08:00 / Manana / Cita previa" /></div>
-        <div><label style={lbl}>Fecha descarga</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")} /></div>
-        <div><label style={lbl}>Hora descarga</label><input style={inp} value={form.hora_descarga} onChange={f("hora_descarga")} placeholder="16:00 / Tarde / Cita previa" /></div>
+        </div>}
+        {!limitedEdit && <div><label style={lbl}>Fecha carga</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_carga} onChange={f("fecha_carga")} /></div>}
+        {!limitedEdit && <div><label style={lbl}>Hora carga</label><input style={inp} value={form.hora_carga} onChange={f("hora_carga")} placeholder="08:00 / Manana / Cita previa" /></div>}
+        {!limitedEdit && <div><label style={lbl}>Fecha descarga</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")} /></div>}
+        {!limitedEdit && <div><label style={lbl}>Hora descarga</label><input style={inp} value={form.hora_descarga} onChange={f("hora_descarga")} placeholder="16:00 / Tarde / Cita previa" /></div>}
         <div><label style={lbl}>Peso kg</label><input type="number" style={inp} value={form.peso_kg} onChange={f("peso_kg")} /></div>
         <div><label style={lbl}>Bultos / palets</label><input type="number" min="0" step="1" style={inp} value={form.bultos} onChange={e=>setForm(p=>({...p,bultos:Number(e.target.value) < 0 ? "" : e.target.value}))} /></div>
-        <div>
+        {!limitedEdit && <div>
           <label style={lbl}>Tipo de precio</label>
           <select style={inp} value={form.tipo_precio} onChange={e=>setForm(p=>({...p,tipo_precio:e.target.value,precio_unitario:"",cantidad:"",importe:"",importe_minimo:"",minimo_unidades:""}))}>
             {TIPOS_PRECIO.map(tipo => <option key={tipo.v} value={tipo.v}>{tipo.l}</option>)}
           </select>
-        </div>
-        <div>
+        </div>}
+        {!limitedEdit && <div>
           <label style={lbl}>{form.tipo_precio === "viaje" ? "Precio viaje si lo conoces (EUR)" : form.tipo_precio === "kg" ? "Precio unitario (EUR/100kg)" : form.tipo_precio === "tonelada" ? "Precio unitario (EUR/tn)" : form.tipo_precio === "km" ? "Precio unitario (EUR/km)" : form.tipo_precio === "palet" ? "Precio unitario (EUR/palet)" : "Precio unitario (EUR/h)"}</label>
           <input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.precio_unitario} onChange={e=>setForm(p=>({...p,precio_unitario:e.target.value,importe:p.tipo_precio === "viaje" ? e.target.value : p.importe}))} placeholder="Opcional" />
-        </div>
-        {form.tipo_precio !== "viaje" && (
+        </div>}
+        {!limitedEdit && form.tipo_precio !== "viaje" && (
           <div>
             <label style={lbl}>{form.tipo_precio === "kg" ? "Peso facturable (kg)" : form.tipo_precio === "tonelada" ? "Toneladas" : form.tipo_precio === "km" ? "Kilometros" : form.tipo_precio === "palet" ? "Palets" : "Horas"}</label>
             <input type="number" min="0" step="0.001" inputMode="decimal" style={inp} value={form.cantidad} onChange={f("cantidad")} placeholder="Opcional" />
           </div>
         )}
-        <div>
+        {!limitedEdit && <div>
           <label style={lbl}>{form.tipo_precio === "viaje" ? "Minimo EUR" : "Minimo facturable"}</label>
           <input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.tipo_precio === "viaje" ? form.importe_minimo : form.minimo_unidades} onChange={e=>setForm(p=>({...p,[p.tipo_precio === "viaje" ? "importe_minimo" : "minimo_unidades"]:e.target.value}))} placeholder="Opcional" />
-        </div>
-        <div><label style={lbl}>Km ruta estimados</label><input type="number" min="0" step="0.1" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Opcional" /></div>
+        </div>}
+        {!limitedEdit && <div><label style={lbl}>Km ruta estimados</label><input type="number" min="0" step="0.1" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Opcional" /></div>}
         <div style={{ gridColumn: "1/-1" }}><label style={lbl}>Notas</label><textarea style={{ ...inp, minHeight: 86, resize: "vertical" }} value={form.notas} onChange={f("notas")} placeholder="Instrucciones de carga, contacto, horarios, observaciones..." /></div>
-        <div style={{ gridColumn: "1/-1" }}>
+        {!limitedEdit && <div style={{ gridColumn: "1/-1" }}>
           <label style={lbl}>Ordenes de carga</label>
           <input
             type="file"
@@ -1779,7 +1803,7 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null }) 
               ))}
             </div>
           )}
-        </div>
+        </div>}
       </div>
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:16 }}>
         {onCancel && (

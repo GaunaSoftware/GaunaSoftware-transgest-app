@@ -167,6 +167,7 @@ function buildOperativaCargaLabels(pedido = {}) {
   const labels = [];
   if (pedido?.carga_lateral) labels.push("Carga lateral");
   if (pedido?.carga_trasera) labels.push("Carga trasera");
+  if (pedido?.carga_techo) labels.push("Techo");
   labels.push(pedido?.intercambio_palets ? "Con intercambio de palets" : "Sin intercambio de palets");
   if (pedido?.requiere_cinchas) labels.push("Necesario llevar cinchas para sujetar la mercancia");
   return labels;

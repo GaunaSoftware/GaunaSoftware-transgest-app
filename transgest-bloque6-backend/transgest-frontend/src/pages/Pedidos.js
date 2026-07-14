@@ -180,7 +180,8 @@ function addDaysLocal(dateIso, days) {
 }
 
 function pedidoFechaOperativaKey(pedido) {
-  return toDateInputValue(pedido?.fecha_carga || pedido?.fecha_descarga || pedido?.fecha_entrega) || "sin-fecha";
+  const cargaPrincipal = parseStops(pedido?.puntos_carga)[0] || {};
+  return toDateInputValue(pedido?.fecha_carga || cargaPrincipal.fecha || pedido?.fecha_descarga || pedido?.fecha_entrega) || "sin-fecha";
 }
 
 function pedidoClienteOrdenKey(pedido) {
@@ -597,9 +598,9 @@ function mergePrimaryStopSchedule(stops, { fecha, hora, ventana } = {}) {
   if (!parsed.length) return parsed;
   return parsed.map((stop, idx) => idx === 0 ? {
     ...stop,
-    fecha: stop.fecha || fecha || "",
-    hora: stop.hora || hora || "",
-    ventana: stop.ventana || ventana || "",
+    fecha: fecha || stop.fecha || "",
+    hora: hora || stop.hora || "",
+    ventana: ventana || stop.ventana || "",
   } : stop);
 }
 
@@ -1303,9 +1304,9 @@ function pedidoStopsForList(pedido = {}, tipo = "carga") {
   return parsed.map((stop, index) => ({
     ...stop,
     direccion: stopAddress(stop) || (index === 0 ? fallback.direccion : ""),
-    fecha: stop.fecha || stop.fecha_carga || stop.fecha_descarga || (index === 0 ? fallback.fecha : ""),
-    hora: stop.hora || stop.hora_carga || stop.hora_descarga || (index === 0 ? fallback.hora : ""),
-    ventana: stop.ventana || stop.ventana_carga || stop.ventana_descarga || (index === 0 ? fallback.ventana : ""),
+    fecha: index === 0 ? (fallback.fecha || stop.fecha || stop.fecha_carga || stop.fecha_descarga || "") : (stop.fecha || stop.fecha_carga || stop.fecha_descarga || ""),
+    hora: index === 0 ? (fallback.hora || stop.hora || stop.hora_carga || stop.hora_descarga || "") : (stop.hora || stop.hora_carga || stop.hora_descarga || ""),
+    ventana: index === 0 ? (fallback.ventana || stop.ventana || stop.ventana_carga || stop.ventana_descarga || "") : (stop.ventana || stop.ventana_carga || stop.ventana_descarga || ""),
   }));
 }
 
@@ -1737,6 +1738,7 @@ function buildOperativaCargaLabels(pedido = {}) {
   const labels = [];
   if (pedido?.carga_lateral) labels.push("Carga lateral");
   if (pedido?.carga_trasera) labels.push("Carga trasera");
+  if (pedido?.carga_techo) labels.push("Techo");
   if (pedido?.intercambio_palets) labels.push("Con intercambio de palets");
   else labels.push("Sin intercambio de palets");
   if (pedido?.requiere_cinchas) labels.push("Necesario llevar cinchas");
@@ -2870,6 +2872,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         tipo_carga: "completa",
         carga_trasera: form.tipo_descarga === "trasera",
         carga_lateral: form.tipo_descarga === "lateral",
+        carga_techo: form.tipo_descarga === "techo",
         condiciones_adicionales: [
           form.tipo_descarga ? `Tipo descarga: ${form.tipo_descarga}` : "",
           form.retorno === "si" ? "Retorno: si" : "Retorno: no",
@@ -3101,6 +3104,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
             <select style={S.sel} value={form.tipo_descarga} onChange={f("tipo_descarga")}>
               <option value="trasera">Trasera</option>
               <option value="lateral">Lateral</option>
+              <option value="techo">Techo</option>
               <option value="muelle">Muelle</option>
               <option value="grua">Grua</option>
               <option value="indiferente">Indiferente</option>
@@ -3933,9 +3937,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
         .tg-stop-editor input, .tg-stop-editor select, .tg-stop-editor textarea, .tg-stop-editor button { max-width:100%; }
         .tg-stop-add-card { width:100%; max-width:100%; overflow:hidden; }
         .tg-stop-add-grid { width:100%; max-width:100%; }
-        .tg-stop-schedule-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
-        .tg-stop-details-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
-        .tg-stop-grid-wide { grid-column:1/-1 !important; }
+        .tg-stop-mini-grid, .tg-stop-schedule-grid, .tg-stop-details-grid { grid-template-columns:repeat(auto-fit,minmax(145px,1fr)) !important; max-width:100% !important; }
+        .tg-stop-address, .tg-stop-grid-wide { grid-column:1/-1 !important; }
         @container (max-width: 700px) {
           .tg-stop-add-grid { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
           .tg-stop-add-grid > select, .tg-stop-address, .tg-stop-add-grid > [style*="grid-column:1/-1"] { grid-column:1/-1 !important; }
@@ -6284,7 +6287,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     if (hydratedPedidoKeyRef.current === editandoKey) return;
     const nextForm = editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({ ...editando, remolque_id_manual: editando.remolque_id || "" }))
-      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, intercambio_palets:false, requiere_cinchas:true });
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, carga_techo:false, intercambio_palets:false, requiere_cinchas:true });
     hydratedPedidoKeyRef.current = editandoKey;
     setForm(nextForm);
     setColaboradorBusqueda("");
@@ -7805,6 +7808,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
                   {[
                     ["carga_lateral","Carga lateral"],
                     ["carga_trasera","Carga trasera"],
+                    ["carga_techo","Techo"],
                     ["intercambio_palets","Intercambio de palets"],
                     ["requiere_cinchas","Necesario llevar cinchas"],
                   ].map(([key,label])=>(
@@ -9077,6 +9081,7 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
     iva_regimen: "general",
     carga_lateral: true,
     carga_trasera: false,
+    carga_techo: false,
     intercambio_palets: false,
     requiere_cinchas: true,
     pendiente_completar: true,
@@ -10719,8 +10724,9 @@ export default function Pedidos() {
         </div>
       )}
 
-      <div style={{...S.card, overflow:"visible",width:"100%",maxWidth:"100%",boxSizing:"border-box"}}>
-        <table style={{width:"100%",maxWidth:"100%",borderCollapse:"collapse"}}>
+      <div style={{...S.card, overflow:"hidden",width:"100%",maxWidth:"100%",boxSizing:"border-box"}}>
+        <div className="tg-responsive-scroll" style={{overflowX:"auto",width:"100%",maxWidth:"100%"}}>
+        <table style={{width:"100%",minWidth:1180,borderCollapse:"collapse"}}>
           <thead><tr>
             <th style={{...S.th,width:42}}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
@@ -10839,7 +10845,7 @@ export default function Pedidos() {
                     onChange={() => togglePedidoSelected(p.id)}
                   />
                 </td>
-                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)"}}>
+                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)",whiteSpace:"nowrap",minWidth:104}}>
                   <div>{p.numero}</div>
                   {priorityMeta.reasons.length > 0 && (
                     <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:4}}>
@@ -11161,6 +11167,7 @@ export default function Pedidos() {
             )})}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Paginacion */}

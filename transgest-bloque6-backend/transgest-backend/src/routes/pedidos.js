@@ -527,6 +527,7 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_colaborador VARCHAR(60)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_lateral BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_trasera BOOLEAN DEFAULT false").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_techo BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS intercambio_palets BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS requiere_cinchas BOOLEAN DEFAULT true").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
@@ -8000,6 +8001,7 @@ router.post("/", GERENTE_O_TRAFICO,
         grupaje_id: req.body.grupaje_id ?? null,
         carga_lateral: req.body.carga_lateral ?? false,
         carga_trasera: req.body.carga_trasera ?? false,
+        carga_techo: req.body.carga_techo ?? false,
         intercambio_palets: req.body.intercambio_palets ?? false,
         requiere_cinchas: req.body.requiere_cinchas ?? true,
         coste_gasoil: req.body.coste_gasoil !== undefined ? (req.body.coste_gasoil ?? 0) : undefined,
@@ -8450,6 +8452,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     grupaje_id: body.grupaje_id ?? null,
     carga_lateral: body.carga_lateral ?? false,
     carga_trasera: body.carga_trasera ?? false,
+    carga_techo: body.carga_techo ?? false,
     intercambio_palets: body.intercambio_palets ?? false,
     requiere_cinchas: body.requiere_cinchas ?? true,
     estado: body.estado ?? undefined,

@@ -148,6 +148,35 @@ function inferDocumentMime(filename = "", fallback = "") {
   return provided || "application/octet-stream";
 }
 
+async function copySolicitudDocsToPedido(client, { solicitudId, pedidoId, empresaId }) {
+  if (!solicitudId || !pedidoId || !empresaId) return;
+  await client.query(
+    `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata)
+     SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
+            COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio'),
+            jsonb_build_object('portal_solicitud_id', solicitud_id, 'portal_documento_id', id, 'origen', 'portal_cliente')
+       FROM portal_solicitud_documentos
+      WHERE solicitud_id=$2 AND empresa_id=$3
+        AND NOT EXISTS (
+          SELECT 1 FROM pedido_docs pd
+           WHERE pd.pedido_id=$1
+             AND pd.empresa_id=$3
+             AND COALESCE(pd.metadata->>'portal_documento_id','')=portal_solicitud_documentos.id::text
+        )`,
+    [pedidoId, solicitudId, empresaId]
+  ).catch(async (err) => {
+    if (err.code !== "42703") throw err;
+    await client.query(
+      `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
+       SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
+              COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio')
+         FROM portal_solicitud_documentos
+        WHERE solicitud_id=$2 AND empresa_id=$3`,
+      [pedidoId, solicitudId, empresaId]
+    );
+  });
+}
+
 function normalizeNonNegativeNumeric(value) {
   const n = normalizeNumeric(value);
   return n !== null && n >= 0 ? n : null;
@@ -1610,7 +1639,7 @@ router.get("/solicitudes/:id/documentos", requireCliente, asyncRoute(async (req,
 router.post("/solicitudes/:id/documentos", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
   const solicitud = await db.query(
-    `SELECT id, estado
+    `SELECT id, estado, pedido_id
        FROM portal_solicitudes_cliente
       WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3
       FOR UPDATE`,
@@ -1643,6 +1672,11 @@ router.post("/solicitudes/:id/documentos", requireCliente, asyncRoute(async (req
       notas || null,
     ]
   );
+  if (sol.pedido_id) {
+    await db.transaction(async (client) => {
+      await copySolicitudDocsToPedido(client, { solicitudId: sol.id, pedidoId: sol.pedido_id, empresaId: empresaId(req) });
+    }).catch(() => {});
+  }
   await db.transaction(async (client) => {
     await addSolicitudEvento(client, req, sol.id, "solicitud.documento.subido", {
       documento_id: rows[0].id,
@@ -1729,6 +1763,93 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
   );
   if (duplicada.rows[0]) {
     return res.status(200).json({ ...duplicada.rows[0], duplicada: true });
+  }
+  const pedidoConfirmado = await db.query(
+    `SELECT id, numero, estado::text AS estado
+       FROM pedidos
+      WHERE empresa_id=$1
+        AND cliente_id=$2
+        AND estado::text IN ('confirmado','en_curso','descarga','incidencia')
+        AND COALESCE(fecha_carga::text,'')=COALESCE($3::text,'')
+        AND (
+          (COALESCE(LOWER(TRIM(referencia_cliente)),'') <> '' AND COALESCE(LOWER(TRIM(referencia_cliente)),'')=COALESCE(LOWER(TRIM($4)),''))
+          OR (
+            LOWER(TRIM(origen))=LOWER(TRIM($5))
+            AND LOWER(TRIM(destino))=LOWER(TRIM($6))
+          )
+        )
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC
+      LIMIT 1`,
+    [
+      empresaId(req),
+      req.user.cliente_id,
+      fechaCargaNorm,
+      body.referencia_cliente || null,
+      origen,
+      destino,
+    ]
+  );
+  if (pedidoConfirmado.rows[0]) {
+    const pedido = pedidoConfirmado.rows[0];
+    const aviso = `El cliente ha enviado una nueva solicitud sobre el pedido ${pedido.numero || pedido.id} ya confirmado. Revisar si son cambios, nueva orden de carga o duplicado antes de modificar planificacion.`;
+    let solicitud;
+    await db.transaction(async (client) => {
+      const inserted = await client.query(
+        `INSERT INTO portal_solicitudes_cliente
+          (empresa_id,cliente_id,solicitado_por,origen,destino,fecha_carga,hora_carga,fecha_descarga,hora_descarga,
+           mercancia,peso_kg,bultos,importe,tipo_precio,precio_unitario,cantidad,importe_minimo,minimo_unidades,km_ruta,
+           referencia_cliente,notas,origen_punto_id,destino_punto_id,ruta_id,estado,pedido_id,respuesta)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,'revisada',$25,$26)
+         RETURNING *`,
+        [
+          empresaId(req),
+          req.user.cliente_id,
+          req.user.id,
+          origen,
+          destino,
+          fechaCargaNorm,
+          normalizeTime(body.hora_carga),
+          fechaDescargaNorm,
+          normalizeTime(body.hora_descarga),
+          body.mercancia || null,
+          normalizeNonNegativeNumeric(body.peso_kg ?? body.peso),
+          normalizePositiveInteger(body.bultos),
+          tarifaSolicitud.importe,
+          tarifaSolicitud.tipo_precio,
+          tarifaSolicitud.precio_unitario,
+          tarifaSolicitud.cantidad,
+          tarifaSolicitud.importe_minimo,
+          tarifaSolicitud.minimo_unidades,
+          tarifaSolicitud.km_ruta,
+          body.referencia_cliente || null,
+          body.notas || null,
+          origenPunto?.id || null,
+          destinoPunto?.id || null,
+          tarifaSolicitud.ruta_id,
+          pedido.id,
+          aviso,
+        ]
+      );
+      solicitud = { ...inserted.rows[0], cliente_nombre: cliente.rows[0].nombre, pedido_numero: pedido.numero, pedido_estado: pedido.estado, pedido_confirmado_existente: true };
+      await client.query(
+        `UPDATE pedidos
+            SET pendiente_completar=true,
+                aviso_completar=$1,
+                updated_at=NOW()
+          WHERE id=$2 AND empresa_id=$3`,
+        [aviso, pedido.id, empresaId(req)]
+      );
+      await addSolicitudEvento(client, req, solicitud.id, "solicitud.pedido_confirmado_detectado", {
+        pedido_id: pedido.id,
+        pedido_numero: pedido.numero,
+        pedido_estado: pedido.estado,
+        origen,
+        destino,
+        fecha_carga: fechaCargaNorm,
+      });
+    });
+    notificarNuevaSolicitud(req, solicitud).catch(() => {});
+    return res.status(202).json(solicitud);
   }
   const { rows } = await db.query(
     `INSERT INTO portal_solicitudes_cliente
@@ -2057,31 +2178,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
           [pedidoExistente.rows[0].id, eid]
         );
         const pedidoActual = pedidoConfirmado.rows[0] || pedidoExistente.rows[0];
-        await client.query(
-          `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata)
-           SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
-                  COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio'),
-                  jsonb_build_object('portal_solicitud_id', solicitud_id, 'portal_documento_id', id, 'origen', 'portal_cliente')
-             FROM portal_solicitud_documentos
-            WHERE solicitud_id=$2 AND empresa_id=$3
-              AND NOT EXISTS (
-                SELECT 1 FROM pedido_docs pd
-                 WHERE pd.pedido_id=$1
-                   AND pd.empresa_id=$3
-                   AND COALESCE(pd.metadata->>'portal_documento_id','')=portal_solicitud_documentos.id::text
-              )`,
-          [pedidoActual.id, sol.id, eid]
-        ).catch(async (err) => {
-          if (err.code !== "42703") throw err;
-          await client.query(
-            `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
-             SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
-                    COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio')
-               FROM portal_solicitud_documentos
-              WHERE solicitud_id=$2 AND empresa_id=$3`,
-            [pedidoActual.id, sol.id, eid]
-          );
-        });
+        await copySolicitudDocsToPedido(client, { solicitudId: sol.id, pedidoId: pedidoActual.id, empresaId: eid });
         const updatedExisting = await client.query(
           `UPDATE portal_solicitudes_cliente
               SET estado='convertida',
@@ -2173,31 +2270,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
       ]
     );
     const pedido = inserted.rows[0];
-    await client.query(
-      `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata)
-       SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
-              COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio'),
-              jsonb_build_object('portal_solicitud_id', solicitud_id, 'portal_documento_id', id, 'origen', 'portal_cliente')
-         FROM portal_solicitud_documentos
-        WHERE solicitud_id=$2 AND empresa_id=$3
-          AND NOT EXISTS (
-            SELECT 1 FROM pedido_docs pd
-             WHERE pd.pedido_id=$1
-               AND pd.empresa_id=$3
-               AND COALESCE(pd.metadata->>'portal_documento_id','')=portal_solicitud_documentos.id::text
-          )`,
-      [pedido.id, sol.id, eid]
-    ).catch(async (err) => {
-      if (err.code !== "42703") throw err;
-      await client.query(
-        `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
-         SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
-                COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio')
-           FROM portal_solicitud_documentos
-          WHERE solicitud_id=$2 AND empresa_id=$3`,
-        [pedido.id, sol.id, eid]
-      );
-    });
+    await copySolicitudDocsToPedido(client, { solicitudId: sol.id, pedidoId: pedido.id, empresaId: eid });
 
     const updated = await client.query(
       `UPDATE portal_solicitudes_cliente

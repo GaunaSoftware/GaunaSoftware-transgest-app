@@ -1606,6 +1606,8 @@ function SolicitudServicio({ onDone, setTab }) {
       }
       if (res?.duplicada) {
         notify("Ya existe una solicitud pendiente similar. La hemos abierto como referencia.", "warning");
+      } else if (res?.pedido_confirmado_existente) {
+        notify(`Ya hay un pedido confirmado${res?.pedido_numero ? ` (${res.pedido_numero})` : ""}. Trafico revisara la nueva orden o cambios enviados.`, "warning", 7000);
       } else {
         notify("Solicitud enviada. Trafico la revisara y la convertira en pedido.", "success");
       }

@@ -43,6 +43,32 @@ const ESTADOS = {
   revisada: { l: "En revision", c: "#3b82f6" },
 };
 
+function estadoClienteSurface(estado) {
+  const key = String(estado || "").toLowerCase();
+  const styles = {
+    pendiente: { bg: "rgba(245,158,11,.07)", border: "rgba(245,158,11,.22)", bar: "rgba(245,158,11,.70)" },
+    revisada: { bg: "rgba(59,130,246,.06)", border: "rgba(59,130,246,.18)", bar: "rgba(59,130,246,.55)" },
+    confirmado: { bg: "rgba(59,130,246,.07)", border: "rgba(59,130,246,.22)", bar: "rgba(59,130,246,.65)" },
+    en_curso: { bg: "rgba(34,211,238,.12)", border: "rgba(34,211,238,.28)", bar: "rgba(34,211,238,.70)" },
+    descarga: { bg: "rgba(167,139,250,.10)", border: "rgba(167,139,250,.28)", bar: "rgba(167,139,250,.65)" },
+    entregado: { bg: "rgba(16,185,129,.08)", border: "rgba(16,185,129,.24)", bar: "rgba(16,185,129,.70)" },
+    facturado: { bg: "rgba(139,92,246,.08)", border: "rgba(139,92,246,.24)", bar: "rgba(139,92,246,.62)" },
+    incidencia: { bg: "rgba(251,191,36,.13)", border: "rgba(251,191,36,.34)", bar: "rgba(251,191,36,.82)" },
+    cancelado: { bg: "rgba(239,68,68,.08)", border: "rgba(239,68,68,.25)", bar: "rgba(239,68,68,.78)" },
+    cancelada: { bg: "rgba(239,68,68,.08)", border: "rgba(239,68,68,.25)", bar: "rgba(239,68,68,.78)" },
+    rechazada: { bg: "rgba(239,68,68,.08)", border: "rgba(239,68,68,.25)", bar: "rgba(239,68,68,.78)" },
+    descartada: { bg: "rgba(239,68,68,.08)", border: "rgba(239,68,68,.25)", bar: "rgba(239,68,68,.78)" },
+    convertida: { bg: "rgba(16,185,129,.08)", border: "rgba(16,185,129,.24)", bar: "rgba(16,185,129,.70)" },
+  };
+  const style = styles[key];
+  if (!style) return {};
+  return {
+    background: style.bg,
+    border: `1px solid ${style.border}`,
+    boxShadow: `inset 3px 0 0 ${style.bar}`,
+  };
+}
+
 const TIMELINE = [
   ["pendiente", "Pendiente"],
   ["confirmado", "Confirmado"],
@@ -873,10 +899,11 @@ export default function PortalClientes() {
           <div>
             {pedidosFiltrados.length === 0 ? <Empty text={q ? "No hay viajes que coincidan con la busqueda." : "Todavia no hay viajes registrados."} /> : pedidosFiltrados.map(p => {
               const estado = ESTADOS[p.estado] || ESTADOS.pendiente;
+              const surface = estadoClienteSurface(p.estado);
               const stIdx = Math.max(0, TIMELINE.findIndex(([k]) => k === p.estado));
               const dcd = docControl[p.id];
               return (
-                <div key={p.id} style={S.card}>
+                <div key={p.id} style={{ ...S.card, ...surface }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                     <div>
                       <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 900, color: "var(--accent)", fontSize: 13 }}>{p.numero}</div>
@@ -1141,8 +1168,15 @@ export default function PortalClientes() {
             {solicitudesFiltradas.length === 0 ? <Empty text={q ? "No hay solicitudes que coincidan con la busqueda." : "No has enviado solicitudes."} /> : solicitudesFiltradas.map(s => {
               const e = ESTADOS[s.estado] || ESTADOS.pendiente;
               const pedidoEstado = s.pedido_estado ? (ESTADOS[s.pedido_estado] || { l:s.pedido_estado, c:"#64748b" }) : null;
+              const surface = estadoClienteSurface(s.pedido_estado || s.estado);
               return (
-                <div key={s.id} style={{ borderBottom: "1px solid var(--border2)", padding: "11px 0" }}>
+                <div key={s.id} style={{
+                  ...surface,
+                  borderBottom: surface.border || "1px solid var(--border2)",
+                  borderRadius: surface.border ? 8 : 0,
+                  padding: "11px 12px",
+                  margin: surface.border ? "0 0 10px" : 0,
+                }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                     <div>
                       <div style={{ fontWeight: 900, color: "var(--text)" }}>{s.origen} -> {s.destino}</div>

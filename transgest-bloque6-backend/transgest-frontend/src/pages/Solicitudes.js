@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { actualizarPortalSolicitudAdmin, convertirPortalSolicitudAdmin, getPortalSolicitudesAdmin, getPortalSolicitudEventosAdmin } from "../services/api";
+import {
+  actualizarPortalSolicitudAdmin,
+  convertirPortalSolicitudAdmin,
+  descargarArchivoProtegido,
+  getPortalSolicitudesAdmin,
+  getPortalSolicitudDocumentosAdmin,
+  getPortalSolicitudEventosAdmin,
+} from "../services/api";
 import { notify, promptDialog } from "../services/notify";
 
 const ESTADO = {
@@ -183,6 +190,10 @@ export default function Solicitudes() {
   const [trabajando, setTrabajando] = useState(null);
   const [eventos, setEventos] = useState({});
   const [eventosAbiertos, setEventosAbiertos] = useState({});
+  const [editando, setEditando] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [docsSolicitud, setDocsSolicitud] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -477,6 +488,74 @@ export default function Solicitudes() {
     }
   }
 
+  async function abrirEditor(sol) {
+    setEditando(sol);
+    setEditForm({
+      origen: sol.origen || "",
+      destino: sol.destino || "",
+      fecha_carga: sol.fecha_carga ? String(sol.fecha_carga).slice(0, 10) : "",
+      hora_carga: sol.hora_carga || "",
+      fecha_descarga: sol.fecha_descarga ? String(sol.fecha_descarga).slice(0, 10) : "",
+      hora_descarga: sol.hora_descarga || "",
+      mercancia: sol.mercancia || "",
+      peso_kg: sol.peso_kg ?? "",
+      bultos: validBultos(sol.bultos) || "",
+      referencia_cliente: sol.referencia_cliente || "",
+      tipo_precio: sol.tipo_precio || "viaje",
+      precio_unitario: sol.precio_unitario ?? "",
+      cantidad: sol.cantidad ?? "",
+      importe: sol.importe ?? "",
+      importe_minimo: sol.importe_minimo ?? "",
+      minimo_unidades: sol.minimo_unidades ?? "",
+      km_ruta: sol.km_ruta ?? "",
+      notas: sol.notas || "",
+      respuesta: sol.respuesta || "",
+    });
+    setDocsSolicitud([]);
+    setDocsLoading(true);
+    try {
+      const docs = await getPortalSolicitudDocumentosAdmin(sol.id);
+      setDocsSolicitud(Array.isArray(docs) ? docs : []);
+    } catch (e) {
+      notify(e.message || "No se pudieron cargar los documentos de la solicitud", "warning");
+    } finally {
+      setDocsLoading(false);
+    }
+  }
+
+  async function guardarEditor() {
+    if (!editando?.id) return;
+    if (!String(editForm.origen || "").trim() || !String(editForm.destino || "").trim()) {
+      notify("Origen y destino son obligatorios", "warning");
+      return;
+    }
+    setTrabajando(editando.id);
+    try {
+      const updated = await actualizarPortalSolicitudAdmin(editando.id, editForm);
+      setSols(prev => prev.map(item => String(item.id) === String(editando.id) ? { ...item, ...updated } : item));
+      setEditando(null);
+      notify("Solicitud actualizada", "success");
+      refreshSolicitudBadges();
+      cargar().catch(() => {});
+    } catch (e) {
+      notify(e.message || "No se pudo actualizar la solicitud", "error");
+    } finally {
+      setTrabajando(null);
+    }
+  }
+
+  async function descargarDocumentoSolicitud(doc) {
+    if (!doc?.download_url) {
+      notify("Documento no disponible", "warning");
+      return;
+    }
+    try {
+      await descargarArchivoProtegido(doc.download_url, doc.nombre || "orden-carga");
+    } catch (e) {
+      notify(e.message || "No se pudo descargar el documento", "error");
+    }
+  }
+
   function exportarCsv() {
     if (!visibles.length) {
       notify("No hay solicitudes para exportar", "warning");
@@ -676,6 +755,7 @@ export default function Solicitudes() {
               {Number(sol.bultos) < 0 && <span style={{color:"#f97316",fontWeight:900}}>Bultos a revisar: valor negativo corregido al aceptar</span>}
               {sol.fecha_descarga && <span>Descarga: {dateEs(sol.fecha_descarga)} {sol.hora_descarga || ""}</span>}
               {sol.pedido_numero && <span>Pedido: {sol.pedido_numero}</span>}
+              {Number(sol.documentos_count || 0) > 0 && <span>{Number(sol.documentos_count || 0)} documento(s) adjunto(s)</span>}
             </div>
             {(sol.vehiculo_matricula || sol.matricula_colaborador || sol.remolque_matricula || sol.remolque_matricula_colaborador) && (
               <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 8 }}>
@@ -708,6 +788,11 @@ export default function Solicitudes() {
               {!rejected && (
                 <button onClick={() => modificarPrecio(sol)} disabled={trabajando === sol.id || ["convertida","rechazada","descartada","cancelada"].includes(sol.estado)} style={{ ...S.btn, color:"#b45309", borderColor:"rgba(245,158,11,.35)" }}>
                   {sol.importe ? "Modificar precio" : "Proponer precio"}
+                </button>
+              )}
+              {!rejected && (
+                <button onClick={() => abrirEditor(sol)} disabled={trabajando === sol.id} style={{ ...S.btn, color:"#0f766e", borderColor:"rgba(15,118,110,.25)" }}>
+                  Editar
                 </button>
               )}
               {!rejected && (
@@ -757,6 +842,94 @@ export default function Solicitudes() {
           </div>
         );
       })}
+      {editando && (
+        <div style={{ position:"fixed", inset:0, zIndex:2200, background:"rgba(15,23,42,.45)", display:"grid", placeItems:"center", padding:16 }}>
+          <div className="tg-responsive-modal" style={{ width:"min(920px,100%)", maxHeight:"92vh", overflowY:"auto", background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:14, padding:18, boxShadow:"0 24px 70px rgba(15,23,42,.25)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", marginBottom:12 }}>
+              <div>
+                <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:900, fontSize:22, color:"var(--text)" }}>Editar solicitud</div>
+                <div style={{ color:"var(--text4)", fontSize:12, marginTop:3 }}>{editando.cliente_nombre || "-"} · {editando.origen || "-"} -> {editando.destino || "-"}</div>
+              </div>
+              <button type="button" onClick={()=>setEditando(null)} style={{ ...S.btn, padding:"8px 12px" }}>X</button>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))", gap:12 }}>
+              {[
+                ["origen", "Origen", "text"],
+                ["destino", "Destino", "text"],
+                ["fecha_carga", "Fecha carga", "date"],
+                ["hora_carga", "Hora carga", "text"],
+                ["fecha_descarga", "Fecha descarga", "date"],
+                ["hora_descarga", "Hora descarga", "text"],
+                ["mercancia", "Mercancia", "text"],
+                ["peso_kg", "Peso kg", "number"],
+                ["bultos", "Bultos / palets", "number"],
+                ["referencia_cliente", "Referencia cliente", "text"],
+                ["km_ruta", "Km ruta", "number"],
+                ["importe", "Importe total EUR", "number"],
+                ["precio_unitario", "Precio unitario", "number"],
+                ["cantidad", "Cantidad", "number"],
+                ["importe_minimo", "Minimo EUR", "number"],
+                ["minimo_unidades", "Minimo unidades", "number"],
+              ].map(([key, label, type]) => (
+                <label key={key} style={{ display:"grid", gap:5, fontSize:11, color:"var(--text5)", fontWeight:900, textTransform:"uppercase", letterSpacing:".05em" }}>
+                  {label}
+                  <input
+                    type={type}
+                    value={editForm[key] ?? ""}
+                    onChange={e=>setEditForm(p=>({...p,[key]:e.target.value}))}
+                    style={{ ...S.input, width:"100%", boxSizing:"border-box" }}
+                  />
+                </label>
+              ))}
+              <label style={{ display:"grid", gap:5, fontSize:11, color:"var(--text5)", fontWeight:900, textTransform:"uppercase", letterSpacing:".05em" }}>
+                Tipo precio
+                <select value={editForm.tipo_precio || "viaje"} onChange={e=>setEditForm(p=>({...p,tipo_precio:e.target.value}))} style={{ ...S.input, width:"100%" }}>
+                  <option value="viaje">Precio por viaje</option>
+                  <option value="km">Por kilometros</option>
+                  <option value="tonelada">Por toneladas</option>
+                  <option value="kg">Por 100 kg</option>
+                  <option value="palet">Por palet</option>
+                  <option value="hora">Por horas</option>
+                </select>
+              </label>
+              <label style={{ gridColumn:"1/-1", display:"grid", gap:5, fontSize:11, color:"var(--text5)", fontWeight:900, textTransform:"uppercase", letterSpacing:".05em" }}>
+                Notas
+                <textarea value={editForm.notas || ""} onChange={e=>setEditForm(p=>({...p,notas:e.target.value}))} style={{ ...S.input, minHeight:80, resize:"vertical", width:"100%", boxSizing:"border-box" }} />
+              </label>
+              <label style={{ gridColumn:"1/-1", display:"grid", gap:5, fontSize:11, color:"var(--text5)", fontWeight:900, textTransform:"uppercase", letterSpacing:".05em" }}>
+                Respuesta / seguimiento visible para el cliente
+                <textarea value={editForm.respuesta || ""} onChange={e=>setEditForm(p=>({...p,respuesta:e.target.value}))} style={{ ...S.input, minHeight:74, resize:"vertical", width:"100%", boxSizing:"border-box" }} />
+              </label>
+            </div>
+            <div style={{ marginTop:16, padding:12, borderRadius:10, border:"1px solid var(--border2)", background:"var(--bg3)" }}>
+              <div style={{ fontWeight:900, color:"var(--text)", marginBottom:8 }}>Ordenes de carga adjuntas</div>
+              {docsLoading ? (
+                <div style={{ color:"var(--text4)", fontSize:12 }}>Cargando documentos...</div>
+              ) : docsSolicitud.length === 0 ? (
+                <div style={{ color:"var(--text5)", fontSize:12 }}>Sin documentos adjuntos en la solicitud.</div>
+              ) : (
+                <div style={{ display:"grid", gap:8 }}>
+                  {docsSolicitud.map(doc => (
+                    <div key={doc.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap", padding:"9px 10px", border:"1px solid var(--border2)", borderRadius:8, background:"var(--bg2)" }}>
+                      <div>
+                        <div style={{ fontWeight:900, color:"var(--text)", fontSize:13 }}>{doc.nombre || "orden-carga"}</div>
+                        <div style={{ color:"var(--text5)", fontSize:11 }}>{doc.file_mime || "archivo"} · {doc.file_size_kb || "-"} KB</div>
+                      </div>
+                      <button type="button" onClick={()=>descargarDocumentoSolicitud(doc)} style={{ ...S.btn, color:"#0f766e" }}>Descargar</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:10, flexWrap:"wrap", marginTop:16 }}>
+              <button type="button" onClick={()=>setEditando(null)} style={S.btn}>Cancelar</button>
+              <button type="button" onClick={guardarEditor} disabled={trabajando === editando.id} style={{ ...S.btn, background:"#0f766e", color:"#fff", borderColor:"#0f766e", opacity: trabajando === editando.id ? .65 : 1 }}>
+                {trabajando === editando.id ? "Guardando..." : "Guardar cambios"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -729,6 +729,8 @@ export const getPortalClienteIntegracionManifest = () => apiFetch("/portal-clien
 export const getPortalClienteIntegracionFeed = (days=90) => apiFetch(`/portal-cliente/integracion/feed?days=${encodeURIComponent(days)}`, { silentError:true });
 export const solicitarPortalClienteIntegracion = (data={}) => apiFetch("/portal-cliente/integracion/solicitar", { method:"POST", body:data });
 export const crearPortalClienteSolicitud = (data) => apiFetch("/portal-cliente/solicitudes", { method:"POST", body:data });
+export const getPortalClienteSolicitudDocumentos = (id) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/documentos`);
+export const subirPortalClienteSolicitudDocumento = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/documentos`, { method:"POST", body:data });
 export const responderPortalClienteReprogramacion = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/reprogramacion`, { method:"POST", body:data });
 export const responderPortalClientePrecio = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/precio`, { method:"POST", body:data });
 export const cancelarPortalClienteSolicitud = (id, data={}) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/cancelar`, { method:"POST", body:data });
@@ -739,6 +741,7 @@ export const getPortalSolicitudesAdmin = (params={}) => apiFetch(`/portal-client
 export const actualizarPortalSolicitudAdmin = (id, data) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
 export const convertirPortalSolicitudAdmin = (id, data={}) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/convertir`, { method:"POST", body:data, timeoutMs:60000 });
 export const getPortalSolicitudEventosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/eventos`);
+export const getPortalSolicitudDocumentosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/documentos`);
 export const getInformeRutas= (desde,hasta) => apiFetch(`/informes/rutas?desde=${desde}&hasta=${hasta}`);
 export const getInformeChoferes=(desde,hasta)=>apiFetch(`/informes/choferes?desde=${desde}&hasta=${hasta}`);
 export const getInformeCobros = ()          => apiFetch("/informes/cobros");

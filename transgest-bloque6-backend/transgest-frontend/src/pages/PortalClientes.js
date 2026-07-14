@@ -19,6 +19,7 @@ import {
   marcarTodasPortalClienteNotificacionesLeidas,
   responderPortalClienteReprogramacion,
   responderPortalClientePrecio,
+  subirPortalClienteSolicitudDocumento,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
@@ -26,6 +27,15 @@ import { notify } from "../services/notify";
 import PortalPointPicker from "../components/PortalPointPicker";
 
 const fmt2 = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || "").split(",").pop() || "");
+    reader.onerror = () => reject(reader.error || new Error("No se pudo leer el archivo"));
+    reader.readAsDataURL(file);
+  });
+}
 
 const ESTADOS = {
   pendiente: { l: "Pendiente", c: "#9ca3af" },
@@ -1475,6 +1485,7 @@ function SolicitudServicio({ onDone, setTab }) {
   const [puntos, setPuntos] = useState([]);
   const [puntosLoading, setPuntosLoading] = useState(true);
   const [puntosError, setPuntosError] = useState("");
+  const [ordenesCarga, setOrdenesCarga] = useState([]);
   const [form, setForm] = useState({
     referencia_cliente: "",
     origen: "",
@@ -1573,12 +1584,33 @@ function SolicitudServicio({ onDone, setTab }) {
       const res = await crearPortalClienteSolicitud({
         ...cleanPayload(form),
       });
+      const solicitudId = res?.id;
+      if (solicitudId && ordenesCarga.length) {
+        let subidos = 0;
+        for (const file of ordenesCarga) {
+          try {
+            const file_base64 = await fileToBase64(file);
+            await subirPortalClienteSolicitudDocumento(solicitudId, {
+              tipo: "orden_carga",
+              nombre: file.name || "orden-carga.pdf",
+              file_mime: file.type || "application/octet-stream",
+              file_base64,
+              notas: "Orden de carga adjuntada por el cliente",
+            });
+            subidos += 1;
+          } catch (uploadError) {
+            notify(`No se pudo subir ${file.name || "un archivo"}: ${uploadError.message || "archivo no valido"}`, "warning");
+          }
+        }
+        if (subidos) notify(`${subidos} orden(es) de carga adjuntada(s).`, "success");
+      }
       if (res?.duplicada) {
         notify("Ya existe una solicitud pendiente similar. La hemos abierto como referencia.", "warning");
       } else {
         notify("Solicitud enviada. Trafico la revisara y la convertira en pedido.", "success");
       }
       setForm({ referencia_cliente: "", origen: "", destino: "", fecha_carga: "", hora_carga: "", fecha_descarga: "", hora_descarga: "", mercancia: "", peso_kg: "", bultos: "", importe: "", tipo_precio: "viaje", precio_unitario: "", cantidad: "", importe_minimo: "", minimo_unidades: "", km_ruta: "", notas: "", origen_punto_id: "", destino_punto_id: "" });
+      setOrdenesCarga([]);
       await onDone();
       setTab("solicitudes");
     } catch (e) {
@@ -1640,6 +1672,28 @@ function SolicitudServicio({ onDone, setTab }) {
         </div>
         <div><label style={lbl}>Km ruta estimados</label><input type="number" min="0" step="0.1" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Opcional" /></div>
         <div style={{ gridColumn: "1/-1" }}><label style={lbl}>Notas</label><textarea style={{ ...inp, minHeight: 86, resize: "vertical" }} value={form.notas} onChange={f("notas")} placeholder="Instrucciones de carga, contacto, horarios, observaciones..." /></div>
+        <div style={{ gridColumn: "1/-1" }}>
+          <label style={lbl}>Ordenes de carga</label>
+          <input
+            type="file"
+            multiple
+            accept=".pdf,image/*,.doc,.docx"
+            style={inp}
+            onChange={event => setOrdenesCarga(Array.from(event.target.files || []))}
+          />
+          <div style={{ fontSize: 11, color: "var(--text5)", marginTop: 5 }}>
+            Puedes adjuntar PDF, imagen o documento. Se enviaran junto con la solicitud y quedaran en el pedido cuando trafico la acepte.
+          </div>
+          {ordenesCarga.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {ordenesCarga.map((file, index) => (
+                <span key={`${file.name}-${index}`} style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid var(--border2)", color: "var(--text3)", fontSize: 11 }}>
+                  {file.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
       <button onClick={enviar} disabled={saving} style={{ marginTop: 16, width: "100%", padding: "12px 18px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", fontWeight: 900, cursor: "pointer", opacity: saving ? .65 : 1 }}>
         {saving ? "Enviando..." : "Enviar solicitud"}

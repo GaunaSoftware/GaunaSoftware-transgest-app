@@ -9,6 +9,7 @@ const {
   notificarUsuariosCliente,
 } = require("../services/notificaciones");
 const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload } = require("../services/documentoControl");
+const { validateBase64Upload } = require("../services/uploadValidation");
 
 const router = express.Router();
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -98,6 +99,23 @@ function ensureSchema() {
         )
       `);
       await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitud_eventos_solicitud ON portal_solicitud_eventos(solicitud_id, created_at DESC)");
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS portal_solicitud_documentos (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+          cliente_id UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+          solicitud_id UUID NOT NULL REFERENCES portal_solicitudes_cliente(id) ON DELETE CASCADE,
+          subido_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+          tipo VARCHAR(80) NOT NULL DEFAULT 'orden_carga',
+          nombre VARCHAR(255) NOT NULL,
+          file_base64 TEXT NOT NULL,
+          file_mime VARCHAR(120),
+          file_size_kb INTEGER,
+          notas TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitud_docs_solicitud ON portal_solicitud_documentos(solicitud_id, created_at DESC)");
     }).catch(err => {
       schemaReady = null;
       throw err;
@@ -114,6 +132,20 @@ function normalizeNumeric(value) {
   if (value === "" || value === undefined || value === null) return null;
   const n = Number(String(value).replace(",", "."));
   return Number.isFinite(n) ? n : null;
+}
+
+function inferDocumentMime(filename = "", fallback = "") {
+  const provided = String(fallback || "").trim();
+  if (provided && provided !== "application/octet-stream") return provided;
+  const lower = String(filename || "").toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".doc")) return "application/msword";
+  if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (lower.endsWith(".txt")) return "text/plain";
+  return provided || "application/octet-stream";
 }
 
 function normalizeNonNegativeNumeric(value) {
@@ -1514,7 +1546,8 @@ router.get("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
             COALESCE(p.matricula_colaborador,'') AS matricula_colaborador,
             COALESCE(p.remolque_matricula_colaborador,'') AS remolque_matricula_colaborador,
             COALESCE(ev.eventos_count,0)::int AS eventos_count,
-            ev.ultimo_evento_at
+            ev.ultimo_evento_at,
+            COALESCE(docs.documentos_count,0)::int AS documentos_count
        FROM portal_solicitudes_cliente s
        LEFT JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
        LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
@@ -1525,6 +1558,11 @@ router.get("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
           WHERE empresa_id=$1
           GROUP BY solicitud_id, empresa_id
        ) ev ON ev.solicitud_id=s.id AND ev.empresa_id=s.empresa_id
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS documentos_count
+           FROM portal_solicitud_documentos d
+          WHERE d.solicitud_id=s.id AND d.empresa_id=s.empresa_id
+       ) docs ON true
       WHERE s.empresa_id=$1 AND s.cliente_id=$2
       ORDER BY s.created_at DESC
       LIMIT 100`,
@@ -1549,6 +1587,87 @@ router.get("/solicitudes/:id/eventos", requireCliente, asyncRoute(async (req, re
     [req.params.id, empresaId(req)]
   );
   res.json(rows);
+}));
+
+router.get("/solicitudes/:id/documentos", requireCliente, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  const solicitud = await db.query(
+    "SELECT id FROM portal_solicitudes_cliente WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3",
+    [req.params.id, empresaId(req), req.user.cliente_id]
+  );
+  if (!solicitud.rows[0]) return res.status(404).json({ error: "Solicitud no encontrada" });
+  const { rows } = await db.query(
+    `SELECT id,tipo,nombre,file_mime,file_size_kb,notas,created_at,
+            CONCAT('/api/v1/portal-cliente/solicitudes/', solicitud_id, '/documentos/', id, '/descargar') AS download_url
+       FROM portal_solicitud_documentos
+      WHERE solicitud_id=$1 AND empresa_id=$2 AND cliente_id=$3
+      ORDER BY created_at DESC`,
+    [req.params.id, empresaId(req), req.user.cliente_id]
+  );
+  res.json(rows);
+}));
+
+router.post("/solicitudes/:id/documentos", requireCliente, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  const solicitud = await db.query(
+    `SELECT id, estado
+       FROM portal_solicitudes_cliente
+      WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3
+      FOR UPDATE`,
+    [req.params.id, empresaId(req), req.user.cliente_id]
+  );
+  const sol = solicitud.rows[0];
+  if (!sol) return res.status(404).json({ error: "Solicitud no encontrada" });
+  if (["rechazada", "descartada", "cancelada"].includes(String(sol.estado || "").toLowerCase())) {
+    return res.status(409).json({ error: "La solicitud ya esta cerrada y no admite documentos" });
+  }
+
+  const { nombre, tipo = "orden_carga", file_base64, file_mime, notas } = req.body || {};
+  if (!nombre || !file_base64) return res.status(400).json({ error: "Faltan nombre o archivo" });
+  const upload = validateBase64Upload({ data: file_base64, mime: inferDocumentMime(nombre, file_mime), filename: nombre, maxBytes: 5 * 1024 * 1024 });
+  const { rows } = await db.query(
+    `INSERT INTO portal_solicitud_documentos
+      (empresa_id,cliente_id,solicitud_id,subido_por,tipo,nombre,file_base64,file_mime,file_size_kb,notas)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     RETURNING id,tipo,nombre,file_mime,file_size_kb,notas,created_at`,
+    [
+      empresaId(req),
+      req.user.cliente_id,
+      sol.id,
+      req.user.id || null,
+      String(tipo || "orden_carga").slice(0, 80),
+      String(nombre).slice(0, 255),
+      upload.base64,
+      upload.mime,
+      Math.ceil(upload.sizeBytes / 1024),
+      notas || null,
+    ]
+  );
+  await db.transaction(async (client) => {
+    await addSolicitudEvento(client, req, sol.id, "solicitud.documento.subido", {
+      documento_id: rows[0].id,
+      tipo: rows[0].tipo,
+      nombre: rows[0].nombre,
+    });
+  }).catch(() => {});
+  notificarGestionSolicitudCliente(req, { id: sol.id, cliente_id: req.user.cliente_id, estado: sol.estado }, "solicitud.documento.subido").catch(() => {});
+  res.status(201).json(rows[0]);
+}));
+
+router.get("/solicitudes/:id/documentos/:docId/descargar", requireCliente, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  const { rows } = await db.query(
+    `SELECT d.nombre,d.file_mime,d.file_base64
+       FROM portal_solicitud_documentos d
+       JOIN portal_solicitudes_cliente s ON s.id=d.solicitud_id AND s.empresa_id=d.empresa_id
+      WHERE d.id=$1 AND d.solicitud_id=$2 AND d.empresa_id=$3 AND d.cliente_id=$4`,
+    [req.params.docId, req.params.id, empresaId(req), req.user.cliente_id]
+  );
+  const doc = rows[0];
+  if (!doc?.file_base64) return res.status(404).send("Documento no disponible");
+  res.setHeader("Content-Type", doc.file_mime || "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="${String(doc.nombre || "orden-carga").replace(/"/g, "")}"`);
+  res.send(Buffer.from(String(doc.file_base64 || ""), "base64"));
 }));
 
 router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
@@ -1837,6 +1956,40 @@ router.get("/admin/solicitudes/:id/eventos", requireGestion, asyncRoute(async (r
   res.json(rows);
 }));
 
+router.get("/admin/solicitudes/:id/documentos", requireGestion, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  const solicitud = await db.query(
+    "SELECT id FROM portal_solicitudes_cliente WHERE id=$1 AND empresa_id=$2",
+    [req.params.id, empresaId(req)]
+  );
+  if (!solicitud.rows[0]) return res.status(404).json({ error: "Solicitud no encontrada" });
+  const { rows } = await db.query(
+    `SELECT id,tipo,nombre,file_mime,file_size_kb,notas,created_at,
+            CONCAT('/api/v1/portal-cliente/admin/solicitudes/', solicitud_id, '/documentos/', id, '/descargar') AS download_url
+       FROM portal_solicitud_documentos
+      WHERE solicitud_id=$1 AND empresa_id=$2
+      ORDER BY created_at DESC`,
+    [req.params.id, empresaId(req)]
+  );
+  res.json(rows);
+}));
+
+router.get("/admin/solicitudes/:id/documentos/:docId/descargar", requireGestion, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  const { rows } = await db.query(
+    `SELECT d.nombre,d.file_mime,d.file_base64
+       FROM portal_solicitud_documentos d
+       JOIN portal_solicitudes_cliente s ON s.id=d.solicitud_id AND s.empresa_id=d.empresa_id
+      WHERE d.id=$1 AND d.solicitud_id=$2 AND d.empresa_id=$3`,
+    [req.params.docId, req.params.id, empresaId(req)]
+  );
+  const doc = rows[0];
+  if (!doc?.file_base64) return res.status(404).send("Documento no disponible");
+  res.setHeader("Content-Type", doc.file_mime || "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="${String(doc.nombre || "orden-carga").replace(/"/g, "")}"`);
+  res.send(Buffer.from(String(doc.file_base64 || ""), "base64"));
+}));
+
 router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
   const eid = empresaId(req);
@@ -1904,6 +2057,31 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
           [pedidoExistente.rows[0].id, eid]
         );
         const pedidoActual = pedidoConfirmado.rows[0] || pedidoExistente.rows[0];
+        await client.query(
+          `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata)
+           SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
+                  COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio'),
+                  jsonb_build_object('portal_solicitud_id', solicitud_id, 'portal_documento_id', id, 'origen', 'portal_cliente')
+             FROM portal_solicitud_documentos
+            WHERE solicitud_id=$2 AND empresa_id=$3
+              AND NOT EXISTS (
+                SELECT 1 FROM pedido_docs pd
+                 WHERE pd.pedido_id=$1
+                   AND pd.empresa_id=$3
+                   AND COALESCE(pd.metadata->>'portal_documento_id','')=portal_solicitud_documentos.id::text
+              )`,
+          [pedidoActual.id, sol.id, eid]
+        ).catch(async (err) => {
+          if (err.code !== "42703") throw err;
+          await client.query(
+            `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
+             SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
+                    COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio')
+               FROM portal_solicitud_documentos
+              WHERE solicitud_id=$2 AND empresa_id=$3`,
+            [pedidoActual.id, sol.id, eid]
+          );
+        });
         const updatedExisting = await client.query(
           `UPDATE portal_solicitudes_cliente
               SET estado='convertida',
@@ -1995,6 +2173,31 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
       ]
     );
     const pedido = inserted.rows[0];
+    await client.query(
+      `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata)
+       SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
+              COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio'),
+              jsonb_build_object('portal_solicitud_id', solicitud_id, 'portal_documento_id', id, 'origen', 'portal_cliente')
+         FROM portal_solicitud_documentos
+        WHERE solicitud_id=$2 AND empresa_id=$3
+          AND NOT EXISTS (
+            SELECT 1 FROM pedido_docs pd
+             WHERE pd.pedido_id=$1
+               AND pd.empresa_id=$3
+               AND COALESCE(pd.metadata->>'portal_documento_id','')=portal_solicitud_documentos.id::text
+          )`,
+      [pedido.id, sol.id, eid]
+    ).catch(async (err) => {
+      if (err.code !== "42703") throw err;
+      await client.query(
+        `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
+         SELECT $1, empresa_id, nombre, 'orden_carga', file_base64, file_mime, file_size_kb,
+                COALESCE(notas, 'Adjuntado por el cliente al solicitar el servicio')
+           FROM portal_solicitud_documentos
+          WHERE solicitud_id=$2 AND empresa_id=$3`,
+        [pedido.id, sol.id, eid]
+      );
+    });
 
     const updated = await client.query(
       `UPDATE portal_solicitudes_cliente
@@ -2045,7 +2248,8 @@ router.get("/admin/solicitudes", requireGestion, asyncRoute(async (req, res) => 
             COALESCE(p.matricula_colaborador,'') AS matricula_colaborador,
             COALESCE(p.remolque_matricula_colaborador,'') AS remolque_matricula_colaborador,
             COALESCE(ev.eventos_count,0)::int AS eventos_count,
-            ev.ultimo_evento_at
+            ev.ultimo_evento_at,
+            COALESCE(docs.documentos_count,0)::int AS documentos_count
        FROM portal_solicitudes_cliente s
        JOIN clientes c ON c.id=s.cliente_id AND c.empresa_id=s.empresa_id
        LEFT JOIN pedidos p ON p.id=s.pedido_id AND p.empresa_id=s.empresa_id
@@ -2056,6 +2260,11 @@ router.get("/admin/solicitudes", requireGestion, asyncRoute(async (req, res) => 
            FROM portal_solicitud_eventos e
           WHERE e.solicitud_id=s.id AND e.empresa_id=s.empresa_id
        ) ev ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS documentos_count
+           FROM portal_solicitud_documentos d
+          WHERE d.solicitud_id=s.id AND d.empresa_id=s.empresa_id
+       ) docs ON true
       WHERE ${where.join(" AND ")}
       ORDER BY s.created_at DESC
       LIMIT 200`,
@@ -2066,21 +2275,48 @@ router.get("/admin/solicitudes", requireGestion, asyncRoute(async (req, res) => 
 
 router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
-  const { estado, pedido_id, respuesta, fecha_propuesta, hora_propuesta, decision_cliente, importe_contraoferta } = req.body || {};
+  const body = req.body || {};
+  const { estado, pedido_id, respuesta, fecha_propuesta, hora_propuesta, decision_cliente, importe_contraoferta } = body;
+  const has = key => Object.prototype.hasOwnProperty.call(body, key);
   let fechaPropuestaNorm = null;
+  let fechaCargaNorm = null;
+  let fechaDescargaNorm = null;
   try {
     fechaPropuestaNorm = ensureValidDateOnly(fecha_propuesta || null, "Fecha propuesta");
+    if (has("fecha_carga")) fechaCargaNorm = ensureValidDateOnly(body.fecha_carga || null, "Fecha de carga");
+    if (has("fecha_descarga")) fechaDescargaNorm = ensureValidDateOnly(body.fecha_descarga || null, "Fecha de descarga");
   } catch (dateErr) {
     return res.status(dateErr.status || 400).json({ error: dateErr.message });
   }
   const eid = empresaId(req);
   const estadoNormalizado = normalizeSolicitudEstado(estado);
   const decisionNormalizada = normalizeDecisionCliente(decision_cliente);
-  const contraofertaProvided = Object.prototype.hasOwnProperty.call(req.body || {}, "importe_contraoferta");
+  const contraofertaProvided = has("importe_contraoferta");
   const contraofertaNormalizada = contraofertaProvided ? normalizeNonNegativeNumeric(importe_contraoferta) : null;
   if (estadoNormalizado === false) return res.status(400).json({ error: "Estado de solicitud no valido" });
   if (decisionNormalizada === false) return res.status(400).json({ error: "Decision de cliente no valida" });
   if (contraofertaProvided && contraofertaNormalizada === null) return res.status(400).json({ error: "El precio propuesto no es valido" });
+
+  const editable = {
+    origen: has("origen") ? String(body.origen || "").trim() : null,
+    destino: has("destino") ? String(body.destino || "").trim() : null,
+    hora_carga: has("hora_carga") ? normalizeTime(body.hora_carga) : null,
+    hora_descarga: has("hora_descarga") ? normalizeTime(body.hora_descarga) : null,
+    mercancia: has("mercancia") ? String(body.mercancia || "").trim() || null : null,
+    peso_kg: has("peso_kg") ? normalizeNonNegativeNumeric(body.peso_kg) : null,
+    bultos: has("bultos") ? normalizePositiveInteger(body.bultos) : null,
+    referencia_cliente: has("referencia_cliente") ? String(body.referencia_cliente || "").trim() || null : null,
+    notas: has("notas") ? String(body.notas || "").trim() || null : null,
+    tipo_precio: has("tipo_precio") ? normalizeTipoPrecio(body.tipo_precio) : null,
+    precio_unitario: has("precio_unitario") ? normalizeNonNegativeNumeric(body.precio_unitario) : null,
+    cantidad: has("cantidad") ? normalizeNonNegativeNumeric(body.cantidad) : null,
+    importe: has("importe") ? normalizeNonNegativeNumeric(body.importe) : null,
+    importe_minimo: has("importe_minimo") ? normalizeNonNegativeNumeric(body.importe_minimo) : null,
+    minimo_unidades: has("minimo_unidades") ? normalizeNonNegativeNumeric(body.minimo_unidades) : null,
+    km_ruta: has("km_ruta") ? normalizeNonNegativeNumeric(body.km_ruta) : null,
+  };
+  if (has("origen") && !editable.origen) return res.status(400).json({ error: "Origen obligatorio" });
+  if (has("destino") && !editable.destino) return res.status(400).json({ error: "Destino obligatorio" });
 
   let result;
   let notificationEvent = "solicitud.actualizada";
@@ -2123,6 +2359,24 @@ router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, re
               decision_precio=CASE WHEN $7::boolean THEN 'pendiente' ELSE decision_precio END,
               decision_precio_at=CASE WHEN $7::boolean THEN NULL ELSE decision_precio_at END,
               contraoferta_at=CASE WHEN $7::boolean THEN NOW() ELSE contraoferta_at END,
+              origen=CASE WHEN $11::boolean THEN $12 ELSE origen END,
+              destino=CASE WHEN $13::boolean THEN $14 ELSE destino END,
+              fecha_carga=CASE WHEN $15::boolean THEN $16 ELSE fecha_carga END,
+              fecha_descarga=CASE WHEN $17::boolean THEN $18 ELSE fecha_descarga END,
+              hora_carga=CASE WHEN $19::boolean THEN $20 ELSE hora_carga END,
+              hora_descarga=CASE WHEN $21::boolean THEN $22 ELSE hora_descarga END,
+              mercancia=CASE WHEN $23::boolean THEN $24 ELSE mercancia END,
+              peso_kg=CASE WHEN $25::boolean THEN $26 ELSE peso_kg END,
+              bultos=CASE WHEN $27::boolean THEN $28 ELSE bultos END,
+              referencia_cliente=CASE WHEN $29::boolean THEN $30 ELSE referencia_cliente END,
+              notas=CASE WHEN $31::boolean THEN $32 ELSE notas END,
+              tipo_precio=CASE WHEN $33::boolean THEN $34 ELSE tipo_precio END,
+              precio_unitario=CASE WHEN $35::boolean THEN $36 ELSE precio_unitario END,
+              cantidad=CASE WHEN $37::boolean THEN $38 ELSE cantidad END,
+              importe=CASE WHEN $39::boolean THEN $40 ELSE importe END,
+              importe_minimo=CASE WHEN $41::boolean THEN $42 ELSE importe_minimo END,
+              minimo_unidades=CASE WHEN $43::boolean THEN $44 ELSE minimo_unidades END,
+              km_ruta=CASE WHEN $45::boolean THEN $46 ELSE km_ruta END,
               updated_at=NOW()
         WHERE id=$9 AND empresa_id=$10
         RETURNING *`,
@@ -2137,6 +2391,42 @@ router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, re
         contraofertaNormalizada,
         req.params.id,
         eid,
+        has("origen"),
+        editable.origen,
+        has("destino"),
+        editable.destino,
+        has("fecha_carga"),
+        fechaCargaNorm,
+        has("fecha_descarga"),
+        fechaDescargaNorm,
+        has("hora_carga"),
+        editable.hora_carga,
+        has("hora_descarga"),
+        editable.hora_descarga,
+        has("mercancia"),
+        editable.mercancia,
+        has("peso_kg"),
+        editable.peso_kg,
+        has("bultos"),
+        editable.bultos,
+        has("referencia_cliente"),
+        editable.referencia_cliente,
+        has("notas"),
+        editable.notas,
+        has("tipo_precio"),
+        editable.tipo_precio,
+        has("precio_unitario"),
+        editable.precio_unitario,
+        has("cantidad"),
+        editable.cantidad,
+        has("importe"),
+        editable.importe,
+        has("importe_minimo"),
+        editable.importe_minimo,
+        has("minimo_unidades"),
+        editable.minimo_unidades,
+        has("km_ruta"),
+        editable.km_ruta,
       ]
     );
     const tipoEvento = estadoNormalizado === "rechazada"
@@ -2155,6 +2445,7 @@ router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, re
       hora_propuesta: hora_propuesta || null,
       decision_cliente: decisionNormalizada,
       importe_contraoferta: contraofertaProvided ? contraofertaNormalizada : null,
+      editado: Object.keys(editable).filter(key => has(key)),
     });
     result = { status: 200, body: rows[0] };
   });

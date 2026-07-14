@@ -23,6 +23,8 @@ const PLACES = [
   ["Girona", "Girona", "Espana", 41.9794, 2.8214, ["Gerona"]],
   ["Zaragoza", "Zaragoza", "Espana", 41.6488, -0.8891],
   ["Sevilla", "Sevilla", "Espana", 37.3891, -5.9845],
+  ["Jerez de la Frontera", "Cadiz", "Espana", 36.6850, -6.1261, ["Jerez"]],
+  ["Jerez de los Caballeros", "Badajoz", "Espana", 38.3206, -6.7726],
   ["Malaga", "Malaga", "Espana", 36.7213, -4.4214],
   ["Cordoba", "Cordoba", "Espana", 37.8882, -4.7794],
   ["Granada", "Granada", "Espana", 37.1773, -3.5986],

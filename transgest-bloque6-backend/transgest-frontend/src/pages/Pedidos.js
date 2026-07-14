@@ -79,7 +79,17 @@ function placeQueryFromDraft(draft = {}, ...extra) {
     draft.nombre,
     draft.name,
     draft.cliente_nombre,
-  ].map(v => String(v || "").trim()).find(v => v.length >= 2) || "";
+  ].map(v => String(v || "").trim()).find(v => v.length >= 2 && !isCountryOnlyDraftQuery(v)) || "";
+}
+
+function isCountryOnlyDraftQuery(value = "") {
+  const normalized = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return ["espana", "spain", "es"].includes(normalized);
 }
 
 function mergeResolvedGeo(draft = {}, geo = {}, fallbackCountry = "EspaÃ±a") {
@@ -3644,10 +3654,12 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const fallbackProvincia = tipo === "carga" ? (form.origen_provincia || "") : (form.destino_provincia || "");
   const inferStopGeo = (stop = {}, idx = 0) => {
     const inferred = inferPlaceGeo(stop, stopAddress(stop), stop.cliente_nombre, stop.direccion, stop.pais);
+    const manualProvincia = !!stop.provincia_manual;
+    const currentProvincia = stopRegion(stop);
     return {
       ...stop,
       pais: stopCountryInputValue(stop, idx === 0 ? fallbackPais : "España") || canonicalCountry(inferred?.pais || "") || fallbackPais || "España",
-      provincia: inferred?.provincia || stopRegion(stop) || (idx === 0 ? fallbackProvincia : ""),
+      provincia: manualProvincia ? (stop.provincia ?? "") : (currentProvincia || inferred?.provincia || (idx === 0 ? fallbackProvincia : "")),
     };
   };
   const resolveStopGeo = async (stop = {}, idx = 0) => {
@@ -4015,8 +4027,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     style={inp}
                     disabled={disabled}
                     value={stopPais}
-                    onChange={e=>updateStop(i, { pais:e.target.value, provincia:"" })}
-                    onKeyDown={e=>completeOnTab(e, Array.from(new Set([...paisesActivos, stopPais])), stopPais, value=>updateStop(i, { pais:value, provincia:"" }))}
+                    onChange={e=>updateStop(i, { pais:e.target.value, provincia:"", provincia_manual:false })}
+                    onKeyDown={e=>completeOnTab(e, Array.from(new Set([...paisesActivos, stopPais])), stopPais, value=>updateStop(i, { pais:value, provincia:"", provincia_manual:false }))}
                     placeholder="País"
                   />
                   <input
@@ -4024,8 +4036,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     style={inp}
                     disabled={disabled}
                     value={stopRegion(d)}
-                    onChange={e=>updateStop(i, { provincia:e.target.value })}
-                    onKeyDown={e=>completeOnTab(e, stopRegions, stopRegion(d), value=>updateStop(i, { provincia:value }))}
+                    onChange={e=>updateStop(i, { provincia:e.target.value, provincia_manual:true })}
+                    onKeyDown={e=>completeOnTab(e, stopRegions, stopRegion(d), value=>updateStop(i, { provincia:value, provincia_manual:true }))}
                     placeholder="Provincia / región"
                   />
                   <input
@@ -4152,16 +4164,16 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               style={inp}
               placeholder="País"
               value={newStopPais}
-              onChange={e=>setNewStop(p=>({...p,pais:e.target.value,provincia:""}))}
-              onKeyDown={e=>completeOnTab(e, Array.from(new Set([...paisesActivos, newStopPais])), newStopPais, value=>setNewStop(p=>({...p,pais:value,provincia:""})))}
+              onChange={e=>setNewStop(p=>({...p,pais:e.target.value,provincia:"",provincia_manual:false}))}
+              onKeyDown={e=>completeOnTab(e, Array.from(new Set([...paisesActivos, newStopPais])), newStopPais, value=>setNewStop(p=>({...p,pais:value,provincia:"",provincia_manual:false})))}
             />
             <input
               list={newStopRegionListId}
               style={inp}
               placeholder="Provincia / región"
               value={newStop.provincia || ""}
-              onChange={e=>setNewStop(p=>({...p,provincia:e.target.value}))}
-              onKeyDown={e=>completeOnTab(e, newStopRegions, newStop.provincia || "", value=>setNewStop(p=>({...p,provincia:value})))}
+              onChange={e=>setNewStop(p=>({...p,provincia:e.target.value,provincia_manual:true}))}
+              onKeyDown={e=>completeOnTab(e, newStopRegions, newStop.provincia || "", value=>setNewStop(p=>({...p,provincia:value,provincia_manual:true})))}
             />
             <input type="number" style={inp} placeholder="Bultos" value={newStop.bultos} onChange={e=>setNewStop(p=>({...p,bultos:e.target.value}))}/>
             <input type="number" style={inp} placeholder="Peso kg" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))}/>

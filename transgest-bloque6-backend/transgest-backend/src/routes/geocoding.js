@@ -15,7 +15,7 @@ const router = express.Router();
 const ROUTE_CACHE_DAYS = Math.max(1, Number(process.env.GEO_ROUTE_CACHE_DAYS || 30));
 const EXTERNAL_TIMEOUT_MS = Math.max(2500, Number(process.env.GEO_EXTERNAL_TIMEOUT_MS || 9000));
 const MAX_ROUTE_POINTS = 12;
-const PLACE_CACHE_VERSION = "v3";
+const PLACE_CACHE_VERSION = "v4";
 let schemaPromise = null;
 let lastNominatimAt = 0;
 let nominatimQueue = Promise.resolve();
@@ -276,16 +276,18 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} 
   }
 
   let resolved = null;
+  const fallback = fallbackPlaceForAddress(buildQuery(query, request.country, request.region));
+  const localResolved = fallback ? selectBestPlaceCandidate(request, [{ provider: "local", ...formatPlace(fallback) }]) : null;
   if (request.localityOnly) {
-    resolved = await geocodeNominatim(request).catch(() => null);
+    resolved = localResolved;
+    if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeNominatim(request).catch(() => null);
     if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeHere(empresaId, request).catch(() => null);
   } else {
     resolved = await geocodeHere(empresaId, request).catch(() => null);
     if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeNominatim(request).catch(() => null);
   }
   if (resolved?.lat == null || resolved?.lng == null) {
-    const fallback = fallbackPlaceForAddress(buildQuery(query, request.country, request.region));
-    resolved = selectBestPlaceCandidate(request, fallback ? [{ provider: "local", ...formatPlace(fallback) }] : []);
+    resolved = localResolved;
   }
   if (resolved?.lat == null || resolved?.lng == null) {
     throw Object.assign(

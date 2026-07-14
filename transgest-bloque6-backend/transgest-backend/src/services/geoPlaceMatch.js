@@ -128,7 +128,8 @@ function significantTokens(value = "") {
 }
 
 function regionMatches(requested = "", candidate = "", label = "") {
-  if (!normalizeGeoText(requested)) return true;
+  const normalizedRequested = normalizeGeoText(requested);
+  if (!normalizedRequested || normalizedRequested.length < 3) return true;
   return fuzzyEquals(requested, candidate) || fuzzyEquals(requested, label);
 }
 

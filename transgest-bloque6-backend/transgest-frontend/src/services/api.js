@@ -613,6 +613,7 @@ export const sincronizarGpsVehiculos = (provider) => apiFetch("/vehiculos/gps/sy
 export const getChoferes    = (activo = "true") => apiFetch(`/choferes?activo=${encodeURIComponent(activo)}`);
 export const crearChofer    = (data)      => apiFetch("/choferes", { method:"POST", body:data });
 export const editarChofer   = (id,data)   => apiFetch(`/choferes/${id}`, { method:"PUT", body:data });
+export const borrarChofer   = (id)        => apiFetch(`/choferes/${id}`, { method:"DELETE" });
 export const getChoferJornadaApp = () => apiFetch("/choferes/app/jornada");
 export const getChoferConjuntoApp = () => apiFetch("/choferes/app/conjunto");
 export const cambiarChoferConjuntoApp = (data) => apiFetch("/choferes/app/conjunto", { method:"POST", body:data, silentSuccess:true });

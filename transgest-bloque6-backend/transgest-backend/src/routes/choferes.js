@@ -111,6 +111,35 @@ function duplicateChoferMessage(duplicate, draft = {}) {
   return "Ya existe un chofer activo con el mismo nombre y telefono en esta empresa.";
 }
 
+async function resolveChoferByIdOrPrefix(empresaId, rawId) {
+  const id = String(rawId || "").trim();
+  if (!id) {
+    const err = new Error("ID de chofer no indicado.");
+    err.status = 400;
+    throw err;
+  }
+  const { rows } = await db.query(
+    `SELECT *
+       FROM choferes
+      WHERE empresa_id=$1
+        AND (id::text=$2 OR id::text LIKE $3)
+      ORDER BY id::text
+      LIMIT 3`,
+    [empresaId, id, `${id}%`]
+  );
+  if (!rows.length) {
+    const err = new Error("Chofer no encontrado.");
+    err.status = 404;
+    throw err;
+  }
+  if (rows.length > 1 && !rows.some(row => String(row.id) === id)) {
+    const err = new Error("El prefijo de ID coincide con varios choferes. Indica el UUID completo.");
+    err.status = 409;
+    throw err;
+  }
+  return rows.find(row => String(row.id) === id) || rows[0];
+}
+
 let jornadaSchemaReady = false;
 let vacacionesSchemaReady = false;
 async function ensureChoferJornadaSchema() {
@@ -1361,6 +1390,58 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
     res.json(rows[0]);
   } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });
+
+router.delete("/:id", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    await ensureChoferesTransparencySchema();
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const chofer = await resolveChoferByIdOrPrefix(empresaId, req.params.id);
+    const choferId = chofer.id;
+
+    const { rows: pedidoRows } = await db.query(
+      `SELECT COUNT(*)::int AS total
+         FROM pedidos
+        WHERE empresa_id=$1
+          AND (chofer_id=$2 OR chofer2_id=$2)`,
+      [empresaId, choferId]
+    ).catch(() => ({ rows: [{ total: 0 }] }));
+    const pedidosAsociados = Number(pedidoRows?.[0]?.total || 0);
+
+    await db.query("UPDATE vehiculos SET chofer_id=NULL, updated_at=NOW() WHERE empresa_id=$1 AND chofer_id=$2", [empresaId, choferId]).catch(() => {});
+    await db.query("UPDATE vehiculos SET chofer_id=NULL, updated_at=NOW() WHERE empresa_id=$1 AND id=$2", [empresaId, chofer.vehiculo_id || null]).catch(() => {});
+    await db.query("UPDATE usuarios SET chofer_id=NULL WHERE empresa_id=$1 AND chofer_id=$2", [empresaId, choferId]).catch(() => {});
+
+    if (pedidosAsociados > 0) {
+      const historial = Array.isArray(chofer.historial_laboral) ? chofer.historial_laboral : [];
+      const baja = {
+        tipo: "baja",
+        fecha: new Date().toISOString().slice(0, 10),
+        motivo: "Eliminado desde ficha de chofer; conserva historico por pedidos asociados.",
+        usuario_id: req.user?.id || null,
+        created_at: new Date().toISOString(),
+      };
+      const { rows } = await db.query(
+        `UPDATE choferes
+            SET activo=false,
+                estado='baja',
+                vehiculo_id=NULL,
+                fecha_baja=COALESCE(fecha_baja, CURRENT_DATE),
+                motivo_baja=COALESCE(NULLIF(motivo_baja,''), $3),
+                historial_laboral=$4::jsonb
+          WHERE id=$1 AND empresa_id=$2
+          RETURNING *`,
+        [choferId, empresaId, baja.motivo, JSON.stringify([...historial, baja].slice(-120))]
+      );
+      return res.json({ ok: true, mode: "soft_delete", chofer: rows[0], pedidos_asociados: pedidosAsociados });
+    }
+
+    await db.query("DELETE FROM choferes WHERE id=$1 AND empresa_id=$2", [choferId, empresaId]);
+    res.json({ ok: true, mode: "hard_delete", id: choferId });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "No se pudo eliminar el chofer." });
+  }
+});
+
 router.initializeSchema = async function initializeChoferesSchema() {
   await ensureChoferesTransparencySchema();
   await ensureChoferJornadaSchema();

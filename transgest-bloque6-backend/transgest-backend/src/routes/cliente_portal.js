@@ -459,7 +459,7 @@ async function getPortalPoint(client, req, pointId, tipo, clienteId = req.user?.
     `SELECT id,nombre,direccion,ciudad,provincia,pais,lat,lng,tipo,ventana,cliente_id
        FROM puntos_interes
       WHERE id=$1 AND empresa_id=$2 AND activo=true
-        AND (cliente_id=$3 OR cliente_id IS NULL)
+        AND cliente_id=$3
         AND (tipo=$4 OR tipo='ambos')
       LIMIT 1`,
     [pointId, empresaId(req), clienteId || null, tipo]
@@ -1540,12 +1540,12 @@ router.get("/puntos", requireCliente, asyncRoute(async (req, res) => {
             contacto_nombre,contacto_telefono,email,notas,cliente_id
        FROM puntos_interes
       WHERE empresa_id=$1 AND activo=true
-        AND (cliente_id=$2 OR cliente_id IS NULL)
-      ORDER BY CASE WHEN cliente_id=$2 THEN 0 ELSE 1 END, nombre ASC
+        AND cliente_id=$2
+      ORDER BY nombre ASC
       LIMIT 250`,
     [empresaId(req), req.user.cliente_id]
   );
-  res.json(rows.map(row => ({ ...row, es_general: !row.cliente_id })));
+  res.json(rows.map(row => ({ ...row, es_general: false })));
 }));
 
 router.post("/puntos", requireCliente, asyncRoute(async (req, res) => {

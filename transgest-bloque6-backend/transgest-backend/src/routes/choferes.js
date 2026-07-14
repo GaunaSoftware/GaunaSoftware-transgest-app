@@ -48,6 +48,69 @@ function normalizePlataformas(value) {
   })).filter(platform => platform.nombre || platform.documentos.length);
 }
 
+function normalizeDuplicateText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeDuplicateDni(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeDuplicatePhone(value) {
+  return String(value || "").replace(/[^\d+]/g, "").replace(/^00/, "+");
+}
+
+async function findDuplicateChofer({ empresaId, dni, email, telefono, nombre, apellidos, excludeId = null }) {
+  const dniKey = normalizeDuplicateDni(dni);
+  const emailKey = String(email || "").trim().toLowerCase();
+  const phoneKey = normalizeDuplicatePhone(telefono);
+  const nombreKey = normalizeDuplicateText(nombre);
+  const apellidosKey = normalizeDuplicateText(apellidos);
+  if (!dniKey && !emailKey && !(phoneKey && nombreKey)) return null;
+
+  const params = [empresaId];
+  let excludeSql = "";
+  if (excludeId) {
+    params.push(excludeId);
+    excludeSql = ` AND id<>$${params.length}`;
+  }
+  const { rows } = await db.query(
+    `SELECT id,nombre,apellidos,dni,email,telefono
+       FROM choferes
+      WHERE empresa_id=$1
+        ${excludeSql}
+        AND COALESCE(activo,true)=true
+      LIMIT 500`,
+    params
+  );
+  return rows.find(row => {
+    if (dniKey && normalizeDuplicateDni(row.dni) === dniKey) return true;
+    if (emailKey && String(row.email || "").trim().toLowerCase() === emailKey) return true;
+    if (phoneKey && normalizeDuplicatePhone(row.telefono) === phoneKey) {
+      const sameNombre = normalizeDuplicateText(row.nombre) === nombreKey;
+      const sameApellidos = !apellidosKey || normalizeDuplicateText(row.apellidos) === apellidosKey;
+      if (sameNombre && sameApellidos) return true;
+    }
+    return false;
+  }) || null;
+}
+
+function duplicateChoferMessage(duplicate, draft = {}) {
+  if (!duplicate) return "Ya existe un chofer con esos datos en esta empresa.";
+  if (normalizeDuplicateDni(duplicate.dni) && normalizeDuplicateDni(duplicate.dni) === normalizeDuplicateDni(draft.dni)) {
+    return "Ya existe un chofer activo con ese DNI/NIE en esta empresa.";
+  }
+  if (duplicate.email && draft.email && String(duplicate.email).trim().toLowerCase() === String(draft.email).trim().toLowerCase()) {
+    return "Ya existe un chofer activo con ese email en esta empresa.";
+  }
+  return "Ya existe un chofer activo con el mismo nombre y telefono en esta empresa.";
+}
+
 let jornadaSchemaReady = false;
 let vacacionesSchemaReady = false;
 async function ensureChoferJornadaSchema() {
@@ -1154,6 +1217,13 @@ router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
     await ensureChoferesTransparencySchema();
     const {nombre,dni,telefono,email,vehiculo_id,categoria_carnet,apellidos,tipo_contrato,salario,notas,sexo,puesto_valor,fecha_alta,plataformas}=req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
+    const duplicate = await findDuplicateChofer({ empresaId, dni, email, telefono, nombre, apellidos });
+    if (duplicate) {
+      return res.status(409).json({
+        error: duplicateChoferMessage(duplicate, { dni, email, telefono, nombre, apellidos }),
+        duplicate_id: duplicate.id,
+      });
+    }
     const {rows}=await db.query(
       `INSERT INTO choferes (nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,tipo_contrato,salario,notas,empresa_id,sexo,puesto_valor,fecha_alta,historial_laboral,plataformas)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::date,CURRENT_DATE),$15::jsonb,$16::jsonb) RETURNING *`,
@@ -1174,6 +1244,13 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
     const empresaId = req.empresaId || req.user.empresa_id;
     const current = await db.query("SELECT * FROM choferes WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);
     if(!current.rows[0]) return res.status(404).json({error:"No encontrado"});
+    const duplicate = await findDuplicateChofer({ empresaId, dni, email, telefono, nombre, apellidos, excludeId: req.params.id });
+    if (duplicate) {
+      return res.status(409).json({
+        error: duplicateChoferMessage(duplicate, { dni, email, telefono, nombre, apellidos }),
+        duplicate_id: duplicate.id,
+      });
+    }
     const previous = current.rows[0];
     const nextActivo = activo!==undefined ? activo !== false : previous.activo !== false;
     const currentHistorial = Array.isArray(previous.historial_laboral) ? previous.historial_laboral : [];

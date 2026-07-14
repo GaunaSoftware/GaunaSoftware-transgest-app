@@ -3300,17 +3300,23 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   }
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.76)",zIndex:520,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:20,width:"min(620px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)",marginBottom:4}}>{form.id ? "Editar punto de interes" : "Guardar punto de interes"}</div>
-        <div style={{fontSize:12,color:"var(--text4)",marginBottom:12}}>Crea una ficha reutilizable para empresas donde cargas o descargas con frecuencia.</div>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.76)",zIndex:2600,display:"flex",alignItems:"center",justifyContent:"center",padding:12,overflow:"auto"}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,width:"min(660px,calc(100vw - 24px))",maxHeight:"calc(100dvh - 24px)",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,.35)"}}>
+        <div style={{position:"sticky",top:0,zIndex:2,background:"var(--bg2)",borderBottom:"1px solid var(--border)",padding:"16px 18px 12px",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
+          <div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)",marginBottom:4}}>{form.id ? "Editar punto de interes" : "Guardar punto de interes"}</div>
+            <div style={{fontSize:12,color:"var(--text4)"}}>Crea una ficha reutilizable para empresas donde cargas o descargas con frecuencia.</div>
+          </div>
+          <button type="button" onClick={onClose} style={{...S.btn,background:"transparent",border:"1px solid var(--border2)",color:"var(--text3)",padding:"7px 10px",flex:"0 0 auto"}}>X</button>
+        </div>
+        <div style={{padding:"0 18px 18px"}}>
         <datalist id={modalCountryListId}>
           {modalCountries.map(country => <option key={country} value={country} />)}
         </datalist>
         <datalist id={modalRegionListId}>
           {modalRegions.map(region => <option key={region} value={region} />)}
         </datalist>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"0 12px"}}>
           <div style={{gridColumn:"1/-1",border:"1px solid var(--border2)",background:"var(--bg3)",borderRadius:9,padding:"10px 12px",marginBottom:4}}>
             <label style={{display:"flex",gap:10,alignItems:"flex-start",fontSize:13,fontWeight:800,color:"var(--text)",cursor:(!initial?.cliente_id && !form.cliente_id)?"default":"pointer"}}>
               <input
@@ -3375,9 +3381,10 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Horario / ventana habitual</label><input style={inp} value={form.ventana} onChange={set("ventana")} placeholder="Ej: 08:00-14:00" /></div>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Notas operativas</label><textarea style={{...inp,height:74,resize:"vertical"}} value={form.notas} onChange={set("notas")} placeholder="Ej: entrada por puerta 3, pedir referencia en garita..." /></div>
         </div>
-        <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:16}}>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:16,flexWrap:"wrap"}}>
           <button type="button" onClick={onClose} style={{...S.btn,background:"transparent",border:"1px solid var(--border2)",color:"var(--text4)"}}>Cancelar</button>
           <button type="button" onClick={guardar} style={{...S.btn,background:"var(--accent)",color:"#fff"}}>Guardar punto</button>
+        </div>
         </div>
       </div>
     </div>
@@ -6663,7 +6670,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   };
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",zIndex:540,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",zIndex:2500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,width:"min(880px,96vw)",maxHeight:"92vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <div style={{padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
           <div>
@@ -6729,7 +6736,22 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
         <PuntoInteresModal
           initial={editing}
           onClose={()=>setEditing(null)}
-          onSave={(next)=>{ setPuntos(next); onApply?.(next); setEditing(null); }}
+          onSave={async (next, saved)=>{
+            setPuntos(next);
+            onApply?.(next);
+            setEditing(null);
+            if (onSelectPoint && saved && !editing?.id) {
+              const ensured = await ensurePointForClient({ ...saved, tipo: saved.tipo || modo || "ambos" });
+              const normalized = ensured?.point || normalizePuntoInteresForForm({
+                ...saved,
+                cliente_id: saved.cliente_id || clienteId || "",
+                tipo: saved.tipo || modo || "ambos",
+              });
+              onSelectPoint(normalized);
+              notify("Punto guardado y seleccionado.", "success");
+              onClose?.();
+            }
+          }}
         />
       )}
     </div>
@@ -8563,7 +8585,13 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
       {managePointsOpen && (
         <GestionPuntosInteresModal
           onClose={()=>setManagePointsOpen(false)}
-          onApply={(next)=>setPuntosInteresCache(next)}
+          onApply={(next)=>{
+            setPuntosInteresCache(next);
+            setPuntosInteresModal(next);
+            if (form.cliente_id) {
+              setPuntosCargaClienteModal(getPuntosCargaCliente(form.cliente_id, next));
+            }
+          }}
           clienteId={form.cliente_id}
           modo={managePointsMode}
           onSelectPoint={(point)=>{

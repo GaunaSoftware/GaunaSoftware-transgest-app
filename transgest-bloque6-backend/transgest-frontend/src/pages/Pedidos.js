@@ -7367,7 +7367,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
           <style>{`
             .tg-pedido-modal, .tg-pedido-modal * { box-sizing:border-box; min-width:0; }
             .tg-pedido-modal input, .tg-pedido-modal select, .tg-pedido-modal textarea, .tg-pedido-modal button { max-width:100%; }
-            .tg-pedido-modal-header { position:sticky; top:0; z-index:5000; isolation:isolate; margin:-28px -28px 16px; padding:18px 28px 12px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; max-width:100%; overflow:hidden; }
+            .tg-pedido-modal-header { position:relative; z-index:20; isolation:isolate; margin:0 0 16px; padding:0 0 12px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; max-width:100%; overflow:hidden; }
             .tg-pedido-modal-title { min-width:0; overflow-wrap:anywhere; word-break:break-word; line-height:1.25; }
             .tg-pedido-map-section { max-width:100%; min-width:0; overflow:hidden; isolation:isolate; position:relative; z-index:0; }
             .tg-pedido-map-section .leaflet-container { max-width:100%; z-index:0; }
@@ -7381,7 +7381,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
             @media (max-width: 760px) {
               .tg-pedido-modal-overlay { align-items:flex-start !important; justify-content:center !important; padding:8px !important; overflow:auto !important; }
               .tg-pedido-modal { width:100% !important; max-width:calc(100vw - 16px) !important; max-height:calc(100dvh - 16px) !important; padding:16px 14px 18px !important; border-radius:12px !important; overflow-x:hidden !important; }
-              .tg-pedido-modal-header { top:0 !important; margin:-16px -14px 12px !important; padding:12px 14px 10px !important; align-items:flex-start !important; }
+              .tg-pedido-modal-header { margin:0 0 12px !important; padding:0 0 10px !important; align-items:flex-start !important; }
               .tg-pedido-modal-title { font-size:15px !important; padding-top:7px !important; }
               .tg-pedido-map-section { padding:10px !important; border-radius:10px !important; margin-bottom:12px !important; }
               .tg-pedido-map-section [style*="grid-template-columns"] { grid-template-columns:1fr !important; }

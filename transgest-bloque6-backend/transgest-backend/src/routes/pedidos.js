@@ -8415,19 +8415,33 @@ router.patch("/:id/estado",
       }
     }
     if (estado === "incidencia") {
-      await db.query(
-        `UPDATE pedidos
-         SET estado=$1,
-             incidencia_tipo=$5,
-             incidencia_descripcion=$2,
-             incidencia_origen=$6,
-             incidencia_creada_por=$7,
-             incidencia_creada_at=NOW(),
-             incidencia_automatica=false,
-             notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $8))
-         WHERE id=$3 AND empresa_id=$4`,
-        [estado, incidencia, req.params.id, empresaId, incidenciaTipo, incidenciaData.origen, actorUsuarioId, `INCIDENCIA: ${incidenciaData.label} - ${incidencia}`]
-      );
+      const incidenciaNota = `INCIDENCIA: ${incidenciaData.label} - ${incidencia}`;
+      try {
+        await db.query(
+          `UPDATE pedidos
+           SET estado=$1,
+               incidencia_tipo=$5,
+               incidencia_descripcion=$2,
+               incidencia_origen=$6,
+               incidencia_creada_por=$7,
+               incidencia_creada_at=NOW(),
+               incidencia_automatica=false,
+               notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $8))
+           WHERE id=$3 AND empresa_id=$4`,
+          [estado, incidencia, req.params.id, empresaId, incidenciaTipo, incidenciaData.origen, actorUsuarioId, incidenciaNota]
+        );
+      } catch (incidenciaError) {
+        const compatibilityCodes = new Set(["42703", "42804", "22P02"]);
+        if (!compatibilityCodes.has(String(incidenciaError?.code || ""))) throw incidenciaError;
+        logger.warn(`Incidencia guardada en modo compatible para pedido ${req.params.id}: ${incidenciaError.message}`);
+        await db.query(
+          `UPDATE pedidos
+              SET estado=$1,
+                  notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $2))
+            WHERE id=$3 AND empresa_id=$4`,
+          [estado, incidenciaNota, req.params.id, empresaId]
+        );
+      }
     } else if (estado === "cancelado") {
       await db.query(
         `UPDATE pedidos
@@ -8461,7 +8475,8 @@ router.patch("/:id/estado",
       estado,
       incidencia: incidencia || null,
       motivo_cancelacion: motivoCancelacion || null,
-    }, req.user?.rol || "usuario", actorUsuarioId);
+    }, req.user?.rol || "usuario", actorUsuarioId)
+      .catch(e => logger.warn("No se pudo registrar la trazabilidad del cambio de estado:", e.message));
     await notificarClienteEstadoPedido(rows[0], rows[0].estado, estado, actorUsuarioId)
       .catch(e => logger.warn("No se pudo notificar el estado al cliente:", e.message));
 

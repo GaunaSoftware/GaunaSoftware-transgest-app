@@ -9423,6 +9423,7 @@ export default function Pedidos() {
   const [bulkClearing, setBulkClearing] = useState(false);
   const [openActionMenuPedidoId, setOpenActionMenuPedidoId] = useState("");
   const [whatsappSending, setWhatsappSending] = useState("");
+  const [incidenciaSelector, setIncidenciaSelector] = useState(null);
   const delayResolverRef = React.useRef(null);
   const [delayRequest, setDelayRequest] = useState(null);
   const [autoAsignando, setAutoAsignando] = useState(null);  // pedido para autoasignacion IA
@@ -9902,16 +9903,8 @@ export default function Pedidos() {
     }
     const incidenciaTexto = String(extra.incidencia || "").trim();
     if (estado === "incidencia" && !incidenciaTexto) {
-      const opciones = INCIDENCIA_TIPOS_PEDIDO.map((item, idx) => `${idx + 1}. ${item.l}`).join("\n");
-      const motivo = window.prompt(`Selecciona motivo de incidencia o escribe el detalle:\n\n${opciones}`, "1");
-      if (!motivo || !motivo.trim()) return;
-      const trimmed = motivo.trim();
-      const selected = INCIDENCIA_TIPOS_PEDIDO[Number(trimmed) - 1]
-        || INCIDENCIA_TIPOS_PEDIDO.find(item => item.v === trimmed.toLowerCase())
-        || INCIDENCIA_TIPOS_PEDIDO.find(item => item.l.toLowerCase() === trimmed.toLowerCase());
-      extra = selected
-        ? { ...extra, incidencia: selected.l, incidencia_tipo: selected.v }
-        : { ...extra, incidencia: trimmed, incidencia_tipo: "operativa" };
+      setIncidenciaSelector({ pedidoId:id, tipo:"", detalle:"" });
+      return;
     }
     // Optimistic update - UI responds instantly
     setPedidos(prev => prev.map(x => x.id===id ? {
@@ -9935,6 +9928,24 @@ export default function Pedidos() {
       setPedidos(prev => prev.map(x => x.id===id ? {...x, estado: p?.estado} : x));
       notify(e.message, "error");
     }
+  }
+
+  async function confirmarIncidenciaSeleccionada() {
+    const tipo = String(incidenciaSelector?.tipo || "").trim();
+    if (!tipo) {
+      notify("Selecciona el motivo de la incidencia.", "warning");
+      return;
+    }
+    const opcion = INCIDENCIA_TIPOS_PEDIDO.find(item => item.v === tipo);
+    const detalle = String(incidenciaSelector?.detalle || "").trim();
+    const descripcion = detalle || opcion?.l || "Incidencia operativa";
+    const pedidoId = incidenciaSelector?.pedidoId;
+    setIncidenciaSelector(null);
+    await cambiarEstado(pedidoId, "incidencia", {
+      incidencia: descripcion,
+      incidencia_descripcion: descripcion,
+      incidencia_tipo: tipo,
+    });
   }
 
 
@@ -11495,6 +11506,42 @@ export default function Pedidos() {
               >
                 Retrasar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {incidenciaSelector && (
+        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&setIncidenciaSelector(null)}>
+          <div style={{...S.mbox,width:"min(620px,96vw)",maxHeight:"min(760px,92vh)",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,marginBottom:8}}>
+              <div>
+                <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:800,color:"var(--text)"}}>Registrar incidencia</div>
+                <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Selecciona un motivo. Ya no hace falta escribir ningun numero.</div>
+              </div>
+              <button type="button" onClick={()=>setIncidenciaSelector(null)} aria-label="Cerrar"
+                style={{width:36,height:36,borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontWeight:900,cursor:"pointer"}}>X</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:9,marginTop:18}}>
+              {INCIDENCIA_TIPOS_PEDIDO.map(item=>{
+                const activa = incidenciaSelector.tipo === item.v;
+                return (
+                  <button key={item.v} type="button"
+                    onClick={()=>setIncidenciaSelector(prev=>({...prev,tipo:item.v}))}
+                    style={{minHeight:48,padding:"10px 12px",borderRadius:8,textAlign:"left",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:800,cursor:"pointer",border:activa?"2px solid #ef4444":"1px solid var(--border2)",background:activa?"rgba(239,68,68,.12)":"var(--bg3)",color:activa?"#ef4444":"var(--text3)"}}>
+                    {item.l}
+                  </button>
+                );
+              })}
+            </div>
+            <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginTop:18,marginBottom:5}}>Detalle (opcional)</label>
+            <textarea rows={4} value={incidenciaSelector.detalle}
+              onChange={e=>setIncidenciaSelector(prev=>({...prev,detalle:e.target.value}))}
+              placeholder="Describe lo ocurrido para trafico y gerencia..."
+              style={{width:"100%",boxSizing:"border-box",resize:"vertical",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",padding:"11px 12px",fontFamily:"'DM Sans',sans-serif",fontSize:13}} />
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap",marginTop:18}}>
+              <button type="button" onClick={()=>setIncidenciaSelector(null)} style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)"}}>Cancelar</button>
+              <button type="button" onClick={confirmarIncidenciaSeleccionada} style={{...S.btn,background:"#ef4444",color:"white"}}>Registrar incidencia</button>
             </div>
           </div>
         </div>

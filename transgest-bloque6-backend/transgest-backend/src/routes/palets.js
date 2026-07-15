@@ -26,6 +26,10 @@ function int(value, fallback = 0) {
   return Math.trunc(num(value, fallback));
 }
 
+function normalizeObraReferencia(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").slice(0, 240);
+}
+
 function stockSign(tipo) {
   const t = String(tipo || "").toLowerCase();
   if (["salida", "salida_stock", "consumo", "venta", "devolucion", "baja"].includes(t)) return -1;
@@ -56,10 +60,48 @@ async function assertClienteEmpresa(clienteId, empresa) {
   const id = emptyToNull(clienteId);
   if (!id) return null;
   const { rows } = await db.query(
-    "SELECT id FROM clientes WHERE id=$1 AND empresa_id=$2 AND activo=true LIMIT 1",
+    "SELECT id, nombre FROM clientes WHERE id=$1 AND empresa_id=$2 AND activo=true LIMIT 1",
     [id, empresa]
   );
   return rows[0] || null;
+}
+
+async function getPaletLoteBalance(queryable, { empresa, movimientoOrigenId, propietarioId, excludeMovimientoId = null }) {
+  const { rows } = await queryable.query(
+    `SELECT origen.id, origen.cantidad, origen.obra_referencia, origen.pedido_ref,
+            origen.cliente_movimiento_id, origen.propietario_cliente_id,
+            COALESCE((
+              SELECT SUM(dev.cantidad)
+                FROM palets_movimientos dev
+               WHERE dev.empresa_id=origen.empresa_id
+                 AND LOWER(dev.tipo)='devolucion'
+                 AND dev.movimiento_origen_id=origen.id
+                 AND ($4::uuid IS NULL OR dev.id<>$4::uuid)
+            ),0) AS devueltos_reservados,
+            COALESCE((
+              SELECT SUM(rect.cantidad)
+                FROM palets_movimientos rect
+                JOIN palets_movimientos dev_rect ON dev_rect.id=rect.movimiento_origen_id
+               WHERE rect.empresa_id=origen.empresa_id
+                 AND LOWER(rect.tipo)='rectificativa_devolucion'
+                 AND dev_rect.movimiento_origen_id=origen.id
+                 AND ($4::uuid IS NULL OR dev_rect.id<>$4::uuid)
+            ),0) AS rectificados
+       FROM palets_movimientos origen
+      WHERE origen.id=$1 AND origen.empresa_id=$2
+        AND origen.propietario_cliente_id=$3
+        AND LOWER(origen.tipo)='entrega'
+      FOR UPDATE`,
+    [movimientoOrigenId, empresa, propietarioId, excludeMovimientoId]
+  );
+  const lote = rows[0];
+  if (!lote) throw httpError(404, "No se ha encontrado la entrada de palets seleccionada para esta obra/referencia.");
+  const devueltosNetos = Math.max(0, int(lote.devueltos_reservados) - int(lote.rectificados));
+  return {
+    ...lote,
+    devueltos_netos: devueltosNetos,
+    pendiente: Math.max(0, int(lote.cantidad) - devueltosNetos),
+  };
 }
 
 async function validatePaletsMovimientoClientes({ empresa, tipo, propietario_cliente_id, cliente_movimiento_id }) {
@@ -70,14 +112,16 @@ async function validatePaletsMovimientoClientes({ empresa, tipo, propietario_cli
     throw httpError(400, "Selecciona el cliente propietario para separar correctamente los registros de palets.");
   }
 
-  if (propietarioId && !(await assertClienteEmpresa(propietarioId, empresa))) {
+  const propietario = propietarioId ? await assertClienteEmpresa(propietarioId, empresa) : null;
+  const movimiento = movimientoId ? await assertClienteEmpresa(movimientoId, empresa) : null;
+  if (propietarioId && !propietario) {
     throw httpError(404, "Cliente propietario no encontrado para esta empresa.");
   }
-  if (movimientoId && !(await assertClienteEmpresa(movimientoId, empresa))) {
+  if (movimientoId && !movimiento) {
     throw httpError(404, "Cliente/obra del movimiento no encontrado para esta empresa.");
   }
 
-  return { propietarioId, movimientoId };
+  return { propietarioId, movimientoId, propietario, movimiento };
 }
 
 async function validatePaletsFacturaBorrador({ empresa, factura_id, cliente_id }) {
@@ -142,7 +186,12 @@ function ensurePaletsWorkflowSchema() {
       await db.query("ALTER TABLE palets_movimientos ADD COLUMN IF NOT EXISTS estado_salida VARCHAR(30) DEFAULT 'confirmada'");
       await db.query("ALTER TABLE palets_movimientos ADD COLUMN IF NOT EXISTS salida_confirmada_at TIMESTAMPTZ");
       await db.query("ALTER TABLE palets_movimientos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ");
+      await db.query("ALTER TABLE palets_movimientos ADD COLUMN IF NOT EXISTS obra_referencia VARCHAR(240)");
+      await db.query("ALTER TABLE palets_movimientos ADD COLUMN IF NOT EXISTS movimiento_origen_id UUID REFERENCES palets_movimientos(id) ON DELETE SET NULL");
       await db.query("UPDATE palets_movimientos SET estado_salida='confirmada' WHERE estado_salida IS NULL");
+      await db.query("UPDATE palets_movimientos SET obra_referencia=NULLIF(TRIM(pedido_ref),'') WHERE obra_referencia IS NULL AND NULLIF(TRIM(pedido_ref),'') IS NOT NULL");
+      await db.query("CREATE INDEX IF NOT EXISTS idx_palets_movimientos_origen ON palets_movimientos(empresa_id, movimiento_origen_id)");
+      await db.query("CREATE INDEX IF NOT EXISTS idx_palets_movimientos_obra ON palets_movimientos(empresa_id, propietario_cliente_id, obra_referencia)");
     })().catch(err => {
       paletsWorkflowSchemaReady = null;
       throw err;
@@ -265,11 +314,11 @@ router.post("/movimientos", PUEDE_EDITAR, async (req, res) => {
   const {
     almacen_id, propietario_cliente_id, cliente_movimiento_id, tipo,
     cantidad, precio_unitario, num_albaran, pedido_ref, fecha, notas, factura_id,
-    estado_salida, salida_confirmada_at,
+    estado_salida, salida_confirmada_at, obra_referencia, movimiento_origen_id,
   } = req.body || {};
 
   if (!tipo) return res.status(400).json({ error: "Tipo obligatorio" });
-  if (!int(cantidad)) return res.status(400).json({ error: "Cantidad obligatoria" });
+  if (int(cantidad) <= 0) return res.status(400).json({ error: "La cantidad debe ser mayor que cero" });
   let clientesMovimiento;
   let facturaId = null;
   try {
@@ -280,31 +329,95 @@ router.post("/movimientos", PUEDE_EDITAR, async (req, res) => {
     return res.status(err.status || 500).json({ error: err.message });
   }
 
-  const { rows } = await db.query(
-    `INSERT INTO palets_movimientos
-      (empresa_id,almacen_id,propietario_cliente_id,cliente_movimiento_id,tipo,cantidad,precio_unitario,
-       num_albaran,pedido_ref,fecha,notas,factura_id,estado_salida,salida_confirmada_at,created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10::date,CURRENT_DATE),$11,$12,$13,$14,$15)
-     RETURNING *`,
-    [
-      empresa,
-      emptyToNull(almacen_id),
-      clientesMovimiento.propietarioId,
-      clientesMovimiento.movimientoId,
-      tipo,
-      int(cantidad),
-      num(precio_unitario),
-      emptyToNull(num_albaran),
-      emptyToNull(pedido_ref),
-      emptyToNull(fecha),
-      emptyToNull(notas),
-      facturaId,
-      emptyToNull(estado_salida) || (String(tipo).toLowerCase() === "devolucion" ? "pendiente" : "confirmada"),
-      emptyToNull(salida_confirmada_at),
-      req.user?.id || null,
-    ]
-  );
-  res.status(201).json(rows[0]);
+  try {
+    const created = await db.transaction(async client => {
+      const tipoNormalizado = String(tipo).toLowerCase();
+      let origenId = emptyToNull(movimiento_origen_id);
+      let obraRef = normalizeObraReferencia(obra_referencia || pedido_ref || clientesMovimiento.movimiento?.nombre);
+
+      if (["entrega", "devolucion"].includes(tipoNormalizado) && !obraRef && !origenId) {
+        throw httpError(400, "Indica la obra o referencia para poder controlar las devoluciones pendientes.");
+      }
+
+      if (tipoNormalizado === "devolucion") {
+        if (!origenId) {
+          const candidates = await client.query(
+            `SELECT id
+               FROM palets_movimientos
+              WHERE empresa_id=$1 AND propietario_cliente_id=$2 AND LOWER(tipo)='entrega'
+                AND LOWER(COALESCE(NULLIF(obra_referencia,''),NULLIF(pedido_ref,''),''))=LOWER($3)
+              ORDER BY fecha, created_at
+              FOR UPDATE`,
+            [empresa, clientesMovimiento.propietarioId, obraRef]
+          );
+          for (const candidate of candidates.rows) {
+            const saldo = await getPaletLoteBalance(client, {
+              empresa,
+              movimientoOrigenId: candidate.id,
+              propietarioId: clientesMovimiento.propietarioId,
+            });
+            if (saldo.pendiente >= int(cantidad)) {
+              origenId = candidate.id;
+              break;
+            }
+          }
+        }
+        if (!origenId) {
+          throw httpError(409, "Selecciona la entrada/obra concreta. No hay un lote con saldo suficiente para esta devolucion.");
+        }
+        const saldo = await getPaletLoteBalance(client, {
+          empresa,
+          movimientoOrigenId: origenId,
+          propietarioId: clientesMovimiento.propietarioId,
+        });
+        if (int(cantidad) > saldo.pendiente) {
+          throw httpError(409, `Solo quedan ${saldo.pendiente} palets pendientes en esta obra/referencia.`);
+        }
+        obraRef = obraRef || normalizeObraReferencia(saldo.obra_referencia || saldo.pedido_ref);
+      }
+
+      if (tipoNormalizado === "rectificativa_devolucion") {
+        if (!origenId) throw httpError(400, "Selecciona la devolucion que quieres rectificar.");
+        const original = await client.query(
+          `SELECT dev.*, COALESCE((SELECT SUM(r.cantidad) FROM palets_movimientos r
+                                   WHERE r.empresa_id=dev.empresa_id
+                                     AND LOWER(r.tipo)='rectificativa_devolucion'
+                                     AND r.movimiento_origen_id=dev.id),0) AS rectificado
+             FROM palets_movimientos dev
+            WHERE dev.id=$1 AND dev.empresa_id=$2 AND LOWER(dev.tipo)='devolucion'
+            FOR UPDATE`,
+          [origenId, empresa]
+        );
+        if (!original.rows[0]) throw httpError(404, "No se ha encontrado la devolucion original.");
+        const disponibleRectificar = Math.max(0, int(original.rows[0].cantidad) - int(original.rows[0].rectificado));
+        if (int(cantidad) > disponibleRectificar) {
+          throw httpError(409, `Solo se pueden rectificar ${disponibleRectificar} palets de esta devolucion.`);
+        }
+        obraRef = obraRef || normalizeObraReferencia(original.rows[0].obra_referencia || original.rows[0].pedido_ref);
+      }
+
+      const { rows } = await client.query(
+        `INSERT INTO palets_movimientos
+          (empresa_id,almacen_id,propietario_cliente_id,cliente_movimiento_id,tipo,cantidad,precio_unitario,
+           num_albaran,pedido_ref,obra_referencia,movimiento_origen_id,fecha,notas,factura_id,
+           estado_salida,salida_confirmada_at,created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12::date,CURRENT_DATE),$13,$14,$15,$16,$17)
+         RETURNING *`,
+        [
+          empresa, emptyToNull(almacen_id), clientesMovimiento.propietarioId, clientesMovimiento.movimientoId,
+          tipoNormalizado, int(cantidad), num(precio_unitario), emptyToNull(num_albaran),
+          emptyToNull(pedido_ref) || obraRef || null, obraRef || null, origenId,
+          emptyToNull(fecha), emptyToNull(notas), facturaId,
+          emptyToNull(estado_salida) || (tipoNormalizado === "devolucion" ? "pendiente" : "confirmada"),
+          emptyToNull(salida_confirmada_at), req.user?.id || null,
+        ]
+      );
+      return rows[0];
+    });
+    res.status(201).json(created);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
 });
 
 router.put("/movimientos/:id", PUEDE_EDITAR, async (req, res) => {
@@ -325,10 +438,10 @@ router.put("/movimientos/:id", PUEDE_EDITAR, async (req, res) => {
   const {
     almacen_id, propietario_cliente_id, cliente_movimiento_id, tipo,
     cantidad, precio_unitario, num_albaran, pedido_ref, fecha, notas, factura_id,
-    estado_salida,
+    estado_salida, obra_referencia, movimiento_origen_id,
   } = req.body || {};
   if (!tipo) return res.status(400).json({ error: "Tipo obligatorio" });
-  if (!int(cantidad)) return res.status(400).json({ error: "Cantidad obligatoria" });
+  if (int(cantidad) <= 0) return res.status(400).json({ error: "La cantidad debe ser mayor que cero" });
   let clientesMovimiento;
   let facturaId = actual.rows[0].factura_id;
   try {
@@ -341,18 +454,42 @@ router.put("/movimientos/:id", PUEDE_EDITAR, async (req, res) => {
     return res.status(err.status || 500).json({ error: err.message });
   }
 
+  const tipoNormalizado = String(tipo).toLowerCase();
+  const origenId = emptyToNull(movimiento_origen_id) || actual.rows[0].movimiento_origen_id || null;
+  const obraRef = normalizeObraReferencia(
+    obra_referencia || pedido_ref || actual.rows[0].obra_referencia || clientesMovimiento.movimiento?.nombre
+  );
+  if (["entrega", "devolucion"].includes(tipoNormalizado) && !obraRef && !origenId) {
+    return res.status(400).json({ error: "Indica la obra o referencia del movimiento." });
+  }
+  if (tipoNormalizado === "devolucion" && origenId) {
+    try {
+      const saldo = await getPaletLoteBalance(db, {
+        empresa,
+        movimientoOrigenId: origenId,
+        propietarioId: clientesMovimiento.propietarioId,
+        excludeMovimientoId: req.params.id,
+      });
+      if (int(cantidad) > saldo.pendiente) {
+        return res.status(409).json({ error: `Solo quedan ${saldo.pendiente} palets pendientes en esta obra/referencia.` });
+      }
+    } catch (err) {
+      return res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+
   const { rows } = await db.query(
     `UPDATE palets_movimientos SET
        almacen_id=$1,propietario_cliente_id=$2,cliente_movimiento_id=$3,tipo=$4,cantidad=$5,
        precio_unitario=$6,num_albaran=$7,pedido_ref=$8,fecha=COALESCE($9::date,CURRENT_DATE),
-       notas=$10,factura_id=$11,estado_salida=$12,updated_at=NOW()
-     WHERE id=$13 AND empresa_id=$14
+       notas=$10,factura_id=$11,estado_salida=$12,obra_referencia=$13,movimiento_origen_id=$14,updated_at=NOW()
+     WHERE id=$15 AND empresa_id=$16
      RETURNING *`,
     [
       emptyToNull(almacen_id),
       clientesMovimiento.propietarioId,
       clientesMovimiento.movimientoId,
-      tipo,
+      tipoNormalizado,
       int(cantidad),
       num(precio_unitario),
       emptyToNull(num_albaran),
@@ -360,7 +497,9 @@ router.put("/movimientos/:id", PUEDE_EDITAR, async (req, res) => {
       emptyToNull(fecha),
       emptyToNull(notas),
       facturaId,
-      emptyToNull(estado_salida) || (String(tipo).toLowerCase() === "devolucion" ? "pendiente" : "confirmada"),
+      emptyToNull(estado_salida) || (tipoNormalizado === "devolucion" ? "pendiente" : "confirmada"),
+      obraRef || null,
+      origenId,
       req.params.id,
       empresa,
     ]

@@ -826,7 +826,7 @@ router.post("/login", async (req, res) => {
     if (!valid) return res.status(401).json({ error: "Credenciales incorrectas" });
     const token = jwt.sign({ superadmin: true, id: rows[0].id, email, rol: rows[0].rol || "superadmin" }, superadminJwtSecret(), { expiresIn: "4h" });
     res.json({ token, nombre: rows[0].nombre, rol: rows[0].rol || "superadmin" });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { logger.error("superadmin error: " + err.message); res.status(500).json({ error: "Error interno del servidor" }); }
 });
 
 router.get("/public/app-meta", async (req, res) => {
@@ -1817,7 +1817,7 @@ router.post("/facturas-suscripcion", superAuth, async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *
     `, [empresa_id, numero, concepto||"Suscripción TransGest", plan||null, periodo_desde, periodo_hasta, importe, fecha_vencimiento||null]);
     res.status(201).json(rows[0]);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { logger.error("superadmin error: " + err.message); res.status(500).json({ error: "Error interno del servidor" }); }
 });
 
 // ── PATCH /superadmin/facturas-suscripcion/:id — Marcar pagada/vencida ────

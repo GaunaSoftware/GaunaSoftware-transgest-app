@@ -1048,17 +1048,23 @@ function normalizeMinimoUnidadesRuta(ruta = {}, tarifaTipo = ruta?.tarifa_tipo) 
 function routeTarifaMatchesDraft(ruta = {}, draft = {}) {
   const tipoRuta = String(ruta.tarifa_tipo || "viaje");
   const tipoDraft = String(draft.tipo_precio || "viaje");
-  if (tipoRuta !== tipoDraft) return false;
   const precioRuta = parseLocaleNumber(ruta.precio_base ?? ruta.precio, NaN);
   const precioDraft = parseLocaleNumber(draft.precio_unitario, NaN);
+  const minimoDraft = parseLocaleNumber(draft.minimo_unidades, NaN);
+  const importeMinimoDraft = parseLocaleNumber(draft.importe_minimo, NaN);
+  const draftTieneTarifa = (Number.isFinite(precioDraft) && precioDraft > 0)
+    || (Number.isFinite(minimoDraft) && minimoDraft > 0)
+    || (Number.isFinite(importeMinimoDraft) && importeMinimoDraft > 0);
+  // Un pedido nuevo parte con tipo "viaje" por defecto. Si aun no hay precio ni
+  // minimos introducidos, esa opcion no debe impedir recuperar una tarifa por tn/km/etc.
+  if (draftTieneTarifa && tipoRuta !== tipoDraft) return false;
   if (Number.isFinite(precioRuta) && precioRuta > 0 && Number.isFinite(precioDraft) && precioDraft > 0) {
     const diffPct = Math.abs(precioRuta - precioDraft) / Math.max(precioRuta, precioDraft);
     if (diffPct > 0.05) return false;
   }
   const minRuta = normalizeMinimoUnidadesRuta(ruta, tipoRuta);
-  const minDraft = parseLocaleNumber(draft.minimo_unidades, NaN);
-  if (tipoRuta !== "viaje" && Number.isFinite(minDraft) && minDraft > 0 && minRuta) {
-    const diff = Math.abs(Number(minRuta) - minDraft);
+  if (tipoRuta !== "viaje" && Number.isFinite(minimoDraft) && minimoDraft > 0 && minRuta) {
+    const diff = Math.abs(Number(minRuta) - minimoDraft);
     if (diff > 0.01) return false;
   }
   return true;
@@ -3697,6 +3703,7 @@ function PagoColaboradorPanel({ pedido, onUpdated }) {
 // ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ DescargasEditor: gestiona multiples puntos de descarga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
 function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const [adding, setAdding] = useState(false);
+  const [editingStopIndex, setEditingStopIndex] = useState(null);
   const [puntosInteres, setPuntosInteres] = useState(getPuntosInteres);
   const emptyStop = { direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", referencia:"", notas:"", google_maps_url:"", pais:"España", provincia:"" };
   const [newStop, setNewStop] = useState(emptyStop);
@@ -3960,6 +3967,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   function removeStop(idx) {
     if (stopsOrdenados.length <= 1) return;
     setStopsOrdenados(stopsOrdenados.filter((_, i) => i !== idx));
+    setEditingStopIndex(current => current === idx ? null : (current > idx ? current - 1 : current));
   }
   function moveStop(idx, delta) {
     const nextIdx = idx + delta;
@@ -4046,6 +4054,10 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               onDragOver={e=>{ if (!disabled && dragIdx !== null) e.preventDefault(); }}
               onDrop={e=>{ e.preventDefault(); dropStop(i); }}
               onDragEnd={()=>setDragIdx(null)}
+              onClick={e=>{
+                if (disabled || e.target.closest("input,select,textarea,button")) return;
+                setEditingStopIndex(current => current === i ? null : i);
+              }}
               style={{
                 background:isPrimary ? "rgba(20,184,166,.08)" : "var(--bg4)",
                 border:`1px solid ${dragIdx !== null && dragIdx !== i ? "rgba(20,184,166,.38)" : "var(--border2)"}`,
@@ -4055,10 +4067,12 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 gap:10,
                 alignItems:"center",
                 opacity:isDragging ? .45 : 1,
-                cursor:!disabled && stopsOrdenados.length > 1 ? "grab" : "default",
+                cursor:!disabled ? (stopsOrdenados.length > 1 ? "grab" : "pointer") : "default",
               }}
             >
-              <span style={{fontFamily:"monospace",fontSize:11,fontWeight:700,color:isPrimary?"var(--green)":"var(--accent)",minWidth:20}}>{i+1}</span>
+              <span style={{fontFamily:"monospace",fontSize:11,fontWeight:800,color:isPrimary?"var(--green)":"var(--accent)",minWidth:58,textTransform:"uppercase"}}>
+                {tipo === "carga" ? "Carga" : "Descarga"} {i+1}
+              </span>
               <div className="tg-stop-card-body" style={{flex:1}}>
                 <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                   <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{stopAddress(d)}</span>
@@ -4105,9 +4119,25 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     placeholder={`Referencia ${label}`}
                   />
                 </div>
+                {editingStopIndex === i && (
+                  <div className="tg-stop-details-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:6,marginTop:8,padding:10,border:"1px solid var(--border2)",borderRadius:7,background:"var(--bg3)"}}>
+                    <input className="tg-stop-grid-wide" style={inp} disabled={disabled} value={stopAddress(d)} onChange={e=>updateStop(i,{direccion:e.target.value})} placeholder="Poblacion o direccion" />
+                    <input type="date" min="2000-01-01" max="2100-12-31" style={inp} disabled={disabled} value={d.fecha || ""} onChange={e=>updateStop(i,{fecha:e.target.value})} />
+                    <input type="time" style={inp} disabled={disabled} value={d.hora || ""} onChange={e=>updateStop(i,{hora:e.target.value})} />
+                    <input style={inp} disabled={disabled} value={d.ventana || ""} onChange={e=>updateStop(i,{ventana:e.target.value})} placeholder="Ventana horaria" />
+                    <input type="number" min="0" style={inp} disabled={disabled} value={d.bultos || ""} onChange={e=>updateStop(i,{bultos:e.target.value})} placeholder="Bultos / palets" />
+                    <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.peso_kg || ""} onChange={e=>updateStop(i,{peso_kg:e.target.value})} placeholder="Peso kg" />
+                    <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.precio || ""} onChange={e=>updateStop(i,{precio:e.target.value})} placeholder={`Precio ${label} EUR`} />
+                    <input className="tg-stop-grid-wide" style={inp} disabled={disabled} value={d.google_maps_url || ""} onChange={e=>updateStop(i,{google_maps_url:e.target.value})} placeholder="Enlace Google Maps (opcional)" />
+                    <input className="tg-stop-grid-wide" style={inp} disabled={disabled} value={d.notas || ""} onChange={e=>updateStop(i,{notas:e.target.value})} placeholder="Notas" />
+                  </div>
+                )}
               </div>
               {!disabled && (
                 <div className="tg-stop-card-actions" style={{display:"flex",gap:2,alignItems:"center"}}>
+                  <button type="button" onClick={() => setEditingStopIndex(current => current === i ? null : i)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:12,fontWeight:800,padding:"2px 5px"}}>
+                    {editingStopIndex === i ? "Cerrar" : "Editar"}
+                  </button>
                   <span title="Arrastra para reordenar" style={{color:"var(--text5)",fontSize:14,padding:"0 3px"}}>::</span>
                   <button type="button" onClick={() => moveStop(i, -1)} disabled={i===0} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===0?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Subir</button>
                   <button type="button" onClick={() => moveStop(i, 1)} disabled={i===stopsOrdenados.length-1} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===stopsOrdenados.length-1?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Bajar</button>
@@ -6333,6 +6363,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const initialFormRef = React.useRef(pedidoDraftSignature(form));
   const hydratedPedidoKeyRef = React.useRef(editando?.id || (editando ? "draft" : "new"));
   const rutasCreadasRef = React.useRef(new Set());
+  const tarifaAutoAplicadaRef = React.useRef("");
   const riesgoConfirmadoRef = React.useRef(new Map());
   const bloqueoClienteNoticeRef = React.useRef("");
 
@@ -6349,6 +6380,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     setPendingDocs(Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
     setShowColaboradorSuggestions(false);
     setShowCostes(!!(nextForm.coste_gasoil || nextForm.coste_peajes || nextForm.coste_dietas || nextForm.coste_otros));
+    tarifaAutoAplicadaRef.current = "";
     initialFormRef.current = pedidoDraftSignature(nextForm);
   }, [editando]);
 
@@ -6445,18 +6477,52 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   }, [form.cliente_id]);
 
   const normalizarTipoRuta = (value) => String(value || "cualquiera").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const matchEndpointRuta = (actual, esperado) => {
+  const endpointMatchScore = (actual, esperado, provinciaActual = "") => {
     const a = normalizePlaceText(actual);
     const e = normalizePlaceText(esperado);
-    if (!e) return true;
-    if (!a) return false;
-    if (a.includes(e) || e.includes(a)) return true;
+    const provincia = normalizePlaceText(provinciaActual);
+    if (!e) return 1;
+    if (a && (a === e || a.includes(e) || e.includes(a))) return 4;
+    // Una tarifa guardada con destino "Alicante" puede actuar como tarifa
+    // provincial para Benissa, Denia, Alcoy, etc. No se equiparan entre si dos
+    // municipios distintos: la provincia debe coincidir con el extremo guardado.
+    if (provincia && (e === provincia || e === `provincia ${provincia}` || e === `${provincia} provincia`)) return 3;
+    if (!a) return 0;
     const stop = new Set(["de","del","la","el","los","las","s","sl","sa","sau","slu","calle","av","avenida","ctra","carretera"]);
     const aTokens = new Set(a.split(/\W+/).filter(t => t.length >= 3 && !stop.has(t)));
     const eTokens = e.split(/\W+/).filter(t => t.length >= 3 && !stop.has(t));
-    if (!eTokens.length) return false;
+    if (!eTokens.length) return 0;
     const hits = eTokens.filter(t => aTokens.has(t)).length;
-    return hits >= Math.min(2, eTokens.length);
+    return hits >= Math.min(2, eTokens.length) ? 2 : 0;
+  };
+  const endpointContextFromDraft = (draft, tipo) => {
+    const isCarga = tipo === "carga";
+    const stops = parseStops(isCarga ? draft.puntos_carga : draft.puntos_descarga);
+    const first = stops[0] || {};
+    const mainLabel = isCarga ? draft.origen : draft.destino;
+    const labels = [mainLabel, stopAddress(first), first.ciudad, first.municipio, first.cliente_nombre].filter(Boolean);
+    const inferred = inferPlaceGeo(first, ...labels);
+    return {
+      labels: Array.from(new Set(labels)),
+      provincia: stopRegion(first, isCarga ? draft.origen_provincia : draft.destino_provincia) || inferred?.provincia || "",
+    };
+  };
+  const routeEndpointScore = (draft, ruta, tipo) => {
+    const ctx = endpointContextFromDraft(draft, tipo);
+    const expected = tipo === "carga" ? ruta?.origen : ruta?.destino;
+    return Math.max(0, ...ctx.labels.map(label => endpointMatchScore(label, expected, ctx.provincia)));
+  };
+  const routeDraftScore = (draft, ruta) => {
+    const origenScore = routeEndpointScore(draft, ruta, "carga");
+    const destinoScore = routeEndpointScore(draft, ruta, "descarga");
+    return origenScore && destinoScore ? (origenScore * 10) + destinoScore : 0;
+  };
+  const bestRouteForDraft = (draft, candidates = rutasCompatibles, requireTarifaMatch = false) => {
+    return candidates
+      .filter(r => !requireTarifaMatch || routeTarifaMatchesDraft(r, draft))
+      .map(r => ({ ruta:r, score:routeDraftScore(draft, r) }))
+      .filter(item => item.score > 0)
+      .sort((a,b) => b.score - a.score || String(a.ruta.id || "").localeCompare(String(b.ruta.id || "")))[0]?.ruta || null;
   };
   const tipoVehiculoDeTexto = (value) => {
     const txt = normalizarTipoRuta(value);
@@ -6843,12 +6909,13 @@ async function maybeCrearRutaClienteDesdePedido() {
   } catch (e) {
     console.warn("No se pudieron refrescar las rutas del cliente antes de guardar:", e.message);
   }
-  const rutaExistente = rutasClienteActualizadas.find(r =>
-    matchEndpointRuta(form.origen, r.origen) &&
-    matchEndpointRuta(form.destino, r.destino) &&
-    (!r.cliente_id || r.cliente_id === form.cliente_id) &&
-    (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
-  );
+  const rutaExistente = rutasClienteActualizadas
+    .filter(r =>
+      routeDraftScore(form, r) >= 44 &&
+      (!r.cliente_id || r.cliente_id === form.cliente_id) &&
+      (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
+    )
+    .sort((a,b) => routeDraftScore(form, b) - routeDraftScore(form, a))[0];
   if (rutaExistente) {
     if (!routeTarifaMatchesDraft(rutaExistente, form)) {
       rutasCreadasRef.current.add(routeKey);
@@ -6883,8 +6950,7 @@ async function maybeCrearRutaClienteDesdePedido() {
     notas: "Creada automaticamente desde pedido",
   }, { silentError: true });
   setRutas(prev => prev.some(r => r.id === nueva.ruta_id || (
-    matchEndpointRuta(origenRuta, r.origen) &&
-    matchEndpointRuta(destinoRuta, r.destino) &&
+    routeDraftScore({...form, origen:origenRuta, destino:destinoRuta}, r) >= 44 &&
     (!r.cliente_id || r.cliente_id === form.cliente_id)
   )) ? prev : [...prev, {
     id: nueva.ruta_id,
@@ -7101,6 +7167,25 @@ async function guardar() {
 
     const pedidoId = pedidoGuardado?.id || editando?.id;
     const esNuevoPedido = !editando?.id;
+
+    // La ruta/tarifa debe persistirse tambien en el alta. Antes este bloque se
+    // ejecutaba despues del return de los pedidos nuevos y solo funcionaba al editar.
+    let rutaAutoId = null;
+    try {
+      rutaAutoId = await maybeCrearRutaClienteDesdePedido();
+    } catch (e) {
+      console.warn("No se pudo crear la ruta:", e.message);
+      notify("El pedido se ha guardado, pero la ruta no pudo anadirse al cliente. Puedes crearla despues desde su ficha.", "warning");
+    }
+
+    if (pedidoId && rutaAutoId && !payload.ruta_id) {
+      try {
+        await editarPedido(pedidoId, buildPedidoUpdatePayload(form, { ruta_id: rutaAutoId }));
+      } catch (e) {
+        console.warn("No se pudo vincular la ruta al pedido:", e.message);
+      }
+    }
+
     if (esNuevoPedido && pedidoId) {
       const docsPendientes = [...pendingDocs];
       const colaboradorId = payload.colaborador_id;
@@ -7122,22 +7207,6 @@ async function guardar() {
       initialFormRef.current = pedidoDraftSignature(form);
       onSaved();
       return;
-    }
-
-    let rutaAutoId = null;
-    try {
-      rutaAutoId = await maybeCrearRutaClienteDesdePedido();
-    } catch (e) {
-      console.warn("No se pudo crear la ruta:", e.message);
-      notify("El pedido se ha guardado, pero la ruta no pudo anadirse al cliente. Puedes crearla despues desde su ficha.", "warning");
-    }
-
-    if (pedidoId && rutaAutoId && !payload.ruta_id) {
-      try {
-        await editarPedido(pedidoId, buildPedidoUpdatePayload(form, { ruta_id: rutaAutoId }));
-      } catch (e) {
-        console.warn("No se pudo vincular la ruta al pedido:", e.message);
-      }
     }
 
     if (pedidoId && pendingDocs.length) {
@@ -7347,6 +7416,32 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
   next.importe_revision_combustible = calcRevisionCombustible(next);
   return next;
 };
+
+const rutaTarifaSugerida = form.cliente_id && form.origen && form.destino
+  ? bestRouteForDraft(form, rutasCompatibles, true)
+  : null;
+
+useEffect(() => {
+  if (!rutaTarifaSugerida?.id || !form.cliente_id || form.ruta_id) return;
+  if (parseLocaleNumber(form.precio_unitario, 0) > 0) return;
+  const origenCtx = endpointContextFromDraft(form, "carga");
+  const destinoCtx = endpointContextFromDraft(form, "descarga");
+  const autoKey = [
+    form.cliente_id,
+    rutaTarifaSugerida.id,
+    normalizePlaceText(form.origen),
+    normalizePlaceText(origenCtx.provincia),
+    normalizePlaceText(form.destino),
+    normalizePlaceText(destinoCtx.provincia),
+  ].join("|");
+  if (tarifaAutoAplicadaRef.current === autoKey) return;
+  tarifaAutoAplicadaRef.current = autoKey;
+  setForm(current => {
+    if (current.ruta_id || parseLocaleNumber(current.precio_unitario, 0) > 0) return current;
+    const next = aplicarTarifaRutaADraft({ ...current, ruta_id:rutaTarifaSugerida.id }, rutaTarifaSugerida);
+    return syncPrecioClienteCol(next);
+  });
+}, [rutaTarifaSugerida, form]);
 
   // The modal JSX (extracted from Pedidos main render)
   return (
@@ -7599,11 +7694,7 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
               )}
               {/* Regla tarifaria por ruta */}
               {form.cliente_id&&form.origen&&form.destino&&(()=>{
-                const rutaTarifa = rutasCompatibles.find(r=>{
-                  const mO = matchEndpointRuta(form.origen, r.origen);
-                  const mD = matchEndpointRuta(form.destino, r.destino);
-                  return mO&&mD&&routeTarifaMatchesDraft(r, form);
-                });
+                const rutaTarifa = rutaTarifaSugerida;
                 if(!rutaTarifa) return null;
                 const precioVista = Number(rutaTarifa.precio_base || 0) * (1 + ((Number(rutaTarifa.recargo_combustible_pct || 0) || 0) / 100));
                 const tipos={viaje:"viaje",kg:"EUR/100kg",tonelada:"EUR/tn",km:"EUR/km",hora:"EUR/h",palet:"EUR/palet"};

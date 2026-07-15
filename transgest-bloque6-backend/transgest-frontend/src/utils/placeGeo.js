@@ -14,6 +14,7 @@ const KNOWN_PLACES = {
   barcelona: { municipio:"Barcelona", provincia:"Barcelona", pais:"Espana", lat:41.3874, lng:2.1686 },
   valencia: { municipio:"Valencia", provincia:"Valencia", pais:"Espana", lat:39.4699, lng:-0.3763 },
   alicante: { municipio:"Alicante", provincia:"Alicante", pais:"Espana", lat:38.3452, lng:-0.4810 },
+  benissa: { municipio:"Benissa", provincia:"Alicante", pais:"Espana", lat:38.7149, lng:0.0521 },
   malaga: { municipio:"Malaga", provincia:"Malaga", pais:"Espana", lat:36.7213, lng:-4.4214 },
   sevilla: { municipio:"Sevilla", provincia:"Sevilla", pais:"Espana", lat:37.3891, lng:-5.9845 },
   jerez: { municipio:"Jerez de la Frontera", provincia:"Cadiz", pais:"Espana", lat:36.6850, lng:-6.1261 },

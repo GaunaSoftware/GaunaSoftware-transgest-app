@@ -452,7 +452,7 @@ async function authenticate(req, res, next) {
 
     const { rows } = await db.query(
       `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id,
-              u.perfil, u.permisos, u.trafico_config,
+              u.perfil, u.permisos, u.trafico_config, u.password_changed_at,
               e.plan, e.estado AS empresa_estado, e.fecha_vencimiento,
               e.bloqueo_manual, e.bloqueo_motivo
        FROM usuarios u
@@ -463,6 +463,18 @@ async function authenticate(req, res, next) {
 
     if (!rows[0] || (!rows[0].activo && !payload.superadmin_impersonation)) {
       return res.status(401).json({ error: "Usuario no valido o desactivado" });
+    }
+
+    // Invalidacion de sesion al cambiar la contrasena (ASVS V3.2): un token
+    // emitido antes del ultimo cambio de clave deja de ser valido. La
+    // impersonacion de superadmin queda exenta (token de soporte de corta vida).
+    if (
+      !payload.superadmin_impersonation &&
+      rows[0].password_changed_at &&
+      payload.iat &&
+      payload.iat * 1000 < new Date(rows[0].password_changed_at).getTime() - 2000
+    ) {
+      return res.status(401).json({ error: "Sesion expirada. Inicia sesion de nuevo." });
     }
 
     req.user = rows[0];

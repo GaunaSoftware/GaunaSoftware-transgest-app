@@ -193,7 +193,7 @@ async function ensureUser(empresaId, { nombre, email, rol, choferId = null }) {
     return one(
       `UPDATE usuarios
           SET empresa_id=$2, nombre=$3, email=$4, username=$4, password_hash=$5, rol=$6, activo=true, chofer_id=$7,
-              debe_cambiar_password=false, password_changed_at=NOW(),
+              debe_cambiar_password=false,
               login_failed_count=0, login_locked_until=NULL
         WHERE id=$1
         RETURNING *`,

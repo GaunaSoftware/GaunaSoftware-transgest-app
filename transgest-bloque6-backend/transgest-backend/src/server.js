@@ -343,24 +343,24 @@ app.use((err, req, res, next) => {
 // ── DB migrations on startup ──────────────────────────
 async function applyMigrations() {
   try {
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS fecha_matriculacion DATE").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS fecha_itv DATE").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS fecha_seguro DATE").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS clase VARCHAR(100)").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS notas TEXT").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS peajes NUMERIC DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tiempo_h NUMERIC").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS activa BOOLEAN DEFAULT true").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tipo_vehiculo VARCHAR(50) DEFAULT 'cualquiera'").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS pct_subida NUMERIC DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30) DEFAULT 'viaje'").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS precio_base NUMERIC DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC").catch(() => {});
-    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0").catch(() => {});
-    await db.query("UPDATE rutas SET activa=true WHERE activa IS NULL").catch(() => {});
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS fecha_matriculacion DATE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS fecha_itv DATE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS fecha_seguro DATE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS clase VARCHAR(100)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS notas TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS peajes NUMERIC DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tiempo_h NUMERIC").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS activa BOOLEAN DEFAULT true").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tipo_vehiculo VARCHAR(50) DEFAULT 'cualquiera'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS pct_subida NUMERIC DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30) DEFAULT 'viaje'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS precio_base NUMERIC DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("UPDATE rutas SET activa=true WHERE activa IS NULL").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS ruta_precios_cliente (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -376,16 +376,16 @@ async function applyMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE (ruta_id, cliente_id)
       )
-    `).catch(() => {});
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30)").catch(() => {});
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC").catch(() => {});
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC").catch(() => {});
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS iva_pct NUMERIC DEFAULT 21").catch(() => {});
-    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_ruta_precios_cliente_cliente ON ruta_precios_cliente(cliente_id)").catch(() => {});
-    await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo = true").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS tarifa_tipo VARCHAR(30)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS iva_pct NUMERIC DEFAULT 21").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_ruta_precios_cliente_cliente ON ruta_precios_cliente(cliente_id)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo = true").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS portal_solicitudes_cliente (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -410,20 +410,20 @@ async function applyMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS fecha_propuesta DATE").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS hora_propuesta VARCHAR(20)").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente VARCHAR(20)").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente_at TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe NUMERIC(12,2)").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe_contraoferta NUMERIC(12,2)").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio VARCHAR(20)").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio_at TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS contraoferta_at TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS origen_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL").catch(() => {});
-    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS destino_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_empresa_estado ON portal_solicitudes_cliente(empresa_id, estado, created_at DESC)").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_cliente ON portal_solicitudes_cliente(cliente_id, created_at DESC)").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS fecha_propuesta DATE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS hora_propuesta VARCHAR(20)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente VARCHAR(20)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_cliente_at TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe NUMERIC(12,2)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe_contraoferta NUMERIC(12,2)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio VARCHAR(20)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS decision_precio_at TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS contraoferta_at TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS origen_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS destino_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_empresa_estado ON portal_solicitudes_cliente(empresa_id, estado, created_at DESC)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitudes_cliente ON portal_solicitudes_cliente(cliente_id, created_at DESC)").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS portal_solicitud_eventos (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -435,8 +435,8 @@ async function applyMigrations() {
         detalle JSONB NOT NULL DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitud_eventos_solicitud ON portal_solicitud_eventos(solicitud_id, created_at DESC)").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_portal_solicitud_eventos_solicitud ON portal_solicitud_eventos(solicitud_id, created_at DESC)").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS pedido_numero_counters (
         empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
@@ -445,19 +445,19 @@ async function applyMigrations() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (empresa_id, year)
       )
-    `).catch(() => {});
-    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
-    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS tipo VARCHAR(60)").catch(() => {});
-    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS tipo_doc VARCHAR(60)").catch(() => {});
-    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_url TEXT").catch(() => {});
-    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_nombre VARCHAR(200)").catch(() => {});
-    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_size_kb INTEGER").catch(() => {});
-    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
-    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS tipo VARCHAR(60)").catch(() => {});
-    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS tipo_doc VARCHAR(60)").catch(() => {});
-    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_url TEXT").catch(() => {});
-    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_nombre VARCHAR(200)").catch(() => {});
-    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_size_kb INTEGER").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS tipo VARCHAR(60)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS tipo_doc VARCHAR(60)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_url TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_nombre VARCHAR(200)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_size_kb INTEGER").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS tipo VARCHAR(60)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS tipo_doc VARCHAR(60)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_url TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_nombre VARCHAR(200)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_size_kb INTEGER").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       DO $$
       BEGIN
@@ -468,7 +468,7 @@ async function applyMigrations() {
           UPDATE docs_vehiculos SET tipo=tipo_doc::text WHERE tipo IS NULL AND tipo_doc IS NOT NULL;
         END IF;
       END $$;
-    `).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       DO $$
       BEGIN
@@ -479,9 +479,9 @@ async function applyMigrations() {
           UPDATE docs_choferes SET tipo=tipo_doc::text WHERE tipo IS NULL AND tipo_doc IS NOT NULL;
         END IF;
       END $$;
-    `).catch(() => {});
-    await db.query("UPDATE docs_vehiculos d SET empresa_id=v.empresa_id FROM vehiculos v WHERE d.vehiculo_id=v.id AND d.empresa_id IS NULL").catch(() => {});
-    await db.query("UPDATE docs_choferes d SET empresa_id=c.empresa_id FROM choferes c WHERE d.chofer_id=c.id AND d.empresa_id IS NULL").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("UPDATE docs_vehiculos d SET empresa_id=v.empresa_id FROM vehiculos v WHERE d.vehiculo_id=v.id AND d.empresa_id IS NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("UPDATE docs_choferes d SET empresa_id=c.empresa_id FROM choferes c WHERE d.chofer_id=c.id AND d.empresa_id IS NULL").catch((e) => logger.debug("mig: " + e.message));
     const idxs = [
       "CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_estado  ON pedidos(empresa_id, estado)",
       "CREATE INDEX IF NOT EXISTS idx_pedidos_empresa_fecha   ON pedidos(empresa_id, fecha_carga DESC NULLS LAST)",
@@ -499,19 +499,19 @@ async function applyMigrations() {
       "CREATE INDEX IF NOT EXISTS idx_vehiculos_itv           ON vehiculos(empresa_id, fecha_itv)    WHERE fecha_itv    IS NOT NULL",
       "CREATE INDEX IF NOT EXISTS idx_vehiculos_seguro        ON vehiculos(empresa_id, fecha_seguro) WHERE fecha_seguro IS NOT NULL",
     ];
-    for (const sql of idxs) { await db.query(sql).catch(() => {}); }
-    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS revision_cobro_at DATE").catch(() => {});
-    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_estado VARCHAR(40)").catch(() => {});
-    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_hasta DATE").catch(() => {});
-    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_envios INTEGER NOT NULL DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_ultimo_envio_at TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS aviso_cobro_dias INTEGER NOT NULL DEFAULT 7").catch(() => {});
-    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)").catch(() => {});
-    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS vencimiento VARCHAR(80)").catch(() => {});
-    await db.query("ALTER TABLE facturas ALTER COLUMN vencimiento TYPE VARCHAR(80) USING vencimiento::text").catch(() => {});
-    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE").catch(() => {});
-    await db.query("UPDATE facturas SET vencimiento=fecha_vencimiento::text WHERE vencimiento IS NULL AND fecha_vencimiento IS NOT NULL").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_facturas_revision_cobro ON facturas(empresa_id, revision_cobro_at) WHERE estado <> 'cobrada'").catch(() => {});
+    for (const sql of idxs) { await db.query(sql).catch((e) => logger.debug("mig: " + e.message)); }
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS revision_cobro_at DATE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_estado VARCHAR(40)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_hasta DATE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_envios INTEGER NOT NULL DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS reclamacion_ultimo_envio_at TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS aviso_cobro_dias INTEGER NOT NULL DEFAULT 7").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS vencimiento VARCHAR(80)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas ALTER COLUMN vencimiento TYPE VARCHAR(80) USING vencimiento::text").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("UPDATE facturas SET vencimiento=fecha_vencimiento::text WHERE vencimiento IS NULL AND fecha_vencimiento IS NOT NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_facturas_revision_cobro ON facturas(empresa_id, revision_cobro_at) WHERE estado <> 'cobrada'").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS factura_registros_fiscales (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -533,9 +533,9 @@ async function applyMigrations() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE (factura_id)
       )
-    `).catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_registros_fiscales_empresa ON factura_registros_fiscales(empresa_id, created_at DESC)").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_registros_fiscales_estado ON factura_registros_fiscales(empresa_id, estado_envio, modo)").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_registros_fiscales_empresa ON factura_registros_fiscales(empresa_id, created_at DESC)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_registros_fiscales_estado ON factura_registros_fiscales(empresa_id, estado_envio, modo)").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS factura_envios_fiscales (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -554,9 +554,9 @@ async function applyMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_envios_fiscales_pendientes ON factura_envios_fiscales(empresa_id, estado, next_retry_at)").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_envios_fiscales_factura ON factura_envios_fiscales(factura_id, created_at DESC)").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_envios_fiscales_pendientes ON factura_envios_fiscales(empresa_id, estado, next_retry_at)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_envios_fiscales_factura ON factura_envios_fiscales(factura_id, created_at DESC)").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS factura_eventos_fiscales (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -567,57 +567,57 @@ async function applyMigrations() {
         detalle JSONB NOT NULL DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_eventos_fiscales_registro ON factura_eventos_fiscales(registro_id, created_at DESC)").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_factura_eventos_fiscales_registro ON factura_eventos_fiscales(registro_id, created_at DESC)").catch((e) => logger.debug("mig: " + e.message));
     // Schema additions
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS email_admin VARCHAR(200)").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS dominio VARCHAR(100)").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'basico'").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'activo'").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_vehiculos INTEGER NOT NULL DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_usuarios INTEGER NOT NULL DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE empresas ALTER COLUMN max_vehiculos SET DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE empresas ALTER COLUMN max_usuarios SET DEFAULT 0").catch(() => {});
-    await db.query("UPDATE empresas SET max_vehiculos=0, max_usuarios=0 WHERE max_vehiculos<>0 OR max_usuarios<>0").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS fecha_vencimiento TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS configuracion JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_trafico JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_alertas JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(120)").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(120)").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_price_id VARCHAR(120)").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ciclo_facturacion VARCHAR(20) DEFAULT 'mensual'").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS metodo_pago VARCHAR(30) DEFAULT 'pendiente'").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS iban_facturacion VARCHAR(80)").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS email_facturacion VARCHAR(255)").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ultimo_aviso_pago_at TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ultimo_aviso_vencido_at TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS bloqueo_motivo VARCHAR(60)").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS bloqueo_manual BOOLEAN DEFAULT false").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS notas_comerciales TEXT").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS proxima_tarea TEXT").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS proxima_tarea_fecha DATE").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ia_limite_mensual INTEGER DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ia_usos_mes INTEGER DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ia_periodo_mes VARCHAR(7)").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email_facturacion TEXT").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS emails_albaranes TEXT").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS iban VARCHAR(50)").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_carga VARCHAR(120)").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_descarga VARCHAR(120)").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS limite_riesgo NUMERIC DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS modo_facturacion VARCHAR(60) DEFAULT 'por_viaje'").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueado BOOLEAN DEFAULT false").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pendiente_revision BOOLEAN DEFAULT false").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS calle VARCHAR(200)").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS num_ext VARCHAR(30)").catch(() => {});
-    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS codigo_postal VARCHAR(20)").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_clientes_pendiente ON clientes(empresa_id, pendiente_revision) WHERE pendiente_revision=true").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_clientes_empresa_cif_norm ON clientes(empresa_id, UPPER(TRIM(COALESCE(cif,'')))) WHERE COALESCE(activo,true)=true AND NULLIF(TRIM(COALESCE(cif,'')),'') IS NOT NULL").catch(() => {});
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS email_admin VARCHAR(200)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS dominio VARCHAR(100)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'basico'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'activo'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_vehiculos INTEGER NOT NULL DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_usuarios INTEGER NOT NULL DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ALTER COLUMN max_vehiculos SET DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ALTER COLUMN max_usuarios SET DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("UPDATE empresas SET max_vehiculos=0, max_usuarios=0 WHERE max_vehiculos<>0 OR max_usuarios<>0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS fecha_vencimiento TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS configuracion JSONB NOT NULL DEFAULT '{}'::jsonb").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_trafico JSONB NOT NULL DEFAULT '{}'::jsonb").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_alertas JSONB NOT NULL DEFAULT '[]'::jsonb").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(120)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(120)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_price_id VARCHAR(120)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ciclo_facturacion VARCHAR(20) DEFAULT 'mensual'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS metodo_pago VARCHAR(30) DEFAULT 'pendiente'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS iban_facturacion VARCHAR(80)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS email_facturacion VARCHAR(255)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ultimo_aviso_pago_at TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ultimo_aviso_vencido_at TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS bloqueo_motivo VARCHAR(60)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS bloqueo_manual BOOLEAN DEFAULT false").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS notas_comerciales TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS proxima_tarea TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS proxima_tarea_fecha DATE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ia_limite_mensual INTEGER DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ia_usos_mes INTEGER DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ia_periodo_mes VARCHAR(7)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email_facturacion TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS emails_albaranes TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS iban VARCHAR(50)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_carga VARCHAR(120)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_descarga VARCHAR(120)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS limite_riesgo NUMERIC DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS modo_facturacion VARCHAR(60) DEFAULT 'por_viaje'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueado BOOLEAN DEFAULT false").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pendiente_revision BOOLEAN DEFAULT false").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS calle VARCHAR(200)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS num_ext VARCHAR(30)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS codigo_postal VARCHAR(20)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_clientes_pendiente ON clientes(empresa_id, pendiente_revision) WHERE pendiente_revision=true").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_clientes_empresa_cif_norm ON clientes(empresa_id, UPPER(TRIM(COALESCE(cif,'')))) WHERE COALESCE(activo,true)=true AND NULLIF(TRIM(COALESCE(cif,'')),'') IS NOT NULL").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       DO $$
       BEGIN
@@ -637,7 +637,7 @@ async function applyMigrations() {
               AND UPPER(TRIM(COALESCE(cif,''))) NOT LIKE 'CLI-%';
         END IF;
       END $$;
-    `).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       DO $$
       BEGIN
@@ -653,14 +653,14 @@ async function applyMigrations() {
         BEGIN ALTER TABLE clientes ALTER COLUMN fiscal_cod_postal TYPE VARCHAR(20); EXCEPTION WHEN others THEN NULL; END;
         BEGIN ALTER TABLE clientes ALTER COLUMN modo_facturacion TYPE VARCHAR(80); EXCEPTION WHEN others THEN NULL; END;
       END $$;
-    `).catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_provincia VARCHAR(120)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_provincia VARCHAR(120)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cmr_tipo VARCHAR(30) DEFAULT 'nacional'").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN horario_carga TYPE VARCHAR(255)").catch(() => {});
-    await db.query("ALTER TABLE clientes ALTER COLUMN horario_descarga TYPE VARCHAR(255)").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_provincia VARCHAR(120)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_provincia VARCHAR(120)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cmr_tipo VARCHAR(30) DEFAULT 'nacional'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ALTER COLUMN horario_carga TYPE VARCHAR(255)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE clientes ALTER COLUMN horario_descarga TYPE VARCHAR(255)").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS empresa_smtp_config (
         empresa_id UUID PRIMARY KEY REFERENCES empresas(id) ON DELETE CASCADE,
@@ -685,7 +685,7 @@ async function applyMigrations() {
         updated_by UUID REFERENCES usuarios(id) ON DELETE SET NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS email_log (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -698,16 +698,16 @@ async function applyMigrations() {
         provider VARCHAR(40),
         sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS empresa_id UUID").catch(() => {});
-    await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS provider VARCHAR(40)").catch(() => {});
-    await ensureApiKeyTables().catch(() => {});
-    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS username VARCHAR(80)").catch(() => {});
-    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS perfil VARCHAR(80)").catch(() => {});
-    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permisos JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
-    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN DEFAULT false").catch(() => {});
-    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS empresa_id UUID").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS provider VARCHAR(40)").catch((e) => logger.debug("mig: " + e.message));
+    await ensureApiKeyTables().catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS username VARCHAR(80)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS perfil VARCHAR(80)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permisos JSONB NOT NULL DEFAULT '{}'::jsonb").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN DEFAULT false").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS password_reset_requests (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -725,10 +725,10 @@ async function applyMigrations() {
         resolved_by UUID REFERENCES superadmins(id) ON DELETE SET NULL,
         resolution_note TEXT
       )
-    `).catch(() => {});
-    await db.query("ALTER TABLE usuarios ALTER COLUMN email DROP NOT NULL").catch(() => {});
-    await db.query("UPDATE usuarios SET username=LOWER(email) WHERE username IS NULL AND email IS NOT NULL").catch(() => {});
-    await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_empresa_username ON usuarios(empresa_id, LOWER(username)) WHERE username IS NOT NULL").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE usuarios ALTER COLUMN email DROP NOT NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("UPDATE usuarios SET username=LOWER(email) WHERE username IS NULL AND email IS NOT NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_empresa_username ON usuarios(empresa_id, LOWER(username)) WHERE username IS NOT NULL").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS superadmins (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -739,9 +739,9 @@ async function applyMigrations() {
         activo BOOLEAN NOT NULL DEFAULT true,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS rol VARCHAR(40) NOT NULL DEFAULT 'superadmin'").catch(() => {});
-    await db.query("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT true").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS rol VARCHAR(40) NOT NULL DEFAULT 'superadmin'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT true").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS invitaciones_usuario (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -754,7 +754,7 @@ async function applyMigrations() {
         created_by VARCHAR(200),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS audit_log_saas (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -767,9 +767,9 @@ async function applyMigrations() {
         ip VARCHAR(80),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_saas_empresa_created ON audit_log_saas(empresa_id, created_at DESC)`).catch(() => {});
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_saas_actor_created ON audit_log_saas(actor_id, created_at DESC)`).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_saas_empresa_created ON audit_log_saas(empresa_id, created_at DESC)`).catch((e) => logger.debug("mig: " + e.message));
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_saas_actor_created ON audit_log_saas(actor_id, created_at DESC)`).catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS audit_log (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -783,11 +783,11 @@ async function applyMigrations() {
         ip INET,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS empresa_id UUID`).catch(() => {});
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_registro ON audit_log(tabla, registro_id)`).catch(() => {});
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_empresa_registro ON audit_log(empresa_id, tabla, registro_id)`).catch(() => {});
-    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_fecha ON audit_log(created_at DESC)`).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS empresa_id UUID`).catch((e) => logger.debug("mig: " + e.message));
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_registro ON audit_log(tabla, registro_id)`).catch((e) => logger.debug("mig: " + e.message));
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_empresa_registro ON audit_log(empresa_id, tabla, registro_id)`).catch((e) => logger.debug("mig: " + e.message));
+    await db.query(`CREATE INDEX IF NOT EXISTS idx_audit_log_fecha ON audit_log(created_at DESC)`).catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS perfiles_usuario (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -798,7 +798,7 @@ async function applyMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE(empresa_id, nombre)
       )
-    `).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS taller_estado (
         empresa_id UUID PRIMARY KEY REFERENCES empresas(id) ON DELETE CASCADE,
@@ -806,7 +806,7 @@ async function applyMigrations() {
         updated_by UUID REFERENCES usuarios(id) ON DELETE SET NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS backup_solicitudes (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -819,7 +819,7 @@ async function applyMigrations() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         resuelto_at TIMESTAMPTZ
       )
-    `).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS facturas_suscripcion (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -838,18 +838,18 @@ async function applyMigrations() {
         notas TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query("ALTER TABLE facturas_suscripcion ADD COLUMN IF NOT EXISTS stripe_invoice_id VARCHAR(120)").catch(() => {});
-    await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_facturas_suscripcion_stripe_invoice ON facturas_suscripcion(stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS notas_operacion TEXT").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS ubicacion_actual VARCHAR(255)").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS ubicacion_fuente VARCHAR(40) DEFAULT 'manual'").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS ubicacion_ts TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS gps_provider VARCHAR(40)").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS gps_external_id VARCHAR(120)").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS gps_lat NUMERIC(10,7)").catch(() => {});
-    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS gps_lng NUMERIC(10,7)").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_vehiculos_gps_link ON vehiculos(empresa_id, gps_provider, gps_external_id) WHERE gps_external_id IS NOT NULL").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE facturas_suscripcion ADD COLUMN IF NOT EXISTS stripe_invoice_id VARCHAR(120)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_facturas_suscripcion_stripe_invoice ON facturas_suscripcion(stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS notas_operacion TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS ubicacion_actual VARCHAR(255)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS ubicacion_fuente VARCHAR(40) DEFAULT 'manual'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS ubicacion_ts TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS gps_provider VARCHAR(40)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS gps_external_id VARCHAR(120)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS gps_lat NUMERIC(10,7)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS gps_lng NUMERIC(10,7)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_vehiculos_gps_link ON vehiculos(empresa_id, gps_provider, gps_external_id) WHERE gps_external_id IS NOT NULL").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS gps_position_log (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -866,48 +866,48 @@ async function applyMigrations() {
         recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_gps_position_log_vehicle ON gps_position_log(vehiculo_id, recorded_at DESC)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_gasoil NUMERIC(10,2) DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_peajes NUMERIC(10,2) DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_dietas NUMERIC(10,2) DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_otros  NUMERIC(10,2) DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_notas  TEXT").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS fecha_descarga DATE").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS hora_descarga TIME").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ventana_carga VARCHAR(100)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ventana_descarga VARCHAR(100)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS km_ruta NUMERIC(10,2)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS km_vacio NUMERIC(10,2)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS volumen NUMERIC(10,2)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_precio VARCHAR(50) DEFAULT 'viaje'").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(10,2)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_iva NUMERIC(5,2) NOT NULL DEFAULT 21").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS iva_regimen VARCHAR(30) NOT NULL DEFAULT 'general'").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_base_sin_combustible NUMERIC(10,2)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC(7,3) DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS importe_revision_combustible NUMERIC(10,2) DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS extracostes_importe NUMERIC(10,2) DEFAULT 0").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_id UUID REFERENCES colaboradores(id) ON DELETE SET NULL").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS chofer2_id UUID REFERENCES choferes(id) ON DELETE SET NULL").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pendiente_completar BOOLEAN DEFAULT false").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS aviso_completar TEXT").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_carga VARCHAR(50)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS grupaje_id UUID").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_id UUID REFERENCES vehiculos(id) ON DELETE SET NULL").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula VARCHAR(50)").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_gps_position_log_vehicle ON gps_position_log(vehiculo_id, recorded_at DESC)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_gasoil NUMERIC(10,2) DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_peajes NUMERIC(10,2) DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_dietas NUMERIC(10,2) DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_otros  NUMERIC(10,2) DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS coste_notas  TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS fecha_descarga DATE").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS hora_descarga TIME").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ventana_carga VARCHAR(100)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ventana_descarga VARCHAR(100)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS km_ruta NUMERIC(10,2)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS km_vacio NUMERIC(10,2)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS volumen NUMERIC(10,2)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_precio VARCHAR(50) DEFAULT 'viaje'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(10,2)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_iva NUMERIC(5,2) NOT NULL DEFAULT 21").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS iva_regimen VARCHAR(30) NOT NULL DEFAULT 'general'").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_base_sin_combustible NUMERIC(10,2)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC(7,3) DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS importe_revision_combustible NUMERIC(10,2) DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS extracostes_importe NUMERIC(10,2) DEFAULT 0").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_id UUID REFERENCES colaboradores(id) ON DELETE SET NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS chofer2_id UUID REFERENCES choferes(id) ON DELETE SET NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pendiente_completar BOOLEAN DEFAULT false").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS aviso_completar TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_carga VARCHAR(50)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS grupaje_id UUID").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_id UUID REFERENCES vehiculos(id) ON DELETE SET NULL").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula VARCHAR(50)").catch((e) => logger.debug("mig: " + e.message));
     // Firma digital y foto de entrega
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_destinatario TEXT").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_fecha TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_nombre VARCHAR(150)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_evidencia JSONB").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_hash VARCHAR(64)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS foto_entrega TEXT").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS condiciones_adicionales TEXT").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ultima_posicion VARCHAR(100)").catch(() => {});
-    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS posicion_ts TIMESTAMPTZ").catch(() => {});
-    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(() => {});
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_destinatario TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_fecha TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_nombre VARCHAR(150)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_evidencia JSONB").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_hash VARCHAR(64)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS foto_entrega TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS condiciones_adicionales TEXT").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ultima_posicion VARCHAR(100)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS posicion_ts TIMESTAMPTZ").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS route_optimizations (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -929,10 +929,10 @@ async function applyMigrations() {
         created_by UUID REFERENCES usuarios(id) ON DELETE SET NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_route_optimizations_pedido ON route_optimizations(pedido_id, created_at DESC)").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_route_optimizations_empresa ON route_optimizations(empresa_id, created_at DESC)").catch(() => {});
-    await db.query("ALTER TABLE route_optimizations ADD COLUMN IF NOT EXISTS waypoint_coordinates JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_route_optimizations_pedido ON route_optimizations(pedido_id, created_at DESC)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_route_optimizations_empresa ON route_optimizations(empresa_id, created_at DESC)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("ALTER TABLE route_optimizations ADD COLUMN IF NOT EXISTS waypoint_coordinates JSONB NOT NULL DEFAULT '[]'::jsonb").catch((e) => logger.debug("mig: " + e.message));
     await db.query(`
       CREATE TABLE IF NOT EXISTS route_dispatches (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -952,9 +952,9 @@ async function applyMigrations() {
         expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
         created_by UUID REFERENCES usuarios(id) ON DELETE SET NULL
       )
-    `).catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_route_dispatches_pedido ON route_dispatches(pedido_id, sent_at DESC)").catch(() => {});
-    await db.query("CREATE INDEX IF NOT EXISTS idx_route_dispatches_token ON route_dispatches(token_hash)").catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_route_dispatches_pedido ON route_dispatches(pedido_id, sent_at DESC)").catch((e) => logger.debug("mig: " + e.message));
+    await db.query("CREATE INDEX IF NOT EXISTS idx_route_dispatches_token ON route_dispatches(token_hash)").catch((e) => logger.debug("mig: " + e.message));
     // facturado as a generated/computed boolean based on factura_id
     // Some old code sends facturado in payload — ensure it's handled gracefully
     await db.query(`
@@ -964,7 +964,7 @@ async function applyMigrations() {
           ALTER TABLE pedidos ADD COLUMN facturado BOOLEAN GENERATED ALWAYS AS (factura_id IS NOT NULL) STORED;
         END IF;
       END $$;
-    `).catch(() => {});
+    `).catch((e) => logger.debug("mig: " + e.message));
     // Add colaborador price fields
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_cliente_col NUMERIC(10,2)").catch(()=>{});
     await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS notas_operacion TEXT").catch(()=>{});

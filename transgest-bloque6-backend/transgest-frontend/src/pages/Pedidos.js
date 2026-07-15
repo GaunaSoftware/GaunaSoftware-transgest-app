@@ -458,26 +458,6 @@ function cleanExtractedDocumentText(text = "") {
     .trim();
 }
 
-function extractPdfTextHeuristic(raw = "") {
-  const chunks = [];
-  String(raw || "").replace(/\(([^()]{2,500})\)\s*Tj/g, (_, value) => {
-    chunks.push(value.replace(/\\([()\\])/g, "$1"));
-    return "";
-  });
-  String(raw || "").replace(/\[((?:\([^()]{1,300}\)\s*){1,80})\]\s*TJ/g, (_, group) => {
-    const line = [];
-    group.replace(/\(([^()]{1,300})\)/g, (_m, value) => {
-      line.push(value.replace(/\\([()\\])/g, "$1"));
-      return "";
-    });
-    if (line.join("").trim()) chunks.push(line.join(""));
-    return "";
-  });
-  const visible = chunks.join("\n");
-  const fallback = String(raw || "").replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s+/g, " ");
-  return cleanExtractedDocumentText(visible.length > 80 ? visible : fallback.slice(0, 12000));
-}
-
 async function prepareAiInboxFile(file) {
   const buffer = await readFileAsArrayBuffer(file);
   const raw = decodeDocumentBytes(buffer);
@@ -487,17 +467,29 @@ async function prepareAiInboxFile(file) {
      lower.endsWith(".jpg") || lower.endsWith(".jpeg") ? "image/jpeg" :
      lower.endsWith(".png") ? "image/png" :
      lower.endsWith(".webp") ? "image/webp" :
+     lower.endsWith(".doc") ? "application/msword" :
+     lower.endsWith(".docx") ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" :
+     lower.endsWith(".xls") ? "application/vnd.ms-excel" :
+     lower.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :
+     lower.endsWith(".ppt") ? "application/vnd.ms-powerpoint" :
+     lower.endsWith(".pptx") ? "application/vnd.openxmlformats-officedocument.presentationml.presentation" :
+     lower.endsWith(".rtf") ? "application/rtf" :
+     lower.endsWith(".odt") ? "application/vnd.oasis.opendocument.text" :
+     lower.endsWith(".eml") ? "message/rfc822" :
+     lower.endsWith(".csv") ? "text/csv" :
+     lower.endsWith(".tsv") ? "text/tab-separated-values" :
+     lower.endsWith(".json") ? "application/json" :
+     /\.(txt|md|html?|xml)$/i.test(lower) ? "text/plain" :
      "application/octet-stream");
   let extractedText = "";
   let extractionStatus = "ok";
   if (mediaType.includes("pdf") || lower.endsWith(".pdf")) {
-    extractedText = extractPdfTextHeuristic(raw);
-    if (extractedText.length < 40) extractionStatus = "sin_texto_pdf";
-  } else if (/\.(txt|eml|csv|xml|html?)$/i.test(lower) || /^text\//i.test(mediaType) || mediaType.includes("message")) {
+    extractionStatus = "procesar_servidor";
+  } else if (/\.(txt|md|json|eml|csv|tsv|xml|html?)$/i.test(lower) || /^text\//i.test(mediaType) || mediaType.includes("message") || mediaType.includes("json")) {
     extractedText = cleanExtractedDocumentText(raw);
-  } else if (/\.(docx|xlsx|jpg|jpeg|png|webp)$/i.test(lower) || /^image\//i.test(mediaType)) {
+  } else if (/\.(doc|docx|rtf|odt|ppt|pptx|xls|xlsx|jpg|jpeg|png|webp)$/i.test(lower) || /^image\//i.test(mediaType)) {
     extractedText = "";
-    extractionStatus = "requiere_texto_manual";
+    extractionStatus = "procesar_servidor";
   } else {
     extractedText = cleanExtractedDocumentText(raw.replace(/[^\x20-\x7E\n\r\t]/g, " "));
     if (extractedText.length < 40) extractionStatus = "texto_no_detectado";
@@ -2203,8 +2195,8 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
   const describeAttachmentStatus = (a) => {
     if (a.extractionStatus === "ok") return `${a.extractedText.length} caracteres detectados`;
     if (/^image\//i.test(a.mediaType || "")) return "imagen lista para IA visual";
-    if (a.mediaType === "application/pdf") return "PDF listo para IA visual; fallback local si no hay API";
-    return "sin texto claro, se adjunta para revisar";
+    if (a.mediaType === "application/pdf") return "PDF listo para extraccion en el servidor e IA visual";
+    return "documento listo para analizar en el servidor";
   };
 
   const cargarHistorialIA = useCallback(async () => {
@@ -2226,16 +2218,12 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
 
   async function interpretar() {
     const textoLimpio = texto.trim();
-    const textosArchivo = archivos.map(a => a.extractedText).filter(Boolean);
-    const textoCombinado = [textoLimpio, ...textosArchivo.map((t, i) => `Documento ${archivos[i]?.name || i + 1}:\n${t}`)]
-      .filter(Boolean)
-      .join("\n\n---\n\n")
-      .slice(0, 20000);
+    const textoCombinado = textoLimpio.slice(0, 20000);
     const tieneArchivo = archivos.length > 0;
-    const tieneVisual = archivos.some(a => a.base64 && (/^image\//i.test(a.mediaType || "") || a.mediaType === "application/pdf"));
+    const tieneArchivoProcesable = archivos.some(a => a.base64);
     if (!textoCombinado.trim() && !tieneArchivo) { setError("Escribe texto o sube un email/PDF con texto legible."); return; }
-    if (!textoCombinado.trim() && tieneArchivo && !tieneVisual) {
-      setError("No he podido extraer texto del documento. Pega tambien el texto o sube una imagen/PDF compatible con IA visual.");
+    if (!textoCombinado.trim() && tieneArchivo && !tieneArchivoProcesable) {
+      setError("No he podido preparar el documento. Vuelve a seleccionarlo o pega el texto principal.");
       return;
     }
     setLoading(true); setError(""); setPreview(null);
@@ -2249,7 +2237,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
           mediaType: a.mediaType,
           sizeKb: a.sizeKb,
           extractionStatus: a.extractionStatus,
-          base64: (/^image\//i.test(a.mediaType || "") || a.mediaType === "application/pdf") ? a.base64 : undefined,
+          base64: a.base64,
         })),
       });
       setPreview(data);
@@ -2431,14 +2419,14 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.txt,.eml,.html,.htm,.csv,.xml,.jpg,.jpeg,.png,.webp,.docx,.xlsx,application/pdf,text/plain,message/rfc822,text/html,text/csv,application/xml,image/jpeg,image/png,image/webp,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept=".pdf,.txt,.md,.json,.eml,.html,.htm,.csv,.tsv,.xml,.jpg,.jpeg,.png,.webp,.doc,.docx,.rtf,.odt,.ppt,.pptx,.xls,.xlsx,application/pdf,text/plain,message/rfc822,text/html,text/csv,application/xml,image/jpeg,image/png,image/webp,application/msword,application/rtf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               onChange={handleFile}
               style={{display:"none"}}
             />
             <div style={{fontSize:18,fontWeight:800,marginBottom:8,color:"var(--text)"}}>{fileLoading ? "Leyendo documento..." : "Seleccionar documentos"}</div>
-            <div style={{fontWeight:600,color:"var(--text)",fontSize:13}}>Email, PDF con texto, DOCX, TXT, HTML, CSV, XML o imagen</div>
+            <div style={{fontWeight:600,color:"var(--text)",fontSize:13}}>PDF, Word, Excel, PowerPoint, email, texto o imagen</div>
             <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
-              PDF/email con texto no necesita API. Imagenes o PDF escaneados necesitan API visual configurada en SuperAdmin.
+              Los PDF con texto se leen en el servidor. Imagenes y PDF escaneados usan la IA documental configurada para la empresa.
             </div>
             <button
               type="button"
@@ -2491,10 +2479,10 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
             </div>
             {visualInfo && (
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 10px",fontSize:11,color:"var(--text3)",marginBottom:10}}>
-                <span style={{fontWeight:800,color:visualInfo.ok ? "var(--green)" : "#f59e0b"}}>IA visual</span>
+                <span style={{fontWeight:800,color:visualInfo.ok ? "var(--green)" : "#f59e0b"}}>IA documental</span>
                 <span>
                   {visualInfo.ok
-                    ? `Documento analizado con ${visualInfo.provider || "proveedor configurado"}`
+                    ? `Documento analizado con ${visualInfo.provider || "proveedor configurado"}${visualInfo.model ? ` (${visualInfo.model})` : ""}`
                     : visualInfo.reason === "sin_api_key"
                       ? "Preparada para analizar imagen/PDF cuando se configure la API en SuperAdmin"
                       : "No hubo JSON interpretable; se mantiene el analisis local"}

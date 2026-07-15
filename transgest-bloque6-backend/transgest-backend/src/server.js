@@ -99,14 +99,14 @@ app.use(cors({
 }));
 app.use("/api/v1/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookRoutes);
 app.use(express.json({
-  limit: process.env.REQUEST_BODY_LIMIT || "8mb",
+  limit: process.env.REQUEST_BODY_LIMIT || "12mb",
   verify: (req, _res, buf) => {
     if (req.originalUrl && req.originalUrl.startsWith("/api/v1/whatsapp/webhook")) {
       req.rawBody = Buffer.from(buf);
     }
   },
 }));
-app.use(express.urlencoded({ extended: true, limit: process.env.REQUEST_BODY_LIMIT || "8mb" }));
+app.use(express.urlencoded({ extended: true, limit: process.env.REQUEST_BODY_LIMIT || "12mb" }));
 if (process.env.NODE_ENV !== "test") {
   app.use(morgan("combined", { stream: { write: msg => logger.info(msg.trim()) } }));
 }

@@ -72,6 +72,13 @@ const APP_META_DEFAULTS = {
   fiscal_software_id: "transgest-tms",
 };
 
+function normalizeAiModelSetting(provider = "", value = "") {
+  const model = String(value || "").trim();
+  if (String(provider || "").toLowerCase() !== "openai") return model;
+  const normalized = model.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
+  return /^gpt-5(?:\.\d+)+-mini$/.test(normalized) ? "gpt-5-mini" : normalized;
+}
+
 function listFromProviderPayload(payload) {
   if (Array.isArray(payload)) return payload;
   for (const key of ["data", "Data", "items", "Items", "result", "Result", "vehiculos", "Vehiculos", "vehicles", "Vehicles"]) {
@@ -2270,9 +2277,10 @@ router.put("/integraciones/ia", superAuth, async (req, res, next) => {
   try {
     const provider = String(req.body?.provider || "anthropic").toLowerCase();
     if (!AI_PROVIDERS.includes(provider)) return res.status(400).json({ error: "Proveedor de IA no valido" });
+    const model = normalizeAiModelSetting(provider, req.body?.model);
     await setGlobalSetting("ia_provider", provider);
     await setGlobalSetting("ia_base_url", String(req.body?.base_url || "").trim());
-    await setGlobalSetting("ia_model", String(req.body?.model || "").trim());
+    await setGlobalSetting("ia_model", model);
     await audit(req, "integracion.ia.configurada", { provider });
     res.json({
       ok: true,
@@ -2499,7 +2507,7 @@ router.put("/config/ia-key", superAuth, async (req, res) => {
     await setGlobalApiKey(provider, api_key);
     await setGlobalSetting("ia_provider", provider);
     await setGlobalSetting("ia_base_url", String(req.body?.base_url || "").trim());
-    await setGlobalSetting("ia_model", String(req.body?.model || "").trim());
+    await setGlobalSetting("ia_model", normalizeAiModelSetting(provider, req.body?.model));
     return res.json({ ok: true, message: "Clave API de IA guardada correctamente" });
     await db.query(`
       CREATE TABLE IF NOT EXISTS system_config (

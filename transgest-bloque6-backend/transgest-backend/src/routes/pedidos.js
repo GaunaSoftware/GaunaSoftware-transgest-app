@@ -4,6 +4,7 @@ const db      = require("../services/db");
 const logger  = require("../services/logger");
 const crypto  = require("crypto");
 const zlib = require("zlib");
+const pdfParse = require("pdf-parse");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
@@ -4012,14 +4013,23 @@ function extractOfficeZipText(buffer, name = "") {
   return cleanAiDocumentText(wanted.map(e => xmlToPlainText(e.data.toString("utf8"))).filter(Boolean).join("\n")).slice(0, 16000);
 }
 
-function extractAiAttachmentText(attachment = {}) {
+async function extractAiAttachmentText(attachment = {}) {
   const buffer = decodeAiAttachmentBase64(attachment.base64);
   if (!buffer) return "";
   const name = String(attachment.name || attachment.filename || "").toLowerCase();
   const mediaType = String(attachment.mediaType || attachment.type || "").toLowerCase();
-  if (mediaType.includes("pdf") || name.endsWith(".pdf")) return extractPdfTextHeuristic(buffer.toString("latin1"));
+  if (mediaType.includes("pdf") || name.endsWith(".pdf")) {
+    try {
+      const parsed = await pdfParse(buffer, { max: 40 });
+      const text = cleanAiDocumentText(parsed?.text || "").slice(0, 16000);
+      if (text.length >= 40) return text;
+    } catch (error) {
+      logger.warn(`No se pudo extraer texto PDF con el parser principal (${name || "documento"}): ${error.message}`);
+    }
+    return extractPdfTextHeuristic(buffer.toString("latin1"));
+  }
   if (name.endsWith(".docx") || name.endsWith(".xlsx") || mediaType.includes("officedocument")) return extractOfficeZipText(buffer, name);
-  if (/(\.txt|\.eml|\.csv|\.xml|\.html?)$/i.test(name) || mediaType.startsWith("text/") || mediaType.includes("message")) {
+  if (/(\.txt|\.md|\.json|\.eml|\.csv|\.tsv|\.xml|\.html?)$/i.test(name) || mediaType.startsWith("text/") || mediaType.includes("message") || mediaType.includes("json") || mediaType.includes("xml")) {
     return cleanAiDocumentText(buffer.toString("utf8")).slice(0, 16000);
   }
   return "";
@@ -4062,7 +4072,14 @@ function extractAiJsonPayload(text = "") {
 
 function aiTextFromProviderResponse(provider, data = {}) {
   if (provider === "openai" || provider === "ai_generic") {
-    return data?.choices?.[0]?.message?.content || data?.output_text || "";
+    if (data?.choices?.[0]?.message?.content) return data.choices[0].message.content;
+    if (data?.output_text) return data.output_text;
+    return Array.isArray(data?.output)
+      ? data.output.flatMap(item => Array.isArray(item?.content) ? item.content : [])
+          .map(item => item?.text || item?.output_text || "")
+          .filter(Boolean)
+          .join("\n")
+      : "";
   }
   return Array.isArray(data?.content)
     ? data.content.map(x => x?.text || "").join("\n")
@@ -4073,9 +4090,15 @@ async function getPedidoAiRuntimeConfig(empresaId) {
   const providerRaw = String(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic") || "anthropic").toLowerCase();
   const provider = ["anthropic", "openai", "ai_generic"].includes(providerRaw) ? providerRaw : "anthropic";
   const baseUrl = String(await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || "") || "").replace(/\/$/, "");
-  const model = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "");
+  const configuredModel = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "").trim();
   const keyInfo = await resolveBestApiKey(empresaId, provider, ["openai", "ai_generic", "anthropic"]);
-  return { provider: keyInfo.provider || provider, baseUrl, model, apiKey: keyInfo.key || "", source: keyInfo.source };
+  const resolvedProvider = keyInfo.provider || provider;
+  let model = configuredModel;
+  if (resolvedProvider === "openai") {
+    model = configuredModel.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
+    if (/^gpt-5(?:\.\d+)+-mini$/.test(model)) model = "gpt-5-mini";
+  }
+  return { provider: resolvedProvider, baseUrl, model, configuredModel, apiKey: keyInfo.key || "", source: keyInfo.source };
 }
 
 function buildAiPedidoExtractionPrompt(texto = "") {
@@ -4109,6 +4132,9 @@ Reglas:
 - Si ves toneladas como 25,6 t o 25.6 t, devuelve peso_kg=25600 y cantidad=25.6 si la tarifa es por tonelada.
 - Si ves precio por tonelada, usa tipo_precio="tonelada" y precio_unitario como EUR/tonelada.
 - Si hay minimo facturable por toneladas, pon minimo_unidades en toneladas.
+- En un "Pedido a proveedor" de transporte, cliente_nombre es la empresa que emite/solicita el pedido, no la empresa transportista que lo recibe como proveedor.
+- Una expresion de ruta como "SAN MIGUEL DE SALINAS A MADRID" significa origen SAN MIGUEL DE SALINAS y destino MADRID.
+- Para el precio del viaje usa la base/importe del servicio de transporte sin IVA, no el total con impuestos.
 - No inventes datos. Usa null si no esta claro.
 
 Texto disponible:
@@ -4122,6 +4148,72 @@ function buildOpenAiPedidoContent(prompt, attachments = []) {
     content.push({ type: "image_url", image_url: { url: `data:${a.mediaType};base64,${a.base64}` } });
   }
   return content;
+}
+
+function buildOpenAiResponsesPedidoContent(prompt, attachments = []) {
+  const content = [{ type: "input_text", text: prompt }];
+  for (const attachment of attachments) {
+    if (!attachment.base64) continue;
+    const mediaType = String(attachment.mediaType || "application/octet-stream").toLowerCase();
+    if (mediaType.startsWith("image/")) {
+      content.push({
+        type: "input_image",
+        image_url: `data:${mediaType};base64,${attachment.base64}`,
+        detail: "high",
+      });
+      continue;
+    }
+    content.push({
+      type: "input_file",
+      filename: String(attachment.name || "documento").slice(0, 180),
+      file_data: `data:${mediaType};base64,${attachment.base64}`,
+      ...(mediaType === "application/pdf" ? { detail: "high" } : {}),
+    });
+  }
+  return content;
+}
+
+function isOpenAiPedidoFileSupported(attachment = {}) {
+  const name = String(attachment.name || attachment.filename || "").toLowerCase();
+  const mediaType = String(attachment.mediaType || attachment.type || "").toLowerCase();
+  if (mediaType.startsWith("image/")) return true;
+  if (/\.(pdf|txt|md|json|html?|xml|doc|docx|rtf|odt|ppt|pptx|csv|tsv|xls|xlsx)$/i.test(name)) return true;
+  return mediaType.includes("pdf")
+    || mediaType.startsWith("text/")
+    || mediaType.includes("word")
+    || mediaType.includes("officedocument")
+    || mediaType.includes("spreadsheet")
+    || mediaType.includes("presentation")
+    || mediaType.includes("excel")
+    || mediaType.includes("rtf")
+    || mediaType.includes("opendocument")
+    || mediaType.includes("json")
+    || mediaType.includes("xml");
+}
+
+async function fetchPedidoAi(url, options, timeoutMs = 45000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error("El proveedor de IA ha superado el tiempo maximo de respuesta");
+      timeoutError.code = "AI_TIMEOUT";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isOpenAiModelAvailabilityError(status, data = {}) {
+  const code = String(data?.error?.code || "").toLowerCase();
+  const message = String(data?.error?.message || data?.message || "").toLowerCase();
+  return [400, 403, 404].includes(Number(status)) && (
+    code.includes("model") || message.includes("model") || message.includes("access") || message.includes("not exist")
+  );
 }
 
 function buildAnthropicPedidoContent(prompt, attachments = []) {
@@ -4144,8 +4236,9 @@ async function callPedidoDocumentAi({ empresaId, texto, attachments = [] }) {
 
   const aiFiles = attachments.filter(a => {
     const mediaType = String(a.mediaType || "");
-    if (!a.base64 || String(a.base64).length > 7_000_000) return false;
+    if (!a.base64 || String(a.base64).length > 9_500_000) return false;
     if (mediaType.startsWith("image/")) return true;
+    if (iaConfig.provider === "openai") return isOpenAiPedidoFileSupported(a);
     return iaConfig.provider === "anthropic" && mediaType === "application/pdf";
   });
   if (!aiFiles.length && !String(texto || "").trim()) return { used: false, reason: "sin_contenido_visual", provider: iaConfig.provider };
@@ -4154,9 +4247,36 @@ async function callPedidoDocumentAi({ empresaId, texto, attachments = [] }) {
   const prompt = buildAiPedidoExtractionPrompt(texto);
 
   let response;
-  if (iaConfig.provider === "openai" || iaConfig.provider === "ai_generic") {
-    const baseUrl = iaConfig.provider === "openai" ? "https://api.openai.com/v1" : (iaConfig.baseUrl || "https://api.openai.com/v1");
-    response = await fetch(`${baseUrl}/chat/completions`, {
+  let modelUsed = iaConfig.model;
+  let recoveredFromModel = "";
+  if (iaConfig.provider === "openai") {
+    const baseUrl = "https://api.openai.com/v1";
+    const requestOpenAi = model => fetchPedidoAi(`${baseUrl}/responses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${iaConfig.apiKey}` },
+      body: JSON.stringify({
+        model,
+        input: [{ role: "user", content: buildOpenAiResponsesPedidoContent(prompt, aiFiles) }],
+        max_output_tokens: 1400,
+      }),
+    });
+    modelUsed = iaConfig.model || "gpt-5-mini";
+    response = await requestOpenAi(modelUsed);
+    const fallbackModels = ["gpt-5-mini", "gpt-4o-mini"].filter(model => model !== modelUsed);
+    while (!response.ok) {
+      const firstError = await response.json().catch(() => ({}));
+      if (!isOpenAiModelAvailabilityError(response.status, firstError) || !fallbackModels.length) {
+        const err = new Error(firstError?.error?.message || firstError?.message || `IA respondio HTTP ${response.status}`);
+        err.status = response.status;
+        throw err;
+      }
+      if (!recoveredFromModel) recoveredFromModel = modelUsed;
+      modelUsed = fallbackModels.shift();
+      response = await requestOpenAi(modelUsed);
+    }
+  } else if (iaConfig.provider === "ai_generic") {
+    const baseUrl = iaConfig.baseUrl || "https://api.openai.com/v1";
+    response = await fetchPedidoAi(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${iaConfig.apiKey}` },
       body: JSON.stringify({
@@ -4167,7 +4287,8 @@ async function callPedidoDocumentAi({ empresaId, texto, attachments = [] }) {
       }),
     });
   } else {
-    response = await fetch("https://api.anthropic.com/v1/messages", {
+    modelUsed = iaConfig.model || "claude-sonnet-4-20250514";
+    response = await fetchPedidoAi("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -4191,7 +4312,14 @@ async function callPedidoDocumentAi({ empresaId, texto, attachments = [] }) {
   }
   await recordApiUsage(empresaId, iaConfig.provider, 1).catch(() => {});
   const parsed = extractAiJsonPayload(aiTextFromProviderResponse(iaConfig.provider, data));
-  return { used: true, provider: iaConfig.provider, parsed, raw_text: parsed ? "" : aiTextFromProviderResponse(iaConfig.provider, data).slice(0, 2000) };
+  return {
+    used: true,
+    provider: iaConfig.provider,
+    model: modelUsed,
+    recoveredFromModel,
+    parsed,
+    raw_text: parsed ? "" : aiTextFromProviderResponse(iaConfig.provider, data).slice(0, 2000),
+  };
 }
 
 function mergeAiDraftFields(draft = {}, ai = {}) {
@@ -4228,32 +4356,67 @@ function mergeAiDraftFields(draft = {}, ai = {}) {
   return next;
 }
 
+function extractSupplierOrderHints(text = "") {
+  const clean = cleanAiDocumentText(text);
+  if (!/pedido\s+a\s+proveedor/i.test(clean)) return {};
+  const lines = clean.split("\n").map(line => line.trim()).filter(Boolean);
+  const titleIndex = lines.findIndex(line => /pedido\s+a\s+proveedor/i.test(line));
+  const companyPattern = /\b(?:S\.?\s*L\.?\s*U?\.?|S\.?\s*A\.?\s*U?\.?|SOCIEDAD\s+LIMITADA|SOCIEDAD\s+ANONIMA)\b/i;
+  const clienteNombre = lines.slice(Math.max(0, titleIndex + 1), titleIndex + 9)
+    .find(line => companyPattern.test(line) && line.length <= 120) || "";
+  const routeLine = lines.find(line => (
+    line.length >= 7 && line.length <= 140 &&
+    /^[A-ZÁÉÍÓÚÜÑ0-9 .,'()\/-]+\s+A\s+[A-ZÁÉÍÓÚÜÑ0-9 .,'()\/-]+$/i.test(line) &&
+    !/transferencia|forma de pago|proveedor/i.test(line)
+  )) || "";
+  const routeMatch = routeLine.match(/^(.+?)\s+A\s+(.+)$/i);
+  const fecha = normalizeAiDate(clean.match(/\d{1,2}[/-]\d{1,2}[/-]20\d{2}/)?.[0] || "");
+  const transportLine = lines.find(line => /transporte/i.test(line) && /\d/.test(line)) || "";
+  const priceMatch = transportLine.match(/\b1[,.]00\s*(\d{2,6}[,.]\d{2,4})/i)
+    || transportLine.match(/(\d{2,6}[,.]\d{2})\s*$/);
+  const price = parseLocaleNumber(priceMatch?.[1]);
+  const description = transportLine
+    .replace(/^\d{5,}\s*/, "")
+    .replace(/\s+1[,.]00[\s\d,.-]*$/, "")
+    .trim();
+  return {
+    cliente_nombre: clienteNombre,
+    origen: routeMatch?.[1]?.trim() || "",
+    destino: routeMatch?.[2]?.trim() || "",
+    fecha_carga: fecha,
+    mercancia: description || "Servicio de transporte",
+    precio_unitario: Number.isFinite(price) && price > 0 ? price : null,
+    importe: Number.isFinite(price) && price > 0 ? price : null,
+  };
+}
+
 function extractAiPedidoDraft(text = "") {
   const raw = String(text || "");
   const clean = normalizeAiText(raw);
   const lower = clean.toLowerCase();
+  const supplierOrder = extractSupplierOrderHints(clean);
   const lineValue = label => {
     const rx = new RegExp(`(?:^|\\n)\\s*(?:${label})\\s*[:\\-]\\s*([^\\n]+)`, "i");
     const m = clean.match(rx);
     return m?.[1]?.trim() || "";
   };
-  const clienteNombre = lineValue("cliente|cargador|empresa|customer|shipper|from|de") || pickAiMatch(clean, [
+  const clienteNombre = lineValue("cliente|cargador|empresa|customer|shipper|from|de") || supplierOrder.cliente_nombre || pickAiMatch(clean, [
     /\bcliente\s+(?:es\s+)?([A-ZÁÉÍÓÚÜÑ0-9][^\n,;]{2,80})/i,
   ]);
-  const origen = lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || pickAiMatch(clean, [
+  const origen = lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || pickAiMatch(clean, [
     /\b(?:carga|recogida|origen)\s+(?:en|desde)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bdesde\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const destino = lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || pickAiMatch(clean, [
+  const destino = lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || pickAiMatch(clean, [
     /\b(?:descarga|entrega|destino)\s+(?:en|a)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bhasta\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const fechaCargaRaw = lineValue("fecha carga|fecha de carga|carga dia|fecha|pickup date|loading date|load date");
+  const fechaCargaRaw = lineValue("fecha carga|fecha de carga|carga dia|fecha|pickup date|loading date|load date") || supplierOrder.fecha_carga;
   const fechaDescargaRaw = lineValue("fecha descarga|fecha de descarga|entrega dia|descarga dia|delivery date|unloading date");
   const anyDate = pickAiMatch(clean, [/\b(?:dia|fecha)\s+(\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?)/i]);
   const horaCarga = normalizePedidoTime(lineValue("hora carga|hora de carga|ventana carga|pickup time|loading time") || pickAiMatch(clean, [/\b(?:carga|recogida|loading|pickup)[^\n]{0,50}\b(\d{1,2}[:.]\d{2})\b/i]));
   const horaDescarga = normalizePedidoTime(lineValue("hora descarga|hora de descarga|hora entrega|ventana descarga|delivery time|unloading time") || pickAiMatch(clean, [/\b(?:descarga|entrega|delivery|unloading)[^\n]{0,50}\b(\d{1,2}[:.]\d{2})\b/i]));
-  const mercancia = lineValue("mercancia|mercancia / notas|producto|goods|commodity|description|carga") || pickAiMatch(clean, [
+  const mercancia = lineValue("mercancia|mercancia / notas|producto|goods|commodity|description|carga") || supplierOrder.mercancia || pickAiMatch(clean, [
     /\bmercancia\s+(?:de\s+)?([^\n;.]{3,120})/i,
   ]);
   const referencia = extractAiReference(clean, lineValue);
@@ -4271,7 +4434,7 @@ function extractAiPedidoDraft(text = "") {
     ? Math.round((parseLocaleNumber(pesoTon[1]) || 0) * 1000)
     : (pesoKg ? parseLocaleNumber(pesoKg[1]) : null);
   const importeNumberRaw = String(importeRaw || "").match(/(\d+(?:[,.]\d{1,2})?)/)?.[1] || "";
-  const importe = parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
+  const importe = supplierOrder.importe ?? parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
   const toneladas = Number.isFinite(pesoKgValue) && pesoKgValue > 0
     ? Number((pesoKgValue / 1000).toFixed(3))
     : null;
@@ -4291,7 +4454,7 @@ function extractAiPedidoDraft(text = "") {
     /(\d+(?:[,.]\d+)?)\s*(?:eur|€|â‚¬)?\s*(?:\/|\s*(?:por|x)\s*)\s*(?:palet|pallet|plt)\b/i,
   ]);
   let tipoPrecio = "viaje";
-  let precioUnitario = importe || null;
+  let precioUnitario = importe || supplierOrder.precio_unitario || null;
   let cantidad = null;
   let minimoUnidades = null;
   let tarifaUnitariaDetectada = false;
@@ -7416,13 +7579,14 @@ router.get("/ai-inbox/status", GERENTE_O_TRAFICO, async (req, res) => {
       basic_available: true,
       visual_available: Boolean(iaConfig.apiKey),
       provider: iaConfig.provider || "local",
+      model: iaConfig.model || null,
       provider_configured_from: iaConfig.apiKey ? (iaConfig.source || "configuracion") : null,
-      supported_basic_documents: ["pdf_texto", "docx", "xlsx_basico", "txt", "eml", "html", "xml", "csv"],
+      supported_basic_documents: ["pdf_texto", "doc", "docx", "rtf", "odt", "xls", "xlsx", "csv", "tsv", "txt", "eml", "html", "xml", "json"],
       supported_visual_documents: ["jpg", "jpeg", "png", "webp", "pdf_escaneado"],
-      mode_label: iaConfig.apiKey ? "Basico + IA visual" : "Basico local",
+      mode_label: iaConfig.apiKey ? "Documentos + IA visual" : "Extraccion local",
       guidance: iaConfig.apiKey
-        ? "Puede interpretar texto y usar proveedor visual para imagenes o PDF escaneados."
-        : "Puede interpretar texto, emails, PDF/DOCX con texto y documentos legibles. Imagenes o PDF escaneados requieren configurar API visual en SuperAdmin.",
+        ? "Interpreta documentos de oficina, PDF, imagenes y PDF escaneados. Los datos siempre quedan pendientes de revision antes de crear el pedido."
+        : "Interpreta PDF con texto, DOCX/XLSX basicos, emails y texto. Imagenes o PDF escaneados requieren configurar IA visual en SuperAdmin.",
     });
   } catch (e) {
     res.status(500).json({ error: e.message || "No se pudo comprobar el estado de la Bandeja IA" });
@@ -7441,15 +7605,15 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
         base64: a?.base64 ? String(a.base64) : "",
       })).filter(a => a.name)
     : [];
-  const attachmentTexts = attachments.map(a => ({
+  const attachmentTexts = (await Promise.all(attachments.map(async a => ({
     name: a.name,
-    text: extractAiAttachmentText(a),
-  })).filter(a => a.text && a.text.length >= 12);
+    text: await extractAiAttachmentText(a),
+  })))).filter(a => a.text && a.text.length >= 12);
   const texto = [textoOriginal, ...attachmentTexts.map(a => `Documento ${a.name}:\n${a.text}`)]
     .filter(Boolean)
     .join("\n\n---\n\n")
     .slice(0, 20000);
-  const hasVisualAttachment = attachments.some(a => a.base64 && (String(a.mediaType || "").startsWith("image/") || String(a.mediaType || "") === "application/pdf"));
+  const hasAiAttachment = attachments.some(a => a.base64);
   const hasDocumentAttachment = attachments.some(a => a.base64) || attachmentTexts.length > 0;
   const sourceAttachments = attachments.map(({ base64, ...a }) => a);
   if ((!texto || texto.length < 12) && !hasDocumentAttachment) {
@@ -7466,13 +7630,25 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
     const warnings = [];
     const suggestions = [];
     let visualAi = { used: false };
-    if (hasVisualAttachment) {
+    if (hasAiAttachment) {
       try {
         visualAi = await callPedidoDocumentAi({ empresaId, texto, attachments });
         if (visualAi.used && visualAi.parsed) {
           draft = mergeAiDraftFields(draft, visualAi.parsed);
           tarifaUnitariaDetectada = tarifaUnitariaDetectada || (draft.tipo_precio && draft.tipo_precio !== "viaje" && Number.isFinite(parseLocaleNumber(draft.precio_unitario)));
-          suggestions.push({ type: "ia_visual", label: "Documento analizado por IA", detail: `Proveedor: ${visualAi.provider}`, confidence: 0.88 });
+          suggestions.push({
+            type: "ia_visual",
+            label: "Documento analizado por IA",
+            detail: `Proveedor: ${visualAi.provider}${visualAi.model ? ` | Modelo: ${visualAi.model}` : ""}`,
+            confidence: 0.88,
+          });
+          if (visualAi.recoveredFromModel) {
+            warnings.push({
+              key: "ia_model_fallback",
+              severity: "baja",
+              message: "El modelo configurado no estaba disponible y el documento se proceso automaticamente con el modelo compatible de respaldo.",
+            });
+          }
         } else if (visualAi.used && !visualAi.parsed) {
           warnings.push({ key: "ia_visual", severity: "media", message: "La IA respondio, pero no devolvio JSON interpretable. Se usa el parser local." });
         } else if (!visualAi.used && visualAi.reason === "sin_api_key" && !attachmentTexts.length) {
@@ -7481,7 +7657,8 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
           warnings.push({ key: "ia_visual_pdf", severity: "media", message: "No se detecto texto legible en el documento. Si es un PDF escaneado, conviertelo a imagen o usa un proveedor visual compatible con PDF." });
         }
       } catch (e) {
-        warnings.push({ key: "ia_visual", severity: "media", message: `IA visual no disponible: ${e.message}. Se usa el parser local.` });
+        logger.warn(`Bandeja IA: proveedor no disponible, se usa extraccion local: ${e.message}`);
+        warnings.push({ key: "ia_visual", severity: "media", message: "El proveedor de IA no ha estado disponible. Se ha mantenido la extraccion local del documento; revisa los campos antes de continuar." });
       }
     }
 
@@ -7640,7 +7817,9 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
           ...a,
           serverTextDetected: attachmentTexts.some(t => t.name === a.name),
         })),
-        ai_visual: visualAi.used ? { provider: visualAi.provider, ok: Boolean(visualAi.parsed) } : { provider: visualAi.provider || null, ok: false, reason: visualAi.reason || null },
+        ai_visual: visualAi.used
+          ? { provider: visualAi.provider, model: visualAi.model || null, ok: Boolean(visualAi.parsed), recovered: Boolean(visualAi.recoveredFromModel) }
+          : { provider: visualAi.provider || null, ok: false, reason: visualAi.reason || null },
       },
       confidence,
       status,

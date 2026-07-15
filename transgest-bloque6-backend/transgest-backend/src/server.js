@@ -57,6 +57,7 @@ const planDiarioRoutes    = require("./routes/plan_diario");
 const controlHorarioRoutes = require("./routes/control_horario");
 const geocodingRoutes     = require("./routes/geocoding");
 const apiKeysPublicRoutes = require("./routes/apiKeysPublic");
+const integrationRoutes   = require("./routes/integration");
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -308,6 +309,7 @@ safeUse(`${api}/email`,         authenticate, requireModulePermission("empresa")
 safeUse(`${api}/registro`,      registroRoutes);
 safeUse(`${api}/mi-cuenta`,     authenticate, requireModulePermission("mi_cuenta"), miCuentaRoutes);
   safeUse(`${api}/api-keys`,      authenticate, requireRole("gerente"), apiKeysPublicRoutes);
+  safeUse(`${api}/integration`,   authenticate, integrationRoutes);
 safeUse(`${api}/superadmin`,    superadminRoutes);
 safeUse(`${api}/superadmin`,    exportacionRoutes);
 safeUse(`${api}/empresa`,       authenticate, requireModulePermission("empresa"), datosEmpresaRoutes);

@@ -609,7 +609,7 @@ function IntegracionesAdmin({ saFetchFn }) {
   const [data, setData] = useState(null);
   const [salud, setSalud] = useState(null);
   const [accountingIntegrations, setAccountingIntegrations] = useState(null);
-  const [integrationTab, setIntegrationTab] = useState("version");
+  const [integrationTab, setIntegrationTab] = useState("empresa");
   const [accountingCompanyId, setAccountingCompanyId] = useState("");
   const [accountingForm, setAccountingForm] = useState({
     connector_id:"",
@@ -809,6 +809,22 @@ function IntegracionesAdmin({ saFetchFn }) {
       notify(e.message || "No se pudo probar el canal fiscal.", "error");
     } finally {
       setTestingFiscal(false);
+    }
+  }
+
+  async function probarGlobal(p) {
+    if (!p) return;
+    setTestingProvider(`global:${p}`);
+    setTestMsg(null);
+    try {
+      const r = await saFetchFn(`/integraciones/global/${p}/test`, { method:"POST", body:{ model:aiForm.model, base_url:aiForm.base_url } });
+      setTestMsg(r);
+      notify(r.message || (r.ok ? "Conexion global verificada." : "La conexion global no esta lista."), r.ok ? "success" : "warning");
+    } catch (e) {
+      setTestMsg({ ok:false, provider:p, message:e.message || "No se pudo probar la clave global." });
+      notify(e.message || "No se pudo probar la clave global.", "error");
+    } finally {
+      setTestingProvider("");
     }
   }
 
@@ -1703,13 +1719,26 @@ function IntegracionesAdmin({ saFetchFn }) {
               Periodo {selectedEmpresa?.ia_periodo_mes || new Date().toISOString().slice(0,7)}. Las cuotas propias de proveedor se guardan debajo.
             </div>
             <div style={{borderTop:"1px solid #22304a",marginTop:12,paddingTop:10}}>
-              <div style={{fontSize:11,fontWeight:900,color:"#94a3b8",textTransform:"uppercase",letterSpacing:".05em",marginBottom:8}}>
-                Motor IA global
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
+                <div style={{fontSize:11,fontWeight:900,color:"#94a3b8",textTransform:"uppercase",letterSpacing:".05em"}}>
+                  Motor IA global
+                </div>
+                <span style={{fontSize:10,fontWeight:900,color:aiGlobalOk ? "#34d399" : "#fbbf24"}}>
+                  {aiGlobalOk ? `Clave disponible (${aiGlobalStatus.global_source || "global"})` : "Falta clave"}
+                </span>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"minmax(160px,.8fr) minmax(170px,1fr) minmax(170px,1fr) auto",gap:8,alignItems:"end"}}>
+              <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginBottom:9}}>
+                Esta clave se usa en la demo y como respaldo. Si una empresa tiene clave propia activa, prevalece la suya. La clave completa nunca vuelve al navegador.
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,alignItems:"end"}}>
                 <div>
                   <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor</label>
-                  <select style={input} value={aiForm.provider} onChange={e=>setAiForm(p=>({...p,provider:e.target.value}))}>
+                  <select style={input} value={aiForm.provider} onChange={e=>setAiForm(p=>({
+                    ...p,
+                    provider:e.target.value,
+                    base_url:e.target.value === "ai_generic" ? p.base_url : "",
+                    model:e.target.value === "openai" ? "gpt-5-mini" : e.target.value === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o-mini",
+                  }))}>
                     {(data?.ai_providers || ["anthropic","openai","ai_generic"]).map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
                   </select>
                 </div>
@@ -1719,10 +1748,24 @@ function IntegracionesAdmin({ saFetchFn }) {
                 </div>
                 <div>
                   <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Modelo</label>
-                  <input style={input} value={aiForm.model} onChange={e=>setAiForm(p=>({...p,model:e.target.value}))} placeholder="gpt-4o-mini, claude-sonnet..." />
+                  <input style={input} value={aiForm.model} onChange={e=>setAiForm(p=>({...p,model:e.target.value}))} placeholder="gpt-5-mini" />
                 </div>
-                <button onClick={guardarIA} style={{...SaaS.btnOk,height:36}}>Guardar IA</button>
               </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:9}}>
+                <button onClick={guardarIA} style={{...SaaS.btnOk,height:36}}>Guardar proveedor y modelo</button>
+                <button onClick={()=>guardarGlobal(aiForm.provider)} style={{...SaaS.btn,height:36,color:"#5eead4",borderColor:"rgba(45,212,191,.30)"}}>
+                  {aiGlobalOk ? "Sustituir clave" : "Configurar clave"}
+                </button>
+                <button onClick={()=>probarGlobal(aiForm.provider)} disabled={testingProvider===`global:${aiForm.provider}`} style={{...SaaS.btn,height:36}}>
+                  {testingProvider===`global:${aiForm.provider}` ? "Probando OpenAI..." : "Probar conexion real"}
+                </button>
+                {aiGlobalOk && <button onClick={()=>eliminarGlobal(aiForm.provider)} style={{...SaaS.btn,color:"#f87171",height:36}}>Eliminar clave</button>}
+              </div>
+              {testMsg && !testMsg.empresa_id && testMsg.provider === aiForm.provider && (
+                <div style={{marginTop:9,fontSize:11,lineHeight:1.45,color:testMsg.ok ? "#34d399" : "#fbbf24",fontWeight:800}}>
+                  {testMsg.message}{testMsg.model ? ` Modelo verificado: ${testMsg.model}.` : ""}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2187,8 +2230,8 @@ function IntegracionesAdmin({ saFetchFn }) {
               </div>
             </div>
             <div style={integrationButtonRow}>
-              <button onClick={()=>guardarGlobal(provider)} style={{...SaaS.btnOk,padding:"7px 10px"}}>Global rutas/IA</button>
-              {providerGlobalOk && <button onClick={()=>eliminarGlobal(provider)} style={{...SaaS.btn,color:"#f87171",padding:"7px 10px"}}>Eliminar rutas/IA</button>}
+              <button onClick={()=>guardarGlobal(provider)} style={{...SaaS.btnOk,padding:"7px 10px"}}>Global {labels[provider] || provider}</button>
+              {providerGlobalOk && <button onClick={()=>eliminarGlobal(provider)} style={{...SaaS.btn,color:"#f87171",padding:"7px 10px"}}>Eliminar {labels[provider] || provider}</button>}
               <button onClick={()=>guardarGlobal(gpsProvider)} style={{...SaaS.btnOk,padding:"7px 10px"}}>Global GPS</button>
               {gpsGlobalOk && <button onClick={()=>eliminarGlobal(gpsProvider)} style={{...SaaS.btn,color:"#f87171",padding:"7px 10px"}}>Eliminar GPS</button>}
             </div>
@@ -2220,7 +2263,7 @@ function IntegracionesAdmin({ saFetchFn }) {
             </div>
           )}
         </div>
-        {testMsg && (
+        {testMsg && (testMsg.empresa_id || !["anthropic","openai","ai_generic"].includes(testMsg.provider)) && (
           <div style={{
             marginTop:10,
             padding:"9px 11px",

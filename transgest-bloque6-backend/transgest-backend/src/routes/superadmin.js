@@ -40,6 +40,12 @@ const {
   summarizeCompanyAccountingSettings,
   upsertCompanyAccountingIntegrationConfig,
 } = require("../services/accountingIntegrationsCatalog");
+const {
+  AI_PROVIDERS,
+  normalizeAiProvider,
+  normalizeAiModel,
+  testAiProviderConnection,
+} = require("../services/aiProvider");
 
 const router = express.Router();
 
@@ -62,7 +68,6 @@ function extractProviderUuid(response = {}) {
 
 const PLAN_PRICES = { lite: 49, basico: 99, profesional: 199, enterprise: 399 };
 const API_PROVIDERS = ["here", "ors", "anthropic", "openai", "ai_generic", "locatel", "tacogest", "movildata", "gps_generic"];
-const AI_PROVIDERS = ["anthropic", "openai", "ai_generic"];
 const GPS_PROVIDERS = ["locatel", "tacogest", "movildata", "gps_generic"];
 const APP_META_DEFAULTS = {
   brand_name: "TransGest",
@@ -71,13 +76,6 @@ const APP_META_DEFAULTS = {
   fiscal_software_name: "TransGest",
   fiscal_software_id: "transgest-tms",
 };
-
-function normalizeAiModelSetting(provider = "", value = "") {
-  const model = String(value || "").trim();
-  if (String(provider || "").toLowerCase() !== "openai") return model;
-  const normalized = model.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
-  return /^gpt-5(?:\.\d+)+-mini$/.test(normalized) ? "gpt-5-mini" : normalized;
-}
 
 function listFromProviderPayload(payload) {
   if (Array.isArray(payload)) return payload;
@@ -325,10 +323,9 @@ async function buildIntegracionesSalud() {
 
   const global = {};
   for (const provider of API_PROVIDERS) global[provider] = await publicStatusForProvider(provider);
-  const aiProviderRaw = String(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic") || "anthropic").toLowerCase();
-  const aiProvider = AI_PROVIDERS.includes(aiProviderRaw) ? aiProviderRaw : "anthropic";
+  const aiProvider = normalizeAiProvider(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic"));
   const aiBaseUrl = String(await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || "") || "");
-  const aiModel = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "");
+  const aiModel = normalizeAiModel(aiProvider, await getGlobalSetting("ia_model", process.env.AI_MODEL || ""));
   const routingProvider = String(process.env.ROUTING_PROVIDER || "local").toLowerCase();
   const validRoutingProvider = ["local", "here", "ors", ""].includes(routingProvider);
   const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_FROM);
@@ -1877,10 +1874,11 @@ router.get("/integraciones", superAuth, async (req, res, next) => {
     `).catch(() => ({ rows: [] }));
     const global = {};
     for (const provider of API_PROVIDERS) global[provider] = await publicStatusForProvider(provider);
+    const aiProvider = normalizeAiProvider(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic"));
     const ai = {
-      provider: await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic"),
+      provider: aiProvider,
       base_url: await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || ""),
-      model: await getGlobalSetting("ia_model", process.env.AI_MODEL || ""),
+      model: normalizeAiModel(aiProvider, await getGlobalSetting("ia_model", process.env.AI_MODEL || "")),
     };
     const app_meta = await getAppMeta();
     const fiscal_configs = empresas.rows.map((empresa) => {
@@ -2065,6 +2063,42 @@ router.delete("/integraciones/global/:provider", superAuth, async (req, res, nex
   } catch (e) { next(e); }
 });
 
+router.post("/integraciones/global/:provider/test", superAuth, async (req, res, next) => {
+  try {
+    const provider = String(req.params.provider || "").toLowerCase();
+    if (!API_PROVIDERS.includes(provider)) return res.status(400).json({ error: "Proveedor no valido" });
+    const resolved = await resolveApiKey(null, provider);
+    let providerTest = null;
+    if (AI_PROVIDERS.includes(provider) && resolved.key) {
+      const selectedProvider = normalizeAiProvider(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic"));
+      providerTest = await testAiProviderConnection({
+        provider,
+        apiKey: resolved.key,
+        model: req.body?.model || (provider === selectedProvider ? await getGlobalSetting("ia_model", process.env.AI_MODEL || "") : ""),
+        baseUrl: req.body?.base_url || (provider === selectedProvider ? await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || "") : ""),
+      });
+    } else if (resolved.key) {
+      providerTest = await testGpsProviderConnection(provider, resolved.key, null);
+    }
+    const ok = Boolean(resolved.key) && Boolean(providerTest?.ok);
+    await audit(req, "integracion.global.test", {
+      provider,
+      ok,
+      source: resolved.source,
+      model: providerTest?.model || null,
+    });
+    res.json({
+      ok,
+      provider,
+      source: resolved.source,
+      has_key: Boolean(resolved.key),
+      model: providerTest?.model || null,
+      message: providerTest?.message || "No hay una clave global configurada para este proveedor.",
+      provider_test: providerTest,
+    });
+  } catch (e) { next(e); }
+});
+
 router.put("/integraciones/empresas/:empresaId/:provider", superAuth, async (req, res, next) => {
   try {
     const provider = String(req.params.provider || "").toLowerCase();
@@ -2120,7 +2154,17 @@ router.post("/integraciones/empresas/:empresaId/:provider/test", superAuth, asyn
     if (!resolved.key) reasons.push(status.use_global === false ? "falta clave propia" : "falta clave global o propia");
     if (resolved.source === "disabled") reasons.push("integracion bloqueada");
     if (gpsConflict) reasons.push(`GPS activo: ${gpsActive}`);
-    const providerTest = ok ? await testGpsProviderConnection(provider, resolved.key, req.params.empresaId).catch(e => ({
+    const providerTest = ok ? await (AI_PROVIDERS.includes(provider)
+      ? (async () => {
+          const selectedProvider = normalizeAiProvider(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic"));
+          return testAiProviderConnection({
+          provider,
+          apiKey: resolved.key,
+          model: provider === selectedProvider ? await getGlobalSetting("ia_model", process.env.AI_MODEL || "") : "",
+          baseUrl: provider === selectedProvider ? await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || "") : "",
+          });
+        })()
+      : testGpsProviderConnection(provider, resolved.key, req.params.empresaId)).catch(e => ({
       ok: false,
       provider,
       message: e.message || "No se pudo comprobar el proveedor.",
@@ -2275,9 +2319,9 @@ router.delete("/integraciones/empresas/:empresaId/:provider/webhook-token", supe
 
 router.put("/integraciones/ia", superAuth, async (req, res, next) => {
   try {
-    const provider = String(req.body?.provider || "anthropic").toLowerCase();
+    const provider = normalizeAiProvider(req.body?.provider);
     if (!AI_PROVIDERS.includes(provider)) return res.status(400).json({ error: "Proveedor de IA no valido" });
-    const model = normalizeAiModelSetting(provider, req.body?.model);
+    const model = normalizeAiModel(provider, req.body?.model);
     await setGlobalSetting("ia_provider", provider);
     await setGlobalSetting("ia_base_url", String(req.body?.base_url || "").trim());
     await setGlobalSetting("ia_model", model);
@@ -2295,7 +2339,7 @@ router.put("/integraciones/ia", superAuth, async (req, res, next) => {
 
 router.get("/config/ia-key", superAuth, async (req, res) => {
   try {
-    const provider = await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic");
+    const provider = normalizeAiProvider(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic"));
     const status = await publicStatusForProvider(provider);
     res.json({
       provider,
@@ -2303,7 +2347,7 @@ router.get("/config/ia-key", superAuth, async (req, res) => {
       masked: "",
       source: status.global_source,
       base_url: await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || ""),
-      model: await getGlobalSetting("ia_model", process.env.AI_MODEL || ""),
+      model: normalizeAiModel(provider, await getGlobalSetting("ia_model", process.env.AI_MODEL || "")),
     });
   } catch(e) {
     const key = process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || "";
@@ -2499,31 +2543,16 @@ router.put("/config/app-meta", superAuth, async (req, res, next) => {
 
 router.put("/config/ia-key", superAuth, async (req, res) => {
   const api_key = String(req.body?.api_key || "").trim();
-  const provider = String(req.body?.provider || "anthropic").toLowerCase();
+  const provider = normalizeAiProvider(req.body?.provider);
   if (!AI_PROVIDERS.includes(provider) || !api_key) {
-    return res.status(400).json({ error: "Clave inválida. Debe empezar por sk-ant-" });
+    return res.status(400).json({ error: "Proveedor o clave API de IA no validos." });
   }
   try {
     await setGlobalApiKey(provider, api_key);
     await setGlobalSetting("ia_provider", provider);
     await setGlobalSetting("ia_base_url", String(req.body?.base_url || "").trim());
-    await setGlobalSetting("ia_model", normalizeAiModelSetting(provider, req.body?.model));
+    await setGlobalSetting("ia_model", normalizeAiModel(provider, req.body?.model));
     return res.json({ ok: true, message: "Clave API de IA guardada correctamente" });
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS system_config (
-        key   VARCHAR(100) PRIMARY KEY,
-        value TEXT,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-    await db.query(`
-      INSERT INTO system_config (key, value, updated_at)
-      VALUES ('anthropic_api_key', $1, NOW())
-      ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()
-    `, [api_key]);
-    // Update runtime env so current process uses it immediately
-    process.env.ANTHROPIC_API_KEY = api_key;
-    res.json({ ok: true, message: "Clave API de IA guardada correctamente" });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -2531,12 +2560,9 @@ router.put("/config/ia-key", superAuth, async (req, res) => {
 
 router.delete("/config/ia-key", superAuth, async (req, res) => {
   try {
-    const provider = String(req.body?.provider || await getGlobalSetting("ia_provider", "anthropic")).toLowerCase();
+    const provider = normalizeAiProvider(req.body?.provider || await getGlobalSetting("ia_provider", "anthropic"));
     await deleteGlobalApiKey(provider);
     return res.json({ ok: true });
-    await db.query("DELETE FROM system_config WHERE key='anthropic_api_key'");
-    delete process.env.ANTHROPIC_API_KEY;
-    res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

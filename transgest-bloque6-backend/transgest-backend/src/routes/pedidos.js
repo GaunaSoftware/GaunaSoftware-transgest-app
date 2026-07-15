@@ -4093,9 +4093,9 @@ async function getPedidoAiRuntimeConfig(empresaId) {
   const configuredModel = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "").trim();
   const keyInfo = await resolveBestApiKey(empresaId, provider, ["openai", "ai_generic", "anthropic"]);
   const resolvedProvider = keyInfo.provider || provider;
-  let model = configuredModel;
+  let model = resolvedProvider === provider ? configuredModel : "";
   if (resolvedProvider === "openai") {
-    model = configuredModel.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
+    model = model.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
     if (/^gpt-5(?:\.\d+)+-mini$/.test(model)) model = "gpt-5-mini";
   }
   return { provider: resolvedProvider, baseUrl, model, configuredModel, apiKey: keyInfo.key || "", source: keyInfo.source };

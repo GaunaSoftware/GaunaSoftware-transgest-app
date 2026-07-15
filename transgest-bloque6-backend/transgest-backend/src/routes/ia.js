@@ -4,6 +4,7 @@ const { authenticate } = require("../middleware/auth");
 const https   = require("https");
 const db      = require("../services/db");
 const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
+const { normalizeAiProvider, normalizeAiModel, normalizeAiBaseUrl, fetchWithTimeout } = require("../services/aiProvider");
 
 router.use(authenticate);
 
@@ -23,7 +24,14 @@ function tryJson(text) {
 
 function extractModelText(provider, data = {}) {
   if (provider === "openai" || provider === "ai_generic") {
-    return data?.choices?.[0]?.message?.content || "";
+    if (data?.choices?.[0]?.message?.content) return data.choices[0].message.content;
+    if (data?.output_text) return data.output_text;
+    return Array.isArray(data?.output)
+      ? data.output.flatMap(item => Array.isArray(item?.content) ? item.content : [])
+          .map(item => item?.text || item?.output_text || "")
+          .filter(Boolean)
+          .join("\n")
+      : "";
   }
   if (Array.isArray(data?.content)) {
     return data.content.map(p => p?.text || "").join("\n");
@@ -158,12 +166,19 @@ async function comprobarCupoIA(req) {
 }
 
 async function getIaRuntimeConfig(empresaId) {
-  const provider = String(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic")).toLowerCase();
+  const provider = normalizeAiProvider(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic"));
   const baseUrl = String(await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || "") || "").replace(/\/$/, "");
-  const model = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "");
-  const safeProvider = ["anthropic", "openai", "ai_generic"].includes(provider) ? provider : "anthropic";
-  const keyInfo = await resolveBestApiKey(empresaId, safeProvider, ["openai", "ai_generic", "anthropic"]);
-  return { provider: keyInfo.provider || safeProvider, baseUrl, model, apiKey: keyInfo.key, keySource: keyInfo.source };
+  const configuredModel = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "");
+  const keyInfo = await resolveBestApiKey(empresaId, provider, ["openai", "ai_generic", "anthropic"]);
+  const resolvedProvider = normalizeAiProvider(keyInfo.provider || provider);
+  const modelForProvider = resolvedProvider === provider ? configuredModel : "";
+  return {
+    provider: resolvedProvider,
+    baseUrl: normalizeAiBaseUrl(resolvedProvider, baseUrl),
+    model: normalizeAiModel(resolvedProvider, modelForProvider),
+    apiKey: keyInfo.key,
+    keySource: keyInfo.source,
+  };
 }
 
 function normalizeOpenAiMessages(messages, system) {
@@ -188,12 +203,56 @@ function buildOpenAiDocumentContent(prompt, attachments = []) {
   return content;
 }
 
+function buildOpenAiResponsesDocumentContent(prompt, attachments = []) {
+  const content = [{ type: "input_text", text: prompt }];
+  for (const a of attachments) {
+    content.push({ type: "input_image", image_url: `data:${a.mediaType};base64,${a.base64}`, detail: "high" });
+  }
+  return content;
+}
+
 function buildAnthropicDocumentContent(prompt, attachments = []) {
   const content = [{ type: "text", text: prompt }];
   for (const a of attachments) {
     content.push({ type: "image", source: { type: "base64", media_type: a.mediaType, data: a.base64 } });
   }
   return content;
+}
+
+function openAiResponsesInput(messages = [], system = "") {
+  const input = [];
+  if (system) input.push({ role: "developer", content: [{ type: "input_text", text: String(system) }] });
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const role = message?.role === "assistant" ? "assistant" : "user";
+    const rawContent = message?.content;
+    if (typeof rawContent === "string") {
+      input.push({ role, content: [{ type: "input_text", text: rawContent }] });
+      continue;
+    }
+    const content = [];
+    for (const part of Array.isArray(rawContent) ? rawContent : []) {
+      if (part?.type === "text" && part.text) {
+        content.push({ type: "input_text", text: String(part.text) });
+        continue;
+      }
+      const source = part?.source || {};
+      if (source.type !== "base64" || !source.data) continue;
+      const mediaType = String(source.media_type || "application/octet-stream").toLowerCase();
+      const dataUrl = `data:${mediaType};base64,${source.data}`;
+      if (mediaType.startsWith("image/")) {
+        content.push({ type: "input_image", image_url: dataUrl, detail: "high" });
+      } else {
+        content.push({
+          type: "input_file",
+          filename: String(part?.name || `documento.${mediaType.includes("pdf") ? "pdf" : "bin"}`),
+          file_data: dataUrl,
+          ...(mediaType === "application/pdf" ? { detail: "high" } : {}),
+        });
+      }
+    }
+    if (content.length) input.push({ role, content });
+  }
+  return input;
 }
 
 // POST /ia/chat — proxy to Anthropic API
@@ -217,25 +276,46 @@ router.post("/chat", async (req, res) => {
   if (!messages?.length) return res.status(400).json({ error: "messages requerido" });
 
   try {
-    if (iaConfig.provider === "openai" || iaConfig.provider === "ai_generic") {
-      const baseUrl = iaConfig.provider === "openai"
-        ? "https://api.openai.com/v1"
-        : (iaConfig.baseUrl || "https://api.openai.com/v1");
-      const proxyRes = await fetch(`${baseUrl}/chat/completions`, {
+    if (iaConfig.provider === "openai") {
+      const proxyRes = await fetchWithTimeout(`${iaConfig.baseUrl}/responses`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
-          model: iaConfig.model || "gpt-4o-mini",
+          model: iaConfig.model,
+          input: openAiResponsesInput(messages, system),
+          max_output_tokens: Math.max(32, Math.min(Number(max_tokens || 1000), 4000)),
+        }),
+      }, 45000);
+      const data = await proxyRes.json().catch(() => ({}));
+      if (!proxyRes.ok) return res.status(proxyRes.status).json(data);
+      await recordApiUsage(req.user?.empresa_id, iaConfig.provider, 1).catch(() => {});
+      return res.json({
+        content: [{ type: "text", text: extractModelText("openai", data) }],
+        provider: "openai",
+        model: iaConfig.model,
+        usage: data?.usage || null,
+      });
+    }
+
+    if (iaConfig.provider === "ai_generic") {
+      const proxyRes = await fetchWithTimeout(`${iaConfig.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: iaConfig.model,
           messages: normalizeOpenAiMessages(messages, system),
           max_tokens,
         }),
-      });
+      }, 45000);
       const data = await proxyRes.json().catch(() => ({}));
-      if (proxyRes.status < 400) await recordApiUsage(req.user?.empresa_id, iaConfig.provider, 1).catch(() => {});
-      return res.status(proxyRes.status).json(data);
+      if (!proxyRes.ok) return res.status(proxyRes.status).json(data);
+      await recordApiUsage(req.user?.empresa_id, iaConfig.provider, 1).catch(() => {});
+      return res.json({
+        content: [{ type: "text", text: extractModelText("ai_generic", data) }],
+        provider: "ai_generic",
+        model: iaConfig.model,
+        usage: data?.usage || null,
+      });
     }
 
     const body = JSON.stringify({
@@ -272,6 +352,7 @@ router.post("/chat", async (req, res) => {
     });
 
     proxyReq.on("error", (e) => res.status(500).json({ error: e.message }));
+    proxyReq.setTimeout(45000, () => proxyReq.destroy(new Error("El proveedor de IA no ha respondido dentro del tiempo de espera.")));
     proxyReq.write(body);
     proxyReq.end();
   } catch(e) {
@@ -346,22 +427,36 @@ ${cleanText || "(Documento aportado como imagen adjunta. Lee la imagen y extrae 
 
   try {
     let remoteData;
-    if (iaConfig.provider === "openai" || iaConfig.provider === "ai_generic") {
-      const baseUrl = iaConfig.provider === "openai" ? "https://api.openai.com/v1" : (iaConfig.baseUrl || "https://api.openai.com/v1");
-      const proxyRes = await fetch(`${baseUrl}/chat/completions`, {
+    if (iaConfig.provider === "openai") {
+      const proxyRes = await fetchWithTimeout(`${iaConfig.baseUrl}/responses`, {
         method: "POST",
         headers: { "Content-Type":"application/json", Authorization:`Bearer ${iaConfig.apiKey}` },
         body: JSON.stringify({
-          model: iaConfig.model || "gpt-4o-mini",
+          model: iaConfig.model,
+          input: [
+            { role:"developer", content:[{ type:"input_text", text:system }] },
+            { role:"user", content:buildOpenAiResponsesDocumentContent(userPrompt, attachments) },
+          ],
+          max_output_tokens: 1800,
+        }),
+      }, 45000);
+      remoteData = await proxyRes.json().catch(() => ({}));
+      if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
+    } else if (iaConfig.provider === "ai_generic") {
+      const proxyRes = await fetchWithTimeout(`${iaConfig.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json", Authorization:`Bearer ${iaConfig.apiKey}` },
+        body: JSON.stringify({
+          model: iaConfig.model,
           response_format: { type:"json_object" },
           messages: normalizeOpenAiMessages([{ role:"user", content:buildOpenAiDocumentContent(userPrompt, attachments) }], system),
           max_tokens: 1800,
         }),
-      });
+      }, 45000);
       remoteData = await proxyRes.json().catch(() => ({}));
       if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
     } else {
-      const proxyRes = await fetch("https://api.anthropic.com/v1/messages", {
+      const proxyRes = await fetchWithTimeout(`${iaConfig.baseUrl}/messages`, {
         method: "POST",
         headers: {
           "Content-Type":"application/json",
@@ -374,7 +469,7 @@ ${cleanText || "(Documento aportado como imagen adjunta. Lee la imagen y extrae 
           system,
           messages: [{ role:"user", content:buildAnthropicDocumentContent(userPrompt, attachments) }],
         }),
-      });
+      }, 45000);
       remoteData = await proxyRes.json().catch(() => ({}));
       if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
     }
@@ -489,22 +584,36 @@ Devuelve este JSON:
 }`;
 
     let remoteData;
-    if (iaConfig.provider === "openai" || iaConfig.provider === "ai_generic") {
-      const baseUrl = iaConfig.provider === "openai" ? "https://api.openai.com/v1" : (iaConfig.baseUrl || "https://api.openai.com/v1");
-      const proxyRes = await fetch(`${baseUrl}/chat/completions`, {
+    if (iaConfig.provider === "openai") {
+      const proxyRes = await fetchWithTimeout(`${iaConfig.baseUrl}/responses`, {
         method: "POST",
         headers: { "Content-Type":"application/json", Authorization:`Bearer ${iaConfig.apiKey}` },
         body: JSON.stringify({
-          model: iaConfig.model || "gpt-4o-mini",
+          model: iaConfig.model,
+          input: [
+            { role:"developer", content:[{ type:"input_text", text:system }] },
+            { role:"user", content:buildOpenAiResponsesDocumentContent(prompt, imageAttachments) },
+          ],
+          max_output_tokens: 2200,
+        }),
+      }, 45000);
+      remoteData = await proxyRes.json().catch(() => ({}));
+      if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
+    } else if (iaConfig.provider === "ai_generic") {
+      const proxyRes = await fetchWithTimeout(`${iaConfig.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json", Authorization:`Bearer ${iaConfig.apiKey}` },
+        body: JSON.stringify({
+          model: iaConfig.model,
           response_format: { type:"json_object" },
           messages: normalizeOpenAiMessages([{ role:"user", content:buildOpenAiDocumentContent(prompt, imageAttachments) }], system),
           max_tokens: 2200,
         }),
-      });
+      }, 45000);
       remoteData = await proxyRes.json().catch(() => ({}));
       if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
     } else {
-      const proxyRes = await fetch("https://api.anthropic.com/v1/messages", {
+      const proxyRes = await fetchWithTimeout(`${iaConfig.baseUrl}/messages`, {
         method: "POST",
         headers: {
           "Content-Type":"application/json",
@@ -517,7 +626,7 @@ Devuelve este JSON:
           system,
           messages: [{ role:"user", content:buildAnthropicDocumentContent(prompt, imageAttachments) }],
         }),
-      });
+      }, 45000);
       remoteData = await proxyRes.json().catch(() => ({}));
       if (!proxyRes.ok) return res.status(proxyRes.status).json(remoteData);
     }

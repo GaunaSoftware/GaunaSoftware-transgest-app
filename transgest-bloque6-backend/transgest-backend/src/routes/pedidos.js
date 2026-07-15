@@ -20,6 +20,7 @@ const {
 const { getEmpresaCalendarForDate, inferCcaaFromText } = require("../services/calendarioLaboral");
 const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
 const { validateBase64Upload } = require("../services/uploadValidation");
+const webhooks = require("../services/webhooks");
 
 const router = express.Router();
 let colaboradorWorkflowSchemaPromise = null;
@@ -7494,6 +7495,7 @@ router.post("/chofer", async (req, res) => {
       repositorio: repo,
       documento_control: ctx ? await buildPedidoDocumentoControlResponse(req, ctx, empresaId) : null,
     });
+    webhooks.dispatch(empresaId, "pedido.creado", { pedido_id: pedido.id, numero: pedido.numero, cliente_id: pedido.cliente_id, origen: pedido.origen, destino: pedido.destino }).catch(() => {});
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message });
     if (e.code === "22P02") return res.status(400).json({ error: "Alguno de los datos del viaje no tiene formato valido." });
@@ -7814,6 +7816,7 @@ router.post("/", GERENTE_O_TRAFICO,
       remolqueMatCreado = remolque_mat;
     });
     res.status(201).json({...pedidoCreado, remolque_matricula: remolqueMatCreado});
+    webhooks.dispatch(empresaId, "pedido.creado", { pedido_id: pedidoCreado && pedidoCreado.id, numero: pedidoCreado && pedidoCreado.numero, cliente_id, origen: pedidoCreado && pedidoCreado.origen, destino: pedidoCreado && pedidoCreado.destino }).catch(() => {});
     if (pedidoCreado && festivoAviso) {
       notificarGerenciaPedido(
         empresaId,
@@ -8641,6 +8644,17 @@ router.post("/:id/firma", async (req, res) => {
       destinatario: "firma_destinatario = $1, firma_nombre = $2, firma_fecha = $5, firma_hash = $7",
     }[firmaRol];
 
+    // Postgres rechaza el bind si se envian mas parametros que placeholders:
+    // $7 (hash) solo existe en el SQL del rol destinatario.
+    const updateParams = [
+      firmaImagen,
+      evidencia.firmante.nombre || defaultNombre,
+      req.params.id,
+      empresaId,
+      firmadoAt,
+      JSON.stringify(evidenciaMulti),
+    ];
+    if (firmaRol === "destinatario") updateParams.push(firmaHash);
     const { rows } = await db.query(`
       UPDATE pedidos
       SET ${roleSetSql},
@@ -8648,15 +8662,7 @@ router.post("/:id/firma", async (req, res) => {
           updated_at = NOW()
       WHERE id = $3 AND empresa_id = $4
       RETURNING id, numero, firma_fecha, firma_nombre, firma_hash, firma_cargador_fecha, firma_cargador_nombre, firma_chofer_fecha, firma_chofer_nombre, firma_evidencia
-    `, [
-      firmaImagen,
-      evidencia.firmante.nombre || defaultNombre,
-      req.params.id,
-      empresaId,
-      firmadoAt,
-      JSON.stringify(evidenciaMulti),
-      firmaHash,
-    ]);
+    `, updateParams);
 
     await logPedidoEvento(req.params.id, empresaId, `firma.${firmaRol}_registrada`, {
       firma_rol: firmaRol,

@@ -79,3 +79,46 @@ Consulta los scopes vigentes en: `GET /api/v1/api-keys/scopes` (con sesión de g
 - Toda acción con API key queda **auditada** (`audit_log_saas`).
 - Para el portal de un cliente concreto existe además el token `tedi_` (manifest/feed);
   las claves `tgk_` son para integración operativa a nivel de empresa.
+
+## 6. Webhooks salientes (push)
+
+En lugar de consultar la API periódicamente, tu sistema puede recibir avisos
+automáticos cuando ocurren eventos. Cada empresa (gerencia) crea suscripciones en
+**Mi cuenta → Integraciones API → Webhooks salientes**, indicando una URL `https://`
+y los eventos que le interesan.
+
+**Eventos disponibles:** `pedido.creado`, `pedido.estado_cambiado`,
+`factura.emitida`, `cliente.creado`.
+
+**Entrega:** TransGest hace un `POST` con cuerpo JSON:
+
+```json
+{
+  "event": "pedido.creado",
+  "empresa_id": "…",
+  "sent_at": "2026-07-15T10:00:00.000Z",
+  "data": { "pedido_id": "…", "numero": "…", "cliente_id": "…", "origen": "…", "destino": "…" }
+}
+```
+
+Cabeceras incluidas:
+
+| Cabecera | Valor |
+|---|---|
+| `X-TransGest-Event` | Nombre del evento |
+| `X-TransGest-Signature` | `sha256=<HMAC-SHA256(secreto, cuerpo)>` |
+
+**Verificación de firma:** al crear el webhook se muestra **una sola vez** un
+secreto (`whsec_…`). Guárdalo y, en cada recepción, calcula el HMAC-SHA256 del
+cuerpo crudo con ese secreto; debe coincidir con el valor de `X-TransGest-Signature`
+(tras `sha256=`). Ejemplo en Node:
+
+```js
+const crypto = require("crypto");
+const firma = "sha256=" + crypto.createHmac("sha256", SECRETO).update(cuerpoCrudo).digest("hex");
+if (firma !== req.headers["x-transgest-signature"]) return res.sendStatus(401);
+```
+
+**Notas:** la entrega es *best-effort* (timeout ~8 s, sin bloquear la operación en
+TransGest). Responde `2xx` para confirmar la recepción; los fallos se contabilizan
+por suscripción (`failure_count`) y quedan visibles en la gestión.

@@ -43,6 +43,17 @@ function apiKeysFetch(path, opts={}) {
 
 const API_KEY_SCOPES = ["pedidos","clientes","vehiculos","choferes","colaboradores","facturacion","rutas","palets","agenda","documentos","informes","control_horario","plan_diario"];
 
+function webhooksFetch(path, opts={}) {
+  const token = getToken();
+  return fetch(`${BASE}/api/v1/webhooks${path}`, {
+    ...opts,
+    headers:{ "Content-Type":"application/json", Authorization:"Bearer "+token, ...(opts.headers||{}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  }).then(r => r.json());
+}
+
+const WEBHOOK_EVENTS = ["pedido.creado","pedido.estado_cambiado","factura.emitida","cliente.creado"];
+
 export default function MiCuenta(){
   const [cuenta,   setCuenta]   = useState(null);
   const [facturas, setFacturas] = useState([]);
@@ -53,6 +64,10 @@ export default function MiCuenta(){
   const [apiKeyForm, setApiKeyForm] = useState({ nombre:"", scopes:[], dias:365 });
   const [nuevaApiKey, setNuevaApiKey] = useState(null);
   const [apiKeyMsj,  setApiKeyMsj]  = useState("");
+  const [webhooks,     setWebhooks]     = useState([]);
+  const [webhookForm,  setWebhookForm]  = useState({ url:"", events:[] });
+  const [nuevoWebhookSecret, setNuevoWebhookSecret] = useState(null);
+  const [webhookMsj,   setWebhookMsj]   = useState("");
 
   // Formulario datos empresa
   const [datosForm, setDatosForm] = useState({ nombre:"", cif:"" });
@@ -139,7 +154,27 @@ export default function MiCuenta(){
     const r = await apiKeysFetch("/").catch(()=>({data:[]}));
     setApiKeys(Array.isArray(r.data) ? r.data : []);
   }
-  useEffect(()=>{ if (esGerente) cargarApiKeys(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ },[]);
+  async function cargarWebhooks(){
+    if (!esGerente) return;
+    const r = await webhooksFetch("/").catch(()=>({data:[]}));
+    setWebhooks(Array.isArray(r.data) ? r.data : []);
+  }
+  useEffect(()=>{ if (esGerente){ cargarApiKeys(); cargarWebhooks(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ },[]);
+  function toggleWebhookEvent(ev){
+    setWebhookForm(p => ({ ...p, events: p.events.includes(ev) ? p.events.filter(e=>e!==ev) : [...p.events, ev] }));
+  }
+  async function crearWebhook(){
+    setWebhookMsj(""); setNuevoWebhookSecret(null);
+    if (!/^https:\/\//i.test(webhookForm.url)){ setWebhookMsj("❌ La URL debe empezar por https://"); return; }
+    if (!webhookForm.events.length){ setWebhookMsj("❌ Selecciona al menos un evento."); return; }
+    const r = await webhooksFetch("/", { method:"POST", body:{ url: webhookForm.url.trim(), events: webhookForm.events } });
+    if (r.secret){ setNuevoWebhookSecret(r.secret); setWebhookForm({ url:"", events:[] }); cargarWebhooks(); }
+    else setWebhookMsj("❌ "+(r.error||"No se pudo crear el webhook"));
+  }
+  async function revocarWebhook(id){
+    const r = await webhooksFetch(`/${id}`, { method:"DELETE" });
+    if (r.ok) cargarWebhooks(); else setWebhookMsj("❌ "+(r.error||"No se pudo eliminar"));
+  }
   function toggleScope(mod){
     setApiKeyForm(p => ({ ...p, scopes: p.scopes.includes(mod) ? p.scopes.filter(s=>s!==mod) : [...p.scopes, mod] }));
   }
@@ -449,6 +484,43 @@ export default function MiCuenta(){
                 <div style={{fontSize:11,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{k.token_mask} · {(k.scopes||[]).join(", ")} · {k.usage_count||0} usos</div>
               </div>
               {k.activo && <button style={{...S.btn,background:"var(--red)"}} onClick={()=>revocarApiKey(k.id)}>Revocar</button>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Webhooks salientes ── */}
+      {tab==="api"&&esGerente&&(
+        <div style={S.card}>
+          <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:8}}>Webhooks salientes</div>
+          <div style={{fontSize:13,color:"var(--text4)",marginBottom:14}}>
+            TransGest avisará a tu sistema (por POST) cuando ocurran estos eventos, sin que tengas que consultar la API. Cada envío incluye la cabecera <code>X-TransGest-Signature: sha256=…</code> Verifícala con HMAC-SHA256 del cuerpo usando el secreto de la suscripción.
+          </div>
+          {nuevoWebhookSecret && (
+            <div style={{...S.msj_ok, marginBottom:12, wordBreak:"break-all"}}>
+              Secreto del webhook (guárdalo ahora, no se volverá a mostrar):<br/><strong>{nuevoWebhookSecret}</strong>
+            </div>
+          )}
+          {webhookMsj && <div style={webhookMsj.startsWith("❌")?S.msj_err:S.msj_ok}>{webhookMsj}</div>}
+          <label style={S.lbl}>URL de destino (https)</label>
+          <input style={S.inp} value={webhookForm.url} onChange={e=>setWebhookForm(p=>({...p,url:e.target.value}))} placeholder="https://tu-sistema.com/hooks/transgest" />
+          <label style={S.lbl}>Eventos</label>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
+            {WEBHOOK_EVENTS.map(ev=>(
+              <button key={ev} type="button" onClick={()=>toggleWebhookEvent(ev)} style={{padding:"5px 10px",borderRadius:20,border:"1px solid var(--border)",fontSize:12,cursor:"pointer",background:webhookForm.events.includes(ev)?"var(--accent)":"var(--bg4)",color:webhookForm.events.includes(ev)?"#fff":"var(--text3)"}}>{ev}</button>
+            ))}
+          </div>
+          <div><button style={{...S.btn,marginTop:12}} onClick={crearWebhook}>Crear webhook</button></div>
+          <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",margin:"22px 0 8px"}}>Webhooks activos</div>
+          {webhooks.length===0 ? (
+            <div style={{fontSize:13,color:"var(--text5)"}}>Aún no has creado ningún webhook.</div>
+          ) : webhooks.map(w=>(
+            <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"9px 0",borderBottom:"1px solid var(--border2)",flexWrap:"wrap"}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontWeight:700,color:"var(--text)",wordBreak:"break-all"}}>{w.url} {!w.activo&&<span style={{color:"var(--red)",fontSize:11}}>(inactivo)</span>}</div>
+                <div style={{fontSize:11,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{(w.events||[]).join(", ")}{w.last_status?` · último envío: ${w.last_status}`:""}{w.failure_count?` · ${w.failure_count} fallos`:""}</div>
+              </div>
+              {w.activo && <button style={{...S.btn,background:"var(--red)"}} onClick={()=>revocarWebhook(w.id)}>Eliminar</button>}
             </div>
           ))}
         </div>

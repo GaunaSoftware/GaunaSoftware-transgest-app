@@ -56,6 +56,7 @@ const whatsappRoutes      = require("./routes/whatsapp");
 const planDiarioRoutes    = require("./routes/plan_diario");
 const controlHorarioRoutes = require("./routes/control_horario");
 const geocodingRoutes     = require("./routes/geocoding");
+const apiKeysPublicRoutes = require("./routes/apiKeysPublic");
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -306,6 +307,7 @@ safeUse(`${api}/pedidos`,       authenticate, requireModulePermission("pedidos")
 safeUse(`${api}/email`,         authenticate, requireModulePermission("empresa"), emailRoutes);
 safeUse(`${api}/registro`,      registroRoutes);
 safeUse(`${api}/mi-cuenta`,     authenticate, requireModulePermission("mi_cuenta"), miCuentaRoutes);
+  safeUse(`${api}/api-keys`,      authenticate, requireRole("gerente"), apiKeysPublicRoutes);
 safeUse(`${api}/superadmin`,    superadminRoutes);
 safeUse(`${api}/superadmin`,    exportacionRoutes);
 safeUse(`${api}/empresa`,       authenticate, requireModulePermission("empresa"), datosEmpresaRoutes);

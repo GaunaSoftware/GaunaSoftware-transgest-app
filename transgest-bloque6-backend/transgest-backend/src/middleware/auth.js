@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const db     = require("../services/db");
 const logger = require("../services/logger");
 const { userJwtSecret } = require("../services/jwtSecrets");
+const empresaApiKeys = require("../services/empresaApiKeys");
 
 const GRACE_DAYS = 7;
 
@@ -144,6 +145,7 @@ const ROLE_PERMISSION_PRESETS = {
     ver: ["agenda","dashboard","pedidos","plan_diario","gestion_trafico","clientes","rutas","vehiculos","choferes","hojas_ruta","informes","documentos","avisos","mi_cuenta"],
     editar: ["mi_cuenta"],
   },
+  api: { ver: [], editar: [] },
   chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","avisos","mi_cuenta"], editar: ["app_chofer","avisos","mi_cuenta"] },
   cliente: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
   cliente_portal: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
@@ -353,6 +355,35 @@ async function authenticate(req, res, next) {
   const token = header.split(" ")[1];
   try {
     await ensureAuthChoferSchema();
+    if (String(token || "").startsWith("tgk_")) {
+      let resolved;
+      try {
+        resolved = await empresaApiKeys.resolveKey(token, req.ip || null);
+      } catch (err) {
+        const status = err.status || 401;
+        const body = { error: err.message || "API key invalida" };
+        if (err.retry_after_seconds) body.retry_after_seconds = err.retry_after_seconds;
+        return res.status(status).json(body);
+      }
+      req.user = {
+        id: null,
+        nombre: resolved.nombre || "Integracion API",
+        email: null,
+        username: `apikey:${resolved.key_id}`,
+        rol: "api",
+        activo: true,
+        empresa_id: resolved.empresa_id,
+        cliente_id: null,
+        plan: resolved.plan,
+        permisos: resolved.permisos,
+        trafico_config: {},
+        api_key_id: resolved.key_id,
+        api_key_scopes: resolved.scopes,
+      };
+      req.empresaId = resolved.empresa_id;
+      res.setHeader("X-RateLimit-Remaining", String(resolved.rate_limit_remaining));
+      return next();
+    }
     if (String(token || "").startsWith("tedi_")) {
       const tokenHash = hashAccessToken(token);
       const { rows } = await db.query(

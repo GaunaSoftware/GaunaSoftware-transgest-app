@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getToken } from "../services/api";
+import { getToken, getUser } from "../services/api";
 
 const BASE = process.env.REACT_APP_API_URL || "";
 const fmt  = d => d ? new Date(d).toLocaleDateString("es-ES") : "Sin límite";
@@ -32,11 +32,27 @@ function backupFetch(path, opts={}) {
   }).then(r => r.json());
 }
 
+function apiKeysFetch(path, opts={}) {
+  const token = getToken();
+  return fetch(`${BASE}/api/v1/api-keys${path}`, {
+    ...opts,
+    headers:{ "Content-Type":"application/json", Authorization:"Bearer "+token, ...(opts.headers||{}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  }).then(r => r.json());
+}
+
+const API_KEY_SCOPES = ["pedidos","clientes","vehiculos","choferes","colaboradores","facturacion","rutas","palets","agenda","documentos","informes","control_horario","plan_diario"];
+
 export default function MiCuenta(){
   const [cuenta,   setCuenta]   = useState(null);
   const [facturas, setFacturas] = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [tab,      setTab]      = useState("plan"); // plan | facturas | datos | password
+  const esGerente = String(getUser()?.rol || "").toLowerCase() === "gerente";
+  const [apiKeys,    setApiKeys]    = useState([]);
+  const [apiKeyForm, setApiKeyForm] = useState({ nombre:"", scopes:[], dias:365 });
+  const [nuevaApiKey, setNuevaApiKey] = useState(null);
+  const [apiKeyMsj,  setApiKeyMsj]  = useState("");
 
   // Formulario datos empresa
   const [datosForm, setDatosForm] = useState({ nombre:"", cif:"" });
@@ -118,6 +134,27 @@ export default function MiCuenta(){
     }
   }
 
+  async function cargarApiKeys(){
+    if (!esGerente) return;
+    const r = await apiKeysFetch("/").catch(()=>({data:[]}));
+    setApiKeys(Array.isArray(r.data) ? r.data : []);
+  }
+  useEffect(()=>{ if (esGerente) cargarApiKeys(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ },[]);
+  function toggleScope(mod){
+    setApiKeyForm(p => ({ ...p, scopes: p.scopes.includes(mod) ? p.scopes.filter(s=>s!==mod) : [...p.scopes, mod] }));
+  }
+  async function crearApiKey(){
+    setApiKeyMsj(""); setNuevaApiKey(null);
+    if (!apiKeyForm.scopes.length){ setApiKeyMsj("❌ Selecciona al menos un modulo."); return; }
+    const r = await apiKeysFetch("/", { method:"POST", body:{ nombre: apiKeyForm.nombre || "Integracion API", scopes: apiKeyForm.scopes, dias: Number(apiKeyForm.dias)||365 } });
+    if (r.token){ setNuevaApiKey(r.token); setApiKeyForm({ nombre:"", scopes:[], dias:365 }); cargarApiKeys(); }
+    else setApiKeyMsj("❌ "+(r.error||"No se pudo crear la clave"));
+  }
+  async function revocarApiKey(id){
+    const r = await apiKeysFetch(`/${id}`, { method:"DELETE" });
+    if (r.ok) cargarApiKeys(); else setApiKeyMsj("❌ "+(r.error||"No se pudo revocar"));
+  }
+
   const plan = PLAN_INFO[cuenta?.plan] || PLAN_INFO.profesional;
   const diasRestantes = cuenta?.fecha_vencimiento
     ? Math.ceil((new Date(cuenta.fecha_vencimiento)-new Date())/(1000*60*60*24)) : null;
@@ -140,6 +177,7 @@ export default function MiCuenta(){
     ["datos",     "🏢 Mis datos"],
     ["password",  "🔑 Contraseña"],
     ["backups",   "Backups"],
+    ...(esGerente ? [["api", "🔌 Integraciones API"]] : []),
     ["soporte",   "💬 Soporte"],
   ];
 
@@ -374,6 +412,45 @@ export default function MiCuenta(){
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Integraciones API ── */}
+      {tab==="api"&&esGerente&&(
+        <div style={S.card}>
+          <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",marginBottom:8}}>Claves de API para integraciones</div>
+          <div style={{fontSize:13,color:"var(--text4)",marginBottom:14}}>
+            Genera claves para que programas externos se integren con tu API. Envía la clave en la cabecera <code>Authorization: Bearer tgk_...</code> Cada clave respeta solo los módulos que selecciones.
+          </div>
+          {nuevaApiKey && (
+            <div style={{...S.msj_ok, marginBottom:12, wordBreak:"break-all"}}>
+              Clave creada (cópiala ahora, no se volverá a mostrar):<br/><strong>{nuevaApiKey}</strong>
+            </div>
+          )}
+          {apiKeyMsj && <div style={apiKeyMsj.startsWith("❌")?S.msj_err:S.msj_ok}>{apiKeyMsj}</div>}
+          <label style={S.lbl}>Nombre</label>
+          <input style={S.inp} value={apiKeyForm.nombre} onChange={e=>setApiKeyForm(p=>({...p,nombre:e.target.value}))} placeholder="Integración ERP, etc." />
+          <label style={S.lbl}>Módulos (scopes)</label>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:6}}>
+            {API_KEY_SCOPES.map(m=>(
+              <button key={m} type="button" onClick={()=>toggleScope(m)} style={{padding:"5px 10px",borderRadius:20,border:"1px solid var(--border)",fontSize:12,cursor:"pointer",background:apiKeyForm.scopes.includes(m)?"var(--accent)":"var(--bg4)",color:apiKeyForm.scopes.includes(m)?"#fff":"var(--text3)"}}>{m}</button>
+            ))}
+          </div>
+          <label style={S.lbl}>Caducidad (días)</label>
+          <input style={{...S.inp,maxWidth:160}} type="number" min={1} max={1095} value={apiKeyForm.dias} onChange={e=>setApiKeyForm(p=>({...p,dias:e.target.value}))} />
+          <div><button style={{...S.btn,marginTop:12}} onClick={crearApiKey}>Crear clave</button></div>
+          <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text4)",margin:"22px 0 8px"}}>Claves activas</div>
+          {apiKeys.length===0 ? (
+            <div style={{fontSize:13,color:"var(--text5)"}}>Aún no has creado ninguna clave.</div>
+          ) : apiKeys.map(k=>(
+            <div key={k.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"9px 0",borderBottom:"1px solid var(--border2)",flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontWeight:700,color:"var(--text)"}}>{k.nombre} {!k.activo&&<span style={{color:"var(--red)",fontSize:11}}>(revocada)</span>}</div>
+                <div style={{fontSize:11,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{k.token_mask} · {(k.scopes||[]).join(", ")} · {k.usage_count||0} usos</div>
+              </div>
+              {k.activo && <button style={{...S.btn,background:"var(--red)"}} onClick={()=>revocarApiKey(k.id)}>Revocar</button>}
+            </div>
+          ))}
         </div>
       )}
 

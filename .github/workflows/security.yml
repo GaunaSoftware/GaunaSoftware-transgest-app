@@ -1,0 +1,63 @@
+name: Seguridad y CI
+
+# Auditoria de dependencias (SCA) y verificacion de sintaxis. Parte del proceso
+# de gestion de vulnerabilidades (ISO 27001 A.8.8 / OWASP ASVS V1.1, V14.2).
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"   # revision semanal (lunes 06:00 UTC)
+
+permissions:
+  contents: read
+
+jobs:
+  sca:
+    name: Auditoria de dependencias (SCA)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - transgest-bloque6-backend/transgest-backend
+          - transgest-bloque6-backend/transgest-accounting-api
+          - transgest-bloque6-backend/transgest-frontend
+          - transgest-bloque6-backend/transgest-accounting-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Instalar dependencias
+        working-directory: ${{ matrix.project }}
+        run: npm ci --ignore-scripts || npm install --ignore-scripts --no-audit --no-fund
+      - name: Auditoria de dependencias de produccion
+        working-directory: ${{ matrix.project }}
+        # Falla el pipeline si hay vulnerabilidades altas o criticas en las
+        # dependencias de produccion. Ajusta --audit-level segun la politica.
+        run: npm audit --omit=dev --audit-level=high
+
+  syntax-check:
+    name: Verificacion de sintaxis (backends)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - transgest-bloque6-backend/transgest-backend
+          - transgest-bloque6-backend/transgest-accounting-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: node --check de todo src y scripts
+        working-directory: ${{ matrix.project }}
+        run: |
+          set -e
+          for f in $(find src scripts -name '*.js'); do
+            node --check "$f"
+          done

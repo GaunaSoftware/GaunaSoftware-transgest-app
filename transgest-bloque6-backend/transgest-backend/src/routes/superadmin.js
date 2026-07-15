@@ -17,6 +17,7 @@ const {
   setGlobalSetting,
   resolveApiKey,
 } = require("../services/apiKeys");
+const empresaApiKeys = require("../services/empresaApiKeys");
 const {
   normalizeFiscalConfig,
   buildFiscalStatus,
@@ -2249,6 +2250,21 @@ router.delete("/integraciones/empresas/:empresaId/:provider/webhook-token", supe
       [req.params.empresaId, provider]
     );
     await audit(req, "integracion.gps.webhook_token.desactivado", { provider }, req.params.empresaId);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+router.get("/integraciones/api-keys", superAuth, async (req, res, next) => {
+  try {
+    res.json({ data: await empresaApiKeys.listAllKeys() });
+  } catch (e) { next(e); }
+});
+
+router.delete("/integraciones/api-keys/:id", superAuth, async (req, res, next) => {
+  try {
+    const revoked = await empresaApiKeys.revokeById(req.params.id);
+    if (!revoked) return res.status(404).json({ error: "API key no encontrada" });
+    await audit(req, "empresa.api_key.revocada_superadmin", { key_id: revoked.id, token_mask: revoked.token_mask }, revoked.empresa_id);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

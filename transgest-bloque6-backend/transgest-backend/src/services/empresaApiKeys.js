@@ -132,6 +132,31 @@ async function listKeys(empresaId) {
   return rows;
 }
 
+// Listado global (todas las empresas) para el panel de superadmin.
+async function listAllKeys() {
+  await ensureSchema();
+  const { rows } = await db.query(
+    `SELECT k.id, k.empresa_id, e.nombre AS empresa_nombre, k.nombre, k.token_mask, k.scopes,
+            k.activo, k.expires_at, k.rate_limit_per_hour, k.usage_count, k.last_used_at, k.created_at
+       FROM empresa_api_keys k
+       LEFT JOIN empresas e ON e.id=k.empresa_id
+      ORDER BY k.activo DESC, k.created_at DESC
+      LIMIT 500`
+  );
+  return rows;
+}
+
+// Revocacion por id sin exigir empresa (uso de superadmin/soporte).
+async function revokeById(keyId) {
+  await ensureSchema();
+  const { rows } = await db.query(
+    `UPDATE empresa_api_keys SET activo=false, updated_at=NOW() WHERE id=$1
+     RETURNING id, empresa_id, token_mask`,
+    [keyId]
+  );
+  return rows[0] || null;
+}
+
 async function revokeKey(empresaId, keyId, actorId = null, ip = null) {
   await ensureSchema();
   const { rows } = await db.query(
@@ -218,6 +243,8 @@ module.exports = {
   permisosFromScopes,
   createKey,
   listKeys,
+  listAllKeys,
   revokeKey,
+  revokeById,
   resolveKey,
 };

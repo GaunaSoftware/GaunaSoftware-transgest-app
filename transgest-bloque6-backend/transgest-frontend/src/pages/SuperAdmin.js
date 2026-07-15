@@ -610,6 +610,7 @@ function IntegracionesAdmin({ saFetchFn }) {
   const [salud, setSalud] = useState(null);
   const [accountingIntegrations, setAccountingIntegrations] = useState(null);
   const [integrationTab, setIntegrationTab] = useState("version");
+  const [apiKeysAll, setApiKeysAll] = useState([]);
   const [accountingCompanyId, setAccountingCompanyId] = useState("");
   const [accountingForm, setAccountingForm] = useState({
     connector_id:"",
@@ -1122,7 +1123,20 @@ function IntegracionesAdmin({ saFetchFn }) {
     ["version", "Version programa"],
     ["empresa", "Empresas y APIs"],
     ["contabilidad", "Contabilidad externa"],
+    ["api-keys", "API keys empresas"],
   ];
+  useEffect(()=>{
+    if (integrationTab === "api-keys") {
+      saFetchFn("/integraciones/api-keys").then(r=>setApiKeysAll(r?.data||[])).catch(()=>setApiKeysAll([]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [integrationTab]);
+  async function revocarApiKeyEmpresa(id){
+    if (!(await confirmDialog({ title:"Revocar API key", message:"La clave dejara de funcionar de inmediato para esa empresa.", confirmText:"Revocar", tone:"danger" }))) return;
+    const r = await saFetchFn(`/integraciones/api-keys/${id}`, { method:"DELETE" });
+    if (r.ok){ notify("API key revocada.","success"); saFetchFn("/integraciones/api-keys").then(x=>setApiKeysAll(x?.data||[])).catch(()=>{}); }
+    else notify(r.error||"No se pudo revocar.","error");
+  }
   const integrationSubcard = {background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12};
   const integrationGrid = {display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:10,alignItems:"end"};
   const integrationButtonRow = {display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"};
@@ -2310,6 +2324,25 @@ function IntegracionesAdmin({ saFetchFn }) {
         </div>
       </div>
 
+      <div style={{display:integrationTab==="api-keys" ? "block" : "none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
+        <div style={{fontWeight:800,color:"#e2e8f0",fontSize:14,marginBottom:6}}>API keys de integracion (todas las empresas)</div>
+        <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginBottom:10}}>Claves tgk_ que cada empresa usa para integrar programas externos. Cada empresa gestiona las suyas en Mi cuenta; aqui tienes control central para revocarlas.</div>
+        {apiKeysAll.length===0 ? (
+          <div style={{fontSize:12,color:"#64748b"}}>No hay API keys creadas.</div>
+        ) : (
+          <div style={{display:"grid",gap:6}}>
+            {apiKeysAll.map(k=>(
+              <div key={k.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:"8px 12px",flexWrap:"wrap"}}>
+                <div style={{minWidth:220}}>
+                  <div style={{color:"#e2e8f0",fontWeight:800,fontSize:13}}>{k.empresa_nombre || k.empresa_id} - {k.nombre} {!k.activo && <span style={{color:"#f87171",fontSize:11}}>(revocada)</span>}</div>
+                  <div style={{fontSize:11,color:"#64748b",fontFamily:"monospace"}}>{k.token_mask} - {(k.scopes||[]).join(", ")} - {k.usage_count||0} usos</div>
+                </div>
+                {k.activo && <button onClick={()=>revocarApiKeyEmpresa(k.id)} style={{...SaaS.btn,color:"#f87171",height:34}}>Revocar</button>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

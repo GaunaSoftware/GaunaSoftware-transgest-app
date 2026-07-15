@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
 import { removeToken, setToken, setUser } from "../services/api";
+import "./SuperAdmin.css";
 
 const BASE = process.env.REACT_APP_API_URL || "";
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -552,7 +553,7 @@ function CorreoGaunaAdmin({ saFetchFn }) {
     }
   }
 
-  const input = { background:"#1e293b", border:"1px solid #334155", color:"#f1f5f9", padding:"8px 10px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+  const input = { background:"var(--sa-input)", border:"1px solid var(--sa-border)", color:"var(--sa-text)", padding:"8px 10px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
   const label = {display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"#64748b",marginBottom:4,marginTop:10};
 
   return (
@@ -610,6 +611,7 @@ function IntegracionesAdmin({ saFetchFn }) {
   const [salud, setSalud] = useState(null);
   const [accountingIntegrations, setAccountingIntegrations] = useState(null);
   const [integrationTab, setIntegrationTab] = useState("empresa");
+  const [integrationScope, setIntegrationScope] = useState("company");
   const [accountingCompanyId, setAccountingCompanyId] = useState("");
   const [accountingForm, setAccountingForm] = useState({
     connector_id:"",
@@ -1054,7 +1056,7 @@ function IntegracionesAdmin({ saFetchFn }) {
     }
   }
 
-  const input = {background:"#1a2035",border:"1px solid #28344f",color:"#e2e8f0",padding:"8px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
+  const input = {background:"var(--sa-input)",border:"1px solid var(--sa-border)",color:"var(--sa-text)",padding:"8px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box"};
   const saludIntegraciones = salud || null;
   const saludTone = !saludIntegraciones
     ? { color:"#94a3b8", bg:"rgba(148,163,184,.08)", border:"#22304a", label:"Sin datos" }
@@ -1669,14 +1671,79 @@ function IntegracionesAdmin({ saFetchFn }) {
         </div>
       </div>
 
-      <div style={{display:integrationTab==="empresa" ? "block" : "none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
-        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
+      <div className="sa-integration-manager" style={{display:integrationTab==="empresa" ? "block" : "none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
+        <div className="sa-scope-switcher">
           <div>
-            <div style={{fontWeight:900,color:"#e2e8f0",fontSize:15}}>Gestion por empresa</div>
+            <div style={{fontWeight:900,color:"#e2e8f0",fontSize:15}}>Ambito de configuracion</div>
             <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4}}>
-              Selecciona una empresa y gestiona sus claves, cuotas, GPS, mapas, IA y canal fiscal desde aqui. En GPS solo puede quedar un proveedor activo a la vez.
+              Cambia de ambito de forma explicita. Las claves generales son respaldo de plataforma; las privadas pertenecen exclusivamente a la empresa seleccionada.
             </div>
           </div>
+          <div className="sa-segmented" role="group" aria-label="Ambito de integraciones">
+            <button type="button" className={integrationScope==="global" ? "is-active" : ""} onClick={()=>setIntegrationScope("global")}>General</button>
+            <button type="button" className={integrationScope==="company" ? "is-active" : ""} onClick={()=>setIntegrationScope("company")}>Por empresa</button>
+          </div>
+        </div>
+
+        {integrationScope === "global" ? (
+          <div className="sa-global-integrations">
+            <div className="sa-scope-notice sa-scope-notice-global">
+              <strong>Configuracion general</strong>
+              <span>Se usa en la demo y como respaldo solo cuando una empresa no tiene una clave privada activa. No modifica credenciales propias de ningun cliente.</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12}}>
+              <div style={integrationSubcard}>
+                <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Rutas, mapas y servicios</div>
+                <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,marginBottom:10}}>Selecciona un proveedor global, configura su clave cifrada y verifica la conexion real.</div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor general</label>
+                <select style={input} value={provider} onChange={e=>setProvider(e.target.value)}>
+                  {companyProviderOptions.map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
+                </select>
+                <div style={{...integrationButtonRow,marginTop:10}}>
+                  <button onClick={()=>guardarGlobal(provider)} style={{...SaaS.btnOk,height:36}}>{providerGlobalOk ? "Sustituir clave" : "Configurar clave"}</button>
+                  <button onClick={()=>probarGlobal(provider)} disabled={testingProvider===`global:${provider}`} style={{...SaaS.btn,height:36}}>{testingProvider===`global:${provider}` ? "Probando..." : "Probar conexion"}</button>
+                  {providerGlobalOk && <button onClick={()=>eliminarGlobal(provider)} style={{...SaaS.btn,color:"#f87171",height:36}}>Eliminar</button>}
+                </div>
+                <div style={{fontSize:11,color:providerGlobalOk ? "#34d399" : "#fbbf24",fontWeight:800,marginTop:9}}>{providerGlobalOk ? `Clave disponible (${providerGlobalStatus.global_source || "global"})` : "Sin clave general"}</div>
+              </div>
+              <div style={integrationSubcard}>
+                <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>IA y automatizacion</div>
+                <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,marginBottom:10}}>Motor general para demo y fallback. La empresa sigue pudiendo usar su propia clave y cuota.</div>
+                <div style={integrationGrid}>
+                  <div>
+                    <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor</label>
+                    <select style={input} value={aiForm.provider} onChange={e=>setAiForm(p=>({...p,provider:e.target.value,base_url:e.target.value==="ai_generic"?p.base_url:""}))}>
+                      {(data?.ai_providers || ["anthropic","openai","ai_generic"]).map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
+                    </select>
+                  </div>
+                  <div><label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Modelo</label><input style={input} value={aiForm.model} onChange={e=>setAiForm(p=>({...p,model:e.target.value}))}/></div>
+                  {aiForm.provider === "ai_generic" && <div><label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>URL base</label><input style={input} value={aiForm.base_url} onChange={e=>setAiForm(p=>({...p,base_url:e.target.value}))}/></div>}
+                </div>
+                <div style={{...integrationButtonRow,marginTop:10}}>
+                  <button onClick={guardarIA} style={{...SaaS.btnOk,height:36}}>Guardar motor</button>
+                  <button onClick={()=>guardarGlobal(aiForm.provider)} style={{...SaaS.btn,height:36,color:"#5eead4"}}>{aiGlobalOk ? "Sustituir clave" : "Configurar clave"}</button>
+                  <button onClick={()=>probarGlobal(aiForm.provider)} disabled={testingProvider===`global:${aiForm.provider}`} style={{...SaaS.btn,height:36}}>{testingProvider===`global:${aiForm.provider}` ? "Probando..." : "Probar conexion"}</button>
+                  {aiGlobalOk && <button onClick={()=>eliminarGlobal(aiForm.provider)} style={{...SaaS.btn,color:"#f87171",height:36}}>Eliminar</button>}
+                </div>
+              </div>
+              <div style={integrationSubcard}>
+                <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>GPS de respaldo</div>
+                <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,marginBottom:10}}>El proveedor activo se elige siempre por empresa. Aqui solo se mantiene una credencial general opcional.</div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor GPS</label>
+                <select style={input} value={gpsProvider} onChange={e=>setGpsProvider(e.target.value)}>{gpsProviders.map(p=><option key={p} value={p}>{labels[p] || p}</option>)}</select>
+                <div style={{...integrationButtonRow,marginTop:10}}>
+                  <button onClick={()=>guardarGlobal(gpsProvider)} style={{...SaaS.btnOk,height:36}}>{gpsGlobalOk ? "Sustituir clave" : "Configurar clave"}</button>
+                  <button onClick={()=>probarGlobal(gpsProvider)} disabled={testingProvider===`global:${gpsProvider}`} style={{...SaaS.btn,height:36}}>{testingProvider===`global:${gpsProvider}` ? "Probando..." : "Probar conexion"}</button>
+                  {gpsGlobalOk && <button onClick={()=>eliminarGlobal(gpsProvider)} style={{...SaaS.btn,color:"#f87171",height:36}}>Eliminar</button>}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+        <>
+        <div className="sa-scope-notice">
+          <strong>Configuracion privada por empresa</strong>
+          <span>Los cambios siguientes afectan solo a <b>{selectedEmpresa?.nombre || "la empresa seleccionada"}</b>. Fiscalidad y certificados nunca se comparten globalmente.</span>
           <select style={{...input,maxWidth:360}} value={empresaId} onChange={e=>setEmpresaId(e.target.value)}>
             {(data?.empresas || []).map(e => <option key={e.id} value={e.id}>{e.nombre} - {e.plan}</option>)}
           </select>
@@ -1717,55 +1784,6 @@ function IntegracionesAdmin({ saFetchFn }) {
             </div>
             <div style={{fontSize:11,color:"#64748b",marginTop:5}}>
               Periodo {selectedEmpresa?.ia_periodo_mes || new Date().toISOString().slice(0,7)}. Las cuotas propias de proveedor se guardan debajo.
-            </div>
-            <div style={{borderTop:"1px solid #22304a",marginTop:12,paddingTop:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
-                <div style={{fontSize:11,fontWeight:900,color:"#94a3b8",textTransform:"uppercase",letterSpacing:".05em"}}>
-                  Motor IA global
-                </div>
-                <span style={{fontSize:10,fontWeight:900,color:aiGlobalOk ? "#34d399" : "#fbbf24"}}>
-                  {aiGlobalOk ? `Clave disponible (${aiGlobalStatus.global_source || "global"})` : "Falta clave"}
-                </span>
-              </div>
-              <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginBottom:9}}>
-                Esta clave se usa en la demo y como respaldo. Si una empresa tiene clave propia activa, prevalece la suya. La clave completa nunca vuelve al navegador.
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,alignItems:"end"}}>
-                <div>
-                  <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor</label>
-                  <select style={input} value={aiForm.provider} onChange={e=>setAiForm(p=>({
-                    ...p,
-                    provider:e.target.value,
-                    base_url:e.target.value === "ai_generic" ? p.base_url : "",
-                    model:e.target.value === "openai" ? "gpt-5-mini" : e.target.value === "anthropic" ? "claude-sonnet-4-20250514" : "gpt-4o-mini",
-                  }))}>
-                    {(data?.ai_providers || ["anthropic","openai","ai_generic"]).map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>URL base</label>
-                  <input style={input} value={aiForm.base_url} onChange={e=>setAiForm(p=>({...p,base_url:e.target.value}))} placeholder="https://api.proveedor.com/v1" />
-                </div>
-                <div>
-                  <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Modelo</label>
-                  <input style={input} value={aiForm.model} onChange={e=>setAiForm(p=>({...p,model:e.target.value}))} placeholder="gpt-5-mini" />
-                </div>
-              </div>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:9}}>
-                <button onClick={guardarIA} style={{...SaaS.btnOk,height:36}}>Guardar proveedor y modelo</button>
-                <button onClick={()=>guardarGlobal(aiForm.provider)} style={{...SaaS.btn,height:36,color:"#5eead4",borderColor:"rgba(45,212,191,.30)"}}>
-                  {aiGlobalOk ? "Sustituir clave" : "Configurar clave"}
-                </button>
-                <button onClick={()=>probarGlobal(aiForm.provider)} disabled={testingProvider===`global:${aiForm.provider}`} style={{...SaaS.btn,height:36}}>
-                  {testingProvider===`global:${aiForm.provider}` ? "Probando OpenAI..." : "Probar conexion real"}
-                </button>
-                {aiGlobalOk && <button onClick={()=>eliminarGlobal(aiForm.provider)} style={{...SaaS.btn,color:"#f87171",height:36}}>Eliminar clave</button>}
-              </div>
-              {testMsg && !testMsg.empresa_id && testMsg.provider === aiForm.provider && (
-                <div style={{marginTop:9,fontSize:11,lineHeight:1.45,color:testMsg.ok ? "#34d399" : "#fbbf24",fontWeight:800}}>
-                  {testMsg.message}{testMsg.model ? ` Modelo verificado: ${testMsg.model}.` : ""}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -2221,23 +2239,6 @@ function IntegracionesAdmin({ saFetchFn }) {
           </div>
         </div>
 
-        <div style={{...integrationSubcard,marginBottom:12,borderColor:"rgba(245,158,11,.22)",background:"rgba(245,158,11,.06)"}}>
-          <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Claves globales de respaldo</div>
-              <div style={{fontSize:11,color:"#fcd34d",lineHeight:1.45,marginTop:4}}>
-                Usalas solo para la demo o como fallback temporal. Una empresa con clave propia activa no necesita tocar estas claves.
-              </div>
-            </div>
-            <div style={integrationButtonRow}>
-              <button onClick={()=>guardarGlobal(provider)} style={{...SaaS.btnOk,padding:"7px 10px"}}>Global {labels[provider] || provider}</button>
-              {providerGlobalOk && <button onClick={()=>eliminarGlobal(provider)} style={{...SaaS.btn,color:"#f87171",padding:"7px 10px"}}>Eliminar {labels[provider] || provider}</button>}
-              <button onClick={()=>guardarGlobal(gpsProvider)} style={{...SaaS.btnOk,padding:"7px 10px"}}>Global GPS</button>
-              {gpsGlobalOk && <button onClick={()=>eliminarGlobal(gpsProvider)} style={{...SaaS.btn,color:"#f87171",padding:"7px 10px"}}>Eliminar GPS</button>}
-            </div>
-          </div>
-        </div>
-
         <div style={{display:"block",marginTop:12,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
             <div>
@@ -2315,6 +2316,8 @@ function IntegracionesAdmin({ saFetchFn }) {
         <div style={{display:"block",fontSize:11,color:"#64748b",marginTop:6}}>
           La configuracion fiscal sensible se mantiene en la propia empresa para respetar APIs, certificados y credenciales separadas por cliente.
         </div>
+        </>
+        )}
       </div>
 
       <div style={{display:integrationTab==="version" ? "block" : "none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
@@ -2745,12 +2748,12 @@ function CalendarioLaboralAdmin({ saFetchFn, empresas }){
 }
 
 const SaaS = {
-  card:{background:"#141c2e",border:"1px solid #1c2740",borderRadius:8,padding:"16px 18px",marginBottom:12},
-  title:{fontSize:15,fontWeight:800,color:"#f1f5f9",marginBottom:12},
-  empty:{padding:18,textAlign:"center",fontSize:12,color:"#64748b"},
-  th:{textAlign:"left",padding:"8px 10px",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",borderBottom:"1px solid #1c2740"},
-  td:{padding:"9px 10px",borderBottom:"1px solid #0d1525",fontSize:12,color:"#94a3b8",verticalAlign:"middle"},
-  btn:{padding:"4px 9px",borderRadius:6,border:"1px solid #1c2740",background:"#1e2d45",color:"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer"},
+  card:{background:"var(--sa-panel)",border:"1px solid var(--sa-border)",borderRadius:8,padding:"16px 18px",marginBottom:12},
+  title:{fontSize:15,fontWeight:800,color:"var(--sa-text)",marginBottom:12},
+  empty:{padding:18,textAlign:"center",fontSize:12,color:"var(--sa-muted)"},
+  th:{textAlign:"left",padding:"8px 10px",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--sa-muted)",borderBottom:"1px solid var(--sa-border)"},
+  td:{padding:"9px 10px",borderBottom:"1px solid var(--sa-border)",fontSize:12,color:"var(--sa-muted)",verticalAlign:"middle"},
+  btn:{padding:"4px 9px",borderRadius:6,border:"1px solid var(--sa-border)",background:"var(--sa-panel-soft)",color:"var(--sa-muted)",fontSize:11,fontWeight:700,cursor:"pointer"},
   btnOk:{padding:"4px 9px",borderRadius:6,border:"1px solid rgba(16,185,129,.25)",background:"rgba(16,185,129,.12)",color:"#34d399",fontSize:11,fontWeight:700,cursor:"pointer"},
   btnWarn:{padding:"4px 9px",borderRadius:6,border:"1px solid rgba(245,158,11,.25)",background:"rgba(245,158,11,.12)",color:"#fbbf24",fontSize:11,fontWeight:700,cursor:"pointer"},
 };
@@ -2799,6 +2802,14 @@ function PasswordResetRequestsPanel({ items = [], onReset, onDismiss, onRefresh 
 export default function SuperAdmin(){
   const [loggedIn,setLoggedIn]=useState(!!saToken());
   const [tab,setTab]=useState("dashboard"); // dashboard | empresas
+  const [menuOpen,setMenuOpen]=useState(false);
+  const [theme,setTheme]=useState(()=>{
+    try {
+      const saved = localStorage.getItem("transgest_superadmin_theme");
+      if (saved === "light" || saved === "dark") return saved;
+    } catch {}
+    return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  });
   const [empresas,setEmpresas]=useState([]);
   const [stats,setStats]=useState(null);
   const [loading,setLoading]=useState(false);
@@ -2833,6 +2844,9 @@ export default function SuperAdmin(){
   },[loggedIn]);
 
   useEffect(()=>{cargar();},[cargar]);
+  useEffect(()=>{
+    try { localStorage.setItem("transgest_superadmin_theme", theme); } catch {}
+  },[theme]);
 
   const empresasFiltradas=empresas.filter(e=>{
     const matchBusq=!busqueda||String(e.nombre||"").toLowerCase().includes(busqueda.toLowerCase())||String(e.email_admin||"").toLowerCase().includes(busqueda.toLowerCase());
@@ -2954,99 +2968,77 @@ export default function SuperAdmin(){
   }
 
   const S={
-    card:{background:"#141c2e",border:"1px solid #1c2740",borderRadius:12,padding:"14px 18px",marginBottom:12},
-    th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#64748b",borderBottom:"1px solid #1c2740",whiteSpace:"nowrap"},
-    td:{padding:"10px 14px",borderBottom:"1px solid #0d1525",fontSize:13,color:"#94a3b8",verticalAlign:"middle"},
+    card:{background:"var(--sa-panel)",border:"1px solid var(--sa-border)",borderRadius:8,padding:"14px 18px",marginBottom:12},
+    th:{textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--sa-muted)",borderBottom:"1px solid var(--sa-border)",whiteSpace:"nowrap"},
+    td:{padding:"10px 14px",borderBottom:"1px solid var(--sa-border)",fontSize:13,color:"var(--sa-muted)",verticalAlign:"middle"},
     btn:{padding:"6px 12px",borderRadius:7,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"},
   };
+
+  const navItems = [
+    ["dashboard","Dashboard","DB"],
+    ["empresas","Empresas","EM"],
+    ["salud","Salud","SL"],
+    ["integraciones","Integraciones","IN"],
+    ["calendario","Calendario laboral","CA"],
+    ["auditoria","Auditoria","AU"],
+    ["backups","Backups","BK"],
+    ["config","Configuracion","CF"],
+  ];
+  const pageMeta = {
+    dashboard:["Dashboard","Resumen general del entorno TransGest"],
+    empresas:["Empresas","Gestion centralizada de clientes y suscripciones"],
+    salud:["Salud del sistema","Estado tecnico y operativo de los servicios"],
+    integraciones:["Integraciones","APIs generales y configuraciones privadas por empresa"],
+    calendario:["Calendario laboral","Festivos y calendario operativo por empresa"],
+    auditoria:["Auditoria","Trazabilidad y actividad relevante del sistema"],
+    backups:["Backups","Proteccion, restauracion y retencion de datos"],
+    config:["Configuracion","Seguridad, usuarios y correo de plataforma"],
+  };
+  const openTab = id => { setTab(id); setMenuOpen(false); };
 
   if(!loggedIn) return <LoginSA onLogin={()=>setLoggedIn(true)}/>;
 
   return(
-    <div className="tg-superadmin-page" style={{minHeight:"100vh",background:"#0f1420",fontFamily:"'DM Sans',sans-serif",color:"#e2e8f0"}}>
-      <style>{`
-        .tg-superadmin-page, .tg-superadmin-page * { box-sizing:border-box; min-width:0; }
-        .tg-superadmin-page table { width:100%; }
-        .tg-superadmin-page [style*="overflow-x:auto"],
-        .tg-superadmin-page [style*="overflow-x: auto"] { -webkit-overflow-scrolling:touch; }
-        @media (max-width: 900px) {
-          .tg-superadmin-page > div:first-of-type { align-items:flex-start !important; padding:14px 16px !important; }
-          .tg-superadmin-page > div:first-of-type > div:last-child { width:100%; justify-content:flex-start !important; flex-wrap:wrap; }
-          .tg-superadmin-page > div:nth-of-type(2) { overflow-x:auto; padding:0 14px !important; -webkit-overflow-scrolling:touch; }
-          .tg-superadmin-page > div:nth-of-type(2) > button { flex:0 0 auto; }
-          .tg-superadmin-page > div:nth-of-type(3) { padding:18px 14px !important; max-width:100% !important; }
-          .tg-superadmin-page [style*="grid-template-columns:1fr 1fr"],
-          .tg-superadmin-page [style*="grid-template-columns: 1fr 1fr"],
-          .tg-superadmin-page [style*="grid-template-columns:1.2fr"],
-          .tg-superadmin-page [style*="grid-template-columns:minmax"],
-          .tg-superadmin-page [style*="grid-template-columns: minmax"],
-          .tg-superadmin-page [style*="grid-template-columns:1fr auto"],
-          .tg-superadmin-page [style*="grid-template-columns: 1fr auto"] {
-            grid-template-columns:1fr !important;
-          }
-          .tg-superadmin-page [style*="position:fixed"],
-          .tg-superadmin-page [style*="position: fixed"] {
-            align-items:flex-start !important;
-            justify-content:center !important;
-            padding:10px !important;
-            overflow:auto !important;
-          }
-          .tg-superadmin-page [style*="position:fixed"] > div,
-          .tg-superadmin-page [style*="position: fixed"] > div,
-          .tg-superadmin-page [style*="position:fixed"] > form,
-          .tg-superadmin-page [style*="position: fixed"] > form {
-            width:100% !important;
-            max-width:calc(100vw - 20px) !important;
-            max-height:calc(100dvh - 20px) !important;
-            overflow:auto !important;
-          }
-        }
-        @media (max-width: 560px) {
-          .tg-superadmin-page [style*="display:flex"],
-          .tg-superadmin-page [style*="display: flex"] { flex-wrap:wrap; }
-          .tg-superadmin-page input,
-          .tg-superadmin-page select,
-          .tg-superadmin-page textarea,
-          .tg-superadmin-page button { max-width:100% !important; }
-          .tg-superadmin-page table {
-            display:block;
-            overflow-x:auto;
-            white-space:nowrap;
-          }
-        }
-      `}</style>
-      {/* Header */}
-      <div style={{background:"#141c2e",borderBottom:"1px solid #1c2740",padding:"14px 28px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
-        <div>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:20}}>TransGestAdmin</div>
-          <div style={{fontSize:12,color:"#64748b",marginTop:2}}>hola maestro.</div>
-        </div>
-        <div style={{display:"flex",gap:10,alignItems:"center"}}>
-          <button onClick={crearEmpresaDemo} disabled={creatingDemo} style={{...S.btn,background:"rgba(20,184,166,.14)",color:"#5eead4",border:"1px solid rgba(20,184,166,.28)",padding:"9px 18px",fontSize:13,fontWeight:700}}>
-            {creatingDemo ? "Creando..." : "+ Empresa demo"}
-          </button>
-          <button onClick={()=>setModalNueva(true)} style={{...S.btn,background:"#3b6ef5",color:"#fff",padding:"9px 18px",fontSize:13,fontWeight:700}}>+ Nueva empresa</button>
-          <button onClick={()=>{
-            saTokenRem();
-            removeToken();
-            setLoggedIn(false);
-          }} style={{...S.btn,background:"rgba(239,68,68,.1)",color:"#f87171",border:"1px solid rgba(239,68,68,.2)"}}>Salir</button>
-        </div>
-      </div>
+    <div className={`tg-superadmin-page sa-theme-${theme}`}>
+      <div className="sa-app-shell">
+        {menuOpen && <button className="sa-menu-scrim" aria-label="Cerrar menu" onClick={()=>setMenuOpen(false)}/>}
+        <aside className={`sa-sidebar ${menuOpen ? "is-open" : ""}`}>
+          <div className="sa-brand-row">
+            <div className="sa-brand">TransGestAdmin</div>
+            <button className="sa-sidebar-close" aria-label="Cerrar menu" onClick={()=>setMenuOpen(false)}>x</button>
+          </div>
+          <nav className="sa-nav" aria-label="Navegacion de superadmin">
+            {navItems.map(([id,label,short])=>(
+              <button key={id} type="button" className={tab===id ? "is-active" : ""} onClick={()=>openTab(id)}>
+                <span className="sa-nav-icon" aria-hidden="true">{short}</span>
+                <span>{label}</span>
+              </button>
+            ))}
+          </nav>
+          <div className="sa-account-card">
+            <span className="sa-account-avatar">SA</span>
+            <span><strong>Superadmin</strong><small>Administrador</small></span>
+          </div>
+        </aside>
 
-      {/* Tabs */}
-      <div style={{background:"#141c2e",borderBottom:"1px solid #1c2740",padding:"0 28px",display:"flex",gap:2}}>
-        {[["dashboard","Dashboard"],["salud","Salud"],["empresas","Empresas"],["integraciones","Integraciones"],["calendario","Calendario laboral"],["auditoria","Auditoria"],["backups","Backups"],["config","Configuracion"]].map(([id,l])=>(
-          <button key={id} onClick={()=>setTab(id)}
-            style={{padding:"12px 16px",border:"none",borderBottom:`2px solid ${tab===id?"#3b6ef5":"transparent"}`,
-              color:tab===id?"#e2e8f0":"#64748b",background:"transparent",
-              fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-            {l}
-          </button>
-        ))}
-      </div>
+        <section className="sa-main-column">
+          <header className="sa-topbar">
+            <div className="sa-page-heading">
+              <button className="sa-menu-button" type="button" aria-label="Abrir menu" onClick={()=>setMenuOpen(true)}>Menu</button>
+              <div>
+                <h1>{pageMeta[tab]?.[0] || "Superadmin"}</h1>
+                <p>{pageMeta[tab]?.[1] || "Gestion de plataforma"}</p>
+              </div>
+            </div>
+            <div className="sa-top-actions">
+              <button className="sa-icon-button" type="button" title={theme==="dark" ? "Activar modo claro" : "Activar modo oscuro"} aria-label={theme==="dark" ? "Activar modo claro" : "Activar modo oscuro"} onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}>{theme==="dark" ? "Claro" : "Oscuro"}</button>
+              <button className="sa-action sa-action-demo" onClick={crearEmpresaDemo} disabled={creatingDemo}>{creatingDemo ? "Creando..." : "+ Empresa demo"}</button>
+              <button className="sa-action sa-action-primary" onClick={()=>setModalNueva(true)}>+ Nueva empresa</button>
+              <button className="sa-action sa-action-danger" onClick={()=>{saTokenRem();removeToken();setLoggedIn(false);}}>Salir</button>
+            </div>
+          </header>
 
-      <div style={{maxWidth:1300,margin:"0 auto",padding:"24px 28px"}}>
+          <main className="sa-content">
 
         {/* Section */}
         {tab==="dashboard"&&stats&&(
@@ -3271,6 +3263,8 @@ export default function SuperAdmin(){
         {tab==="backups"&&(
           <BackupsAdmin saFetchFn={saFetch}/>
         )}
+          </main>
+        </section>
       </div>
 
       {modalNueva&&<ModalNuevaEmpresa onClose={()=>setModalNueva(false)} onCreada={()=>{setModalNueva(false);cargar();}}/>}

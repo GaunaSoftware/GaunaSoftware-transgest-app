@@ -196,6 +196,16 @@ app.use("/api/v1/pedidos/colaborador", publicWorkflowLimiter);
 app.use("/api/v1/gps/webhook", publicWorkflowLimiter);
 app.use("/api/v1/fiscal/webhook", publicWorkflowLimiter);
 app.use("/api/v1/whatsapp/webhook", publicWorkflowLimiter);
+// Rate limit global por IP (ASVS V13.1): frena abuso/DoS sin afectar al uso
+// normal. Generoso y configurable con RATE_LIMIT_PER_MIN. Los limites de login
+// (mas estrictos) siguen aplicando encima en sus rutas.
+const globalApiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Math.max(60, Number(process.env.RATE_LIMIT_PER_MIN || 1200)),
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: "Demasiadas solicitudes. Reduce el ritmo e intenta de nuevo en unos segundos." },
+});
+app.use("/api/v1", globalApiLimiter);
 
 // ── Health check ──────────────────────────────────────
 app.head("/", (_req, res) => {

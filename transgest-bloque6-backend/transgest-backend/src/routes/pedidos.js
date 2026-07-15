@@ -4907,6 +4907,39 @@ async function registrarHistorialAsignacionPedido(client, pedido = {}, empresaId
   }
 }
 
+async function sincronizarConjuntoChoferDesdePedido(queryClient, pedido = {}, empresaId) {
+  if (!pedido?.chofer_id || !pedido?.vehiculo_id || !empresaId) return;
+  try {
+    const choferId = pedido.chofer_id;
+    const vehiculoId = pedido.vehiculo_id;
+    const remolqueId = pedido.remolque_id || null;
+
+    await queryClient.query(
+      "UPDATE vehiculos SET chofer_id=NULL WHERE empresa_id=$1 AND chofer_id=$2 AND id<>$3",
+      [empresaId, choferId, vehiculoId]
+    );
+
+    if (remolqueId) {
+      await queryClient.query(
+        "UPDATE vehiculos SET remolque_id=NULL WHERE empresa_id=$1 AND remolque_id=$2 AND id<>$3",
+        [empresaId, remolqueId, vehiculoId]
+      );
+    }
+
+    await queryClient.query(
+      "UPDATE choferes SET vehiculo_id=$1 WHERE empresa_id=$2 AND id=$3",
+      [vehiculoId, empresaId, choferId]
+    );
+
+    await queryClient.query(
+      "UPDATE vehiculos SET chofer_id=$1, remolque_id=$2, updated_at=NOW() WHERE empresa_id=$3 AND id=$4",
+      [choferId, remolqueId, empresaId, vehiculoId]
+    );
+  } catch (err) {
+    logger.warn("No se pudo sincronizar el conjunto del chofer desde pedido:", err.message);
+  }
+}
+
 function pedidoTieneMinimosOperativos(pedido = {}) {
   const tieneAsignacion = Boolean(pedido.vehiculo_id || pedido.colaborador_id);
   const importe = Number(pedido.importe || pedido.precio_cliente_col || 0);
@@ -8063,6 +8096,7 @@ router.post("/", GERENTE_O_TRAFICO,
         pedido = updatedPedido || pedido;
       }
       pedido = await confirmarPedidoPorAsignacionSiProcede(pedido, empresaId, req.user, client);
+      await sincronizarConjuntoChoferDesdePedido(client, pedido, empresaId);
       if (rutaIncompatibleDesvinculada) {
         await logPedidoEvento(pedido.id, empresaId, "ruta.incompatible_desvinculada", {
           ruta_id_solicitada: requestedRutaId,
@@ -8583,6 +8617,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     let pedidoActualizado = rows[0];
     pedidoActualizado = await limpiarPendienteCompletarSiProcede(pedidoActualizado, empresaId, req.user);
     pedidoActualizado = await confirmarPedidoPorAsignacionSiProcede(pedidoActualizado, empresaId, req.user);
+    if (assignmentFieldsTouched) await sincronizarConjuntoChoferDesdePedido(db, pedidoActualizado, empresaId);
     if (assignmentFieldsTouched && pedidoAntesAsignacion) {
       const changed = ["vehiculo_id", "chofer_id", "chofer2_id", "remolque_id", "colaborador_id"].some(
         k => String(pedidoAntesAsignacion[k] || "") !== String(pedidoActualizado[k] || "")

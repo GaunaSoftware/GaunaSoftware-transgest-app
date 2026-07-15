@@ -464,7 +464,7 @@ router.post("/billing/checkout", async (req, res) => {
 
   let payload;
   try {
-    payload = jwt.verify(header.split(" ")[1], userJwtSecret());
+    payload = jwt.verify(header.split(" ")[1], userJwtSecret(), { algorithms: ["HS256"] });
   } catch {
     return res.status(401).json({ error: "Token invalido" });
   }

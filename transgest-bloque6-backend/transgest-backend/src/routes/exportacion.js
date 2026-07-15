@@ -19,7 +19,7 @@ function superAuth(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) return res.status(401).json({ error: "No autorizado" });
   try {
-    const payload = jwt.verify(header.split(" ")[1], superadminJwtSecret());
+    const payload = jwt.verify(header.split(" ")[1], superadminJwtSecret(), { algorithms: ["HS256"] });
     if (!payload.superadmin) return res.status(403).json({ error: "Acceso denegado" });
     req.superadmin = payload;
     next();

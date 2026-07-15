@@ -28,7 +28,7 @@ router.post("/sso/exchange", async (req, res, next) => {
 
   let payload;
   try {
-    payload = jwt.verify(token, config.ssoJwtSecret);
+    payload = jwt.verify(token, config.ssoJwtSecret, { algorithms: ["HS256"] });
   } catch {
     return res.status(401).json({ error: "Token SSO invalido o caducado" });
   }

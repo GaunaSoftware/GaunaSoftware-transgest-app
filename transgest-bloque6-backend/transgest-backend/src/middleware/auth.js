@@ -448,7 +448,7 @@ async function authenticate(req, res, next) {
       return next();
     }
 
-    const payload = jwt.verify(token, userJwtSecret());
+    const payload = jwt.verify(token, userJwtSecret(), { algorithms: ["HS256"] });
 
     const { rows } = await db.query(
       `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id,

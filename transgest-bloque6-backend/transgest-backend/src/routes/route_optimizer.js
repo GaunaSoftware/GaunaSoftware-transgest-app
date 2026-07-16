@@ -4,6 +4,7 @@ const db = require("../services/db");
 const { enviarEmail } = require("../services/email");
 const { crearNotificacion } = require("../services/notificaciones");
 const { resolveApiKey, getCompanyApiConfig, publicStatusForProvider, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
+const { resolveMapsCoords } = require("../services/mapsLink");
 
 const router = express.Router();
 
@@ -272,6 +273,16 @@ function stopQuery(stop) {
   return stop?.address || stop?.google_maps_url || "";
 }
 
+// Como stopCoordinate pero, si no hay coords inline y el enlace de Google Maps
+// es corto (maps.app.goo.gl), lo expande por red para sacar el punto exacto.
+async function resolveStopCoordinate(stop) {
+  const sync = stopCoordinate(stop);
+  if (sync) return sync;
+  const c = await resolveMapsCoords((stop && (stop.google_maps_url || stop.address)) || "");
+  if (c) return [c.lng, c.lat];
+  return null;
+}
+
 function mapsUrl(stops) {
   const addresses = stops.map(stopQuery).filter(Boolean);
   if (!addresses.length) return "";
@@ -428,7 +439,7 @@ async function geocodeLocal(address) {
 
 async function routeLocal(stops) {
   const coordinates = [];
-  for (const stop of stops) coordinates.push(stopCoordinate(stop) || await geocodeLocal(stopQuery(stop) || stop?.name || ""));
+  for (const stop of stops) coordinates.push(await resolveStopCoordinate(stop) || await geocodeLocal(stopQuery(stop) || stop?.name || ""));
   let data;
   try {
     data = await fetchJson(
@@ -454,7 +465,7 @@ async function routeLocal(stops) {
 async function routeOrs(stops, preference, truck, apiKey) {
   if (!apiKey) throw new Error("ORS_API_KEY no configurada");
   const coordinates = [];
-  for (const stop of stops) coordinates.push(stopCoordinate(stop) || await geocodeOrs(stopQuery(stop), apiKey));
+  for (const stop of stops) coordinates.push(await resolveStopCoordinate(stop) || await geocodeOrs(stopQuery(stop), apiKey));
   const body = {
     coordinates,
     preference: preferenceForProvider(preference, "ors"),
@@ -496,7 +507,7 @@ async function routeOrs(stops, preference, truck, apiKey) {
 async function routeHere(stops, preference, truck, apiKey) {
   if (!apiKey) throw new Error("HERE_API_KEY no configurada");
   const coordinates = [];
-  for (const stop of stops) coordinates.push(stopCoordinate(stop) || await geocodeHere(stopQuery(stop), apiKey));
+  for (const stop of stops) coordinates.push(await resolveStopCoordinate(stop) || await geocodeHere(stopQuery(stop), apiKey));
   const params = new URLSearchParams({
     apiKey,
     transportMode: "truck",

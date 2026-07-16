@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const db = require("../services/db");
 const { resolveApiKey, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
 const { fallbackPlaceForAddress } = require("../services/geoFallback");
+const { resolveMapsCoords } = require("../services/mapsLink");
 const {
   countryCodeFor,
   isCountryOnlyQuery,
@@ -261,6 +262,10 @@ async function cachePlace(empresaId, queryKey, q, country, region, resolved) {
 async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} }) {
   const direct = directCoordinates(raw);
   if (direct) return { provider: "coordinates", ...formatPlace({ ...raw, ...direct, label: raw.label || q }) };
+  // Enlace corto de Google Maps (maps.app.goo.gl): se expande por red y se usa
+  // el punto exacto, para no depender de geocodificar el texto.
+  const shortLink = await resolveMapsCoords(raw.google_maps_url || raw.maps_url || raw.googleMapsUrl || "");
+  if (shortLink) return { provider: "coordinates", ...formatPlace({ ...raw, lat: shortLink.lat, lng: shortLink.lng, label: raw.label || q }) };
   const request = parsePlaceRequest(cleanText(q), country, region);
   const query = request.query;
   if (query.length < 2) throw Object.assign(new Error("Indica una poblacion o direccion"), { status: 400 });

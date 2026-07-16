@@ -44,13 +44,22 @@ function isMapsUrl(url) {
   return /^https?:\/\/[^\s]*(google\.[a-z.]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl|g\.co\/)/i.test(String(url || "").trim());
 }
 
-// Area de operacion realista (Peninsula, Baleares, Canarias, Portugal, sur de
-// Francia, norte de Marruecos). Guarda de seguridad: Google devuelve un mapa por
-// defecto DISTINTO segun la IP del servidor, asi que al hacer scraping del cuerpo
-// podemos toparnos con una coordenada de otra region (p.ej. Los Angeles desde una
-// IP de EE.UU.). Descartamos lo que caiga fuera para no calcular km absurdos.
+// Area de operacion realista de un transportista europeo: toda Europa (incl.
+// Escandinavia, Este y Turquia), Canarias, Islas y norte de Africa. Guarda de
+// seguridad SOLO para el scraping del cuerpo: Google devuelve un mapa por defecto
+// DISTINTO segun la IP del servidor (desde EE.UU. resolvia a Los Angeles), asi
+// que descartamos coordenadas de otro continente para no calcular km absurdos.
+// Un enlace legitimo de Francia/Alemania/Italia/etc. cae dentro y se acepta.
+// Configurable por si hiciera falta operar fuera (MAPS_AREA_BOX="latMin,latMax,lngMin,lngMax").
+const AREA_BOX = (() => {
+  const parts = String(process.env.MAPS_AREA_BOX || "20,64,-20,45").split(",").map(Number);
+  const [latMin, latMax, lngMin, lngMax] = parts.length === 4 && parts.every(Number.isFinite) ? parts : [20, 64, -20, 45];
+  return { latMin, latMax, lngMin, lngMax };
+})();
 function withinOperatingArea(lat, lng) {
-  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 27 && lat <= 55 && lng >= -19 && lng <= 20;
+  return Number.isFinite(lat) && Number.isFinite(lng)
+    && lat >= AREA_BOX.latMin && lat <= AREA_BOX.latMax
+    && lng >= AREA_BOX.lngMin && lng <= AREA_BOX.lngMax;
 }
 
 // Anade contexto España (gl/hl) a una URL de Google Maps para que la resolucion

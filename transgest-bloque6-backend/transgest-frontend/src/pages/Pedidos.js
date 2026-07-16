@@ -10714,9 +10714,15 @@ export default function Pedidos() {
                         Ver en trafico
                       </button>
                       {needsAssignment && (
+                      <button onClick={e=>{e.stopPropagation();abrirEditar(p, {_focus_asignacion: true});}}
+                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(20,184,166,.4)",background:"rgba(20,184,166,.12)",color:"var(--accent)",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                          Asignar
+                        </button>
+                      )}
+                      {needsAssignment && (
                       <button onClick={e=>{e.stopPropagation();setAutoAsignando(p);}}
                           style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(139,92,246,.4)",background:"rgba(139,92,246,.1)",color:"#a78bfa",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                          Asignar
+                          Autoasignar IA
                         </button>
                       )}
                       <button onClick={e=>{e.stopPropagation();solicitarRetrasoPedido(p, p.numero || "este pedido");}}

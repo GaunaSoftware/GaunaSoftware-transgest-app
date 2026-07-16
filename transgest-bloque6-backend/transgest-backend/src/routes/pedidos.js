@@ -6603,7 +6603,7 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
     const [vehiculosRes, conflictsRes] = await Promise.all([
       db.query(
         `SELECT v.id, v.matricula, v.clase, v.tipo, v.estado, v.carga_max_kg,
-                v.remolque_id, v.remolque_matricula, v.chofer_id,
+                v.remolque_id, (SELECT rv.matricula FROM vehiculos rv WHERE rv.id = v.remolque_id) AS remolque_matricula, v.chofer_id,
                 v.ubicacion_actual, v.ubicacion_fuente, v.ubicacion_ts,
                 v.gps_provider, v.gps_external_id, v.gps_lat, v.gps_lng,
                 ch.id AS chofer_id_resuelto, ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos,
@@ -6655,7 +6655,7 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
         [empresaId]
       ).catch(async () => db.query(
         `SELECT v.id, v.matricula, v.clase, v.tipo, v.estado, v.carga_max_kg,
-                v.remolque_id, v.remolque_matricula, v.chofer_id,
+                v.remolque_id, (SELECT rv.matricula FROM vehiculos rv WHERE rv.id = v.remolque_id) AS remolque_matricula, v.chofer_id,
                 v.ubicacion_actual, v.ubicacion_fuente, v.ubicacion_ts,
                 v.gps_provider, v.gps_external_id, v.gps_lat, v.gps_lng,
                 ch.id AS chofer_id_resuelto, ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos,

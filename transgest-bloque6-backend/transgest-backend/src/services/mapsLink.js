@@ -44,6 +44,24 @@ function isMapsUrl(url) {
   return /^https?:\/\/[^\s]*(google\.[a-z.]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl|g\.co\/)/i.test(String(url || "").trim());
 }
 
+// Extrae coords del CUERPO de una pagina de Google Maps. Prioriza el center= del
+// og:image (staticmap), que es el centro real del sitio, para no coger por error
+// una coordenada de encuadre/limite que tambien aparece en el HTML.
+function coordsFromMapsBody(body) {
+  const b = String(body || "");
+  if (!b) return null;
+  const centerMatch = b.match(/[?&]center=(-?\d{1,3}(?:\.\d+)?)(?:,|%2C|%2c)(-?\d{1,3}(?:\.\d+)?)/);
+  if (centerMatch) {
+    const lat = Number(centerMatch[1]);
+    const lng = Number(centerMatch[2]);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0)) {
+      return { lat, lng };
+    }
+  }
+  // Respaldo: URL canonica @lat,lng o el patron !3d!4d de los datos del sitio.
+  return matchCoords(b);
+}
+
 // Enlaces cortos que hay que expandir (no llevan coords inline).
 function isShortMapsUrl(url) {
   return /^https?:\/\/([a-z0-9-]+\.)?(goo\.gl\/maps|maps\.app\.goo\.gl|g\.co\/)/i.test(String(url || "").trim());
@@ -85,11 +103,11 @@ async function expandForCoords(startUrl) {
         current = next;
         continue;
       }
-      // Sin mas redirecciones: mira la URL final y, si hace falta, un trozo del body.
+      // Sin mas redirecciones: mira la URL final y, si hace falta, el body.
       const inFinal = coordsFromText(current);
       if (inFinal) return inFinal;
-      const body = (await res.text().catch(() => "")).slice(0, 200000);
-      return coordsFromText(body);
+      const body = (await res.text().catch(() => "")).slice(0, 300000);
+      return coordsFromMapsBody(body);
     }
     return coordsFromText(current);
   } catch {
@@ -105,7 +123,9 @@ async function resolveMapsCoords(url) {
   if (!t) return null;
   const direct = coordsFromText(t);
   if (direct) return direct;
-  if (!isShortMapsUrl(t)) return null;
+  // Expandimos cualquier URL de Google Maps sin coords inline (enlaces cortos del
+  // movil y enlaces largos por feature-ID que solo llevan el sitio, no lat/lng).
+  if (!isMapsUrl(t)) return null;
   return expandForCoords(t);
 }
 

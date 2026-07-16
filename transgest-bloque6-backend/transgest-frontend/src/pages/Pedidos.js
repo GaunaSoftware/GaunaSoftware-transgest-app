@@ -8157,7 +8157,7 @@ useEffect(() => {
                 Se generara factura de paralizacion por {parseLocaleNumber(form.importe_paralizacion,0).toFixed(2)} EUR sin IVA
               </div>
             )}
-            {form.precio_unitario&&(
+            {(calcImporte(form)>0 || form.precio_unitario)&&(
               <div style={{background:"rgba(34,211,160,.07)",border:"1px solid rgba(34,211,160,.2)",borderRadius:8,padding:"10px 16px",marginTop:4}}>
                 {sumAdditionalDescargaPrices(form.puntos_descarga)>0&&(
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>

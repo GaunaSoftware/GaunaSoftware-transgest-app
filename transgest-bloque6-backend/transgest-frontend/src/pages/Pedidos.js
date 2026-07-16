@@ -4065,7 +4065,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 setEditingStopIndex(current => current === i ? null : i);
               }}
               style={{
-                background:isPrimary ? "rgba(20,184,166,.08)" : "var(--bg4)",
+                background:"var(--bg4)",
                 border:`1px solid ${dragIdx !== null && dragIdx !== i ? "rgba(20,184,166,.38)" : "var(--border2)"}`,
                 borderRadius:8,
                 padding:"8px 12px",
@@ -4076,15 +4076,12 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 cursor:!disabled ? (stopsOrdenados.length > 1 ? "grab" : "pointer") : "default",
               }}
             >
-              <span style={{fontFamily:"monospace",fontSize:11,fontWeight:800,color:isPrimary?"var(--green)":"var(--accent)",minWidth:58,textTransform:"uppercase"}}>
+              <span style={{fontFamily:"monospace",fontSize:11,fontWeight:800,color:"var(--accent)",minWidth:58,textTransform:"uppercase"}}>
                 {tipo === "carga" ? "Carga" : "Descarga"} {i+1}
               </span>
               <div className="tg-stop-card-body" style={{flex:1}}>
                 <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                   <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{stopAddress(d)}</span>
-                  <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:isPrimary?"var(--green)":"var(--text5)"}}>
-                    {isPrimary ? "Principal" : "Secundaria"}
-                  </span>
                 </div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
                   {d.cliente_nombre && <span style={{marginRight:8}}>{d.cliente_nombre}</span>}

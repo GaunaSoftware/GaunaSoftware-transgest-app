@@ -248,6 +248,9 @@ function weekIndexInMonth(dateIso) {
 function buildPedidoCalendarGroups(items, { desde, hasta, currentWeek = false } = {}) {
   const byMonth = new Map();
   const sorted = [...items].sort((a, b) => {
+    const acan = a.pedido?.estado === "cancelado" ? 1 : 0;
+    const bcan = b.pedido?.estado === "cancelado" ? 1 : 0;
+    if (acan !== bcan) return acan - bcan;
     const da = pedidoFechaOperativaKey(a.pedido);
     const db = pedidoFechaOperativaKey(b.pedido);
     if (da !== db) return String(da).localeCompare(String(db));
@@ -716,7 +719,7 @@ const LABEL_ESTADO = {
 };
 const COLOR_ESTADO = {
   pendiente:"#fb8c3a", confirmado:"#3b6ef5", en_curso:"#22d3ee",
-  descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#f05252", incidencia:"#fbbf24"
+  descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#d98b8b", incidencia:"#fbbf24"
 };
 const INCIDENCIA_TIPOS_PEDIDO = [
   { v:"taller", l:"Camion en taller" },
@@ -10534,6 +10537,9 @@ export default function Pedidos() {
     : pedidosFiltrados;
   const usarAgrupadoCalendario = !groupByCliente;
   const ordenarItemsPedidoPorFecha = (a, b) => {
+    const acan = a?.pedido?.estado === "cancelado" ? 1 : 0;
+    const bcan = b?.pedido?.estado === "cancelado" ? 1 : 0;
+    if (acan !== bcan) return acan - bcan;
     const da = pedidoFechaOperativaKey(a?.pedido);
     const db = pedidoFechaOperativaKey(b?.pedido);
     if (da !== db) return String(da).localeCompare(String(db));

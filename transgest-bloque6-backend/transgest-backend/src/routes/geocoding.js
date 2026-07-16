@@ -4,6 +4,7 @@ const db = require("../services/db");
 const { resolveApiKey, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
 const { fallbackPlaceForAddress } = require("../services/geoFallback");
 const { resolveMapsCoords } = require("../services/mapsLink");
+const { googleGeocode } = require("../services/googleGeocode");
 const {
   countryCodeFor,
   isCountryOnlyQuery,
@@ -207,6 +208,24 @@ async function geocodeHere(empresaId, request) {
   return selectBestPlaceCandidate(request, candidates);
 }
 
+// Geocodificador de Google (Geocoding API). Autenticado por key, no depende de
+// la IP: es el proveedor mas fiable para poblaciones/direcciones de cualquier pais.
+async function geocodeGoogle(empresaId, request) {
+  const resolved = await resolveApiKey(empresaId, "google");
+  if (!resolved.key) return null;
+  await assertApiUsageAllowed(empresaId, "google");
+  const query = buildQuery(searchQueryFor(request), request.country, request.region);
+  const place = await googleGeocode(resolved.key, query, { region: countryCodeFor(request.country) || "es", language: "es" });
+  await recordApiUsage(empresaId, "google", 1).catch(() => {});
+  if (!place || place.lat == null) return null;
+  const candidate = {
+    provider: "google",
+    ...formatPlace({ municipio: place.municipio, provincia: place.provincia, pais: place.pais, lat: place.lat, lng: place.lng, label: place.label }),
+    country_code: place.country_code,
+  };
+  return selectBestPlaceCandidate(request, [candidate]) || candidate;
+}
+
 async function geocodeNominatim(request) {
   return withNominatimThrottle(async () => {
     const url = new URL("https://nominatim.openstreetmap.org/search");
@@ -283,16 +302,19 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} 
     if (validCached) return validCached;
   }
 
-  let resolved = null;
+  // Google primero si hay clave configurada: fiable y sin depender de la IP.
+  let resolved = await geocodeGoogle(empresaId, request).catch(() => null);
   const fallback = fallbackPlaceForAddress(buildQuery(query, request.country, request.region));
   const localResolved = fallback ? selectBestPlaceCandidate(request, [{ provider: "local", ...formatPlace(fallback) }]) : null;
-  if (request.localityOnly) {
-    resolved = localResolved;
-    if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeNominatim(request).catch(() => null);
-    if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeHere(empresaId, request).catch(() => null);
-  } else {
-    resolved = await geocodeHere(empresaId, request).catch(() => null);
-    if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeNominatim(request).catch(() => null);
+  if (!resolved || resolved.lat == null || resolved.lng == null) {
+    if (request.localityOnly) {
+      resolved = localResolved;
+      if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeNominatim(request).catch(() => null);
+      if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeHere(empresaId, request).catch(() => null);
+    } else {
+      resolved = await geocodeHere(empresaId, request).catch(() => null);
+      if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeNominatim(request).catch(() => null);
+    }
   }
   if (resolved?.lat == null || resolved?.lng == null) {
     resolved = localResolved;

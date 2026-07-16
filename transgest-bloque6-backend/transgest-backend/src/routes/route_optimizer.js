@@ -5,6 +5,7 @@ const { enviarEmail } = require("../services/email");
 const { crearNotificacion } = require("../services/notificaciones");
 const { resolveApiKey, getCompanyApiConfig, publicStatusForProvider, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
 const { resolveMapsCoords } = require("../services/mapsLink");
+const { googleGeocode } = require("../services/googleGeocode");
 
 const router = express.Router();
 
@@ -410,9 +411,13 @@ function estimatedRouteFromCoordinates(coordinates, stops, reason = "") {
   };
 }
 
-async function geocodeLocal(address) {
+async function geocodeLocal(address, googleKey) {
   const direct = parseCoordinateAddress(address);
   if (direct) return direct;
+  if (googleKey) {
+    const g = await googleGeocode(googleKey, cleanAddress(address), { region: "es", language: "es" }).catch(() => null);
+    if (g && Number.isFinite(g.lat) && Number.isFinite(g.lng)) return [g.lng, g.lat];
+  }
   const fallback = fallbackCoordinateForAddress(address);
   if (fallback) return fallback;
   const cleaned = cleanAddress(address);
@@ -437,9 +442,9 @@ async function geocodeLocal(address) {
   throw new Error(`No se encontro la direccion "${cleaned}". Revisa que tenga localidad/provincia o usa un enlace de Google Maps con coordenadas.${lastError ? ` Detalle: ${lastError}` : ""}`);
 }
 
-async function routeLocal(stops) {
+async function routeLocal(stops, googleKey) {
   const coordinates = [];
-  for (const stop of stops) coordinates.push(await resolveStopCoordinate(stop) || await geocodeLocal(stopQuery(stop) || stop?.name || ""));
+  for (const stop of stops) coordinates.push(await resolveStopCoordinate(stop) || await geocodeLocal(stopQuery(stop) || stop?.name || "", googleKey));
   let data;
   try {
     data = await fetchJson(
@@ -812,6 +817,7 @@ router.post("/optimize", async (req, res, next) => {
     if (!empresaId) return res.status(400).json({ error: "Empresa no encontrada en sesion." });
     const stops = normalizeStops(req.body?.stops);
     if (stops.length < 2) return res.status(400).json({ error: "Se necesitan al menos origen y destino." });
+    const googleKey = (await resolveApiKey(empresaId, "google").catch(() => ({ key: "" }))).key || "";
 
     const requestedProvider = String(req.body?.provider || await configuredProvider(empresaId)).toLowerCase();
     const provider = PROVIDERS[requestedProvider] ? requestedProvider : await configuredProvider(empresaId);
@@ -831,12 +837,12 @@ router.post("/optimize", async (req, res, next) => {
     try {
       if (provider === "here") result = await routeHere(stops, req.body?.preference, truck, keyInfo.key);
       else if (provider === "ors") result = await routeOrs(stops, req.body?.preference, truck, keyInfo.key);
-      else result = await routeLocal(stops);
+      else result = await routeLocal(stops, googleKey);
       if (result.provider !== "local") await recordApiUsage(empresaId, result.provider, 1);
     } catch (e) {
       warning = `${PROVIDERS[provider]?.label || provider}: ${e.message}. Se intenta calculo orientativo con mapa gratuito.`;
       try {
-        result = await routeLocal(stops);
+        result = await routeLocal(stops, googleKey);
         warning = `${warning} Distancia calculada con mapa gratuito; revisar restricciones de camion.`;
       } catch (fallbackError) {
         warning = `${warning} No se pudo calcular distancia automatica: ${fallbackError.message}. Se usa enlace orientativo.`;

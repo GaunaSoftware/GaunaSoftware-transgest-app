@@ -4,6 +4,7 @@ const db = require("./db");
 const PROVIDER_ENV = {
   here: "HERE_API_KEY",
   ors: "ORS_API_KEY",
+  google: "GOOGLE_MAPS_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   ai_generic: "AI_API_KEY",

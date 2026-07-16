@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   getClientes, crearFactura, crearCliente as crearClienteApi,
   getPaletMovimientos, crearPaletMovimiento, editarPaletMovimiento, confirmarSalidaPaletMovimiento, borrarPaletMovimiento,
+  getPaletAlertasEstado, setPaletAlertaEstado,
   getAlmacenes, crearAlmacen,
   getAlmacenMercancias, crearAlmacenMercancia,
   getAlmacenMovimientos, crearAlmacenMovimiento, editarAlmacenMovimiento, borrarAlmacenMovimiento,
@@ -151,6 +152,7 @@ function buildAlertasAntiguedadPalets(movimientos, clientes, cfgPalets){
       if (dias < 14) return;
       const exceso = Math.max(0, dias - 14);
       alertas.push({
+        alerta_key: `palets:${clienteId}:${lote.id || `${lote.fecha || "sin-fecha"}:${lote.ref}`}`.slice(0, 280),
         cliente_id: clienteId,
         cliente_nombre: cliente?.nombre || lote.cliente_nombre || "Cliente sin identificar",
         obra_nombre: lote.ref,
@@ -674,11 +676,13 @@ export default function Palets(){
     const [empresaCfg,setEmpresaCfg]=useState({});
     const [modal,setModal]=useState(false);
   const [movimientoEditando,setMovimientoEditando]=useState(null);
-  const [tab,setTab]=useState("stock"); // stock | dev_cliente | historial | almacenes
+  const [tab,setTab]=useState("stock"); // stock | historial | almacenes
     const [filtroCliente,setFiltroCliente]=useState("todos");
     const [devDesde,setDevDesde]=useState("");
     const [devHasta,setDevHasta]=useState("");
     const [clientesPlegados,setClientesPlegados]=useState({});
+    const [alertaEstados,setAlertaEstados]=useState({});
+    const [mostrarAlertasOcultas,setMostrarAlertasOcultas]=useState(false);
     const empresa = useEmpresaPerfil();
     const cfgPalets = normalizePaletsCfg(empresaCfg?.cfg_precios?.palets);
 
@@ -711,6 +715,9 @@ export default function Palets(){
     useEffect(()=>{
       getClientes().then(d=>setClientes(Array.isArray(d?.data)?d.data:Array.isArray(d)?d:[])).catch(()=>{});
       cargarMovimientos();
+      getPaletAlertasEstado()
+        .then(rows=>setAlertaEstados(Object.fromEntries((Array.isArray(rows)?rows:[]).map(row=>[row.alerta_key,row.estado]))))
+        .catch(()=>{});
     },[cargarMovimientos]);
 
     useEffect(() => {
@@ -854,14 +861,23 @@ export default function Palets(){
     try {
       let factura = null;
       if (!String(mv.id || "").startsWith("pmv_")) {
-        await confirmarSalidaPaletMovimiento(mv.id);
-        try {
-          factura = await generarFacturaDevolucion(mv);
-          if (factura?.id) await confirmarSalidaPaletMovimiento(mv.id, { factura_id: factura.id });
-        } catch (e) {
-          notify("Salida confirmada, pero no se ha podido generar la factura borrador: " + e.message, "warning");
-        }
-        await cargarMovimientos();
+        const confirmado = await confirmarSalidaPaletMovimiento(mv.id, { generar_factura_async:true });
+        setMovimientos(prev => prev.map(m => m.id===mv.id ? {
+          ...m,
+          ...normalizarMovimientoApi(confirmado || {}),
+          estado_salida:"confirmada",
+          salida_confirmada_at:confirmado?.salida_confirmada_at || new Date().toISOString(),
+          factura_programada:Boolean(confirmado?.factura_programada),
+        } : m));
+        notify(
+          confirmado?.factura_programada
+            ? "Salida confirmada. La factura borrador se esta generando en segundo plano."
+            : "Salida de palets confirmada. Ya se ha actualizado el stock.",
+          "success"
+        );
+        window.setTimeout(()=>cargarMovimientos(), 1800);
+        window.setTimeout(()=>cargarMovimientos(), 6000);
+        return;
       } else {
         try {
           factura = await generarFacturaDevolucion(mv);
@@ -884,6 +900,27 @@ export default function Palets(){
       }
     } catch (e) {
       notify("No se pudo confirmar la salida: " + e.message, "error");
+    }
+  }
+
+  async function cambiarEstadoAlerta(alertaKey, estado){
+    const anterior = alertaEstados[alertaKey];
+    setAlertaEstados(prev => {
+      const next = { ...prev };
+      if (estado === "activa") delete next[alertaKey];
+      else next[alertaKey] = estado;
+      return next;
+    });
+    try {
+      await setPaletAlertaEstado({ alerta_key:alertaKey, estado });
+    } catch (error) {
+      setAlertaEstados(prev => {
+        const next = { ...prev };
+        if (anterior) next[alertaKey] = anterior;
+        else delete next[alertaKey];
+        return next;
+      });
+      notify("No se pudo actualizar la alerta: " + error.message, "error");
     }
   }
 
@@ -1011,9 +1048,13 @@ export default function Palets(){
   const totalDevuelto=clientesConPalets.reduce((s,c)=>s+Number(c.devoluciones||0),0);
   const totalSalidasPreparadas=clientesConPalets.reduce((s,c)=>s+Number(c.pendientesSalida||0),0);
   const alertasAntiguedad = buildAlertasAntiguedadPalets(movimientos, clientes, cfgPalets);
-  const alertasCriticas = alertasAntiguedad.filter(a => a.nivel === "critica");
-  const totalPaletsEnAlerta = alertasAntiguedad.reduce((s,a)=>s+Number(a.palets||0),0);
-  const costeAlmacenajeEstimado = alertasAntiguedad.reduce((s,a)=>s+Number(a.coste_estimado||0),0);
+  const alertasConEstado = alertasAntiguedad.map(a => ({ ...a, estado_usuario:alertaEstados[a.alerta_key] || "activa" }));
+  const alertasOcultas = alertasConEstado.filter(a => a.estado_usuario === "oculta");
+  const alertasVisibles = alertasConEstado.filter(a => mostrarAlertasOcultas || a.estado_usuario !== "oculta");
+  const alertasNoLeidas = alertasConEstado.filter(a => a.estado_usuario === "activa");
+  const alertasCriticas = alertasNoLeidas.filter(a => a.nivel === "critica");
+  const totalPaletsEnAlerta = alertasNoLeidas.reduce((s,a)=>s+Number(a.palets||0),0);
+  const costeAlmacenajeEstimado = alertasNoLeidas.reduce((s,a)=>s+Number(a.coste_estimado||0),0);
 
   function clienteIdMovimiento(m) {
     return m.propietario_cliente_id || m.cliente_id || "";
@@ -1144,7 +1185,7 @@ export default function Palets(){
           ["Stock empresa",stockEmpresa,"palets",stockEmpresa>0?"#10b981":"#f59e0b","□"],
           ["Pendientes devolucion",totalPendiente,"palets",totalPendiente>0?"#f97316":"#10b981","↶"],
           ["Salidas preparadas",totalSalidasPreparadas,"palets",totalSalidasPreparadas>0?"#f59e0b":"#10b981","↑"],
-          ["Alertas antiguedad",alertasAntiguedad.length,"lotes",alertasCriticas.length>0?"#ef4444":alertasAntiguedad.length>0?"#f59e0b":"#10b981","!"],
+          ["Alertas antiguedad",alertasNoLeidas.length,"lotes",alertasCriticas.length>0?"#ef4444":alertasNoLeidas.length>0?"#f59e0b":"#10b981","!"],
           ["Devueltos registrados",totalDevuelto,"palets","#10b981","▣"],
           ["Clientes con palets",clientesConPalets.filter(c=>c.stock>0).length,"clientes","#3b82f6","☷"],
           ["Total movimientos",movimientos.length,"registros","#64748b","⌁"],
@@ -1164,7 +1205,7 @@ export default function Palets(){
 
       {/* Tabs */}
       <div style={{display:"flex",gap:22,borderBottom:"1px solid #dbe5ec",marginBottom:18}}>
-        {[["stock","Palets / cliente"],["dev_cliente","Dev. Cliente"],["almacen_propio","Mercancia propia"],["almacen_cliente","Almacen cliente"],["historial","Historial"]].map(([id,l])=>(
+        {[["stock","Palets de clientes"],["almacen_propio","Mercancia propia"],["almacen_cliente","Almacen cliente"],["historial","Historial"]].map(([id,l])=>(
           <button key={id} onClick={()=>setTab(id)} style={{...S.btn,border:"none",borderRadius:0,borderBottom:`2px solid ${tab===id?"#008b82":"transparent"}`,color:tab===id?"#006f68":"#64748b",background:"transparent",padding:"0 0 13px",fontSize:14,fontWeight:800,boxShadow:"none"}}>
             {l}
           </button>
@@ -1191,8 +1232,8 @@ export default function Palets(){
               </div>
             </div>
           </div>
-          <div style={{marginTop:14,padding:"16px 18px",borderRadius:10,background:alertasAntiguedad.length?"rgba(249,115,22,.07)":"rgba(16,185,129,.07)",border:`1px solid ${alertasAntiguedad.length?"#fed7aa":"rgba(16,185,129,.20)"}`}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:alertasAntiguedad.length?10:0}}>
+          <div style={{marginTop:14,padding:"16px 18px",borderRadius:10,background:alertasNoLeidas.length?"rgba(249,115,22,.07)":"rgba(16,185,129,.07)",border:`1px solid ${alertasNoLeidas.length?"#fed7aa":"rgba(16,185,129,.20)"}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:alertasVisibles.length?10:0}}>
               <div>
                 <div style={{fontWeight:900,fontSize:16,color:"#0f172a"}}>Alertas de antiguedad y almacenaje</div>
                 <div style={{fontSize:13,color:"#64748b",marginTop:3}}>
@@ -1203,35 +1244,50 @@ export default function Palets(){
                 <span style={{...S.btn,background:alertasCriticas.length?"rgba(239,68,68,.12)":"#fff",color:alertasCriticas.length?"#ef4444":"#64748b",border:"1px solid #fecaca",cursor:"default"}}>
                   {alertasCriticas.length} criticas
                 </span>
-                <span style={{...S.btn,background:alertasAntiguedad.length?"rgba(249,115,22,.12)":"#fff",color:alertasAntiguedad.length?"#f97316":"#64748b",border:"1px solid #fed7aa",cursor:"default"}}>
+                <span style={{...S.btn,background:alertasNoLeidas.length?"rgba(249,115,22,.12)":"#fff",color:alertasNoLeidas.length?"#f97316":"#64748b",border:"1px solid #fed7aa",cursor:"default"}}>
                   {fmtN(totalPaletsEnAlerta)} palets
                 </span>
                 <span style={{...S.btn,background:"#fff",color:"#64748b",border:"1px solid #dbe5ec",cursor:"default"}}>
                   {costeAlmacenajeEstimado>0 ? `${fmt2(costeAlmacenajeEstimado)} EUR estimados` : "Sin coste configurado"}
                 </span>
+                {alertasOcultas.length>0&&(
+                  <button type="button" onClick={()=>setMostrarAlertasOcultas(v=>!v)} style={{...S.btn,background:"#fff",color:"#64748b",border:"1px solid #dbe5ec"}}>
+                    {mostrarAlertasOcultas ? "Ocultar archivadas" : `Ver ocultas (${alertasOcultas.length})`}
+                  </button>
+                )}
               </div>
             </div>
-            {alertasAntiguedad.length ? (
+            {alertasVisibles.length ? (
               <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
-                {alertasAntiguedad.slice(0,6).map((a,idx)=>(
-                  <div key={`${a.cliente_id}-${a.fecha}-${idx}`} style={{border:"1px solid #fed7aa",borderRadius:8,padding:"14px 16px",background:"#fff",display:"grid",gridTemplateColumns:"48px 1fr auto",alignItems:"center",gap:16}}>
+                {alertasVisibles.slice(0,8).map((a,idx)=>(
+                  <div key={`${a.alerta_key}-${idx}`} style={{border:"1px solid #fed7aa",borderRadius:8,padding:"14px 16px",background:"#fff",display:"grid",gridTemplateColumns:"48px minmax(0,1fr)",alignItems:"center",gap:16,opacity:a.estado_usuario==="leida"?.65:1}}>
                     <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(249,115,22,.12)",display:"flex",alignItems:"center",justifyContent:"center",color:"#ef4444",fontWeight:900,fontSize:22}}>!</div>
                     <div>
-                    <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                       <span style={{fontWeight:900,fontSize:13,color:"#0f172a"}}>{a.cliente_nombre}</span>
+                      <span style={{fontSize:13,fontWeight:900,color:a.nivel==="critica"?"#ef4444":"#f59e0b",textTransform:"uppercase"}}>{a.dias} dias</span>
                     </div>
                     <div style={{fontSize:12,color:"#64748b",marginTop:3}}>{a.obra_nombre}</div>
-                    <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:7,fontSize:12,color:"#64748b"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:7,fontSize:12,color:"#64748b",flexWrap:"wrap"}}>
                       <span>{fmtN(a.palets)} palets desde {a.fecha || "-"}</span>
                       {a.coste_estimado>0 && <strong style={{color:"#f59e0b"}}>{fmt2(a.coste_estimado)} EUR</strong>}
                     </div>
                     </div>
-                    <span style={{fontSize:13,fontWeight:900,color:a.nivel==="critica"?"#ef4444":"#f59e0b",textTransform:"uppercase"}}>{a.dias} dias</span>
+                    <div style={{gridColumn:"1 / -1",display:"flex",justifyContent:"flex-end",gap:7,flexWrap:"wrap"}}>
+                      <button type="button" onClick={()=>cambiarEstadoAlerta(a.alerta_key,a.estado_usuario==="leida"?"activa":"leida")} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"#fff"}}>
+                        {a.estado_usuario==="leida" ? "Marcar no leida" : "Marcar leida"}
+                      </button>
+                      <button type="button" onClick={()=>cambiarEstadoAlerta(a.alerta_key,a.estado_usuario==="oculta"?"activa":"oculta")} style={{...S.btn,padding:"5px 10px",fontSize:11,background:a.estado_usuario==="oculta"?"rgba(16,185,129,.08)":"#fff"}}>
+                        {a.estado_usuario==="oculta" ? "Restaurar" : "Ocultar"}
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{fontSize:12,color:"#10b981",fontWeight:700}}>Sin palets envejecidos pendientes de devolver.</div>
+              <div style={{fontSize:12,color:"#10b981",fontWeight:700}}>
+                {alertasConEstado.length ? "No hay alertas visibles. Puedes recuperar las ocultas desde el boton superior." : "Sin palets envejecidos pendientes de devolver."}
+              </div>
             )}
           </div>
         </div>
@@ -1322,13 +1378,13 @@ export default function Palets(){
         </div>
       )}
 
-      {/* Dev. Cliente */}
-      {tab==="dev_cliente"&&(
+      {/* Movimientos y devoluciones integrados en Palets de clientes */}
+      {tab==="stock"&&(
         <div style={S.card}>
           <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
             <div>
-              <div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>Devoluciones por cliente</div>
-              <div style={{fontSize:12,color:"var(--text5)",marginTop:2}}>Registros separados por fecha, cliente y albaran.</div>
+              <div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>Movimientos y devoluciones por cliente</div>
+              <div style={{fontSize:12,color:"var(--text5)",marginTop:2}}>Consulta en una sola vista las obras, entregas, devoluciones, rectificaciones y albaranes.</div>
             </div>
             <select value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)} style={{...S.inp,width:240,marginLeft:"auto"}}>
               <option value="todos">Todos los clientes</option>

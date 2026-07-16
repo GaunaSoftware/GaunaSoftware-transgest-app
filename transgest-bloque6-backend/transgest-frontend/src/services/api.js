@@ -944,9 +944,11 @@ export const borrarAlmacen         = (id)        => apiFetch(`/palets/almacenes/
 export const getPaletMovimientos   = (params={}) => apiFetch(`/palets/movimientos?${new URLSearchParams(params)}`);
 export const crearPaletMovimiento  = (data)      => apiFetch("/palets/movimientos", { method:"POST", body:data });
 export const editarPaletMovimiento = (id,data)   => apiFetch(`/palets/movimientos/${id}`, { method:"PUT", body:data });
-export const confirmarSalidaPaletMovimiento = (id,data={}) => apiFetch(`/palets/movimientos/${id}/confirmar-salida`, { method:"PATCH", body:data });
+export const confirmarSalidaPaletMovimiento = (id,data={}) => apiFetch(`/palets/movimientos/${id}/confirmar-salida`, { method:"PATCH", body:data, silentSuccess:true });
 export const borrarPaletMovimiento = (id)        => apiFetch(`/palets/movimientos/${id}`, { method:"DELETE" });
 export const getPaletResumen       = ()          => apiFetch("/palets/resumen");
+export const getPaletAlertasEstado = ()          => apiFetch("/palets/alertas-estado", { silentError:true });
+export const setPaletAlertaEstado  = (data)      => apiFetch("/palets/alertas-estado", { method:"PUT", body:data, silentSuccess:true });
 export const getAlmacenMercancias  = (params={}) => apiFetch(`/palets/mercancias?${new URLSearchParams(params)}`);
 export const crearAlmacenMercancia = (data)      => apiFetch("/palets/mercancias", { method:"POST", body:data });
 export const editarAlmacenMercancia= (id,data)   => apiFetch(`/palets/mercancias/${id}`, { method:"PUT", body:data });

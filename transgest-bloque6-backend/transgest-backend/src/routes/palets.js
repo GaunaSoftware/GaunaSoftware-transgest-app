@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../services/db");
+const logger = require("../services/logger");
 const { requireRole } = require("../middleware/auth");
 
 const router = express.Router();
@@ -28,6 +29,18 @@ function int(value, fallback = 0) {
 
 function normalizeObraReferencia(value) {
   return String(value || "").trim().replace(/\s+/g, " ").slice(0, 240);
+}
+
+function paymentDays(value) {
+  const match = String(value || "").match(/\d+/);
+  return match ? Math.max(0, Math.min(365, Number(match[0]) || 0)) : 30;
+}
+
+function addDaysDateOnly(value, days) {
+  const date = value ? new Date(`${String(value).slice(0, 10)}T12:00:00Z`) : new Date();
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return date.toISOString().slice(0, 10);
 }
 
 function stockSign(tipo) {
@@ -144,6 +157,78 @@ async function validatePaletsFacturaBorrador({ empresa, factura_id, cliente_id }
   return facturaId;
 }
 
+async function generarFacturaBorradorDevolucion({ empresa, movimientoId, usuarioId }) {
+  return db.transaction(async client => {
+    const { rows } = await client.query(
+      `SELECT pm.*, c.tipo_iva, c.iva_regimen, c.tipo_irpf, c.forma_pago, c.vencimiento
+         FROM palets_movimientos pm
+         JOIN clientes c ON c.id=pm.propietario_cliente_id AND c.empresa_id=pm.empresa_id
+        WHERE pm.id=$1 AND pm.empresa_id=$2 AND LOWER(pm.tipo)='devolucion'
+        FOR UPDATE`,
+      [movimientoId, empresa]
+    );
+    const movimiento = rows[0];
+    if (!movimiento || movimiento.factura_id) return movimiento?.factura_id || null;
+    if (String(movimiento.estado_salida || "").toLowerCase() !== "confirmada") return null;
+
+    const cantidad = Math.max(0, num(movimiento.cantidad));
+    const precioUnitario = Math.max(0, num(movimiento.precio_unitario));
+    const base = Math.round(cantidad * precioUnitario * 100) / 100;
+    if (!cantidad || !precioUnitario || !base) return null;
+
+    const fecha = String(movimiento.fecha || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const year = Number(fecha.slice(0, 4)) || new Date().getFullYear();
+    const serie = "A";
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`facturas:${empresa}:${serie}:${year}`]);
+    const { rows: last } = await client.query(
+      `SELECT numero FROM facturas
+        WHERE serie=$1 AND EXTRACT(year FROM fecha)=$2 AND empresa_id=$3
+        ORDER BY numero DESC LIMIT 1 FOR UPDATE`,
+      [serie, year, empresa]
+    );
+    const lastNumber = last[0] ? parseInt(String(last[0].numero || "").split("-").pop(), 10) || 0 : 0;
+    const numero = `${serie}-${year}-${String(lastNumber + 1).padStart(4, "0")}`;
+    const tipoIva = Number.isFinite(Number(movimiento.tipo_iva)) ? Number(movimiento.tipo_iva) : 21;
+    const ivaRegimen = movimiento.iva_regimen || (tipoIva === 0 ? "cero" : tipoIva === 10 ? "reducido" : tipoIva === 4 ? "superreducido" : "general");
+    const tipoIrpf = Number(movimiento.tipo_irpf || 0);
+    const cuotaIva = Math.round(base * tipoIva) / 100;
+    const cuotaIrpf = Math.round(base * tipoIrpf) / 100;
+    const total = Math.round((base + cuotaIva - cuotaIrpf) * 100) / 100;
+    const vencimiento = String(movimiento.vencimiento || "30 dias").trim();
+    const fechaVencimiento = addDaysDateOnly(fecha, paymentDays(vencimiento));
+    const referencia = normalizeObraReferencia(movimiento.obra_referencia || movimiento.pedido_ref);
+    const concepto = `Devolucion de palets - Albaran ${movimiento.num_albaran || "-"} - ${cantidad} palets`;
+
+    const { rows: facturas } = await client.query(
+      `INSERT INTO facturas
+        (numero,serie,cliente_id,fecha,fecha_vencimiento,estado,forma_pago,vencimiento,
+         base_imponible,tipo_iva,cuota_iva,tipo_irpf,cuota_irpf,total,iva_regimen,
+         observaciones,notas_internas,created_by,empresa_id)
+       VALUES ($1,$2,$3,$4,$5,'borrador',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       RETURNING id,numero`,
+      [
+        numero, serie, movimiento.propietario_cliente_id, fecha, fechaVencimiento,
+        movimiento.forma_pago || null, vencimiento, base, tipoIva, cuotaIva, tipoIrpf, cuotaIrpf,
+        total, ivaRegimen,
+        `Devolucion de palets. Albaran ${movimiento.num_albaran || "-"}${referencia ? ` - Obra/ref: ${referencia}` : ""}.`,
+        "Borrador generado automaticamente al confirmar la salida de palets.",
+        usuarioId || null, empresa,
+      ]
+    );
+    const factura = facturas[0];
+    await client.query(
+      "INSERT INTO factura_lineas (factura_id,concepto,cantidad,precio_unit,orden) VALUES ($1,$2,$3,$4,0)",
+      [factura.id, concepto, cantidad, precioUnitario]
+    );
+    await client.query(
+      "UPDATE palets_movimientos SET factura_id=$1,updated_at=NOW() WHERE id=$2 AND empresa_id=$3",
+      [factura.id, movimientoId, empresa]
+    );
+    logger.info(`Factura borrador ${factura.numero} generada para devolucion de palets ${movimientoId}`);
+    return factura.id;
+  });
+}
+
 async function prepararMercanciaMovimiento(client, { empresa, mercancia_id, almacen_id, tipo, cantidad }) {
   if (!mercancia_id) return { mercancia: null, almacenId: emptyToNull(almacen_id), error: null };
 
@@ -192,6 +277,15 @@ function ensurePaletsWorkflowSchema() {
       await db.query("UPDATE palets_movimientos SET obra_referencia=NULLIF(TRIM(pedido_ref),'') WHERE obra_referencia IS NULL AND NULLIF(TRIM(pedido_ref),'') IS NOT NULL");
       await db.query("CREATE INDEX IF NOT EXISTS idx_palets_movimientos_origen ON palets_movimientos(empresa_id, movimiento_origen_id)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_palets_movimientos_obra ON palets_movimientos(empresa_id, propietario_cliente_id, obra_referencia)");
+      await db.query(`CREATE TABLE IF NOT EXISTS palets_alertas_usuario (
+        empresa_id UUID NOT NULL,
+        usuario_id UUID NOT NULL,
+        alerta_key VARCHAR(300) NOT NULL,
+        estado VARCHAR(20) NOT NULL DEFAULT 'leida',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (empresa_id, usuario_id, alerta_key)
+      )`);
+      await db.query("CREATE INDEX IF NOT EXISTS idx_palets_alertas_usuario_estado ON palets_alertas_usuario(empresa_id,usuario_id,estado)");
     })().catch(err => {
       paletsWorkflowSchemaReady = null;
       throw err;
@@ -306,6 +400,49 @@ router.get("/movimientos", async (req, res) => {
     params
   );
   res.json(rows);
+});
+
+router.get("/alertas-estado", async (req, res) => {
+  await ensurePaletsWorkflowSchema();
+  const empresa = empresaId(req);
+  const usuarioId = req.user?.id;
+  if (!usuarioId) return res.json([]);
+  const { rows } = await db.query(
+    `SELECT alerta_key,estado,updated_at
+       FROM palets_alertas_usuario
+      WHERE empresa_id=$1 AND usuario_id=$2
+      ORDER BY updated_at DESC`,
+    [empresa, usuarioId]
+  );
+  res.json(rows);
+});
+
+router.put("/alertas-estado", async (req, res) => {
+  await ensurePaletsWorkflowSchema();
+  const empresa = empresaId(req);
+  const usuarioId = req.user?.id;
+  const alertaKey = String(req.body?.alerta_key || "").trim().slice(0, 300);
+  const estado = String(req.body?.estado || "").trim().toLowerCase();
+  if (!alertaKey) return res.status(400).json({ error: "Alerta no valida" });
+  if (!["activa", "leida", "oculta"].includes(estado)) {
+    return res.status(400).json({ error: "Estado de alerta no valido" });
+  }
+  if (estado === "activa") {
+    await db.query(
+      "DELETE FROM palets_alertas_usuario WHERE empresa_id=$1 AND usuario_id=$2 AND alerta_key=$3",
+      [empresa, usuarioId, alertaKey]
+    );
+    return res.json({ alerta_key: alertaKey, estado: "activa" });
+  }
+  const { rows } = await db.query(
+    `INSERT INTO palets_alertas_usuario (empresa_id,usuario_id,alerta_key,estado,updated_at)
+     VALUES ($1,$2,$3,$4,NOW())
+     ON CONFLICT (empresa_id,usuario_id,alerta_key)
+     DO UPDATE SET estado=EXCLUDED.estado,updated_at=NOW()
+     RETURNING alerta_key,estado,updated_at`,
+    [empresa, usuarioId, alertaKey, estado]
+  );
+  res.json(rows[0]);
 });
 
 router.post("/movimientos", PUEDE_EDITAR, async (req, res) => {
@@ -510,7 +647,7 @@ router.put("/movimientos/:id", PUEDE_EDITAR, async (req, res) => {
 router.patch("/movimientos/:id/confirmar-salida", PUEDE_EDITAR, async (req, res) => {
   await ensurePaletsWorkflowSchema();
   const empresa = empresaId(req);
-  const { factura_id } = req.body || {};
+  const { factura_id, generar_factura_async = false } = req.body || {};
   const actual = await db.query(
     "SELECT * FROM palets_movimientos WHERE id=$1 AND empresa_id=$2 AND LOWER(tipo)='devolucion' LIMIT 1",
     [req.params.id, empresa]
@@ -537,7 +674,23 @@ router.patch("/movimientos/:id/confirmar-salida", PUEDE_EDITAR, async (req, res)
      RETURNING *`,
     [facturaId, req.params.id, empresa]
   );
-  res.json(rows[0]);
+  const movimiento = rows[0];
+  const facturaProgramada = Boolean(
+    generar_factura_async &&
+    !movimiento.factura_id &&
+    Number(movimiento.precio_unitario || 0) > 0
+  );
+  res.json({ ...movimiento, factura_programada: facturaProgramada });
+
+  if (facturaProgramada) {
+    setImmediate(() => {
+      generarFacturaBorradorDevolucion({
+        empresa,
+        movimientoId: movimiento.id,
+        usuarioId: req.user?.id || null,
+      }).catch(error => logger.error(`No se pudo generar la factura de palets ${movimiento.id}: ${error.message}`));
+    });
+  }
 });
 
 router.delete("/movimientos/:id", PUEDE_EDITAR, async (req, res) => {

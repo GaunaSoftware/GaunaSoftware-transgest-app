@@ -426,11 +426,33 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
   }
 
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(500px,96vw)"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:14}}>
-          {editando ? "Editar movimiento de palets" : "Registrar movimiento de palets"}
+    <div className="tg-palets-modal-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <style>{`
+        .tg-palets-modal { width:min(720px,100%); max-height:calc(100dvh - 24px); display:flex; flex-direction:column; overflow:hidden; }
+        .tg-palets-modal-body { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable; }
+        .tg-palets-lotes-scroll { max-height:230px; overflow-y:auto; display:grid; gap:6px; padding-right:3px; overscroll-behavior:contain; }
+        .tg-palets-selected-scroll { max-height:160px; overflow-y:auto; display:grid; gap:6px; padding-right:3px; }
+        .tg-palets-modal-actions { position:sticky; bottom:0; z-index:4; background:var(--bg2); border-top:1px solid var(--border2); padding:12px 0 2px; }
+        @media (max-width:600px) {
+          .tg-palets-modal-overlay { padding:0 !important; align-items:stretch !important; }
+          .tg-palets-modal { width:100%; max-height:100dvh; min-height:100dvh; border-radius:0 !important; border-left:0 !important; border-right:0 !important; }
+          .tg-palets-modal-header { padding:13px 14px !important; }
+          .tg-palets-modal-body { padding:0 14px 14px !important; }
+          .tg-palets-modal-form-grid { grid-template-columns:minmax(0,1fr) !important; }
+          .tg-palets-lote-button { grid-template-columns:minmax(0,1fr) !important; }
+          .tg-palets-lote-count { justify-self:start; }
+          .tg-palets-selected-row { grid-template-columns:minmax(0,1fr) 92px !important; }
+          .tg-palets-modal-actions > button, .tg-palets-success-actions > button { flex:1 1 140px; min-height:42px; }
+        }
+      `}</style>
+      <div className="tg-palets-modal" style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12}}>
+        <div className="tg-palets-modal-header" style={{padding:"17px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,borderBottom:"1px solid var(--border2)",flex:"0 0 auto"}}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"var(--text)"}}>
+            {editando ? "Editar movimiento de palets" : "Registrar movimiento de palets"}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Cerrar" style={{width:36,height:36,borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:18,fontWeight:900,cursor:"pointer",flex:"0 0 auto"}}>X</button>
         </div>
+        <div className="tg-palets-modal-body" style={{padding:"0 22px 18px"}}>
         <label style={lbl}>Tipo de movimiento</label>
         <select style={inp} value={form.tipo} onChange={f("tipo")} disabled={editando}>
           {TIPOS.map(t=><option key={t.v} value={t.v}>{TIPO_FORM_LABEL[t.v] || t.l}</option>)}
@@ -454,24 +476,28 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
               <div style={{fontSize:11,fontWeight:800,color:"var(--text3)"}}>Palets registrados pendientes de devolver</div>
               {lotesDisponibles.length === 0 ? (
                 <div style={{fontSize:11,color:"var(--text5)"}}>No hay lotes pendientes para este cliente.</div>
-              ) : lotesDisponibles.map(lote => {
-                const ref = lote.ref || "Sin referencia";
-                const seleccionado = lotesSeleccionados.some(item=>String(item.id)===String(lote.id));
-                return (
-                  <button key={lote.id || `${lote.fecha}-${ref}`} type="button"
-                    onClick={() => toggleLote(lote)}
-                    style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:8,alignItems:"center",textAlign:"left",padding:"8px 9px",borderRadius:7,border:seleccionado?"2px solid #10b981":"1px solid rgba(249,115,22,.24)",background:seleccionado?"rgba(16,185,129,.10)":"rgba(249,115,22,.07)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                    <span style={{minWidth:0}}>
-                      <span style={{display:"block",fontSize:12,fontWeight:800,overflowWrap:"anywhere"}}>{ref}</span>
-                      <span style={{display:"block",fontSize:10,color:"var(--text5)",marginTop:2}}>{formatDateEs(lote.fecha)} · {fmtN(lote.devueltas)} devueltos · {fmtN(lote.preparadas)} preparados</span>
-                    </span>
-                    <span style={{fontSize:11,color:seleccionado?"#10b981":"#f97316",fontWeight:900}}>{fmtN(lote.pendiente)} pendientes</span>
-                  </button>
-                );
-              })}
+              ) : (
+                <div className="tg-palets-lotes-scroll">
+                  {lotesDisponibles.map(lote => {
+                    const ref = lote.ref || "Sin referencia";
+                    const seleccionado = lotesSeleccionados.some(item=>String(item.id)===String(lote.id));
+                    return (
+                      <button className="tg-palets-lote-button" key={lote.id || `${lote.fecha}-${ref}`} type="button"
+                        onClick={() => toggleLote(lote)}
+                        style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:8,alignItems:"center",textAlign:"left",padding:"8px 9px",borderRadius:7,border:seleccionado?"2px solid #10b981":"1px solid rgba(249,115,22,.24)",background:seleccionado?"rgba(16,185,129,.10)":"rgba(249,115,22,.07)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                        <span style={{minWidth:0}}>
+                          <span style={{display:"block",fontSize:12,fontWeight:800,overflowWrap:"anywhere"}}>{ref}</span>
+                          <span style={{display:"block",fontSize:10,color:"var(--text5)",marginTop:2}}>{formatDateEs(lote.fecha)} · {fmtN(lote.devueltas)} devueltos · {fmtN(lote.preparadas)} preparados</span>
+                        </span>
+                        <span className="tg-palets-lote-count" style={{fontSize:11,color:seleccionado?"#10b981":"#f97316",fontWeight:900,whiteSpace:"nowrap"}}>{fmtN(lote.pendiente)} pendientes</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               {lotesSeleccionados.length > 0 && (
-                <div style={{display:"grid",gap:6,marginTop:4}}>
-                  {lotesSeleccionados.map(lote=><div key={lote.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 110px",gap:8,alignItems:"center"}}>
+                <div className="tg-palets-selected-scroll" style={{marginTop:4}}>
+                  {lotesSeleccionados.map(lote=><div className="tg-palets-selected-row" key={lote.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 110px",gap:8,alignItems:"center"}}>
                     <span style={{fontSize:11,color:"var(--text3)",overflowWrap:"anywhere"}}>{lote.ref}</span>
                     <input type="number" min="1" max={lote.max || undefined} value={lote.cantidad}
                       onChange={e=>{
@@ -489,7 +515,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
             {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         </>)}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
+        <div className="tg-palets-modal-form-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
           <div>
             <label style={lbl}>Cantidad de palets</label>
             <input type="number" min="1" style={inp} value={form.cantidad} onChange={f("cantidad")} readOnly={form.tipo==="devolucion"&&lotesSeleccionados.length>0}/>
@@ -542,10 +568,10 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
         <label style={lbl}>Notas</label>
         <input style={inp} value={form.notas} onChange={f("notas")} placeholder="Opcional"/>
         {facturaGenerada&&(
-          <div style={{marginTop:12,padding:"10px 14px",background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.25)",borderRadius:8}}>
+          <div className="tg-palets-modal-actions" style={{marginTop:12,padding:"10px 14px",background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.25)",borderRadius:8}}>
             <div style={{fontWeight:700,color:"var(--green)",fontSize:13,marginBottom:4}}>Factura borrador generada: {facturaGenerada.numero}</div>
             <div style={{fontSize:12,color:"var(--text4)"}}>Ve a Facturacion para emitirla. El movimiento ya ha sido registrado.</div>
-            <div style={{display:"flex",gap:8,marginTop:8}}>
+            <div className="tg-palets-success-actions" style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
               <button onClick={imprimirAlbaran} style={{padding:"6px 14px",borderRadius:6,border:"none",
                 background:"#f59e0b",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"'DM Sans',sans-serif"}}>
                 Imprimir albaran
@@ -553,7 +579,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
               <button onClick={onSaved} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Aceptar y cerrar</button></div>
           </div>
         )}
-        {!facturaGenerada&&<div style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end",flexWrap:"wrap"}}>
+        {!facturaGenerada&&<div className="tg-palets-modal-actions" style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end",flexWrap:"wrap"}}>
           {form.tipo==="devolucion"&&form.num_albaran&&form.cliente_id&&(
             <button onClick={imprimirAlbaran}
               style={{padding:"7px 14px",borderRadius:7,border:"1px solid rgba(245,158,11,.4)",
@@ -565,6 +591,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
           <button onClick={onClose} style={{padding:"7px 14px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
           <button onClick={guardar} disabled={generandoFactura} style={{padding:"7px 16px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>{generandoFactura?"Generando...":(editando?"Guardar cambios":"Registrar")}</button>
         </div>}
+        </div>
       </div>
     </div>
   );

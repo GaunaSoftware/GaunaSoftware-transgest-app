@@ -134,6 +134,8 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
 
   if (rows[0]) return res.status(201).json(withComputedFields(rows[0]));
 
+  // Insert sin fila = ya existe ese punto para este mismo cliente (o general).
+  // Devolvemos el punto existente del MISMO ambito, nunca el de otro cliente.
   const existing = await db.query(
     `SELECT * FROM puntos_interes
       WHERE empresa_id=$1
@@ -151,7 +153,8 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
       LIMIT 1`,
     [empresa, direccion, clienteId]
   );
-  return res.status(200).json(withComputedFields(existing.rows[0]));
+  if (existing.rows[0]) return res.status(200).json(withComputedFields(existing.rows[0]));
+  return res.status(409).json({ error: "No se pudo guardar el punto por un conflicto de direccion. Vuelve a intentarlo." });
 });
 
 router.put("/:id", PUEDE_EDITAR, async (req, res) => {

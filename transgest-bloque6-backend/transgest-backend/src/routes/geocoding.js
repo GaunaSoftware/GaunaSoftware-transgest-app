@@ -19,6 +19,28 @@ function cleanText(value = "") {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+// Codigo ISO de pais para el filtro countrycodes de Nominatim. La app es de
+// transporte centrado en Espana: sin pista, asumimos ES para evitar que un
+// nombre de poblacion ambiguo resuelva a otro pais.
+function countryCodeFromHint(country = "") {
+  const c = normalizeKey(country);
+  if (!c) return "es";
+  const map = {
+    espana: "es", spain: "es", es: "es", esp: "es",
+    portugal: "pt", pt: "pt",
+    francia: "fr", france: "fr", fr: "fr",
+    andorra: "ad", ad: "ad",
+    italia: "it", italy: "it", it: "it",
+    alemania: "de", germany: "de", de: "de",
+    belgica: "be", belgium: "be", be: "be",
+    holanda: "nl", paisesbajos: "nl", netherlands: "nl", nl: "nl",
+    suiza: "ch", switzerland: "ch", ch: "ch",
+    reinounido: "gb", unitedkingdom: "gb", gb: "gb", uk: "gb",
+    marruecos: "ma", morocco: "ma", ma: "ma",
+  };
+  return map[c] || "";
+}
+
 function pickAddressPart(address = {}, keys = []) {
   for (const key of keys) {
     const value = cleanText(address[key]);
@@ -224,7 +246,7 @@ async function geocodeHere(empresaId, q, country, region) {
   return null;
 }
 
-async function geocodeNominatim(q, country, region) {
+async function geocodeNominatim(q, country, region, countryCode = "") {
   const attempts = [
     buildQuery(q, country, region),
     country || region ? cleanText(q) : "",
@@ -235,6 +257,8 @@ async function geocodeNominatim(q, country, region) {
     url.searchParams.set("addressdetails", "1");
     url.searchParams.set("limit", "1");
     url.searchParams.set("accept-language", "es");
+    // Restringe el pais para que un nombre ambiguo no salte a otro estado.
+    if (countryCode) url.searchParams.set("countrycodes", countryCode);
     url.searchParams.set("q", query);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
@@ -305,13 +329,17 @@ async function resolvePlace(empresaId, q, country, region) {
     return { source: "cache", provider: cached.rows[0].provider, ...cached.rows[0].result };
   }
 
-  const variants = placeVariants(cleaned);
+  const countryCode = countryCodeFromHint(country);
+  // Incluimos la provincia (region) en la etiqueta base para desambiguar
+  // poblaciones homonimas; placeVariants genera luego variantes mas simples.
+  const variants = placeVariants(buildQuery(cleaned, country, region));
   // HERE una sola vez con la etiqueta completa (evita gastar cuota de pago).
   let resolved = await geocodeHere(empresaId, cleaned, country, region).catch(() => null);
-  // Nominatim probando variantes cada vez mas simples hasta encontrar una.
+  // Nominatim probando variantes cada vez mas simples hasta encontrar una,
+  // siempre restringido al pais para no saltar a otro estado.
   if (!resolved || resolved.lat == null) {
     for (const v of variants) {
-      resolved = await geocodeNominatim(v, "", "").catch(() => null);
+      resolved = await geocodeNominatim(v, "", "", countryCode).catch(() => null);
       if (resolved && resolved.lat != null) break;
     }
   }

@@ -34,7 +34,9 @@ CREATE TABLE IF NOT EXISTS puntos_interes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_dir ON puntos_interes(empresa_id, LOWER(TRIM(direccion))) WHERE activo=true;
+-- Unicidad por (empresa, cliente, direccion): cada cliente puede tener su propia
+-- copia de una misma direccion; cliente_id NULL = punto general compartido.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cli_dir ON puntos_interes(empresa_id, COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid), LOWER(TRIM(direccion))) WHERE activo=true;
 CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_nombre ON puntos_interes(empresa_id, LOWER(nombre)) WHERE activo=true;
 
 CREATE TABLE IF NOT EXISTS almacenes (

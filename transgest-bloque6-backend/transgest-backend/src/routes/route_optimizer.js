@@ -318,10 +318,17 @@ async function fetchJson(url, options = {}) {
   }
 }
 
+// Sesgo a Espana para geocoders: salvo que la direccion mencione otro pais, se
+// restringe la busqueda a ES para que un nombre ambiguo no salte al extranjero
+// (p.ej. "Guadalupe" -> Caribe, "Leon" -> EE.UU.).
+const OTRO_PAIS_RE = /(francia|france|portugal|italia|italy|alemania|germany|andorra|belgica|belgium|holanda|netherlands|paises bajos|suiza|switzerland|reino unido|united kingdom|uk|marruecos|morocco)/i;
+function biasEspana(address) { return !OTRO_PAIS_RE.test(String(address || "")); }
+
 async function geocodeOrs(address, key) {
   const direct = parseCoordinateAddress(address);
   if (direct) return direct;
   const params = new URLSearchParams({ api_key: key, text: address, size: "1" });
+  if (biasEspana(address)) params.set("boundary.country", "ES");
   const data = await fetchJson(`https://api.openrouteservice.org/geocode/search?${params.toString()}`);
   const coords = data?.features?.[0]?.geometry?.coordinates;
   if (!Array.isArray(coords)) throw new Error(`No se pudo geocodificar: ${address}`);
@@ -332,6 +339,7 @@ async function geocodeHere(address, key) {
   const direct = parseCoordinateAddress(address);
   if (direct) return direct;
   const params = new URLSearchParams({ apiKey: key, q: address, limit: "1" });
+  if (biasEspana(address)) params.set("in", "countryCode:ESP");
   const data = await fetchJson(`https://geocode.search.hereapi.com/v1/geocode?${params.toString()}`);
   const pos = data?.items?.[0]?.position;
   if (!pos) throw new Error(`No se pudo geocodificar: ${address}`);
@@ -402,6 +410,7 @@ async function geocodeLocal(address) {
   let lastError = "";
   for (const q of queries) {
     const params = new URLSearchParams({ q, format: "json", limit: "1", addressdetails: "1" });
+      if (biasEspana(q)) params.set("countrycodes", "es");
     try {
       const data = await fetchJson(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
         headers: {

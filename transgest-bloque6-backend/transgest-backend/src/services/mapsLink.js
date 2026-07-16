@@ -12,10 +12,7 @@ const COORD_PATTERNS = [
   /^\s*(-?\d{1,3}(?:\.\d+)?),\s*(-?\d{1,3}(?:\.\d+)?)\s*$/,
 ];
 
-// Extrae {lat,lng} de un texto (URL de maps o "lat,lng"). Sincrono, sin red.
-function coordsFromText(text) {
-  const raw = String(text || "");
-  if (!raw) return null;
+function matchCoords(raw) {
   for (const re of COORD_PATTERNS) {
     const m = raw.match(re);
     if (!m) continue;
@@ -25,6 +22,21 @@ function coordsFromText(text) {
       return { lat, lng };
     }
   }
+  return null;
+}
+
+// Extrae {lat,lng} de un texto (URL de maps o "lat,lng"). Sincrono, sin red.
+// Tambien prueba una version url-decodificada, porque el muro de consentimiento
+// de Google envuelve la URL real (con las coords) en un parametro ?continue=...
+function coordsFromText(text) {
+  const raw = String(text || "");
+  if (!raw) return null;
+  const direct = matchCoords(raw);
+  if (direct) return direct;
+  try {
+    const decoded = decodeURIComponent(raw.replace(/\+/g, " "));
+    if (decoded !== raw) return matchCoords(decoded);
+  } catch { /* URI mal formada: ignoramos */ }
   return null;
 }
 

@@ -1825,7 +1825,10 @@ function findPuntoInteresForStop(stop = {}, fallback = "") {
   ].map(normalizePlaceText).filter(Boolean));
   return lista.find(p => {
     const variants = pointVariants(p);
-    return candidates.some(c => variants.some(v => v === c || v.includes(c) || c.includes(v)));
+    // Sin un identificador explicito solo aceptamos coincidencias exactas. Una
+    // poblacion generica (p. ej. "Madrid") no debe heredar el nombre de otro
+    // punto cuya direccion simplemente contenga esa palabra.
+    return candidates.some(c => variants.some(v => v === c));
   }) || null;
 }
 
@@ -6361,6 +6364,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [puntosCargaClienteLoading, setPuntosCargaClienteLoading] = useState(false);
   const [pendingDocs, setPendingDocs] = useState(() => Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
   const initialFormRef = React.useRef(pedidoDraftSignature(form));
+  const userInteractedWithFormRef = React.useRef(false);
   const hydratedPedidoKeyRef = React.useRef(editando?.id || (editando ? "draft" : "new"));
   const rutasCreadasRef = React.useRef(new Set());
   const tarifaAutoAplicadaRef = React.useRef("");
@@ -6381,8 +6385,18 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     setShowColaboradorSuggestions(false);
     setShowCostes(!!(nextForm.coste_gasoil || nextForm.coste_peajes || nextForm.coste_dietas || nextForm.coste_otros));
     tarifaAutoAplicadaRef.current = "";
+    userInteractedWithFormRef.current = false;
     initialFormRef.current = pedidoDraftSignature(nextForm);
   }, [editando]);
+
+  useEffect(() => {
+    // Geocodificacion, hidratacion de paradas y tarifas pueden completar el
+    // borrador al abrirlo. Mientras el usuario no haya intervenido, esos
+    // cambios forman parte del estado inicial y no deben disparar el aviso.
+    if (editando && !userInteractedWithFormRef.current) {
+      initialFormRef.current = pedidoDraftSignature(form);
+    }
+  }, [editando, form]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setMapPedidoDraft(form), 550);
@@ -7492,7 +7506,15 @@ useEffect(() => {
               }
             }
           `}</style>
-          <div className="tg-pedido-modal" style={S.mbox}>
+          <div
+            className="tg-pedido-modal"
+            style={S.mbox}
+            onInputCapture={() => { userInteractedWithFormRef.current = true; }}
+            onChangeCapture={() => { userInteractedWithFormRef.current = true; }}
+            onClickCapture={event => {
+              if (event.target.closest("button")) userInteractedWithFormRef.current = true;
+            }}
+          >
             <div className="tg-pedido-modal-header">
               <div className="tg-pedido-modal-title" style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,color:"var(--text)",flex:1}}>
                 {editando?._readonly

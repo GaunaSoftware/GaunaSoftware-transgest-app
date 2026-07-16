@@ -4048,7 +4048,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             return (
             <div
               className="tg-stop-card"
-              key={`${key}-${i}-${stopAddress(d) || d.cliente_nombre || "stop"}`}
+              key={`${key}-${i}-${d.id || d.punto_interes_id || "stop"}`}
               draggable={!disabled && stopsOrdenados.length > 1}
               onDragStart={e=>{ setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
               onDragOver={e=>{ if (!disabled && dragIdx !== null) e.preventDefault(); }}

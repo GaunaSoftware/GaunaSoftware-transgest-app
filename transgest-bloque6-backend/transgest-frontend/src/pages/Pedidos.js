@@ -6928,7 +6928,7 @@ async function maybeCrearRutaClienteDesdePedido() {
   }
   const rutaExistente = rutasClienteActualizadas
     .filter(r =>
-      routeDraftScore(form, r) >= 44 &&
+      routeDraftScore(form, r) >= 43 &&
       (!r.cliente_id || r.cliente_id === form.cliente_id) &&
       (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
     )
@@ -6954,7 +6954,22 @@ async function maybeCrearRutaClienteDesdePedido() {
     return null;
   }
   const origenRuta = form.origen.trim().toUpperCase();
-  const destinoRuta = form.destino.trim().toUpperCase();
+  let destinoRuta = form.destino.trim().toUpperCase();
+  // Tarifas a nivel de PROVINCIA: si el destino tiene provincia y no es ya la
+  // propia provincia, preguntamos si la tarifa aplica a toda la provincia
+  // (agrupa todos sus pueblos) o solo a este pueblo (excepcion con otro precio).
+  const destinoProvincia = String(form.destino_provincia || "").trim();
+  if (destinoProvincia && normalizePlaceText(destinoProvincia) !== normalizePlaceText(form.destino)) {
+    const usarProvincia = await confirmDialog({
+      title: "Ambito de la tarifa",
+      message: `Puedes guardar esta tarifa para toda la provincia de ${destinoProvincia} (aplicara a todos sus pueblos) o solo para ${form.destino.trim()}.
+
+Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueblo (excepcion).`,
+      confirmText: `Provincia ${destinoProvincia}`,
+      cancelText: `Solo ${form.destino.trim()}`,
+    });
+    if (usarProvincia) destinoRuta = destinoProvincia.toUpperCase();
+  }
   const nueva = await crearRutaCliente(form.cliente_id, {
     origen: origenRuta,
     destino: destinoRuta,

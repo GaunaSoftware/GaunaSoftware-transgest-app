@@ -53,6 +53,7 @@ async function ensureColaboradorOpsSchema() {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
           colaborador_id UUID NOT NULL REFERENCES colaboradores(id) ON DELETE CASCADE,
+          pedido_id UUID REFERENCES pedidos(id) ON DELETE CASCADE,
           token_hash VARCHAR(80) NOT NULL UNIQUE,
           expires_at TIMESTAMPTZ NOT NULL,
           opened_at TIMESTAMPTZ,
@@ -61,6 +62,8 @@ async function ensureColaboradorOpsSchema() {
         )
       `).catch(()=>{});
       await db.query("CREATE INDEX IF NOT EXISTS idx_colaborador_liq_tokens_hash ON colaborador_liquidacion_tokens(token_hash)").catch(()=>{});
+      await db.query("ALTER TABLE colaborador_liquidacion_tokens ADD COLUMN IF NOT EXISTS pedido_id UUID REFERENCES pedidos(id) ON DELETE CASCADE").catch(()=>{});
+      await db.query("CREATE INDEX IF NOT EXISTS idx_colaborador_liq_tokens_pedido ON colaborador_liquidacion_tokens(pedido_id) WHERE pedido_id IS NOT NULL").catch(()=>{});
       await db.query("ALTER TABLE colaborador_liquidacion_tokens ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ").catch(()=>{});
       await db.query("ALTER TABLE colaborador_liquidacion_tokens ADD COLUMN IF NOT EXISTS acknowledged_ip VARCHAR(80)").catch(()=>{});
       await db.query("ALTER TABLE colaborador_liquidacion_tokens ADD COLUMN IF NOT EXISTS acknowledged_user_agent TEXT").catch(()=>{});
@@ -104,6 +107,12 @@ async function ensureColaboradorOpsSchema() {
 
 function hashToken(token) {
   return crypto.createHash("sha256").update(String(token || "")).digest("hex");
+}
+
+const COLABORADOR_ACCESS_TERMINAL_STATES = new Set(["entregado", "facturado", "cancelado", "cancelada", "finalizado", "finalizada"]);
+
+function isColaboradorAccessTerminalState(estado) {
+  return COLABORADOR_ACCESS_TERMINAL_STATES.has(String(estado || "").trim().toLowerCase());
 }
 
 function publicBaseUrl(req) {
@@ -948,6 +957,12 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
       .btn-primary{background:#0f766e;border-color:#0f766e;color:#fff}
       .trip-panel{margin-top:14px;border:1px dashed #cbd5e1;border-radius:14px;padding:14px;background:#f8fafc}
       .trip-placeholder{color:#64748b;font-size:13px}
+      .driver-card{margin-bottom:12px;padding:12px;border:1px solid #cbd5e1;border-radius:12px;background:#fff}
+      .driver-card h3{margin:0 0 4px;font-size:14px}
+      .driver-card p{margin:0 0 10px;color:#64748b;font-size:12px}
+      .driver-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+      .driver-grid label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#64748b}
+      .driver-grid input{display:block;width:100%;margin-top:4px;padding:9px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px}
       .progress{display:grid;gap:10px}
       .step{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:10px 12px}
       .step.done{background:#ecfdf5;border-color:#bbf7d0}
@@ -969,6 +984,7 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         .hero,.trip{padding:14px}
         h1{font-size:24px}
         .step{grid-template-columns:1fr;align-items:flex-start}
+        .driver-grid{grid-template-columns:1fr}
       }
     </style></head><body><main>
       <section class="hero">
@@ -1013,7 +1029,20 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
           return;
         }
         const steps = Array.isArray(workflow.steps) ? workflow.steps : [];
+        const driverForm = '<div class="driver-card">'
+          + '<h3>Conductor efectivo del viaje</h3>'
+          + '<p>Estos datos se incorporan al DCD/carta de porte y quedan vinculados solo a este viaje.</p>'
+          + '<div class="driver-grid">'
+          + '<label>Nombre<input data-driver-field="nombre" value="' + escapeHtml(pedido.conductor_efectivo_nombre || '') + '" autocomplete="given-name"></label>'
+          + '<label>Apellidos<input data-driver-field="apellidos" value="' + escapeHtml(pedido.conductor_efectivo_apellidos || '') + '" autocomplete="family-name"></label>'
+          + '<label>DNI / NIE<input data-driver-field="dni" value="' + escapeHtml(pedido.conductor_efectivo_dni || '') + '" autocomplete="off"></label>'
+          + '<label>Telefono<input data-driver-field="telefono" value="' + escapeHtml(pedido.conductor_efectivo_telefono || '') + '" inputmode="tel" autocomplete="tel"></label>'
+          + '<label>Matricula tractora<input data-driver-field="matricula" value="' + escapeHtml(pedido.matricula_colaborador || '') + '" autocomplete="off"></label>'
+          + '<label>Matricula remolque<input data-driver-field="remolque" value="' + escapeHtml(pedido.remolque_matricula_colaborador || '') + '" autocomplete="off"></label>'
+          + '</div><button type="button" class="btn btn-primary" data-action="save-driver" data-pedido-id="' + escapeHtml(tripId) + '">Guardar datos del viaje</button>'
+          + '</div>';
         box.innerHTML = '<div class="trip-badges" style="margin-bottom:12px"><span class="' + statusClass(workflow.status) + '">' + escapeHtml(String(workflow.status || "pendiente").replace("_"," ")) + '</span><span class="badge badge-neutral">' + escapeHtml(String(pedido.estado || "pendiente").replace("_"," ")) + '</span></div>'
+          + driverForm
           + '<div class="progress">'
           + steps.map((step) => {
             const done = !!step.done;
@@ -1058,6 +1087,31 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         const nextStatus = document.getElementById('op-status-' + tripId);
         if (nextStatus) nextStatus.innerHTML = '<span class="ok">Estado actualizado.</span>';
       }
+      async function saveDriver(tripId){
+        const box = panel(tripId);
+        const read = (field) => box && box.querySelector('[data-driver-field="' + field + '"]') ? box.querySelector('[data-driver-field="' + field + '"]').value : '';
+        const status = document.getElementById('op-status-' + tripId);
+        if (status) status.innerHTML = '<span class="warn">Guardando conductor...</span>';
+        const res = await fetch('/api/v1/colaboradores/public/portal/' + encodeURIComponent(TOKEN) + '/pedidos/' + encodeURIComponent(tripId) + '/operativa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'guardar_conductor',
+            conductor: {
+              nombre: read('nombre'), apellidos: read('apellidos'), dni: read('dni'), telefono: read('telefono'),
+              matricula: read('matricula'), remolque: read('remolque')
+            }
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (status) status.innerHTML = '<span class="error">' + escapeHtml(data.error || 'No se pudo guardar el conductor') + '</span>';
+          return;
+        }
+        renderWorkflow(tripId, data);
+        const nextStatus = document.getElementById('op-status-' + tripId);
+        if (nextStatus) nextStatus.innerHTML = '<span class="ok">Conductor guardado para el DCD.</span>';
+      }
       async function uploadDoc(file, tripId, fase){
         const status = document.getElementById('op-status-' + tripId);
         if (status) status.innerHTML = '<span class="warn">Subiendo documento...</span>';
@@ -1082,6 +1136,11 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           if (status) status.innerHTML = '<span class="error">' + escapeHtml(data.error || 'No se pudo subir el archivo') + '</span>';
+          return;
+        }
+        if (data.acceso_finalizado) {
+          const box = panel(tripId);
+          if (box) box.innerHTML = '<div class="ok">Viaje entregado. El albaran se ha adjuntado y este acceso temporal ha quedado desactivado.</div>';
           return;
         }
         await loadOperativa(tripId);
@@ -1128,6 +1187,7 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         if (trigger.getAttribute('data-action') === 'load-operativa') return loadOperativa(tripId);
         if (trigger.getAttribute('data-action') === 'list-docs') return listDocs(tripId);
         if (trigger.getAttribute('data-action') === 'open-dcd') return openDcd(tripId);
+        if (trigger.getAttribute('data-action') === 'save-driver') return saveDriver(tripId);
         const action = trigger.getAttribute('data-run-action');
         if (action) return runAction(tripId, action);
       });
@@ -1147,15 +1207,25 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
 async function getLiquidacionPublicData(tokenValue) {
   const tokenHash = hashToken(tokenValue);
   const tokenRes = await db.query(
-    `SELECT t.*, c.nombre, c.cif
+    `SELECT t.*, c.nombre, c.cif, tp.numero AS pedido_numero, tp.estado AS pedido_estado
          FROM colaborador_liquidacion_tokens t
          JOIN colaboradores c ON c.id=t.colaborador_id AND c.empresa_id=t.empresa_id
+         LEFT JOIN pedidos tp ON tp.id=t.pedido_id AND tp.empresa_id=t.empresa_id
         WHERE t.token_hash=$1 AND t.expires_at > NOW()
+          AND (
+            t.pedido_id IS NULL
+            OR (
+              tp.id IS NOT NULL
+              AND tp.colaborador_id=t.colaborador_id
+              AND LOWER(COALESCE(tp.estado::text,'')) NOT IN ('entregado','facturado','cancelado','cancelada','finalizado','finalizada')
+            )
+          )
         LIMIT 1`,
     [tokenHash]
   );
   const token = tokenRes.rows[0];
   if (!token) return null;
+  const pedidoScopeId = token.pedido_id || null;
   const [viajes, facturas, pagos, documentos, vehiculos] = await Promise.all([
     db.query(
       `SELECT p.*, c.nombre AS cliente_nombre, p.precio_colaborador AS importe_colaborador,
@@ -1177,20 +1247,22 @@ async function getLiquidacionPublicData(tokenValue) {
                 )
            ) docs ON true
           WHERE p.empresa_id=$1 AND p.colaborador_id=$2
+            AND ($3::uuid IS NULL OR p.id=$3)
           ORDER BY p.fecha_carga DESC NULLS LAST, p.created_at DESC NULLS LAST
           LIMIT 500`,
-      [token.empresa_id, token.colaborador_id]
+      [token.empresa_id, token.colaborador_id, pedidoScopeId]
     ),
-    db.query(
+    pedidoScopeId ? Promise.resolve({ rows: [] }) : db.query(
       `SELECT cf.*, p.numero, p.referencia_cliente
            FROM colaborador_facturas cf
            LEFT JOIN pedidos p ON p.id=cf.pedido_id
           WHERE cf.empresa_id=$1 AND cf.colaborador_id=$2
+            AND ($3::uuid IS NULL OR cf.pedido_id=$3)
           ORDER BY cf.fecha DESC, cf.created_at DESC
           LIMIT 500`,
-      [token.empresa_id, token.colaborador_id]
+      [token.empresa_id, token.colaborador_id, pedidoScopeId]
     ),
-    db.query(
+    pedidoScopeId ? Promise.resolve({ rows: [] }) : db.query(
       `SELECT *
            FROM colaborador_pagos
           WHERE empresa_id=$1 AND colaborador_id=$2
@@ -1198,7 +1270,7 @@ async function getLiquidacionPublicData(tokenValue) {
           LIMIT 500`,
       [token.empresa_id, token.colaborador_id]
     ),
-    db.query(
+    pedidoScopeId ? Promise.resolve({ rows: [] }) : db.query(
       `SELECT id,tipo,nombre,caducidad,notas,created_at,file_base64,file_mime,file_size_kb
            FROM colaborador_documentos
           WHERE empresa_id=$1 AND colaborador_id=$2
@@ -1206,7 +1278,7 @@ async function getLiquidacionPublicData(tokenValue) {
           LIMIT 200`,
       [token.empresa_id, token.colaborador_id]
     ),
-    db.query(
+    pedidoScopeId ? Promise.resolve({ rows: [] }) : db.query(
       `SELECT id,matricula,marca,modelo,tipo,tara_kg,carga_max_kg,bastidor,num_ejes,longitud_m,notas,
               doc_tarjeta_transp,doc_tarjeta_exp,doc_seguro_venc,doc_itv_venc,doc_tacografo_venc
          FROM colaborador_vehiculos
@@ -1215,14 +1287,53 @@ async function getLiquidacionPublicData(tokenValue) {
       [token.empresa_id, token.colaborador_id]
     ).catch(() => ({ rows: [] })),
   ]);
+  const viajesPublicos = pedidoScopeId
+    ? viajes.rows.map((row) => ({
+        id: row.id,
+        numero: row.numero,
+        referencia_cliente: row.referencia_cliente,
+        estado: row.estado,
+        origen: row.origen,
+        destino: row.destino,
+        fecha_carga: row.fecha_carga,
+        fecha_descarga: row.fecha_descarga,
+        hora_carga: row.hora_carga,
+        hora_descarga: row.hora_descarga,
+        mercancia: row.mercancia,
+        descripcion_carga: row.mercancia,
+        peso_kg: row.peso_kg,
+        bultos: row.bultos,
+        cliente_nombre: row.cliente_nombre,
+        albaranes_count: row.albaranes_count,
+        conductor_efectivo_nombre: row.conductor_efectivo_nombre,
+        conductor_efectivo_apellidos: row.conductor_efectivo_apellidos,
+        conductor_efectivo_dni: row.conductor_efectivo_dni,
+        conductor_efectivo_telefono: row.conductor_efectivo_telefono,
+        matricula_colaborador: row.matricula_colaborador,
+        remolque_matricula_colaborador: row.remolque_matricula_colaborador,
+      }))
+    : viajes.rows;
   return {
     token,
-    viajes: viajes.rows,
+    viajes: viajesPublicos,
     facturas: facturas.rows,
     pagos: pagos.rows,
     documentos: documentos.rows,
     vehiculos: vehiculos.rows,
   };
+}
+
+function rejectPedidoScopedPortal(data, res, format = "json") {
+  if (!data?.token?.pedido_id) return false;
+  const message = "Este acceso temporal solo permite operar el viaje asignado.";
+  if (format === "html") {
+    res.status(403).send(`<!doctype html><meta charset="utf-8"><h1>Acceso limitado</h1><p>${htmlEscape(message)}</p>`);
+  } else if (format === "text") {
+    res.status(403).send(message);
+  } else {
+    res.status(403).json({ error: message });
+  }
+  return true;
 }
 
 async function getColaboradorOpsData(empresaId, colaboradorId, { referencia = "" } = {}) {
@@ -1330,6 +1441,9 @@ async function getPortalProveedorPedido(tokenValue, pedidoId) {
     `SELECT p.id, p.numero, p.empresa_id, p.colaborador_id, p.estado, p.origen, p.destino, p.fecha_carga,
             p.fecha_descarga, p.hora_carga, p.hora_descarga, p.mercancia, p.mercancia AS descripcion_carga, p.notas,
             p.peso_kg, p.bultos, p.km_ruta AS km, p.km_ruta, p.precio_colaborador,
+            p.conductor_efectivo_nombre, p.conductor_efectivo_apellidos,
+            p.conductor_efectivo_dni, p.conductor_efectivo_telefono,
+            p.matricula_colaborador, p.remolque_matricula_colaborador,
             c.nombre AS cliente_nombre,
             co.nombre AS colaborador_nombre
        FROM pedidos p
@@ -1338,11 +1452,14 @@ async function getPortalProveedorPedido(tokenValue, pedidoId) {
       WHERE p.id=$1
         AND p.empresa_id=$2
         AND p.colaborador_id=$3
+        AND ($4::uuid IS NULL OR p.id=$4)
       LIMIT 1`,
-    [pedidoId, data.token.empresa_id, data.token.colaborador_id]
+    [pedidoId, data.token.empresa_id, data.token.colaborador_id, data.token.pedido_id || null]
   );
   if (!rows[0]) return null;
-  return { token: data.token, pedido: rows[0] };
+  const pedido = { ...rows[0] };
+  if (data.token.pedido_id) delete pedido.precio_colaborador;
+  return { token: data.token, pedido };
 }
 
 function normalizePortalChoferPasosPayload(value = {}) {
@@ -1433,6 +1550,12 @@ async function actualizarEstadoPedidoPortal(pedidoId, empresaId, nextEstado) {
       WHERE id=$2 AND empresa_id=$3`,
     [nextEstado, pedidoId, empresaId]
   ).catch(() => {});
+  if (isColaboradorAccessTerminalState(nextEstado)) {
+    await db.query(
+      "UPDATE colaborador_liquidacion_tokens SET expires_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2 AND expires_at>NOW()",
+      [pedidoId, empresaId]
+    ).catch(() => {});
+  }
 }
 
 async function savePortalProveedorChoferPasos({ pedidoId, empresaId, patch = {}, colaboradorId = null }) {
@@ -1457,7 +1580,7 @@ async function savePortalProveedorChoferPasos({ pedidoId, empresaId, patch = {},
   return normalizePortalChoferPasosPayload(nextData);
 }
 
-async function ejecutarPortalProveedorAccionOperativa(ctx, action) {
+async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
   const pedido = ctx?.pedido;
   if (!pedido?.id) {
     const err = new Error("Pedido no disponible");
@@ -1468,6 +1591,46 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, action) {
   const now = new Date().toISOString();
   let patch = null;
   let nextEstado = null;
+  const action = String(body?.action || "");
+  if (action === "guardar_conductor") {
+    const conductor = body?.conductor && typeof body.conductor === "object" ? body.conductor : {};
+    const nombre = String(conductor.nombre || "").trim().slice(0, 120);
+    const apellidos = String(conductor.apellidos || "").trim().slice(0, 180);
+    const dni = String(conductor.dni || "").trim().toUpperCase().slice(0, 40);
+    const telefono = String(conductor.telefono || "").trim().slice(0, 40);
+    const matricula = String(conductor.matricula || "").trim().toUpperCase().slice(0, 60);
+    const remolque = String(conductor.remolque || "").trim().toUpperCase().slice(0, 60);
+    if (!nombre || !apellidos || !dni) {
+      throw Object.assign(new Error("Indica nombre, apellidos y DNI/NIE del conductor efectivo."), { status: 400 });
+    }
+    const { rows } = await db.query(
+      `UPDATE pedidos
+          SET conductor_efectivo_nombre=$1,
+              conductor_efectivo_apellidos=$2,
+              conductor_efectivo_dni=$3,
+              conductor_efectivo_telefono=$4,
+              matricula_colaborador=$5,
+              remolque_matricula_colaborador=$6,
+              updated_at=NOW()
+        WHERE id=$7 AND empresa_id=$8 AND colaborador_id=$9
+        RETURNING *`,
+      [nombre, apellidos, dni, telefono || null, matricula || null, remolque || null, pedido.id, pedido.empresa_id, ctx?.token?.colaborador_id]
+    );
+    if (!rows[0]) throw Object.assign(new Error("No se pudo guardar el conductor del viaje."), { status: 404 });
+    await logPedidoEventoPortal(pedido.id, pedido.empresa_id, "colaborador_portal.conductor_actualizado", {
+      colaborador_id: ctx?.token?.colaborador_id || null,
+      conductor_nombre: `${nombre} ${apellidos}`.trim(),
+      conductor_dni: dni,
+      matricula: matricula || null,
+      remolque: remolque || null,
+    });
+    const pasosGuardados = await getPortalProveedorChoferPasos(pedido.id, pedido.empresa_id);
+    return {
+      pedido: rows[0],
+      pasos: pasosGuardados,
+      workflow: buildPortalProveedorOperativa(rows[0], pasosGuardados),
+    };
+  }
   switch (String(action || "")) {
     case "posicionar_carga":
       patch = { carga_iniciada: true, carga_iniciada_at: now };
@@ -1542,8 +1705,9 @@ async function getPortalProveedorDocumentoControlContext(tokenValue, pedidoId) {
       WHERE p.id=$1
         AND p.empresa_id=$2
         AND p.colaborador_id=$3
+        AND ($4::uuid IS NULL OR p.id=$4)
       LIMIT 1`,
-    [pedidoId, data.token.empresa_id, data.token.colaborador_id]
+    [pedidoId, data.token.empresa_id, data.token.colaborador_id, data.token.pedido_id || null]
   );
   const pedido = rows[0];
   if (!pedido) return null;
@@ -1589,6 +1753,7 @@ router.get("/public/liquidacion/:token", async (req, res) => {
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).send("<!doctype html><meta charset='utf-8'><h1>Enlace no disponible</h1><p>El enlace ha caducado o no existe.</p>");
     const token = data.token;
+    if (token.pedido_id) return res.redirect(`/api/v1/colaboradores/public/portal/${encodeURIComponent(req.params.token)}/operativa`);
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [token.id]).catch(()=>{});
     res.send(renderLiquidacionColaboradorHtml({
       colaborador: token,
@@ -1610,6 +1775,7 @@ router.get("/public/portal/:token", async (req, res) => {
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).send("<!doctype html><meta charset='utf-8'><h1>Enlace no disponible</h1><p>El enlace ha caducado o no existe.</p>");
     const token = data.token;
+    if (token.pedido_id) return res.redirect(`/api/v1/colaboradores/public/portal/${encodeURIComponent(req.params.token)}/operativa`);
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [token.id]).catch(()=>{});
     res.send(renderLiquidacionColaboradorHtml({
       colaborador: token,
@@ -1630,6 +1796,7 @@ router.get("/public/portal/:token/resumen", async (req, res) => {
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).json({ error: "Enlace no disponible" });
+    if (rejectPedidoScopedPortal(data, res)) return;
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [data.token.id]).catch(()=>{});
     const resumen = buildPortalProveedorResumen(data);
     delete resumen._facturas_estado;
@@ -1644,6 +1811,7 @@ router.get("/public/portal/:token/informe-acciones", async (req, res) => {
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).send("<!doctype html><meta charset='utf-8'><h1>Enlace no disponible</h1><p>El enlace ha caducado o no existe.</p>");
+    if (rejectPedidoScopedPortal(data, res, "html")) return;
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [data.token.id]).catch(()=>{});
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(`acciones-proveedor-${data.token.nombre || data.token.colaborador_id || "colaborador"}.html`)}"`);
@@ -1659,6 +1827,7 @@ router.get("/public/portal/:token/facturas", async (req, res) => {
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).json({ error: "Enlace no disponible" });
+    if (rejectPedidoScopedPortal(data, res)) return;
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [data.token.id]).catch(()=>{});
     res.json((data.facturas || []).map(f => {
       const situacion = situacionFacturaProveedor(f);
@@ -1690,6 +1859,7 @@ router.get("/public/portal/:token/pagos", async (req, res) => {
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).json({ error: "Enlace no disponible" });
+    if (rejectPedidoScopedPortal(data, res)) return;
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [data.token.id]).catch(()=>{});
     const resumen = resumenPagosProveedor(data.viajes || [], data.facturas || [], data.pagos || []);
     res.json({
@@ -1723,6 +1893,7 @@ router.get("/public/portal/:token/documentos", async (req, res) => {
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).json({ error: "Enlace no disponible" });
+    if (rejectPedidoScopedPortal(data, res)) return;
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [data.token.id]).catch(()=>{});
     const documentos = data.documentos || [];
     res.json({
@@ -1755,6 +1926,7 @@ router.post("/public/portal/:token/documentos", express.json({ limit: "6mb" }), 
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).json({ error: "Enlace no disponible" });
+    if (rejectPedidoScopedPortal(data, res)) return;
     const { tipo, nombre, caducidad, notas, file_base64, file_mime, file_size_kb } = req.body || {};
     const upload = validateBase64Upload({ data: file_base64, mime: file_mime, filename: nombre });
     if (!nombre || !String(nombre).trim()) return res.status(400).json({ error: "Nombre de documento obligatorio" });
@@ -1796,6 +1968,7 @@ router.get("/public/portal/:token/documentos/:docId/descargar", async (req, res)
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).send("Enlace no disponible");
+    if (rejectPedidoScopedPortal(data, res, "text")) return;
     const { rows } = await db.query(
       `SELECT id,nombre,file_base64,file_mime
          FROM colaborador_documentos
@@ -1819,6 +1992,7 @@ router.get("/public/portal/:token/vehiculos", async (req, res) => {
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).json({ error: "Enlace no disponible" });
+    if (rejectPedidoScopedPortal(data, res)) return;
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [data.token.id]).catch(()=>{});
     const { rows } = await db.query(
       `SELECT id,matricula,marca,modelo,tipo,tara_kg,carga_max_kg,bastidor,num_ejes,longitud_m,notas,
@@ -1881,6 +2055,7 @@ router.get("/public/liquidacion/:token/descargar", async (req, res) => {
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).send("<!doctype html><meta charset='utf-8'><h1>Enlace no disponible</h1><p>El enlace ha caducado o no existe.</p>");
+    if (rejectPedidoScopedPortal(data, res, "html")) return;
     const token = data.token;
     await db.query(
       `UPDATE colaborador_liquidacion_tokens
@@ -1963,6 +2138,11 @@ router.get("/public/portal/:token/pedidos/:pedidoId/operativa", async (req, res)
       pedido: ctx.pedido,
       pasos,
       workflow: buildPortalProveedorOperativa(ctx.pedido, pasos),
+      acceso: ctx.token.pedido_id ? {
+        tipo: "conductor_invitado",
+        alcance: "pedido",
+        permisos: { operativa: true, dcd: true, albaranes: true, vacaciones: false, tacografo: false, flota: false },
+      } : { tipo: "portal_colaborador", alcance: "colaborador" },
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1975,7 +2155,7 @@ router.post("/public/portal/:token/pedidos/:pedidoId/operativa", express.json({ 
     const ctx = await getPortalProveedorPedido(req.params.token, req.params.pedidoId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no disponible para este proveedor" });
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [ctx.token.id]).catch(() => {});
-    const result = await ejecutarPortalProveedorAccionOperativa(ctx, req.body?.action);
+    const result = await ejecutarPortalProveedorAccionOperativa(ctx, req.body || {});
     res.json(result);
   } catch (e) {
     res.status(Number(e.status || 500)).json({ error: e.message || "No se pudo actualizar la operativa" });
@@ -2044,8 +2224,9 @@ router.post("/public/portal/:token/pedidos/:pedidoId/albaranes", express.json({ 
       colaborador_id: ctx.token.colaborador_id,
     });
     const faseNormalizada = String(fase || "").trim().toLowerCase();
+    let accesoFinalizado = false;
     if (faseNormalizada === "carga" || faseNormalizada === "descarga") {
-      await savePortalProveedorChoferPasos({
+      const pasosActualizados = await savePortalProveedorChoferPasos({
         pedidoId: ctx.pedido.id,
         empresaId: ctx.pedido.empresa_id,
         colaboradorId: ctx.token.colaborador_id,
@@ -2053,10 +2234,15 @@ router.post("/public/portal/:token/pedidos/:pedidoId/albaranes", express.json({ 
           ? { albaran_descarga: true, albaran_descarga_at: new Date().toISOString() }
           : { albaran_carga: true, albaran_carga_at: new Date().toISOString() },
       }).catch(() => null);
+      if (faseNormalizada === "descarga" && pasosActualizados?.descarga_ok) {
+        await actualizarEstadoPedidoPortal(ctx.pedido.id, ctx.pedido.empresa_id, "entregado");
+        accesoFinalizado = true;
+      }
     }
     await notificarAlbaranProveedor(ctx.pedido.empresa_id, ctx.pedido, { id: ctx.token.colaborador_id, nombre: ctx.token.nombre }, { ...rows[0], skip_notificacion: isQaRequest(req) });
     res.status(201).json({
       ...rows[0],
+      acceso_finalizado: accesoFinalizado,
       download_url: `/api/v1/colaboradores/public/portal/${encodeURIComponent(req.params.token)}/pedidos/${encodeURIComponent(ctx.pedido.id)}/albaranes/${encodeURIComponent(rows[0].id)}/descargar`,
     });
   } catch(e) {
@@ -2069,6 +2255,7 @@ router.post("/public/portal/:token/pedidos/:pedidoId/factura", express.json({ li
     await ensureColaboradorOpsSchema();
     const ctx = await getPortalProveedorPedido(req.params.token, req.params.pedidoId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no disponible para este proveedor" });
+    if (ctx.token.pedido_id) return res.status(403).json({ error: "El acceso temporal de conductor no permite subir facturas." });
     const { rows: colRows } = await db.query(
       "SELECT id,nombre,tipo_iva,iva_regimen FROM colaboradores WHERE id=$1 AND empresa_id=$2",
       [ctx.token.colaborador_id, ctx.token.empresa_id]
@@ -2170,6 +2357,7 @@ router.get("/public/portal/:token/facturas/:facturaId/descargar", async (req, re
     await ensureColaboradorOpsSchema();
     const data = await getLiquidacionPublicData(req.params.token);
     if (!data?.token) return res.status(404).send("Enlace no disponible");
+    if (rejectPedidoScopedPortal(data, res, "text")) return;
     const { rows } = await db.query(
       `SELECT id,pedido_id,numero_factura,referencia_orden,archivo_base64,archivo_mime
          FROM colaborador_facturas
@@ -2527,19 +2715,56 @@ router.post("/:id/liquidacion-token", GERENTE_O_TRAFICO, async (req,res) => {
       [req.params.id, empresaId]
     );
     if (!col.rows[0]) return res.status(404).json({ error: "Colaborador no encontrado" });
-    const dias = Math.min(Math.max(Number(req.body?.dias || 30), 1), 90);
+    const pedidoIdRaw = String(req.body?.pedido_id || "").trim();
+    const pedidoId = pedidoIdRaw || null;
+    if (pedidoId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pedidoId)) {
+      return res.status(400).json({ error: "El pedido indicado no es valido" });
+    }
+    let pedidoScope = null;
+    if (pedidoId) {
+      const pedidoRes = await db.query(
+        `SELECT id,numero,estado
+           FROM pedidos
+          WHERE id=$1 AND empresa_id=$2 AND colaborador_id=$3
+          LIMIT 1`,
+        [pedidoId, empresaId, req.params.id]
+      );
+      pedidoScope = pedidoRes.rows[0] || null;
+      if (!pedidoScope) return res.status(404).json({ error: "El pedido no esta asignado a este colaborador" });
+      if (isColaboradorAccessTerminalState(pedidoScope.estado)) {
+        return res.status(409).json({ error: "El viaje ya ha finalizado y no admite un acceso temporal nuevo" });
+      }
+    }
+    const dias = Math.min(Math.max(Number(req.body?.dias || (pedidoId ? 7 : 30)), 1), pedidoId ? 30 : 90);
+    if (pedidoId) {
+      await db.query(
+        `UPDATE colaborador_liquidacion_tokens
+            SET expires_at=NOW()
+          WHERE empresa_id=$1
+            AND colaborador_id=$2
+            AND pedido_id=$3
+            AND expires_at>NOW()`,
+        [empresaId, req.params.id, pedidoId]
+      );
+    }
     const token = crypto.randomBytes(32).toString("hex");
     const { rows } = await db.query(
       `INSERT INTO colaborador_liquidacion_tokens
-        (empresa_id,colaborador_id,token_hash,expires_at,created_by)
-       VALUES ($1,$2,$3,NOW() + ($4::text || ' days')::interval,$5)
-       RETURNING id, expires_at, opened_at, created_at`,
-      [empresaId, req.params.id, hashToken(token), String(dias), req.user?.id || null]
+        (empresa_id,colaborador_id,pedido_id,token_hash,expires_at,created_by)
+       VALUES ($1,$2,$3,$4,NOW() + ($5::text || ' days')::interval,$6)
+       RETURNING id, pedido_id, expires_at, opened_at, created_at`,
+      [empresaId, req.params.id, pedidoId, hashToken(token), String(dias), req.user?.id || null]
     );
     res.status(201).json({
       ...rows[0],
       colaborador_id: req.params.id,
       colaborador_nombre: col.rows[0].nombre,
+      pedido_id: pedidoId,
+      pedido_numero: pedidoScope?.numero || null,
+      alcance: pedidoId ? "viaje" : "portal_colaborador",
+      permisos: pedidoId
+        ? { operativa: true, dcd: true, albaranes: true, vacaciones: false, tacografo: false, flota: false }
+        : null,
       url: `${publicBaseUrl(req)}/api/v1/colaboradores/public/liquidacion/${token}`,
       portal_url: `${publicBaseUrl(req)}/api/v1/colaboradores/public/portal/${token}`,
       operativa_url: `${publicBaseUrl(req)}/api/v1/colaboradores/public/portal/${token}/operativa`,
@@ -2617,9 +2842,11 @@ router.get("/:id/liquidacion-tokens", GERENTE_O_TRAFICO, async (req,res) => {
     await ensureColaboradorOpsSchema();
     const empresaId = req.empresaId || req.user?.empresa_id;
     const { rows } = await db.query(
-      `SELECT t.id,t.expires_at,t.opened_at,t.acknowledged_at,t.downloaded_at,t.download_count,t.created_at,u.nombre AS created_by_nombre
+      `SELECT t.id,t.pedido_id,t.expires_at,t.opened_at,t.acknowledged_at,t.downloaded_at,t.download_count,t.created_at,
+              u.nombre AS created_by_nombre,p.numero AS pedido_numero,p.estado AS pedido_estado
          FROM colaborador_liquidacion_tokens t
          LEFT JOIN usuarios u ON u.id=t.created_by
+         LEFT JOIN pedidos p ON p.id=t.pedido_id AND p.empresa_id=t.empresa_id
         WHERE t.empresa_id=$1 AND t.colaborador_id=$2
         ORDER BY t.created_at DESC
         LIMIT 12`,
@@ -2627,7 +2854,7 @@ router.get("/:id/liquidacion-tokens", GERENTE_O_TRAFICO, async (req,res) => {
     );
     res.json(rows.map(row => ({
       ...row,
-      caducado: row.expires_at ? new Date(row.expires_at).getTime() < Date.now() : false,
+      caducado: (row.expires_at ? new Date(row.expires_at).getTime() < Date.now() : false) || isColaboradorAccessTerminalState(row.pedido_estado),
       abierto: Boolean(row.opened_at),
       confirmado: Boolean(row.acknowledged_at),
       descargado: Boolean(row.downloaded_at),

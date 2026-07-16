@@ -45,6 +45,9 @@ async function ensureSchema() {
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS username VARCHAR(120)").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permisos JSONB").catch(() => {});
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL").catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN NOT NULL DEFAULT false").catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ").catch(() => {});
 
   await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(() => {});
   await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT true").catch(() => {});
@@ -193,31 +196,18 @@ async function ensureUser(empresaId, { nombre, email, rol, choferId = null }) {
     return one(
       `UPDATE usuarios
           SET empresa_id=$2, nombre=$3, email=$4, username=$4, password_hash=$5, rol=$6, activo=true, chofer_id=$7,
-              debe_cambiar_password=false,
-              login_failed_count=0, login_locked_until=NULL
+              debe_cambiar_password=false, login_failed_count=0, login_locked_until=NULL
         WHERE id=$1
         RETURNING *`,
       [existing.id, empresaId, nombre, email, passwordHash, rol, choferId]
-    ).catch(() => one(
-      // Fallback si alguna columna de política de login aún no existe en este entorno.
-      `UPDATE usuarios
-          SET empresa_id=$2, nombre=$3, email=$4, username=$4, password_hash=$5, rol=$6, activo=true, chofer_id=$7
-        WHERE id=$1
-        RETURNING *`,
-      [existing.id, empresaId, nombre, email, passwordHash, rol, choferId]
-    ));
+    );
   }
   return one(
-    `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,chofer_id,debe_cambiar_password)
-     VALUES ($1,$2,$2,$3,$4,$5,true,$6,false)
+    `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,chofer_id,debe_cambiar_password,login_failed_count,login_locked_until)
+     VALUES ($1,$2,$2,$3,$4,$5,true,$6,false,0,NULL)
      RETURNING *`,
     [nombre, email, passwordHash, rol, empresaId, choferId]
-  ).catch(() => one(
-    `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,chofer_id)
-     VALUES ($1,$2,$2,$3,$4,$5,true,$6)
-     RETURNING *`,
-    [nombre, email, passwordHash, rol, empresaId, choferId]
-  ));
+  );
 }
 
 async function ensureCliente(empresaId, data) {
@@ -592,7 +582,7 @@ async function main(options = {}) {
     empresa_id: empresaId,
     demo_mode: true,
     usuarios: DEMO_EMAILS,
-    password: DEMO_PASSWORD,
+    password_configurada: true,
     resumen: {
       clientes: clientes.length,
       choferes: choferes.length,

@@ -1,5 +1,6 @@
 const express = require("express");
 const db      = require("../services/db");
+const logger  = require("../services/logger");
 const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
 const { crearNotificacion } = require("../services/notificaciones");
 const { validateBase64Upload } = require("../services/uploadValidation");
@@ -7,23 +8,28 @@ const router  = express.Router();
 router.use(authenticate);
 
 let schemaReady = false;
+function failChoferSchema(error) {
+  logger.error("Chofer schema no disponible: " + error.message);
+  throw error;
+}
+
 async function ensureChoferesTransparencySchema() {
   if (schemaReady) return;
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS sexo VARCHAR(30)").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS puesto_valor VARCHAR(120)").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS estado VARCHAR(40) NOT NULL DEFAULT 'disponible'").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS avisos JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_alta DATE").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_baja DATE").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS motivo_baja TEXT").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base TEXT").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_nombre VARCHAR(180)").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_fecha TIMESTAMPTZ").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_nombre TEXT").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_mime VARCHAR(120)").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_base64 TEXT").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS historial_laboral JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
-  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS plataformas JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS sexo VARCHAR(30)").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS puesto_valor VARCHAR(120)").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS estado VARCHAR(40) NOT NULL DEFAULT 'disponible'").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS avisos JSONB NOT NULL DEFAULT '[]'::jsonb").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_alta DATE").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS fecha_baja DATE").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS motivo_baja TEXT").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base TEXT").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_nombre VARCHAR(180)").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_fecha TIMESTAMPTZ").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_nombre TEXT").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_mime VARCHAR(120)").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_base64 TEXT").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS historial_laboral JSONB NOT NULL DEFAULT '[]'::jsonb").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS plataformas JSONB NOT NULL DEFAULT '[]'::jsonb").catch(failChoferSchema);
   schemaReady = true;
 }
 
@@ -40,6 +46,98 @@ function normalizePlataformas(value) {
       notas: String(doc?.notas || "").trim().slice(0, 500),
     })).filter(doc => doc.nombre || doc.caducidad || doc.fecha_tope || doc.notas),
   })).filter(platform => platform.nombre || platform.documentos.length);
+}
+
+function normalizeDuplicateText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeDuplicateDni(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeDuplicatePhone(value) {
+  return String(value || "").replace(/[^\d+]/g, "").replace(/^00/, "+");
+}
+
+async function findDuplicateChofer({ empresaId, dni, email, telefono, nombre, apellidos, excludeId = null }) {
+  const dniKey = normalizeDuplicateDni(dni);
+  const emailKey = String(email || "").trim().toLowerCase();
+  const phoneKey = normalizeDuplicatePhone(telefono);
+  const nombreKey = normalizeDuplicateText(nombre);
+  const apellidosKey = normalizeDuplicateText(apellidos);
+  if (!dniKey && !emailKey && !(phoneKey && nombreKey)) return null;
+
+  const params = [empresaId];
+  let excludeSql = "";
+  if (excludeId) {
+    params.push(excludeId);
+    excludeSql = ` AND id<>$${params.length}`;
+  }
+  const { rows } = await db.query(
+    `SELECT id,nombre,apellidos,dni,email,telefono
+       FROM choferes
+      WHERE empresa_id=$1
+        ${excludeSql}
+        AND COALESCE(activo,true)=true
+      LIMIT 500`,
+    params
+  );
+  return rows.find(row => {
+    if (dniKey && normalizeDuplicateDni(row.dni) === dniKey) return true;
+    if (emailKey && String(row.email || "").trim().toLowerCase() === emailKey) return true;
+    if (phoneKey && normalizeDuplicatePhone(row.telefono) === phoneKey) {
+      const sameNombre = normalizeDuplicateText(row.nombre) === nombreKey;
+      const sameApellidos = !apellidosKey || normalizeDuplicateText(row.apellidos) === apellidosKey;
+      if (sameNombre && sameApellidos) return true;
+    }
+    return false;
+  }) || null;
+}
+
+function duplicateChoferMessage(duplicate, draft = {}) {
+  if (!duplicate) return "Ya existe un chofer con esos datos en esta empresa.";
+  if (normalizeDuplicateDni(duplicate.dni) && normalizeDuplicateDni(duplicate.dni) === normalizeDuplicateDni(draft.dni)) {
+    return "Ya existe un chofer activo con ese DNI/NIE en esta empresa.";
+  }
+  if (duplicate.email && draft.email && String(duplicate.email).trim().toLowerCase() === String(draft.email).trim().toLowerCase()) {
+    return "Ya existe un chofer activo con ese email en esta empresa.";
+  }
+  return "Ya existe un chofer activo con el mismo nombre y telefono en esta empresa.";
+}
+
+async function resolveChoferByIdOrPrefix(empresaId, rawId) {
+  const id = String(rawId || "").trim();
+  if (!id) {
+    const err = new Error("ID de chofer no indicado.");
+    err.status = 400;
+    throw err;
+  }
+  const { rows } = await db.query(
+    `SELECT *
+       FROM choferes
+      WHERE empresa_id=$1
+        AND (id::text=$2 OR id::text LIKE $3)
+      ORDER BY id::text
+      LIMIT 3`,
+    [empresaId, id, `${id}%`]
+  );
+  if (!rows.length) {
+    const err = new Error("Chofer no encontrado.");
+    err.status = 404;
+    throw err;
+  }
+  if (rows.length > 1 && !rows.some(row => String(row.id) === id)) {
+    const err = new Error("El prefijo de ID coincide con varios choferes. Indica el UUID completo.");
+    err.status = 409;
+    throw err;
+  }
+  return rows.find(row => String(row.id) === id) || rows[0];
 }
 
 let jornadaSchemaReady = false;
@@ -67,8 +165,8 @@ async function ensureChoferJornadaSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_abierta ON chofer_jornadas(empresa_id, chofer_id, estado) WHERE estado='abierta'").catch(() => {});
-  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_fecha ON chofer_jornadas(empresa_id, chofer_id, inicio_at DESC)").catch(() => {});
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_abierta ON chofer_jornadas(empresa_id, chofer_id, estado) WHERE estado='abierta'").catch(failChoferSchema);
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_fecha ON chofer_jornadas(empresa_id, chofer_id, inicio_at DESC)").catch(failChoferSchema);
   jornadaSchemaReady = true;
 }
 
@@ -97,8 +195,8 @@ async function ensureChoferVacacionesSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_empresa_estado ON chofer_vacaciones_solicitudes(empresa_id, estado, fecha_inicio)").catch(() => {});
-  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_chofer ON chofer_vacaciones_solicitudes(empresa_id, chofer_id, fecha_inicio DESC)").catch(() => {});
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_empresa_estado ON chofer_vacaciones_solicitudes(empresa_id, estado, fecha_inicio)").catch(failChoferSchema);
+  await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_vacaciones_chofer ON chofer_vacaciones_solicitudes(empresa_id, chofer_id, fecha_inicio DESC)").catch(failChoferSchema);
   vacacionesSchemaReady = true;
 }
 
@@ -592,7 +690,7 @@ router.post("/app/firma-base", requireChoferApp, async (req, res) => {
         RETURNING *`,
       [firma, nombre, chofer.id, empresaId]
     );
-    await crearNotificacion(
+    await notifyAsignacionConjunto(
       empresaId,
       "chofer_firma_base",
       "Firma de chofer registrada",
@@ -1148,6 +1246,13 @@ router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
     await ensureChoferesTransparencySchema();
     const {nombre,dni,telefono,email,vehiculo_id,categoria_carnet,apellidos,tipo_contrato,salario,notas,sexo,puesto_valor,fecha_alta,plataformas}=req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
+    const duplicate = await findDuplicateChofer({ empresaId, dni, email, telefono, nombre, apellidos });
+    if (duplicate) {
+      return res.status(409).json({
+        error: duplicateChoferMessage(duplicate, { dni, email, telefono, nombre, apellidos }),
+        duplicate_id: duplicate.id,
+      });
+    }
     const {rows}=await db.query(
       `INSERT INTO choferes (nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,tipo_contrato,salario,notas,empresa_id,sexo,puesto_valor,fecha_alta,historial_laboral,plataformas)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::date,CURRENT_DATE),$15::jsonb,$16::jsonb) RETURNING *`,
@@ -1168,6 +1273,13 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
     const empresaId = req.empresaId || req.user.empresa_id;
     const current = await db.query("SELECT * FROM choferes WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);
     if(!current.rows[0]) return res.status(404).json({error:"No encontrado"});
+    const duplicate = await findDuplicateChofer({ empresaId, dni, email, telefono, nombre, apellidos, excludeId: req.params.id });
+    if (duplicate) {
+      return res.status(409).json({
+        error: duplicateChoferMessage(duplicate, { dni, email, telefono, nombre, apellidos }),
+        duplicate_id: duplicate.id,
+      });
+    }
     const previous = current.rows[0];
     const nextActivo = activo!==undefined ? activo !== false : previous.activo !== false;
     const currentHistorial = Array.isArray(previous.historial_laboral) ? previous.historial_laboral : [];
@@ -1278,4 +1390,62 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
     res.json(rows[0]);
   } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });
+
+router.delete("/:id", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    await ensureChoferesTransparencySchema();
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const chofer = await resolveChoferByIdOrPrefix(empresaId, req.params.id);
+    const choferId = chofer.id;
+
+    const { rows: pedidoRows } = await db.query(
+      `SELECT COUNT(*)::int AS total
+         FROM pedidos
+        WHERE empresa_id=$1
+          AND (chofer_id=$2 OR chofer2_id=$2)`,
+      [empresaId, choferId]
+    ).catch(() => ({ rows: [{ total: 0 }] }));
+    const pedidosAsociados = Number(pedidoRows?.[0]?.total || 0);
+
+    await db.query("UPDATE vehiculos SET chofer_id=NULL, updated_at=NOW() WHERE empresa_id=$1 AND chofer_id=$2", [empresaId, choferId]).catch(() => {});
+    await db.query("UPDATE vehiculos SET chofer_id=NULL, updated_at=NOW() WHERE empresa_id=$1 AND id=$2", [empresaId, chofer.vehiculo_id || null]).catch(() => {});
+    await db.query("UPDATE usuarios SET chofer_id=NULL WHERE empresa_id=$1 AND chofer_id=$2", [empresaId, choferId]).catch(() => {});
+
+    if (pedidosAsociados > 0) {
+      const historial = Array.isArray(chofer.historial_laboral) ? chofer.historial_laboral : [];
+      const baja = {
+        tipo: "baja",
+        fecha: new Date().toISOString().slice(0, 10),
+        motivo: "Eliminado desde ficha de chofer; conserva historico por pedidos asociados.",
+        usuario_id: req.user?.id || null,
+        created_at: new Date().toISOString(),
+      };
+      const { rows } = await db.query(
+        `UPDATE choferes
+            SET activo=false,
+                estado='baja',
+                vehiculo_id=NULL,
+                fecha_baja=COALESCE(fecha_baja, CURRENT_DATE),
+                motivo_baja=COALESCE(NULLIF(motivo_baja,''), $3),
+                historial_laboral=$4::jsonb
+          WHERE id=$1 AND empresa_id=$2
+          RETURNING *`,
+        [choferId, empresaId, baja.motivo, JSON.stringify([...historial, baja].slice(-120))]
+      );
+      return res.json({ ok: true, mode: "soft_delete", chofer: rows[0], pedidos_asociados: pedidosAsociados });
+    }
+
+    await db.query("DELETE FROM choferes WHERE id=$1 AND empresa_id=$2", [choferId, empresaId]);
+    res.json({ ok: true, mode: "hard_delete", id: choferId });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "No se pudo eliminar el chofer." });
+  }
+});
+
+router.initializeSchema = async function initializeChoferesSchema() {
+  await ensureChoferesTransparencySchema();
+  await ensureChoferJornadaSchema();
+  await ensureChoferVacacionesSchema();
+};
+
 module.exports = router;

@@ -7,7 +7,7 @@ import MojibakeFixer from "./components/MojibakeFixer";
 import Login  from "./pages/Login";
 import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
-import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, getAgendaEventos, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
+import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, completarAgendaEvento, getAgendaEventos, posponerAgendaEvento, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
 import { getEmpresaPlanLocal, normalizePlan } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
@@ -1071,7 +1071,45 @@ function addDaysKey(days) {
   return dateKey(d);
 }
 
-function StartupTasksPanel({ data, onClose, onOpenAgenda }) {
+function startupSnoozePayload(value) {
+  if (value === "tomorrow") {
+    const until = new Date();
+    until.setDate(until.getDate() + 1);
+    until.setHours(9, 0, 0, 0);
+    return { hasta:until.toISOString() };
+  }
+  return { minutos:Number(value) };
+}
+
+function reminderIsPostponed(evento) {
+  const value = evento?.metadata?.recordatorio_pospuesto_hasta;
+  if (!value) return false;
+  const until = new Date(value);
+  return !Number.isNaN(until.getTime()) && until.getTime() > Date.now();
+}
+
+function removeStartupTask(data, id) {
+  const next = {
+    ...data,
+    pasadas:(data?.pasadas || []).filter(item => String(item.id) !== String(id)),
+    hoy:(data?.hoy || []).filter(item => String(item.id) !== String(id)),
+    manana:(data?.manana || []).filter(item => String(item.id) !== String(id)),
+  };
+  next.visible = next.pasadas.length + next.hoy.length + next.manana.length > 0;
+  return next;
+}
+
+function appendStartupTask(data, evento) {
+  const clean = removeStartupTask(data, evento.id);
+  const taskDay = dateKey(evento.fecha_inicio || evento.start || evento.fecha);
+  const today = addDaysKey(0);
+  const tomorrow = addDaysKey(1);
+  const bucket = taskDay < today ? "pasadas" : taskDay === tomorrow ? "manana" : "hoy";
+  return { ...clean, visible:true, [bucket]:[...(clean[bucket] || []), evento] };
+}
+
+function StartupTasksPanel({ data, onClose, onOpenAgenda, onComplete, onSnooze }) {
+  const [busyId, setBusyId] = useState("");
   if (!data?.visible) return null;
   const sections = [
     ["pasadas", "Pasadas", data.pasadas || [], "#ef4444"],
@@ -1079,6 +1117,14 @@ function StartupTasksPanel({ data, onClose, onOpenAgenda }) {
     ["manana", "Mañana", data.manana || [], "#f59e0b"],
   ].filter(([, , items]) => items.length);
   if (!sections.length) return null;
+
+  async function runAction(id, action) {
+    if (busyId) return;
+    setBusyId(String(id));
+    try { await action(); }
+    catch (error) { toast(error?.message || "No se pudo actualizar el recordatorio.", "error"); }
+    finally { setBusyId(""); }
+  }
   return (
     <div style={{position:"fixed",inset:0,zIndex:9200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"72px 16px 16px",background:"rgba(15,23,42,.22)",fontFamily:"'DM Sans',sans-serif"}}>
       <div style={{width:"min(560px,100%)",maxHeight:"calc(100vh - 110px)",overflow:"auto",border:"1px solid var(--border)",borderRadius:14,background:"var(--bg2)",boxShadow:"0 22px 70px rgba(15,23,42,.22)"}}>
@@ -1098,12 +1144,25 @@ function StartupTasksPanel({ data, onClose, onOpenAgenda }) {
               </div>
               <div style={{display:"grid"}}>
                 {items.slice(0, 6).map(ev => (
-                  <button key={ev.id || `${key}-${ev.titulo}-${ev.fecha_inicio}`} onClick={onOpenAgenda} style={{textAlign:"left",padding:"10px 12px",border:"none",borderBottom:"1px solid var(--border)",background:"transparent",cursor:"pointer"}}>
+                  <div key={ev.id || `${key}-${ev.titulo}-${ev.fecha_inicio}`} style={{textAlign:"left",padding:"10px 12px",borderBottom:"1px solid var(--border)",background:"transparent"}}>
                     <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>{ev.titulo || ev.title || "Tarea"}</div>
                     <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>
                       {dateKey(ev.fecha_inicio || ev.start || ev.fecha)} · {ev.estado || "pendiente"}{ev.asignado_nombre ? ` · ${ev.asignado_nombre}` : ""}
                     </div>
-                  </button>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+                      <button disabled={busyId === String(ev.id)} onClick={()=>onOpenAgenda(ev)} style={{height:30,padding:"0 9px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Abrir</button>
+                      <select disabled={busyId === String(ev.id)} aria-label={`Posponer ${ev.titulo || "tarea"}`} defaultValue="" onChange={e=>{ const value=e.target.value; e.target.value=""; if (value) runAction(ev.id, ()=>onSnooze(ev, value)); }} style={{height:30,padding:"0 8px",borderRadius:7,border:"1px solid rgba(245,158,11,.32)",background:"rgba(245,158,11,.08)",color:"var(--text)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                        <option value="">Posponer...</option>
+                        <option value="15">15 min</option>
+                        <option value="60">1 hora</option>
+                        <option value="180">3 horas</option>
+                        <option value="tomorrow">{"Ma\u00f1ana a las 09:00"}</option>
+                      </select>
+                      <button disabled={busyId === String(ev.id)} onClick={()=>runAction(ev.id, ()=>onComplete(ev))} style={{height:30,padding:"0 9px",borderRadius:7,border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.10)",color:"#059669",fontSize:11,fontWeight:900,cursor:"pointer"}}>
+                        {busyId === String(ev.id) ? "Guardando..." : "Completar"}
+                      </button>
+                    </div>
+                  </div>
                 ))}
                 {items.length > 6 && <div style={{padding:"8px 12px",fontSize:11,color:"var(--text5)"}}>Y {items.length - 6} más en Agenda.</div>}
               </div>
@@ -1400,7 +1459,7 @@ function PasswordChangeRequired({ user, onChanged, onLogout }) {
 }
 
 function AppInner() {
-  const { user, loading, refreshUser, logout } = useAuth();
+  const { user, loading, refreshUser, logout, puedeVer } = useAuth();
   const [vista, setVista] = useState(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [avisosCriticos,   setAvisosCriticos]   = useState(0);
@@ -1414,8 +1473,22 @@ function AppInner() {
   const [avisosOperativosColaboradores, setAvisosOperativosColaboradores] = useState({ items: [], resumen: {} });
   const [avisosOperativosOpen, setAvisosOperativosOpen] = useState(false);
   const [startupTasks, setStartupTasks] = useState({ visible:false, pasadas:[], hoy:[], manana:[] });
+  const startupSnoozeTimersRef = useRef(new Set());
   const [pedidoActionMenuOpen, setPedidoActionMenuOpen] = useState(false);
   const [guidedModule, setGuidedModule] = useState(null);
+  const isInternalOfficeUser = ["gerente", "trafico", "administrativo", "contable"].includes(user?.rol);
+
+  useEffect(() => {
+    setAvisosOperativosColaboradores({ items: [], resumen: {} });
+    setAvisosOperativosOpen(false);
+    setNotificacionesNoLeidas(0);
+    setAvisosCriticos(0);
+  }, [user?.id, user?.rol]);
+
+  useEffect(() => () => {
+    startupSnoozeTimersRef.current.forEach(timer => window.clearTimeout(timer));
+    startupSnoozeTimersRef.current.clear();
+  }, []);
 
   // Ã¢â€â‚¬Ã¢â€â‚¬ Estado de bloqueo por suscripciÃƒÂ³n Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   const [bloqueado, setBloqueado] = useState(() => {
@@ -1483,6 +1556,7 @@ function AppInner() {
     if (isChoferAppOnly) return;
     // Badges: defer 3s so dashboard renders first, then load in background
     function calcTallerBadge() {
+      if (!puedeVer("taller")) return Promise.resolve(0);
       getTallerEstado().then(t => {
         const solicitudes = Array.isArray(t?.solicitudes_mecanico) ? t.solicitudes_mecanico : [];
         const tareas = Array.isArray(t?.tareas_mecanicos) ? t.tareas_mecanicos : [];
@@ -1497,6 +1571,11 @@ function AppInner() {
       }).catch(()=>{});
     }
     function calcNotificacionesBadge(extraAvisos = null) {
+      if (!puedeVer("avisos")) {
+        setNotificacionesNoLeidas(0);
+        setAvisosCriticos(0);
+        return Promise.resolve(0);
+      }
       return getNotificaciones(20)
         .then(d => {
           const noLeidas = Number(d?.no_leidas || 0);
@@ -1507,7 +1586,7 @@ function AppInner() {
         .catch(() => 0);
     }
     function calcColaboradoresBadge() {
-      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol)) return Promise.resolve(0);
+      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol) || !puedeVer("colaboradores")) return Promise.resolve(0);
       return getColaboradoresPendientesRevision()
         .then(d => {
           const count = Number(d?.count || 0);
@@ -1517,7 +1596,7 @@ function AppInner() {
         .catch(() => 0);
     }
     function calcAvisosOperativosColaboradores() {
-      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol)) return Promise.resolve({ items: [], resumen: {} });
+      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol) || !puedeVer("avisos")) return Promise.resolve({ items: [], resumen: {} });
       return getAvisosOperativosColaboradores()
         .then(d => {
           const next = d && Array.isArray(d.items) ? d : { items: [], resumen: {} };
@@ -1530,19 +1609,19 @@ function AppInner() {
         .catch(() => ({ items: [], resumen: {} }));
     }
     function calcStartupTasks() {
-      if (!["gerente","trafico","administrativo","contable","responsable_taller"].includes(user?.rol)) return Promise.resolve(null);
+      if (!["gerente","trafico","administrativo","contable","responsable_taller"].includes(user?.rol) || !puedeVer("agenda")) return Promise.resolve(null);
       const key = `tms_startup_tasks_seen_${user?.empresa_id || "empresa"}_${user?.id || "user"}_${dateKey(new Date())}`;
       try {
         if (window.sessionStorage.getItem(key) === "1") return Promise.resolve(null);
       } catch {}
       const desde = addDaysKey(-14);
-      const hasta = addDaysKey(1);
-      return getAgendaEventos({ desde, hasta, estado:"pendiente" })
+      const hasta = addDaysKey(2);
+      return getAgendaEventos({ desde, hasta })
         .then(payload => {
           const arr = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.eventos) ? payload.eventos : [];
           const today = addDaysKey(0);
           const tomorrow = addDaysKey(1);
-          const abiertas = arr.filter(ev => !["completada","cancelada","cerrada"].includes(String(ev.estado || "").toLowerCase()));
+          const abiertas = arr.filter(ev => ["pendiente","en_progreso"].includes(String(ev.estado || "").toLowerCase()) && !reminderIsPostponed(ev));
           const next = {
             visible: false,
             pasadas: abiertas.filter(ev => dateKey(ev.fecha_inicio || ev.start || ev.fecha) && dateKey(ev.fecha_inicio || ev.start || ev.fecha) < today),
@@ -1559,7 +1638,7 @@ function AppInner() {
         .catch(() => null);
     }
     function calcSolicitudesBadge() {
-      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol)) return Promise.resolve(0);
+      if (!["gerente","trafico","administrativo","contable"].includes(user?.rol) || !puedeVer("solicitudes")) return Promise.resolve(0);
       return getPortalSolicitudesAdmin({ estado:"pendiente" })
         .then(d => {
           const count = Array.isArray(d) ? d.length : 0;
@@ -1568,8 +1647,8 @@ function AppInner() {
         })
         .catch(() => 0);
     }
-    const puedeVerBadgeTaller = ["gerente","contable","responsable_taller","trafico"].includes(user?.rol);
-    const puedeVerAlertasVehiculos = ["gerente","trafico","responsable_taller","contable"].includes(user?.rol);
+    const puedeVerBadgeTaller = ["gerente","contable","responsable_taller","trafico"].includes(user?.rol) && puedeVer("taller");
+    const puedeVerAlertasVehiculos = ["gerente","trafico","responsable_taller","contable"].includes(user?.rol) && puedeVer("vehiculos");
     calcNotificacionesBadge();
     const notifRefresh = () => calcNotificacionesBadge();
     const solicitudesRefresh = () => calcSolicitudesBadge();
@@ -1581,6 +1660,12 @@ function AppInner() {
     window.addEventListener("tms:agenda-refresh", avisosOperativosRefresh);
     window.addEventListener("tms:pedidos-changed", avisosOperativosRefresh);
     const tallerIv = puedeVerBadgeTaller ? setInterval(calcTallerBadge, 30000) : null;
+    const solicitudesIv = isInternalOfficeUser
+      ? setInterval(() => {
+          calcNotificacionesBadge();
+          calcSolicitudesBadge();
+        }, 30000)
+      : null;
 
     const earlyBadgeTimer = setTimeout(() => {
       if (puedeVerBadgeTaller) calcTallerBadge();
@@ -1594,7 +1679,7 @@ function AppInner() {
     const badgeTimer = setTimeout(() => {
       // Single combined fetch for alertas (docs + vehiculos)
       Promise.all([
-        getDocsProximosVencer().catch(()=>[]),
+        puedeVer("documentos") ? getDocsProximosVencer().catch(()=>[]) : Promise.resolve([]),
         puedeVerAlertasVehiculos ? getAlertasDocVehiculos().catch(()=>[]) : Promise.resolve([]),
       ]).then(([docs, alertasVeh]) => {
         const docsCount = Array.isArray(docs)
@@ -1606,10 +1691,12 @@ function AppInner() {
       }).catch(()=>{});
 
       // Clientes pendientes (solo gerente/contable)
-      if (["gerente","contable"].includes(user?.rol)) {
+      if (["gerente","contable"].includes(user?.rol) && puedeVer("clientes")) {
         getClientesPendientesRevision()
           .then(d => setClientesPendientes(d?.count || 0))
           .catch(() => {});
+      }
+      if (["gerente","contable"].includes(user?.rol) && puedeVer("excepciones")) {
         getExcepcionesOperativas()
           .then(d => setExcepcionesPendientes(Number(d?.resumen?.critica || 0) + Number(d?.resumen?.alta || 0)))
           .catch(() => {});
@@ -1629,9 +1716,11 @@ function AppInner() {
       calcSolicitudesBadge();
       calcColaboradoresBadge();
       calcAvisosOperativosColaboradores();
-      if (["gerente","contable"].includes(user?.rol)) {
+      if (["gerente","contable"].includes(user?.rol) && puedeVer("clientes")) {
         getClientesPendientesRevision()
           .then(d => setClientesPendientes(d?.count || 0)).catch(()=>{});
+      }
+      if (["gerente","contable"].includes(user?.rol) && puedeVer("excepciones")) {
         getExcepcionesOperativas()
           .then(d => setExcepcionesPendientes(Number(d?.resumen?.critica || 0) + Number(d?.resumen?.alta || 0)))
           .catch(()=>{});
@@ -1647,9 +1736,10 @@ function AppInner() {
       window.removeEventListener("tms:agenda-refresh", avisosOperativosRefresh);
       window.removeEventListener("tms:pedidos-changed", avisosOperativosRefresh);
       if (tallerIv) clearInterval(tallerIv);
+      if (solicitudesIv) clearInterval(solicitudesIv);
       clearInterval(refreshIv);
     };
-  }, [user]);
+  }, [user, puedeVer, isInternalOfficeUser]);
 
   useEffect(() => {
     if (!user) {
@@ -1729,6 +1819,38 @@ function AppInner() {
     return nextUser;
   }
 
+  async function handleStartupTaskComplete(evento) {
+    await completarAgendaEvento(evento.id);
+    setStartupTasks(prev => removeStartupTask(prev, evento.id));
+    window.dispatchEvent(new CustomEvent("tms:agenda-refresh"));
+    toast("Tarea marcada como completada.", "success");
+  }
+
+  async function handleStartupTaskSnooze(evento, value) {
+    const actualizado = await posponerAgendaEvento(evento.id, startupSnoozePayload(value));
+    setStartupTasks(prev => removeStartupTask(prev, evento.id));
+    const untilValue = actualizado?.metadata?.recordatorio_pospuesto_hasta;
+    const until = untilValue ? new Date(untilValue) : null;
+    if (until && !Number.isNaN(until.getTime())) {
+      const delay = Math.max(0, until.getTime() - Date.now());
+      const timer = window.setTimeout(() => {
+        startupSnoozeTimersRef.current.delete(timer);
+        getAgendaEventos({ desde:addDaysKey(-14), hasta:addDaysKey(2) })
+          .then(rows => {
+            const current = (Array.isArray(rows) ? rows : []).find(item => String(item.id) === String(evento.id));
+            if (current && ["pendiente","en_progreso"].includes(String(current.estado || "").toLowerCase()) && !reminderIsPostponed(current)) {
+              setStartupTasks(prev => appendStartupTask(prev, current));
+            }
+          })
+          .catch(() => {});
+      }, delay);
+      startupSnoozeTimersRef.current.add(timer);
+      toast(`Recordatorio pospuesto hasta ${until.toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}.`, "success");
+    } else {
+      toast("Recordatorio pospuesto.", "success");
+    }
+  }
+
   return (
     <>
     <LaunchSplash rol={user?.rol} />
@@ -1778,7 +1900,7 @@ function AppInner() {
         {contenido}
       </Suspense>
     </Layout>
-    {user?.rol !== "chofer" && (
+    {isInternalOfficeUser && (
       <OperativeAlertsPanel
         user={user}
         data={avisosOperativosColaboradores}
@@ -1802,6 +1924,8 @@ function AppInner() {
     <StartupTasksPanel
       data={startupTasks}
       onClose={() => setStartupTasks(prev => ({ ...prev, visible:false }))}
+      onComplete={handleStartupTaskComplete}
+      onSnooze={handleStartupTaskSnooze}
       onOpenAgenda={() => {
         setStartupTasks(prev => ({ ...prev, visible:false }));
         if (modulosVisibles.has("agenda")) setVista("agenda");

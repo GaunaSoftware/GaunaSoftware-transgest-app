@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { getChoferHistorialVehiculos, getTractoraPeriodos } from "../services/api";
 import { asignarRemolque } from "../services/api";
-import { getChoferes, crearChofer, editarChofer, getVehiculos, getNominasEmitidas, getTallerEstado, guardarTallerEstado, getChoferJornadas } from "../services/api";
+import { getChoferes, crearChofer, editarChofer, borrarChofer, getVehiculos, getNominasEmitidas, getTallerEstado, guardarTallerEstado, getChoferJornadas } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
@@ -1003,6 +1003,30 @@ export default function Choferes() {
   });
 
   // Badge de docs próximos a caducar
+  const eliminarChofer = async (chofer, event) => {
+    event?.stopPropagation?.();
+    const nombre = `${chofer.nombre || ""} ${chofer.apellidos || ""}`.trim() || "este chofer";
+    const ok = await confirmDialog({
+      title: "Eliminar chofer",
+      message: `Eliminar ${nombre}? Si tiene pedidos asociados, se dara de baja y se conservara el historico.`,
+      confirmText: "Eliminar",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      const result = await borrarChofer(chofer.id);
+      notify(
+        result?.mode === "soft_delete"
+          ? "Chofer dado de baja y desasignado. Se conserva el historico de pedidos."
+          : "Chofer eliminado correctamente.",
+        "success"
+      );
+      await cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo eliminar el chofer.", "error");
+    }
+  };
+
   function alertasDocs(c) {
     const keys = ["dni_vencimiento","carnet_vencimiento","cap_vencimiento","tarjeta_vencimiento","adr_vencimiento","medico_vencimiento"];
     return keys.some(k => c[k] && semaforo(c[k]).nivel <= 1);
@@ -1073,6 +1097,15 @@ export default function Choferes() {
                       <span style={{ ...S.badge, background: c.activo!==false ? "var(--green-dim)" : "rgba(239,68,68,.1)", color: c.activo!==false ? "var(--green)" : "var(--red)" }}>
                         {c.activo!==false ? "Activo" : "Baja"}
                       </span>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={(event)=>eliminarChofer(c, event)}
+                          style={{...S.btn,marginLeft:8,padding:"4px 8px",background:"rgba(239,68,68,.08)",color:"var(--red)",border:"1px solid rgba(239,68,68,.2)"}}
+                        >
+                          Eliminar
+                        </button>
+                      )}
                     </td>
                     <td style={{ ...S.td, fontSize:11, color:"var(--text4)" }}>
                       {veh ? <span>{veh.matricula}</span> : <span style={{ color:"var(--text5)" }}>Sin vehículo</span>}

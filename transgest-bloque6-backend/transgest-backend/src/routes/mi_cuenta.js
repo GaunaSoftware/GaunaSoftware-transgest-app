@@ -1,218 +1,235 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const { body, validationResult } = require("express-validator");
 const db = require("../services/db");
 const logger = require("../services/logger");
-const { assertPasswordNotReused, rememberPasswordHash } = require("../services/passwordPolicy");
+const {
+  assertPasswordNotReused,
+  rememberPasswordHash,
+} = require("../services/passwordPolicy");
 
 const router = express.Router();
-
-let miCuentaSchemaReady = false;
-async function ensureMiCuentaSchema() {
-  if (miCuentaSchemaReady) return;
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS soporte_mensajes (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE,
-      usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
-      email VARCHAR(200),
-      mensaje TEXT NOT NULL,
-      estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
-      ip VARCHAR(80),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `).catch((e) => logger.error("ensureMiCuentaSchema soporte: " + e.message));
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS facturas_saas (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
-      numero VARCHAR(60),
-      concepto TEXT,
-      periodo_desde DATE,
-      periodo_hasta DATE,
-      importe NUMERIC(12,2) NOT NULL DEFAULT 0,
-      estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
-      fecha_vencimiento DATE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `).catch((e) => logger.error("ensureMiCuentaSchema facturas_saas: " + e.message));
-  await db.query("CREATE INDEX IF NOT EXISTS idx_facturas_saas_empresa ON facturas_saas(empresa_id, created_at DESC)").catch(() => {});
-  miCuentaSchemaReady = true;
-}
+const EDIT_DATA_ROLES = new Set(["gerente", "administrativo"]);
 
 function empresaId(req) {
   return req.empresaId || req.user?.empresa_id || null;
 }
 
-// ── GET / ── Resumen de cuenta: plan, estado, vencimiento y uso real ──
-router.get("/", async (req, res) => {
-  try {
-    const eid = empresaId(req);
-    if (!eid) return res.status(403).json({ error: "Usuario sin empresa asignada" });
+function canEditData(req) {
+  return EDIT_DATA_ROLES.has(String(req.user?.rol || "").toLowerCase());
+}
 
-    const { rows } = await db.query(
-      `SELECT id, nombre, cif, plan, estado, fecha_vencimiento, ciclo_facturacion, metodo_pago
-         FROM empresas WHERE id=$1 LIMIT 1`,
-      [eid]
+function cleanText(value, max = 500) {
+  return String(value || "").trim().slice(0, max);
+}
+
+async function safeOne(sql, params, fallback = {}) {
+  try {
+    const { rows } = await db.query(sql, params);
+    return rows[0] || fallback;
+  } catch (err) {
+    logger.warn(`[MiCuenta] consulta opcional fallida: ${err.message}`);
+    return fallback;
+  }
+}
+
+async function safeRows(sql, params) {
+  try {
+    const { rows } = await db.query(sql, params);
+    return rows || [];
+  } catch (err) {
+    if (err.code !== "42P01" && err.code !== "42703") {
+      logger.warn(`[MiCuenta] listado opcional fallido: ${err.message}`);
+    }
+    return [];
+  }
+}
+
+async function ensureSupportSchema() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS soporte_mensajes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE,
+      usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+      nombre VARCHAR(180),
+      email VARCHAR(255),
+      mensaje TEXT NOT NULL,
+      estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      resuelto_at TIMESTAMPTZ
+    )
+  `).catch(async () => {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS soporte_mensajes (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE,
+        usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+        nombre VARCHAR(180),
+        email VARCHAR(255),
+        mensaje TEXT NOT NULL,
+        estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resuelto_at TIMESTAMPTZ
+      )
+    `);
+  });
+  await db.query("CREATE INDEX IF NOT EXISTS idx_soporte_mensajes_empresa ON soporte_mensajes(empresa_id, created_at DESC)").catch(() => {});
+}
+
+router.get("/", async (req, res) => {
+  const empId = empresaId(req);
+  if (!empId) return res.status(400).json({ error: "Usuario sin empresa asociada" });
+
+  try {
+    const empresa = await safeOne(
+      `SELECT id, nombre, cif, email_admin, plan, estado, fecha_vencimiento,
+              max_vehiculos, max_usuarios, ciclo_facturacion, metodo_pago
+         FROM empresas
+        WHERE id=$1`,
+      [empId],
+      null
     );
-    const empresa = rows[0];
     if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
 
-    const [veh, usu, ped] = await Promise.all([
-      db.query("SELECT COUNT(*)::int AS n FROM vehiculos WHERE empresa_id=$1 AND COALESCE(activo,true)=true", [eid]).catch(() => ({ rows: [{ n: 0 }] })),
-      db.query("SELECT COUNT(*)::int AS n FROM usuarios WHERE empresa_id=$1 AND activo IS DISTINCT FROM false", [eid]).catch(() => ({ rows: [{ n: 0 }] })),
-      db.query("SELECT COUNT(*)::int AS n FROM pedidos WHERE empresa_id=$1 AND created_at >= NOW() - INTERVAL '30 days'", [eid]).catch(() => ({ rows: [{ n: 0 }] })),
+    const [vehiculos, usuarios, pedidosMes] = await Promise.all([
+      safeOne("SELECT COUNT(*)::int AS total FROM vehiculos WHERE empresa_id=$1", [empId], { total: 0 }),
+      safeOne("SELECT COUNT(*)::int AS total FROM usuarios WHERE empresa_id=$1 AND COALESCE(activo,true)=true", [empId], { total: 0 }),
+      safeOne("SELECT COUNT(*)::int AS total FROM pedidos WHERE empresa_id=$1 AND created_at >= NOW() - INTERVAL '30 days'", [empId], { total: 0 }),
     ]);
 
     res.json({
-      ...empresa,
-      suscripcion: req.suscripcion || null,
+      id: empresa.id,
+      nombre: empresa.nombre || "",
+      cif: empresa.cif || "",
+      email_admin: empresa.email_admin || req.user?.email || "",
+      plan: empresa.plan || "basico",
+      estado: empresa.estado || "activo",
+      fecha_vencimiento: empresa.fecha_vencimiento || null,
+      ciclo_facturacion: empresa.ciclo_facturacion || "mensual",
+      metodo_pago: empresa.metodo_pago || "pendiente",
+      limites: {
+        vehiculos: Number(empresa.max_vehiculos || 0) || null,
+        usuarios: Number(empresa.max_usuarios || 0) || null,
+      },
       uso: {
-        vehiculos: veh.rows[0]?.n || 0,
-        usuarios: usu.rows[0]?.n || 0,
-        pedidos_mes: ped.rows[0]?.n || 0,
+        vehiculos: Number(vehiculos.total || 0),
+        usuarios: Number(usuarios.total || 0),
+        pedidos_mes: Number(pedidosMes.total || 0),
       },
     });
   } catch (err) {
-    logger.error("mi-cuenta GET /: " + err.message);
-    res.status(500).json({ error: "No se pudo cargar la información de la cuenta" });
+    logger.error(`[MiCuenta] GET /: ${err.message}`);
+    res.status(500).json({ error: "No se pudo cargar la cuenta" });
   }
 });
 
-// ── GET /facturas ── Facturas de suscripción SaaS (vacío si aún no hay) ──
 router.get("/facturas", async (req, res) => {
+  const empId = empresaId(req);
+  if (!empId) return res.status(400).json({ error: "Usuario sin empresa asociada" });
+
+  const rows = await safeRows(
+    `SELECT id, numero, concepto, plan, periodo_desde, periodo_hasta,
+            importe, estado, fecha_emision, fecha_vencimiento, fecha_pago, notas
+       FROM facturas_suscripcion
+      WHERE empresa_id=$1
+      ORDER BY fecha_emision DESC, created_at DESC
+      LIMIT 100`,
+    [empId]
+  );
+  res.json(rows);
+});
+
+router.patch("/datos", async (req, res) => {
+  const empId = empresaId(req);
+  if (!empId) return res.status(400).json({ error: "Usuario sin empresa asociada" });
+  if (!canEditData(req)) return res.status(403).json({ error: "Solo gerencia o administracion puede modificar los datos de la empresa" });
+
+  const nombre = cleanText(req.body?.nombre, 180);
+  const cif = cleanText(req.body?.cif, 40).toUpperCase();
+  if (!nombre) return res.status(400).json({ error: "Indica el nombre o razon social" });
+
   try {
-    const eid = empresaId(req);
-    if (!eid) return res.json([]);
-    await ensureMiCuentaSchema();
     const { rows } = await db.query(
-      `SELECT id, numero, concepto, periodo_desde, periodo_hasta, importe, estado, fecha_vencimiento
-         FROM facturas_saas
-        WHERE empresa_id=$1
-        ORDER BY created_at DESC
-        LIMIT 100`,
-      [eid]
+      `UPDATE empresas
+          SET nombre=$2, cif=$3
+        WHERE id=$1
+        RETURNING id, nombre, cif, email_admin, plan, estado, fecha_vencimiento`,
+      [empId, nombre, cif || null]
     );
-    res.json(rows);
+    if (!rows[0]) return res.status(404).json({ error: "Empresa no encontrada" });
+    res.json({ ok: true, ...rows[0] });
   } catch (err) {
-    logger.error("mi-cuenta GET /facturas: " + err.message);
-    res.json([]);
+    logger.error(`[MiCuenta] PATCH /datos: ${err.message}`);
+    res.status(500).json({ error: "No se pudieron guardar los datos" });
   }
 });
 
-// ── PATCH /datos ── Actualizar razón social / CIF (solo gerencia) ──
-router.patch("/datos",
-  body("nombre").optional().isString().trim().isLength({ max: 200 }),
-  body("cif").optional().isString().trim().isLength({ max: 60 }),
-  async (req, res) => {
-    try {
-      if (req.user?.rol !== "gerente") {
-        return res.status(403).json({ error: "Solo gerencia puede editar los datos de la empresa." });
-      }
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-      const eid = empresaId(req);
-      if (!eid) return res.status(403).json({ error: "Usuario sin empresa asignada" });
-
-      const updates = [];
-      const params = [eid];
-      let i = 2;
-      if (typeof req.body?.nombre === "string" && req.body.nombre.trim()) {
-        updates.push(`nombre=$${i++}`); params.push(req.body.nombre.trim());
-      }
-      if ("cif" in (req.body || {})) {
-        updates.push(`cif=$${i++}`); params.push(String(req.body.cif || "").trim() || null);
-      }
-      if (!updates.length) return res.status(400).json({ error: "Nada que actualizar" });
-
-      await db.query(`UPDATE empresas SET ${updates.join(",")} WHERE id=$1`, params);
-      res.json({ ok: true });
-    } catch (err) {
-      logger.error("mi-cuenta PATCH /datos: " + err.message);
-      res.status(500).json({ error: "No se pudieron guardar los datos" });
-    }
+router.post("/cambiar-password", async (req, res) => {
+  const passwordActual = String(req.body?.password_actual || "");
+  const passwordNuevo = String(req.body?.password_nuevo || "");
+  if (!passwordActual || passwordNuevo.length < 8) {
+    return res.status(400).json({ error: "La nueva contrasena debe tener al menos 8 caracteres" });
   }
-);
 
-// ── POST /cambiar-password ── Cambio de contraseña del propio usuario ──
-router.post("/cambiar-password",
-  body("password_actual").notEmpty(),
-  body("password_nuevo").isLength({ min: 8 }).withMessage("Mínimo 8 caracteres"),
-  async (req, res) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  try {
+    const { rows } = await db.query(
+      "SELECT id, empresa_id, password_hash FROM usuarios WHERE id=$1",
+      [req.user.id]
+    );
+    const usuario = rows[0];
+    if (!usuario) return res.status(404).json({ error: "Usuario no encontrado" });
 
-      const { password_actual, password_nuevo } = req.body;
-      const { rows } = await db.query(
-        "SELECT id, empresa_id, password_hash FROM usuarios WHERE id=$1",
-        [req.user.id]
-      );
-      const user = rows[0];
-      if (!user) return res.status(404).json({ error: "Usuario no encontrado" });
+    const valid = await bcrypt.compare(passwordActual, usuario.password_hash || "");
+    if (!valid) return res.status(400).json({ error: "Contrasena actual incorrecta" });
 
-      const valid = await bcrypt.compare(password_actual, user.password_hash);
-      if (!valid) return res.status(400).json({ error: "Contraseña actual incorrecta" });
+    await assertPasswordNotReused({
+      usuarioId: usuario.id,
+      empresaId: usuario.empresa_id,
+      passwordNuevo,
+      currentHash: usuario.password_hash,
+    });
 
-      await assertPasswordNotReused({
-        usuarioId: user.id,
-        empresaId: user.empresa_id,
-        passwordNuevo: password_nuevo,
-        currentHash: user.password_hash,
+    const hash = await bcrypt.hash(passwordNuevo, 12);
+    await db.transaction(async (client) => {
+      await rememberPasswordHash({
+        usuarioId: usuario.id,
+        empresaId: usuario.empresa_id,
+        passwordHash: usuario.password_hash,
+        queryClient: client,
       });
-
-      const hash = await bcrypt.hash(password_nuevo, 12);
-      await db.transaction(async (client) => {
-        await rememberPasswordHash({
-          usuarioId: user.id,
-          empresaId: user.empresa_id,
-          passwordHash: user.password_hash,
-          queryClient: client,
-        });
-        await client.query(
-          "UPDATE usuarios SET password_hash=$1, debe_cambiar_password=false, password_changed_at=NOW() WHERE id=$2",
-          [hash, user.id]
-        );
-      });
-
-      logger.info(`Contraseña cambiada (mi-cuenta): ${req.user.email || req.user.username}`);
-      res.json({ ok: true });
-    } catch (err) {
-      const status = err.status || 500;
-      if (status >= 500) logger.error("mi-cuenta POST /cambiar-password: " + err.message);
-      res.status(status).json({ error: status < 500 ? err.message : "No se pudo cambiar la contraseña" });
-    }
-  }
-);
-
-// ── POST /soporte ── Mensaje de soporte del cliente ──
-router.post("/soporte",
-  body("mensaje").isString().trim().isLength({ min: 1, max: 5000 }),
-  async (req, res) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-      await ensureMiCuentaSchema();
-      await db.query(
-        `INSERT INTO soporte_mensajes (empresa_id, usuario_id, email, mensaje, ip)
-         VALUES ($1,$2,$3,$4,$5)`,
-        [
-          empresaId(req),
-          req.user?.id || null,
-          req.user?.email || req.user?.username || null,
-          String(req.body.mensaje).trim(),
-          req.ip || null,
-        ]
+      await client.query(
+        "UPDATE usuarios SET password_hash=$1, debe_cambiar_password=false, password_changed_at=NOW(), login_failed_count=0, login_locked_until=NULL WHERE id=$2",
+        [hash, usuario.id]
       );
-      logger.info(`Mensaje de soporte recibido de ${req.user?.email || req.user?.username || "usuario"} (${empresaId(req)})`);
-      res.json({ ok: true });
-    } catch (err) {
-      logger.error("mi-cuenta POST /soporte: " + err.message);
-      res.status(500).json({ error: "No se pudo enviar el mensaje" });
-    }
+    });
+
+    logger.info(`[MiCuenta] contrasena cambiada por ${req.user.email || req.user.username}`);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error(`[MiCuenta] POST /cambiar-password: ${err.message}`);
+    res.status(err.status || 500).json({ error: err.status ? err.message : "No se pudo cambiar la contrasena" });
   }
-);
+});
+
+router.post("/soporte", async (req, res) => {
+  const empId = empresaId(req);
+  if (!empId) return res.status(400).json({ error: "Usuario sin empresa asociada" });
+
+  const mensaje = cleanText(req.body?.mensaje, 4000);
+  if (!mensaje) return res.status(400).json({ error: "Escribe el mensaje para soporte" });
+
+  try {
+    await ensureSupportSchema();
+    const { rows } = await db.query(
+      `INSERT INTO soporte_mensajes (empresa_id, usuario_id, nombre, email, mensaje)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id, estado, created_at`,
+      [empId, req.user.id || null, req.user.nombre || null, req.user.email || req.user.username || null, mensaje]
+    );
+    res.status(201).json({ ok: true, ...rows[0] });
+  } catch (err) {
+    logger.error(`[MiCuenta] POST /soporte: ${err.message}`);
+    res.status(500).json({ error: "No se pudo enviar el mensaje a soporte" });
+  }
+});
 
 module.exports = router;

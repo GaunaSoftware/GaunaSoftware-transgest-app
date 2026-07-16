@@ -313,7 +313,7 @@ CREATE INDEX IF NOT EXISTS idx_colab_veh_colaborador ON colaborador_vehiculos(co
 CREATE TABLE IF NOT EXISTS pedidos (
   id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   empresa_id          UUID         REFERENCES empresas(id) ON DELETE CASCADE,
-  numero              VARCHAR(20)  NOT NULL UNIQUE,
+  numero              VARCHAR(20)  NOT NULL,
   cliente_id          UUID NOT NULL REFERENCES clientes(id),
   ruta_id             UUID         REFERENCES rutas(id),
   vehiculo_id         UUID         REFERENCES vehiculos(id) ON DELETE SET NULL,
@@ -349,6 +349,7 @@ CREATE TABLE IF NOT EXISTS pedidos (
   updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_pedidos_empresa  ON pedidos(empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pedidos_empresa_numero_unique ON pedidos(empresa_id, numero);
 CREATE INDEX IF NOT EXISTS idx_pedidos_cliente  ON pedidos(cliente_id);
 CREATE INDEX IF NOT EXISTS idx_pedidos_estado   ON pedidos(estado);
 CREATE INDEX IF NOT EXISTS idx_pedidos_fecha    ON pedidos(fecha_pedido DESC);

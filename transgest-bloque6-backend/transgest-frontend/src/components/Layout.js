@@ -574,7 +574,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
     return [{ id: defaultId, label: getLabelForId(defaultId, modulos) }];
   });
   const [activeTab, setActiveTab] = useState(vistaActiva);
-  const FULLSCREEN_ROLES = ["chofer", "cliente"];
+  const FULLSCREEN_ROLES = ["chofer", "cliente", "cliente_portal"];
   // Sync tabs when vista changes externally
   useEffect(() => {
     if (!vistaActiva) return;

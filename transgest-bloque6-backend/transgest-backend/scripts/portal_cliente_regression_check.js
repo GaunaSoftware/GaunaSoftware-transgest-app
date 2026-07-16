@@ -6,8 +6,10 @@ const {
   nextPedidoNumero,
   normalizeNonNegativeNumeric,
   normalizePositiveInteger,
+  mergeTarifaSolicitud,
   portalPointLabel,
   portalPointStop,
+  resolvePortalRutaTarifa,
   resolveSolicitudImporte,
 } = portalRouter._test;
 
@@ -64,6 +66,42 @@ async function run() {
   assert.match(queries[0].sql, /GREATEST\(pedido_numero_counters\.last_num, EXCLUDED\.last_num\)/);
   assert.equal(queries[0].params[0], "empresa-qa");
   assert.equal(queries[0].params[3], `PED-${year}-%`);
+
+  const routeClient = {
+    async query(sql, params) {
+      queries.push({ sql, params });
+      return {
+        rows: [
+          {
+            id: "ruta-berge-andorra",
+            origen: "BERGE MARITIMA - Alicante",
+            destino: "Andorra de Teruel",
+            km: "392",
+            precio_base: "680.64",
+            tarifa_tipo: "viaje",
+            minimo_facturable: null,
+            minimo_unidades: null,
+            prioridad: 0,
+          },
+        ],
+      };
+    },
+  };
+  const ruta = await resolvePortalRutaTarifa(
+    routeClient,
+    "empresa-qa",
+    "cliente-berge",
+    "berge maritima - alicante",
+    "Andorra",
+    { nombre: "BERGE MARITIMA", ciudad: "Alicante", provincia: "Alicante" },
+    { nombre: "ANDORRA", ciudad: "Andorra de Teruel", provincia: "Teruel" }
+  );
+  assert.equal(ruta.id, "ruta-berge-andorra");
+  const tarifa = mergeTarifaSolicitud({ importe: 0, km_ruta: null }, ruta);
+  assert.equal(tarifa.ruta_id, "ruta-berge-andorra");
+  assert.equal(tarifa.km_ruta, 392);
+  assert.equal(tarifa.precio_unitario, 680.64);
+  assert.equal(tarifa.importe, 680.64);
 
   const marker = new Error("qa async route");
   await new Promise((resolve, reject) => {

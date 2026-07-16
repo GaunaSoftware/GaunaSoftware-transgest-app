@@ -58,6 +58,37 @@ async function crearNotificacion({ empresa_id, usuario_id, tipo, titulo, mensaje
   return rows[0] || null;
 }
 
+async function notificarUsuariosCliente({
+  empresa_id,
+  cliente_id,
+  tipo,
+  titulo,
+  mensaje,
+  data = {},
+  created_by = null,
+}) {
+  if (!empresa_id || !cliente_id || !tipo || !titulo) return [];
+  const { rows } = await db.query(
+    `SELECT id
+       FROM usuarios
+      WHERE empresa_id=$1
+        AND cliente_id=$2
+        AND activo IS DISTINCT FROM false
+        AND rol::text IN ('cliente','cliente_portal')
+      ORDER BY created_at ASC NULLS LAST`,
+    [empresa_id, cliente_id]
+  ).catch(() => ({ rows: [] }));
+  return Promise.all(rows.map(usuario => crearNotificacion({
+    empresa_id,
+    usuario_id: usuario.id,
+    tipo,
+    titulo,
+    mensaje,
+    data: { ...data, audiencia: "cliente" },
+    created_by,
+  })));
+}
+
 async function listarNotificaciones(empresaId, usuarioId, { limit = 50, includeRead = false } = {}) {
   await ensureNotificacionesSchema();
   const max = Math.min(Math.max(Number(limit) || 50, 1), 100);
@@ -108,6 +139,7 @@ async function marcarTodasLeidas(empresaId, usuarioId) {
 module.exports = {
   ensureNotificacionesSchema,
   crearNotificacion,
+  notificarUsuariosCliente,
   listarNotificaciones,
   marcarLeida,
   marcarTodasLeidas,

@@ -167,6 +167,7 @@ function buildOperativaCargaLabels(pedido = {}) {
   const labels = [];
   if (pedido?.carga_lateral) labels.push("Carga lateral");
   if (pedido?.carga_trasera) labels.push("Carga trasera");
+  if (pedido?.carga_techo) labels.push("Techo");
   labels.push(pedido?.intercambio_palets ? "Con intercambio de palets" : "Sin intercambio de palets");
   if (pedido?.requiere_cinchas) labels.push("Necesario llevar cinchas para sujetar la mercancia");
   return labels;
@@ -340,21 +341,29 @@ function buildCodigoControl({ empresaId, pedidoId }) {
   return crypto.createHash("sha1").update(`${empresaId}:${pedidoId}`).digest("hex").slice(0, 12).toUpperCase();
 }
 
-function buildPublicToken({ empresaId, pedidoId }) {
-  const secret = process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+function currentDocumentSecret() {
+  return process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+}
+
+function documentVerificationSecrets() {
+  return [...new Set([
+    currentDocumentSecret(),
+    process.env.DOC_CONTROL_LEGACY_SECRET,
+  ].map(value => String(value || "").trim()).filter(Boolean))];
+}
+
+function buildPublicToken({ empresaId, pedidoId, secret = currentDocumentSecret() }) {
   return crypto
     .createHmac("sha256", secret)
     .update(`${empresaId}:${pedidoId}`)
     .digest("hex");
 }
 
-function buildLegacyPublicToken({ empresaId, pedidoId }) {
-  const secret = process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+function buildLegacyPublicToken({ empresaId, pedidoId, secret = currentDocumentSecret() }) {
   return crypto.createHash("sha256").update(`${empresaId}:${pedidoId}:${secret}`).digest("hex");
 }
 
-function buildPublicVerificationCode({ empresaId, pedidoId }) {
-  const secret = process.env.DOC_CONTROL_SECRET || process.env.JWT_SECRET || "transgest-doc-control";
+function buildPublicVerificationCode({ empresaId, pedidoId, secret = currentDocumentSecret() }) {
   return crypto
     .createHmac("sha256", secret)
     .update(`verify:${empresaId}:${pedidoId}`)
@@ -377,15 +386,18 @@ function safeTextEqual(expected, received) {
 
 function verifyPublicToken({ empresaId, pedidoId, token }) {
   if (!token) return false;
-  return (
-    safeTokenEqual(buildPublicToken({ empresaId, pedidoId }), token) ||
-    safeTokenEqual(buildLegacyPublicToken({ empresaId, pedidoId }), token)
-  );
+  return documentVerificationSecrets().some(secret => (
+    safeTokenEqual(buildPublicToken({ empresaId, pedidoId, secret }), token) ||
+    safeTokenEqual(buildLegacyPublicToken({ empresaId, pedidoId, secret }), token)
+  ));
 }
 
 function verifyPublicVerificationCode({ empresaId, pedidoId, code }) {
   if (!code) return true;
-  return safeTextEqual(buildPublicVerificationCode({ empresaId, pedidoId }), String(code).trim().toUpperCase());
+  return documentVerificationSecrets().some(secret => safeTextEqual(
+    buildPublicVerificationCode({ empresaId, pedidoId, secret }),
+    String(code).trim().toUpperCase()
+  ));
 }
 
 function isLocalhostBase(value) {
@@ -906,7 +918,7 @@ function buildDocumentoControlSignatures(pedido = {}) {
       imagen: pedido?.firma_cargador || "",
     }),
     chofer: pick("chofer", {
-      nombre: pedido?.firma_chofer_nombre || pedido?.chofer_firma_base_nombre || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim(),
+      nombre: pedido?.firma_chofer_nombre || pedido?.chofer_firma_base_nombre || [pedido?.conductor_efectivo_nombre, pedido?.conductor_efectivo_apellidos].filter(Boolean).join(" ").trim() || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim(),
       fecha: pedido?.firma_chofer_fecha || pedido?.chofer_firma_base_fecha || "",
       imagen: pedido?.firma_chofer || pedido?.chofer_firma_base || "",
     }),
@@ -976,7 +988,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   const cmrTipo = String(pedido?.cmr_tipo || "").toLowerCase() === "internacional" || shouldUseInternationalCmr(origenPais, destinoPais)
     ? "internacional"
     : "nacional";
-  const choferNombre = [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim();
+  const choferNombre = [pedido?.conductor_efectivo_nombre, pedido?.conductor_efectivo_apellidos].filter(Boolean).join(" ").trim()
+    || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim();
   const firmas = buildDocumentoControlSignatures(pedido);
 
   const documento = {
@@ -998,7 +1011,9 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     cargador_contractual: cargador,
     transportista_efectivo: transportista,
     colaborador: esColaborador ? transportista : null,
-    transportistas_sucesivos: esColaborador ? [transportista].filter(t => hasText(t.nombre)) : [],
+    // La subcontratacion no convierte por si sola al transportista efectivo en
+    // transportista sucesivo ni justifica repetirlo en las casillas 16 y 17.
+    transportistas_sucesivos: [],
     empresa: {
       nombre: companyName(empresa),
       cif: empresa?.cif || "",
@@ -1015,8 +1030,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     },
     chofer: {
       nombre: choferNombre || firmas.chofer.nombre || "",
-      dni: pedido?.chofer_dni || "",
-      telefono: pedido?.chofer_telefono || pedido?.chofer_tel || "",
+      dni: pedido?.conductor_efectivo_dni || pedido?.chofer_dni || "",
+      telefono: pedido?.conductor_efectivo_telefono || pedido?.chofer_telefono || pedido?.chofer_tel || "",
       email: pedido?.chofer_email || "",
     },
     firmas,
@@ -1056,6 +1071,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       peso_kg: pesoKg || null,
       bultos: pedido?.bultos || null,
       volumen: pedido?.volumen || null,
+      metros_lineales: pedido?.metros_lineales || null,
       embalaje: pedido?.embalaje || (pedido?.bultos ? "Bultos/palets" : ""),
       marcas_numeros: buildGoodsMarksAndReferences(pedido, cargas, descargas),
     },
@@ -1155,6 +1171,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     { key: "hora_descarga", ok: hasText(documento.horarios.hora_descarga) || hasText(documento.horarios.ventana_descarga), label: "Hora o ventana de descarga", category: "operativa" },
     { key: "vehiculo", ok: hasText(documento.vehiculo.tractora), label: "Matricula del vehiculo tractor", category: "vehiculo" },
     { key: "remolque", ok: hasText(documento.vehiculo.remolque), label: "Matricula de remolque si aplica", category: "vehiculo", required: false },
+    { key: "chofer_nombre", ok: hasText(documento.chofer.nombre), label: "Conductor efectivo identificado", category: "vehiculo", required: false },
+    { key: "chofer_dni", ok: hasText(documento.chofer.dni), label: "DNI/NIE del conductor efectivo", category: "vehiculo", required: false },
     { key: "operativa_carga", ok: Array.isArray(documento.condiciones.operativa_carga), label: "Operativa de carga documentada", category: "condiciones", required: false },
     { key: "ecmr_internacional", ok: documento.cmr_tipo !== "internacional" || buildEcmrConsignmentNote(documento).missing_fields.length === 0, label: "eCMR internacional con datos CMR minimos", category: "interoperabilidad" },
     { key: "firma_avanzada", ok: false, label: "Proveedor de firma avanzada eIDAS integrado", category: "firma", required: false },
@@ -1551,7 +1569,7 @@ async function generateDocumentoControlPdf({
   writeLine("Carga", `${text(documento?.origen?.nombre)} - ${text(documento?.origen?.direccion)} | ${fmtDate(documento?.horarios?.fecha_carga)} ${text(documento?.horarios?.hora_carga || documento?.horarios?.ventana_carga)}`);
   writeLine("Descarga", `${text(documento?.destino?.nombre)} - ${text(documento?.destino?.direccion)} | ${fmtDate(documento?.horarios?.fecha_descarga)} ${text(documento?.horarios?.hora_descarga || documento?.horarios?.ventana_descarga)}`);
   writeLine("Mercancia", documento?.mercancia?.descripcion);
-  writeLine("Peso / bultos", `${peso} | ${text(documento?.mercancia?.bultos)}`);
+  writeLine("Peso / bultos / ML", `${peso} | ${text(documento?.mercancia?.bultos)} | ${text(documento?.mercancia?.metros_lineales)}`);
   writeLine("Vehiculo", `Tractora: ${text(documento?.vehiculo?.tractora)} | Remolque: ${text(documento?.vehiculo?.remolque)}`);
 
   writeStops("Puntos de carga", documento?.cargas);
@@ -1698,6 +1716,7 @@ async function buildDocumentoControlCmrHtml({
   const descargaFecha = `${cmrDate(doc.horarios?.fecha_descarga)} ${cmrText(doc.horarios?.hora_descarga || doc.horarios?.ventana_descarga, "")}`.trim();
   const peso = doc.mercancia?.peso_kg ? `${Number(doc.mercancia.peso_kg).toLocaleString("es-ES")} kg` : "-";
   const volumen = doc.mercancia?.volumen ? `${cmrText(doc.mercancia.volumen)} m3` : "-";
+  const metrosLineales = doc.mercancia?.metros_lineales ? `${cmrText(doc.mercancia.metros_lineales)} ML` : "-";
   const controls = `<div class="no-print cmr-actions"><button onclick="window.print()">Imprimir</button>${qrUrl ? `<button onclick="navigator.clipboard && navigator.clipboard.writeText(${JSON.stringify(qrUrl)})">Copiar enlace QR</button>` : ""}</div>`;
   const printScript = autoPrint ? `<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250));</script>` : "";
   const privateNotes = publicView ? "" : `<section class="cmr-box cmr-wide"><h2>Condiciones operativas internas / Internal operational terms</h2>
@@ -1742,8 +1761,8 @@ async function buildDocumentoControlCmrHtml({
       <div class="cmr-box"><div class="cmr-num">21 Establecido en / Established in</div><p>${escapeHtml(doc.origen?.provincia || doc.origen?.pais || "Espana")} - ${escapeHtml(cmrDate(generatedAt))}</p><p class="cmr-small">Control: ${escapeHtml(doc.codigo_control || "-")}</p></div>
     </section>
     <table class="cmr-goods">
-      <thead><tr><th>6 Marcas y numeros</th><th>7 Cantidad</th><th>8 Embalaje</th><th>9 Naturaleza mercancia</th><th>11 Peso bruto</th><th>12 Volumen</th></tr></thead>
-      <tbody><tr><td>${escapeHtml(doc.mercancia?.marcas_numeros || "-")}</td><td>${escapeHtml(doc.mercancia?.bultos || "-")}</td><td>${escapeHtml(doc.mercancia?.embalaje || "-")}</td><td>${escapeHtml(doc.mercancia?.descripcion || "-")}</td><td>${escapeHtml(peso)}</td><td>${escapeHtml(volumen)}</td></tr></tbody>
+      <thead><tr><th>6 Marcas y numeros</th><th>7 Cantidad</th><th>8 Embalaje</th><th>9 Naturaleza mercancia</th><th>11 Peso bruto</th><th>12 Volumen / ML</th></tr></thead>
+      <tbody><tr><td>${escapeHtml(doc.mercancia?.marcas_numeros || "-")}</td><td>${escapeHtml(doc.mercancia?.bultos || "-")}</td><td>${escapeHtml(doc.mercancia?.embalaje || "-")}</td><td>${escapeHtml(doc.mercancia?.descripcion || "-")}</td><td>${escapeHtml(peso)}</td><td>${escapeHtml([volumen !== "-" ? volumen : "", metrosLineales !== "-" ? metrosLineales : ""].filter(Boolean).join(" / ") || "-")}</td></tr></tbody>
     </table>
     <section class="cmr-grid">
       <div class="cmr-box"><div class="cmr-num">15 Reembolso / Cash on delivery</div><p>${escapeHtml(doc.condiciones?.reembolso_contra_entrega || "-")}</p></div>
@@ -1868,7 +1887,7 @@ async function generateDocumentoControlCmrPdf({
   const goodsH = 64;
   const goodsCols = [82, 62, 72, 168, 70, 57];
   let x = left;
-  ["6 Marcas y numeros", "7 Cantidad", "8 Embalaje", "9 Naturaleza mercancia", "11 Peso bruto", "12 Volumen"].forEach((h, idx) => {
+  ["6 Marcas y numeros", "7 Cantidad", "8 Embalaje", "9 Naturaleza mercancia", "11 Peso bruto", "12 Volumen / ML"].forEach((h, idx) => {
     const w = goodsCols[idx];
     drawRect(x, y, w, goodsH);
     put(h, x + 4, y + 5, w - 8, { bold: true, size: 6.5, color: "#0f766e" });
@@ -1878,7 +1897,10 @@ async function generateDocumentoControlCmrPdf({
       docData.mercancia?.embalaje || "-",
       docData.mercancia?.descripcion || "-",
       docData.mercancia?.peso_kg ? `${Number(docData.mercancia.peso_kg).toLocaleString("es-ES")} kg` : "-",
-      docData.mercancia?.volumen || "-",
+      [
+        docData.mercancia?.volumen ? `${docData.mercancia.volumen} m3` : "",
+        docData.mercancia?.metros_lineales ? `${docData.mercancia.metros_lineales} ML` : "",
+      ].filter(Boolean).join(" / ") || "-",
     ][idx];
     put(value, x + 4, y + 28, w - 8, { size: 7.5, height: 28 });
     x += w;

@@ -13,11 +13,24 @@ function validateEnv() {
     critical.push("JWT_SECRET debe ser una clave larga y aleatoria.");
   }
   if (isProd) {
-    if (!process.env.USER_JWT_SECRET) warnings.push("USER_JWT_SECRET no esta definido; los tokens de usuario caen a JWT_SECRET.");
-    if (!process.env.SUPERADMIN_JWT_SECRET) warnings.push("SUPERADMIN_JWT_SECRET no esta definido; superadmin cae a JWT_SECRET.");
-    if (!process.env.ACCOUNTING_SSO_JWT_SECRET) warnings.push("ACCOUNTING_SSO_JWT_SECRET no esta definido; SSO contable cae a JWT_SECRET.");
-    if (process.env.USER_JWT_SECRET && process.env.SUPERADMIN_JWT_SECRET && process.env.USER_JWT_SECRET === process.env.SUPERADMIN_JWT_SECRET) {
-      warnings.push("USER_JWT_SECRET y SUPERADMIN_JWT_SECRET deben ser distintos.");
+    const secretDomains = [
+      ["USER_JWT_SECRET", process.env.USER_JWT_SECRET],
+      ["SUPERADMIN_JWT_SECRET", process.env.SUPERADMIN_JWT_SECRET],
+      ["ACCOUNTING_SSO_JWT_SECRET", process.env.ACCOUNTING_SSO_JWT_SECRET],
+      ["API_KEYS_ENCRYPTION_SECRET", process.env.API_KEYS_ENCRYPTION_SECRET],
+      ["DOC_CONTROL_SECRET", process.env.DOC_CONTROL_SECRET],
+    ];
+    for (const [name, value] of secretDomains) {
+      if (hasPlaceholder(value) || String(value || "").length < 32) {
+        critical.push(`${name} debe ser una clave larga, aleatoria y exclusiva.`);
+      }
+    }
+    const configuredSecrets = secretDomains.map(([, value]) => String(value || ""));
+    if (new Set(configuredSecrets).size !== configuredSecrets.length) {
+      critical.push("Los secretos de usuario, superadmin, SSO contable, claves API y documentos publicos deben ser distintos entre si.");
+    }
+    if (configuredSecrets.some(value => value && value === String(process.env.JWT_SECRET || ""))) {
+      critical.push("Los secretos especializados no pueden reutilizar JWT_SECRET.");
     }
   }
   if (hasPlaceholder(process.env.DB_PASSWORD) || String(process.env.DB_PASSWORD || "").length < 20) {

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   getClientes, crearFactura, crearCliente as crearClienteApi,
   getPaletMovimientos, crearPaletMovimiento, editarPaletMovimiento, confirmarSalidaPaletMovimiento, borrarPaletMovimiento,
+  getPaletAlertasEstado, setPaletAlertaEstado,
   getAlmacenes, crearAlmacen,
   getAlmacenMercancias, crearAlmacenMercancia,
   getAlmacenMovimientos, crearAlmacenMovimiento, editarAlmacenMovimiento, borrarAlmacenMovimiento,
@@ -35,6 +36,48 @@ function salidaPaletsConfirmada(m){
 
 function esRectificativaDevolucion(m){
   return String(m?.tipo || "").toLowerCase() === "rectificativa_devolucion";
+}
+
+function obraReferenciaMovimiento(m){
+  return String(m?.obra_referencia || m?.pedido_ref || m?.obra_nombre || m?.cliente_movimiento_nombre || "")
+    .trim()
+    .replace(/\s+/g," ");
+}
+
+function buildPaletLotBalances(movimientos, propietarioId, propietarioNombre = ""){
+  const owner = String(propietarioId || "");
+  const ownerName = String(propietarioNombre || "").toLocaleLowerCase("es").trim();
+  const items = (movimientos || []).filter(m => {
+    const movementOwner = String(m.propietario_cliente_id || m.cliente_id || "");
+    if (movementOwner) return movementOwner === owner;
+    const legacyName = String(m.propietario_nombre || m.cliente_nombre || "").toLocaleLowerCase("es").trim();
+    return Boolean(ownerName) && legacyName === ownerName;
+  });
+  const devoluciones = items.filter(m => m.tipo === "devolucion");
+  const rectificativas = items.filter(esRectificativaDevolucion);
+  return items
+    .filter(m => m.tipo === "entrega")
+    .map(entrada => {
+      const ref = obraReferenciaMovimiento(entrada) || "Sin obra/ref";
+      const vinculadas = devoluciones.filter(dev =>
+        String(dev.movimiento_origen_id || "") === String(entrada.id || "") ||
+        (!dev.movimiento_origen_id && obraReferenciaMovimiento(dev).toLocaleLowerCase("es") === ref.toLocaleLowerCase("es"))
+      );
+      const idsDevolucion = new Set(vinculadas.map(dev => String(dev.id || "")));
+      const rectificadas = rectificativas
+        .filter(rect => idsDevolucion.has(String(rect.movimiento_origen_id || "")))
+        .reduce((sum,rect)=>sum+Number(rect.cantidad||0),0);
+      const devueltas = vinculadas
+        .filter(salidaPaletsConfirmada)
+        .reduce((sum,dev)=>sum+Number(dev.cantidad||0),0);
+      const preparadas = vinculadas
+        .filter(dev=>!salidaPaletsConfirmada(dev))
+        .reduce((sum,dev)=>sum+Number(dev.cantidad||0),0);
+      const devueltasNetas = Math.max(0, devueltas - rectificadas);
+      const pendiente = Math.max(0, Number(entrada.cantidad||0) - devueltasNetas - preparadas);
+      return { ...entrada, ref, devueltas:devueltasNetas, preparadas, pendiente };
+    })
+    .sort((a,b)=>String(a.fecha||"").localeCompare(String(b.fecha||"")) || a.ref.localeCompare(b.ref,"es"));
 }
 
 function signoPaletsMovimiento(m){
@@ -99,45 +142,25 @@ function formatDateEs(value){
 
 function buildAlertasAntiguedadPalets(movimientos, clientes, cfgPalets){
   const clientesById = new Map((clientes || []).map(c => [String(c.id), c]));
-  const byCliente = new Map();
-  (movimientos || []).forEach(m => {
-    const clienteId = String(m.propietario_cliente_id || m.cliente_id || "");
-    if (!clienteId) return;
-    if (!byCliente.has(clienteId)) byCliente.set(clienteId, []);
-    byCliente.get(clienteId).push(m);
-  });
   const precioDia = Number(cfgPalets?.precio_alquiler || 0);
   const alertas = [];
-  byCliente.forEach((items, clienteId) => {
-    const entradas = items
-      .filter(m => m.tipo === "entrega" || esRectificativaDevolucion(m))
-      .map(m => ({ ...m, restante: Number(m.cantidad || 0) }))
-      .filter(m => m.restante > 0)
-      .sort((a,b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
-    let salidas = items
-      .filter(m => m.tipo === "devolucion" && salidaPaletsConfirmada(m))
-      .reduce((s,m) => s + Number(m.cantidad || 0), 0);
-    entradas.forEach(m => {
-      if (salidas <= 0) return;
-      const usado = Math.min(m.restante, salidas);
-      m.restante -= usado;
-      salidas -= usado;
-    });
-    entradas.forEach(m => {
-      if (m.restante <= 0) return;
-      const dias = diasDesde(m.fecha);
+  clientesById.forEach((cliente, clienteId) => {
+    buildPaletLotBalances(movimientos, clienteId, cliente?.nombre).forEach(lote => {
+      const pendienteReal = Number(lote.pendiente || 0) + Number(lote.preparadas || 0);
+      if (pendienteReal <= 0) return;
+      const dias = diasDesde(lote.fecha);
       if (dias < 14) return;
       const exceso = Math.max(0, dias - 14);
-      const cliente = clientesById.get(clienteId);
       alertas.push({
+        alerta_key: `palets:${clienteId}:${lote.id || `${lote.fecha || "sin-fecha"}:${lote.ref}`}`.slice(0, 280),
         cliente_id: clienteId,
-        cliente_nombre: cliente?.nombre || m.cliente_nombre || "Cliente sin identificar",
-        obra_nombre: m.obra_nombre || m.cliente_movimiento_nombre || m.pedido_ref || m.notas || "Sin obra/ref",
-        fecha: m.fecha,
+        cliente_nombre: cliente?.nombre || lote.cliente_nombre || "Cliente sin identificar",
+        obra_nombre: lote.ref,
+        fecha: lote.fecha,
         dias,
-        palets: m.restante,
+        palets: pendienteReal,
         nivel: dias >= 30 ? "critica" : "urgente",
-        coste_estimado: precioDia > 0 ? m.restante * exceso * precioDia : 0,
+        coste_estimado: precioDia > 0 ? pendienteReal * exceso * precioDia : 0,
       });
     });
   });
@@ -152,7 +175,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
       tipo:"entrega",cliente_id:"",propietario_cliente_id:"",cliente_movimiento_id:"",cantidad:"",
       fecha:new Date().toISOString().slice(0,10),
       pedido_ref:"",precio_unitario:cfg.precio_devolucion||5,notas:"",
-      num_albaran:"",estado_salida:"confirmada"
+      num_albaran:"",estado_salida:"confirmada",obra_referencia:"",movimiento_origen_id:""
     };
     if (!initial) return base;
     return {
@@ -164,6 +187,14 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
       precio_unitario: String(initial.precio_unitario ?? base.precio_unitario),
       estado_salida: initial.estado_salida || (initial.tipo === "devolucion" ? "pendiente" : "confirmada"),
     };
+  });
+  const [lotesSeleccionados,setLotesSeleccionados]=useState(()=>{
+    if (!initial?.movimiento_origen_id) return [];
+    return [{
+      id:initial.movimiento_origen_id,
+      ref:obraReferenciaMovimiento(initial) || "Obra/ref seleccionada",
+      cantidad:Number(initial.cantidad||0),
+    }];
   });
   const [generandoFactura, setGenerandoFactura]=useState(false);
   const [facturaGenerada, setFacturaGenerada]=useState(null);
@@ -186,6 +217,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
   async function guardar(){
     if(!form.cantidad||Number(form.cantidad)<=0){notify("Indica la cantidad de palets", "warning");return;}
     if((form.tipo==="entrega"||form.tipo==="devolucion"||form.tipo==="rectificativa_devolucion")&&!form.propietario_cliente_id&&!form.cliente_id){notify("Selecciona el propietario de los palets", "warning");return;}
+    if(["entrega","devolucion"].includes(form.tipo) && !form.pedido_ref && !form.obra_referencia && !form.cliente_movimiento_id && lotesSeleccionados.length===0){notify("Indica o selecciona la obra/referencia", "warning");return;}
     if(form.tipo==="devolucion"&&!form.num_albaran){notify("El numero de albaran es obligatorio para devoluciones", "warning");return;}
     if (editando) {
       const ok = await confirmDialog({
@@ -197,7 +229,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
       if (!ok) return;
     }
     const propietarioId = form.propietario_cliente_id || form.cliente_id;
-    const movimientoNombre = clientes.find(c=>c.id===form.cliente_movimiento_id)?.nombre || form.pedido_ref || "";
+    const movimientoNombre = clientes.find(c=>c.id===form.cliente_movimiento_id)?.nombre || form.obra_referencia || form.pedido_ref || "";
     const mv={
       ...form,
       cliente_id:propietarioId,
@@ -210,7 +242,20 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
     };
     if (typeof (editando ? onServerUpdate : onServerSave) === "function") {
       try {
-        await (editando ? onServerUpdate : onServerSave)(mv);
+        if (!editando && form.tipo === "devolucion" && lotesSeleccionados.length > 0) {
+          for (const lote of lotesSeleccionados) {
+            if (Number(lote.cantidad || 0) <= 0) continue;
+            await onServerSave({
+              ...mv,
+              cantidad:Number(lote.cantidad),
+              pedido_ref:lote.ref,
+              obra_referencia:lote.ref,
+              movimiento_origen_id:lote.id,
+            });
+          }
+        } else {
+          await (editando ? onServerUpdate : onServerSave)(mv);
+        }
       } catch (e) {
         notify("No se pudo guardar el movimiento: " + e.message, "error");
         return;
@@ -264,22 +309,29 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
   const lotesDisponibles = (() => {
     const propietarioId = form.propietario_cliente_id || form.cliente_id || "";
     if (form.tipo !== "devolucion" || !propietarioId) return [];
-    const entradas = movimientos
-      .filter(m => (m.tipo === "entrega" || esRectificativaDevolucion(m)) && String(m.propietario_cliente_id || m.cliente_id || "") === String(propietarioId))
-      .map(m => ({ ...m, restante: Number(m.cantidad || 0) }))
-      .filter(m => m.restante > 0)
-      .sort((a,b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
-    let salidas = movimientos
-      .filter(m => m.tipo === "devolucion" && String(m.propietario_cliente_id || m.cliente_id || "") === String(propietarioId))
-      .reduce((s,m) => s + Number(m.cantidad || 0), 0);
-    entradas.forEach(m => {
-      if (salidas <= 0) return;
-      const usado = Math.min(m.restante, salidas);
-      m.restante -= usado;
-      salidas -= usado;
-    });
-    return entradas.filter(m => m.restante > 0);
+    const propietario = clientes.find(c=>String(c.id)===String(propietarioId));
+    return buildPaletLotBalances(movimientos, propietarioId, propietario?.nombre).filter(m => m.pendiente > 0);
   })();
+
+  function actualizarLotesSeleccionados(next){
+    setLotesSeleccionados(next);
+    const total = next.reduce((sum,lote)=>sum+Number(lote.cantidad||0),0);
+    setForm(prev=>({
+      ...prev,
+      cantidad:total > 0 ? String(total) : "",
+      pedido_ref:next.length === 1 ? next[0].ref : next.length > 1 ? `${next.length} obras/referencias` : "",
+      obra_referencia:next.length === 1 ? next[0].ref : "",
+      movimiento_origen_id:next.length === 1 ? next[0].id : "",
+    }));
+  }
+
+  function toggleLote(lote){
+    const existe = lotesSeleccionados.some(item=>String(item.id)===String(lote.id));
+    const next = existe
+      ? lotesSeleccionados.filter(item=>String(item.id)!==String(lote.id))
+      : [...lotesSeleccionados,{id:lote.id,ref:lote.ref,cantidad:Number(lote.pendiente||0),max:Number(lote.pendiente||0)}];
+    actualizarLotesSeleccionados(next);
+  }
 
   function imprimirAlbaran() {
     const cliente = clientes.find(cl=>cl.id===form.cliente_id);
@@ -374,11 +426,33 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
   }
 
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(500px,96vw)"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:14}}>
-          {editando ? "Editar movimiento de palets" : "Registrar movimiento de palets"}
+    <div className="tg-palets-modal-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <style>{`
+        .tg-palets-modal { width:min(720px,100%); max-height:calc(100dvh - 24px); display:flex; flex-direction:column; overflow:hidden; }
+        .tg-palets-modal-body { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable; }
+        .tg-palets-lotes-scroll { max-height:230px; overflow-y:auto; display:grid; gap:6px; padding-right:3px; overscroll-behavior:contain; }
+        .tg-palets-selected-scroll { max-height:160px; overflow-y:auto; display:grid; gap:6px; padding-right:3px; }
+        .tg-palets-modal-actions { position:sticky; bottom:0; z-index:4; background:var(--bg2); border-top:1px solid var(--border2); padding:12px 0 2px; }
+        @media (max-width:600px) {
+          .tg-palets-modal-overlay { padding:0 !important; align-items:stretch !important; }
+          .tg-palets-modal { width:100%; max-height:100dvh; min-height:100dvh; border-radius:0 !important; border-left:0 !important; border-right:0 !important; }
+          .tg-palets-modal-header { padding:13px 14px !important; }
+          .tg-palets-modal-body { padding:0 14px 14px !important; }
+          .tg-palets-modal-form-grid { grid-template-columns:minmax(0,1fr) !important; }
+          .tg-palets-lote-button { grid-template-columns:minmax(0,1fr) !important; }
+          .tg-palets-lote-count { justify-self:start; }
+          .tg-palets-selected-row { grid-template-columns:minmax(0,1fr) 92px !important; }
+          .tg-palets-modal-actions > button, .tg-palets-success-actions > button { flex:1 1 140px; min-height:42px; }
+        }
+      `}</style>
+      <div className="tg-palets-modal" style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12}}>
+        <div className="tg-palets-modal-header" style={{padding:"17px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,borderBottom:"1px solid var(--border2)",flex:"0 0 auto"}}>
+          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"var(--text)"}}>
+            {editando ? "Editar movimiento de palets" : "Registrar movimiento de palets"}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Cerrar" style={{width:36,height:36,borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:18,fontWeight:900,cursor:"pointer",flex:"0 0 auto"}}>X</button>
         </div>
+        <div className="tg-palets-modal-body" style={{padding:"0 22px 18px"}}>
         <label style={lbl}>Tipo de movimiento</label>
         <select style={inp} value={form.tipo} onChange={f("tipo")} disabled={editando}>
           {TIPOS.map(t=><option key={t.v} value={t.v}>{TIPO_FORM_LABEL[t.v] || t.l}</option>)}
@@ -390,7 +464,10 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
         )}
         {esCliente&&(<>
           <label style={lbl}>Propietario de los palets</label>
-          <select style={inp} value={form.propietario_cliente_id || form.cliente_id} onChange={e=>setForm(p=>({...p,propietario_cliente_id:e.target.value,cliente_id:e.target.value}))}>
+          <select style={inp} value={form.propietario_cliente_id || form.cliente_id} onChange={e=>{
+            setLotesSeleccionados([]);
+            setForm(p=>({...p,propietario_cliente_id:e.target.value,cliente_id:e.target.value,cantidad:"",pedido_ref:"",obra_referencia:"",movimiento_origen_id:""}));
+          }}>
             <option value="">Seleccionar propietario...</option>
             {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
@@ -399,22 +476,37 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
               <div style={{fontSize:11,fontWeight:800,color:"var(--text3)"}}>Palets registrados pendientes de devolver</div>
               {lotesDisponibles.length === 0 ? (
                 <div style={{fontSize:11,color:"var(--text5)"}}>No hay lotes pendientes para este cliente.</div>
-              ) : lotesDisponibles.map(lote => {
-                const ref = lote.obra_nombre || lote.pedido_ref || lote.cliente_movimiento_nombre || lote.notas || "Sin referencia";
-                return (
-                  <button key={lote.id || `${lote.fecha}-${ref}`} type="button"
-                    onClick={() => setForm(p => ({
-                      ...p,
-                      cantidad: String(Number(p.cantidad || 0) + Number(lote.restante || 0)),
-                      pedido_ref: p.pedido_ref && p.pedido_ref !== ref ? `${p.pedido_ref} | ${ref}` : ref,
-                      cliente_movimiento_id: lote.cliente_movimiento_id || p.cliente_movimiento_id || "",
-                    }))}
-                    style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",textAlign:"left",padding:"7px 9px",borderRadius:7,border:"1px solid rgba(249,115,22,.24)",background:"rgba(249,115,22,.07)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                    <span style={{fontSize:12,fontWeight:800}}>{ref}</span>
-                    <span style={{fontSize:11,color:"#f97316",fontWeight:900}}>{fmtN(lote.restante)} palets</span>
-                  </button>
-                );
-              })}
+              ) : (
+                <div className="tg-palets-lotes-scroll">
+                  {lotesDisponibles.map(lote => {
+                    const ref = lote.ref || "Sin referencia";
+                    const seleccionado = lotesSeleccionados.some(item=>String(item.id)===String(lote.id));
+                    return (
+                      <button className="tg-palets-lote-button" key={lote.id || `${lote.fecha}-${ref}`} type="button"
+                        onClick={() => toggleLote(lote)}
+                        style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:8,alignItems:"center",textAlign:"left",padding:"8px 9px",borderRadius:7,border:seleccionado?"2px solid #10b981":"1px solid rgba(249,115,22,.24)",background:seleccionado?"rgba(16,185,129,.10)":"rgba(249,115,22,.07)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                        <span style={{minWidth:0}}>
+                          <span style={{display:"block",fontSize:12,fontWeight:800,overflowWrap:"anywhere"}}>{ref}</span>
+                          <span style={{display:"block",fontSize:10,color:"var(--text5)",marginTop:2}}>{formatDateEs(lote.fecha)} · {fmtN(lote.devueltas)} devueltos · {fmtN(lote.preparadas)} preparados</span>
+                        </span>
+                        <span className="tg-palets-lote-count" style={{fontSize:11,color:seleccionado?"#10b981":"#f97316",fontWeight:900,whiteSpace:"nowrap"}}>{fmtN(lote.pendiente)} pendientes</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {lotesSeleccionados.length > 0 && (
+                <div className="tg-palets-selected-scroll" style={{marginTop:4}}>
+                  {lotesSeleccionados.map(lote=><div className="tg-palets-selected-row" key={lote.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 110px",gap:8,alignItems:"center"}}>
+                    <span style={{fontSize:11,color:"var(--text3)",overflowWrap:"anywhere"}}>{lote.ref}</span>
+                    <input type="number" min="1" max={lote.max || undefined} value={lote.cantidad}
+                      onChange={e=>{
+                        const cantidad=Math.max(0,Math.min(Number(lote.max||Infinity),Math.trunc(Number(e.target.value||0))));
+                        actualizarLotesSeleccionados(lotesSeleccionados.map(item=>String(item.id)===String(lote.id)?{...item,cantidad}:item));
+                      }} style={{...inp,padding:"5px 8px"}} aria-label={`Palets a devolver de ${lote.ref}`} />
+                  </div>)}
+                </div>
+              )}
             </div>
           )}
           <label style={lbl}>Obra / cliente del movimiento</label>
@@ -423,10 +515,10 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
             {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         </>)}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
+        <div className="tg-palets-modal-form-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
           <div>
             <label style={lbl}>Cantidad de palets</label>
-            <input type="number" min="1" style={inp} value={form.cantidad} onChange={f("cantidad")}/>
+            <input type="number" min="1" style={inp} value={form.cantidad} onChange={f("cantidad")} readOnly={form.tipo==="devolucion"&&lotesSeleccionados.length>0}/>
           </div>
           <div>
             <label style={lbl}>Fecha</label>
@@ -464,7 +556,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
           )}
           <div>
             <label style={lbl}>Obra / Ref.</label>
-            <input style={inp} value={form.pedido_ref} onChange={f("pedido_ref")} placeholder="Obra tal, P0001..."/>
+            <input style={inp} value={form.pedido_ref} onChange={e=>setForm(p=>({...p,pedido_ref:e.target.value,obra_referencia:e.target.value}))} placeholder="Obra tal, P0001..." readOnly={form.tipo==="devolucion"&&lotesSeleccionados.length>1}/>
           </div>
         </div>
         {form.tipo==="devolucion"&&Number(form.cantidad)>0&&Number(form.precio_unitario)>0&&(
@@ -476,10 +568,10 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
         <label style={lbl}>Notas</label>
         <input style={inp} value={form.notas} onChange={f("notas")} placeholder="Opcional"/>
         {facturaGenerada&&(
-          <div style={{marginTop:12,padding:"10px 14px",background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.25)",borderRadius:8}}>
+          <div className="tg-palets-modal-actions" style={{marginTop:12,padding:"10px 14px",background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.25)",borderRadius:8}}>
             <div style={{fontWeight:700,color:"var(--green)",fontSize:13,marginBottom:4}}>Factura borrador generada: {facturaGenerada.numero}</div>
             <div style={{fontSize:12,color:"var(--text4)"}}>Ve a Facturacion para emitirla. El movimiento ya ha sido registrado.</div>
-            <div style={{display:"flex",gap:8,marginTop:8}}>
+            <div className="tg-palets-success-actions" style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
               <button onClick={imprimirAlbaran} style={{padding:"6px 14px",borderRadius:6,border:"none",
                 background:"#f59e0b",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"'DM Sans',sans-serif"}}>
                 Imprimir albaran
@@ -487,7 +579,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
               <button onClick={onSaved} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Aceptar y cerrar</button></div>
           </div>
         )}
-        {!facturaGenerada&&<div style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end",flexWrap:"wrap"}}>
+        {!facturaGenerada&&<div className="tg-palets-modal-actions" style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end",flexWrap:"wrap"}}>
           {form.tipo==="devolucion"&&form.num_albaran&&form.cliente_id&&(
             <button onClick={imprimirAlbaran}
               style={{padding:"7px 14px",borderRadius:7,border:"1px solid rgba(245,158,11,.4)",
@@ -499,6 +591,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
           <button onClick={onClose} style={{padding:"7px 14px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
           <button onClick={guardar} disabled={generandoFactura} style={{padding:"7px 16px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>{generandoFactura?"Generando...":(editando?"Guardar cambios":"Registrar")}</button>
         </div>}
+        </div>
       </div>
     </div>
   );
@@ -610,11 +703,13 @@ export default function Palets(){
     const [empresaCfg,setEmpresaCfg]=useState({});
     const [modal,setModal]=useState(false);
   const [movimientoEditando,setMovimientoEditando]=useState(null);
-  const [tab,setTab]=useState("stock"); // stock | dev_cliente | historial | almacenes
+  const [tab,setTab]=useState("stock"); // stock | historial | almacenes
     const [filtroCliente,setFiltroCliente]=useState("todos");
     const [devDesde,setDevDesde]=useState("");
     const [devHasta,setDevHasta]=useState("");
     const [clientesPlegados,setClientesPlegados]=useState({});
+    const [alertaEstados,setAlertaEstados]=useState({});
+    const [mostrarAlertasOcultas,setMostrarAlertasOcultas]=useState(false);
     const empresa = useEmpresaPerfil();
     const cfgPalets = normalizePaletsCfg(empresaCfg?.cfg_precios?.palets);
 
@@ -625,7 +720,9 @@ export default function Palets(){
       cliente_movimiento_id: m.cliente_movimiento_id || "",
       cliente_id: m.propietario_cliente_id || m.cliente_id || "",
       cliente_nombre: m.propietario_nombre || m.cliente_nombre || "",
-      obra_nombre: m.obra_nombre || m.cliente_movimiento_nombre || m.pedido_ref || m.notas || "",
+      obra_nombre: m.obra_referencia || m.obra_nombre || m.cliente_movimiento_nombre || m.pedido_ref || m.notas || "",
+      obra_referencia: m.obra_referencia || m.pedido_ref || "",
+      movimiento_origen_id: m.movimiento_origen_id || "",
       cantidad: Number(m.cantidad || 0),
       precio_unitario: Number(m.precio_unitario || 0),
       estado_salida: m.estado_salida || (m.tipo === "devolucion" ? "confirmada" : "confirmada"),
@@ -645,6 +742,9 @@ export default function Palets(){
     useEffect(()=>{
       getClientes().then(d=>setClientes(Array.isArray(d?.data)?d.data:Array.isArray(d)?d:[])).catch(()=>{});
       cargarMovimientos();
+      getPaletAlertasEstado()
+        .then(rows=>setAlertaEstados(Object.fromEntries((Array.isArray(rows)?rows:[]).map(row=>[row.alerta_key,row.estado]))))
+        .catch(()=>{});
     },[cargarMovimientos]);
 
     useEffect(() => {
@@ -684,6 +784,8 @@ export default function Palets(){
       propietario_cliente_id: mv.propietario_cliente_id || mv.cliente_id || null,
       fecha: mv.fecha,
       pedido_ref: mv.pedido_ref,
+      obra_referencia: mv.obra_referencia || mv.pedido_ref,
+      movimiento_origen_id: mv.movimiento_origen_id || null,
       num_albaran: mv.num_albaran,
       notas: mv.notas,
       estado_salida: mv.estado_salida,
@@ -700,6 +802,8 @@ export default function Palets(){
       propietario_cliente_id: mv.propietario_cliente_id || mv.cliente_id || null,
       fecha: mv.fecha,
       pedido_ref: mv.pedido_ref,
+      obra_referencia: mv.obra_referencia || mv.pedido_ref,
+      movimiento_origen_id: mv.movimiento_origen_id || null,
       num_albaran: mv.num_albaran,
       notas: mv.notas,
       estado_salida: mv.estado_salida,
@@ -784,14 +888,23 @@ export default function Palets(){
     try {
       let factura = null;
       if (!String(mv.id || "").startsWith("pmv_")) {
-        await confirmarSalidaPaletMovimiento(mv.id);
-        try {
-          factura = await generarFacturaDevolucion(mv);
-          if (factura?.id) await confirmarSalidaPaletMovimiento(mv.id, { factura_id: factura.id });
-        } catch (e) {
-          notify("Salida confirmada, pero no se ha podido generar la factura borrador: " + e.message, "warning");
-        }
-        await cargarMovimientos();
+        const confirmado = await confirmarSalidaPaletMovimiento(mv.id, { generar_factura_async:true });
+        setMovimientos(prev => prev.map(m => m.id===mv.id ? {
+          ...m,
+          ...normalizarMovimientoApi(confirmado || {}),
+          estado_salida:"confirmada",
+          salida_confirmada_at:confirmado?.salida_confirmada_at || new Date().toISOString(),
+          factura_programada:Boolean(confirmado?.factura_programada),
+        } : m));
+        notify(
+          confirmado?.factura_programada
+            ? "Salida confirmada. La factura borrador se esta generando en segundo plano."
+            : "Salida de palets confirmada. Ya se ha actualizado el stock.",
+          "success"
+        );
+        window.setTimeout(()=>cargarMovimientos(), 1800);
+        window.setTimeout(()=>cargarMovimientos(), 6000);
+        return;
       } else {
         try {
           factura = await generarFacturaDevolucion(mv);
@@ -817,13 +930,37 @@ export default function Palets(){
     }
   }
 
+  async function cambiarEstadoAlerta(alertaKey, estado){
+    const anterior = alertaEstados[alertaKey];
+    setAlertaEstados(prev => {
+      const next = { ...prev };
+      if (estado === "activa") delete next[alertaKey];
+      else next[alertaKey] = estado;
+      return next;
+    });
+    try {
+      await setPaletAlertaEstado({ alerta_key:alertaKey, estado });
+    } catch (error) {
+      setAlertaEstados(prev => {
+        const next = { ...prev };
+        if (anterior) next[alertaKey] = anterior;
+        else delete next[alertaKey];
+        return next;
+      });
+      notify("No se pudo actualizar la alerta: " + error.message, "error");
+    }
+  }
+
   async function rectificarDevolucion(mv){
     if (mv.tipo !== "devolucion" || !salidaPaletsConfirmada(mv)) {
       notify("Solo se pueden rectificar devoluciones ya confirmadas.", "warning");
       return;
     }
     const yaRectificado = movimientos
-      .filter(m => esRectificativaDevolucion(m) && String(m.notas || "").includes(String(mv.id || "")))
+      .filter(m => esRectificativaDevolucion(m) && (
+        String(m.movimiento_origen_id || "") === String(mv.id || "") ||
+        String(m.notas || "").includes(String(mv.id || ""))
+      ))
       .reduce((s,m) => s + Number(m.cantidad || 0), 0);
     const maximo = Math.max(0, Number(mv.cantidad || 0) - yaRectificado);
     if (maximo <= 0) {
@@ -865,6 +1002,8 @@ export default function Palets(){
         propietario_cliente_id: mv.propietario_cliente_id || mv.cliente_id || null,
         fecha: new Date().toISOString().slice(0,10),
         pedido_ref: `Rectifica ${mv.num_albaran || mv.pedido_ref || String(mv.id || "").slice(0,8)}`,
+        obra_referencia: mv.obra_referencia || mv.pedido_ref || mv.obra_nombre || "",
+        movimiento_origen_id: mv.id,
         num_albaran: mv.num_albaran || "",
         notas: `Rectificativa de devolucion original ${mv.id || "-"}${mv.obra_nombre ? " | Obra: "+mv.obra_nombre : ""}${mv.notas ? " | "+mv.notas : ""}`,
         estado_salida: "confirmada",
@@ -901,38 +1040,27 @@ export default function Palets(){
   // Stock pendiente por cliente
   const clientesConPalets = clientes.map(c=>{
     const clienteNombre = String(c.nombre || "").toLowerCase().trim();
-    const clienteNombreCorto = clienteNombre.slice(0, 12);
-    const mvsCli = movimientos.filter(m=>
-      clienteIdMovimiento(m)===c.id ||
-      (m.propietario_nombre && clienteNombre &&
-        m.propietario_nombre.toLowerCase().trim() === clienteNombre) ||
-      (m.cliente_nombre && c.nombre &&
-        m.cliente_nombre.toLowerCase().trim() === c.nombre.toLowerCase().trim()) ||
-      (m.propietario_nombre && clienteNombreCorto &&
-        m.propietario_nombre.toLowerCase().includes(clienteNombreCorto)) ||
-      (m.cliente_nombre && clienteNombreCorto &&
-        m.cliente_nombre.toLowerCase().includes(clienteNombreCorto))
-    );
-    const stock=mvsCli.reduce((s,m)=>{
-      if(m.tipo==="entrega") return s+Number(m.cantidad||0);
-      if(esRectificativaDevolucion(m)) return s+Number(m.cantidad||0);
-      if(m.tipo==="devolucion") return salidaPaletsConfirmada(m) ? s-Number(m.cantidad||0) : s;
-      return s;
-    },0);
-    const entregas=mvsCli.filter(m=>m.tipo==="entrega" || esRectificativaDevolucion(m)).reduce((s,m)=>s+Number(m.cantidad||0),0);
+    const mvsCli = movimientos.filter(m=>{
+      const propietarioId = clienteIdMovimiento(m);
+      if(propietarioId) return String(propietarioId) === String(c.id);
+
+      // Compatibilidad con movimientos antiguos: solo nombre exacto para no
+      // mezclar saldos de clientes con denominaciones similares.
+      const propietarioNombre = String(m.propietario_nombre || "").toLowerCase().trim();
+      const movimientoCliente = String(m.cliente_nombre || "").toLowerCase().trim();
+      return Boolean(clienteNombre) &&
+        (propietarioNombre === clienteNombre || movimientoCliente === clienteNombre);
+    });
+    const lotes = buildPaletLotBalances(mvsCli, c.id, c.nombre);
+    const entregas=lotes.reduce((s,lote)=>s+Number(lote.cantidad||0),0);
     const rectificadas=mvsCli.filter(esRectificativaDevolucion).reduce((s,m)=>s+Number(m.cantidad||0),0);
     const devolucionesConfirmadas = mvsCli.filter(m=>m.tipo==="devolucion" && salidaPaletsConfirmada(m));
     const devolucionesPendientesSalida = mvsCli.filter(m=>m.tipo==="devolucion" && !salidaPaletsConfirmada(m));
-    const devoluciones=devolucionesConfirmadas.reduce((s,m)=>s+Number(m.cantidad||0),0);
-    const pendientesSalida=devolucionesPendientesSalida.reduce((s,m)=>s+Number(m.cantidad||0),0);
+    const devoluciones=lotes.reduce((s,lote)=>s+Number(lote.devueltas||0),0);
+    const pendientesSalida=lotes.reduce((s,lote)=>s+Number(lote.preparadas||0),0);
+    const stock=Math.max(0,entregas-devoluciones);
     const importeDevoluciones=devolucionesConfirmadas.reduce((s,m)=>s+Number(m.cantidad||0)*Number(m.precio_unitario||0),0);
-    const devolucionesDetalle = Object.values(devolucionesConfirmadas.reduce((acc,m)=>{
-      const key = m.obra_nombre || m.pedido_ref || m.cliente_movimiento_nombre || m.notas || "Sin obra/ref";
-      if(!acc[key]) acc[key] = { nombre:key, cantidad:0, importe:0 };
-      acc[key].cantidad += Number(m.cantidad||0);
-      acc[key].importe += Number(m.cantidad||0)*Number(m.precio_unitario||0);
-      return acc;
-    },{}));
+    const devolucionesDetalle = lotes.filter(lote=>lote.devueltas>0).map(lote=>({nombre:lote.ref,cantidad:lote.devueltas}));
     const pendientesSalidaDetalle = Object.values(devolucionesPendientesSalida.reduce((acc,m)=>{
       const key = m.obra_nombre || m.pedido_ref || m.cliente_movimiento_nombre || m.notas || "Sin obra/ref";
       if(!acc[key]) acc[key] = { nombre:key, cantidad:0, movimientos:[] };
@@ -940,16 +1068,20 @@ export default function Palets(){
       acc[key].movimientos.push(m);
       return acc;
     },{}));
-    return{...c,stock,entregas,rectificadas,devoluciones,pendientesSalida,importeDevoluciones,devolucionesDetalle,pendientesSalidaDetalle};
+    return{...c,stock,entregas,rectificadas,devoluciones,pendientesSalida,importeDevoluciones,devolucionesDetalle,pendientesSalidaDetalle,lotes};
   }).filter(c=>c.entregas>0||c.devoluciones>0||c.stock!==0||c.pendientesSalida>0);
 
   const totalPendiente=clientesConPalets.reduce((s,c)=>s+Math.max(0,c.entregas-c.devoluciones),0);
   const totalDevuelto=clientesConPalets.reduce((s,c)=>s+Number(c.devoluciones||0),0);
   const totalSalidasPreparadas=clientesConPalets.reduce((s,c)=>s+Number(c.pendientesSalida||0),0);
   const alertasAntiguedad = buildAlertasAntiguedadPalets(movimientos, clientes, cfgPalets);
-  const alertasCriticas = alertasAntiguedad.filter(a => a.nivel === "critica");
-  const totalPaletsEnAlerta = alertasAntiguedad.reduce((s,a)=>s+Number(a.palets||0),0);
-  const costeAlmacenajeEstimado = alertasAntiguedad.reduce((s,a)=>s+Number(a.coste_estimado||0),0);
+  const alertasConEstado = alertasAntiguedad.map(a => ({ ...a, estado_usuario:alertaEstados[a.alerta_key] || "activa" }));
+  const alertasOcultas = alertasConEstado.filter(a => a.estado_usuario === "oculta");
+  const alertasVisibles = alertasConEstado.filter(a => mostrarAlertasOcultas || a.estado_usuario !== "oculta");
+  const alertasNoLeidas = alertasConEstado.filter(a => a.estado_usuario === "activa");
+  const alertasCriticas = alertasNoLeidas.filter(a => a.nivel === "critica");
+  const totalPaletsEnAlerta = alertasNoLeidas.reduce((s,a)=>s+Number(a.palets||0),0);
+  const costeAlmacenajeEstimado = alertasNoLeidas.reduce((s,a)=>s+Number(a.coste_estimado||0),0);
 
   function clienteIdMovimiento(m) {
     return m.propietario_cliente_id || m.cliente_id || "";
@@ -1080,7 +1212,7 @@ export default function Palets(){
           ["Stock empresa",stockEmpresa,"palets",stockEmpresa>0?"#10b981":"#f59e0b","□"],
           ["Pendientes devolucion",totalPendiente,"palets",totalPendiente>0?"#f97316":"#10b981","↶"],
           ["Salidas preparadas",totalSalidasPreparadas,"palets",totalSalidasPreparadas>0?"#f59e0b":"#10b981","↑"],
-          ["Alertas antiguedad",alertasAntiguedad.length,"lotes",alertasCriticas.length>0?"#ef4444":alertasAntiguedad.length>0?"#f59e0b":"#10b981","!"],
+          ["Alertas antiguedad",alertasNoLeidas.length,"lotes",alertasCriticas.length>0?"#ef4444":alertasNoLeidas.length>0?"#f59e0b":"#10b981","!"],
           ["Devueltos registrados",totalDevuelto,"palets","#10b981","▣"],
           ["Clientes con palets",clientesConPalets.filter(c=>c.stock>0).length,"clientes","#3b82f6","☷"],
           ["Total movimientos",movimientos.length,"registros","#64748b","⌁"],
@@ -1100,7 +1232,7 @@ export default function Palets(){
 
       {/* Tabs */}
       <div style={{display:"flex",gap:22,borderBottom:"1px solid #dbe5ec",marginBottom:18}}>
-        {[["stock","Palets / cliente"],["dev_cliente","Dev. Cliente"],["almacen_propio","Mercancia propia"],["almacen_cliente","Almacen cliente"],["historial","Historial"]].map(([id,l])=>(
+        {[["stock","Palets de clientes"],["almacen_propio","Mercancia propia"],["almacen_cliente","Almacen cliente"],["historial","Historial"]].map(([id,l])=>(
           <button key={id} onClick={()=>setTab(id)} style={{...S.btn,border:"none",borderRadius:0,borderBottom:`2px solid ${tab===id?"#008b82":"transparent"}`,color:tab===id?"#006f68":"#64748b",background:"transparent",padding:"0 0 13px",fontSize:14,fontWeight:800,boxShadow:"none"}}>
             {l}
           </button>
@@ -1127,8 +1259,8 @@ export default function Palets(){
               </div>
             </div>
           </div>
-          <div style={{marginTop:14,padding:"16px 18px",borderRadius:10,background:alertasAntiguedad.length?"rgba(249,115,22,.07)":"rgba(16,185,129,.07)",border:`1px solid ${alertasAntiguedad.length?"#fed7aa":"rgba(16,185,129,.20)"}`}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:alertasAntiguedad.length?10:0}}>
+          <div style={{marginTop:14,padding:"16px 18px",borderRadius:10,background:alertasNoLeidas.length?"rgba(249,115,22,.07)":"rgba(16,185,129,.07)",border:`1px solid ${alertasNoLeidas.length?"#fed7aa":"rgba(16,185,129,.20)"}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:alertasVisibles.length?10:0}}>
               <div>
                 <div style={{fontWeight:900,fontSize:16,color:"#0f172a"}}>Alertas de antiguedad y almacenaje</div>
                 <div style={{fontSize:13,color:"#64748b",marginTop:3}}>
@@ -1139,35 +1271,50 @@ export default function Palets(){
                 <span style={{...S.btn,background:alertasCriticas.length?"rgba(239,68,68,.12)":"#fff",color:alertasCriticas.length?"#ef4444":"#64748b",border:"1px solid #fecaca",cursor:"default"}}>
                   {alertasCriticas.length} criticas
                 </span>
-                <span style={{...S.btn,background:alertasAntiguedad.length?"rgba(249,115,22,.12)":"#fff",color:alertasAntiguedad.length?"#f97316":"#64748b",border:"1px solid #fed7aa",cursor:"default"}}>
+                <span style={{...S.btn,background:alertasNoLeidas.length?"rgba(249,115,22,.12)":"#fff",color:alertasNoLeidas.length?"#f97316":"#64748b",border:"1px solid #fed7aa",cursor:"default"}}>
                   {fmtN(totalPaletsEnAlerta)} palets
                 </span>
                 <span style={{...S.btn,background:"#fff",color:"#64748b",border:"1px solid #dbe5ec",cursor:"default"}}>
                   {costeAlmacenajeEstimado>0 ? `${fmt2(costeAlmacenajeEstimado)} EUR estimados` : "Sin coste configurado"}
                 </span>
+                {alertasOcultas.length>0&&(
+                  <button type="button" onClick={()=>setMostrarAlertasOcultas(v=>!v)} style={{...S.btn,background:"#fff",color:"#64748b",border:"1px solid #dbe5ec"}}>
+                    {mostrarAlertasOcultas ? "Ocultar archivadas" : `Ver ocultas (${alertasOcultas.length})`}
+                  </button>
+                )}
               </div>
             </div>
-            {alertasAntiguedad.length ? (
+            {alertasVisibles.length ? (
               <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
-                {alertasAntiguedad.slice(0,6).map((a,idx)=>(
-                  <div key={`${a.cliente_id}-${a.fecha}-${idx}`} style={{border:"1px solid #fed7aa",borderRadius:8,padding:"14px 16px",background:"#fff",display:"grid",gridTemplateColumns:"48px 1fr auto",alignItems:"center",gap:16}}>
+                {alertasVisibles.slice(0,8).map((a,idx)=>(
+                  <div key={`${a.alerta_key}-${idx}`} style={{border:"1px solid #fed7aa",borderRadius:8,padding:"14px 16px",background:"#fff",display:"grid",gridTemplateColumns:"48px minmax(0,1fr)",alignItems:"center",gap:16,opacity:a.estado_usuario==="leida"?.65:1}}>
                     <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(249,115,22,.12)",display:"flex",alignItems:"center",justifyContent:"center",color:"#ef4444",fontWeight:900,fontSize:22}}>!</div>
                     <div>
-                    <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                       <span style={{fontWeight:900,fontSize:13,color:"#0f172a"}}>{a.cliente_nombre}</span>
+                      <span style={{fontSize:13,fontWeight:900,color:a.nivel==="critica"?"#ef4444":"#f59e0b",textTransform:"uppercase"}}>{a.dias} dias</span>
                     </div>
                     <div style={{fontSize:12,color:"#64748b",marginTop:3}}>{a.obra_nombre}</div>
-                    <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:7,fontSize:12,color:"#64748b"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:7,fontSize:12,color:"#64748b",flexWrap:"wrap"}}>
                       <span>{fmtN(a.palets)} palets desde {a.fecha || "-"}</span>
                       {a.coste_estimado>0 && <strong style={{color:"#f59e0b"}}>{fmt2(a.coste_estimado)} EUR</strong>}
                     </div>
                     </div>
-                    <span style={{fontSize:13,fontWeight:900,color:a.nivel==="critica"?"#ef4444":"#f59e0b",textTransform:"uppercase"}}>{a.dias} dias</span>
+                    <div style={{gridColumn:"1 / -1",display:"flex",justifyContent:"flex-end",gap:7,flexWrap:"wrap"}}>
+                      <button type="button" onClick={()=>cambiarEstadoAlerta(a.alerta_key,a.estado_usuario==="leida"?"activa":"leida")} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"#fff"}}>
+                        {a.estado_usuario==="leida" ? "Marcar no leida" : "Marcar leida"}
+                      </button>
+                      <button type="button" onClick={()=>cambiarEstadoAlerta(a.alerta_key,a.estado_usuario==="oculta"?"activa":"oculta")} style={{...S.btn,padding:"5px 10px",fontSize:11,background:a.estado_usuario==="oculta"?"rgba(16,185,129,.08)":"#fff"}}>
+                        {a.estado_usuario==="oculta" ? "Restaurar" : "Ocultar"}
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{fontSize:12,color:"#10b981",fontWeight:700}}>Sin palets envejecidos pendientes de devolver.</div>
+              <div style={{fontSize:12,color:"#10b981",fontWeight:700}}>
+                {alertasConEstado.length ? "No hay alertas visibles. Puedes recuperar las ocultas desde el boton superior." : "Sin palets envejecidos pendientes de devolver."}
+              </div>
             )}
           </div>
         </div>
@@ -1198,6 +1345,16 @@ export default function Palets(){
                   <tr key={c.id} style={{background:(c.entregas-c.devoluciones)>0?"rgba(249,115,22,.03)":"transparent"}}>
                     <td style={{...S.td,fontWeight:600,color:"var(--text)"}}>
                       <div>{c.nombre}</div>
+                      {c.lotes?.length>0 && (
+                        <div style={{marginTop:6,display:"grid",gap:4}}>
+                          {c.lotes.map(lote=><div key={lote.id} style={{display:"grid",gridTemplateColumns:"minmax(120px,1fr) auto",gap:8,alignItems:"center",fontSize:10,padding:"4px 6px",borderRadius:6,background:"var(--bg3)",border:"1px solid var(--border)",fontWeight:600}}>
+                            <span style={{overflowWrap:"anywhere"}}>{lote.ref}</span>
+                            <span style={{color:lote.pendiente>0?"#f97316":"#10b981",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
+                              {fmtN(lote.devueltas)} dev. · {fmtN(lote.preparadas)} prep. · {fmtN(lote.pendiente)} pend.
+                            </span>
+                          </div>)}
+                        </div>
+                      )}
                       {c.devolucionesDetalle?.length>0 && (
                         <div style={{marginTop:5,display:"flex",gap:5,flexWrap:"wrap"}}>
                           {c.devolucionesDetalle.map(d=>(
@@ -1248,13 +1405,13 @@ export default function Palets(){
         </div>
       )}
 
-      {/* Dev. Cliente */}
-      {tab==="dev_cliente"&&(
+      {/* Movimientos y devoluciones integrados en Palets de clientes */}
+      {tab==="stock"&&(
         <div style={S.card}>
           <div style={{display:"flex",gap:10,marginBottom:12,alignItems:"center",flexWrap:"wrap"}}>
             <div>
-              <div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>Devoluciones por cliente</div>
-              <div style={{fontSize:12,color:"var(--text5)",marginTop:2}}>Registros separados por fecha, cliente y albaran.</div>
+              <div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>Movimientos y devoluciones por cliente</div>
+              <div style={{fontSize:12,color:"var(--text5)",marginTop:2}}>Consulta en una sola vista las obras, entregas, devoluciones, rectificaciones y albaranes.</div>
             </div>
             <select value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)} style={{...S.inp,width:240,marginLeft:"auto"}}>
               <option value="todos">Todos los clientes</option>

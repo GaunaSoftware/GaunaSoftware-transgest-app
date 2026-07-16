@@ -310,6 +310,63 @@ export async function descargarArchivoProtegido(path, fallbackName = "documento"
   return { filename, size: blob.size };
 }
 
+export async function verArchivoProtegido(path, fallbackName = "documento") {
+  const token = getToken();
+  let res;
+  try {
+    res = await fetch(apiUrl(path), {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  } catch (e) {
+    const message = friendlyApiError(e.message, 0, null, path);
+    notifyError(message);
+    throw new Error(message);
+  }
+
+  if (res.status === 401) {
+    removeToken();
+    window.location.href = "/";
+    return null;
+  }
+
+  if (!res.ok) {
+    const data = await parseApiResponse(res);
+    const requestId = extractRequestId(res, data);
+    const message = friendlyApiError(
+      data.error || data.message || data.mensaje || data.raw_text || `Error ${res.status}`,
+      res.status,
+      requestId,
+      path
+    );
+    rememberApiError({ status: res.status, path, request_id: requestId, error: data.error || data.message || data.mensaje || data.raw_text || null });
+    notifyError(message, res.status);
+    const err = new Error(message);
+    err.status = res.status;
+    err.data = data;
+    err.request_id = requestId;
+    throw err;
+  }
+
+  const blob = await res.blob();
+  const filename = filenameFromDisposition(res.headers.get("content-disposition")) || fallbackName || "documento";
+  const objectUrl = URL.createObjectURL(blob);
+  const opened = window.open(objectUrl, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  return { filename, size: blob.size };
+}
+
 export async function login(email, password) {
   const data = await apiFetch("/auth/login", {
     method: "POST",
@@ -357,7 +414,7 @@ export async function cambiarPassword(password_actual, password_nuevo) {
 // ── Clientes ──────────────────────────────────────────
 export const getClientes  = (q = "", activo = "true", page = 1, limit = 100, options = {}) => apiFetch(`/clientes?q=${encodeURIComponent(q)}&activo=${activo}&page=${page}&limit=${limit}`, options);
 export const getCliente   = (id)      => apiFetch(`/clientes/${id}`);
-export const getClienteRiesgoOperativo = (id) => apiFetch(`/clientes/${id}/riesgo-operativo`);
+export const getClienteRiesgoOperativo = (id, options = {}) => apiFetch(`/clientes/${id}/riesgo-operativo`, options);
 export const crearCliente = (data)    => apiFetch("/clientes", { method:"POST", body:data, timeoutMs:30000, silentSuccess:true });
 export const editarCliente= (id,data) => apiFetch(`/clientes/${id}`, { method:"PUT", body:data, timeoutMs:30000, silentSuccess:true });
 export const borrarCliente= (id)      => apiFetch(`/clientes/${id}`, { method:"DELETE" });
@@ -556,6 +613,7 @@ export const sincronizarGpsVehiculos = (provider) => apiFetch("/vehiculos/gps/sy
 export const getChoferes    = (activo = "true") => apiFetch(`/choferes?activo=${encodeURIComponent(activo)}`);
 export const crearChofer    = (data)      => apiFetch("/choferes", { method:"POST", body:data });
 export const editarChofer   = (id,data)   => apiFetch(`/choferes/${id}`, { method:"PUT", body:data });
+export const borrarChofer   = (id)        => apiFetch(`/choferes/${id}`, { method:"DELETE" });
 export const getChoferJornadaApp = () => apiFetch("/choferes/app/jornada");
 export const getChoferConjuntoApp = () => apiFetch("/choferes/app/conjunto");
 export const cambiarChoferConjuntoApp = (data) => apiFetch("/choferes/app/conjunto", { method:"POST", body:data, silentSuccess:true });
@@ -653,12 +711,17 @@ export const getAgendaUsuarios = () => apiFetch("/agenda/usuarios", { silentSucc
 export const getAgendaEventos = (params={}) => apiFetch(`/agenda?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
 export const crearAgendaEvento = (data) => apiFetch("/agenda", { method:"POST", body:data });
 export const editarAgendaEvento = (id, data) => apiFetch(`/agenda/${id}`, { method:"PATCH", body:data });
+export const posponerAgendaEvento = (id, data) => apiFetch(`/agenda/${id}/posponer`, { method:"POST", body:data });
+export const completarAgendaEvento = (id) => apiFetch(`/agenda/${id}/completar`, { method:"POST", body:{} });
 export const borrarAgendaEvento = (id) => apiFetch(`/agenda/${id}`, { method:"DELETE" });
 export const getPortalClienteResumen = () => apiFetch("/portal-cliente/resumen", { silentError:true });
 export const getPortalClientePedidos = () => apiFetch("/portal-cliente/pedidos", { silentError:true });
 export const getPortalClienteFacturas = () => apiFetch("/portal-cliente/facturas", { silentError:true });
 export const getPortalClienteFactura = (id) => apiFetch(`/portal-cliente/facturas/${encodeURIComponent(id)}`);
 export const getPortalClienteSolicitudes = () => apiFetch("/portal-cliente/solicitudes", { silentError:true });
+export const getPortalClienteNotificaciones = (limit=20) => apiFetch(`/portal-cliente/notificaciones?limit=${encodeURIComponent(limit)}`, { silentSuccess:true, silentError:true });
+export const marcarPortalClienteNotificacionLeida = (id) => apiFetch(`/portal-cliente/notificaciones/${encodeURIComponent(id)}/leida`, { method:"PATCH", body:{} });
+export const marcarTodasPortalClienteNotificacionesLeidas = () => apiFetch("/portal-cliente/notificaciones/leer-todas", { method:"POST", body:{} });
 export const getPortalClienteSolicitudEventos = (id) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/eventos`);
 export const getPortalClientePuntos = () => apiFetch("/portal-cliente/puntos");
 export const crearPortalClientePunto = (data) => apiFetch("/portal-cliente/puntos", { method:"POST", body:data });
@@ -667,6 +730,9 @@ export const getPortalClienteIntegracionManifest = () => apiFetch("/portal-clien
 export const getPortalClienteIntegracionFeed = (days=90) => apiFetch(`/portal-cliente/integracion/feed?days=${encodeURIComponent(days)}`, { silentError:true });
 export const solicitarPortalClienteIntegracion = (data={}) => apiFetch("/portal-cliente/integracion/solicitar", { method:"POST", body:data });
 export const crearPortalClienteSolicitud = (data) => apiFetch("/portal-cliente/solicitudes", { method:"POST", body:data });
+export const getPortalClienteSolicitudDocumentos = (id) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/documentos`);
+export const subirPortalClienteSolicitudDocumento = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/documentos`, { method:"POST", body:data });
+export const actualizarPortalClienteSolicitud = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
 export const responderPortalClienteReprogramacion = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/reprogramacion`, { method:"POST", body:data });
 export const responderPortalClientePrecio = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/precio`, { method:"POST", body:data });
 export const cancelarPortalClienteSolicitud = (id, data={}) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/cancelar`, { method:"POST", body:data });
@@ -677,6 +743,7 @@ export const getPortalSolicitudesAdmin = (params={}) => apiFetch(`/portal-client
 export const actualizarPortalSolicitudAdmin = (id, data) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
 export const convertirPortalSolicitudAdmin = (id, data={}) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/convertir`, { method:"POST", body:data, timeoutMs:60000 });
 export const getPortalSolicitudEventosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/eventos`);
+export const getPortalSolicitudDocumentosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/documentos`);
 export const getInformeRutas= (desde,hasta) => apiFetch(`/informes/rutas?desde=${desde}&hasta=${hasta}`);
 export const getInformeChoferes=(desde,hasta)=>apiFetch(`/informes/choferes?desde=${desde}&hasta=${hasta}`);
 export const getInformeCobros = ()          => apiFetch("/informes/cobros");
@@ -712,9 +779,9 @@ export const getLoginBrand = async (identifier) => {
 };
 
 // ── Rutas por cliente ─────────────────────────────────
-export const getRutasCliente   = (cid)        => apiFetch(`/clientes/${cid}/rutas`);
+export const getRutasCliente   = (cid, options = {}) => apiFetch(`/clientes/${cid}/rutas`, options);
 export const getRutasClienteSalud = (cid)     => apiFetch(`/clientes/${cid}/rutas/salud`);
-export const crearRutaCliente  = (cid, data)  => apiFetch(`/clientes/${cid}/rutas`, { method:"POST", body:data });
+export const crearRutaCliente  = (cid, data, options = {}) => apiFetch(`/clientes/${cid}/rutas`, { method:"POST", body:data, ...options });
 export const editarRutaCliente = (cid,rid,data)=>apiFetch(`/clientes/${cid}/rutas/${rid}`, { method:"PUT", body:data });
 export const borrarRutaCliente = (cid, rid)   => apiFetch(`/clientes/${cid}/rutas/${rid}`, { method:"DELETE" });
 
@@ -877,9 +944,11 @@ export const borrarAlmacen         = (id)        => apiFetch(`/palets/almacenes/
 export const getPaletMovimientos   = (params={}) => apiFetch(`/palets/movimientos?${new URLSearchParams(params)}`);
 export const crearPaletMovimiento  = (data)      => apiFetch("/palets/movimientos", { method:"POST", body:data });
 export const editarPaletMovimiento = (id,data)   => apiFetch(`/palets/movimientos/${id}`, { method:"PUT", body:data });
-export const confirmarSalidaPaletMovimiento = (id,data={}) => apiFetch(`/palets/movimientos/${id}/confirmar-salida`, { method:"PATCH", body:data });
+export const confirmarSalidaPaletMovimiento = (id,data={}) => apiFetch(`/palets/movimientos/${id}/confirmar-salida`, { method:"PATCH", body:data, silentSuccess:true });
 export const borrarPaletMovimiento = (id)        => apiFetch(`/palets/movimientos/${id}`, { method:"DELETE" });
 export const getPaletResumen       = ()          => apiFetch("/palets/resumen");
+export const getPaletAlertasEstado = ()          => apiFetch("/palets/alertas-estado", { silentError:true });
+export const setPaletAlertaEstado  = (data)      => apiFetch("/palets/alertas-estado", { method:"PUT", body:data, silentSuccess:true });
 export const getAlmacenMercancias  = (params={}) => apiFetch(`/palets/mercancias?${new URLSearchParams(params)}`);
 export const crearAlmacenMercancia = (data)      => apiFetch("/palets/mercancias", { method:"POST", body:data });
 export const editarAlmacenMercancia= (id,data)   => apiFetch(`/palets/mercancias/${id}`, { method:"PUT", body:data });
@@ -959,22 +1028,30 @@ export const actualizarGpsPedido = (id, data) =>
 export const registrarGpsChoferApp = (data) =>
   apiFetch("/choferes/app/gps", { method: "POST", body: data, timeoutMs: 15000, silentSuccess: true, silentError: true });
 
-// ── Geocodificacion / ruta (mapa de pedidos y calculador de km) ──
-// Robusto en backend: cache + HERE/Nominatim + diccionario local + OSRM con fallback.
-export const calcularRutaGeo = ({ origen, destino, waypoints, puntos, country } = {}) => {
-  // GET para que el mapa (solo lectura) requiera permiso "ver", no "editar".
-  const params = new URLSearchParams();
-  if (origen) params.set("origen", origen);
-  if (destino) params.set("destino", destino);
-  if (country) params.set("country", country);
-  if (Array.isArray(waypoints) && waypoints.length) params.set("waypoints", JSON.stringify(waypoints));
-  if (Array.isArray(puntos) && puntos.length) params.set("puntos", JSON.stringify(puntos));
-  return apiFetch(`/geocoding/route?${params.toString()}`, { silentError: true, timeoutMs: 20000 });
+export const calcularRutaGeo = (points = []) => {
+  const compactPoints = points.map(point => {
+    const hasExplicitQuery = Object.prototype.hasOwnProperty.call(point, "query");
+    return {
+      label: point.label || point.nombre || point.direccion || "",
+      query: hasExplicitQuery ? (point.query || "") : (point.address || point.direccion || point.label || point.nombre || ""),
+      role: point.role || point.tipo || "parada",
+      country: point.country || point.pais || "",
+      region: point.region || point.provincia || "",
+      google_maps_url: point.google_maps_url || "",
+      lat: point.lat ?? point.latitude ?? point.latitud ?? null,
+      lng: point.lng ?? point.lon ?? point.longitude ?? point.longitud ?? null,
+    };
+  });
+  return apiFetch(`/geocoding/route?points=${encodeURIComponent(JSON.stringify(compactPoints))}`, {
+    timeoutMs: 35000,
+    silentSuccess: true,
+  });
 };
-export const calcularDistanciaGeo = ({ origen, destino, country } = {}) => {
-  const params = new URLSearchParams({ origen: origen || "", destino: destino || "" });
-  if (country) params.set("country", country);
-  return apiFetch(`/geocoding/distance?${params.toString()}`, { silentError: true, timeoutMs: 20000 });
-};
+
+export const calcularDistanciaGeo = (origin, destination) =>
+  calcularRutaGeo([
+    { label: origin, role: "origen" },
+    { label: destination, role: "destino" },
+  ]);
 
 

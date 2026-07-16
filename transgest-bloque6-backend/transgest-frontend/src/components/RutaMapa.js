@@ -1,203 +1,241 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { calcularRutaGeo } from "../services/api";
 
-// Carga Leaflet auto-alojado (same-origin) para cumplir la CSP `script-src 'self'`.
-// No usa CDN (motivo por el que fallaban intentos anteriores) ni añade dependencias npm.
-let leafletPromise = null;
-function loadLeaflet() {
-  if (typeof window === "undefined") return Promise.reject(new Error("sin ventana"));
-  if (window.L) return Promise.resolve(window.L);
-  if (leafletPromise) return leafletPromise;
-  leafletPromise = new Promise((resolve, reject) => {
-    try {
-      if (!document.querySelector("link[data-leaflet]")) {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = "/vendor/leaflet/leaflet.css";
-        link.setAttribute("data-leaflet", "1");
-        document.head.appendChild(link);
-      }
-      const existing = document.querySelector("script[data-leaflet]");
-      if (existing) {
-        existing.addEventListener("load", () => window.L ? resolve(window.L) : reject(new Error("Leaflet no disponible")));
-        existing.addEventListener("error", () => reject(new Error("No se pudo cargar el mapa")));
-        return;
-      }
-      const script = document.createElement("script");
-      script.src = "/vendor/leaflet/leaflet.js";
-      script.async = true;
-      script.setAttribute("data-leaflet", "1");
-      script.onload = () => window.L ? resolve(window.L) : reject(new Error("Leaflet no disponible"));
-      script.onerror = () => { leafletPromise = null; reject(new Error("No se pudo cargar el mapa")); };
-      document.body.appendChild(script);
-    } catch (e) {
-      leafletPromise = null;
-      reject(e);
-    }
-  });
-  return leafletPromise;
+const DEFAULT_CENTER = [40.2, -3.7];
+
+function safeCoordinate(value, min, max) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : null;
 }
 
-function markerIcon(L, texto, color) {
-  return L.divIcon({
-    className: "",
-    html: `<div style="background:${color};color:#fff;width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);
-      display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.4);border:2px solid #fff;">
-      <span style="transform:rotate(45deg);font-size:12px;font-weight:800;font-family:sans-serif;">${texto}</span></div>`,
-    iconSize: [26, 26],
-    iconAnchor: [13, 24],
-    popupAnchor: [0, -22],
-  });
+function normalizedPoint(point = {}, index = 0) {
+  const lat = safeCoordinate(point.lat ?? point.latitude ?? point.latitud, -90, 90);
+  const lng = safeCoordinate(point.lng ?? point.lon ?? point.longitude ?? point.longitud, -180, 180);
+  const hasExplicitQuery = Object.prototype.hasOwnProperty.call(point, "query");
+  return {
+    label: String(point.label || point.nombre || point.direccion || `Parada ${index + 1}`).trim(),
+    query: String(hasExplicitQuery ? (point.query || "") : (point.address || point.direccion || point.label || point.nombre || "")).trim(),
+    role: point.tipo || point.role || (index === 0 ? "origen" : "parada"),
+    country: point.pais || point.country || "",
+    region: point.provincia || point.region || "",
+    google_maps_url: point.google_maps_url || "",
+    title: point.title || "",
+    tone: point.tone || null,
+    lat,
+    lng,
+  };
 }
 
-function formatDuracion(min) {
-  const m = Number(min);
-  if (!Number.isFinite(m) || m <= 0) return "";
-  const h = Math.floor(m / 60);
-  const r = Math.round(m % 60);
-  return h > 0 ? `${h}h ${r}min` : `${r}min`;
+function normalizeRouteText(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-export default function RutaMapa({ puntos = [], altura = 260 }) {
+const COUNTRY_ONLY_VALUES = new Set([
+  "alemania", "austria", "belgica", "bulgaria", "chequia", "chipre", "croacia", "dinamarca",
+  "eslovaquia", "eslovenia", "espana", "estonia", "finlandia", "francia", "grecia", "hungria",
+  "irlanda", "islandia", "italia", "letonia", "lituania", "luxemburgo", "malta", "noruega",
+  "paises bajos", "polonia", "portugal", "reino unido", "rumania", "suecia", "suiza",
+  "spain", "france", "germany", "italy", "united kingdom",
+]);
+
+function isRoutePointReady(point = {}) {
+  if (safeCoordinate(point.lat, -90, 90) !== null && safeCoordinate(point.lng, -180, 180) !== null) return true;
+  const query = normalizeRouteText(point.query);
+  const country = normalizeRouteText(point.country);
+  return query.length >= 2 && query !== country && !COUNTRY_ONLY_VALUES.has(query);
+}
+
+function markerIcon(number, color, label) {
+  const wrapper = document.createElement("div");
+  wrapper.setAttribute("aria-label", label);
+  wrapper.style.cssText = [
+    "width:30px", "height:30px", "border-radius:50%", "display:grid", "place-items:center",
+    `background:${color}`, "color:#fff", "border:3px solid #fff", "box-shadow:0 2px 8px rgba(15,23,42,.35)",
+    "font:800 12px/1 system-ui,sans-serif",
+  ].join(";");
+  wrapper.textContent = String(number);
+  return L.divIcon({ html: wrapper, className: "", iconSize: [30, 30], iconAnchor: [15, 15] });
+}
+
+function vehicleIcon() {
+  const wrapper = document.createElement("div");
+  wrapper.setAttribute("aria-label", "Posicion conocida del vehiculo");
+  wrapper.style.cssText = [
+    "width:34px", "height:34px", "border-radius:8px", "display:grid", "place-items:center",
+    "background:#0f766e", "color:#fff", "border:3px solid #fff", "box-shadow:0 2px 9px rgba(15,23,42,.4)",
+    "font:800 15px/1 system-ui,sans-serif",
+  ].join(";");
+  wrapper.textContent = "V";
+  return L.divIcon({ html: wrapper, className: "", iconSize: [34, 34], iconAnchor: [17, 17] });
+}
+
+function popupNode(title, label, status) {
+  const node = document.createElement("div");
+  const heading = document.createElement("strong");
+  const text = document.createElement("div");
+  const state = document.createElement("small");
+  heading.textContent = title;
+  text.textContent = label;
+  state.textContent = status;
+  state.style.display = "block";
+  state.style.marginTop = "4px";
+  node.append(heading, text, state);
+  return node;
+}
+
+function providerLabel(route) {
+  if (route?.provider === "ors_hgv") return "Ruta para camion";
+  if (route?.provider === "osrm") return "Ruta orientativa";
+  if (route?.provider === "estimate") return "Distancia estimada";
+  return "Ruta calculada";
+}
+
+export default function RutaMapa({ points = [], vehiclePosition = null }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
-  const layerRef = useRef(null);
-  const [estado, setEstado] = useState("cargando"); // cargando | ok | vacio | error
-  const [info, setInfo] = useState(null);
+  const overlayRef = useRef(null);
+  const [routeState, setRouteState] = useState({ key: "", data: null });
+  const [loadingKey, setLoadingKey] = useState("");
+  const [errorState, setErrorState] = useState({ key: "", message: "" });
+  const [retry, setRetry] = useState(0);
+  const requestIdRef = useRef(0);
 
-  const reqPuntos = (puntos || [])
-    .map((p) => {
-      const lat = Number(p?.lat);
-      const lng = Number(p?.lng);
-      const role = p?.role || (p?.tipo === "carga" ? "origen" : p?.tipo === "descarga" ? "destino" : "parada");
-      return {
-        lat: Number.isFinite(lat) ? lat : null,
-        lng: Number.isFinite(lng) ? lng : null,
-        label: String(p?.label || p?.title || "").trim(),
-        role,
-      };
-    })
-    .filter((p) => (p.lat != null && p.lng != null) || p.label.length >= 2);
-
-  const puntosKey = JSON.stringify(reqPuntos);
+  const pointKey = JSON.stringify(points.map((point, index) => normalizedPoint(point, index)));
+  const routePoints = useMemo(() => JSON.parse(pointKey), [pointKey]);
+  const routeReady = routePoints.length >= 2 && routePoints.every(isRoutePointReady);
+  const route = routeState.key === pointKey ? routeState.data : null;
+  const loading = loadingKey === pointKey;
+  const error = errorState.key === pointKey ? errorState.message : "";
 
   useEffect(() => {
-    let cancelled = false;
-    if (reqPuntos.length < 2) { setEstado("vacio"); return; }
-    setEstado("cargando");
-
-    (async () => {
-      let L;
-      try {
-        L = await loadLeaflet();
-      } catch {
-        if (!cancelled) { setEstado("error"); setInfo({ error: "No se pudo cargar el mapa." }); }
-        return;
-      }
-      let data;
-      try {
-        data = await calcularRutaGeo({ puntos: reqPuntos });
-      } catch {
-        if (!cancelled) { setEstado("error"); setInfo({ error: "No se pudo trazar la ruta." }); }
-        return;
-      }
-      if (cancelled) return;
-      if (!data?.ok || !Array.isArray(data.puntos) || data.puntos.length < 2) {
-        setEstado("error");
-        setInfo({ error: data?.error || "No se pudieron localizar los puntos." });
-        return;
-      }
-
-      try {
-        if (!mapRef.current && containerRef.current) {
-          mapRef.current = L.map(containerRef.current, {
-            zoomControl: true,
-            attributionControl: true,
-            scrollWheelZoom: false,
-          });
-          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 18,
-            attribution: "© OpenStreetMap",
-          }).addTo(mapRef.current);
-        }
-        const map = mapRef.current;
-        if (!map) return;
-        if (layerRef.current) { map.removeLayer(layerRef.current); }
-        const group = L.layerGroup().addTo(map);
-        layerRef.current = group;
-
-        const linePts = Array.isArray(data.geometry) && data.geometry.length > 1
-          ? data.geometry
-          : data.puntos.map((p) => [p.lat, p.lng]);
-        const line = L.polyline(linePts, { color: "#0f766e", weight: 4, opacity: 0.85 }).addTo(group);
-
-        data.puntos.forEach((p, i) => {
-          const isOrigen = i === 0;
-          const isDestino = i === data.puntos.length - 1;
-          const color = isOrigen ? "#10b981" : isDestino ? "#ef4444" : "#3b82f6";
-          L.marker([p.lat, p.lng], { icon: markerIcon(L, String(i + 1), color) })
-            .addTo(group)
-            .bindPopup(`<b>${isOrigen ? "Carga" : isDestino ? "Descarga" : "Parada"}</b><br/>${(p.label || "").replace(/</g, "&lt;")}`);
-        });
-
-        try { map.fitBounds(line.getBounds().pad(0.2)); } catch { /* bounds vacíos */ }
-        setTimeout(() => { try { map.invalidateSize(); map.fitBounds(line.getBounds().pad(0.2)); } catch {} }, 250);
-
-        setInfo({ km: data.km, duration_min: data.duration_min, source: data.source, warning: data.warning });
-        setEstado("ok");
-      } catch {
-        if (!cancelled) { setEstado("error"); setInfo({ error: "No se pudo dibujar el mapa." }); }
-      }
-    })();
-
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [puntosKey]);
-
-  useEffect(() => () => {
-    try { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; layerRef.current = null; } } catch {}
+    if (!containerRef.current || mapRef.current) return undefined;
+    const standard = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    });
+    const relief = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+      maxZoom: 17,
+      attribution: "Map data &copy; OpenStreetMap contributors, SRTM | Map style &copy; OpenTopoMap",
+    });
+    const map = L.map(containerRef.current, { center: DEFAULT_CENTER, zoom: 5, layers: [standard] });
+    L.control.layers({ Estandar: standard, Relieve: relief }, null, { position: "topright" }).addTo(map);
+    mapRef.current = map;
+    overlayRef.current = L.layerGroup().addTo(map);
+    const timer = setTimeout(() => map.invalidateSize(), 80);
+    return () => {
+      clearTimeout(timer);
+      map.remove();
+      mapRef.current = null;
+      overlayRef.current = null;
+    };
   }, []);
 
-  if (estado === "vacio") return null;
+  useEffect(() => {
+    let active = true;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    if (!routeReady) {
+      setRouteState({ key: pointKey, data: null });
+      setLoadingKey("");
+      setErrorState({ key: pointKey, message: "" });
+      return () => { active = false; };
+    }
+    setLoadingKey(pointKey);
+    setRouteState({ key: "", data: null });
+    setErrorState({ key: pointKey, message: "" });
+    const timer = window.setTimeout(() => {
+      calcularRutaGeo(routePoints)
+        .then(data => {
+          if (!active || requestIdRef.current !== requestId) return;
+          if (!data?.ok) throw new Error(data?.error || "No se pudo calcular la ruta");
+          setRouteState({ key: pointKey, data });
+        })
+        .catch(err => {
+          if (!active || requestIdRef.current !== requestId) return;
+          setRouteState({ key: pointKey, data: null });
+          setErrorState({ key: pointKey, message: err?.message || "No se pudo calcular la ruta." });
+        })
+        .finally(() => {
+          if (active && requestIdRef.current === requestId) setLoadingKey("");
+        });
+    }, 450);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [pointKey, retry, routePoints, routeReady]);
 
-  // Si no se puede trazar, no mostramos un recuadro de error grande: solo una
-  // nota discreta. Las tarjetas de puntos (origen/destino) se mantienen aparte.
-  if (estado === "error") {
-    return (
-      <div style={{ marginBottom: 10, fontSize: 11, color: "var(--text5)", fontStyle: "italic" }}>
-        No se pudo situar esta ruta en el mapa. Comprueba que origen y destino tengan población y provincia.
-      </div>
-    );
-  }
+  useEffect(() => {
+    const map = mapRef.current;
+    const overlay = overlayRef.current;
+    if (!map || !overlay) return;
+    overlay.clearLayers();
+    const resolved = Array.isArray(route?.points) ? route.points : routePoints;
+    const bounds = [];
+
+    resolved.forEach((point, index) => {
+      const lat = safeCoordinate(point.lat, -90, 90);
+      const lng = safeCoordinate(point.lng, -180, 180);
+      if (lat === null || lng === null) return;
+      const original = routePoints[index] || {};
+      const color = original.tone?.color || (point.role === "destino" || point.role === "descarga" ? "#f97316" : "#0f766e");
+      const title = original.title || (point.role === "destino" || point.role === "descarga" ? `Descarga ${index + 1}` : `Parada ${index + 1}`);
+      const status = original.tone?.label || "Planificada";
+      L.marker([lat, lng], { icon: markerIcon(index + 1, color, `${title}: ${point.label}`) })
+        .bindPopup(popupNode(title, point.label || original.label || "Punto sin nombre", status))
+        .addTo(overlay);
+      bounds.push([lat, lng]);
+    });
+
+    const geometry = Array.isArray(route?.geometry) ? route.geometry.filter(item => (
+      Array.isArray(item) && safeCoordinate(item[0], -90, 90) !== null && safeCoordinate(item[1], -180, 180) !== null
+    )) : [];
+    if (geometry.length >= 2) {
+      L.polyline(geometry, { color: "#0f766e", weight: 5, opacity: 0.86 }).addTo(overlay);
+      bounds.push(...geometry);
+    }
+
+    const vehicleLat = safeCoordinate(vehiclePosition?.lat, -90, 90);
+    const vehicleLng = safeCoordinate(vehiclePosition?.lng, -180, 180);
+    if (vehicleLat !== null && vehicleLng !== null) {
+      L.marker([vehicleLat, vehicleLng], { icon: vehicleIcon(), zIndexOffset: 1000 })
+        .bindPopup("Posicion conocida mas reciente del vehiculo")
+        .addTo(overlay);
+      bounds.push([vehicleLat, vehicleLng]);
+    }
+
+    if (bounds.length) map.fitBounds(bounds, { padding: [32, 32], maxZoom: 13 });
+    else map.setView(DEFAULT_CENTER, 5);
+    setTimeout(() => map.invalidateSize(), 60);
+  }, [route, routePoints, vehiclePosition?.lat, vehiclePosition?.lng]);
 
   return (
-    // isolation + zIndex crean un contexto de apilamiento propio para que los
-    // controles de Leaflet (z-index 1000) no tapen la cruz de cerrar del modal.
-    <div style={{ marginBottom: 12, position: "relative", zIndex: 0, isolation: "isolate" }}>
-      <div style={{ position: "relative", borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
-        <div ref={containerRef} style={{ height: altura, width: "100%", background: "var(--bg3)" }} />
-        {estado === "cargando" && (
-          <div style={{
-            position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
-            background: "var(--bg3)", color: "var(--text4)", fontSize: 12, textAlign: "center", padding: 12,
-          }}>
-            Cargando mapa de la ruta…
-          </div>
+    <div style={{ position:"relative", zIndex:0, isolation:"isolate", border: "1px solid var(--border2)", borderRadius: 8, overflow: "hidden", background: "var(--bg3)" }}>
+      <div ref={containerRef} role="img" aria-label="Ruta y puntos operativos del pedido" style={{ position:"relative", zIndex:0, width: "100%", height: "clamp(280px, 38vh, 440px)", background: "var(--bg3)" }} />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 11px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 11, color: "var(--text4)" }}>
+          {loading && <strong style={{ color: "var(--accent)" }}>Calculando ruta...</strong>}
+          {!routeReady && <span>Completa origen y destino para mostrar la ruta.</span>}
+          {!loading && route && <strong style={{ color: "var(--text)" }}>{providerLabel(route)}</strong>}
+          {Number(route?.km) > 0 && <span>{Number(route.km).toLocaleString("es-ES", { maximumFractionDigits: 1 })} km</span>}
+          {Number(route?.duration_min) > 0 && <span>{Math.floor(route.duration_min / 60)} h {route.duration_min % 60} min</span>}
+          {route?.warning && <span style={{ color: "#b45309" }}>{route.warning}</span>}
+          {error && <span role="alert" style={{ color: "#dc2626" }}>{error}</span>}
+        </div>
+        {error && (
+          <button type="button" onClick={() => setRetry(value => value + 1)} style={{ border: "1px solid var(--border2)", background: "var(--button-bg)", color: "var(--text)", borderRadius: 7, padding: "6px 10px", fontWeight: 800, cursor: "pointer" }}>
+            Reintentar
+          </button>
         )}
       </div>
-      {estado === "ok" && (info?.km || info?.warning) && (
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 6, fontSize: 12, color: "var(--text4)" }}>
-          {info?.km ? (
-            <span style={{ fontWeight: 800, color: "var(--text2)" }}>
-              {Number(info.km).toLocaleString("es-ES")} km{info.duration_min ? ` · ${formatDuracion(info.duration_min)}` : ""}
-            </span>
-          ) : null}
-          {info?.source === "estimacion" && (
-            <span style={{ color: "#f59e0b" }}>Distancia estimada (enrutador no disponible)</span>
-          )}
-          {info?.source === "osrm" && <span style={{ color: "var(--text5)" }}>Ruta orientativa por carretera · validar restricciones de camión</span>}
-        </div>
-      )}
     </div>
   );
 }

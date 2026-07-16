@@ -27,17 +27,22 @@ const DEMO_LOGIN_IDENTIFIERS = new Set([
 let demoLoginSeedPromise = null;
 
 let authSchemaReady = false;
+function failAuthSchema(error) {
+  logger.error("Auth schema no disponible: " + error.message);
+  throw error;
+}
+
 async function ensureAuthSchema() {
   if (authSchemaReady) return;
-  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL").catch(() => {});
-  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trafico_config JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
-  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN NOT NULL DEFAULT false").catch(() => {});
-  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ").catch(() => {});
-  await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS logo_base64 TEXT").catch(() => {});
-  await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
-  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch(() => {});
-  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ").catch(() => {});
-  await ensurePasswordPolicySchema(db).catch(() => {});
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL").catch(failAuthSchema);
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trafico_config JSONB NOT NULL DEFAULT '{}'::jsonb").catch(failAuthSchema);
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN NOT NULL DEFAULT false").catch(failAuthSchema);
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ").catch(failAuthSchema);
+  await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS logo_base64 TEXT").catch(failAuthSchema);
+  await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(failAuthSchema);
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_failed_count INTEGER NOT NULL DEFAULT 0").catch(failAuthSchema);
+  await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ").catch(failAuthSchema);
+  await ensurePasswordPolicySchema(db).catch(failAuthSchema);
   await db.query(`
     CREATE TABLE IF NOT EXISTS password_reset_requests (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -55,7 +60,7 @@ async function ensureAuthSchema() {
       resolved_by UUID REFERENCES superadmins(id) ON DELETE SET NULL,
       resolution_note TEXT
     )
-  `).catch(() => {});
+  `).catch(failAuthSchema);
   authSchemaReady = true;
 }
 
@@ -629,5 +634,7 @@ router.post("/cambiar-password", authenticate,
     res.json({ ok: true });
   }
 );
+
+router.initializeSchema = ensureAuthSchema;
 
 module.exports = router;

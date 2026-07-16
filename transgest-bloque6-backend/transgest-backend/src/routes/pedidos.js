@@ -4,10 +4,11 @@ const db      = require("../services/db");
 const logger  = require("../services/logger");
 const crypto  = require("crypto");
 const zlib = require("zlib");
+const pdfParse = require("pdf-parse");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
-const { crearNotificacion } = require("../services/notificaciones");
+const { crearNotificacion, notificarUsuariosCliente } = require("../services/notificaciones");
 const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload, buildDocumentoControlExpediente, buildDocumentoControlStructuredExport, buildDocumentoControlSignaturePackage, buildDocumentoControlQrDataUrl, buildDocumentoControlHtml, generateDocumentoControlPdf, buildDocumentoControlFilename, buildDocumentoControlExportFilename, verifyPublicToken, verifyPublicVerificationCode } = require("../services/documentoControl");
 const {
   syncPedidoRegulatoryCore,
@@ -23,6 +24,7 @@ const { validateBase64Upload } = require("../services/uploadValidation");
 const webhooks = require("../services/webhooks");
 
 const router = express.Router();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let colaboradorWorkflowSchemaPromise = null;
 let pedidoOrdenCargaSchemaPromise = null;
 let pedidoCartaPorteSchemaPromise = null;
@@ -35,6 +37,57 @@ function htmlEscape(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function optionalUuid(value) {
+  const normalized = String(value || "").trim();
+  return UUID_RE.test(normalized) ? normalized : null;
+}
+
+const INCIDENCIA_PEDIDO_TIPOS = {
+  taller: "Camion en taller",
+  carga: "Problema en carga",
+  descarga: "Problema en descarga",
+  retraso: "Retraso",
+  documentacion: "Documentacion",
+  cliente: "Cliente",
+  colaborador: "Colaborador",
+  trafico: "Trafico",
+  paralizacion: "Paralizacion",
+  gps: "GPS / localizacion",
+  otro: "Otro",
+  operativa: "Operativa",
+};
+
+function normalizePedidoIncidenciaTipo(value) {
+  const raw = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  if (["camion_taller", "vehiculo_taller", "averia", "taller"].includes(raw)) return "taller";
+  if (["problema_carga", "carga"].includes(raw)) return "carga";
+  if (["problema_descarga", "descarga"].includes(raw)) return "descarga";
+  if (["retraso", "demora"].includes(raw)) return "retraso";
+  if (["documentacion", "documento", "albaran", "dcd"].includes(raw)) return "documentacion";
+  if (["cliente"].includes(raw)) return "cliente";
+  if (["colaborador", "proveedor", "subcontratado"].includes(raw)) return "colaborador";
+  if (["trafico", "planificacion"].includes(raw)) return "trafico";
+  if (["paralizacion", "espera"].includes(raw)) return "paralizacion";
+  if (["gps", "localizacion", "ubicacion"].includes(raw)) return "gps";
+  if (["otro", "otros"].includes(raw)) return "otro";
+  return "operativa";
+}
+
+function buildPedidoIncidenciaInput(body = {}, fallbackPedido = {}, actorRol = "") {
+  const tipo = normalizePedidoIncidenciaTipo(body.incidencia_tipo || body.tipo_incidencia || fallbackPedido.incidencia_tipo);
+  const descripcionRaw = String(
+    body.incidencia
+    ?? body.incidencia_descripcion
+    ?? body.descripcion_incidencia
+    ?? fallbackPedido.incidencia_descripcion
+    ?? ""
+  ).trim();
+  const label = INCIDENCIA_PEDIDO_TIPOS[tipo] || INCIDENCIA_PEDIDO_TIPOS.operativa;
+  const descripcion = descripcionRaw || label;
+  const origen = actorRol === "chofer" ? "chofer" : "trafico";
+  return { tipo, label, descripcion, origen };
 }
 
 function stableJson(value) {
@@ -321,13 +374,45 @@ function renderColaboradorMapsBox(pedido) {
   `;
 }
 
+const PEDIDO_DATE_FIELDS = new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga", "firma_fecha"]);
+
 function normalizePedidoDate(value) {
   if (!value) return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    const year = value.getUTCFullYear();
+    if (year < 2000 || year > 2100) return null;
+    return value.toISOString().slice(0, 10);
+  }
   const raw = String(value).trim();
-  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (match) return match[1];
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? raw : parsed.toISOString().slice(0, 10);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 2000 || year > 2100) return null;
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) return null;
+  return raw;
+}
+
+function isInvalidPedidoDateInput(value) {
+  return value !== "" && value !== null && value !== undefined && !normalizePedidoDate(value);
+}
+
+function assertPedidoDateInputs(source = {}, fields = PEDIDO_DATE_FIELDS) {
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(source, field) && isInvalidPedidoDateInput(source[field])) {
+      const err = new Error("Formato de fecha no valido. Usa el selector de fecha o el formato AAAA-MM-DD.");
+      err.status = 400;
+      err.field = field;
+      throw err;
+    }
+  }
 }
 
 function assertPedidoDateOrder(fechaCarga, fechaDescarga) {
@@ -423,6 +508,9 @@ async function ensureColaboradorWorkflowSchema() {
   if (!colaboradorWorkflowSchemaPromise) {
     colaboradorWorkflowSchemaPromise = (async () => {
       await db.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"').catch(() => {});
+      await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'incidencia'").catch(error => {
+        logger.warn("No se pudo asegurar el estado incidencia en pedidos:", error.message);
+      });
       await db.query("ALTER TABLE pedidos ALTER COLUMN ventana_carga TYPE VARCHAR(80)").catch(() => {});
       await db.query("ALTER TABLE pedidos ALTER COLUMN ventana_descarga TYPE VARCHAR(80)").catch(() => {});
       await db.query(`
@@ -441,12 +529,14 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_colaborador VARCHAR(60)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_lateral BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_trasera BOOLEAN DEFAULT false").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_techo BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS intercambio_palets BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS requiere_cinchas BOOLEAN DEFAULT true").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_provincia VARCHAR(120)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_provincia VARCHAR(120)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metros_lineales NUMERIC(10,2)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cmr_tipo VARCHAR(30) DEFAULT 'nacional'").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motivo_cancelacion TEXT").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ").catch(() => {});
@@ -489,6 +579,10 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_chofer TEXT").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_chofer_nombre VARCHAR(180)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_chofer_fecha TIMESTAMPTZ").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_nombre VARCHAR(120)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_apellidos VARCHAR(180)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_dni VARCHAR(40)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_telefono VARCHAR(40)").catch(() => {});
       await db.query(`
         CREATE TABLE IF NOT EXISTS pedido_docs (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -582,12 +676,35 @@ async function ensureColaboradorWorkflowSchema() {
   await colaboradorWorkflowSchemaPromise;
 }
 
+async function optionalPedidoQuery(queryClient, sql, params, warning) {
+  if (queryClient === db) {
+    return queryClient.query(sql, params).catch(error => {
+      logger.warn(warning, error.message);
+      return { rows: [] };
+    });
+  }
+  const savepoint = "pedido_optional_query";
+  await queryClient.query(`SAVEPOINT ${savepoint}`);
+  try {
+    const result = await queryClient.query(sql, params);
+    await queryClient.query(`RELEASE SAVEPOINT ${savepoint}`);
+    return result;
+  } catch (error) {
+    await queryClient.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+    await queryClient.query(`RELEASE SAVEPOINT ${savepoint}`);
+    logger.warn(warning, error.message);
+    return { rows: [] };
+  }
+}
+
 async function logPedidoEvento(pedidoId, empresaId, tipo, detalle = {}, actorTipo = "sistema", actorId = null, queryClient = db) {
-  await queryClient.query(
+  await optionalPedidoQuery(
+    queryClient,
     `INSERT INTO pedido_eventos (pedido_id,empresa_id,tipo,actor_tipo,actor_id,detalle)
      VALUES ($1,$2,$3,$4,$5,$6)`,
-    [pedidoId, empresaId, tipo, actorTipo, actorId, JSON.stringify(detalle)]
-  ).catch(e => logger.warn("No se pudo registrar evento de pedido:", e.message));
+    [pedidoId, empresaId, tipo, actorTipo, actorId, JSON.stringify(detalle)],
+    "No se pudo registrar evento de pedido:"
+  );
 }
 
 function summarizePedidoChanges(before = {}, after = {}, fieldNames = []) {
@@ -887,6 +1004,38 @@ async function notificarGestionPedido(empresaId, tipo, titulo, mensaje, data = {
   }).catch(() => null)));
 }
 
+async function notificarClienteEstadoPedido(pedido, estadoAnterior, estadoNuevo, createdBy = null) {
+  if (!pedido?.empresa_id || !pedido?.cliente_id || !estadoNuevo || String(estadoAnterior || "") === String(estadoNuevo)) return [];
+  const labels = {
+    pendiente: "Pendiente",
+    confirmado: "Confirmado",
+    en_curso: "En ruta",
+    descarga: "En descarga",
+    entregado: "Entregado",
+    cancelado: "Cancelado",
+    incidencia: "Con incidencia",
+    facturado: "Facturado",
+  };
+  const label = labels[estadoNuevo] || estadoNuevo;
+  return notificarUsuariosCliente({
+    empresa_id: pedido.empresa_id,
+    cliente_id: pedido.cliente_id,
+    tipo: "portal_cliente_pedido_estado",
+    titulo: `Viaje ${pedido.numero || "actualizado"}: ${label}`,
+    mensaje: `El viaje ${pedido.origen || "Origen"} -> ${pedido.destino || "Destino"} ha cambiado a ${label.toLowerCase()}.`,
+    data: {
+      pedido_id: pedido.id,
+      pedido_numero: pedido.numero || null,
+      estado_anterior: estadoAnterior || null,
+      estado: estadoNuevo,
+      tab: "seguimiento",
+      view: "portal_cliente",
+      dedupe_key: `portal-pedido-estado:${pedido.id}:${estadoNuevo}`,
+    },
+    created_by: createdBy,
+  });
+}
+
 async function notificarGerenciaPedido(empresaId, tipo, titulo, mensaje, data = {}, createdBy = null) {
   if (!empresaId) return;
   const { rows } = await db.query(
@@ -1081,7 +1230,7 @@ function buildRepositioningPlan({ vehicle, originCoord, previousTrip, targetPedi
   const travelMin = estimateTruckTravelMinutes(distance);
   const departureBase = previousFinishAt && previousFinishAt > now ? previousFinishAt : now;
   const arrivalAt = travelMin !== null ? new Date(departureBase.getTime() + travelMin * 60000) : null;
-  const targetLoadAt = combinePedidoDateTime(targetPedido?.fecha_carga || targetPedido?.fecha_pedido, targetPedido?.hora_carga);
+  const targetLoadAt = combinePedidoDateTime(targetPedido?.fecha_carga, targetPedido?.hora_carga);
   return {
     source,
     source_label: previousCoord
@@ -1504,7 +1653,7 @@ async function aplicarKmVacioDesdePasos({ pedidoId, empresaId, patch = {}, actor
     [
       pedido.vehiculo_id,
       empresaId,
-      pedido.fecha_carga || pedido.fecha_pedido || null,
+      pedido.fecha_carga || null,
       kmVacio,
       prev.destino || "Descarga anterior",
       pedido.origen || "Carga siguiente",
@@ -1899,10 +2048,25 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
 async function getPedidoDocumentoControlExpedienteData(pedidoId, empresaId) {
   const [docsRes, eventosRes] = await Promise.all([
     db.query(`
-      SELECT id, nombre, tipo, file_mime, file_size_kb, notas, created_at,
-             CASE WHEN file_mime ILIKE 'image/%' THEN file_base64 ELSE NULL END AS file_base64
+      SELECT id, nombre, tipo, file_mime, file_size_kb, notas, metadata, created_at,
+             CASE
+               WHEN file_mime ILIKE 'image/%' THEN file_base64
+               ELSE NULL
+             END AS file_base64,
+             CASE
+               WHEN file_mime ILIKE 'application/pdf%' THEN true
+               ELSE false
+             END AS es_pdf
         FROM pedido_docs
        WHERE pedido_id=$1 AND empresa_id=$2
+         AND (
+           LOWER(COALESCE(tipo,'')) LIKE '%albaran%'
+           OR LOWER(COALESCE(nombre,'')) LIKE '%albaran%'
+           OR LOWER(COALESCE(tipo,'')) LIKE '%pod%'
+           OR LOWER(COALESCE(nombre,'')) LIKE '%pod%'
+           OR LOWER(COALESCE(tipo,'')) LIKE '%cmr%'
+           OR LOWER(COALESCE(nombre,'')) LIKE '%cmr%'
+         )
        ORDER BY created_at DESC
        LIMIT 80
     `, [pedidoId, empresaId]).catch(() => ({ rows: [] })),
@@ -1929,11 +2093,18 @@ async function getPedidoDocumentoControlExpedienteData(pedidoId, empresaId) {
 
 function anexosDocumentoControl(documentos = []) {
   return (Array.isArray(documentos) ? documentos : []).map(doc => ({
+    id: doc.id || null,
     nombre: doc.nombre || "Documento adjunto",
     tipo: doc.tipo || "",
     mime: doc.file_mime || "",
     size_kb: doc.file_size_kb || null,
     created_at: doc.created_at || null,
+    firmado: Boolean(doc.metadata?.firmado || doc.metadata?.scanner || doc.metadata?.fase || String(doc.tipo || "").toLowerCase().includes("albaran")),
+    etiqueta: String(doc.tipo || doc.nombre || "").toLowerCase().includes("descarga") ? "Albaran/POD descarga" :
+      String(doc.tipo || doc.nombre || "").toLowerCase().includes("carga") ? "Albaran carga" :
+      String(doc.tipo || doc.nombre || "").toLowerCase().includes("cmr") ? "CMR adjunto" :
+      "Albaran/POD adjunto",
+    pdf_adjunto: Boolean(doc.es_pdf || String(doc.file_mime || "").toLowerCase().includes("pdf")),
     data_url: doc.file_base64 && String(doc.file_mime || "").startsWith("image/")
       ? `data:${doc.file_mime};base64,${doc.file_base64}`
       : "",
@@ -1945,6 +2116,11 @@ function attachDocumentoControlAnexos(payload, documentos = []) {
     payload.documento.documentos_anexos = anexosDocumentoControl(documentos);
   }
   return payload;
+}
+
+async function getPedidoDocumentoControlAnexos(pedidoId, empresaId) {
+  const expedienteData = await getPedidoDocumentoControlExpedienteData(pedidoId, empresaId);
+  return anexosDocumentoControl(expedienteData.documentos);
 }
 
 async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
@@ -3012,6 +3188,7 @@ function renderColaboradorPedidoBox(data, { mostrarPrecio = false } = {}) {
         <div class="f"><div class="fl">Descarga</div><div class="fv">${htmlEscape([data.fecha_descarga || data.fecha_entrega, data.hora_descarga || data.ventana_descarga].filter(Boolean).join(" ") || "-")}</div></div>
         <div class="f"><div class="fl">Mercancia</div><div class="fv">${htmlEscape(data.mercancia || "-")}</div></div>
         <div class="f"><div class="fl">Peso / bultos</div><div class="fv">${htmlEscape([data.peso_kg ? `${data.peso_kg} kg` : "", data.bultos ? `${data.bultos} bultos` : ""].filter(Boolean).join(" - ") || "-")}</div></div>
+        <div class="f"><div class="fl">M3 / ML</div><div class="fv">${htmlEscape([data.volumen ? `${data.volumen} m3` : "", data.metros_lineales ? `${data.metros_lineales} ML` : ""].filter(Boolean).join(" - ") || "-")}</div></div>
         <div class="f"><div class="fl">Tractora</div><div class="fv">${htmlEscape(data.matricula_colaborador || "Pendiente")}</div></div>
         <div class="f"><div class="fl">Remolque</div><div class="fv">${htmlEscape(data.remolque_matricula_colaborador || "-")}</div></div>
         ${precioRow}
@@ -3508,7 +3685,7 @@ function getMissingColumn(error) {
 }
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
-  "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen",
+  "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
   "cantidad", "precio_unitario", "extracostes_importe",
   "tipo_iva",
   "km_vacio_enlace",
@@ -3616,6 +3793,7 @@ function shouldUseInternationalCmr(origenPais = "España", destinoPais = "Españ
 function normalizePedidoValue(field, value) {
   if (value === "") return null;
   if (UUID_PEDIDO_FIELDS.has(field)) return normalizePedidoUuid(value);
+  if (PEDIDO_DATE_FIELDS.has(field)) return normalizePedidoDate(value);
   if (!NUMERIC_PEDIDO_FIELDS.has(field) || value === null || value === undefined) return value;
   let normalizedValue = value;
   if (typeof normalizedValue === "string") {
@@ -3836,14 +4014,23 @@ function extractOfficeZipText(buffer, name = "") {
   return cleanAiDocumentText(wanted.map(e => xmlToPlainText(e.data.toString("utf8"))).filter(Boolean).join("\n")).slice(0, 16000);
 }
 
-function extractAiAttachmentText(attachment = {}) {
+async function extractAiAttachmentText(attachment = {}) {
   const buffer = decodeAiAttachmentBase64(attachment.base64);
   if (!buffer) return "";
   const name = String(attachment.name || attachment.filename || "").toLowerCase();
   const mediaType = String(attachment.mediaType || attachment.type || "").toLowerCase();
-  if (mediaType.includes("pdf") || name.endsWith(".pdf")) return extractPdfTextHeuristic(buffer.toString("latin1"));
+  if (mediaType.includes("pdf") || name.endsWith(".pdf")) {
+    try {
+      const parsed = await pdfParse(buffer, { max: 40 });
+      const text = cleanAiDocumentText(parsed?.text || "").slice(0, 16000);
+      if (text.length >= 40) return text;
+    } catch (error) {
+      logger.warn(`No se pudo extraer texto PDF con el parser principal (${name || "documento"}): ${error.message}`);
+    }
+    return extractPdfTextHeuristic(buffer.toString("latin1"));
+  }
   if (name.endsWith(".docx") || name.endsWith(".xlsx") || mediaType.includes("officedocument")) return extractOfficeZipText(buffer, name);
-  if (/(\.txt|\.eml|\.csv|\.xml|\.html?)$/i.test(name) || mediaType.startsWith("text/") || mediaType.includes("message")) {
+  if (/(\.txt|\.md|\.json|\.eml|\.csv|\.tsv|\.xml|\.html?)$/i.test(name) || mediaType.startsWith("text/") || mediaType.includes("message") || mediaType.includes("json") || mediaType.includes("xml")) {
     return cleanAiDocumentText(buffer.toString("utf8")).slice(0, 16000);
   }
   return "";
@@ -3886,7 +4073,14 @@ function extractAiJsonPayload(text = "") {
 
 function aiTextFromProviderResponse(provider, data = {}) {
   if (provider === "openai" || provider === "ai_generic") {
-    return data?.choices?.[0]?.message?.content || data?.output_text || "";
+    if (data?.choices?.[0]?.message?.content) return data.choices[0].message.content;
+    if (data?.output_text) return data.output_text;
+    return Array.isArray(data?.output)
+      ? data.output.flatMap(item => Array.isArray(item?.content) ? item.content : [])
+          .map(item => item?.text || item?.output_text || "")
+          .filter(Boolean)
+          .join("\n")
+      : "";
   }
   return Array.isArray(data?.content)
     ? data.content.map(x => x?.text || "").join("\n")
@@ -3897,9 +4091,15 @@ async function getPedidoAiRuntimeConfig(empresaId) {
   const providerRaw = String(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic") || "anthropic").toLowerCase();
   const provider = ["anthropic", "openai", "ai_generic"].includes(providerRaw) ? providerRaw : "anthropic";
   const baseUrl = String(await getGlobalSetting("ia_base_url", process.env.AI_BASE_URL || "") || "").replace(/\/$/, "");
-  const model = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "");
+  const configuredModel = String(await getGlobalSetting("ia_model", process.env.AI_MODEL || "") || "").trim();
   const keyInfo = await resolveBestApiKey(empresaId, provider, ["openai", "ai_generic", "anthropic"]);
-  return { provider: keyInfo.provider || provider, baseUrl, model, apiKey: keyInfo.key || "", source: keyInfo.source };
+  const resolvedProvider = keyInfo.provider || provider;
+  let model = resolvedProvider === provider ? configuredModel : "";
+  if (resolvedProvider === "openai") {
+    model = model.toLowerCase().replace(/_/g, "-").replace(/\s+/g, "-");
+    if (/^gpt-5(?:\.\d+)+-mini$/.test(model)) model = "gpt-5-mini";
+  }
+  return { provider: resolvedProvider, baseUrl, model, configuredModel, apiKey: keyInfo.key || "", source: keyInfo.source };
 }
 
 function buildAiPedidoExtractionPrompt(texto = "") {
@@ -3933,6 +4133,9 @@ Reglas:
 - Si ves toneladas como 25,6 t o 25.6 t, devuelve peso_kg=25600 y cantidad=25.6 si la tarifa es por tonelada.
 - Si ves precio por tonelada, usa tipo_precio="tonelada" y precio_unitario como EUR/tonelada.
 - Si hay minimo facturable por toneladas, pon minimo_unidades en toneladas.
+- En un "Pedido a proveedor" de transporte, cliente_nombre es la empresa que emite/solicita el pedido, no la empresa transportista que lo recibe como proveedor.
+- Una expresion de ruta como "SAN MIGUEL DE SALINAS A MADRID" significa origen SAN MIGUEL DE SALINAS y destino MADRID.
+- Para el precio del viaje usa la base/importe del servicio de transporte sin IVA, no el total con impuestos.
 - No inventes datos. Usa null si no esta claro.
 
 Texto disponible:
@@ -3946,6 +4149,72 @@ function buildOpenAiPedidoContent(prompt, attachments = []) {
     content.push({ type: "image_url", image_url: { url: `data:${a.mediaType};base64,${a.base64}` } });
   }
   return content;
+}
+
+function buildOpenAiResponsesPedidoContent(prompt, attachments = []) {
+  const content = [{ type: "input_text", text: prompt }];
+  for (const attachment of attachments) {
+    if (!attachment.base64) continue;
+    const mediaType = String(attachment.mediaType || "application/octet-stream").toLowerCase();
+    if (mediaType.startsWith("image/")) {
+      content.push({
+        type: "input_image",
+        image_url: `data:${mediaType};base64,${attachment.base64}`,
+        detail: "high",
+      });
+      continue;
+    }
+    content.push({
+      type: "input_file",
+      filename: String(attachment.name || "documento").slice(0, 180),
+      file_data: `data:${mediaType};base64,${attachment.base64}`,
+      ...(mediaType === "application/pdf" ? { detail: "high" } : {}),
+    });
+  }
+  return content;
+}
+
+function isOpenAiPedidoFileSupported(attachment = {}) {
+  const name = String(attachment.name || attachment.filename || "").toLowerCase();
+  const mediaType = String(attachment.mediaType || attachment.type || "").toLowerCase();
+  if (mediaType.startsWith("image/")) return true;
+  if (/\.(pdf|txt|md|json|html?|xml|doc|docx|rtf|odt|ppt|pptx|csv|tsv|xls|xlsx)$/i.test(name)) return true;
+  return mediaType.includes("pdf")
+    || mediaType.startsWith("text/")
+    || mediaType.includes("word")
+    || mediaType.includes("officedocument")
+    || mediaType.includes("spreadsheet")
+    || mediaType.includes("presentation")
+    || mediaType.includes("excel")
+    || mediaType.includes("rtf")
+    || mediaType.includes("opendocument")
+    || mediaType.includes("json")
+    || mediaType.includes("xml");
+}
+
+async function fetchPedidoAi(url, options, timeoutMs = 45000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      const timeoutError = new Error("El proveedor de IA ha superado el tiempo maximo de respuesta");
+      timeoutError.code = "AI_TIMEOUT";
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isOpenAiModelAvailabilityError(status, data = {}) {
+  const code = String(data?.error?.code || "").toLowerCase();
+  const message = String(data?.error?.message || data?.message || "").toLowerCase();
+  return [400, 403, 404].includes(Number(status)) && (
+    code.includes("model") || message.includes("model") || message.includes("access") || message.includes("not exist")
+  );
 }
 
 function buildAnthropicPedidoContent(prompt, attachments = []) {
@@ -3968,8 +4237,9 @@ async function callPedidoDocumentAi({ empresaId, texto, attachments = [] }) {
 
   const aiFiles = attachments.filter(a => {
     const mediaType = String(a.mediaType || "");
-    if (!a.base64 || String(a.base64).length > 7_000_000) return false;
+    if (!a.base64 || String(a.base64).length > 9_500_000) return false;
     if (mediaType.startsWith("image/")) return true;
+    if (iaConfig.provider === "openai") return isOpenAiPedidoFileSupported(a);
     return iaConfig.provider === "anthropic" && mediaType === "application/pdf";
   });
   if (!aiFiles.length && !String(texto || "").trim()) return { used: false, reason: "sin_contenido_visual", provider: iaConfig.provider };
@@ -3978,9 +4248,36 @@ async function callPedidoDocumentAi({ empresaId, texto, attachments = [] }) {
   const prompt = buildAiPedidoExtractionPrompt(texto);
 
   let response;
-  if (iaConfig.provider === "openai" || iaConfig.provider === "ai_generic") {
-    const baseUrl = iaConfig.provider === "openai" ? "https://api.openai.com/v1" : (iaConfig.baseUrl || "https://api.openai.com/v1");
-    response = await fetch(`${baseUrl}/chat/completions`, {
+  let modelUsed = iaConfig.model;
+  let recoveredFromModel = "";
+  if (iaConfig.provider === "openai") {
+    const baseUrl = "https://api.openai.com/v1";
+    const requestOpenAi = model => fetchPedidoAi(`${baseUrl}/responses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${iaConfig.apiKey}` },
+      body: JSON.stringify({
+        model,
+        input: [{ role: "user", content: buildOpenAiResponsesPedidoContent(prompt, aiFiles) }],
+        max_output_tokens: 1400,
+      }),
+    });
+    modelUsed = iaConfig.model || "gpt-5-mini";
+    response = await requestOpenAi(modelUsed);
+    const fallbackModels = ["gpt-5-mini", "gpt-4o-mini"].filter(model => model !== modelUsed);
+    while (!response.ok) {
+      const firstError = await response.json().catch(() => ({}));
+      if (!isOpenAiModelAvailabilityError(response.status, firstError) || !fallbackModels.length) {
+        const err = new Error(firstError?.error?.message || firstError?.message || `IA respondio HTTP ${response.status}`);
+        err.status = response.status;
+        throw err;
+      }
+      if (!recoveredFromModel) recoveredFromModel = modelUsed;
+      modelUsed = fallbackModels.shift();
+      response = await requestOpenAi(modelUsed);
+    }
+  } else if (iaConfig.provider === "ai_generic") {
+    const baseUrl = iaConfig.baseUrl || "https://api.openai.com/v1";
+    response = await fetchPedidoAi(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${iaConfig.apiKey}` },
       body: JSON.stringify({
@@ -3991,7 +4288,8 @@ async function callPedidoDocumentAi({ empresaId, texto, attachments = [] }) {
       }),
     });
   } else {
-    response = await fetch("https://api.anthropic.com/v1/messages", {
+    modelUsed = iaConfig.model || "claude-sonnet-4-20250514";
+    response = await fetchPedidoAi("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -4015,7 +4313,14 @@ async function callPedidoDocumentAi({ empresaId, texto, attachments = [] }) {
   }
   await recordApiUsage(empresaId, iaConfig.provider, 1).catch(() => {});
   const parsed = extractAiJsonPayload(aiTextFromProviderResponse(iaConfig.provider, data));
-  return { used: true, provider: iaConfig.provider, parsed, raw_text: parsed ? "" : aiTextFromProviderResponse(iaConfig.provider, data).slice(0, 2000) };
+  return {
+    used: true,
+    provider: iaConfig.provider,
+    model: modelUsed,
+    recoveredFromModel,
+    parsed,
+    raw_text: parsed ? "" : aiTextFromProviderResponse(iaConfig.provider, data).slice(0, 2000),
+  };
 }
 
 function mergeAiDraftFields(draft = {}, ai = {}) {
@@ -4052,32 +4357,67 @@ function mergeAiDraftFields(draft = {}, ai = {}) {
   return next;
 }
 
+function extractSupplierOrderHints(text = "") {
+  const clean = cleanAiDocumentText(text);
+  if (!/pedido\s+a\s+proveedor/i.test(clean)) return {};
+  const lines = clean.split("\n").map(line => line.trim()).filter(Boolean);
+  const titleIndex = lines.findIndex(line => /pedido\s+a\s+proveedor/i.test(line));
+  const companyPattern = /\b(?:S\.?\s*L\.?\s*U?\.?|S\.?\s*A\.?\s*U?\.?|SOCIEDAD\s+LIMITADA|SOCIEDAD\s+ANONIMA)\b/i;
+  const clienteNombre = lines.slice(Math.max(0, titleIndex + 1), titleIndex + 9)
+    .find(line => companyPattern.test(line) && line.length <= 120) || "";
+  const routeLine = lines.find(line => (
+    line.length >= 7 && line.length <= 140 &&
+    /^[A-ZÁÉÍÓÚÜÑ0-9 .,'()\/-]+\s+A\s+[A-ZÁÉÍÓÚÜÑ0-9 .,'()\/-]+$/i.test(line) &&
+    !/transferencia|forma de pago|proveedor/i.test(line)
+  )) || "";
+  const routeMatch = routeLine.match(/^(.+?)\s+A\s+(.+)$/i);
+  const fecha = normalizeAiDate(clean.match(/\d{1,2}[/-]\d{1,2}[/-]20\d{2}/)?.[0] || "");
+  const transportLine = lines.find(line => /transporte/i.test(line) && /\d/.test(line)) || "";
+  const priceMatch = transportLine.match(/\b1[,.]00\s*(\d{2,6}[,.]\d{2,4})/i)
+    || transportLine.match(/(\d{2,6}[,.]\d{2})\s*$/);
+  const price = parseLocaleNumber(priceMatch?.[1]);
+  const description = transportLine
+    .replace(/^\d{5,}\s*/, "")
+    .replace(/\s+1[,.]00[\s\d,.-]*$/, "")
+    .trim();
+  return {
+    cliente_nombre: clienteNombre,
+    origen: routeMatch?.[1]?.trim() || "",
+    destino: routeMatch?.[2]?.trim() || "",
+    fecha_carga: fecha,
+    mercancia: description || "Servicio de transporte",
+    precio_unitario: Number.isFinite(price) && price > 0 ? price : null,
+    importe: Number.isFinite(price) && price > 0 ? price : null,
+  };
+}
+
 function extractAiPedidoDraft(text = "") {
   const raw = String(text || "");
   const clean = normalizeAiText(raw);
   const lower = clean.toLowerCase();
+  const supplierOrder = extractSupplierOrderHints(clean);
   const lineValue = label => {
     const rx = new RegExp(`(?:^|\\n)\\s*(?:${label})\\s*[:\\-]\\s*([^\\n]+)`, "i");
     const m = clean.match(rx);
     return m?.[1]?.trim() || "";
   };
-  const clienteNombre = lineValue("cliente|cargador|empresa|customer|shipper|from|de") || pickAiMatch(clean, [
+  const clienteNombre = lineValue("cliente|cargador|empresa|customer|shipper|from|de") || supplierOrder.cliente_nombre || pickAiMatch(clean, [
     /\bcliente\s+(?:es\s+)?([A-ZÁÉÍÓÚÜÑ0-9][^\n,;]{2,80})/i,
   ]);
-  const origen = lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || pickAiMatch(clean, [
+  const origen = lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || pickAiMatch(clean, [
     /\b(?:carga|recogida|origen)\s+(?:en|desde)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bdesde\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const destino = lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || pickAiMatch(clean, [
+  const destino = lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || pickAiMatch(clean, [
     /\b(?:descarga|entrega|destino)\s+(?:en|a)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bhasta\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const fechaCargaRaw = lineValue("fecha carga|fecha de carga|carga dia|fecha|pickup date|loading date|load date");
+  const fechaCargaRaw = lineValue("fecha carga|fecha de carga|carga dia|fecha|pickup date|loading date|load date") || supplierOrder.fecha_carga;
   const fechaDescargaRaw = lineValue("fecha descarga|fecha de descarga|entrega dia|descarga dia|delivery date|unloading date");
   const anyDate = pickAiMatch(clean, [/\b(?:dia|fecha)\s+(\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?)/i]);
   const horaCarga = normalizePedidoTime(lineValue("hora carga|hora de carga|ventana carga|pickup time|loading time") || pickAiMatch(clean, [/\b(?:carga|recogida|loading|pickup)[^\n]{0,50}\b(\d{1,2}[:.]\d{2})\b/i]));
   const horaDescarga = normalizePedidoTime(lineValue("hora descarga|hora de descarga|hora entrega|ventana descarga|delivery time|unloading time") || pickAiMatch(clean, [/\b(?:descarga|entrega|delivery|unloading)[^\n]{0,50}\b(\d{1,2}[:.]\d{2})\b/i]));
-  const mercancia = lineValue("mercancia|mercancia / notas|producto|goods|commodity|description|carga") || pickAiMatch(clean, [
+  const mercancia = lineValue("mercancia|mercancia / notas|producto|goods|commodity|description|carga") || supplierOrder.mercancia || pickAiMatch(clean, [
     /\bmercancia\s+(?:de\s+)?([^\n;.]{3,120})/i,
   ]);
   const referencia = extractAiReference(clean, lineValue);
@@ -4095,7 +4435,7 @@ function extractAiPedidoDraft(text = "") {
     ? Math.round((parseLocaleNumber(pesoTon[1]) || 0) * 1000)
     : (pesoKg ? parseLocaleNumber(pesoKg[1]) : null);
   const importeNumberRaw = String(importeRaw || "").match(/(\d+(?:[,.]\d{1,2})?)/)?.[1] || "";
-  const importe = parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
+  const importe = supplierOrder.importe ?? parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
   const toneladas = Number.isFinite(pesoKgValue) && pesoKgValue > 0
     ? Number((pesoKgValue / 1000).toFixed(3))
     : null;
@@ -4115,7 +4455,7 @@ function extractAiPedidoDraft(text = "") {
     /(\d+(?:[,.]\d+)?)\s*(?:eur|€|â‚¬)?\s*(?:\/|\s*(?:por|x)\s*)\s*(?:palet|pallet|plt)\b/i,
   ]);
   let tipoPrecio = "viaje";
-  let precioUnitario = importe || null;
+  let precioUnitario = importe || supplierOrder.precio_unitario || null;
   let cantidad = null;
   let minimoUnidades = null;
   let tarifaUnitariaDetectada = false;
@@ -4243,7 +4583,7 @@ function isValidMapsUrl(value) {
   return /^(https?:\/\/|geo:)/i.test(raw);
 }
 
-function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCountry = "España", fallbackRegion = "") {
+function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCountry = "España", fallbackRegion = "", fallbackSchedule = {}) {
   const parsed = normalizePedidoJsonList(value);
   const seen = new Set();
   return parsed.map((stop, idx) => {
@@ -4261,6 +4601,9 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCou
       provincia: String(source.provincia || source.region || source.state || (idx === 0 ? fallbackRegion : "") || "").trim(),
       google_maps_url: cleanMaps,
       notas: notas || "",
+      fecha: source.fecha || source.fecha_carga || source.fecha_descarga || (idx === 0 ? fallbackSchedule.fecha || "" : ""),
+      hora: source.hora || source.hora_carga || source.hora_descarga || (idx === 0 ? fallbackSchedule.hora || "" : ""),
+      ventana: source.ventana || source.ventana_carga || source.ventana_descarga || (idx === 0 ? fallbackSchedule.ventana || "" : ""),
       lat: source.lat ?? source.latitud ?? source.metadata?.lat ?? null,
       lng: source.lng ?? source.longitud ?? source.metadata?.lng ?? null,
     };
@@ -4276,6 +4619,15 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCou
     seen.add(key);
     return true;
   });
+}
+
+function mergePrimaryStopScheduleForStorage(stops = [], schedule = {}) {
+  return normalizePedidoJsonList(stops).map((stop, idx) => idx === 0 ? {
+    ...stop,
+    fecha: stop.fecha || stop.fecha_carga || stop.fecha_descarga || schedule.fecha || "",
+    hora: stop.hora || stop.hora_carga || stop.hora_descarga || schedule.hora || "",
+    ventana: stop.ventana || stop.ventana_carga || stop.ventana_descarga || schedule.ventana || "",
+  } : stop);
 }
 
 function derivePedidoGeoFromStops(cargas = [], descargas = [], fallback = {}) {
@@ -4298,15 +4650,58 @@ function derivePedidoGeoFromStops(cargas = [], descargas = [], fallback = {}) {
   };
 }
 
+function routeMatchKeyPedido(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(s\.?l\.?u?|s\.?a\.?u?|s\.?l\.?|s\.?a\.?|slu|sau|sl|sa)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function routeCandidatesPedido(text = "", stops = []) {
+  const values = [text];
+  normalizePedidoJsonList(stops).forEach(stop => {
+    values.push(
+      stop.nombre,
+      stop.direccion,
+      stop.poblacion,
+      stop.ciudad,
+      stop.provincia,
+      [stop.nombre, stop.poblacion || stop.ciudad].filter(Boolean).join(" "),
+      [stop.direccion, stop.poblacion || stop.ciudad].filter(Boolean).join(" ")
+    );
+  });
+  String(text || "").split(/\s+-\s+/).forEach(part => values.push(part));
+  return [...new Set(values.map(routeMatchKeyPedido).filter(Boolean))];
+}
+
+function routeTextScorePedido(routeText = "", candidates = []) {
+  const routeKey = routeMatchKeyPedido(routeText);
+  if (!routeKey || !candidates.length) return 0;
+  let best = 0;
+  for (const candidate of candidates) {
+    if (routeKey === candidate) best = Math.max(best, 100);
+    else if (routeKey.includes(candidate) || candidate.includes(routeKey)) {
+      const ratio = Math.min(routeKey.length, candidate.length) / Math.max(routeKey.length, candidate.length);
+      best = Math.max(best, ratio >= 0.42 ? 70 + Math.round(ratio * 20) : 35);
+    }
+  }
+  return best;
+}
+
 async function inferKmRutaPedido(queryClient, empresaId, payload = {}) {
   const current = parseLocaleNumber(payload.km_ruta);
   if (Number.isFinite(current) && current > 0) return current;
   const rutaId = normalizePedidoUuid(payload.ruta_id);
   if (rutaId) {
-    const { rows } = await queryClient.query(
+    const { rows } = await optionalPedidoQuery(
+      queryClient,
       "SELECT km FROM rutas WHERE id=$1 AND activa=true AND (empresa_id=$2 OR empresa_id IS NULL) LIMIT 1",
-      [rutaId, empresaId]
-    ).catch(() => ({ rows: [] }));
+      [rutaId, empresaId],
+      "No se pudieron inferir los kilometros desde la ruta seleccionada:"
+    );
     const km = Number(rows[0]?.km || 0);
     if (Number.isFinite(km) && km > 0) return km;
   }
@@ -4314,20 +4709,31 @@ async function inferKmRutaPedido(queryClient, empresaId, payload = {}) {
   const destino = String(payload.destino || "").trim();
   const clienteId = normalizePedidoUuid(payload.cliente_id);
   if (!origen || !destino || !clienteId) return null;
-  const { rows } = await queryClient.query(
-    `SELECT r.km
+  const { rows } = await optionalPedidoQuery(
+    queryClient,
+    `SELECT r.km,r.origen,r.destino,
+            CASE WHEN r.cliente_id=$2 THEN 0 ELSE 1 END AS prioridad
        FROM rutas r
        LEFT JOIN ruta_precios_cliente rpc ON rpc.ruta_id=r.id
       WHERE r.activa=true
         AND (r.empresa_id=$1 OR r.empresa_id IS NULL)
         AND (r.cliente_id=$2 OR rpc.cliente_id=$2)
-        AND LOWER(TRIM(r.origen))=LOWER(TRIM($3))
-        AND LOWER(TRIM(r.destino))=LOWER(TRIM($4))
-      ORDER BY CASE WHEN r.cliente_id=$2 THEN 0 ELSE 1 END, r.updated_at DESC
-      LIMIT 1`,
-    [empresaId, clienteId, origen, destino]
-  ).catch(() => ({ rows: [] }));
-  const km = Number(rows[0]?.km || 0);
+      ORDER BY CASE WHEN r.cliente_id=$2 THEN 0 ELSE 1 END, r.created_at DESC
+      LIMIT 350`,
+    [empresaId, clienteId],
+    "No se pudieron inferir los kilometros desde las rutas del cliente:"
+  );
+  const origenCandidates = routeCandidatesPedido(origen, payload.puntos_carga || payload.cargas || []);
+  const destinoCandidates = routeCandidatesPedido(destino, payload.puntos_descarga || payload.descargas || []);
+  let best = null;
+  for (const route of rows) {
+    const originScore = routeTextScorePedido(route.origen, origenCandidates);
+    const destinationScore = routeTextScorePedido(route.destino, destinoCandidates);
+    if (originScore < 55 || destinationScore < 55) continue;
+    const score = originScore + destinationScore - Number(route.prioridad || 0) * 8;
+    if (!best || score > best.score) best = { ...route, score };
+  }
+  const km = Number(best?.km || 0);
   return Number.isFinite(km) && km > 0 ? km : null;
 }
 
@@ -4665,6 +5071,39 @@ async function registrarHistorialAsignacionPedido(client, pedido = {}, empresaId
   }
 }
 
+async function sincronizarConjuntoChoferDesdePedido(queryClient, pedido = {}, empresaId) {
+  if (!pedido?.chofer_id || !pedido?.vehiculo_id || !empresaId) return;
+  try {
+    const choferId = pedido.chofer_id;
+    const vehiculoId = pedido.vehiculo_id;
+    const remolqueId = pedido.remolque_id || null;
+
+    await queryClient.query(
+      "UPDATE vehiculos SET chofer_id=NULL WHERE empresa_id=$1 AND chofer_id=$2 AND id<>$3",
+      [empresaId, choferId, vehiculoId]
+    );
+
+    if (remolqueId) {
+      await queryClient.query(
+        "UPDATE vehiculos SET remolque_id=NULL WHERE empresa_id=$1 AND remolque_id=$2 AND id<>$3",
+        [empresaId, remolqueId, vehiculoId]
+      );
+    }
+
+    await queryClient.query(
+      "UPDATE choferes SET vehiculo_id=$1 WHERE empresa_id=$2 AND id=$3",
+      [vehiculoId, empresaId, choferId]
+    );
+
+    await queryClient.query(
+      "UPDATE vehiculos SET chofer_id=$1, remolque_id=$2, updated_at=NOW() WHERE empresa_id=$3 AND id=$4",
+      [choferId, remolqueId, empresaId, vehiculoId]
+    );
+  } catch (err) {
+    logger.warn("No se pudo sincronizar el conjunto del chofer desde pedido:", err.message);
+  }
+}
+
 function pedidoTieneMinimosOperativos(pedido = {}) {
   const tieneAsignacion = Boolean(pedido.vehiculo_id || pedido.colaborador_id);
   const importe = Number(pedido.importe || pedido.precio_cliente_col || 0);
@@ -4737,21 +5176,31 @@ async function confirmarPedidoPorAsignacionSiProcede(pedido, empresaId, actor = 
 
 async function updateExistingPedidoFields(client, fields, pedidoId, empresaId) {
   const pending = fields.map(([field, value]) => [field, normalizePedidoValue(field, value)]);
+  const transactionalClient = client !== db;
+  let attempt = 0;
   while (pending.length) {
     const setClauses = pending.map(([k], i) => `${k}=$${i + 1}`).join(", ");
     const values = pending.map(([, v]) => v);
     values.push(pedidoId, empresaId);
+    const savepoint = `pedido_optional_fields_${attempt++}`;
+    if (transactionalClient) await client.query(`SAVEPOINT ${savepoint}`);
     try {
       const { rows } = await client.query(
         `UPDATE pedidos SET ${setClauses} WHERE id=$${values.length - 1} AND empresa_id=$${values.length} RETURNING *`,
         values
       );
+      if (transactionalClient) await client.query(`RELEASE SAVEPOINT ${savepoint}`);
       return rows[0] || null;
     } catch (error) {
+      if (transactionalClient) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+      }
       const missingColumn = getMissingColumn(error);
       if (!missingColumn) throw error;
       const next = pending.filter(([field]) => field !== missingColumn);
       if (next.length === pending.length) throw error;
+      logger.warn(`Pedidos: columna opcional ausente en el esquema; se omite ${missingColumn}.`);
       pending.length = 0;
       pending.push(...next);
     }
@@ -4895,6 +5344,31 @@ async function nextPedidoNumero(client, empresaId, prefix = "DCD") {
   return `${prefix}-${anio}-${String(lastNum + 1).padStart(4, "0")}`;
 }
 
+async function nextGestionPedidoNumero(client, empresaId) {
+  const year = new Date().getFullYear();
+  const prefix = `PED-${year}-`;
+  await client.query(
+    `INSERT INTO pedido_numero_counters (empresa_id, year, last_num)
+     SELECT $1, $2,
+            COALESCE(MAX(CASE WHEN numero ~ $3 THEN substring(numero from $3)::int ELSE 0 END), 0)
+       FROM pedidos
+      WHERE empresa_id=$1 AND numero LIKE $4
+     ON CONFLICT (empresa_id, year) DO UPDATE
+       SET last_num=GREATEST(pedido_numero_counters.last_num, EXCLUDED.last_num),
+           updated_at=NOW()`,
+    [empresaId, year, `^${prefix}([0-9]+)$`, `${prefix}%`]
+  );
+  const { rows } = await client.query(
+    `UPDATE pedido_numero_counters
+        SET last_num=last_num+1, updated_at=NOW()
+      WHERE empresa_id=$1 AND year=$2
+      RETURNING last_num`,
+    [empresaId, year]
+  );
+  const next = Number(rows[0]?.last_num || 1);
+  return `${prefix}${String(next).padStart(4, "0")}`;
+}
+
 async function usuarioPuedeGestionarPedido(req, pedido) {
   if (ROLES_GESTION_PEDIDOS.has(req.user?.rol)) return true;
   if (req.user?.rol !== "chofer") return false;
@@ -4956,7 +5430,7 @@ router.get("/chofer/clientes", async (req, res) => {
       const { rows } = await db.query(
         `SELECT c.id, c.nombre, c.cif, c.direccion, c.ciudad, c.pais,
                 COUNT(p.id)::int AS cargas_total,
-                MAX(COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date)) AS ultima_carga,
+                MAX(p.fecha_carga) AS ultima_carga,
                 TRUE AS acceso_rapido
            FROM pedidos p
            JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
@@ -4965,7 +5439,7 @@ router.get("/chofer/clientes", async (req, res) => {
             AND p.cliente_id IS NOT NULL
             AND (${ownClauses.join(" OR ")})
           GROUP BY c.id
-          ORDER BY COUNT(p.id) DESC, MAX(COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date)) DESC NULLS LAST, c.nombre ASC
+          ORDER BY COUNT(p.id) DESC, MAX(p.fecha_carga) DESC NULLS LAST, c.nombre ASC
           LIMIT 8`,
         ownParams
       );
@@ -4976,7 +5450,7 @@ router.get("/chofer/clientes", async (req, res) => {
     const { rows } = await db.query(
       `SELECT c.id, c.nombre, c.cif, c.direccion, c.ciudad, c.pais,
               COUNT(p.id)::int AS cargas_total,
-              MAX(COALESCE(p.fecha_carga, p.fecha_pedido, p.created_at::date)) AS ultima_carga,
+              MAX(p.fecha_carga) AS ultima_carga,
               FALSE AS acceso_rapido
          FROM clientes c
          LEFT JOIN pedidos p ON p.cliente_id=c.id AND p.empresa_id=c.empresa_id
@@ -5227,8 +5701,8 @@ router.get("/", async (req, res) => {
       params.push(scope.tipos_viaje);
     }
   }
-  if (desde)      { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) >= $${i++}`);  params.push(desde); }
-  if (hasta)      { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) <= $${i++}`);  params.push(hasta); }
+  if (desde)      { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) >= $${i++}`);  params.push(desde); }
+  if (hasta)      { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) <= $${i++}`);  params.push(hasta); }
   if (pendiente_completar === "true")  { where.push("p.pendiente_completar IS TRUE"); }
   if (pendiente_completar === "false") { where.push("COALESCE(p.pendiente_completar,false) IS FALSE"); }
   if (tipo_carga) { where.push(`COALESCE(p.tipo_carga,'') = $${i++}`); params.push(tipo_carga); }
@@ -5258,7 +5732,7 @@ router.get("/", async (req, res) => {
       SELECT p.* -- empresa_id filtrado en where dinamico
         FROM pedidos p
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
        LIMIT $${i++} OFFSET $${i++}
     )
     SELECT p.*,
@@ -5293,13 +5767,13 @@ router.get("/", async (req, res) => {
         FROM pedido_docs d
        WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
     ) docs ON true
-    ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+    ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
   `, `
     WITH filtered AS (
       SELECT p.* -- empresa_id filtrado en where dinamico
         FROM pedidos p
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
        LIMIT $${i - 2} OFFSET $${i - 1}
     )
     SELECT p.*,
@@ -5333,7 +5807,7 @@ router.get("/", async (req, res) => {
         FROM pedido_docs d
        WHERE d.pedido_id = p.id AND d.empresa_id = p.empresa_id
     ) docs ON true
-    ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+    ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
   `, [...params, limit, offset]);
 
   // Get total count for pagination (params already excludes limit/offset)
@@ -5414,8 +5888,8 @@ router.get("/resumen-lista", async (req, res) => {
         params.push(scope.tipos_viaje);
       }
     }
-    if (desde) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) >= $${i++}`); params.push(desde); }
-    if (hasta) { where.push(`COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) <= $${i++}`); params.push(hasta); }
+    if (desde) { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) >= $${i++}`); params.push(desde); }
+    if (hasta) { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) <= $${i++}`); params.push(hasta); }
     if (pendiente_completar === "true") where.push("p.pendiente_completar IS TRUE");
     if (pendiente_completar === "false") where.push("COALESCE(p.pendiente_completar,false) IS FALSE");
     if (tipo_carga) { where.push(`COALESCE(p.tipo_carga,'') = $${i++}`); params.push(tipo_carga); }
@@ -5444,7 +5918,8 @@ router.get("/resumen-lista", async (req, res) => {
       SELECT p.id, p.numero, p.empresa_id, p.cliente_id, p.colaborador_id,
              p.vehiculo_id, p.chofer_id, p.chofer2_id, p.remolque_id,
              p.fecha_pedido, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
-             p.hora_carga, p.hora_descarga, p.origen, p.destino, p.referencia_cliente,
+             p.hora_carga, p.hora_descarga, p.ventana_carga, p.ventana_descarga,
+             p.puntos_carga, p.puntos_descarga, p.origen, p.destino, p.referencia_cliente,
              p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
              p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,
              p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
@@ -5468,13 +5943,14 @@ router.get("/resumen-lista", async (req, res) => {
         LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
         LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
        LIMIT $${i++} OFFSET $${i++}
     `, `
       SELECT p.id, p.numero, p.empresa_id, p.cliente_id, p.colaborador_id,
              p.vehiculo_id, p.chofer_id, p.chofer2_id, p.remolque_id,
              p.fecha_pedido, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
-             p.hora_carga, p.hora_descarga, p.origen, p.destino, p.referencia_cliente,
+             p.hora_carga, p.hora_descarga, p.ventana_carga, p.ventana_descarga,
+             p.puntos_carga, p.puntos_descarga, p.origen, p.destino, p.referencia_cliente,
              p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
              p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,
              p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
@@ -5497,7 +5973,7 @@ router.get("/resumen-lista", async (req, res) => {
         LEFT JOIN vehiculos r ON r.id=p.remolque_id AND r.empresa_id=p.empresa_id
         LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
        WHERE ${where.join(" AND ")}
-       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido, p.fecha_descarga, p.fecha_entrega) DESC, p.created_at DESC
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) DESC NULLS LAST, p.created_at DESC
        LIMIT $${i - 2} OFFSET $${i - 1}
     `, [...params, limitN, offset]);
 
@@ -6120,7 +6596,7 @@ router.get("/:id/planificacion-ia", GERENTE_O_TRAFICO, async (req, res) => {
 
     const originCoord = firstPedidoStopWithCoords(pedido);
     const originText = originCoord?.text || pedido.origen || "";
-    const fechaCarga = dateOnly(pedido.fecha_carga || pedido.fecha_pedido);
+    const fechaCarga = dateOnly(pedido.fecha_carga);
     const fechaDesde = fechaCarga ? new Date(`${fechaCarga}T00:00:00.000Z`) : null;
     const fechaHasta = fechaDesde ? new Date(fechaDesde.getTime() + 36 * 60 * 60 * 1000) : null;
 
@@ -7104,13 +7580,14 @@ router.get("/ai-inbox/status", GERENTE_O_TRAFICO, async (req, res) => {
       basic_available: true,
       visual_available: Boolean(iaConfig.apiKey),
       provider: iaConfig.provider || "local",
+      model: iaConfig.model || null,
       provider_configured_from: iaConfig.apiKey ? (iaConfig.source || "configuracion") : null,
-      supported_basic_documents: ["pdf_texto", "docx", "xlsx_basico", "txt", "eml", "html", "xml", "csv"],
+      supported_basic_documents: ["pdf_texto", "doc", "docx", "rtf", "odt", "xls", "xlsx", "csv", "tsv", "txt", "eml", "html", "xml", "json"],
       supported_visual_documents: ["jpg", "jpeg", "png", "webp", "pdf_escaneado"],
-      mode_label: iaConfig.apiKey ? "Basico + IA visual" : "Basico local",
+      mode_label: iaConfig.apiKey ? "Documentos + IA visual" : "Extraccion local",
       guidance: iaConfig.apiKey
-        ? "Puede interpretar texto y usar proveedor visual para imagenes o PDF escaneados."
-        : "Puede interpretar texto, emails, PDF/DOCX con texto y documentos legibles. Imagenes o PDF escaneados requieren configurar API visual en SuperAdmin.",
+        ? "Interpreta documentos de oficina, PDF, imagenes y PDF escaneados. Los datos siempre quedan pendientes de revision antes de crear el pedido."
+        : "Interpreta PDF con texto, DOCX/XLSX basicos, emails y texto. Imagenes o PDF escaneados requieren configurar IA visual en SuperAdmin.",
     });
   } catch (e) {
     res.status(500).json({ error: e.message || "No se pudo comprobar el estado de la Bandeja IA" });
@@ -7129,15 +7606,15 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
         base64: a?.base64 ? String(a.base64) : "",
       })).filter(a => a.name)
     : [];
-  const attachmentTexts = attachments.map(a => ({
+  const attachmentTexts = (await Promise.all(attachments.map(async a => ({
     name: a.name,
-    text: extractAiAttachmentText(a),
-  })).filter(a => a.text && a.text.length >= 12);
+    text: await extractAiAttachmentText(a),
+  })))).filter(a => a.text && a.text.length >= 12);
   const texto = [textoOriginal, ...attachmentTexts.map(a => `Documento ${a.name}:\n${a.text}`)]
     .filter(Boolean)
     .join("\n\n---\n\n")
     .slice(0, 20000);
-  const hasVisualAttachment = attachments.some(a => a.base64 && (String(a.mediaType || "").startsWith("image/") || String(a.mediaType || "") === "application/pdf"));
+  const hasAiAttachment = attachments.some(a => a.base64);
   const hasDocumentAttachment = attachments.some(a => a.base64) || attachmentTexts.length > 0;
   const sourceAttachments = attachments.map(({ base64, ...a }) => a);
   if ((!texto || texto.length < 12) && !hasDocumentAttachment) {
@@ -7154,13 +7631,25 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
     const warnings = [];
     const suggestions = [];
     let visualAi = { used: false };
-    if (hasVisualAttachment) {
+    if (hasAiAttachment) {
       try {
         visualAi = await callPedidoDocumentAi({ empresaId, texto, attachments });
         if (visualAi.used && visualAi.parsed) {
           draft = mergeAiDraftFields(draft, visualAi.parsed);
           tarifaUnitariaDetectada = tarifaUnitariaDetectada || (draft.tipo_precio && draft.tipo_precio !== "viaje" && Number.isFinite(parseLocaleNumber(draft.precio_unitario)));
-          suggestions.push({ type: "ia_visual", label: "Documento analizado por IA", detail: `Proveedor: ${visualAi.provider}`, confidence: 0.88 });
+          suggestions.push({
+            type: "ia_visual",
+            label: "Documento analizado por IA",
+            detail: `Proveedor: ${visualAi.provider}${visualAi.model ? ` | Modelo: ${visualAi.model}` : ""}`,
+            confidence: 0.88,
+          });
+          if (visualAi.recoveredFromModel) {
+            warnings.push({
+              key: "ia_model_fallback",
+              severity: "baja",
+              message: "El modelo configurado no estaba disponible y el documento se proceso automaticamente con el modelo compatible de respaldo.",
+            });
+          }
         } else if (visualAi.used && !visualAi.parsed) {
           warnings.push({ key: "ia_visual", severity: "media", message: "La IA respondio, pero no devolvio JSON interpretable. Se usa el parser local." });
         } else if (!visualAi.used && visualAi.reason === "sin_api_key" && !attachmentTexts.length) {
@@ -7169,7 +7658,8 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
           warnings.push({ key: "ia_visual_pdf", severity: "media", message: "No se detecto texto legible en el documento. Si es un PDF escaneado, conviertelo a imagen o usa un proveedor visual compatible con PDF." });
         }
       } catch (e) {
-        warnings.push({ key: "ia_visual", severity: "media", message: `IA visual no disponible: ${e.message}. Se usa el parser local.` });
+        logger.warn(`Bandeja IA: proveedor no disponible, se usa extraccion local: ${e.message}`);
+        warnings.push({ key: "ia_visual", severity: "media", message: "El proveedor de IA no ha estado disponible. Se ha mantenido la extraccion local del documento; revisa los campos antes de continuar." });
       }
     }
 
@@ -7328,7 +7818,9 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
           ...a,
           serverTextDetected: attachmentTexts.some(t => t.name === a.name),
         })),
-        ai_visual: visualAi.used ? { provider: visualAi.provider, ok: Boolean(visualAi.parsed) } : { provider: visualAi.provider || null, ok: false, reason: visualAi.reason || null },
+        ai_visual: visualAi.used
+          ? { provider: visualAi.provider, model: visualAi.model || null, ok: Boolean(visualAi.parsed), recovered: Boolean(visualAi.recoveredFromModel) }
+          : { provider: visualAi.provider || null, ok: false, reason: visualAi.reason || null },
       },
       confidence,
       status,
@@ -7410,14 +7902,22 @@ router.post("/chofer", async (req, res) => {
         fecha: fechaCargaNorm,
         hora: horaCargaNorm || "",
         pais: origenPais,
-      }], origen, origenPais, req.body?.origen_provincia || "");
+      }], origen, origenPais, req.body?.origen_provincia || "", {
+        fecha: fechaCargaNorm,
+        hora: horaCargaNorm || "",
+        ventana: req.body?.ventana_carga || "",
+      });
       const puntosDescarga = normalizePedidoStopsForStorage(req.body?.puntos_descarga || [{
         nombre: req.body?.destino_nombre || destino,
         direccion: destino,
         fecha: fechaDescargaNorm,
         hora: horaDescargaNorm || "",
         pais: destinoPais,
-      }], destino, destinoPais, req.body?.destino_provincia || "");
+      }], destino, destinoPais, req.body?.destino_provincia || "", {
+        fecha: fechaDescargaNorm,
+        hora: horaDescargaNorm || "",
+        ventana: req.body?.ventana_descarga || "",
+      });
       const geoPedido = derivePedidoGeoFromStops(puntosCarga, puntosDescarga, {
         origen_pais: origenPais,
         destino_pais: destinoPais,
@@ -7465,6 +7965,7 @@ router.post("/chofer", async (req, res) => {
         ["cmr_tipo", cmrTipoPedido(geoPedido.origen_pais, geoPedido.destino_pais, req.body?.cmr_tipo)],
         ["referencia_cliente", req.body?.referencia_cliente || null],
         ["tipo_carga", req.body?.tipo_carga || null],
+        ["metros_lineales", normalizePedidoValue("metros_lineales", req.body?.metros_lineales)],
         ["puntos_carga", JSON.stringify(puntosCarga)],
         ["puntos_descarga", JSON.stringify(puntosDescarga)],
         ["remolque_id", normalizePedidoUuid(req.body?.remolque_id) || chofer.remolque_id || null],
@@ -7519,6 +8020,11 @@ router.post("/", GERENTE_O_TRAFICO,
             remolque_id_manual, remolque_id } = req.body; // remolque_id_manual si se especifica uno distinto al del conjunto
 
     const empresaId = req.empresaId||req.user.empresa_id;
+    try {
+      assertPedidoDateInputs(req.body, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga"]));
+    } catch (dateErr) {
+      return res.status(dateErr.status || 400).json({ error: dateErr.message, field: dateErr.field });
+    }
     let rutaIdNorm = normalizePedidoUuid(ruta_id);
     if (ruta_id && !rutaIdNorm) {
       return res.status(400).json({ error: "La ruta indicada no es valida." });
@@ -7572,57 +8078,41 @@ router.post("/", GERENTE_O_TRAFICO,
       let remolque_mat = null;
 
       if (vehiculo_id) {
+        await client.query("SAVEPOINT pedido_vehicle_lookup");
         try {
-          // Try to get remolque_id (may not exist if migration not run)
           const { rows: veh } = await client.query(
-            "SELECT matricula, clase FROM vehiculos WHERE id=$1 AND empresa_id=$2",
+            "SELECT matricula, clase, remolque_id FROM vehiculos WHERE id=$1 AND empresa_id=$2",
             [vehiculo_id, empresaId]
           );
           const tractora = veh[0];
+          const currentRemolqueId = tractora?.remolque_id;
 
-          // Try to get remolque_id separately (column may not exist)
-          try {
-            const { rows: remRows } = await client.query(
-              "SELECT remolque_id FROM vehiculos WHERE id=$1 AND empresa_id=$2", [vehiculo_id, empresaId]
+          if (remolqueSolicitado && remolqueSolicitado !== currentRemolqueId) {
+            await client.query(
+              "UPDATE vehiculos SET remolque_id=$1 WHERE id=$2 AND empresa_id=$3",
+              [remolqueSolicitado, vehiculo_id, empresaId]
             );
-            const currentRemolqueId = remRows[0]?.remolque_id;
-
-            if (remolqueSolicitado && remolqueSolicitado !== currentRemolqueId) {
-              await client.query(
-                "UPDATE vehiculos SET remolque_id=$1 WHERE id=$2 AND empresa_id=$3",
-                [remolqueSolicitado, vehiculo_id, empresaId]
-              );
-              const { rows: rm } = await client.query("SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2", [remolqueSolicitado, empresaId]);
-              remolque_mat = rm[0]?.matricula;
-              remolque_id_efectivo = remolqueSolicitado;
-            } else if (!remolque_id_manual && currentRemolqueId) {
-              remolque_id_efectivo = currentRemolqueId;
-              const { rows: rem } = await client.query("SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2", [currentRemolqueId, empresaId]);
-              remolque_mat = rem[0]?.matricula;
-            }
-          } catch(remErr) {
-            // remolque_id column does not exist yet - skip silently
-            if (remolqueSolicitado) remolque_id_efectivo = remolqueSolicitado;
+            const { rows: rm } = await client.query("SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2", [remolqueSolicitado, empresaId]);
+            remolque_mat = rm[0]?.matricula;
+            remolque_id_efectivo = remolqueSolicitado;
+          } else if (!remolque_id_manual && currentRemolqueId) {
+            remolque_id_efectivo = currentRemolqueId;
+            const { rows: rem } = await client.query("SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2", [currentRemolqueId, empresaId]);
+            remolque_mat = rem[0]?.matricula;
           }
+          await client.query("RELEASE SAVEPOINT pedido_vehicle_lookup");
         } catch(vehErr) {
-          // ignore vehicle lookup errors
+          await client.query("ROLLBACK TO SAVEPOINT pedido_vehicle_lookup");
+          await client.query("RELEASE SAVEPOINT pedido_vehicle_lookup");
+          logger.warn(`Pedidos: no se pudo resolver el conjunto asignado; se conserva la seleccion recibida. ${vehErr.message}`);
         }
       }
 
-      // Generar numero
-      const anio = new Date().getFullYear();
-      const { rows: last } = await client.query(
-        `SELECT numero FROM pedidos
-         WHERE empresa_id=$1
-           AND numero LIKE $2
-         ORDER BY created_at DESC LIMIT 1`,
-        [empresaId, `PED-${anio}-%`]
-      );
-      const lastNum = last[0] ? parseInt(last[0].numero.split("-").pop()) || 0 : 0;
-      const numero  = `PED-${anio}-${String(lastNum + 1).padStart(4, "0")}`;
+      const numero = await nextGestionPedidoNumero(client, empresaId);
 
       // Check if remolque columns exist (migration may not have run)
       let pedido;
+      await client.query("SAVEPOINT pedido_insert_with_trailer");
       try {
         const r = await client.query(`
           INSERT INTO pedidos (numero, cliente_id, ruta_id, vehiculo_id, chofer_id,
@@ -7636,9 +8126,13 @@ router.post("/", GERENTE_O_TRAFICO,
            remolque_id_efectivo, remolque_mat]
         );
         pedido = r.rows[0];
+        await client.query("RELEASE SAVEPOINT pedido_insert_with_trailer");
       } catch(colErr) {
+        await client.query("ROLLBACK TO SAVEPOINT pedido_insert_with_trailer");
+        await client.query("RELEASE SAVEPOINT pedido_insert_with_trailer");
         // Fallback: insert without remolque columns if migration not run
         if (colErr.code === '42703') {
+          logger.warn("Pedidos: esquema sin columnas de remolque; se usa alta compatible.");
           const r = await client.query(`
             INSERT INTO pedidos (numero, cliente_id, ruta_id, vehiculo_id, chofer_id,
               origen, destino, fecha_pedido, fecha_carga, hora_carga, fecha_entrega,
@@ -7658,10 +8152,18 @@ router.post("/", GERENTE_O_TRAFICO,
       const origenPaisFallback = normalizePaisPedido(req.body.origen_pais || req.body.pais_origen || "España");
       const destinoPaisFallback = normalizePaisPedido(req.body.destino_pais || req.body.pais_destino || "España");
       const puntosCargaNorm = req.body.puntos_carga !== undefined
-        ? normalizePedidoStopsForStorage(req.body.puntos_carga, origen, origenPaisFallback, req.body.origen_provincia || req.body.provincia_origen || "")
+        ? normalizePedidoStopsForStorage(req.body.puntos_carga, origen, origenPaisFallback, req.body.origen_provincia || req.body.provincia_origen || "", {
+            fecha: fechaCargaNorm || "",
+            hora: horaCargaNorm || "",
+            ventana: req.body.ventana_carga || "",
+          })
         : null;
       const puntosDescargaNorm = req.body.puntos_descarga !== undefined
-        ? normalizePedidoStopsForStorage(req.body.puntos_descarga, destino, destinoPaisFallback, req.body.destino_provincia || req.body.provincia_destino || "")
+        ? normalizePedidoStopsForStorage(req.body.puntos_descarga, destino, destinoPaisFallback, req.body.destino_provincia || req.body.provincia_destino || "", {
+            fecha: fechaDescargaNorm || fechaEntregaNorm || "",
+            hora: horaDescargaNorm || "",
+            ventana: req.body.ventana_descarga || "",
+          })
         : null;
       const geoPedido = derivePedidoGeoFromStops(puntosCargaNorm || [], puntosDescargaNorm || [], {
         ...req.body,
@@ -7682,6 +8184,7 @@ router.post("/", GERENTE_O_TRAFICO,
         km_ruta: req.body.km_ruta ?? null,
         km_vacio: req.body.km_vacio ?? null,
         volumen: req.body.volumen ?? null,
+        metros_lineales: req.body.metros_lineales ?? null,
         tipo_precio: req.body.tipo_precio ?? "viaje",
         cantidad: req.body.cantidad !== undefined ? (req.body.cantidad ?? null) : undefined,
         precio_unitario: req.body.precio_unitario ?? null,
@@ -7701,6 +8204,10 @@ router.post("/", GERENTE_O_TRAFICO,
         referencia_cliente: req.body.referencia_cliente ?? null,
         matricula_colaborador: req.body.matricula_colaborador !== undefined ? (req.body.matricula_colaborador ? String(req.body.matricula_colaborador).trim().toUpperCase() : null) : undefined,
         remolque_matricula_colaborador: req.body.remolque_matricula_colaborador !== undefined ? (req.body.remolque_matricula_colaborador ? String(req.body.remolque_matricula_colaborador).trim().toUpperCase() : null) : undefined,
+        conductor_efectivo_nombre: req.body.conductor_efectivo_nombre !== undefined ? String(req.body.conductor_efectivo_nombre || "").trim().slice(0, 120) || null : undefined,
+        conductor_efectivo_apellidos: req.body.conductor_efectivo_apellidos !== undefined ? String(req.body.conductor_efectivo_apellidos || "").trim().slice(0, 180) || null : undefined,
+        conductor_efectivo_dni: req.body.conductor_efectivo_dni !== undefined ? String(req.body.conductor_efectivo_dni || "").trim().toUpperCase().slice(0, 40) || null : undefined,
+        conductor_efectivo_telefono: req.body.conductor_efectivo_telefono !== undefined ? String(req.body.conductor_efectivo_telefono || "").trim().slice(0, 40) || null : undefined,
         pendiente_completar: req.body.pendiente_completar ?? false,
         aviso_completar: req.body.aviso_completar ?? null,
         tipo_carga: req.body.tipo_carga ?? null,
@@ -7708,6 +8215,7 @@ router.post("/", GERENTE_O_TRAFICO,
         grupaje_id: req.body.grupaje_id ?? null,
         carga_lateral: req.body.carga_lateral ?? false,
         carga_trasera: req.body.carga_trasera ?? false,
+        carga_techo: req.body.carga_techo ?? false,
         intercambio_palets: req.body.intercambio_palets ?? false,
         requiere_cinchas: req.body.requiere_cinchas ?? true,
         coste_gasoil: req.body.coste_gasoil !== undefined ? (req.body.coste_gasoil ?? 0) : undefined,
@@ -7720,8 +8228,16 @@ router.post("/", GERENTE_O_TRAFICO,
         minimo_unidades: req.body.minimo_unidades !== undefined ? (parseLocaleNumber(req.body.minimo_unidades) || 0) : undefined,
         importe_paralizacion: req.body.importe_paralizacion !== undefined ? (parseLocaleNumber(req.body.importe_paralizacion) || 0) : undefined,
         paralizacion_horas: req.body.paralizacion_horas !== undefined ? (parseLocaleNumber(req.body.paralizacion_horas) || 0) : undefined,
-        puntos_carga: puntosCargaNorm !== null ? JSON.stringify(puntosCargaNorm) : undefined,
-        puntos_descarga: puntosDescargaNorm !== null ? JSON.stringify(puntosDescargaNorm) : undefined,
+        puntos_carga: puntosCargaNorm !== null ? JSON.stringify(mergePrimaryStopScheduleForStorage(puntosCargaNorm, {
+          fecha: fechaCargaNorm || "",
+          hora: horaCargaNorm || "",
+          ventana: req.body.ventana_carga || "",
+        })) : undefined,
+        puntos_descarga: puntosDescargaNorm !== null ? JSON.stringify(mergePrimaryStopScheduleForStorage(puntosDescargaNorm, {
+          fecha: fechaDescargaNorm || fechaEntregaNorm || "",
+          hora: horaDescargaNorm || "",
+          ventana: req.body.ventana_descarga || "",
+        })) : undefined,
       };
       const requestedRutaId = normalizePedidoUuid(req.body.ruta_id);
       let rutaIncompatibleDesvinculada = false;
@@ -7761,6 +8277,7 @@ router.post("/", GERENTE_O_TRAFICO,
         pedido = updatedPedido || pedido;
       }
       pedido = await confirmarPedidoPorAsignacionSiProcede(pedido, empresaId, req.user, client);
+      await sincronizarConjuntoChoferDesdePedido(client, pedido, empresaId);
       if (rutaIncompatibleDesvinculada) {
         await logPedidoEvento(pedido.id, empresaId, "ruta.incompatible_desvinculada", {
           ruta_id_solicitada: requestedRutaId,
@@ -7832,6 +8349,12 @@ router.post("/", GERENTE_O_TRAFICO,
         .catch(e => logger.warn("No se pudo notificar planificacion ida-retorno:", e.message));
     }
     } catch (e) {
+      if (e.code === "23505" && String(e.constraint || "").includes("pedidos_numero")) {
+        return res.status(409).json({
+          error: "No se pudo reservar el numero del pedido. Actualiza la pantalla y vuelve a guardarlo.",
+          code: "PEDIDO_NUMERO_DUPLICADO",
+        });
+      }
       if (e.code === "22001") {
         return res.status(400).json({ error: "Alguno de los textos del pedido supera la longitud permitida. Revisa ventanas horarias, matriculas o referencias." });
       }
@@ -7880,10 +8403,10 @@ router.patch("/:id/estado",
     await assertUnicoViajeActivoChofer({ pedido: rows[0], empresaId, estadoDestino: estado });
 
     await ensureColaboradorWorkflowSchema();
-    const incidencia = typeof req.body.incidencia === "string" ? req.body.incidencia.trim() : "";
-    const incidenciaTipo = typeof req.body.incidencia_tipo === "string" && req.body.incidencia_tipo.trim()
-      ? req.body.incidencia_tipo.trim().slice(0, 80)
-      : "operativa";
+    const actorUsuarioId = optionalUuid(req.user?.id);
+    const incidenciaData = buildPedidoIncidenciaInput(req.body || {}, rows[0], req.user?.rol);
+    const incidencia = incidenciaData.descripcion;
+    const incidenciaTipo = incidenciaData.tipo;
     const motivoCancelacion = typeof req.body.motivo_cancelacion === "string"
       ? req.body.motivo_cancelacion.trim()
       : typeof req.body.motivo === "string" ? req.body.motivo.trim() : "";
@@ -7894,20 +8417,34 @@ router.patch("/:id/estado",
         return res.status(400).json({ error: "Indica el motivo de cancelacion para cancelar este pedido.", code: "MOTIVO_CANCELACION_REQUERIDO" });
       }
     }
-    if (estado === "incidencia" && incidencia) {
-      await db.query(
-        `UPDATE pedidos
-         SET estado=$1,
-             incidencia_tipo=$5,
-             incidencia_descripcion=$2,
-             incidencia_origen=$6,
-             incidencia_creada_por=$7,
-             incidencia_creada_at=NOW(),
-             incidencia_automatica=false,
-             notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $2))
-         WHERE id=$3 AND empresa_id=$4`,
-        [estado, `INCIDENCIA: ${incidencia}`, req.params.id, empresaId, incidenciaTipo, req.user?.rol === "chofer" ? "chofer" : "trafico", req.user?.id || null]
-      );
+    if (estado === "incidencia") {
+      const incidenciaNota = `INCIDENCIA: ${incidenciaData.label} - ${incidencia}`;
+      try {
+        await db.query(
+          `UPDATE pedidos
+           SET estado=$1,
+               incidencia_tipo=$5,
+               incidencia_descripcion=$2,
+               incidencia_origen=$6,
+               incidencia_creada_por=$7,
+               incidencia_creada_at=NOW(),
+               incidencia_automatica=false,
+               notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $8))
+           WHERE id=$3 AND empresa_id=$4`,
+          [estado, incidencia, req.params.id, empresaId, incidenciaTipo, incidenciaData.origen, actorUsuarioId, incidenciaNota]
+        );
+      } catch (incidenciaError) {
+        const compatibilityCodes = new Set(["42703", "42804", "22P02"]);
+        if (!compatibilityCodes.has(String(incidenciaError?.code || ""))) throw incidenciaError;
+        logger.warn(`Incidencia guardada en modo compatible para pedido ${req.params.id}: ${incidenciaError.message}`);
+        await db.query(
+          `UPDATE pedidos
+              SET estado=$1,
+                  notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $2))
+            WHERE id=$3 AND empresa_id=$4`,
+          [estado, incidenciaNota, req.params.id, empresaId]
+        );
+      }
     } else if (estado === "cancelado") {
       await db.query(
         `UPDATE pedidos
@@ -7920,7 +8457,7 @@ router.patch("/:id/estado",
                ELSE TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $4::text))
              END
          WHERE id=$5 AND empresa_id=$6`,
-        [estado, motivoCancelacion || null, req.user?.id || null, `CANCELACION: ${motivoCancelacion}`, req.params.id, empresaId]
+        [estado, motivoCancelacion || null, actorUsuarioId, `CANCELACION: ${motivoCancelacion}`, req.params.id, empresaId]
       );
     } else {
       await db.query(
@@ -7941,7 +8478,10 @@ router.patch("/:id/estado",
       estado,
       incidencia: incidencia || null,
       motivo_cancelacion: motivoCancelacion || null,
-    }, req.user?.rol || "usuario", req.user?.id || null);
+    }, req.user?.rol || "usuario", actorUsuarioId)
+      .catch(e => logger.warn("No se pudo registrar la trazabilidad del cambio de estado:", e.message));
+    await notificarClienteEstadoPedido(rows[0], rows[0].estado, estado, actorUsuarioId)
+      .catch(e => logger.warn("No se pudo notificar el estado al cliente:", e.message));
 
     if (estado === "incidencia") {
       const origenIncidencia = req.user?.rol === "chofer" ? "chofer" : "trafico";
@@ -7955,18 +8495,19 @@ router.patch("/:id/estado",
         {
           pedido_id: req.params.id,
           pedido_numero: rows[0].numero || null,
-          origen: origenIncidencia,
+          origen: incidenciaData.origen || origenIncidencia,
           incidencia_tipo: incidenciaTipo,
           incidencia: incidencia || null,
+          incidencia_label: incidenciaData.label,
           ruta: `${rows[0].origen || ""} -> ${rows[0].destino || ""}`,
           dedupe_key: `incidencia:${req.params.id}:${crypto.randomUUID()}`,
         },
-        req.user?.id || null
+        actorUsuarioId
       ).catch(e => logger.warn("No se pudo notificar incidencia de pedido:", e.message));
     }
 
     if (estado === "entregado") {
-      await aplicarAutomatismosEntrega(req.params.id, empresaId, req.user?.id || null, { appBaseUrl: publicBaseUrl(req) });
+      await aplicarAutomatismosEntrega(req.params.id, empresaId, actorUsuarioId, { appBaseUrl: publicBaseUrl(req) });
     }
 
     if (estado === "confirmado" || estado === "entregado") {
@@ -8010,6 +8551,11 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     [req.params.id, empresaId]
   );
   if (!pedidoActualRows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+  try {
+    assertPedidoDateInputs(body || {}, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga", "firma_fecha"]));
+  } catch (dateErr) {
+    return res.status(dateErr.status || 400).json({ error: dateErr.message, field: dateErr.field });
+  }
   if (
     Object.prototype.hasOwnProperty.call(body || {}, "estado") &&
     String(pedidoActualRows[0].estado || "").toLowerCase() === "entregado" &&
@@ -8103,6 +8649,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     peso_kg: body.peso_kg ?? null,
     bultos: body.bultos ?? null,
     volumen: body.volumen ?? null,
+    metros_lineales: body.metros_lineales ?? null,
     importe: body.importe,
     notas: body.notas ?? null,
     km_ruta: body.km_ruta ?? null,
@@ -8125,6 +8672,10 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     referencia_cliente: body.referencia_cliente ?? null,
     matricula_colaborador: body.matricula_colaborador !== undefined ? (body.matricula_colaborador ? String(body.matricula_colaborador).trim().toUpperCase() : null) : undefined,
     remolque_matricula_colaborador: body.remolque_matricula_colaborador !== undefined ? (body.remolque_matricula_colaborador ? String(body.remolque_matricula_colaborador).trim().toUpperCase() : null) : undefined,
+    conductor_efectivo_nombre: body.conductor_efectivo_nombre !== undefined ? String(body.conductor_efectivo_nombre || "").trim().slice(0, 120) || null : undefined,
+    conductor_efectivo_apellidos: body.conductor_efectivo_apellidos !== undefined ? String(body.conductor_efectivo_apellidos || "").trim().slice(0, 180) || null : undefined,
+    conductor_efectivo_dni: body.conductor_efectivo_dni !== undefined ? String(body.conductor_efectivo_dni || "").trim().toUpperCase().slice(0, 40) || null : undefined,
+    conductor_efectivo_telefono: body.conductor_efectivo_telefono !== undefined ? String(body.conductor_efectivo_telefono || "").trim().slice(0, 40) || null : undefined,
     pendiente_completar: body.pendiente_completar ?? false,
     aviso_completar: body.aviso_completar ?? null,
     tipo_carga: body.tipo_carga ?? null,
@@ -8132,9 +8683,22 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     grupaje_id: body.grupaje_id ?? null,
     carga_lateral: body.carga_lateral ?? false,
     carga_trasera: body.carga_trasera ?? false,
+    carga_techo: body.carga_techo ?? false,
     intercambio_palets: body.intercambio_palets ?? false,
     requiere_cinchas: body.requiere_cinchas ?? true,
     estado: body.estado ?? undefined,
+    incidencia_tipo: body.estado === "incidencia" || body.incidencia_tipo !== undefined || body.incidencia_descripcion !== undefined || body.incidencia !== undefined
+      ? buildPedidoIncidenciaInput(body || {}, pedidoActualRows[0], req.user?.rol).tipo
+      : undefined,
+    incidencia_descripcion: body.estado === "incidencia" || body.incidencia_descripcion !== undefined || body.incidencia !== undefined
+      ? buildPedidoIncidenciaInput(body || {}, pedidoActualRows[0], req.user?.rol).descripcion
+      : undefined,
+    incidencia_origen: body.estado === "incidencia"
+      ? buildPedidoIncidenciaInput(body || {}, pedidoActualRows[0], req.user?.rol).origen
+      : undefined,
+    incidencia_creada_por: body.estado === "incidencia" ? optionalUuid(req.user?.id) : undefined,
+    incidencia_creada_at: body.estado === "incidencia" ? new Date() : undefined,
+    incidencia_automatica: body.estado === "incidencia" ? false : undefined,
     // Costes reales por viaje
     coste_gasoil:  body.coste_gasoil  !== undefined ? (body.coste_gasoil  ?? 0) : undefined,
     coste_peajes:  body.coste_peajes  !== undefined ? (body.coste_peajes  ?? 0) : undefined,
@@ -8153,8 +8717,18 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     minimo_unidades:        body.minimo_unidades        !== undefined ? (parseLocaleNumber(body.minimo_unidades) || 0) : undefined,
     importe_paralizacion:   body.importe_paralizacion   !== undefined ? (parseLocaleNumber(body.importe_paralizacion) || 0) : undefined,
     paralizacion_horas:     body.paralizacion_horas     !== undefined ? (parseLocaleNumber(body.paralizacion_horas) || 0) : undefined,
-    puntos_carga:           body.puntos_carga           !== undefined ? JSON.stringify(puntosCargaNormUpdate) : undefined,
-    puntos_descarga:        body.puntos_descarga        !== undefined ? JSON.stringify(puntosDescargaNormUpdate) : undefined,
+    puntos_carga:           body.puntos_carga           !== undefined ? JSON.stringify(mergePrimaryStopScheduleForStorage(puntosCargaNormUpdate, {
+      fecha: body.fecha_carga !== undefined ? normalizePedidoDate(body.fecha_carga) : normalizePedidoDate(pedidoActualRows[0].fecha_carga),
+      hora: body.hora_carga !== undefined ? normalizePedidoTime(body.hora_carga) : (pedidoActualRows[0].hora_carga || ""),
+      ventana: body.ventana_carga !== undefined ? body.ventana_carga || "" : (pedidoActualRows[0].ventana_carga || ""),
+    })) : undefined,
+    puntos_descarga:        body.puntos_descarga        !== undefined ? JSON.stringify(mergePrimaryStopScheduleForStorage(puntosDescargaNormUpdate, {
+      fecha: body.fecha_descarga !== undefined
+        ? normalizePedidoDate(body.fecha_descarga)
+        : (body.fecha_entrega !== undefined ? normalizePedidoDate(body.fecha_entrega) : normalizePedidoDate(pedidoActualRows[0].fecha_descarga || pedidoActualRows[0].fecha_entrega)),
+      hora: body.hora_descarga !== undefined ? normalizePedidoTime(body.hora_descarga) : (pedidoActualRows[0].hora_descarga || ""),
+      ventana: body.ventana_descarga !== undefined ? body.ventana_descarga || "" : (pedidoActualRows[0].ventana_descarga || ""),
+    })) : undefined,
   };
   const inferPayload = { ...pedidoActualRows[0] };
   for (const [key, value] of Object.entries(fieldMap)) {
@@ -8214,7 +8788,15 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
       (k === "ruta_id" && rutaIncompatibleDesvinculada) ||
       (k === "km_ruta" && normalizedFieldMap.km_ruta && !body.km_ruta) ||
       (k === "cantidad" && normalizedFieldMap.cantidad !== fieldMap.cantidad) ||
-      (k === "minimo_unidades" && normalizedFieldMap.minimo_unidades !== fieldMap.minimo_unidades)
+      (k === "minimo_unidades" && normalizedFieldMap.minimo_unidades !== fieldMap.minimo_unidades) ||
+      (String(body.estado || "").toLowerCase() === "incidencia" && [
+        "incidencia_tipo",
+        "incidencia_descripcion",
+        "incidencia_origen",
+        "incidencia_creada_por",
+        "incidencia_creada_at",
+        "incidencia_automatica",
+      ].includes(k))
     ))
     .map(([k, v]) => [k, normalizePedidoValue(k, v)]);
   if (fields.length === 0) return res.status(400).json({ error: "No hay campos para actualizar" });
@@ -8232,6 +8814,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     let pedidoActualizado = rows[0];
     pedidoActualizado = await limpiarPendienteCompletarSiProcede(pedidoActualizado, empresaId, req.user);
     pedidoActualizado = await confirmarPedidoPorAsignacionSiProcede(pedidoActualizado, empresaId, req.user);
+    if (assignmentFieldsTouched) await sincronizarConjuntoChoferDesdePedido(db, pedidoActualizado, empresaId);
     if (assignmentFieldsTouched && pedidoAntesAsignacion) {
       const changed = ["vehiculo_id", "chofer_id", "chofer2_id", "remolque_id", "colaborador_id"].some(
         k => String(pedidoAntesAsignacion[k] || "") !== String(pedidoActualizado[k] || "")
@@ -8248,6 +8831,8 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
       await logPedidoEvento(pedidoActualizado.id, empresaId, "pedido.editado_estado", {
         estado: pedidoActualizado.estado,
       }, req.user?.rol || "usuario", req.user?.id || null);
+      await notificarClienteEstadoPedido(pedidoActualRows[0], pedidoActualRows[0].estado, pedidoActualizado.estado, req.user?.id || null)
+        .catch(error => logger.warn("No se pudo notificar el estado al cliente:", error.message));
     }
     const cambiosPedido = summarizePedidoChanges(pedidoActualRows[0], pedidoActualizado, fields.map(([k]) => k));
     if (cambiosPedido.length) {
@@ -8300,6 +8885,8 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
         await logPedidoEvento(updatedPedido.id, empresaId, "pedido.editado_estado", {
           estado: updatedPedido.estado,
         }, req.user?.rol || "usuario", req.user?.id || null);
+        await notificarClienteEstadoPedido(pedidoActualRows[0], pedidoActualRows[0].estado, updatedPedido.estado, req.user?.id || null)
+          .catch(error => logger.warn("No se pudo notificar el estado al cliente:", error.message));
       }
       const cambiosPedido = summarizePedidoChanges(pedidoActualRows[0], updatedPedido, fields.map(([k]) => k));
       if (cambiosPedido.length) {
@@ -8484,6 +9071,7 @@ router.get("/:id/carta-porte", async (req, res) => {
       perfilEmpresa.provincia,
       perfilEmpresa.pais,
     ].filter(Boolean).join(", ");
+    const documentosAnexos = await getPedidoDocumentoControlAnexos(req.params.id, empresaId).catch(() => []);
 
     res.json({
       ...rows[0],
@@ -8501,6 +9089,8 @@ router.get("/:id/carta-porte", async (req, res) => {
       emp_tel: perfilEmpresa.telefono || "",
       emp_email: perfilEmpresa.email || "",
       emp_logo: "",
+      documentos_anexos: documentosAnexos,
+      albaranes_adjuntos_count: documentosAnexos.length,
     });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -8644,9 +9234,7 @@ router.post("/:id/firma", async (req, res) => {
       destinatario: "firma_destinatario = $1, firma_nombre = $2, firma_fecha = $5, firma_hash = $7",
     }[firmaRol];
 
-    // Postgres rechaza el bind si se envian mas parametros que placeholders:
-    // $7 (hash) solo existe en el SQL del rol destinatario.
-    const updateParams = [
+    const firmaParams = [
       firmaImagen,
       evidencia.firmante.nombre || defaultNombre,
       req.params.id,
@@ -8654,7 +9242,8 @@ router.post("/:id/firma", async (req, res) => {
       firmadoAt,
       JSON.stringify(evidenciaMulti),
     ];
-    if (firmaRol === "destinatario") updateParams.push(firmaHash);
+    if (firmaRol === "destinatario") firmaParams.push(firmaHash);
+
     const { rows } = await db.query(`
       UPDATE pedidos
       SET ${roleSetSql},
@@ -8662,7 +9251,7 @@ router.post("/:id/firma", async (req, res) => {
           updated_at = NOW()
       WHERE id = $3 AND empresa_id = $4
       RETURNING id, numero, firma_fecha, firma_nombre, firma_hash, firma_cargador_fecha, firma_cargador_nombre, firma_chofer_fecha, firma_chofer_nombre, firma_evidencia
-    `, updateParams);
+    `, firmaParams);
 
     await logPedidoEvento(req.params.id, empresaId, `firma.${firmaRol}_registrada`, {
       firma_rol: firmaRol,

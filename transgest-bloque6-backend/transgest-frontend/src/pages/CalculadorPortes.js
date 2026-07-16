@@ -48,20 +48,16 @@ export default function CalculadorPortes() {
     if (!origen.trim() || !destino.trim()) return;
     setCalcKm(true);
     try {
-      // Cálculo robusto vía backend: caché + geocoder externo + diccionario
-      // local de respaldo + OSRM con estimación por línea recta si falla.
-      const data = await calcularDistanciaGeo({ origen: origen.trim(), destino: destino.trim() });
-      const kmCalc = Number(data?.km);
-      if (data?.ok && Number.isFinite(kmCalc) && kmCalc > 0) {
-        setKm(Math.round(kmCalc));
-        if (data.source === "estimacion") {
-          notify("Distancia estimada (el enrutador de carretera no respondió). Revisa el valor.", "warning");
-        }
-      } else {
-        notify(data?.error || "No se encontró alguna población. Introdúcelas manualmente.", "warning");
+      const route = await calcularDistanciaGeo(origen.trim(), destino.trim());
+      const calculatedKm = Number(route?.km);
+      if (!route?.ok || !Number.isFinite(calculatedKm) || calculatedKm <= 0) {
+        notify("No se pudo calcular una distancia fiable. Revisa las poblaciones.", "warning");
+        return;
       }
-    } catch {
-      notify("No se pudo calcular la distancia. Introduce los kilómetros manualmente.", "error");
+      setKm(Math.round(calculatedKm));
+      if (route.warning) notify(route.warning, route.provider === "estimate" ? "warning" : "info");
+    } catch (e) {
+      notify(e.message || "No se pudo calcular la distancia.", "error");
     } finally {
       setCalcKm(false);
     }

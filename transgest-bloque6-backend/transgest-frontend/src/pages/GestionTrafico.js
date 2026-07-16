@@ -573,6 +573,41 @@ function findLinkedChoferForVehiculo(vehiculo, choferes = []) {
   ) || null;
 }
 
+function buildTrafficAssignment(pedido, vehiculo, fechaCarga, choferes = []) {
+  const linkedChoferRaw = findLinkedChoferForVehiculo(vehiculo, choferes);
+  const linkedChofer = isChoferAsignable(linkedChoferRaw) ? linkedChoferRaw : null;
+  const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
+  const choferId = hasCollaborator
+    ? (pedido?.chofer_id || null)
+    : (linkedChofer?.id || vehiculo?.chofer_id || pedido?.chofer_id || null);
+  const remolqueId = vehiculo?.remolque_id || pedido?.remolque_id || null;
+  const estadoActual = String(pedido?.estado || "pendiente").toLowerCase();
+
+  return {
+    linkedChofer,
+    payload: {
+      vehiculo_id: vehiculo?.id || null,
+      chofer_id: choferId,
+      remolque_id: remolqueId,
+      fecha_carga: fechaCarga,
+      estado: estadoActual === "pendiente" ? "confirmado" : estadoActual,
+    },
+  };
+}
+
+function buildTrafficAssignmentLocalPatch(actualizado, payload, vehiculo, linkedChofer) {
+  const choferNombre = linkedChofer
+    ? `${linkedChofer.nombre || ""} ${linkedChofer.apellidos || ""}`.replace(/\s+/g, " ").trim()
+    : String(vehiculo?.chofer_nombre || "").trim();
+  return {
+    ...(actualizado || {}),
+    ...payload,
+    vehiculo_matricula: vehiculo?.matricula || actualizado?.vehiculo_matricula || null,
+    remolque_matricula: vehiculo?.remolque_matricula || actualizado?.remolque_matricula || null,
+    ...(choferNombre ? { chofer_nombre: choferNombre } : {}),
+  };
+}
+
 function getPedidoStateValidationIssues(pedido, targetEstado = "") {
   const estado = String(targetEstado || pedido?.estado || "").toLowerCase();
   const issues = [];
@@ -3856,14 +3891,14 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     const p = pedidos.find(x => String(x.id) === String(pedido_id));
     if (!p || pedidoTieneFacturaFinal(p)) return;
     const vehiculo = vehiculos.find(v => String(v.id) === String(vehiculo_id));
-    const linkedChoferRaw = findLinkedChoferForVehiculo(vehiculo, choferes);
-    const linkedChofer = isChoferAsignable(linkedChoferRaw) ? linkedChoferRaw : null;
-    const nextForm = {
-      ...p,
-      vehiculo_id,
-      fecha_carga: dia.toISOString().slice(0,10),
-      chofer_id: p.colaborador_id || p.colaborador_nombre ? (p.chofer_id || "") : (p.chofer_id || linkedChofer?.id || ""),
-    };
+    if (!vehiculo) return;
+    const { payload: assignmentPayload, linkedChofer } = buildTrafficAssignment(
+      p,
+      vehiculo,
+      dia.toISOString().slice(0,10),
+      choferes
+    );
+    const nextForm = { ...p, ...assignmentPayload };
     if (
       String(p.vehiculo_id || "") === String(nextForm.vehiculo_id || "") &&
       toDateInputValue(p.fecha_carga || p.fecha_pedido) === nextForm.fecha_carga &&
@@ -3916,28 +3951,27 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       if (!seguir) return;
     }
     try {
+      let actualizado;
       try {
-        await editarPedido(p.id, nextForm);
+        actualizado = await editarPedido(p.id, assignmentPayload);
       } catch (err) {
         if (!isFestivoConfirmError(err) || !(await confirmFestivoDestino(err))) throw err;
-        await editarPedido(p.id, { ...nextForm, festivo_confirmado: true });
+        actualizado = await editarPedido(p.id, { ...assignmentPayload, festivo_confirmado: true });
         notify("Asignacion aceptada con aviso de festivo. Gerencia queda notificada.", "success");
       }
-      syncPedidoLocal(p.id, {
-        vehiculo_id: nextForm.vehiculo_id,
-        chofer_id: nextForm.chofer_id,
-        fecha_carga: nextForm.fecha_carga,
-      });
+      syncPedidoLocal(
+        p.id,
+        buildTrafficAssignmentLocalPatch(actualizado, assignmentPayload, vehiculo, linkedChofer)
+      );
       const currentIds = getTrips(vehiculo_id, dia).map(x => String(x.id)).filter(id => id !== String(p.id));
       const nextIds = [...currentIds, String(p.id)];
-      setCellTripOrder(vehiculo_id, nextForm.fecha_carga, nextIds);
-      persistCellTripOrder(vehiculo_id, nextForm.fecha_carga, nextIds);
+      setCellTripOrder(vehiculo_id, assignmentPayload.fecha_carga, nextIds);
+      persistCellTripOrder(vehiculo_id, assignmentPayload.fecha_carga, nextIds);
       broadcastPedidosChanged({ pedido_id: p.id, source: "gestion-trafico-dnd" });
       notify(
         `${p.numero || "Pedido"} asignado a ${vehiculo?.matricula || "vehiculo"}${linkedChofer && !p.chofer_id ? ` con ${linkedChofer.nombre || ""} ${linkedChofer.apellidos || ""}`.trim().replace(/\s+/g, " ") : ""}.`,
         "success"
       );
-      cargar();
     } catch(err) { notify(err.message, "error"); }
   }
 
@@ -3979,27 +4013,25 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     const pedido = pedidos.find(p => String(p.id) === String(addTripExistingId));
     const vehiculo = vehiculos.find(v => String(v.id) === String(addTripCell.vehiculo_id));
     if (!pedido || !vehiculo) return;
-    const linkedChoferRaw = findLinkedChoferForVehiculo(vehiculo, choferes);
-    const linkedChofer = isChoferAsignable(linkedChoferRaw) ? linkedChoferRaw : null;
-    const payload = {
-      ...pedido,
-      vehiculo_id: vehiculo.id,
-      fecha_carga: addTripCell.fecha,
-      chofer_id: pedido.chofer_id || linkedChofer?.id || "",
-    };
+    const { payload, linkedChofer } = buildTrafficAssignment(
+      pedido,
+      vehiculo,
+      addTripCell.fecha,
+      choferes
+    );
     setAddTripSaving(true);
     try {
+      let actualizado;
       try {
-        await editarPedido(pedido.id, payload);
+        actualizado = await editarPedido(pedido.id, payload);
       } catch (err) {
         if (!isFestivoConfirmError(err) || !(await confirmFestivoDestino(err))) throw err;
-        await editarPedido(pedido.id, { ...payload, festivo_confirmado: true });
+        actualizado = await editarPedido(pedido.id, { ...payload, festivo_confirmado: true });
       }
-      syncPedidoLocal(pedido.id, {
-        vehiculo_id: payload.vehiculo_id,
-        chofer_id: payload.chofer_id,
-        fecha_carga: payload.fecha_carga,
-      });
+      syncPedidoLocal(
+        pedido.id,
+        buildTrafficAssignmentLocalPatch(actualizado, payload, vehiculo, linkedChofer)
+      );
       const day = new Date(`${addTripCell.fecha}T00:00:00`);
       const currentIds = getTrips(vehiculo.id, day).map(x => String(x.id)).filter(id => id !== String(pedido.id));
       const nextIds = [...currentIds, String(pedido.id)];
@@ -4009,7 +4041,6 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       notify(`${pedido.numero || "Viaje"} anadido a ${vehiculo.matricula || "la celda"}.`, "success");
       setAddTripCell(null);
       setAddTripExistingId("");
-      cargar();
     } catch (err) {
       notify(err.message || "No se pudo anadir el viaje.", "error");
     } finally {

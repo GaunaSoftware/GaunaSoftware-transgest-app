@@ -44,9 +44,34 @@ function isMapsUrl(url) {
   return /^https?:\/\/[^\s]*(google\.[a-z.]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl|g\.co\/)/i.test(String(url || "").trim());
 }
 
+// Area de operacion realista (Peninsula, Baleares, Canarias, Portugal, sur de
+// Francia, norte de Marruecos). Guarda de seguridad: Google devuelve un mapa por
+// defecto DISTINTO segun la IP del servidor, asi que al hacer scraping del cuerpo
+// podemos toparnos con una coordenada de otra region (p.ej. Los Angeles desde una
+// IP de EE.UU.). Descartamos lo que caiga fuera para no calcular km absurdos.
+function withinOperatingArea(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 27 && lat <= 55 && lng >= -19 && lng <= 20;
+}
+
+// Anade contexto España (gl/hl) a una URL de Google Maps para que la resolucion
+// del sitio no dependa de la IP del servidor.
+function withEsContext(u) {
+  try {
+    const url = new URL(u);
+    if (/(^|\.)google\./i.test(url.hostname) && url.pathname.includes("/maps")) {
+      if (!url.searchParams.has("gl")) url.searchParams.set("gl", "ES");
+      if (!url.searchParams.has("hl")) url.searchParams.set("hl", "es");
+    }
+    return url.toString();
+  } catch {
+    return u;
+  }
+}
+
 // Extrae coords del CUERPO de una pagina de Google Maps. Prioriza el center= del
 // og:image (staticmap), que es el centro real del sitio, para no coger por error
-// una coordenada de encuadre/limite que tambien aparece en el HTML.
+// una coordenada de encuadre/limite que tambien aparece en el HTML. Aplica la
+// guarda de area para no devolver un mapa por defecto de otra region.
 function coordsFromMapsBody(body) {
   const b = String(body || "");
   if (!b) return null;
@@ -54,12 +79,12 @@ function coordsFromMapsBody(body) {
   if (centerMatch) {
     const lat = Number(centerMatch[1]);
     const lng = Number(centerMatch[2]);
-    if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0)) {
-      return { lat, lng };
-    }
+    if (withinOperatingArea(lat, lng) && !(lat === 0 && lng === 0)) return { lat, lng };
   }
   // Respaldo: URL canonica @lat,lng o el patron !3d!4d de los datos del sitio.
-  return matchCoords(b);
+  const fallback = matchCoords(b);
+  if (fallback && withinOperatingArea(fallback.lat, fallback.lng)) return fallback;
+  return null;
 }
 
 // Enlaces cortos que hay que expandir (no llevan coords inline).
@@ -87,11 +112,14 @@ async function expandForCoords(startUrl) {
   const timer = setTimeout(() => controller.abort(), Number(process.env.MAPS_LINK_TIMEOUT_MS || 6000));
   try {
     for (let hop = 0; hop < 6; hop++) {
-      const res = await fetch(current, {
+      const res = await fetch(withEsContext(current), {
         method: "GET",
         redirect: "manual",
         signal: controller.signal,
-        headers: { "User-Agent": "TransGestTMS/1.0 maps-resolver (app.gauna.es)" },
+        headers: {
+          "User-Agent": "TransGestTMS/1.0 maps-resolver (app.gauna.es)",
+          "Accept-Language": "es-ES,es;q=0.9",
+        },
       });
       const loc = res.headers.get("location");
       if (res.status >= 300 && res.status < 400 && loc) {

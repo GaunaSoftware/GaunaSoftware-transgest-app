@@ -772,7 +772,11 @@ async function notificarGestionSolicitudCliente(req, solicitud, tipoEvento = "so
         ? { tipo: "portal_cliente_reprogramacion", titulo: "Nueva propuesta de fecha", mensaje: solicitud.respuesta || `Trafico ha propuesto una nueva fecha para ${route}.` }
         : tipoEvento === "solicitud.precio.propuesto"
           ? { tipo: "portal_cliente_precio", titulo: "Nueva propuesta economica", mensaje: solicitud.respuesta || `Trafico ha propuesto un precio para ${route}.` }
-          : { tipo: "portal_cliente_respuesta", titulo: "Respuesta a tu solicitud", mensaje: solicitud.respuesta || `Trafico ha actualizado tu solicitud ${route}.` };
+          : tipoEvento === "solicitud.propuesta"
+            ? { tipo: "portal_cliente_propuesta_viaje", titulo: "Propuesta de viaje", mensaje: solicitud.respuesta || `Trafico te ha propuesto el viaje ${route}. Revisalo y aceptalo o rechazalo.` }
+            : tipoEvento === "solicitud.mensaje"
+              ? { tipo: "portal_cliente_mensaje", titulo: "Nuevo mensaje de trafico", mensaje: solicitud.respuesta || `Trafico te ha escrito sobre ${route}.` }
+              : { tipo: "portal_cliente_respuesta", titulo: "Respuesta a tu solicitud", mensaje: solicitud.respuesta || `Trafico ha actualizado tu solicitud ${route}.` };
   return notificarUsuariosCliente({
     empresa_id: empresaId(req),
     cliente_id: solicitud.cliente_id,
@@ -786,6 +790,29 @@ async function notificarGestionSolicitudCliente(req, solicitud, tipoEvento = "so
     },
     created_by: req.user?.id || null,
   });
+}
+
+// Avisa a la empresa (gerencia/trafico/administrativo) de un evento de la
+// solicitud iniciado por el cliente (aceptacion, rechazo, mensaje).
+async function notificarEmpresaSolicitud(req, { titulo, mensaje, solicitud_id, pedido_id = null }) {
+  const { rows } = await db.query(
+    `SELECT id
+       FROM usuarios
+      WHERE empresa_id=$1
+        AND activo IS DISTINCT FROM false
+        AND rol::text IN ('gerente','trafico','administrativo')
+      LIMIT 20`,
+    [empresaId(req)]
+  ).catch(() => ({ rows: [] }));
+  await Promise.all(rows.map(u => crearNotificacion({
+    empresa_id: empresaId(req),
+    usuario_id: u.id,
+    tipo: "portal_cliente_solicitud",
+    titulo,
+    mensaje,
+    data: { solicitud_id, pedido_id, view: "solicitudes" },
+    created_by: req.user?.id || null,
+  }).catch(() => null)));
 }
 
 async function notificarSolicitudIntegracion(req, detalle = {}) {
@@ -2371,6 +2398,145 @@ router.post("/solicitudes/:id/cancelar", requireCliente, asyncRoute(async (req, 
   res.status(result.status).json(result.body);
 }));
 
+// El cliente ACEPTA una propuesta de viaje: confirma el pedido pendiente asociado
+// y avisa a la empresa. La solicitud pasa a convertida.
+router.post("/solicitudes/:id/aceptar", requireCliente, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  let result;
+  await db.transaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT * FROM portal_solicitudes_cliente
+        WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3 FOR UPDATE`,
+      [req.params.id, empresaId(req), req.user.cliente_id]
+    );
+    const sol = rows[0];
+    if (!sol) { result = { status: 404, body: { error: "Solicitud no encontrada" } }; return; }
+    if (String(sol.estado || "").toLowerCase() !== "propuesta") {
+      result = { status: 409, body: { error: "Esta solicitud no esta pendiente de tu aceptacion." } }; return;
+    }
+    let pedido = null;
+    if (sol.pedido_id) {
+      const pr = await client.query(
+        `UPDATE pedidos SET estado='confirmado', updated_at=NOW()
+          WHERE id=$1 AND empresa_id=$2 AND estado::text='pendiente'
+          RETURNING id, numero, estado::text AS estado`,
+        [sol.pedido_id, empresaId(req)]
+      );
+      pedido = pr.rows[0] || null;
+    }
+    const updated = await client.query(
+      `UPDATE portal_solicitudes_cliente
+          SET estado='convertida', decision_cliente='aceptada', decision_cliente_at=NOW(),
+              respuesta=$1, updated_at=NOW()
+        WHERE id=$2 AND empresa_id=$3 RETURNING *`,
+      [pedido ? `Viaje aceptado por el cliente. Pedido ${pedido.numero} confirmado.` : "Viaje aceptado por el cliente.", sol.id, empresaId(req)]
+    );
+    await addSolicitudEvento(client, req, sol.id, "solicitud.aceptada.cliente", {
+      pedido_id: sol.pedido_id || null, pedido_numero: pedido?.numero || null, estado_pedido: pedido?.estado || "confirmado",
+    });
+    result = { status: 200, body: { ok: true, solicitud: updated.rows[0], pedido }, sol };
+  });
+  if (result?.status === 200) {
+    await notificarEmpresaSolicitud(req, {
+      titulo: "Viaje aceptado por el cliente",
+      mensaje: `${req.user?.nombre || "El cliente"} ha aceptado el viaje ${result.sol?.origen || ""} -> ${result.sol?.destino || ""}.`,
+      solicitud_id: req.params.id,
+      pedido_id: result.body?.pedido?.id || result.sol?.pedido_id || null,
+    }).catch(() => {});
+  }
+  res.status(result.status).json(result.body);
+}));
+
+// El cliente RECHAZA la propuesta: se cancela el pedido pendiente y la solicitud
+// vuelve a la empresa (pendiente) marcada como rechazada por el cliente.
+router.post("/solicitudes/:id/rechazar", requireCliente, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  const motivo = String(req.body?.motivo || req.body?.mensaje || "").trim().slice(0, 500);
+  let result;
+  await db.transaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT * FROM portal_solicitudes_cliente
+        WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3 FOR UPDATE`,
+      [req.params.id, empresaId(req), req.user.cliente_id]
+    );
+    const sol = rows[0];
+    if (!sol) { result = { status: 404, body: { error: "Solicitud no encontrada" } }; return; }
+    if (String(sol.estado || "").toLowerCase() !== "propuesta") {
+      result = { status: 409, body: { error: "Esta solicitud no esta pendiente de tu aceptacion." } }; return;
+    }
+    if (sol.pedido_id) {
+      await client.query(
+        `UPDATE pedidos SET estado='cancelado', motivo_cancelacion=$1, cancelado_at=NOW(), cancelado_by=$2, updated_at=NOW()
+          WHERE id=$3 AND empresa_id=$4 AND estado::text='pendiente'`,
+        [motivo ? `Rechazado por el cliente: ${motivo}` : "Rechazado por el cliente", req.user?.id || null, sol.pedido_id, empresaId(req)]
+      );
+    }
+    const updated = await client.query(
+      `UPDATE portal_solicitudes_cliente
+          SET estado='pendiente', pedido_id=NULL, decision_cliente='rechazada', decision_cliente_at=NOW(),
+              respuesta=$1, updated_at=NOW()
+        WHERE id=$2 AND empresa_id=$3 RETURNING *`,
+      [motivo ? `Propuesta rechazada por el cliente: ${motivo}` : "Propuesta rechazada por el cliente.", sol.id, empresaId(req)]
+    );
+    await addSolicitudEvento(client, req, sol.id, "solicitud.rechazada.cliente", { motivo: motivo || null });
+    result = { status: 200, body: { ok: true, solicitud: updated.rows[0] }, sol };
+  });
+  if (result?.status === 200) {
+    await notificarEmpresaSolicitud(req, {
+      titulo: "Propuesta rechazada por el cliente",
+      mensaje: `${req.user?.nombre || "El cliente"} ha rechazado la propuesta de ${result.sol?.origen || ""} -> ${result.sol?.destino || ""}.${motivo ? ` Motivo: ${motivo}` : ""}`,
+      solicitud_id: req.params.id,
+    }).catch(() => {});
+  }
+  res.status(result.status).json(result.body);
+}));
+
+// Hilo compartido: el cliente escribe un mensaje visible tambien para la empresa.
+router.post("/solicitudes/:id/mensaje", requireCliente, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  const texto = String(req.body?.mensaje || req.body?.texto || "").trim().slice(0, 2000);
+  if (!texto) return res.status(400).json({ error: "Escribe un mensaje." });
+  let sol = null;
+  await db.transaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT id, origen, destino FROM portal_solicitudes_cliente
+        WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3 LIMIT 1`,
+      [req.params.id, empresaId(req), req.user.cliente_id]
+    );
+    sol = rows[0];
+    if (!sol) return;
+    await addSolicitudEvento(client, req, sol.id, "mensaje.cliente", { mensaje: texto });
+  });
+  if (!sol) return res.status(404).json({ error: "Solicitud no encontrada" });
+  await notificarEmpresaSolicitud(req, {
+    titulo: "Nuevo mensaje del cliente",
+    mensaje: `${req.user?.nombre || "El cliente"} sobre ${sol.origen || ""} -> ${sol.destino || ""}: ${texto.slice(0, 140)}`,
+    solicitud_id: req.params.id,
+  }).catch(() => {});
+  res.json({ ok: true });
+}));
+
+// Hilo compartido: la empresa escribe un mensaje visible tambien para el cliente.
+router.post("/admin/solicitudes/:id/mensaje", requireGestion, asyncRoute(async (req, res) => {
+  await ensureSchema();
+  const texto = String(req.body?.mensaje || req.body?.texto || "").trim().slice(0, 2000);
+  if (!texto) return res.status(400).json({ error: "Escribe un mensaje." });
+  let sol = null;
+  await db.transaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT id, cliente_id, origen, destino FROM portal_solicitudes_cliente
+        WHERE id=$1 AND empresa_id=$2 LIMIT 1`,
+      [req.params.id, empresaId(req)]
+    );
+    sol = rows[0];
+    if (!sol) return;
+    await addSolicitudEvento(client, req, sol.id, "mensaje.empresa", { mensaje: texto });
+  });
+  if (!sol) return res.status(404).json({ error: "Solicitud no encontrada" });
+  await notificarGestionSolicitudCliente(req, { id: sol.id, cliente_id: sol.cliente_id, origen: sol.origen, destino: sol.destino, respuesta: texto }, "solicitud.mensaje").catch(() => {});
+  res.json({ ok: true });
+}));
+
 router.get("/admin/solicitudes/:id/eventos", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
   const solicitud = await db.query(
@@ -2426,6 +2592,12 @@ router.get("/admin/solicitudes/:id/documentos/:docId/descargar", requireGestion,
 router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
   const eid = empresaId(req);
+  // modo "proponer": el pedido se crea PENDIENTE y la solicitud queda en
+  // "propuesta" a la espera de que el cliente lo acepte desde su portal.
+  const modoProponer = req.body?.modo === "proponer" || req.query?.modo === "proponer";
+  const estadoPedidoDestino = modoProponer ? "pendiente" : "confirmado";
+  const estadoSolicitudDestino = modoProponer ? "propuesta" : "convertida";
+  const eventoConversion = modoProponer ? "solicitud.propuesta" : "solicitud.convertida";
   const limpiarInvalidos = req.body?.force === true || req.body?.limpiar_bultos === true || req.body?.limpiar_invalidos === true;
   let result;
   await db.transaction(async (client) => {
@@ -2482,7 +2654,9 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
         [eid, sol.pedido_id || null, sol.id]
       );
       if (pedidoExistente.rows[0]) {
-        const pedidoConfirmado = await client.query(
+        // En modo propuesta NO confirmamos el pedido: se deja pendiente hasta que
+        // el cliente lo acepte.
+        const pedidoConfirmado = modoProponer ? { rows: [] } : await client.query(
           `UPDATE pedidos
               SET estado='confirmado', updated_at=NOW()
             WHERE id=$1 AND empresa_id=$2 AND estado::text='pendiente'
@@ -2493,22 +2667,22 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
         await copySolicitudDocsToPedido(client, { solicitudId: sol.id, pedidoId: pedidoActual.id, empresaId: eid });
         const updatedExisting = await client.query(
           `UPDATE portal_solicitudes_cliente
-              SET estado='convertida',
-                  respuesta=COALESCE(respuesta,$1),
-                  decision_cliente=COALESCE(decision_cliente,'aceptada'),
-                  decision_cliente_at=COALESCE(decision_cliente_at,NOW()),
+              SET estado=$4,
+                  respuesta=$1,
+                  decision_cliente=CASE WHEN $5::text IS NULL THEN decision_cliente ELSE COALESCE(decision_cliente,$5::text) END,
+                  decision_cliente_at=CASE WHEN $5::text IS NULL THEN decision_cliente_at ELSE COALESCE(decision_cliente_at,NOW()) END,
                   updated_at=NOW()
             WHERE id=$2 AND empresa_id=$3
             RETURNING *`,
-          [`Solicitud aceptada. Pedido ${pedidoActual.numero} creado.`, sol.id, eid]
+          [modoProponer ? `Propuesta de viaje reenviada. Pedido ${pedidoActual.numero} pendiente de tu aceptacion.` : `Solicitud aceptada. Pedido ${pedidoActual.numero} creado.`, sol.id, eid, estadoSolicitudDestino, modoProponer ? null : "aceptada"]
         );
-        await addSolicitudEvento(client, req, sol.id, "solicitud.convertida", {
+        await addSolicitudEvento(client, req, sol.id, eventoConversion, {
           pedido_id: pedidoActual.id,
           pedido_numero: pedidoActual.numero,
           estado_pedido: pedidoActual.estado,
-          ya_convertida: true,
+          ya_convertida: !modoProponer,
         });
-        result = { status: 200, body: { ok: true, pedido: pedidoActual, solicitud: updatedExisting.rows[0] || sol, ya_convertida: true } };
+        result = { status: 200, body: { ok: true, pedido: pedidoActual, solicitud: updatedExisting.rows[0] || sol, ya_convertida: !modoProponer } };
         return;
       }
     }
@@ -2549,7 +2723,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
          mercancia,peso_kg,bultos,importe,notas,estado,empresa_id,referencia_cliente,fecha_descarga,hora_descarga,
          puntos_carga,puntos_descarga,pendiente_completar,aviso_completar,portal_solicitud_id,
          tipo_precio,precio_unitario,cantidad,importe_minimo,minimo_unidades,km_ruta)
-       VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,$12,$13,'confirmado',$14,$15,$16,$17,$18::jsonb,$19::jsonb,true,$20,$21,$22,$23,$24,$25,$26,$27)
+       VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,$12,$13,$28,$14,$15,$16,$17,$18::jsonb,$19::jsonb,true,$20,$21,$22,$23,$24,$25,$26,$27)
        RETURNING *`,
       [
         numero,
@@ -2579,28 +2753,32 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
         tipoPrecioPedido === "viaje" ? importeMinimoPedido : null,
         tipoPrecioPedido !== "viaje" ? minimoUnidadesPedido : null,
         kmRutaPedido,
+        estadoPedidoDestino,
       ]
     );
     const pedido = inserted.rows[0];
     await copySolicitudDocsToPedido(client, { solicitudId: sol.id, pedidoId: pedido.id, empresaId: eid });
 
+    const respuestaConversion = modoProponer
+      ? `Propuesta de viaje enviada. Pedido ${pedido.numero} pendiente de tu aceptacion.`
+      : `Solicitud aceptada. Pedido ${pedido.numero} creado.`;
     const updated = await client.query(
       `UPDATE portal_solicitudes_cliente
-          SET estado='convertida',
+          SET estado=$6,
               pedido_id=$1,
               respuesta=$2,
               ruta_id=COALESCE(ruta_id,$5),
-              decision_cliente='aceptada',
-              decision_cliente_at=NOW(),
+              decision_cliente=CASE WHEN $7::text IS NULL THEN decision_cliente ELSE $7::text END,
+              decision_cliente_at=CASE WHEN $7::text IS NULL THEN decision_cliente_at ELSE NOW() END,
               updated_at=NOW()
         WHERE id=$3 AND empresa_id=$4
         RETURNING *`,
-      [pedido.id, `Solicitud aceptada. Pedido ${pedido.numero} creado.`, sol.id, eid, tarifaPedido.ruta_id]
+      [pedido.id, respuestaConversion, sol.id, eid, tarifaPedido.ruta_id, estadoSolicitudDestino, modoProponer ? null : "aceptada"]
     );
-    await addSolicitudEvento(client, req, sol.id, "solicitud.convertida", {
+    await addSolicitudEvento(client, req, sol.id, eventoConversion, {
       pedido_id: pedido.id,
       pedido_numero: pedido.numero,
-      estado_pedido: "confirmado",
+      estado_pedido: estadoPedidoDestino,
       bultos_limpiados: bultosInvalidos && limpiarInvalidos,
       ruta_id: tarifaPedido.ruta_id,
       tarifa_aplicada: Boolean(rutaMatch?.id),
@@ -2608,7 +2786,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
     result = { status: 201, body: { ok: true, pedido, solicitud: updated.rows[0] } };
   });
   if ([200, 201].includes(result?.status) && result.body?.solicitud?.id) {
-    await notificarGestionSolicitudCliente(req, result.body.solicitud, "solicitud.convertida").catch(() => {});
+    await notificarGestionSolicitudCliente(req, result.body.solicitud, eventoConversion).catch(() => {});
   }
   res.status(result.status).json(result.body);
 }));

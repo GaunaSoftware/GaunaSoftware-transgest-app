@@ -679,6 +679,9 @@ async function applyMigrations() {
     `).catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(captureStartupMigrationError);
     await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'incidencia'").catch(captureStartupMigrationError);
+    await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'espera_carga'").catch(captureStartupMigrationError);
+    await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'cargando'").catch(captureStartupMigrationError);
+    await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'espera_descarga'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_provincia VARCHAR(120)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_provincia VARCHAR(120)").catch(captureStartupMigrationError);

@@ -27,14 +27,17 @@ const SEV = {
 const ESTADO_PEDIDO = {
   pendiente: { label:"Pendiente", color:"var(--text4)" },
   confirmado: { label:"Confirmado", color:"var(--accent-l)" },
+  espera_carga: { label:"Espera carga", color:"#eab308" },
+  cargando: { label:"Cargando", color:"#14b8a6" },
   en_curso: { label:"En ruta", color:"#f59e0b" },
+  espera_descarga: { label:"Espera descarga", color:"#d946ef" },
   descarga: { label:"En descarga", color:"#a78bfa" },
   entregado: { label:"Entregado", color:"var(--green)" },
   facturado: { label:"Facturado", color:"#8b5cf6" },
   cancelado: { label:"Cancelado", color:"#ef4444" },
   incidencia: { label:"Incidencia", color:"#f97316" },
 };
-const ESTADO_PEDIDO_ORDEN = ["pendiente", "confirmado", "en_curso", "descarga", "entregado", "facturado", "incidencia", "cancelado"];
+const ESTADO_PEDIDO_ORDEN = ["pendiente", "confirmado", "espera_carga", "cargando", "en_curso", "espera_descarga", "descarga", "entregado", "facturado", "incidencia", "cancelado"];
 
 function estadoPedidoMeta(estado) {
   const key = String(estado || "").toLowerCase();

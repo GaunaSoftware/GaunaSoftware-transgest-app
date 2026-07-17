@@ -712,13 +712,13 @@ function buildPedidoCriticalAlertKey(item) {
   ].filter(Boolean).join("::");
 }
 
-const ESTADOS_RAW = ["pendiente","confirmado","en_curso","descarga","entregado","cancelado","incidencia"];
+const ESTADOS_RAW = ["pendiente","confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"];
 const LABEL_ESTADO = {
-  pendiente:"Pendiente", confirmado:"Confirmado", en_curso:"En curso",
+  pendiente:"Pendiente", confirmado:"Confirmado", espera_carga:"Espera carga", cargando:"Cargando", en_curso:"En curso", espera_descarga:"Espera descarga",
   descarga:"En descarga", entregado:"Entregado", cancelado:"Cancelado", incidencia:"Incidencia"
 };
 const COLOR_ESTADO = {
-  pendiente:"#fb8c3a", confirmado:"#3b6ef5", en_curso:"#22d3ee",
+  pendiente:"#fb8c3a", confirmado:"#3b6ef5", espera_carga:"#eab308", cargando:"#14b8a6", en_curso:"#22d3ee", espera_descarga:"#d946ef",
   descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#d98b8b", incidencia:"#fbbf24"
 };
 const INCIDENCIA_TIPOS_PEDIDO = [

@@ -201,8 +201,11 @@ const EC = {
 
 const QUICK_STATE_FLOW = {
   pendiente: { next: "confirmado", label: "Confirmar" },
-  confirmado: { next: "en_curso", label: "En curso" },
-  en_curso: { next: "descarga", label: "Descarga" },
+  confirmado: { next: "espera_carga", label: "Espera carga" },
+  espera_carga: { next: "cargando", label: "Cargando" },
+  cargando: { next: "en_curso", label: "En curso" },
+  en_curso: { next: "espera_descarga", label: "Espera descarga" },
+  espera_descarga: { next: "descarga", label: "Descarga" },
   descarga: { next: "entregado", label: "Entregar" },
 };
 const CRITICAL_ALERTS_STORAGE_KEY = "tms_trafico_critical_alerts_read";

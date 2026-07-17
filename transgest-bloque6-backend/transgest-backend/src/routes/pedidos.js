@@ -1751,8 +1751,11 @@ async function savePedidoChoferPasos({
     };
     let nextEstado = null;
     if (patch.descarga_ok || nextData.descarga_ok) nextEstado = "entregado";
-    else if (patch.descarga_iniciada || patch.posicionado_descarga || nextData.descarga_iniciada || nextData.posicionado_descarga) nextEstado = "descarga";
+    else if (patch.descarga_iniciada || nextData.descarga_iniciada) nextEstado = "descarga";
+    else if (patch.posicionado_descarga || patch.aviso_espera_descarga || nextData.posicionado_descarga || nextData.aviso_espera_descarga) nextEstado = "espera_descarga";
     else if (patch.viaje_iniciado || patch.carga_ok || nextData.viaje_iniciado || nextData.carga_ok) nextEstado = "en_curso";
+    else if (patch.carga_iniciada || nextData.carga_iniciada) nextEstado = "cargando";
+    else if (patch.aviso_espera_carga || nextData.aviso_espera_carga) nextEstado = "espera_carga";
     if (nextEstado && !["cancelado", "entregado"].includes(String(pedido.estado || "").toLowerCase())) {
       await assertUnicoViajeActivoChofer({ pedido, empresaId, estadoDestino: nextEstado });
       addUpdate("estado", nextEstado);
@@ -8381,7 +8384,7 @@ router.post("/", GERENTE_O_TRAFICO,
 
 // PATCH /pedidos/:id/estado
 router.patch("/:id/estado",
-  body("estado").isIn(["pendiente","confirmado","en_curso","descarga","entregado","cancelado","incidencia"]),
+  body("estado").isIn(["pendiente","confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"]),
   async (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -8394,7 +8397,7 @@ router.patch("/:id/estado",
     if (!(await usuarioPuedeGestionarPedido(req, rows[0]))) {
       return res.status(403).json({ error: "No puedes modificar este pedido" });
     }
-    if (req.user?.rol === "chofer" && !["en_curso","descarga","entregado","incidencia"].includes(estado)) {
+    if (req.user?.rol === "chofer" && !["espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","incidencia"].includes(estado)) {
       return res.status(403).json({ error: "El chofer no puede aplicar este estado" });
     }
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {

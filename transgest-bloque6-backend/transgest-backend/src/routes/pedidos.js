@@ -8432,7 +8432,7 @@ router.patch("/:id/estado",
                incidencia_creada_por=$7,
                incidencia_creada_at=NOW(),
                incidencia_automatica=false,
-               notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $8))
+               notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $8::text))
            WHERE id=$3 AND empresa_id=$4`,
           [estado, incidencia, req.params.id, empresaId, incidenciaTipo, incidenciaData.origen, actorUsuarioId, incidenciaNota]
         );
@@ -8444,7 +8444,7 @@ router.patch("/:id/estado",
         await db.query(
           `UPDATE pedidos
               SET estado=$1,
-                  notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $2))
+                  notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $2::text))
             WHERE id=$3 AND empresa_id=$4`,
           [estado, incidenciaNota, req.params.id, empresaId]
         );

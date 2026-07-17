@@ -8437,9 +8437,10 @@ router.patch("/:id/estado",
           [estado, incidencia, req.params.id, empresaId, incidenciaTipo, incidenciaData.origen, actorUsuarioId, incidenciaNota]
         );
       } catch (incidenciaError) {
-        const compatibilityCodes = new Set(["42703", "42804", "22P02"]);
-        if (!compatibilityCodes.has(String(incidenciaError?.code || ""))) throw incidenciaError;
-        logger.warn(`Incidencia guardada en modo compatible para pedido ${req.params.id}: ${incidenciaError.message}`);
+        // Ante CUALQUIER error del update completo, no fallamos: aplicamos el
+        // update seguro (estado + notas) y rellenamos las columnas estructuradas
+        // en best-effort. Asi crear una incidencia nunca devuelve un 500.
+        logger.warn(`Incidencia en modo compatible para pedido ${req.params.id} (code ${incidenciaError?.code || "?"}): ${incidenciaError.message}`);
         await db.query(
           `UPDATE pedidos
               SET estado=$1,
@@ -8447,6 +8448,13 @@ router.patch("/:id/estado",
             WHERE id=$3 AND empresa_id=$4`,
           [estado, incidenciaNota, req.params.id, empresaId]
         );
+        await db.query(
+          `UPDATE pedidos
+              SET incidencia_tipo=$1, incidencia_descripcion=$2, incidencia_origen=$3,
+                  incidencia_creada_por=$4, incidencia_creada_at=NOW(), incidencia_automatica=false
+            WHERE id=$5 AND empresa_id=$6`,
+          [incidenciaTipo, incidencia, incidenciaData.origen, actorUsuarioId, req.params.id, empresaId]
+        ).catch(colErr => logger.warn(`Campos estructurados de incidencia no guardados (${colErr?.code || "?"}): ${colErr.message}`));
       }
     } else if (estado === "cancelado") {
       await db.query(

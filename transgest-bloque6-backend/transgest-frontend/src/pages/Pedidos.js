@@ -719,7 +719,7 @@ const LABEL_ESTADO = {
 };
 const COLOR_ESTADO = {
   pendiente:"#fb8c3a", confirmado:"#3b6ef5", espera_carga:"#eab308", cargando:"#14b8a6", en_curso:"#22d3ee", espera_descarga:"#d946ef",
-  descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#d98b8b", incidencia:"#fbbf24"
+  descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#ef4444", incidencia:"#fbbf24"
 };
 const INCIDENCIA_TIPOS_PEDIDO = [
   { v:"taller", l:"Camion en taller" },
@@ -10516,6 +10516,8 @@ export default function Pedidos() {
 
   const pedidosConMeta = pedidos.map(p => ({ pedido: p, priorityMeta: getPedidoPriorityMeta(p) }));
   const pedidosFiltrados = pedidosConMeta.filter(({ pedido, priorityMeta }) => {
+    // Los cancelados desaparecen de la vista general; solo se ven si se filtra a proposito por "cancelado".
+    if (String(pedido.estado || "").toLowerCase() === "cancelado" && filtroEst !== "cancelado") return false;
     if (filtroSinAsignacion && !priorityMeta.flags.missingAssignment) return false;
     if (filtroPendienteCompletar && !pedido.pendiente_completar && priorityMeta.validationIssues.length === 0) return false;
     if (filtroColaborador && !pedido.colaborador_id) return false;

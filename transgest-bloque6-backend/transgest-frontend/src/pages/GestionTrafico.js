@@ -192,6 +192,10 @@ function buscarTarifaRutaPedido(pedido, rutas = []) {
 
 const EC = {
   en_curso:   { label:"En Curso",   color:"#f97316", bg:"rgba(249,115,22,.18)",  border:"rgba(249,115,22,.5)"  },
+  espera_carga: { label:"Espera carga", color:"#eab308", bg:"rgba(234,179,8,.16)", border:"rgba(234,179,8,.45)" },
+  cargando: { label:"Cargando", color:"#14b8a6", bg:"rgba(20,184,166,.16)", border:"rgba(20,184,166,.45)" },
+  espera_descarga: { label:"Espera descarga", color:"#d946ef", bg:"rgba(217,70,239,.16)", border:"rgba(217,70,239,.45)" },
+  descarga: { label:"En descarga", color:"#a78bfa", bg:"rgba(167,139,250,.16)", border:"rgba(167,139,250,.45)" },
   confirmado: { label:"Confirmado", color:"#3b82f6", bg:"rgba(59,130,246,.18)",  border:"rgba(59,130,246,.5)"  },
   pendiente:  { label:"Pendiente",  color:"#9ca3af", bg:"rgba(156,163,175,.14)", border:"rgba(156,163,175,.4)" },
   entregado:  { label:"Entregado",  color:"#10b981", bg:"rgba(16,185,129,.16)",  border:"rgba(16,185,129,.45)" },

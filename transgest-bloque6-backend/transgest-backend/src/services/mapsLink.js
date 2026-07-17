@@ -160,9 +160,12 @@ async function resolveMapsCoords(url) {
   if (!t) return null;
   const direct = coordsFromText(t);
   if (direct) return direct;
-  // Expandimos cualquier URL de Google Maps sin coords inline (enlaces cortos del
-  // movil y enlaces largos por feature-ID que solo llevan el sitio, no lat/lng).
-  if (!isMapsUrl(t)) return null;
+  // Solo expandimos enlaces CORTOS (goo.gl / maps.app.goo.gl): redirigen a una URL
+  // con coordenadas reales y fiables. Los enlaces largos por feature-ID
+  // (place//data=!1s0x...) NO se scrapean: desde el servidor, Google devuelve un
+  // centro por defecto (p.ej. Madrid) que falsea los km. Para esos es mas fiable
+  // geocodificar la direccion/poblacion con la API de Google (fuera de aqui).
+  if (!isShortMapsUrl(t)) return null;
   return expandForCoords(t);
 }
 

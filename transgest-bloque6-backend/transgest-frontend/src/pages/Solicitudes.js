@@ -744,6 +744,7 @@ export default function Solicitudes() {
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--text3)", marginTop: 12 }}>
+              {Number(sol.viajes || 1) > 1 && <span style={{ fontWeight: 900, color: "#3b82f6" }}>Viajes: {Number(sol.viajes)} (se crearan {Number(sol.viajes)} pedidos)</span>}
               {sol.mercancia && <span>Mercancia: {sol.mercancia}</span>}
               {sol.peso_kg && <span>Peso: {Number(sol.peso_kg).toLocaleString("es-ES")} kg</span>}
               {validBultos(sol.bultos) && <span>Bultos: {validBultos(sol.bultos)}</span>}

@@ -69,6 +69,7 @@ function ensureSchema() {
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS tipo_precio VARCHAR(20) DEFAULT 'viaje'");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(12,4)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS cantidad NUMERIC(12,3)");
+      await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS viajes INTEGER DEFAULT 1");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS importe_minimo NUMERIC(12,2)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC(12,3)");
       await db.query("ALTER TABLE portal_solicitudes_cliente ADD COLUMN IF NOT EXISTS km_ruta NUMERIC(12,2)");
@@ -1908,8 +1909,8 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
     `INSERT INTO portal_solicitudes_cliente
       (empresa_id,cliente_id,solicitado_por,origen,destino,fecha_carga,hora_carga,fecha_descarga,hora_descarga,
        mercancia,peso_kg,bultos,importe,tipo_precio,precio_unitario,cantidad,importe_minimo,minimo_unidades,km_ruta,
-       referencia_cliente,notas,origen_punto_id,destino_punto_id,ruta_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+       referencia_cliente,notas,origen_punto_id,destino_punto_id,ruta_id,viajes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
      RETURNING *`,
     [
       empresaId(req),
@@ -1936,6 +1937,7 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
       origenPunto?.id || null,
       destinoPunto?.id || null,
       tarifaSolicitud.ruta_id,
+      Math.max(1, Math.min(20, parseInt(body.viajes ?? body.num_viajes ?? 1, 10) || 1)),
     ]
   );
   const solicitud = { ...rows[0], cliente_nombre: cliente.rows[0].nombre };
@@ -2687,7 +2689,8 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
       }
     }
 
-    const numero = await nextPedidoNumero(client, eid);
+    // Nº de viajes solicitados por el cliente: se crea un pedido por viaje.
+    const viajesSolicitud = Math.max(1, Math.min(20, parseInt(sol.viajes, 10) || 1));
     const notas = [
       sol.notas,
       `Solicitud portal cliente: ${sol.id}`,
@@ -2717,6 +2720,9 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
       rutaMatch?.id ? `Tarifa/ruta aplicada: ${rutaMatch.origen} -> ${rutaMatch.destino}.` : "No se encontro una tarifa/ruta compatible; revisar precio y kilometros.",
     ].join(" ");
 
+    const pedidosCreados = [];
+    for (let viajeIdx = 0; viajeIdx < viajesSolicitud; viajeIdx++) {
+    const numero = await nextPedidoNumero(client, eid);
     const inserted = await client.query(
       `INSERT INTO pedidos
         (numero,cliente_id,ruta_id,origen,destino,fecha_pedido,fecha_carga,hora_carga,fecha_entrega,
@@ -2756,12 +2762,16 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
         estadoPedidoDestino,
       ]
     );
-    const pedido = inserted.rows[0];
-    await copySolicitudDocsToPedido(client, { solicitudId: sol.id, pedidoId: pedido.id, empresaId: eid });
+    pedidosCreados.push(inserted.rows[0]);
+    await copySolicitudDocsToPedido(client, { solicitudId: sol.id, pedidoId: inserted.rows[0].id, empresaId: eid });
+    }
+    const pedido = pedidosCreados[0];
 
+    const totalViajes = pedidosCreados.length;
+    const sufijoViajes = totalViajes > 1 ? ` (${totalViajes} viajes: ${pedidosCreados.map(p => p.numero).join(", ")})` : "";
     const respuestaConversion = modoProponer
-      ? `Propuesta de viaje enviada. Pedido ${pedido.numero} pendiente de tu aceptacion.`
-      : `Solicitud aceptada. Pedido ${pedido.numero} creado.`;
+      ? `Propuesta de viaje enviada. Pedido ${pedido.numero}${sufijoViajes} pendiente de tu aceptacion.`
+      : `Solicitud aceptada. Pedido ${pedido.numero}${sufijoViajes} creado.`;
     const updated = await client.query(
       `UPDATE portal_solicitudes_cliente
           SET estado=$6,
@@ -2779,11 +2789,13 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
       pedido_id: pedido.id,
       pedido_numero: pedido.numero,
       estado_pedido: estadoPedidoDestino,
+      total_viajes: totalViajes,
+      pedidos: pedidosCreados.map(p => ({ id: p.id, numero: p.numero })),
       bultos_limpiados: bultosInvalidos && limpiarInvalidos,
       ruta_id: tarifaPedido.ruta_id,
       tarifa_aplicada: Boolean(rutaMatch?.id),
     });
-    result = { status: 201, body: { ok: true, pedido, solicitud: updated.rows[0] } };
+    result = { status: 201, body: { ok: true, pedido, pedidos: pedidosCreados, total_viajes: totalViajes, solicitud: updated.rows[0] } };
   });
   if ([200, 201].includes(result?.status) && result.body?.solicitud?.id) {
     await notificarGestionSolicitudCliente(req, result.body.solicitud, eventoConversion).catch(() => {});

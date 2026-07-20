@@ -1583,6 +1583,7 @@ function solicitudToPortalForm(s = {}) {
     notas: s.notas || "",
     origen_punto_id: s.origen_punto_id || "",
     destino_punto_id: s.destino_punto_id || "",
+    viajes: s.viajes || 1,
   };
 }
 
@@ -1761,6 +1762,7 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
         {!limitedEdit && <div><label style={lbl}>Hora descarga</label><input style={inp} value={form.hora_descarga} onChange={f("hora_descarga")} placeholder="16:00 / Tarde / Cita previa" /></div>}
         <div><label style={lbl}>Peso kg</label><input type="number" style={inp} value={form.peso_kg} onChange={f("peso_kg")} /></div>
         <div><label style={lbl}>Bultos / palets</label><input type="number" min="0" step="1" style={inp} value={form.bultos} onChange={e=>setForm(p=>({...p,bultos:Number(e.target.value) < 0 ? "" : e.target.value}))} /></div>
+        {!limitedEdit && <div><label style={lbl}>Numero de viajes</label><input type="number" min="1" max="20" step="1" style={inp} value={form.viajes} onChange={e=>setForm(p=>({...p, viajes: Math.max(1, Math.min(20, Number(e.target.value)||1))}))} /><div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>Cuantos viajes/camiones necesitas. Al aceptarse se crearan ese numero de pedidos.</div></div>}
         {!limitedEdit && <div>
           <label style={lbl}>Tipo de precio</label>
           <select style={inp} value={form.tipo_precio} onChange={e=>setForm(p=>({...p,tipo_precio:e.target.value,precio_unitario:"",cantidad:"",importe:"",importe_minimo:"",minimo_unidades:""}))}>

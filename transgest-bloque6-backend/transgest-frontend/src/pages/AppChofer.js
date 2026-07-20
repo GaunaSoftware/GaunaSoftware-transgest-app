@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, getTallerSolicitudCapacidades, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion, adrRequisitos } from "../utils/adr";
 import { confirmDialog, notify } from "../services/notify";
 import { getCurrentLocation, requestForegroundLocationPermission, watchForegroundLocation, isNativeMobileApp } from "../services/mobileRuntime";
 import { enqueueOfflineItem, markOfflineAttempt, queueSummary, readOfflineQueue, readyOfflineItems, writeOfflineQueue } from "../services/offlineQueue";
@@ -1574,6 +1575,31 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
               </div>
             ))}
           </div>
+          {(() => {
+            const adrItems = (Array.isArray(pedido.adr_items) ? pedido.adr_items : []).filter(it => it && (it.un || it.nombre));
+            if (!pedido.adr && !adrItems.length) return null;
+            const ex = adrExencion(adrItems);
+            const reqs = adrRequisitos(adrItems);
+            return (
+              <div style={{border:"2px solid #b91c1c",borderRadius:10,padding:"12px 14px",marginBottom:12,background:"rgba(239,68,68,.06)"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <span style={{display:"inline-block",width:18,height:18,background:"#f59e0b",border:"2px solid #111",transform:"rotate(45deg)",borderRadius:3}}/>
+                  <strong style={{fontSize:13,color:"#b91c1c"}}>Mercancia peligrosa (ADR)</strong>
+                  <span style={{marginLeft:"auto",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:20,background:ex.exento?"rgba(16,185,129,.15)":"rgba(239,68,68,.15)",color:ex.exento?"#10b981":"#ef4444"}}>{ex.exento?"Exencion 1.1.3.6":"ADR completo"}</span>
+                </div>
+                {adrItems.map((it,i)=>(
+                  <div key={i} style={{fontFamily:"monospace",fontSize:11,color:"var(--text)",background:"var(--bg4)",borderRadius:6,padding:"6px 8px",marginBottom:4,wordBreak:"break-word"}}>{adrDocLine(it)}</div>
+                ))}
+                <div style={{fontSize:11,color:"var(--text4)",margin:"6px 0 8px"}}>{ex.resumen}</div>
+                <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",marginBottom:4}}>Comprobar antes de cargar</div>
+                {reqs.filter(r=>r.obligatorio).map(r=>(
+                  <div key={r.clave} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text3)",padding:"3px 0"}}>
+                    <span style={{color:"#ef4444",fontWeight:900}}>&#9744;</span>{r.etiqueta}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
           {pedido.notas&&(
             <div style={{background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.2)",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:12,color:"var(--text3)"}}>
               Notas: {pedido.notas}

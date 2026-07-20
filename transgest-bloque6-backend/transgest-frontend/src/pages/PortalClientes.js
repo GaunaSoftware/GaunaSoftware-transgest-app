@@ -135,7 +135,8 @@ const TIMELINE = [
 
 function dateEs(v) {
   if (!v) return "-";
-  return new Date(v).toLocaleDateString("es-ES");
+  // El dia de la semana lo pone el programa desde la fecha (no lo escribe nadie).
+  return new Date(v).toLocaleDateString("es-ES", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function isValidDateInput(value) {

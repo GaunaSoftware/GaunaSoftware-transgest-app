@@ -24,7 +24,9 @@ function refreshSolicitudBadges() {
 
 function dateEs(v) {
   if (!v) return "-";
-  return new Date(v).toLocaleDateString("es-ES");
+  // Incluye el dia de la semana (lo pone el programa a partir de la fecha), asi
+  // no depende de lo que el cliente escriba a mano y no hay dias mal escritos.
+  return new Date(v).toLocaleDateString("es-ES", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function ageHours(v) {

@@ -738,8 +738,6 @@ export const actualizarPortalClienteSolicitud = (id, data) => apiFetch(`/portal-
 export const responderPortalClienteReprogramacion = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/reprogramacion`, { method:"POST", body:data });
 export const responderPortalClientePrecio = (id, data) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/precio`, { method:"POST", body:data });
 export const cancelarPortalClienteSolicitud = (id, data={}) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/cancelar`, { method:"POST", body:data });
-export const aceptarPortalClienteViaje = (id, data={}) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/aceptar`, { method:"POST", body:data });
-export const rechazarPortalClienteViaje = (id, data={}) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/rechazar`, { method:"POST", body:data });
 export const enviarMensajePortalCliente = (id, mensaje) => apiFetch(`/portal-cliente/solicitudes/${encodeURIComponent(id)}/mensaje`, { method:"POST", body:{ mensaje } });
 export const getPortalPedidoAlbaranes = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/albaranes`);
 export const getPortalPedidoEventos = (pedidoId) => apiFetch(`/portal-cliente/pedidos/${encodeURIComponent(pedidoId)}/eventos`);
@@ -749,7 +747,6 @@ export const actualizarPortalSolicitudAdmin = (id, data) => apiFetch(`/portal-cl
 export const convertirPortalSolicitudAdmin = (id, data={}) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/convertir`, { method:"POST", body:data, timeoutMs:60000 });
 export const getPortalSolicitudEventosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/eventos`);
 export const enviarMensajePortalSolicitudAdmin = (id, mensaje) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/mensaje`, { method:"POST", body:{ mensaje } });
-export const proponerPortalSolicitudAdmin = (id, data={}) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/convertir`, { method:"POST", body:{ ...data, modo:"proponer" }, timeoutMs:60000 });
 export const getPortalSolicitudDocumentosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/documentos`);
 export const getInformeRutas= (desde,hasta) => apiFetch(`/informes/rutas?desde=${desde}&hasta=${hasta}`);
 export const getInformeChoferes=(desde,hasta)=>apiFetch(`/informes/choferes?desde=${desde}&hasta=${hasta}`);

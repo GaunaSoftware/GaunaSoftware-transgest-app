@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   actualizarPortalClienteSolicitud,
-  aceptarPortalClienteViaje,
-  rechazarPortalClienteViaje,
   enviarMensajePortalCliente,
   cancelarPortalClienteSolicitud,
   crearPortalClienteSolicitud,
@@ -481,7 +479,6 @@ export default function PortalClientes() {
   const [solicitudEventosAbierta, setSolicitudEventosAbierta] = useState(null);
   const [msgInput, setMsgInput] = useState({});
   const [enviandoMsg, setEnviandoMsg] = useState(null);
-  const [trabajandoViaje, setTrabajandoViaje] = useState(null);
   const [facturaSel, setFacturaSel] = useState(null);
   const [solicitudEditando, setSolicitudEditando] = useState(null);
   const [loadingFactura, setLoadingFactura] = useState(null);
@@ -617,35 +614,6 @@ export default function PortalClientes() {
       await cargar();
     } catch (e) {
       notify(e.message, "error");
-    }
-  }
-
-  async function aceptarViaje(s) {
-    if (!s?.id) return;
-    setTrabajandoViaje(s.id);
-    try {
-      await aceptarPortalClienteViaje(s.id);
-      notify("Viaje aceptado. Trafico ya puede planificarlo.", "success");
-      await cargar();
-    } catch (e) {
-      notify(e.message || "No se pudo aceptar el viaje.", "error");
-    } finally {
-      setTrabajandoViaje(null);
-    }
-  }
-
-  async function rechazarViaje(s) {
-    if (!s?.id) return;
-    const motivo = window.prompt("Motivo del rechazo (opcional, lo vera trafico):") || "";
-    setTrabajandoViaje(s.id);
-    try {
-      await rechazarPortalClienteViaje(s.id, { motivo });
-      notify("Has rechazado la propuesta. Trafico revisara la solicitud.", "success");
-      await cargar();
-    } catch (e) {
-      notify(e.message || "No se pudo rechazar la propuesta.", "error");
-    } finally {
-      setTrabajandoViaje(null);
     }
   }
 
@@ -1384,24 +1352,6 @@ export default function PortalClientes() {
                     </div>
                   )}
                   {s.respuesta && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text3)" }}>{s.respuesta}</div>}
-                  {String(s.estado || "").toLowerCase() === "propuesta" && (
-                    <div style={{ marginTop: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(139,92,246,.35)", background: "rgba(139,92,246,.09)" }}>
-                      <div style={{ fontSize: 13, fontWeight: 900, color: "#7c3aed" }}>
-                        Trafico te propone este viaje
-                      </div>
-                      <div style={{ marginTop: 4, fontSize: 12, color: "var(--text4)" }}>
-                        Revisa los datos{s.pedido_numero ? ` (pedido ${s.pedido_numero})` : ""} y confirma. El viaje no se planifica hasta que lo aceptes.
-                      </div>
-                      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                        <button onClick={() => aceptarViaje(s)} disabled={trabajandoViaje === s.id} style={{ ...S.btn, background: "#10b981", borderColor: "#10b981", color: "#fff", opacity: trabajandoViaje === s.id ? .55 : 1 }}>
-                          {trabajandoViaje === s.id ? "Procesando..." : "Aceptar viaje"}
-                        </button>
-                        <button onClick={() => rechazarViaje(s)} disabled={trabajandoViaje === s.id} style={{ ...S.btn, color: "#ef4444", borderColor: "rgba(239,68,68,.25)", opacity: trabajandoViaje === s.id ? .55 : 1 }}>
-                          Rechazar
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   {s.fecha_propuesta && (
                     <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(59,130,246,.2)", background: "rgba(59,130,246,.08)" }}>
                       <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)" }}>

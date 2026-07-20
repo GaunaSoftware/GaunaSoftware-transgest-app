@@ -2400,99 +2400,6 @@ router.post("/solicitudes/:id/cancelar", requireCliente, asyncRoute(async (req, 
   res.status(result.status).json(result.body);
 }));
 
-// El cliente ACEPTA una propuesta de viaje: confirma el pedido pendiente asociado
-// y avisa a la empresa. La solicitud pasa a convertida.
-router.post("/solicitudes/:id/aceptar", requireCliente, asyncRoute(async (req, res) => {
-  await ensureSchema();
-  let result;
-  await db.transaction(async (client) => {
-    const { rows } = await client.query(
-      `SELECT * FROM portal_solicitudes_cliente
-        WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3 FOR UPDATE`,
-      [req.params.id, empresaId(req), req.user.cliente_id]
-    );
-    const sol = rows[0];
-    if (!sol) { result = { status: 404, body: { error: "Solicitud no encontrada" } }; return; }
-    if (String(sol.estado || "").toLowerCase() !== "propuesta") {
-      result = { status: 409, body: { error: "Esta solicitud no esta pendiente de tu aceptacion." } }; return;
-    }
-    let pedido = null;
-    if (sol.pedido_id) {
-      const pr = await client.query(
-        `UPDATE pedidos SET estado='confirmado', updated_at=NOW()
-          WHERE id=$1 AND empresa_id=$2 AND estado::text='pendiente'
-          RETURNING id, numero, estado::text AS estado`,
-        [sol.pedido_id, empresaId(req)]
-      );
-      pedido = pr.rows[0] || null;
-    }
-    const updated = await client.query(
-      `UPDATE portal_solicitudes_cliente
-          SET estado='convertida', decision_cliente='aceptada', decision_cliente_at=NOW(),
-              respuesta=$1, updated_at=NOW()
-        WHERE id=$2 AND empresa_id=$3 RETURNING *`,
-      [pedido ? `Viaje aceptado por el cliente. Pedido ${pedido.numero} confirmado.` : "Viaje aceptado por el cliente.", sol.id, empresaId(req)]
-    );
-    await addSolicitudEvento(client, req, sol.id, "solicitud.aceptada.cliente", {
-      pedido_id: sol.pedido_id || null, pedido_numero: pedido?.numero || null, estado_pedido: pedido?.estado || "confirmado",
-    });
-    result = { status: 200, body: { ok: true, solicitud: updated.rows[0], pedido }, sol };
-  });
-  if (result?.status === 200) {
-    await notificarEmpresaSolicitud(req, {
-      titulo: "Viaje aceptado por el cliente",
-      mensaje: `${req.user?.nombre || "El cliente"} ha aceptado el viaje ${result.sol?.origen || ""} -> ${result.sol?.destino || ""}.`,
-      solicitud_id: req.params.id,
-      pedido_id: result.body?.pedido?.id || result.sol?.pedido_id || null,
-    }).catch(() => {});
-  }
-  res.status(result.status).json(result.body);
-}));
-
-// El cliente RECHAZA la propuesta: se cancela el pedido pendiente y la solicitud
-// vuelve a la empresa (pendiente) marcada como rechazada por el cliente.
-router.post("/solicitudes/:id/rechazar", requireCliente, asyncRoute(async (req, res) => {
-  await ensureSchema();
-  const motivo = String(req.body?.motivo || req.body?.mensaje || "").trim().slice(0, 500);
-  let result;
-  await db.transaction(async (client) => {
-    const { rows } = await client.query(
-      `SELECT * FROM portal_solicitudes_cliente
-        WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3 FOR UPDATE`,
-      [req.params.id, empresaId(req), req.user.cliente_id]
-    );
-    const sol = rows[0];
-    if (!sol) { result = { status: 404, body: { error: "Solicitud no encontrada" } }; return; }
-    if (String(sol.estado || "").toLowerCase() !== "propuesta") {
-      result = { status: 409, body: { error: "Esta solicitud no esta pendiente de tu aceptacion." } }; return;
-    }
-    if (sol.pedido_id) {
-      await client.query(
-        `UPDATE pedidos SET estado='cancelado', motivo_cancelacion=$1, cancelado_at=NOW(), cancelado_by=$2, updated_at=NOW()
-          WHERE id=$3 AND empresa_id=$4 AND estado::text='pendiente'`,
-        [motivo ? `Rechazado por el cliente: ${motivo}` : "Rechazado por el cliente", req.user?.id || null, sol.pedido_id, empresaId(req)]
-      );
-    }
-    const updated = await client.query(
-      `UPDATE portal_solicitudes_cliente
-          SET estado='pendiente', pedido_id=NULL, decision_cliente='rechazada', decision_cliente_at=NOW(),
-              respuesta=$1, updated_at=NOW()
-        WHERE id=$2 AND empresa_id=$3 RETURNING *`,
-      [motivo ? `Propuesta rechazada por el cliente: ${motivo}` : "Propuesta rechazada por el cliente.", sol.id, empresaId(req)]
-    );
-    await addSolicitudEvento(client, req, sol.id, "solicitud.rechazada.cliente", { motivo: motivo || null });
-    result = { status: 200, body: { ok: true, solicitud: updated.rows[0] }, sol };
-  });
-  if (result?.status === 200) {
-    await notificarEmpresaSolicitud(req, {
-      titulo: "Propuesta rechazada por el cliente",
-      mensaje: `${req.user?.nombre || "El cliente"} ha rechazado la propuesta de ${result.sol?.origen || ""} -> ${result.sol?.destino || ""}.${motivo ? ` Motivo: ${motivo}` : ""}`,
-      solicitud_id: req.params.id,
-    }).catch(() => {});
-  }
-  res.status(result.status).json(result.body);
-}));
-
 // Hilo compartido: el cliente escribe un mensaje visible tambien para la empresa.
 router.post("/solicitudes/:id/mensaje", requireCliente, asyncRoute(async (req, res) => {
   await ensureSchema();
@@ -2594,12 +2501,9 @@ router.get("/admin/solicitudes/:id/documentos/:docId/descargar", requireGestion,
 router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async (req, res) => {
   await ensureSchema();
   const eid = empresaId(req);
-  // modo "proponer": el pedido se crea PENDIENTE y la solicitud queda en
-  // "propuesta" a la espera de que el cliente lo acepte desde su portal.
-  const modoProponer = req.body?.modo === "proponer" || req.query?.modo === "proponer";
-  const estadoPedidoDestino = modoProponer ? "pendiente" : "confirmado";
-  const estadoSolicitudDestino = modoProponer ? "propuesta" : "convertida";
-  const eventoConversion = modoProponer ? "solicitud.propuesta" : "solicitud.convertida";
+  const estadoPedidoDestino = "confirmado";
+  const estadoSolicitudDestino = "convertida";
+  const eventoConversion = "solicitud.convertida";
   const limpiarInvalidos = req.body?.force === true || req.body?.limpiar_bultos === true || req.body?.limpiar_invalidos === true;
   let result;
   await db.transaction(async (client) => {
@@ -2656,9 +2560,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
         [eid, sol.pedido_id || null, sol.id]
       );
       if (pedidoExistente.rows[0]) {
-        // En modo propuesta NO confirmamos el pedido: se deja pendiente hasta que
-        // el cliente lo acepte.
-        const pedidoConfirmado = modoProponer ? { rows: [] } : await client.query(
+        const pedidoConfirmado = await client.query(
           `UPDATE pedidos
               SET estado='confirmado', updated_at=NOW()
             WHERE id=$1 AND empresa_id=$2 AND estado::text='pendiente'
@@ -2676,15 +2578,15 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
                   updated_at=NOW()
             WHERE id=$2 AND empresa_id=$3
             RETURNING *`,
-          [modoProponer ? `Propuesta de viaje reenviada. Pedido ${pedidoActual.numero} pendiente de tu aceptacion.` : `Solicitud aceptada. Pedido ${pedidoActual.numero} creado.`, sol.id, eid, estadoSolicitudDestino, modoProponer ? null : "aceptada"]
+          [`Solicitud aceptada. Pedido ${pedidoActual.numero} creado.`, sol.id, eid, estadoSolicitudDestino, "aceptada"]
         );
         await addSolicitudEvento(client, req, sol.id, eventoConversion, {
           pedido_id: pedidoActual.id,
           pedido_numero: pedidoActual.numero,
           estado_pedido: pedidoActual.estado,
-          ya_convertida: !modoProponer,
+          ya_convertida: true,
         });
-        result = { status: 200, body: { ok: true, pedido: pedidoActual, solicitud: updatedExisting.rows[0] || sol, ya_convertida: !modoProponer } };
+        result = { status: 200, body: { ok: true, pedido: pedidoActual, solicitud: updatedExisting.rows[0] || sol, ya_convertida: true } };
         return;
       }
     }
@@ -2769,9 +2671,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
 
     const totalViajes = pedidosCreados.length;
     const sufijoViajes = totalViajes > 1 ? ` (${totalViajes} viajes: ${pedidosCreados.map(p => p.numero).join(", ")})` : "";
-    const respuestaConversion = modoProponer
-      ? `Propuesta de viaje enviada. Pedido ${pedido.numero}${sufijoViajes} pendiente de tu aceptacion.`
-      : `Solicitud aceptada. Pedido ${pedido.numero}${sufijoViajes} creado.`;
+    const respuestaConversion = `Solicitud aceptada. Pedido ${pedido.numero}${sufijoViajes} creado.`;
     const updated = await client.query(
       `UPDATE portal_solicitudes_cliente
           SET estado=$6,
@@ -2783,7 +2683,7 @@ router.post("/admin/solicitudes/:id/convertir", requireGestion, asyncRoute(async
               updated_at=NOW()
         WHERE id=$3 AND empresa_id=$4
         RETURNING *`,
-      [pedido.id, respuestaConversion, sol.id, eid, tarifaPedido.ruta_id, estadoSolicitudDestino, modoProponer ? null : "aceptada"]
+      [pedido.id, respuestaConversion, sol.id, eid, tarifaPedido.ruta_id, estadoSolicitudDestino, "aceptada"]
     );
     await addSolicitudEvento(client, req, sol.id, eventoConversion, {
       pedido_id: pedido.id,

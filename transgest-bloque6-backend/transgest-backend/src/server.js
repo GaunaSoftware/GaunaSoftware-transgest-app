@@ -32,6 +32,7 @@ const colaboradoresRoutes = require("./routes/colaboradores");
 const informesRoutes      = require("./routes/informes");
 const docsRoutes          = require("./routes/docs");
 const cartaPorteRoutes  = require("./routes/carta_porte");
+const adrRoutes         = require("./routes/adr");
 const emailRoutes         = require("./routes/email");
 const registroRoutes      = require("./routes/registro");
 const miCuentaRoutes      = require("./routes/mi_cuenta");
@@ -310,6 +311,7 @@ safeUse(`${api}/colaboradores`, colaboradoresAuthUnlessPublic, colaboradoresRout
 safeUse(`${api}/informes`,      authenticate, requireModulePermission("informes"), requirePlanFeature("kpis_avanzados"), informesRoutes);
 safeUse(`${api}/docs`,          authenticate, requireModulePermission("documentos"), docsRoutes);
 safeUse(`${api}/pedidos`,       authenticate, requireModulePermission("pedidos"), cartaPorteRoutes);
+safeUse(`${api}/adr`,           authenticate, requireModulePermission("pedidos"), adrRoutes);
 safeUse(`${api}/email`,         authenticate, requireModulePermission("empresa"), emailRoutes);
 safeUse(`${api}/registro`,      registroRoutes);
 safeUse(`${api}/mi-cuenta`,     authenticate, requireModulePermission("mi_cuenta"), miCuentaRoutes);

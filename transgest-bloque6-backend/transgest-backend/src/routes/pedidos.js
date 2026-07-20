@@ -22,6 +22,7 @@ const { getEmpresaCalendarForDate, inferCcaaFromText } = require("../services/ca
 const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
 const { validateBase64Upload } = require("../services/uploadValidation");
 const webhooks = require("../services/webhooks");
+const adrService = require("../services/adr");
 
 const router = express.Router();
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -538,6 +539,8 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_provincia VARCHAR(120)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metros_lineales NUMERIC(10,2)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cmr_tipo VARCHAR(30) DEFAULT 'nacional'").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS adr BOOLEAN DEFAULT false").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS adr_items JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motivo_cancelacion TEXT").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_by TEXT").catch(() => {});
@@ -8224,6 +8227,8 @@ router.post("/", GERENTE_O_TRAFICO,
         carga_techo: req.body.carga_techo ?? false,
         intercambio_palets: req.body.intercambio_palets ?? false,
         requiere_cinchas: req.body.requiere_cinchas ?? true,
+        adr: req.body.adr !== undefined ? !!req.body.adr : undefined,
+        adr_items: req.body.adr_items !== undefined ? JSON.stringify(Array.isArray(req.body.adr_items) ? req.body.adr_items.map(it => adrService.normalizeItem(it)) : []) : undefined,
         coste_gasoil: req.body.coste_gasoil !== undefined ? (req.body.coste_gasoil ?? 0) : undefined,
         coste_peajes: req.body.coste_peajes !== undefined ? (req.body.coste_peajes ?? 0) : undefined,
         coste_dietas: req.body.coste_dietas !== undefined ? (req.body.coste_dietas ?? 0) : undefined,
@@ -8700,6 +8705,8 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     carga_techo: body.carga_techo ?? false,
     intercambio_palets: body.intercambio_palets ?? false,
     requiere_cinchas: body.requiere_cinchas ?? true,
+    adr: body.adr !== undefined ? !!body.adr : undefined,
+    adr_items: body.adr_items !== undefined ? JSON.stringify(Array.isArray(body.adr_items) ? body.adr_items.map(it => adrService.normalizeItem(it)) : []) : undefined,
     estado: body.estado ?? undefined,
     incidencia_tipo: body.estado === "incidencia" || body.incidencia_tipo !== undefined || body.incidencia_descripcion !== undefined || body.incidencia !== undefined
       ? buildPedidoIncidenciaInput(body || {}, pedidoActualRows[0], req.user?.rol).tipo

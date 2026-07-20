@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const BASE = process.env.REACT_APP_API_URL || "";
+const BASE = process.env.REACT_APP_API_URL || "https://transgest-backend.onrender.com";
 
 const REGISTRO_PLANES = [
   { id:"lite",        nombre:"Lite",        precio:49,  veh:"DCD", usr:"2", color:"#0f766e",

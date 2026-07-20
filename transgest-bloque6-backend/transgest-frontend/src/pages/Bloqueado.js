@@ -1,7 +1,7 @@
 import { notify } from "../services/notify";
 import { getToken, removeToken } from "../services/api";
 
-const BASE = process.env.REACT_APP_API_URL || "";
+const BASE = process.env.REACT_APP_API_URL || "https://transgest-backend.onrender.com";
 
 export default function Bloqueado({ motivo, mensaje, user }) {
   const esGerente = user?.rol === "gerente";

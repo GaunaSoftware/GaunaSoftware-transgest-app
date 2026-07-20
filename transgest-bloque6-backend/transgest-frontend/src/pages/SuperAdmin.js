@@ -3,7 +3,7 @@ import { confirmDialog, notify, promptDialog } from "../services/notify";
 import { removeToken, setToken, setUser } from "../services/api";
 import "./SuperAdmin.css";
 
-const BASE = process.env.REACT_APP_API_URL || "";
+const BASE = process.env.REACT_APP_API_URL || "https://transgest-backend.onrender.com";
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtN = n => Number(n||0).toLocaleString("es-ES",{maximumFractionDigits:0});
 const fmtDate = d => {

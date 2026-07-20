@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   actualizarPortalSolicitudAdmin,
   convertirPortalSolicitudAdmin,
-  proponerPortalSolicitudAdmin,
   enviarMensajePortalSolicitudAdmin,
   descargarArchivoProtegido,
   getPortalSolicitudesAdmin,
@@ -486,33 +485,6 @@ export default function Solicitudes() {
     }
   }
 
-  async function proponer(sol) {
-    setTrabajando(sol.id);
-    try {
-      const r = await proponerPortalSolicitudAdmin(sol.id, { limpiar_invalidos: true });
-      const solicitudActualizada = r?.solicitud || {};
-      const pedido = r?.pedido || (Array.isArray(r?.pedidos) ? r.pedidos[0] : {}) || {};
-      setSols(prev => prev.map(item => String(item.id) === String(sol.id)
-        ? {
-            ...item,
-            ...solicitudActualizada,
-            estado: "propuesta",
-            pedido_id: pedido.id || solicitudActualizada.pedido_id || item.pedido_id,
-            pedido_numero: pedido.numero || solicitudActualizada.pedido_numero || item.pedido_numero,
-            respuesta: solicitudActualizada.respuesta || "Viaje propuesto al cliente. Pendiente de que lo acepte.",
-          }
-        : item
-      ));
-      notify("Propuesta enviada al cliente. Recibira un aviso para aceptar o rechazar el viaje.", "success");
-      refreshSolicitudBadges();
-      cargar().catch(() => {});
-    } catch (e) {
-      notify(e.message, "error");
-    } finally {
-      setTrabajando(null);
-    }
-  }
-
   async function enviarMensajeEmpresa(sol) {
     const texto = String(msgInput[sol.id] || "").trim();
     if (!texto) { notify("Escribe un mensaje.", "warning"); return; }
@@ -850,16 +822,6 @@ export default function Solicitudes() {
                 <button onClick={() => convertir(sol)} disabled={conversionDisabled} title={pricePending ? "Pendiente de respuesta del cliente a la contraoferta" : ""} style={{ ...S.btn, background: "#10b981", color: "#fff", borderColor: "#10b981", opacity: conversionDisabled ? .55 : 1 }}>
                   {trabajando === sol.id ? "Procesando..." : pricePending ? "Esperando precio" : "Convertir en pedido"}
                 </button>
-              )}
-              {!rejected && sol.estado !== "propuesta" && (
-                <button onClick={() => proponer(sol)} disabled={conversionDisabled} title="Crea el pedido y se lo propone al cliente: recibira un aviso y debera aceptarlo antes de confirmarse." style={{ ...S.btn, background: "#8b5cf6", color: "#fff", borderColor: "#8b5cf6", opacity: conversionDisabled ? .55 : 1 }}>
-                  {trabajando === sol.id ? "Procesando..." : "Proponer al cliente"}
-                </button>
-              )}
-              {sol.estado === "propuesta" && (
-                <span style={{ ...S.btn, background: "rgba(139,92,246,.12)", color: "#7c3aed", borderColor: "rgba(139,92,246,.35)", cursor: "default", fontWeight: 800 }}>
-                  Esperando que el cliente acepte
-                </span>
               )}
               {!rejected && (
                 <button onClick={() => reprogramar(sol)} disabled={disabled} style={{ ...S.btn, opacity: disabled ? .55 : 1 }}>

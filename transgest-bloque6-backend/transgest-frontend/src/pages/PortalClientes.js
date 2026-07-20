@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   actualizarPortalClienteSolicitud,
+  aceptarPortalClienteViaje,
+  rechazarPortalClienteViaje,
+  enviarMensajePortalCliente,
   cancelarPortalClienteSolicitud,
   crearPortalClienteSolicitud,
   descargarArchivoProtegido,
@@ -375,6 +378,11 @@ function solicitudEventoLabel(tipo) {
     "solicitud.creada": "Solicitud creada",
     "solicitud.reprogramacion.cliente": "Respuesta a reprogramacion",
     "solicitud.reprogramacion.propuesta": "Reprogramacion propuesta",
+    "solicitud.propuesta": "Viaje propuesto por trafico",
+    "solicitud.aceptada.cliente": "Has aceptado el viaje",
+    "solicitud.rechazada.cliente": "Has rechazado la propuesta",
+    "mensaje.cliente": "Mensaje tuyo",
+    "mensaje.empresa": "Mensaje de trafico",
     "solicitud.convertida": "Convertida en pedido",
     "solicitud.rechazada": "Solicitud rechazada",
     "solicitud.cancelada.cliente": "Cancelada por cliente",
@@ -471,6 +479,9 @@ export default function PortalClientes() {
   const [pedSel, setPedSel] = useState(null);
   const [pedidoEventosAbierto, setPedidoEventosAbierto] = useState(null);
   const [solicitudEventosAbierta, setSolicitudEventosAbierta] = useState(null);
+  const [msgInput, setMsgInput] = useState({});
+  const [enviandoMsg, setEnviandoMsg] = useState(null);
+  const [trabajandoViaje, setTrabajandoViaje] = useState(null);
   const [facturaSel, setFacturaSel] = useState(null);
   const [solicitudEditando, setSolicitudEditando] = useState(null);
   const [loadingFactura, setLoadingFactura] = useState(null);
@@ -606,6 +617,53 @@ export default function PortalClientes() {
       await cargar();
     } catch (e) {
       notify(e.message, "error");
+    }
+  }
+
+  async function aceptarViaje(s) {
+    if (!s?.id) return;
+    setTrabajandoViaje(s.id);
+    try {
+      await aceptarPortalClienteViaje(s.id);
+      notify("Viaje aceptado. Trafico ya puede planificarlo.", "success");
+      await cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo aceptar el viaje.", "error");
+    } finally {
+      setTrabajandoViaje(null);
+    }
+  }
+
+  async function rechazarViaje(s) {
+    if (!s?.id) return;
+    const motivo = window.prompt("Motivo del rechazo (opcional, lo vera trafico):") || "";
+    setTrabajandoViaje(s.id);
+    try {
+      await rechazarPortalClienteViaje(s.id, { motivo });
+      notify("Has rechazado la propuesta. Trafico revisara la solicitud.", "success");
+      await cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo rechazar la propuesta.", "error");
+    } finally {
+      setTrabajandoViaje(null);
+    }
+  }
+
+  async function enviarMensajeCliente(s) {
+    const texto = String(msgInput[s.id] || "").trim();
+    if (!texto) { notify("Escribe un mensaje.", "warning"); return; }
+    setEnviandoMsg(s.id);
+    try {
+      await enviarMensajePortalCliente(s.id, texto);
+      setMsgInput(prev => ({ ...prev, [s.id]: "" }));
+      const data = await getPortalClienteSolicitudEventos(s.id);
+      setSolicitudEventos(prev => ({ ...prev, [s.id]: Array.isArray(data) ? data : [] }));
+      setSolicitudEventosAbierta(s.id);
+      notify("Mensaje enviado a trafico.", "success");
+    } catch (e) {
+      notify(e.message || "No se pudo enviar el mensaje.", "error");
+    } finally {
+      setEnviandoMsg(null);
     }
   }
 
@@ -1326,6 +1384,24 @@ export default function PortalClientes() {
                     </div>
                   )}
                   {s.respuesta && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text3)" }}>{s.respuesta}</div>}
+                  {String(s.estado || "").toLowerCase() === "propuesta" && (
+                    <div style={{ marginTop: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(139,92,246,.35)", background: "rgba(139,92,246,.09)" }}>
+                      <div style={{ fontSize: 13, fontWeight: 900, color: "#7c3aed" }}>
+                        Trafico te propone este viaje
+                      </div>
+                      <div style={{ marginTop: 4, fontSize: 12, color: "var(--text4)" }}>
+                        Revisa los datos{s.pedido_numero ? ` (pedido ${s.pedido_numero})` : ""} y confirma. El viaje no se planifica hasta que lo aceptes.
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                        <button onClick={() => aceptarViaje(s)} disabled={trabajandoViaje === s.id} style={{ ...S.btn, background: "#10b981", borderColor: "#10b981", color: "#fff", opacity: trabajandoViaje === s.id ? .55 : 1 }}>
+                          {trabajandoViaje === s.id ? "Procesando..." : "Aceptar viaje"}
+                        </button>
+                        <button onClick={() => rechazarViaje(s)} disabled={trabajandoViaje === s.id} style={{ ...S.btn, color: "#ef4444", borderColor: "rgba(239,68,68,.25)", opacity: trabajandoViaje === s.id ? .55 : 1 }}>
+                          Rechazar
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {s.fecha_propuesta && (
                     <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(59,130,246,.2)", background: "rgba(59,130,246,.08)" }}>
                       <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text)" }}>
@@ -1400,15 +1476,46 @@ export default function PortalClientes() {
                     <div style={{ marginTop: 10, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, padding: "10px 12px" }}>
                       {(solicitudEventos[s.id] || []).length === 0 ? (
                         <div style={{ fontSize: 12, color: "var(--text5)" }}>Sin eventos registrados.</div>
-                      ) : (solicitudEventos[s.id] || []).map(ev => (
-                        <div key={ev.id} style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, padding: "7px 0", borderBottom: "1px solid var(--border2)" }}>
-                          <div style={{ fontSize: 11, color: "var(--text5)" }}>{ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : "-"}</div>
-                          <div>
-                            <div style={{ fontSize: 12, fontWeight: 900, color: "var(--text)" }}>{solicitudEventoLabel(ev.tipo)}</div>
-                            {solicitudEventoResumen(ev) && <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 2 }}>{solicitudEventoResumen(ev)}</div>}
+                      ) : (solicitudEventos[s.id] || []).map(ev => {
+                        const esMensaje = ev.tipo === "mensaje.cliente" || ev.tipo === "mensaje.empresa";
+                        if (esMensaje) {
+                          const mio = ev.tipo === "mensaje.cliente";
+                          return (
+                            <div key={ev.id} style={{ display: "flex", justifyContent: mio ? "flex-end" : "flex-start", padding: "5px 0" }}>
+                              <div style={{ maxWidth: "80%", padding: "8px 11px", borderRadius: 10, background: mio ? "rgba(20,184,166,.12)" : "var(--bg2)", border: `1px solid ${mio ? "rgba(20,184,166,.3)" : "var(--border2)"}` }}>
+                                <div style={{ fontSize: 10, fontWeight: 900, color: mio ? "var(--accent)" : "var(--text4)", marginBottom: 2 }}>
+                                  {mio ? "Tu" : "Trafico"}
+                                </div>
+                                <div style={{ fontSize: 12.5, color: "var(--text)", whiteSpace: "pre-wrap" }}>{ev.detalle?.mensaje || ""}</div>
+                                <div style={{ fontSize: 10, color: "var(--text5)", marginTop: 3, textAlign: "right" }}>
+                                  {ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : ""}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={ev.id} style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, padding: "7px 0", borderBottom: "1px solid var(--border2)" }}>
+                            <div style={{ fontSize: 11, color: "var(--text5)" }}>{ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : "-"}</div>
+                            <div>
+                              <div style={{ fontSize: 12, fontWeight: 900, color: "var(--text)" }}>{solicitudEventoLabel(ev.tipo)}</div>
+                              {solicitudEventoResumen(ev) && <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 2 }}>{solicitudEventoResumen(ev)}</div>}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
+                      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                        <input
+                          value={msgInput[s.id] || ""}
+                          onChange={e => setMsgInput(prev => ({ ...prev, [s.id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === "Enter") enviarMensajeCliente(s); }}
+                          placeholder="Escribe un mensaje para trafico..."
+                          style={{ flex: 1, minWidth: 0, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", borderRadius: 8, padding: "9px 12px", outline: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}
+                        />
+                        <button onClick={() => enviarMensajeCliente(s)} disabled={enviandoMsg === s.id} style={{ ...S.btn, background: "var(--accent)", color: "#fff", borderColor: "var(--accent)", opacity: enviandoMsg === s.id ? .55 : 1 }}>
+                          {enviandoMsg === s.id ? "Enviando..." : "Enviar"}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

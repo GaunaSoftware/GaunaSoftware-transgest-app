@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   actualizarPortalSolicitudAdmin,
   convertirPortalSolicitudAdmin,
+  proponerPortalSolicitudAdmin,
+  enviarMensajePortalSolicitudAdmin,
   descargarArchivoProtegido,
   getPortalSolicitudesAdmin,
   getPortalSolicitudDocumentosAdmin,
@@ -12,10 +14,28 @@ import { notify, promptDialog } from "../services/notify";
 const ESTADO = {
   pendiente: { l: "Pendiente", c: "#f97316" },
   revisada: { l: "En revision", c: "#3b82f6" },
+  propuesta: { l: "Propuesta enviada", c: "#8b5cf6" },
   convertida: { l: "Aceptada", c: "#10b981" },
   descartada: { l: "Rechazada", c: "#ef4444" },
   rechazada: { l: "Rechazada", c: "#ef4444" },
   cancelada: { l: "Cancelada", c: "#ef4444" },
+};
+
+const EVENTO_LABEL = {
+  "solicitud.creada": "Solicitud creada",
+  "solicitud.editada.cliente": "Editada por el cliente",
+  "solicitud.pedido.editado.cliente": "Pedido editado por el cliente",
+  "solicitud.convertida": "Convertida en pedido",
+  "solicitud.propuesta": "Viaje propuesto al cliente",
+  "solicitud.aceptada.cliente": "Viaje aceptado por el cliente",
+  "solicitud.rechazada.cliente": "Propuesta rechazada por el cliente",
+  "solicitud.cancelada.cliente": "Cancelada por el cliente",
+  "solicitud.pedido.cancelado.cliente": "Pedido cancelado por el cliente",
+  "solicitud.reprogramacion.propuesta": "Nueva fecha propuesta",
+  "solicitud.reprogramacion.cliente": "Respuesta del cliente a la fecha",
+  "solicitud.precio.aceptada": "Precio aceptado por el cliente",
+  "solicitud.precio.rechazada": "Precio rechazado por el cliente",
+  "solicitud.documento.subido": "Documento adjuntado",
 };
 
 function refreshSolicitudBadges() {
@@ -192,6 +212,8 @@ export default function Solicitudes() {
   const [trabajando, setTrabajando] = useState(null);
   const [eventos, setEventos] = useState({});
   const [eventosAbiertos, setEventosAbiertos] = useState({});
+  const [msgInput, setMsgInput] = useState({});
+  const [enviandoMsg, setEnviandoMsg] = useState(null);
   const [editando, setEditando] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [docsSolicitud, setDocsSolicitud] = useState([]);
@@ -461,6 +483,52 @@ export default function Solicitudes() {
       }
     } finally {
       setTrabajando(null);
+    }
+  }
+
+  async function proponer(sol) {
+    setTrabajando(sol.id);
+    try {
+      const r = await proponerPortalSolicitudAdmin(sol.id, { limpiar_invalidos: true });
+      const solicitudActualizada = r?.solicitud || {};
+      const pedido = r?.pedido || (Array.isArray(r?.pedidos) ? r.pedidos[0] : {}) || {};
+      setSols(prev => prev.map(item => String(item.id) === String(sol.id)
+        ? {
+            ...item,
+            ...solicitudActualizada,
+            estado: "propuesta",
+            pedido_id: pedido.id || solicitudActualizada.pedido_id || item.pedido_id,
+            pedido_numero: pedido.numero || solicitudActualizada.pedido_numero || item.pedido_numero,
+            respuesta: solicitudActualizada.respuesta || "Viaje propuesto al cliente. Pendiente de que lo acepte.",
+          }
+        : item
+      ));
+      notify("Propuesta enviada al cliente. Recibira un aviso para aceptar o rechazar el viaje.", "success");
+      refreshSolicitudBadges();
+      cargar().catch(() => {});
+    } catch (e) {
+      notify(e.message, "error");
+    } finally {
+      setTrabajando(null);
+    }
+  }
+
+  async function enviarMensajeEmpresa(sol) {
+    const texto = String(msgInput[sol.id] || "").trim();
+    if (!texto) { notify("Escribe un mensaje.", "warning"); return; }
+    setEnviandoMsg(sol.id);
+    try {
+      await enviarMensajePortalSolicitudAdmin(sol.id, texto);
+      setMsgInput(prev => ({ ...prev, [sol.id]: "" }));
+      // Recarga el hilo para ver el mensaje recien enviado.
+      const rows = await getPortalSolicitudEventosAdmin(sol.id);
+      setEventos(prev => ({ ...prev, [sol.id]: Array.isArray(rows) ? rows : [] }));
+      setEventosAbiertos(prev => ({ ...prev, [sol.id]: true }));
+      notify("Mensaje enviado al cliente.", "success");
+    } catch (e) {
+      notify(e.message, "error");
+    } finally {
+      setEnviandoMsg(null);
     }
   }
 
@@ -783,6 +851,16 @@ export default function Solicitudes() {
                   {trabajando === sol.id ? "Procesando..." : pricePending ? "Esperando precio" : "Convertir en pedido"}
                 </button>
               )}
+              {!rejected && sol.estado !== "propuesta" && (
+                <button onClick={() => proponer(sol)} disabled={conversionDisabled} title="Crea el pedido y se lo propone al cliente: recibira un aviso y debera aceptarlo antes de confirmarse." style={{ ...S.btn, background: "#8b5cf6", color: "#fff", borderColor: "#8b5cf6", opacity: conversionDisabled ? .55 : 1 }}>
+                  {trabajando === sol.id ? "Procesando..." : "Proponer al cliente"}
+                </button>
+              )}
+              {sol.estado === "propuesta" && (
+                <span style={{ ...S.btn, background: "rgba(139,92,246,.12)", color: "#7c3aed", borderColor: "rgba(139,92,246,.35)", cursor: "default", fontWeight: 800 }}>
+                  Esperando que el cliente acepte
+                </span>
+              )}
               {!rejected && (
                 <button onClick={() => reprogramar(sol)} disabled={disabled} style={{ ...S.btn, opacity: disabled ? .55 : 1 }}>
                   Reprogramar
@@ -828,18 +906,50 @@ export default function Solicitudes() {
               <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: "var(--bg3)", border: "1px solid var(--border2)" }}>
                 {(eventos[sol.id] || []).length === 0 ? (
                   <div style={{ fontSize: 12, color: "var(--text5)" }}>Sin movimientos registrados.</div>
-                ) : eventos[sol.id].map(ev => (
-                  <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid var(--border2)" }}>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 900, color: "var(--text)" }}>{ev.tipo}</div>
-                      {ev.detalle?.pedido_numero && <div style={{ fontSize: 11, color: "var(--text4)" }}>Pedido: {ev.detalle.pedido_numero}</div>}
-                      {ev.detalle?.respuesta && <div style={{ fontSize: 11, color: "var(--text4)" }}>{ev.detalle.respuesta}</div>}
+                ) : eventos[sol.id].map(ev => {
+                  const esMensaje = ev.tipo === "mensaje.cliente" || ev.tipo === "mensaje.empresa";
+                  if (esMensaje) {
+                    const deCliente = ev.tipo === "mensaje.cliente";
+                    return (
+                      <div key={ev.id} style={{ display: "flex", justifyContent: deCliente ? "flex-start" : "flex-end", padding: "5px 0" }}>
+                        <div style={{ maxWidth: "80%", padding: "8px 11px", borderRadius: 10, background: deCliente ? "var(--bg2)" : "rgba(59,130,246,.12)", border: `1px solid ${deCliente ? "var(--border2)" : "rgba(59,130,246,.3)"}` }}>
+                          <div style={{ fontSize: 10, fontWeight: 900, color: deCliente ? "var(--text4)" : "var(--accent)", marginBottom: 2 }}>
+                            {deCliente ? (sol.cliente_nombre || "Cliente") : "Trafico (tu)"}
+                          </div>
+                          <div style={{ fontSize: 12.5, color: "var(--text)", whiteSpace: "pre-wrap" }}>{ev.detalle?.mensaje || ""}</div>
+                          <div style={{ fontSize: 10, color: "var(--text5)", marginTop: 3, textAlign: "right" }}>
+                            {ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : ""}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid var(--border2)" }}>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: "var(--text)" }}>{EVENTO_LABEL[ev.tipo] || ev.tipo}</div>
+                        {ev.detalle?.pedido_numero && <div style={{ fontSize: 11, color: "var(--text4)" }}>Pedido: {ev.detalle.pedido_numero}</div>}
+                        {ev.detalle?.respuesta && <div style={{ fontSize: 11, color: "var(--text4)" }}>{ev.detalle.respuesta}</div>}
+                        {ev.detalle?.motivo && <div style={{ fontSize: 11, color: "var(--text4)" }}>Motivo: {ev.detalle.motivo}</div>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text5)", whiteSpace: "nowrap" }}>
+                        {ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : ""}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--text5)", whiteSpace: "nowrap" }}>
-                      {ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : ""}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <input
+                    value={msgInput[sol.id] || ""}
+                    onChange={e => setMsgInput(prev => ({ ...prev, [sol.id]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === "Enter") enviarMensajeEmpresa(sol); }}
+                    placeholder="Escribe un mensaje para el cliente..."
+                    style={{ ...S.input, flex: 1, margin: 0 }}
+                  />
+                  <button onClick={() => enviarMensajeEmpresa(sol)} disabled={enviandoMsg === sol.id} style={{ ...S.btn, background: "var(--accent)", color: "#fff", borderColor: "var(--accent)", opacity: enviandoMsg === sol.id ? .55 : 1 }}>
+                    {enviandoMsg === sol.id ? "Enviando..." : "Enviar al cliente"}
+                  </button>
+                </div>
               </div>
             )}
           </div>

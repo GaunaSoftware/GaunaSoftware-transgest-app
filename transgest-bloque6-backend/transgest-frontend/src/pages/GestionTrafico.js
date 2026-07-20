@@ -2514,7 +2514,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         getPedidosResumenLista({ desde: desdeCarga, hasta: hastaCarga, limit: 1000 }, { timeoutMs: 45000, silentError: true }),
         getPedidosResumenLista({
           tipo_carga: "grupaje",
-          estado: "pendiente,confirmado,en_curso,descarga,incidencia",
+          estado: "pendiente,confirmado,espera_carga,cargando,en_curso,espera_descarga,descarga,incidencia",
           facturado: "false",
           limit: 1000,
         }, { timeoutMs: 45000, silentError: true }),

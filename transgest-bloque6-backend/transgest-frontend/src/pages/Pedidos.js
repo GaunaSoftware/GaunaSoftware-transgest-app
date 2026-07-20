@@ -6166,14 +6166,22 @@ function getPedidoMapaPasos(pedido = {}, choferPasos = null) {
 
 function pedidoPointTone({ tipo, pedido = {}, pasos = {} }) {
   const estado = String(pedido?.estado || "").toLowerCase();
-  const incidencia = estado === "incidencia" || pedido?.incidencia_activa || pedido?.incidencia_descripcion;
+  // Solo es incidencia si el pedido ESTA en estado incidencia (o hay un flag
+  // booleano explicito de incidencia abierta). Antes bastaba con que
+  // incidencia_descripcion tuviera texto, pero ese campo se queda con el
+  // historico aunque la incidencia ya este resuelta y el pedido haya avanzado,
+  // asi que todos los puntos del mapa salian rojos "Incidencia".
+  const incidencia = estado === "incidencia" || pedido?.incidencia_activa === true;
   if (incidencia) return { key:"incidencia", label:"Incidencia", color:"#ef4444", bg:"rgba(239,68,68,.16)", border:"rgba(239,68,68,.55)" };
   if (tipo === "carga") {
-    if (pasos.carga_ok || ["en_curso","descarga","entregado","facturado"].includes(estado)) {
+    if (pasos.carga_ok || ["en_curso","espera_descarga","descarga","entregado","facturado"].includes(estado)) {
       return { key:"ok", label:"Carga OK", color:"#10b981", bg:"rgba(16,185,129,.17)", border:"rgba(16,185,129,.55)" };
     }
-    if (pasos.carga_proceso || pasos.carga_iniciada) {
-      return { key:"activo", label:"En carga", color:"#f59e0b", bg:"rgba(245,158,11,.18)", border:"rgba(245,158,11,.55)" };
+    if (estado === "cargando" || pasos.carga_proceso || pasos.carga_iniciada) {
+      return { key:"activo", label:"En carga", color:"#14b8a6", bg:"rgba(20,184,166,.16)", border:"rgba(20,184,166,.55)" };
+    }
+    if (estado === "espera_carga") {
+      return { key:"espera", label:"Espera carga", color:"#eab308", bg:"rgba(234,179,8,.16)", border:"rgba(234,179,8,.5)" };
     }
   }
   if (tipo === "descarga") {
@@ -6182,6 +6190,9 @@ function pedidoPointTone({ tipo, pedido = {}, pasos = {} }) {
     }
     if (pasos.descarga_iniciada || pasos.posicionado_descarga || estado === "descarga") {
       return { key:"activo", label:pasos.descarga_iniciada || estado === "descarga" ? "En descarga" : "Llegado a descarga", color:"#f97316", bg:"rgba(249,115,22,.18)", border:"rgba(249,115,22,.55)" };
+    }
+    if (estado === "espera_descarga") {
+      return { key:"espera", label:"Espera descarga", color:"#d946ef", bg:"rgba(217,70,239,.16)", border:"rgba(217,70,239,.5)" };
     }
     if (pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso") {
       return { key:"proximo", label:"Destino pendiente", color:"#3b82f6", bg:"rgba(59,130,246,.16)", border:"rgba(59,130,246,.48)" };

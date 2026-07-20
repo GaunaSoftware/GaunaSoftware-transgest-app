@@ -1,4 +1,6 @@
 import { useDebounce } from "../hooks/useDebounce";
+import AdrPanel from "../components/AdrPanel";
+import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
 import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
 import { getLogoDataUrl } from "../services/logoHelper";
 import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
@@ -4630,6 +4632,15 @@ ${!esCol ? bloqueEmailsAlbaranes : ""}
     <div class="f"><div class="fl">Volumen (m3)</div><div class="fv">${pedido.volumen||"-"}</div></div>
     <div class="f"><div class="fl">ML</div><div class="fv">${pedido.metros_lineales||"-"}</div></div>
   </div>
+  ${(Array.isArray(pedido.adr_items) && pedido.adr_items.filter(it=>it&&(it.un||it.nombre)).length) ? `
+  <div style="margin-top:10px;border:2px solid #b91c1c;border-radius:6px;padding:9px 10px;background:#fef2f2">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="display:inline-block;width:16px;height:16px;background:#f59e0b;border:2px solid #111;transform:rotate(45deg)"></span>
+      <span style="color:#b91c1c;font-weight:800;font-size:12px">MERCANCIA PELIGROSA (ADR) &mdash; Documento de transporte 5.4.1</span>
+    </div>
+    ${pedido.adr_items.filter(it=>it&&(it.un||it.nombre)).map(it=>`<div style="font-family:monospace;font-size:11px;color:#111;margin-bottom:3px">${adrDocLine(it)}</div>`).join("")}
+    <div style="font-size:10px;color:#7f1d1d;margin-top:4px">${adrExencion(pedido.adr_items).resumen}</div>
+  </div>` : ""}
 </div>
 ${esCol ? `
 <div class="sec">
@@ -8095,6 +8106,12 @@ useEffect(() => {
               <div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>
               <div><label style={S.label}>ML</label><input type="text" inputMode="decimal" style={S.input} value={form.metros_lineales||""} onChange={f("metros_lineales")} placeholder="Metros lineales"/></div>
             </div>
+
+            <AdrPanel
+              adr={!!form.adr}
+              items={Array.isArray(form.adr_items) ? form.adr_items : []}
+              onChange={({ adr, adr_items }) => setForm(p => ({ ...p, adr, adr_items }))}
+            />
 
             <div style={S.sec}>Precio</div>
             <div style={{fontSize:11,color:"var(--text5)",margin:"-6px 0 8px"}}>El porte se introduce sin IVA. Selecciona aqui si la orden va con IVA, 0% o exenta.</div>

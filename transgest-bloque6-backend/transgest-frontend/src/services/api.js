@@ -748,6 +748,11 @@ export const convertirPortalSolicitudAdmin = (id, data={}) => apiFetch(`/portal-
 export const getPortalSolicitudEventosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/eventos`);
 export const enviarMensajePortalSolicitudAdmin = (id, mensaje) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/mensaje`, { method:"POST", body:{ mensaje } });
 export const getPortalSolicitudDocumentosAdmin = (id) => apiFetch(`/portal-cliente/admin/solicitudes/${encodeURIComponent(id)}/documentos`);
+// ── ADR (mercancías peligrosas) ───────────────────────
+export const getAdrCatalogo = (q="") => apiFetch(`/adr/catalogo?q=${encodeURIComponent(q)}`, { silentError:true });
+export const getAdrOnu = (un) => apiFetch(`/adr/onu/${encodeURIComponent(un)}`, { silentError:true });
+export const getAdrMeta = () => apiFetch("/adr/meta", { silentError:true, silentSuccess:true });
+
 export const getInformeRutas= (desde,hasta) => apiFetch(`/informes/rutas?desde=${desde}&hasta=${hasta}`);
 export const getInformeChoferes=(desde,hasta)=>apiFetch(`/informes/choferes?desde=${desde}&hasta=${hasta}`);
 export const getInformeCobros = ()          => apiFetch("/informes/cobros");

@@ -3869,6 +3869,7 @@ const PEDIDO_TARIFA_CALC_FIELDS = new Set([
   "importe_minimo",
   "minimo_unidades",
   "peso_kg",
+  "puntos_carga",
   "puntos_descarga",
 ]);
 
@@ -3883,16 +3884,18 @@ function calcPedidoImporteCanonical(payload = {}) {
   const cantidadRaw = parseLocaleNumber(payload.cantidad);
   const extra = Math.max(0, parseLocaleNumber(payload.extracostes_importe ?? payload.extracostes) || 0);
   const descargasExtra = sumAdditionalDescargaPrices(payload.puntos_descarga);
+  const cargasExtra = sumAdditionalDescargaPrices(payload.puntos_carga);
+  const stopsExtra = descargasExtra + cargasExtra;
   const minEur = Math.max(0, parseLocaleNumber(payload.importe_minimo) || 0);
   const minUnits = Math.max(0, parseLocaleNumber(payload.minimo_unidades) || 0);
   let cantidad = Number.isFinite(cantidadRaw) ? cantidadRaw : 0;
   if (tipo === "viaje") {
-    return roundMoney(Math.max(precio, minEur) + extra + descargasExtra);
+    return roundMoney(Math.max(precio, minEur) + extra + stopsExtra);
   }
   cantidad = Math.max(cantidad, minUnits);
   if (!Number.isFinite(cantidad) || cantidad <= 0) return null;
   const base = tipo === "kg" ? (cantidad / 100) * precio : cantidad * precio;
-  return roundMoney(base + extra + descargasExtra);
+  return roundMoney(base + extra + stopsExtra);
 }
 
 function normalizeAiText(value = "") {

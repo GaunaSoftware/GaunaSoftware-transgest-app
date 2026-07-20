@@ -2016,7 +2016,12 @@ function applyIvaOptionToDraft(draft = {}, value = "general") {
 }
 
 function calcIvaPedido(form = {}, baseOverride = null) {
-  const base = Number.isFinite(Number(baseOverride)) ? Number(baseOverride) : calcImporte(form);
+  // OJO: Number(null) es 0 y es finito, asi que el chequeo anterior cogia base=0
+  // cuando no se pasaba baseOverride (llamada calcIvaPedido(form)) -> el IVA y el
+  // total salian siempre 0. Solo usamos el override si de verdad viene un numero.
+  const base = (baseOverride !== null && baseOverride !== undefined && Number.isFinite(Number(baseOverride)))
+    ? Number(baseOverride)
+    : calcImporte(form);
   const regimen = ivaOptionValue(form);
   const option = IVA_PEDIDO_OPTIONS.find(o => o.value === regimen) || IVA_PEDIDO_OPTIONS[0];
   const cuota = option.tipo_iva > 0 ? base * (option.tipo_iva / 100) : 0;

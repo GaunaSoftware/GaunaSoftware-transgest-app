@@ -9458,6 +9458,9 @@ export default function Pedidos() {
   const [reprogrammingPedidoId, setReprogrammingPedidoId] = useState("");
   const [bulkRescheduling, setBulkRescheduling] = useState(false);
   const [bulkClearing, setBulkClearing] = useState(false);
+  const [bulkVehiculo, setBulkVehiculo] = useState("");
+  const [bulkChofer, setBulkChofer] = useState("");
+  const [bulkAssigning, setBulkAssigning] = useState(false);
   const [openActionMenuPedidoId, setOpenActionMenuPedidoId] = useState("");
   const [whatsappSending, setWhatsappSending] = useState("");
   const [incidenciaSelector, setIncidenciaSelector] = useState(null);
@@ -10470,6 +10473,35 @@ export default function Pedidos() {
     }
   }
 
+  async function asignarSeleccionados() {
+    if (!bulkVehiculo && !bulkChofer) { notify("Elige un vehiculo o un chofer para asignar.", "info"); return; }
+    const lista = selectedPedidosOperables.filter(p => !pedidoTieneFacturaBorrador(p));
+    if (!lista.length) { notify("No hay pedidos asignables seleccionados.", "info"); return; }
+    const veh = vehiculos.find(v => String(v.id) === String(bulkVehiculo));
+    const chf = choferes.find(c => String(c.id) === String(bulkChofer));
+    const desc = [veh ? `vehiculo ${veh.matricula}` : "", (chf || veh) ? `chofer ${chf ? (chf.nombre || "") : "del vehiculo"}` : ""].filter(Boolean).join(" + ");
+    const ok = await confirmDialog({ title: "Asignar a seleccionados", message: `Se asignara ${desc || "el recurso elegido"} a ${lista.length} pedido(s) seleccionados.`, confirmText: "Asignar" });
+    if (!ok) return;
+    setBulkAssigning(true);
+    try {
+      for (const pedido of lista) {
+        const patch = {};
+        if (bulkVehiculo) { patch.vehiculo_id = bulkVehiculo; patch.colaborador_id = ""; }
+        if (bulkChofer) patch.chofer_id = bulkChofer;
+        else if (veh && veh.chofer_id) patch.chofer_id = veh.chofer_id;
+        await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, patch));
+      }
+      notify(`Asignados ${lista.length} pedido(s) seleccionados.`, "success");
+      setSelectedPedidoIds([]); setBulkVehiculo(""); setBulkChofer("");
+      cargar();
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-assign" } }));
+    } catch (e) {
+      notify(e.message || "No se pudieron asignar los pedidos seleccionados.", "error");
+    } finally {
+      setBulkAssigning(false);
+    }
+  }
+
   async function cambiarEstadoSeleccionados() {
     const lista = selectedPedidosOperables;
     if (!lista.length) {
@@ -10948,6 +10980,17 @@ export default function Pedidos() {
             style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.24)",opacity:bulkRescheduling?0.6:1,cursor:bulkRescheduling?"not-allowed":"pointer"}}
           >
             Aplicar estado
+          </button>
+          <select value={bulkVehiculo} onChange={e => setBulkVehiculo(e.target.value)} style={{...S.sel,width:150,padding:"5px 10px",fontSize:11}}>
+            <option value="">Vehiculo...</option>
+            {vehiculos.map(v => <option key={v.id} value={v.id}>{v.matricula}</option>)}
+          </select>
+          <select value={bulkChofer} onChange={e => setBulkChofer(e.target.value)} style={{...S.sel,width:150,padding:"5px 10px",fontSize:11}}>
+            <option value="">Chofer (auto del vehiculo)...</option>
+            {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
+          </select>
+          <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer)} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?"not-allowed":"pointer"}}>
+            {bulkAssigning ? "Asignando..." : "Asignar"}
           </button>
           <button
             onClick={() => setSelectedPedidoIds([])}

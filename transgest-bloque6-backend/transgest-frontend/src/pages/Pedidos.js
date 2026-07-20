@@ -824,7 +824,8 @@ function calcImporte(form) {
   const precio  = toNum(form.precio_unitario, 0);
   const cant    = toNum(form.cantidad, 0);
   const extra   = toNum(form.extracostes ?? form.extracostes_importe, 0);
-  const descargasExtra = sumAdditionalDescargaPrices(form.puntos_descarga);
+  const descargasExtra = sumAdditionalStopPrices(form.puntos_descarga);
+  const cargasExtra = sumAdditionalStopPrices(form.puntos_carga);
   const minEur  = toNum(form.importe_minimo, 0);
   const minUnits = toNum(form.minimo_unidades, 0);
   const units = minUnits > 0 ? Math.max(cant, minUnits) : cant;
@@ -833,7 +834,7 @@ function calcImporte(form) {
   else if (form.tipo_precio === "kg") base = (units / 100) * precio;
   else base = precio * units;
   if (form.tipo_precio === "viaje" && minEur > 0) base = Math.max(base, minEur);
-  const total = base + extra + descargasExtra;
+  const total = base + extra + descargasExtra + cargasExtra;
   const safeTotal = Number.isFinite(total) ? total : 0;
   return safeTotal;
 }
@@ -1980,7 +1981,10 @@ function sumStopWeights(stops) {
   return parseStops(stops).reduce((total, stop) => total + Number(stop.peso_kg || 0), 0);
 }
 
-function sumAdditionalDescargaPrices(stops) {
+// Suma el precio de las paradas ADICIONALES (todas menos la principal), sirve
+// tanto para cargas como para descargas. La primera parada es el origen/destino
+// principal, cuyo importe ya va en el precio base del viaje.
+function sumAdditionalStopPrices(stops) {
   return parseStops(stops)
     .slice(1)
     .reduce((total, stop) => {
@@ -8171,10 +8175,16 @@ useEffect(() => {
             )}
             {(calcImporte(form)>0 || form.precio_unitario)&&(
               <div style={{background:"rgba(34,211,160,.07)",border:"1px solid rgba(34,211,160,.2)",borderRadius:8,padding:"10px 16px",marginTop:4}}>
-                {sumAdditionalDescargaPrices(form.puntos_descarga)>0&&(
+                {sumAdditionalStopPrices(form.puntos_carga)>0&&(
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                    <span style={{fontSize:11,color:"var(--text3)"}}>Cargas adicionales incluidas</span>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--green)"}}>+{sumAdditionalStopPrices(form.puntos_carga).toFixed(2)} EUR</span>
+                  </div>
+                )}
+                {sumAdditionalStopPrices(form.puntos_descarga)>0&&(
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
                     <span style={{fontSize:11,color:"var(--text3)"}}>Descargas adicionales incluidas</span>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--green)"}}>+{sumAdditionalDescargaPrices(form.puntos_descarga).toFixed(2)} EUR</span>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--green)"}}>+{sumAdditionalStopPrices(form.puntos_descarga).toFixed(2)} EUR</span>
                   </div>
                 )}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>

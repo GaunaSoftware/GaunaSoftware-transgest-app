@@ -747,6 +747,13 @@ export default function Solicitudes() {
         const e = ESTADO[sol.estado] || ESTADO.pendiente;
         const rejected = isRejected(sol);
         const pricePending = sol.decision_precio === "pendiente";
+        const reprogramaPending = !!sol.fecha_propuesta && (!sol.decision_cliente || sol.decision_cliente === "pendiente");
+        const esperandoCliente = !rejected && (pricePending || reprogramaPending);
+        const esperandoClienteMsg = pricePending && reprogramaPending
+          ? "Esperando que el cliente responda a la nueva fecha y al precio propuestos."
+          : pricePending
+            ? "Esperando que el cliente acepte o rechace el precio propuesto."
+            : "Esperando que el cliente acepte o rechace la nueva fecha propuesta.";
         const disabled = trabajando === sol.id || ["convertida", "rechazada", "descartada", "cancelada"].includes(sol.estado);
         const conversionDisabled = disabled || pricePending;
         const aged = isAged(sol);
@@ -778,6 +785,11 @@ export default function Solicitudes() {
                 )}
               </div>
               <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end" }}>
+                {esperandoCliente && (
+                  <span title={esperandoClienteMsg} style={{ padding:"3px 10px", borderRadius:20, color:"#7c3aed", background:"rgba(139,92,246,.14)", fontSize:11, fontWeight:900 }}>
+                    Esperando cliente
+                  </span>
+                )}
                 {aged && <span style={{ padding:"3px 9px", borderRadius:20, color:"#ef4444", background:"rgba(239,68,68,.14)", fontSize:11, fontWeight:900 }}>+24 h</span>}
                 <span style={{ padding: "3px 10px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 11, fontWeight: 900 }}>{e.l}</span>
               </div>

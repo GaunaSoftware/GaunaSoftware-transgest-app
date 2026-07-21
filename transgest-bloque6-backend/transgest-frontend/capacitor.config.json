@@ -1,12 +1,25 @@
 {
-  "appId": "com.transgest.chofer",
-  "appName": "TransGest Chofer",
+  "appId": "com.gaunasoftware.transgest",
+  "appName": "TransGest",
   "webDir": "build",
   "bundledWebRuntime": false,
+  "backgroundColor": "#0d1017",
   "server": {
-    "androidScheme": "https"
+    "androidScheme": "https",
+    "iosScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "always"
   },
   "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "backgroundColor": "#0d1017",
+      "showSpinner": false
+    },
     "Geolocation": {
       "permissions": [
         "location"

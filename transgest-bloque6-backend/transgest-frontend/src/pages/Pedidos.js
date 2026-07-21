@@ -9548,6 +9548,7 @@ export default function Pedidos() {
   const [bulkClearing, setBulkClearing] = useState(false);
   const [bulkVehiculo, setBulkVehiculo] = useState("");
   const [bulkChofer, setBulkChofer] = useState("");
+  const [bulkMatricula, setBulkMatricula] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [openActionMenuPedidoId, setOpenActionMenuPedidoId] = useState("");
   const [whatsappSending, setWhatsappSending] = useState("");
@@ -10562,25 +10563,31 @@ export default function Pedidos() {
   }
 
   async function asignarSeleccionados() {
-    if (!bulkVehiculo && !bulkChofer) { notify("Elige un vehiculo o un chofer para asignar.", "info"); return; }
+    const matriculaManual = String(bulkMatricula || "").trim().toUpperCase();
+    if (!bulkVehiculo && !bulkChofer && !matriculaManual) { notify("Elige un vehiculo, un chofer o escribe una matricula para asignar.", "info"); return; }
     const lista = selectedPedidosOperables.filter(p => !pedidoTieneFacturaBorrador(p));
     if (!lista.length) { notify("No hay pedidos asignables seleccionados.", "info"); return; }
     const veh = vehiculos.find(v => String(v.id) === String(bulkVehiculo));
     const chf = choferes.find(c => String(c.id) === String(bulkChofer));
-    const desc = [veh ? `vehiculo ${veh.matricula}` : "", (chf || veh) ? `chofer ${chf ? (chf.nombre || "") : "del vehiculo"}` : ""].filter(Boolean).join(" + ");
+    const desc = [
+      matriculaManual ? `matricula ${matriculaManual}` : "",
+      veh ? `vehiculo ${veh.matricula}` : "",
+      (chf || veh) ? `chofer ${chf ? (chf.nombre || "") : "del vehiculo"}` : "",
+    ].filter(Boolean).join(" + ");
     const ok = await confirmDialog({ title: "Asignar a seleccionados", message: `Se asignara ${desc || "el recurso elegido"} a ${lista.length} pedido(s) seleccionados.`, confirmText: "Asignar" });
     if (!ok) return;
     setBulkAssigning(true);
     try {
       for (const pedido of lista) {
         const patch = {};
-        if (bulkVehiculo) { patch.vehiculo_id = bulkVehiculo; patch.colaborador_id = ""; }
+        if (bulkVehiculo) { patch.vehiculo_id = bulkVehiculo; patch.colaborador_id = ""; patch.matricula_manual = ""; }
+        else if (matriculaManual) { patch.matricula_manual = matriculaManual; patch.vehiculo_id = ""; patch.colaborador_id = ""; }
         if (bulkChofer) patch.chofer_id = bulkChofer;
         else if (veh && veh.chofer_id) patch.chofer_id = veh.chofer_id;
         await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, patch));
       }
       notify(`Asignados ${lista.length} pedido(s) seleccionados.`, "success");
-      setSelectedPedidoIds([]); setBulkVehiculo(""); setBulkChofer("");
+      setSelectedPedidoIds([]); setBulkVehiculo(""); setBulkChofer(""); setBulkMatricula("");
       cargar();
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-assign" } }));
     } catch (e) {
@@ -11077,7 +11084,16 @@ export default function Pedidos() {
             <option value="">Chofer (auto del vehiculo)...</option>
             {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
           </select>
-          <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer)} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?"not-allowed":"pointer"}}>
+          <span style={{fontSize:11,color:"var(--text5)"}}>o</span>
+          <input
+            value={bulkMatricula}
+            onChange={e => setBulkMatricula(e.target.value.toUpperCase())}
+            placeholder="Matricula a mano"
+            title="Escribe una matricula a mano (asignacion propia, sin IA) y aplicala a los seleccionados"
+            disabled={!!bulkVehiculo}
+            style={{...S.input,width:140,padding:"5px 10px",fontSize:11,opacity:bulkVehiculo?0.5:1}}
+          />
+          <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer && !String(bulkMatricula||"").trim())} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer&&!String(bulkMatricula||"").trim()))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer&&!String(bulkMatricula||"").trim()))?"not-allowed":"pointer"}}>
             {bulkAssigning ? "Asignando..." : "Asignar"}
           </button>
           <button
@@ -11300,7 +11316,7 @@ export default function Pedidos() {
                   </div>
                 </td>
                 <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{Number(p.importe||0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</td>
-                <td style={{...S.td, position:"sticky", right:0, zIndex:2, background: rowBackground ? `linear-gradient(${rowBackground}, ${rowBackground}), var(--card-bg, #ffffff)` : "var(--card-bg, #ffffff)", boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"}} onClick={e=>e.stopPropagation()}>
+                <td style={{...S.td, position:"sticky", right:0, zIndex: actionMenuOpen ? 40 : 2, background: rowBackground ? `linear-gradient(${rowBackground}, ${rowBackground}), var(--card-bg, #ffffff)` : "var(--card-bg, #ffffff)", boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"}} onClick={e=>e.stopPropagation()}>
                   {pedidoTieneFacturaFinal(p)
                     ? <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>FACTURADO</span>

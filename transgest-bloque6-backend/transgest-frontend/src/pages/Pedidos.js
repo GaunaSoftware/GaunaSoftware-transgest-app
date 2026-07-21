@@ -8511,12 +8511,25 @@ useEffect(() => {
               </div>
               {!form.vehiculo_id && !form.colaborador_id && (
                 <div style={{gridColumn:"1/-1",background:"var(--bg4)",border:"1px dashed var(--border2)",borderRadius:8,padding:"10px 12px"}}>
-                  <div style={{fontSize:11,color:"var(--text4)",marginBottom:8}}>El vehiculo no esta en la flota? Escribe la matricula a mano (asignacion propia, no es colaborador):</div>
+                  <div style={{fontSize:11,color:"var(--text4)",marginBottom:8}}>Elige una matricula de la flota o escribe una a mano (asignacion propia, no es colaborador):</div>
+                  <datalist id="tg-fleet-matriculas">
+                    {vehiculosLocal.map(v => <option key={v.id} value={v.matricula}/>)}
+                  </datalist>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                    <div><label style={S.label}>Matricula tractora (a mano)</label>
-                      <input style={S.input} value={form.matricula_manual||""} onChange={e=>setForm(p=>({...p,matricula_manual:e.target.value.toUpperCase()}))} placeholder="Ej: 1234 ABC"/></div>
-                    <div><label style={S.label}>Matricula remolque (a mano)</label>
-                      <input style={S.input} value={form.remolque_matricula_manual||""} onChange={e=>setForm(p=>({...p,remolque_matricula_manual:e.target.value.toUpperCase()}))} placeholder="Ej: R-1234"/></div>
+                    <div><label style={S.label}>Matricula tractora</label>
+                      <input list="tg-fleet-matriculas" style={S.input} value={form.matricula_manual||""}
+                        onChange={e=>{
+                          const val = e.target.value.toUpperCase();
+                          const veh = vehiculosLocal.find(v => String(v.matricula||"").toUpperCase() === val);
+                          if (veh) {
+                            const chofDelVeh = veh.chofer_id || choferesLocal.find(ch => ch.vehiculo_id === veh.id)?.id || "";
+                            setForm(p=>({...p, vehiculo_id: veh.id, matricula_manual:"", remolque_matricula_manual:"", chofer_id: p.chofer_id || chofDelVeh, remolque_id_manual: veh.remolque_id || p.remolque_id_manual}));
+                          } else {
+                            setForm(p=>({...p, matricula_manual: val}));
+                          }
+                        }} placeholder="Elige o escribe (ej: 1234 ABC)"/></div>
+                    <div><label style={S.label}>Matricula remolque</label>
+                      <input list="tg-fleet-matriculas" style={S.input} value={form.remolque_matricula_manual||""} onChange={e=>setForm(p=>({...p,remolque_matricula_manual:e.target.value.toUpperCase()}))} placeholder="Elige o escribe (ej: R-1234)"/></div>
                   </div>
                 </div>
               )}
@@ -10567,10 +10580,15 @@ export default function Pedidos() {
     if (!bulkVehiculo && !bulkChofer && !matriculaManual) { notify("Elige un vehiculo, un chofer o escribe una matricula para asignar.", "info"); return; }
     const lista = selectedPedidosOperables.filter(p => !pedidoTieneFacturaBorrador(p));
     if (!lista.length) { notify("No hay pedidos asignables seleccionados.", "info"); return; }
-    const veh = vehiculos.find(v => String(v.id) === String(bulkVehiculo));
+    // Si la matricula escrita existe en la flota, se asigna el vehiculo real
+    // (datos limpios); si no, se guarda como matricula a mano.
+    const vehPorMatricula = matriculaManual ? vehiculos.find(v => String(v.matricula || "").toUpperCase() === matriculaManual) : null;
+    const vehiculoIdEfectivo = bulkVehiculo || (vehPorMatricula ? vehPorMatricula.id : "");
+    const matriculaEfectiva = (matriculaManual && !vehPorMatricula) ? matriculaManual : "";
+    const veh = vehiculos.find(v => String(v.id) === String(vehiculoIdEfectivo));
     const chf = choferes.find(c => String(c.id) === String(bulkChofer));
     const desc = [
-      matriculaManual ? `matricula ${matriculaManual}` : "",
+      matriculaEfectiva ? `matricula ${matriculaEfectiva}` : "",
       veh ? `vehiculo ${veh.matricula}` : "",
       (chf || veh) ? `chofer ${chf ? (chf.nombre || "") : "del vehiculo"}` : "",
     ].filter(Boolean).join(" + ");
@@ -10580,8 +10598,8 @@ export default function Pedidos() {
     try {
       for (const pedido of lista) {
         const patch = {};
-        if (bulkVehiculo) { patch.vehiculo_id = bulkVehiculo; patch.colaborador_id = ""; patch.matricula_manual = ""; }
-        else if (matriculaManual) { patch.matricula_manual = matriculaManual; patch.vehiculo_id = ""; patch.colaborador_id = ""; }
+        if (vehiculoIdEfectivo) { patch.vehiculo_id = vehiculoIdEfectivo; patch.colaborador_id = ""; patch.matricula_manual = ""; }
+        else if (matriculaEfectiva) { patch.matricula_manual = matriculaEfectiva; patch.vehiculo_id = ""; patch.colaborador_id = ""; }
         if (bulkChofer) patch.chofer_id = bulkChofer;
         else if (veh && veh.chofer_id) patch.chofer_id = veh.chofer_id;
         await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, patch));
@@ -11085,13 +11103,17 @@ export default function Pedidos() {
             {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
           </select>
           <span style={{fontSize:11,color:"var(--text5)"}}>o</span>
+          <datalist id="tg-bulk-matriculas">
+            {vehiculos.map(v => <option key={v.id} value={v.matricula}/>)}
+          </datalist>
           <input
+            list="tg-bulk-matriculas"
             value={bulkMatricula}
             onChange={e => setBulkMatricula(e.target.value.toUpperCase())}
-            placeholder="Matricula a mano"
-            title="Escribe una matricula a mano (asignacion propia, sin IA) y aplicala a los seleccionados"
+            placeholder="Matricula (elige o escribe)"
+            title="Elige una matricula de la flota o escribe una a mano (sin IA) y aplicala a los seleccionados"
             disabled={!!bulkVehiculo}
-            style={{...S.input,width:140,padding:"5px 10px",fontSize:11,opacity:bulkVehiculo?0.5:1}}
+            style={{...S.input,width:170,padding:"5px 10px",fontSize:11,opacity:bulkVehiculo?0.5:1}}
           />
           <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer && !String(bulkMatricula||"").trim())} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer&&!String(bulkMatricula||"").trim()))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer&&!String(bulkMatricula||"").trim()))?"not-allowed":"pointer"}}>
             {bulkAssigning ? "Asignando..." : "Asignar"}

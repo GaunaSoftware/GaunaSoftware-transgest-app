@@ -1,5 +1,6 @@
 import { useDebounce } from "../hooks/useDebounce";
 import AdrPanel from "../components/AdrPanel";
+import QuickAssignModal from "../components/QuickAssignModal";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
 import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
 import { getLogoDataUrl } from "../services/logoHelper";
@@ -8509,28 +8510,9 @@ useEffect(() => {
                   {choferesLocal.filter(c=>c.id!==form.chofer_id).map(c=><option key={c.id} value={c.id}>{c.nombre} {c.apellidos||""}</option>)}
                 </select>
               </div>
-              {!form.vehiculo_id && !form.colaborador_id && (
-                <div style={{gridColumn:"1/-1",background:"var(--bg4)",border:"1px dashed var(--border2)",borderRadius:8,padding:"10px 12px"}}>
-                  <div style={{fontSize:11,color:"var(--text4)",marginBottom:8}}>Elige una matricula de la flota o escribe una a mano (asignacion propia, no es colaborador):</div>
-                  <datalist id="tg-fleet-matriculas">
-                    {vehiculosLocal.map(v => <option key={v.id} value={v.matricula}/>)}
-                  </datalist>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                    <div><label style={S.label}>Matricula tractora</label>
-                      <input list="tg-fleet-matriculas" style={S.input} value={form.matricula_manual||""}
-                        onChange={e=>{
-                          const val = e.target.value.toUpperCase();
-                          const veh = vehiculosLocal.find(v => String(v.matricula||"").toUpperCase() === val);
-                          if (veh) {
-                            const chofDelVeh = veh.chofer_id || choferesLocal.find(ch => ch.vehiculo_id === veh.id)?.id || "";
-                            setForm(p=>({...p, vehiculo_id: veh.id, matricula_manual:"", remolque_matricula_manual:"", chofer_id: p.chofer_id || chofDelVeh, remolque_id_manual: veh.remolque_id || p.remolque_id_manual}));
-                          } else {
-                            setForm(p=>({...p, matricula_manual: val}));
-                          }
-                        }} placeholder="Elige o escribe (ej: 1234 ABC)"/></div>
-                    <div><label style={S.label}>Matricula remolque</label>
-                      <input list="tg-fleet-matriculas" style={S.input} value={form.remolque_matricula_manual||""} onChange={e=>setForm(p=>({...p,remolque_matricula_manual:e.target.value.toUpperCase()}))} placeholder="Elige o escribe (ej: R-1234)"/></div>
-                  </div>
+              {!form.vehiculo_id && !form.colaborador_id && form.matricula_manual && (
+                <div style={{gridColumn:"1/-1",fontSize:12,color:"var(--text3)",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 12px"}}>
+                  Matricula asignada a mano: <strong style={{color:"var(--text)"}}>{form.matricula_manual}</strong>{form.remolque_matricula_manual?` · Remolque ${form.remolque_matricula_manual}`:""} — para cambiarla usa el boton "Asignar" de la lista.
                 </div>
               )}
               {form.chofer2_id&&(
@@ -9564,6 +9546,7 @@ export default function Pedidos() {
   const [bulkMatricula, setBulkMatricula] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [openActionMenuPedidoId, setOpenActionMenuPedidoId] = useState("");
+  const [quickAssignPedido, setQuickAssignPedido] = useState(null);
   const [actionMenuPos, setActionMenuPos] = useState(null);
   function abrirMenuAcciones(pedidoId, btn) {
     try {
@@ -10632,6 +10615,20 @@ export default function Pedidos() {
     }
   }
 
+  async function aplicarQuickAssign(patch) {
+    const p = quickAssignPedido;
+    if (!p) return;
+    try {
+      await editarPedido(p.id, buildPedidoUpdatePayload(p, patch));
+      notify("Asignacion guardada.", "success");
+      setQuickAssignPedido(null);
+      cargar();
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: p.id, source: "pedidos-quick-assign" } }));
+    } catch (e) {
+      notify(e.message || "No se pudo asignar.", "error");
+    }
+  }
+
   async function cambiarEstadoSeleccionados() {
     const lista = selectedPedidosOperables;
     if (!lista.length) {
@@ -10890,7 +10887,7 @@ export default function Pedidos() {
                         Ver en trafico
                       </button>
                       {needsAssignment && (
-                      <button onClick={e=>{e.stopPropagation();abrirEditar(p, {_focus_asignacion: true});}}
+                      <button onClick={e=>{e.stopPropagation();setQuickAssignPedido(p);}}
                           style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(20,184,166,.4)",background:"rgba(20,184,166,.12)",color:"var(--accent)",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
                           Asignar
                         </button>
@@ -11467,9 +11464,9 @@ export default function Pedidos() {
                               </button>
                             )}
                             {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
-                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirEditar(p, {_focus_asignacion:true});}}
+                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");setQuickAssignPedido(p);}}
                                 style={{...S.btn,textAlign:"left",background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)",padding:"6px 10px",fontSize:11}}>
-                                Cambiar vehiculo/chofer
+                                Asignar vehiculo/chofer
                               </button>
                             )}
                             {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
@@ -11816,6 +11813,15 @@ export default function Pedidos() {
       {ordenCarga && <OrdenCargaModal pedido={ordenCarga} onClose={()=>setOrdenCarga(null)}/>}
 
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Autoasignacion IA ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+      {quickAssignPedido && (
+        <QuickAssignModal
+          pedido={quickAssignPedido}
+          vehiculos={vehiculos}
+          choferes={choferes}
+          onClose={()=>setQuickAssignPedido(null)}
+          onAssign={aplicarQuickAssign}
+        />
+      )}
       {autoAsignando && (
         <ModalAutoAsignacion
           pedido={autoAsignando}

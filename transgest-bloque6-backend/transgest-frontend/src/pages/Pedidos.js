@@ -9564,6 +9564,20 @@ export default function Pedidos() {
   const [bulkMatricula, setBulkMatricula] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [openActionMenuPedidoId, setOpenActionMenuPedidoId] = useState("");
+  const [actionMenuPos, setActionMenuPos] = useState(null);
+  function abrirMenuAcciones(pedidoId, btn) {
+    try {
+      const r = btn.getBoundingClientRect();
+      const menuMaxH = 320;
+      const openUp = (r.bottom + menuMaxH > window.innerHeight - 12) && (r.top > window.innerHeight - r.bottom);
+      setActionMenuPos({
+        right: Math.max(8, window.innerWidth - r.right),
+        top: openUp ? undefined : Math.round(r.bottom + 6),
+        bottom: openUp ? Math.round(window.innerHeight - r.top + 6) : undefined,
+      });
+    } catch { setActionMenuPos(null); }
+    setOpenActionMenuPedidoId(pedidoId);
+  }
   const [whatsappSending, setWhatsappSending] = useState("");
   const [incidenciaSelector, setIncidenciaSelector] = useState(null);
   const delayResolverRef = React.useRef(null);
@@ -9772,7 +9786,10 @@ export default function Pedidos() {
     if (typeof window === "undefined") return;
     const handleClose = () => setOpenActionMenuPedidoId("");
     window.addEventListener("click", handleClose);
-    return () => window.removeEventListener("click", handleClose);
+    // El menu "Mas" va en posicion fija: si se hace scroll se queda descolgado,
+    // asi que lo cerramos al hacer scroll (en cualquier contenedor).
+    window.addEventListener("scroll", handleClose, true);
+    return () => { window.removeEventListener("click", handleClose); window.removeEventListener("scroll", handleClose, true); };
   }, []);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -11430,13 +11447,13 @@ export default function Pedidos() {
                           <button style={{...S.btn,background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.2)",padding:"4px 10px",fontSize:11}} onClick={()=>setFacturando(p)}>Facturar</button>
                         )}
                         <button
-                          onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId(actionMenuOpen ? "" : String(p.id));}}
+                          onClick={e=>{e.stopPropagation();if(actionMenuOpen){setOpenActionMenuPedidoId("");}else{abrirMenuAcciones(String(p.id), e.currentTarget);}}}
                           style={{...S.btn,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)",padding:"4px 8px",fontSize:11}}
                         >
                           {actionMenuOpen ? "Cerrar" : "Mas"}
                         </button>
                         {actionMenuOpen && (
-                          <div onClick={e=>e.stopPropagation()} style={{position:"absolute",top:"calc(100% + 6px)",right:0,zIndex:500,minWidth:190,padding:8,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.18)",display:"flex",flexDirection:"column",gap:6}}>
+                          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:actionMenuPos?.top,bottom:actionMenuPos?.bottom,right:actionMenuPos?.right ?? 12,zIndex:3000,minWidth:200,maxHeight:320,overflowY:"auto",padding:8,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.28)",display:"flex",flexDirection:"column",gap:6}}>
                             {canEdit && (
                               <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirCopiarPedido(p);}}
                                 style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"6px 10px",fontSize:11}}>

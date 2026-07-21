@@ -11046,12 +11046,12 @@ export default function Pedidos() {
 
       <div style={{...S.card, overflow:"hidden",width:"100%",maxWidth:"100%",boxSizing:"border-box"}}>
         <div className="tg-responsive-scroll" style={{overflowX:"auto",width:"100%",maxWidth:"100%"}}>
-        <table style={{width:"100%",minWidth:1180,borderCollapse:"collapse"}}>
+        <table style={{width:"100%",minWidth:1320,borderCollapse:"collapse"}}>
           <thead><tr>
             <th style={{...S.th,width:42}}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
             </th>
-            {["N. Pedido","Cliente","Origen -> Destino","F. Carga","H. Carga","F. Descarga","H. Descarga","Vehiculo","Estado","Importe","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}
+            {["N. Pedido","Cliente","Origen -> Destino","F. Carga","H. Carga","F. Descarga","H. Descarga","Vehiculo","Estado","Importe","Acciones"].map(h=><th key={h} style={h==="Acciones" ? {...S.th, position:"sticky", right:0, zIndex:3, boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"} : S.th}>{h}</th>)}
           </tr></thead>
           <tbody>
             {loading ? <tr><td colSpan={12} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
@@ -11252,7 +11252,7 @@ export default function Pedidos() {
                   </div>
                 </td>
                 <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{Number(p.importe||0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</td>
-                <td style={S.td} onClick={e=>e.stopPropagation()}>
+                <td style={{...S.td, position:"sticky", right:0, zIndex:2, background: rowBackground ? `linear-gradient(${rowBackground}, ${rowBackground}), var(--card-bg, #ffffff)` : "var(--card-bg, #ffffff)", boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"}} onClick={e=>e.stopPropagation()}>
                   {pedidoTieneFacturaFinal(p)
                     ? <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>FACTURADO</span>

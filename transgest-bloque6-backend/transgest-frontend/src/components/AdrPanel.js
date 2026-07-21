@@ -6,9 +6,9 @@ import {
 } from "../utils/adr";
 
 const S = {
-  wrap: { border: "1px solid rgba(239,68,68,.35)", borderRadius: 10, padding: 14, background: "rgba(239,68,68,.05)", marginTop: 12 },
+  wrap: { border: "1px solid var(--border2,#e2e8f0)", borderRadius: 10, padding: 14, background: "var(--bg3,#f8fafc)", marginTop: 12 },
   head: { display: "flex", alignItems: "center", gap: 10, cursor: "pointer" },
-  diamond: { width: 26, height: 26, background: "#f59e0b", transform: "rotate(45deg)", border: "2px solid #111", borderRadius: 4, flexShrink: 0 },
+  diamond: { width: 18, height: 18, background: "#f5b301", transform: "rotate(45deg)", border: "1.5px solid rgba(0,0,0,.4)", borderRadius: 3, flexShrink: 0, opacity: .9 },
   lbl: { display: "block", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text5)", margin: "8px 0 3px" },
   inp: { width: "100%", boxSizing: "border-box", background: "var(--bg4,#fff)", border: "1px solid var(--border2,#cfdbe5)", color: "var(--text,#0f172a)", padding: "8px 10px", borderRadius: 7, fontSize: 13, outline: "none" },
   item: { border: "1px solid var(--border2,#e2e8f0)", borderRadius: 8, padding: 12, background: "var(--bg3,#f8fafc)", marginTop: 10 },
@@ -76,7 +76,7 @@ export default function AdrPanel({ adr = false, items = [], onChange }) {
         <input type="checkbox" checked={!!adr} onChange={e => setAdr(e.target.checked)} style={{ width: 18, height: 18 }} />
         <span style={{ fontWeight: 900, fontSize: 14, color: "var(--text,#0f172a)" }}>Mercancía peligrosa (ADR)</span>
         {adr && (
-          <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 900, padding: "3px 10px", borderRadius: 20, background: ex.exento ? "rgba(16,185,129,.15)" : "rgba(239,68,68,.15)", color: ex.exento ? "#10b981" : "#ef4444" }}>
+          <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 20, background: ex.exento ? "rgba(16,185,129,.13)" : "rgba(245,158,11,.14)", color: ex.exento ? "#0f9f77" : "#b45309" }}>
             {ex.aplica ? (ex.exento ? "Exención 1.1.3.6" : "ADR completo") : "Sin datos"}
           </span>
         )}
@@ -158,7 +158,7 @@ export default function AdrPanel({ adr = false, items = [], onChange }) {
 
           <button type="button" style={{ ...S.btn, marginTop: 10 }} onClick={addItem}>+ Añadir mercancía peligrosa</button>
 
-          <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: ex.exento ? "rgba(16,185,129,.08)" : "rgba(239,68,68,.08)", border: `1px solid ${ex.exento ? "rgba(16,185,129,.25)" : "rgba(239,68,68,.25)"}` }}>
+          <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: ex.exento ? "rgba(16,185,129,.07)" : "rgba(245,158,11,.07)", border: `1px solid ${ex.exento ? "rgba(16,185,129,.22)" : "rgba(245,158,11,.28)"}` }}>
             <div style={{ fontSize: 12, fontWeight: 900, color: "var(--text,#0f172a)" }}>Exención 1.1.3.6 (regla de los 1000 puntos)</div>
             <div style={{ fontSize: 12, color: "var(--text3,#475569)", marginTop: 3 }}>{ex.resumen}</div>
             <div style={{ fontSize: 11, color: "var(--text5,#94a3b8)", marginTop: 4 }}>

@@ -13,6 +13,41 @@ const { getWhatsappStatus } = require("../services/whatsapp");
 const { CCAA, buildCalendarResponse, fallbackSpanishHolidays, fetchSpainHolidays, normalizeCcaa, normalizeYear } = require("../services/calendarioLaboral");
 const stripe = require("../services/stripe");
 const { IMAGE_MIMES, validateBase64Upload } = require("../services/uploadValidation");
+const { crearNotificacion } = require("../services/notificaciones");
+
+// Avisa al chofer asignado de que tiene documentacion nueva en su viaje.
+// Best-effort y con dedupe corto para no repetir si se envian varios seguidos.
+async function notificarChoferDocumentosPedido(empresaId, pedidoId) {
+  try {
+    const { rows: pr } = await db.query(
+      "SELECT numero, origen, destino, chofer_id FROM pedidos WHERE id=$1 AND empresa_id=$2 LIMIT 1",
+      [pedidoId, empresaId]
+    );
+    const pedido = pr[0];
+    if (!pedido || !pedido.chofer_id) return;
+    const { rows: ur } = await db.query(
+      "SELECT id FROM usuarios WHERE empresa_id=$1 AND chofer_id=$2 AND activo=true LIMIT 1",
+      [empresaId, pedido.chofer_id]
+    );
+    const usuario = ur[0];
+    if (!usuario) return;
+    const dupe = await db.query(
+      `SELECT 1 FROM notificaciones_internas
+        WHERE empresa_id=$1 AND usuario_id=$2 AND tipo='documento_chofer_pedido'
+          AND data->>'pedido_id'=$3 AND created_at > NOW() - INTERVAL '15 minutes' LIMIT 1`,
+      [empresaId, usuario.id, String(pedidoId)]
+    ).catch(() => ({ rows: [] }));
+    if (dupe.rows[0]) return;
+    await crearNotificacion({
+      empresa_id: empresaId,
+      usuario_id: usuario.id,
+      tipo: "documento_chofer_pedido",
+      titulo: "Documento nuevo en tu viaje",
+      mensaje: `Trafico ha enviado documentacion al pedido ${pedido.numero || ""} (${pedido.origen || ""} -> ${pedido.destino || ""}).`.trim(),
+      data: { pedido_id: String(pedidoId), pedido_numero: pedido.numero || null },
+    });
+  } catch { /* best-effort */ }
+}
 const router  = express.Router();
 router.use(authenticate);
 
@@ -1940,11 +1975,25 @@ router.patch("/pedido-docs/doc/:doc_id/chofer", async (req,res) => {
   try {
     const visible = req.body?.visible_chofer === true || req.body?.visible_chofer === "true";
     const { rows } = await db.query(
-      "UPDATE pedido_docs SET visible_chofer=$1 WHERE id=$2 AND empresa_id=$3 RETURNING id,COALESCE(visible_chofer,false) AS visible_chofer",
+      "UPDATE pedido_docs SET visible_chofer=$1 WHERE id=$2 AND empresa_id=$3 RETURNING id,pedido_id,COALESCE(visible_chofer,false) AS visible_chofer",
       [visible, req.params.doc_id, EID(req)]
     );
     if (!rows[0]) return res.status(404).json({ error: "Documento no encontrado" });
-    res.json(rows[0]);
+    if (visible) notificarChoferDocumentosPedido(EID(req), rows[0].pedido_id).catch(() => {});
+    res.json({ id: rows[0].id, visible_chofer: rows[0].visible_chofer });
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// Enviar (o retirar) TODOS los documentos de un pedido a la app del chofer de una vez.
+router.patch("/pedido-docs/:pedido_id/chofer-todos", async (req,res) => {
+  try {
+    const visible = req.body?.visible_chofer === true || req.body?.visible_chofer === "true";
+    const { rowCount } = await db.query(
+      "UPDATE pedido_docs SET visible_chofer=$1 WHERE pedido_id=$2 AND empresa_id=$3",
+      [visible, req.params.pedido_id, EID(req)]
+    );
+    if (visible && rowCount > 0) notificarChoferDocumentosPedido(EID(req), req.params.pedido_id).catch(() => {});
+    res.json({ ok: true, actualizados: rowCount, visible_chofer: visible });
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 

@@ -3,7 +3,7 @@ import AdrPanel from "../components/AdrPanel";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
 import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
 import { getLogoDataUrl } from "../services/logoHelper";
-import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPedidoDocAChofer, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
+import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPedidoDocAChofer, enviarTodosPedidoDocsAChofer, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
@@ -5774,9 +5774,24 @@ function TabDocsPedido({ pedido }) {
 
   return (
     <div>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
         <div style={{fontSize:13,fontWeight:600,color:"var(--text3)"}}>Documentos del viaje</div>
-        <label style={{marginLeft:"auto",padding:"5px 12px",borderRadius:7,background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:uploading?"not-allowed":"pointer",opacity:uploading?0.6:1}}>
+        {docs.length > 0 && docs.some(d=>!d.visible_chofer) && (
+          <button
+            onClick={async()=>{
+              setDocs(p=>p.map(x=>({...x,visible_chofer:true})));
+              try {
+                await enviarTodosPedidoDocsAChofer(pedido.id, true);
+                notify("Todos los documentos enviados a la app del chofer.", "success");
+              } catch(err) {
+                notify(err.message || "No se pudieron enviar los documentos.", "error");
+              }
+            }}
+            style={{marginLeft:"auto",border:"1px solid rgba(16,185,129,.4)",background:"rgba(16,185,129,.10)",color:"#10b981",borderRadius:7,padding:"5px 12px",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+            Enviar todos a app
+          </button>
+        )}
+        <label style={{marginLeft:docs.length > 0 && docs.some(d=>!d.visible_chofer) ? 0 : "auto",padding:"5px 12px",borderRadius:7,background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:uploading?"not-allowed":"pointer",opacity:uploading?0.6:1}}>
           {uploading?"Subiendo...":"Adjuntar"}
           <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" style={{display:"none"}} disabled={uploading} onChange={subir}/>
         </label>

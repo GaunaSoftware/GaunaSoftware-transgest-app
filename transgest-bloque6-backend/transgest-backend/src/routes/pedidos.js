@@ -528,6 +528,8 @@ async function ensureColaboradorWorkflowSchema() {
       `);
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS matricula_colaborador VARCHAR(60)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_colaborador VARCHAR(60)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS matricula_manual VARCHAR(60)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_manual VARCHAR(60)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_lateral BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_trasera BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_techo BOOLEAN DEFAULT false").catch(() => {});
@@ -8281,6 +8283,8 @@ router.post("/", GERENTE_O_TRAFICO,
         requiere_cinchas: req.body.requiere_cinchas ?? true,
         adr: req.body.adr !== undefined ? !!req.body.adr : undefined,
         adr_items: req.body.adr_items !== undefined ? JSON.stringify(Array.isArray(req.body.adr_items) ? req.body.adr_items.map(it => adrService.normalizeItem(it)) : []) : undefined,
+        matricula_manual: req.body.matricula_manual !== undefined ? (String(req.body.matricula_manual || "").trim().toUpperCase().slice(0, 60) || null) : undefined,
+        remolque_matricula_manual: req.body.remolque_matricula_manual !== undefined ? (String(req.body.remolque_matricula_manual || "").trim().toUpperCase().slice(0, 60) || null) : undefined,
         coste_gasoil: req.body.coste_gasoil !== undefined ? (req.body.coste_gasoil ?? 0) : undefined,
         coste_peajes: req.body.coste_peajes !== undefined ? (req.body.coste_peajes ?? 0) : undefined,
         coste_dietas: req.body.coste_dietas !== undefined ? (req.body.coste_dietas ?? 0) : undefined,
@@ -8759,6 +8763,8 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     requiere_cinchas: body.requiere_cinchas ?? true,
     adr: body.adr !== undefined ? !!body.adr : undefined,
     adr_items: body.adr_items !== undefined ? JSON.stringify(Array.isArray(body.adr_items) ? body.adr_items.map(it => adrService.normalizeItem(it)) : []) : undefined,
+    matricula_manual: body.matricula_manual !== undefined ? (String(body.matricula_manual || "").trim().toUpperCase().slice(0, 60) || null) : undefined,
+    remolque_matricula_manual: body.remolque_matricula_manual !== undefined ? (String(body.remolque_matricula_manual || "").trim().toUpperCase().slice(0, 60) || null) : undefined,
     estado: body.estado ?? undefined,
     incidencia_tipo: body.estado === "incidencia" || body.incidencia_tipo !== undefined || body.incidencia_descripcion !== undefined || body.incidencia !== undefined
       ? buildPedidoIncidenciaInput(body || {}, pedidoActualRows[0], req.user?.rol).tipo

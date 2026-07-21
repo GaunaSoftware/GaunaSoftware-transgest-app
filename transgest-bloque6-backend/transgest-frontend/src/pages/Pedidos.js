@@ -794,14 +794,15 @@ function getPedidoStateValidationIssues(pedido, targetEstado = "") {
   const estado = String(targetEstado || pedido?.estado || "").toLowerCase();
   const issues = [];
   const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
+  const hasManualMatricula = Boolean(String(pedido?.matricula_manual || "").trim());
   const needsOperationalData = ["confirmado", "en_curso", "descarga", "entregado"].includes(estado);
   const needsDeliveryData = ["descarga", "entregado"].includes(estado);
   if (!toDateInputValue(pedido?.fecha_carga)) issues.push("Falta fecha de carga");
   if (needsOperationalData) {
     if (!String(pedido?.origen || "").trim()) issues.push("Falta origen");
     if (!String(pedido?.destino || "").trim()) issues.push("Falta destino");
-    if (!hasCollaborator && !pedido?.vehiculo_id) issues.push("Falta vehiculo");
-    if (!hasCollaborator && !pedido?.chofer_id) issues.push("Falta chofer");
+    if (!hasCollaborator && !hasManualMatricula && !pedido?.vehiculo_id) issues.push("Falta vehiculo");
+    if (!hasCollaborator && !hasManualMatricula && !pedido?.chofer_id) issues.push("Falta chofer");
   }
   if (needsDeliveryData && !toDateInputValue(pedido?.fecha_descarga || pedido?.fecha_entrega)) issues.push("Falta fecha de descarga");
   return issues;
@@ -4683,8 +4684,8 @@ ${bloqueEconomicoColaborador}
 <div class="sec">
   <div class="sec-t">Asignacion de transporte propio</div>
   <div class="g3">
-    <div class="f hl"><div class="fl">Vehiculo / Tractora</div><div class="fv big">${pedido.vehiculo_matricula||pedido.matricula||"Sin asignar"}</div></div>
-    <div class="f hl"><div class="fl">Remolque</div><div class="fv">${pedido.remolque_matricula||pedido.remolque_mat||"Sin remolque"}</div></div>
+    <div class="f hl"><div class="fl">Vehiculo / Tractora</div><div class="fv big">${pedido.vehiculo_matricula||pedido.matricula||pedido.matricula_manual||"Sin asignar"}</div></div>
+    <div class="f hl"><div class="fl">Remolque</div><div class="fv">${pedido.remolque_matricula||pedido.remolque_mat||pedido.remolque_matricula_manual||"Sin remolque"}</div></div>
     <div class="f hl"><div class="fl">Chofer principal</div><div class="fv big">${pedido.chofer_nombre||"Sin asignar"}</div></div>
   </div>
   ${pedido.chofer2_nombre?`<div class="f" style="margin-top:8px"><div class="fl">2o Chofer</div><div class="fv">${pedido.chofer2_nombre}</div></div>`:""}
@@ -8418,6 +8419,8 @@ useEffect(() => {
                       vehiculo_id: vid,
                       chofer_id: choferEraDelAnterior ? choferDelVehiculo : p.chofer_id,
                       remolque_id_manual: remolqueEraDelAnterior ? (veh?.remolque_id || "") : p.remolque_id_manual,
+                      matricula_manual: vid ? "" : p.matricula_manual,
+                      remolque_matricula_manual: vid ? "" : p.remolque_matricula_manual,
                     };
                   });
                   // Mostrar aviso operacional si el vehiculo tiene notas
@@ -8506,6 +8509,17 @@ useEffect(() => {
                   {choferesLocal.filter(c=>c.id!==form.chofer_id).map(c=><option key={c.id} value={c.id}>{c.nombre} {c.apellidos||""}</option>)}
                 </select>
               </div>
+              {!form.vehiculo_id && !form.colaborador_id && (
+                <div style={{gridColumn:"1/-1",background:"var(--bg4)",border:"1px dashed var(--border2)",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontSize:11,color:"var(--text4)",marginBottom:8}}>El vehiculo no esta en la flota? Escribe la matricula a mano (asignacion propia, no es colaborador):</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <div><label style={S.label}>Matricula tractora (a mano)</label>
+                      <input style={S.input} value={form.matricula_manual||""} onChange={e=>setForm(p=>({...p,matricula_manual:e.target.value.toUpperCase()}))} placeholder="Ej: 1234 ABC"/></div>
+                    <div><label style={S.label}>Matricula remolque (a mano)</label>
+                      <input style={S.input} value={form.remolque_matricula_manual||""} onChange={e=>setForm(p=>({...p,remolque_matricula_manual:e.target.value.toUpperCase()}))} placeholder="Ej: R-1234"/></div>
+                  </div>
+                </div>
+              )}
               {form.chofer2_id&&(
                 <div style={{gridColumn:"1/-1",background:"rgba(139,92,246,.06)",border:"1px solid rgba(139,92,246,.18)",borderRadius:8,padding:"10px 14px",display:"flex",alignItems:"center",gap:12}}>
                   <span style={{fontSize:13}}></span>
@@ -11265,9 +11279,12 @@ export default function Pedidos() {
                     </div>
                   ) : (
                     <>
-                      <div style={{fontFamily:"'JetBrains Mono',monospace"}}>{p.vehiculo_matricula||"-"}</div>
-                      {p.remolque_matricula && (
-                        <div style={{fontSize:10,color:"#a78bfa",marginTop:1}}>REM {p.remolque_matricula}</div>
+                      <div style={{fontFamily:"'JetBrains Mono',monospace"}}>{p.vehiculo_matricula||p.matricula_manual||"-"}</div>
+                      {!p.vehiculo_matricula && p.matricula_manual && (
+                        <div style={{fontSize:9,color:"var(--text5)",marginTop:1}}>a mano</div>
+                      )}
+                      {(p.remolque_matricula||(!p.vehiculo_matricula&&p.remolque_matricula_manual)) && (
+                        <div style={{fontSize:10,color:"#a78bfa",marginTop:1}}>REM {p.remolque_matricula||p.remolque_matricula_manual}</div>
                       )}
                     </>
                   )}

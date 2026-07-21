@@ -602,6 +602,7 @@ async function ensureColaboradorWorkflowSchema() {
         )
       `).catch(() => {});
       await db.query("ALTER TABLE pedido_docs ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
+      await db.query("ALTER TABLE pedido_docs ADD COLUMN IF NOT EXISTS visible_chofer BOOLEAN NOT NULL DEFAULT false").catch(() => {});
       await db.query(`
         CREATE TABLE IF NOT EXISTS pedido_eventos (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -7302,6 +7303,57 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message, code: e.code || undefined, pedido_activo: e.pedido_activo || undefined });
   }
+});
+
+// Documentos que trafico ha marcado como visibles para el chofer (p. ej. la
+// orden de carga). No se envian automaticamente: solo los explicitamente marcados.
+router.get("/:id/chofer-docs", async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const { rows: pedidoRows } = await db.query(
+      "SELECT id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
+      [req.params.id, empresaId]
+    );
+    const pedido = pedidoRows[0];
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
+      return res.status(403).json({ error: "No puedes ver documentos de este pedido" });
+    }
+    const { rows } = await db.query(
+      "SELECT id,nombre,tipo,file_mime,file_size_kb,created_at FROM pedido_docs WHERE pedido_id=$1 AND empresa_id=$2 AND visible_chofer=true ORDER BY created_at",
+      [req.params.id, empresaId]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/:id/chofer-docs/:docId/archivo", async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const { rows: pedidoRows } = await db.query(
+      "SELECT id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
+      [req.params.id, empresaId]
+    );
+    const pedido = pedidoRows[0];
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
+      return res.status(403).json({ error: "No puedes ver documentos de este pedido" });
+    }
+    const { rows } = await db.query(
+      "SELECT id,nombre,file_base64,file_mime FROM pedido_docs WHERE id=$1 AND pedido_id=$2 AND empresa_id=$3 AND visible_chofer=true LIMIT 1",
+      [req.params.docId, req.params.id, empresaId]
+    );
+    const doc = rows[0];
+    if (!doc || !doc.file_base64) return res.status(404).json({ error: "Documento no disponible" });
+    const mime = String(doc.file_mime || "application/octet-stream").split(";")[0] || "application/octet-stream";
+    const filename = String(doc.nombre || `documento-${doc.id}`).replace(/[\r\n"]/g, " ").slice(0, 180);
+    const cleanBase64 = String(doc.file_base64).includes(",") ? String(doc.file_base64).split(",").pop() : String(doc.file_base64);
+    const buffer = Buffer.from(cleanBase64, "base64");
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Length", buffer.length);
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(filename)}"`);
+    res.send(buffer);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post("/:id/chofer-docs", async (req, res) => {

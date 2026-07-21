@@ -1859,7 +1859,7 @@ router.get("/logo", async (req,res) => {
 router.get("/pedido-docs/:pedido_id", async (req,res) => {
   try {
     const {rows} = await db.query(
-      "SELECT id,nombre,tipo,file_mime,file_size_kb,notas,created_at FROM pedido_docs WHERE pedido_id=$1 AND empresa_id=$2 ORDER BY created_at",
+      "SELECT id,nombre,tipo,file_mime,file_size_kb,notas,COALESCE(visible_chofer,false) AS visible_chofer,created_at FROM pedido_docs WHERE pedido_id=$1 AND empresa_id=$2 ORDER BY created_at",
       [req.params.pedido_id,EID(req)]
     );
     res.json(rows);
@@ -1931,6 +1931,20 @@ router.delete("/pedido-docs/:doc_id", async (req,res) => {
   try {
     await db.query("DELETE FROM pedido_docs WHERE id=$1 AND empresa_id=$2",[req.params.doc_id,EID(req)]);
     res.json({ok:true});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// Elegir si un documento del pedido es visible en la app del chofer (no se
+// envia automaticamente: trafico decide cuales manda, p. ej. la orden de carga).
+router.patch("/pedido-docs/doc/:doc_id/chofer", async (req,res) => {
+  try {
+    const visible = req.body?.visible_chofer === true || req.body?.visible_chofer === "true";
+    const { rows } = await db.query(
+      "UPDATE pedido_docs SET visible_chofer=$1 WHERE id=$2 AND empresa_id=$3 RETURNING id,COALESCE(visible_chofer,false) AS visible_chofer",
+      [visible, req.params.doc_id, EID(req)]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Documento no encontrado" });
+    res.json(rows[0]);
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 

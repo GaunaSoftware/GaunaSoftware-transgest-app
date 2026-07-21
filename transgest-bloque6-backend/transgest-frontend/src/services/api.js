@@ -979,6 +979,8 @@ export const getPedidoDocsB64   = (pid)       => apiFetch(`/empresa/pedido-docs/
 export const subirPedidoDoc     = (pid, data) => apiFetch(`/empresa/pedido-docs/${pid}`, {method:"POST",body:data});
 export const subirPedidoDocChofer = (pid, data) => apiFetch(`/pedidos/${pid}/chofer-docs`, {method:"POST",body:data});
 export const borrarPedidoDoc    = (id)        => apiFetch(`/empresa/pedido-docs/${id}`, {method:"DELETE"});
+export const enviarPedidoDocAChofer = (docId, visible) => apiFetch(`/empresa/pedido-docs/doc/${encodeURIComponent(docId)}/chofer`, {method:"PATCH", body:{ visible_chofer: !!visible }});
+export const getChoferPedidoDocs = (pid) => apiFetch(`/pedidos/${encodeURIComponent(pid)}/chofer-docs`, { silentError:true });
 export const getPedidoDocsBulk  = (ids)       => apiFetch("/empresa/pedido-docs-bulk", {method:"POST",body:{pedido_ids:ids}});
 // ── Periodos tractora por chófer ─────────────────────────────────────────
 export const getTractoraPeriodos = (cid)      => apiFetch(`/empresa/tractora-periodos/${cid}`);

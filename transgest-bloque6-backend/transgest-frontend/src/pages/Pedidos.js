@@ -3,7 +3,7 @@ import AdrPanel from "../components/AdrPanel";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
 import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
 import { getLogoDataUrl } from "../services/logoHelper";
-import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
+import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPedidoDocAChofer, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
@@ -5804,6 +5804,22 @@ function TabDocsPedido({ pedido }) {
                 {d.tipo}
               </span>
               <button onClick={()=>verDoc(d)} style={{border:"1px solid var(--border2)",background:"var(--bg)",color:"var(--accent)",borderRadius:7,padding:"5px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>Ver</button>
+              <button
+                title={d.visible_chofer ? "Visible en la app del chofer. Pulsa para dejar de enviarlo." : "Enviar este documento a la app del chofer"}
+                onClick={async()=>{
+                  const next = !d.visible_chofer;
+                  setDocs(p=>p.map(x=>x.id===d.id?{...x,visible_chofer:next}:x));
+                  try {
+                    await enviarPedidoDocAChofer(d.id, next);
+                    notify(next ? "Documento enviado a la app del chofer." : "Documento retirado de la app del chofer.", "success");
+                  } catch(err) {
+                    setDocs(p=>p.map(x=>x.id===d.id?{...x,visible_chofer:!next}:x));
+                    notify(err.message || "No se pudo actualizar el documento.", "error");
+                  }
+                }}
+                style={{border:`1px solid ${d.visible_chofer?"rgba(16,185,129,.4)":"var(--border2)"}`,background:d.visible_chofer?"rgba(16,185,129,.12)":"var(--bg)",color:d.visible_chofer?"#10b981":"var(--text4)",borderRadius:7,padding:"5px 10px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+                {d.visible_chofer ? "En app del chofer" : "Enviar a app"}
+              </button>
               <button onClick={async()=>{
                 const ok = await confirmDialog({
                   title: "Eliminar documento",

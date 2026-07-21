@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, getTallerSolicitudCapacidades, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
+import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, getTallerSolicitudCapacidades, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion, adrRequisitos } from "../utils/adr";
 import { confirmDialog, notify } from "../services/notify";
@@ -858,6 +858,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const [tick,         setTick]         = useState(0);
   const [docControl,   setDocControl]   = useState(null);
   const [docControlLoading, setDocControlLoading] = useState(false);
+  const [choferDocs,   setChoferDocs]   = useState([]);
   const [qrVisible, setQrVisible] = useState(false);
   const [firmandoCargador, setFirmandoCargador] = useState(false);
   const [mercanciaCarga, setMercanciaCarga] = useState({
@@ -895,6 +896,22 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       });
     return () => { alive = false; };
   }, [pedido.id]);
+
+  useEffect(() => {
+    let alive = true;
+    getChoferPedidoDocs(pedido.id)
+      .then(d => { if (alive) setChoferDocs(Array.isArray(d) ? d : []); })
+      .catch(() => { if (alive) setChoferDocs([]); });
+    return () => { alive = false; };
+  }, [pedido.id]);
+
+  async function verChoferDoc(doc) {
+    try {
+      await verArchivoProtegido(`/pedidos/${pedido.id}/chofer-docs/${encodeURIComponent(doc.id)}/archivo`, doc.nombre || "documento");
+    } catch (err) {
+      notify(err.message || "No se pudo abrir el documento.", "error");
+    }
+  }
 
   const cargarDocumentoControl = useCallback(async () => {
     setDocControlLoading(true);
@@ -1600,6 +1617,23 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
               </div>
             );
           })()}
+          {choferDocs.length > 0 && (
+            <div style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:900,color:"var(--text)",marginBottom:8}}>Documentos del viaje ({choferDocs.length})</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {choferDocs.map(doc => (
+                  <div key={doc.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"var(--bg3)",borderRadius:8,border:"1px solid var(--border)"}}>
+                    <span style={{fontSize:12,fontWeight:800,color:"var(--text5)"}}>{doc.file_mime?.includes("pdf")?"PDF":doc.file_mime?.startsWith("image/")?"IMG":"DOC"}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{doc.nombre}</div>
+                      {doc.tipo && <div style={{fontSize:10,color:"var(--text5)"}}>{doc.tipo}</div>}
+                    </div>
+                    <button onClick={()=>verChoferDoc(doc)} style={{border:"1px solid var(--border2)",background:"var(--bg)",color:"var(--accent)",borderRadius:7,padding:"6px 12px",fontSize:12,fontWeight:800,cursor:"pointer",flexShrink:0}}>Ver</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {pedido.notas&&(
             <div style={{background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.2)",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:12,color:"var(--text3)"}}>
               Notas: {pedido.notas}

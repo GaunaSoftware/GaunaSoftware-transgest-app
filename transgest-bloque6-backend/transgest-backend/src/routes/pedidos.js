@@ -4620,9 +4620,16 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCou
       lng: source.lng ?? source.longitud ?? source.metadata?.lng ?? null,
     };
   }).filter(stop => {
-    if (!stop.direccion && !stop.google_maps_url && (stop.lat == null || stop.lng == null)) return false;
+    // No descartar una parada que tenga nombre de cliente/punto aunque le falte
+    // la direccion exacta (p. ej. una 2a descarga elegida por nombre).
+    if (!stop.direccion && !stop.google_maps_url && !stop.cliente_nombre && (stop.lat == null || stop.lng == null)) return false;
+    // Deduplicado: incluir cliente_nombre y referencia para NO colapsar dos
+    // descargas distintas que geocodifiquen al mismo punto (misma poblacion) o
+    // compartan direccion pero sean clientes distintos.
     const key = [
       String(stop.direccion || "").trim().toLowerCase(),
+      String(stop.cliente_nombre || "").trim().toLowerCase(),
+      String(stop.referencia || stop.referencia_cliente || "").trim().toLowerCase(),
       String(stop.google_maps_url || "").trim().toLowerCase(),
       stop.lat ?? "",
       stop.lng ?? "",

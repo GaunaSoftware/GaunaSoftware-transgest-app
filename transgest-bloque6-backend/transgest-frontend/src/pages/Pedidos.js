@@ -4603,6 +4603,16 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
       <div class="f hl"><div class="fl">Origen -> Punto de carga</div><div class="fv big">${htmlEscape(origenNombreOrden || origenOrden || "-")}</div>${origenNombreOrden && origenOrden ? `<div class="map-address">${htmlEscape(origenOrden)}</div>` : ""}${cargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(cargaPostalOrden)}</div>` : ""}${pedido.ventana_carga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_carga}</div>`:""}${cargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(cargaPrincipal.google_maps_url)}">${htmlEscape(cargaPrincipal.google_maps_url)}</a></div>`:""}</div>
       <div class="f hl"><div class="fl">Destino -> Punto de entrega</div><div class="fv big">${htmlEscape(destinoNombreOrden || destinoOrden || "-")}</div>${destinoNombreOrden && destinoOrden ? `<div class="map-address">${htmlEscape(destinoOrden)}</div>` : ""}${descargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(descargaPostalOrden)}</div>` : ""}${pedido.ventana_descarga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_descarga}</div>`:""}${descargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(descargaPrincipal.google_maps_url)}">${htmlEscape(descargaPrincipal.google_maps_url)}</a></div>`:""}</div>
     </div>
+    ${(() => {
+      const cargasAdic = parseStops(pedido.puntos_carga).slice(1).filter(s => stopAddress(s) || s.cliente_nombre);
+      const descargasAdic = parseStops(pedido.puntos_descarga).slice(1).filter(s => stopAddress(s) || s.cliente_nombre);
+      if (!cargasAdic.length && !descargasAdic.length) return "";
+      const row = (label, s, color) => `<div class="f"><div class="fl" style="color:${color}">${htmlEscape(label)}</div><div class="fv">${htmlEscape(s.cliente_nombre || stopAddress(s) || "-")}${s.cliente_nombre && stopAddress(s) ? `<div class="map-address">${htmlEscape(stopAddress(s))}</div>` : ""}${(s.fecha||s.hora||s.ventana)?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${htmlEscape([fmtDate(s.fecha)||"", s.hora||"", s.ventana?`(${s.ventana})`:""].filter(Boolean).join(" "))}</div>`:""}</div></div>`;
+      return `<div class="g2" style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1">
+        ${cargasAdic.map((s,i)=>row(`Carga adicional ${i+2}`, s, "#0f766e")).join("")}
+        ${descargasAdic.map((s,i)=>row(`Descarga adicional ${i+2}`, s, "#b45309")).join("")}
+      </div>`;
+    })()}
     <div class="g3">
       <div class="f"><div class="fl">Fecha carga</div><div class="fv">${fmtDate(pedido.fecha_carga)}</div></div>
       <div class="f"><div class="fl">Hora carga</div><div class="fv">${pedido.hora_carga||"-"}</div></div>

@@ -5162,7 +5162,9 @@ function pedidoTieneAsignacionActiva(pedido = {}) {
     pedido.chofer_id ||
     pedido.chofer2_id ||
     pedido.remolque_id ||
-    pedido.colaborador_id
+    pedido.colaborador_id ||
+    String(pedido.matricula_manual || "").trim() ||
+    String(pedido.matricula_colaborador || "").trim()
   );
 }
 

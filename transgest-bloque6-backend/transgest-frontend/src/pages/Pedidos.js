@@ -793,8 +793,9 @@ function getPedidoOperationalFlags(pedido, now = new Date()) {
   const cargaAt = buildPedidoCargaDate(pedido);
   const diffHours = cargaAt ? (cargaAt.getTime() - now.getTime()) / 3600000 : null;
   const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
-  const missingVehiculo = !pedido?.vehiculo_id && !hasCollaborator;
-  const missingChofer = !pedido?.chofer_id && !hasCollaborator;
+  const hasManualPlate = Boolean(String(pedido?.matricula_manual || "").trim() || String(pedido?.matricula_colaborador || "").trim());
+  const missingVehiculo = !pedido?.vehiculo_id && !hasCollaborator && !hasManualPlate;
+  const missingChofer = !pedido?.chofer_id && !hasCollaborator && !hasManualPlate;
   const missingAssignment = missingVehiculo || missingChofer;
   const overdueAssignment = missingAssignment && diffHours !== null && diffHours < 0;
   const urgentAssignment = missingAssignment && diffHours !== null && diffHours >= 0 && diffHours <= 24;

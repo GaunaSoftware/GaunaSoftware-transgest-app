@@ -7080,7 +7080,9 @@ Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueb
     });
     if (usarProvincia) destinoRuta = destinoProvincia.toUpperCase();
   }
-  const nueva = await crearRutaCliente(form.cliente_id, {
+  let nueva;
+  try {
+  nueva = await crearRutaCliente(form.cliente_id, {
     origen: origenRuta,
     destino: destinoRuta,
     km: toNullableNumber(form.km_ruta),
@@ -7091,6 +7093,15 @@ Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueb
     minimo_unidades: form.tipo_precio !== "viaje" ? toNullableNumber(form.minimo_unidades) : null,
     notas: "Creada automaticamente desde pedido",
   }, { silentError: true });
+  } catch (e) {
+    // El pedido ya se guardo; la ruta/tarifa es un extra. Si falla, se registra
+    // en consola pero no se molesta al usuario con un aviso en cada guardado.
+    console.warn("No se pudo crear la ruta del cliente automaticamente:", e?.message || e);
+    return null;
+  }
+  // Si la creacion de ruta no devolvio id (fallo silencioso o sin permiso), no
+  // seguimos: el pedido ya se guardo y no queremos avisar en falso.
+  if (!nueva?.ruta_id) return null;
   setRutas(prev => prev.some(r => r.id === nueva.ruta_id || (
     routeDraftScore({...form, origen:origenRuta, destino:destinoRuta}, r) >= 44 &&
     (!r.cliente_id || r.cliente_id === form.cliente_id)

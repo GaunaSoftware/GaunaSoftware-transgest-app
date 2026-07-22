@@ -1151,12 +1151,28 @@ router.post("/:id/rutas", invalidateCache("rutas", "clientes"), async (req,res) 
       );
       rutaId = nueva[0].id;
     }
-    // Vincular precio al cliente
+    // Vincular precio al cliente. Se hace resiliente: si el ON CONFLICT falla
+    // (p. ej. falta la constraint unica en un esquema antiguo), se cae a un
+    // UPDATE + INSERT manual para no tirar todo el guardado de la ruta.
     const precio = numericOrNull(precio_base);
-    await db.query(
-      "INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (ruta_id,cliente_id) DO UPDATE SET precio=EXCLUDED.precio, tarifa_tipo=EXCLUDED.tarifa_tipo, minimo_facturable=EXCLUDED.minimo_facturable, minimo_unidades=EXCLUDED.minimo_unidades, recargo_combustible_pct=EXCLUDED.recargo_combustible_pct",
-      [rutaId, req.params.id, precio || 0, minima.tarifaTipo, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0]
-    );
+    const precioValues = [rutaId, req.params.id, precio || 0, minima.tarifaTipo, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0];
+    try {
+      await db.query(
+        "INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (ruta_id,cliente_id) DO UPDATE SET precio=EXCLUDED.precio, tarifa_tipo=EXCLUDED.tarifa_tipo, minimo_facturable=EXCLUDED.minimo_facturable, minimo_unidades=EXCLUDED.minimo_unidades, recargo_combustible_pct=EXCLUDED.recargo_combustible_pct",
+        precioValues
+      );
+    } catch (errPrecio) {
+      const upd = await db.query(
+        "UPDATE ruta_precios_cliente SET precio=$3, tarifa_tipo=$4, minimo_facturable=$5, minimo_unidades=$6, recargo_combustible_pct=$7 WHERE ruta_id=$1 AND cliente_id=$2",
+        precioValues
+      );
+      if (!upd.rowCount) {
+        await db.query(
+          "INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+          precioValues
+        );
+      }
+    }
     res.status(201).json({ ruta_id: rutaId, ok: true });
   } catch(e) { res.status(500).json({error:e.message}); }
 });

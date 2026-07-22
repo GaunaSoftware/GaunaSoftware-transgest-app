@@ -1986,7 +1986,11 @@ function stopToRoutePlace(stop, fallback = "", type = "Parada") {
 }
 
 function sumStopWeights(stops) {
-  return parseStops(stops).reduce((total, stop) => total + Number(stop.peso_kg || 0), 0);
+  return parseStops(stops).reduce((total, stop) => {
+    // Usa el mismo parser que el peso general: "15,20" -> 15200 kg, etc.
+    const n = normalizePesoKgInput(stop.peso_kg);
+    return total + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
 }
 
 // Suma el precio de las paradas ADICIONALES (todas menos la principal), sirve
@@ -4611,7 +4615,13 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
       const cargasAdic = parseStops(pedido.puntos_carga).slice(1).filter(s => stopAddress(s) || s.cliente_nombre);
       const descargasAdic = parseStops(pedido.puntos_descarga).slice(1).filter(s => stopAddress(s) || s.cliente_nombre);
       if (!cargasAdic.length && !descargasAdic.length) return "";
-      const row = (label, s, color) => `<div class="f"><div class="fl" style="color:${color}">${htmlEscape(label)}</div><div class="fv">${htmlEscape(s.cliente_nombre || stopAddress(s) || "-")}${s.cliente_nombre && stopAddress(s) ? `<div class="map-address">${htmlEscape(stopAddress(s))}</div>` : ""}${(s.fecha||s.hora||s.ventana)?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${htmlEscape([fmtDate(s.fecha)||"", s.hora||"", s.ventana?`(${s.ventana})`:""].filter(Boolean).join(" "))}</div>`:""}</div></div>`;
+      const row = (label, s, color) => {
+        const win = s.ventana || [s.ventana_inicio, s.ventana_fin].filter(Boolean).join("-") || "";
+        const meta = [fmtDate(s.fecha) || "", s.hora || "", win ? `Ventana ${win}` : ""].filter(Boolean).join(" · ");
+        const ref = s.referencia || s.referencia_cliente || "";
+        const extra = [ref ? `Ref: ${ref}` : "", s.bultos ? `${s.bultos} bultos` : "", s.peso_kg ? `${s.peso_kg} kg` : ""].filter(Boolean).join(" · ");
+        return `<div class="f"><div class="fl" style="color:${color}">${htmlEscape(label)}</div><div class="fv">${htmlEscape(s.cliente_nombre || stopAddress(s) || "-")}${s.cliente_nombre && stopAddress(s) ? `<div class="map-address">${htmlEscape(stopAddress(s))}</div>` : ""}${meta ? `<div style="font-size:10px;color:#6b7280;margin-top:2px">${htmlEscape(meta)}</div>` : ""}${extra ? `<div style="font-size:10px;color:#6b7280;margin-top:1px">${htmlEscape(extra)}</div>` : ""}${s.notas ? `<div style="font-size:10px;color:#6b7280;margin-top:1px">${htmlEscape(s.notas)}</div>` : ""}</div></div>`;
+      };
       return `<div class="g2" style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1">
         ${cargasAdic.map((s,i)=>row(`Carga adicional ${i+2}`, s, "#0f766e")).join("")}
         ${descargasAdic.map((s,i)=>row(`Descarga adicional ${i+2}`, s, "#b45309")).join("")}
@@ -10638,15 +10648,26 @@ export default function Pedidos() {
     if (!ok) return;
     setBulkAssigning(true);
     try {
+      let okCount = 0; const fallos = [];
       for (const pedido of lista) {
         const patch = {};
         if (vehiculoIdEfectivo) { patch.vehiculo_id = vehiculoIdEfectivo; patch.colaborador_id = ""; patch.matricula_manual = ""; }
         else if (matriculaEfectiva) { patch.matricula_manual = matriculaEfectiva; patch.vehiculo_id = ""; patch.colaborador_id = ""; }
         if (bulkChofer) patch.chofer_id = bulkChofer;
         else if (veh && veh.chofer_id) patch.chofer_id = veh.chofer_id;
-        await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, patch));
+        try {
+          await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, patch));
+          okCount++;
+        } catch (err) {
+          fallos.push(`${pedido.numero || pedido.id}: ${err.message || "error"}`);
+        }
       }
-      notify(`Asignados ${lista.length} pedido(s) seleccionados.`, "success");
+      notify(
+        fallos.length
+          ? `Asignados ${okCount} de ${lista.length}. Fallaron ${fallos.length}: ${fallos.slice(0, 2).join(" | ")}${fallos.length > 2 ? "..." : ""}`
+          : `Asignados ${okCount} pedido(s) seleccionados.`,
+        fallos.length ? "warning" : "success"
+      );
       setSelectedPedidoIds([]); setBulkVehiculo(""); setBulkChofer(""); setBulkMatricula("");
       cargar();
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-assign" } }));
@@ -10699,10 +10720,21 @@ export default function Pedidos() {
     if (!ok) return;
     setBulkRescheduling(true);
     try {
+      let okCount = 0; const fallos = [];
       for (const pedido of validos) {
-        await cambiarEstadoPedido(pedido.id, bulkEstado);
+        try {
+          await cambiarEstadoPedido(pedido.id, bulkEstado);
+          okCount++;
+        } catch (err) {
+          fallos.push(`${pedido.numero || pedido.id}: ${err.message || "error"}`);
+        }
       }
-      notify(`Estado actualizado en ${validos.length} pedido(s).`, "success");
+      notify(
+        fallos.length
+          ? `Estado actualizado en ${okCount} de ${validos.length}. Fallaron ${fallos.length}: ${fallos.slice(0, 2).join(" | ")}`
+          : `Estado actualizado en ${okCount} pedido(s).`,
+        fallos.length ? "warning" : "success"
+      );
       setSelectedPedidoIds(prev => prev.filter(id => invalidos.some(item => item.pedido.id === id)));
       cargar();
       if (typeof window !== "undefined") {

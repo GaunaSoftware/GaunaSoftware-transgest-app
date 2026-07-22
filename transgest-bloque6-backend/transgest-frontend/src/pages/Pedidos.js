@@ -11358,27 +11358,37 @@ export default function Pedidos() {
                 </td>
                 <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)",whiteSpace:"nowrap",minWidth:104}}>
                   <div>{p.numero}</div>
-                  {priorityMeta.reasons.length > 0 && (
+                  {(() => {
+                    // Sin repetir: si ya se muestra "Completar" (pendiente_completar),
+                    // no repetimos "Datos pendientes". Y solo "Vencido" va en color de
+                    // alarma; el resto (urgente, datos, completar) en gris discreto.
+                    const visibles = priorityMeta.reasons.filter(r => !(r.key === "data" && p.pendiente_completar));
+                    if (!visibles.length) return null;
+                    return (
                     <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:4}}>
-                      {priorityMeta.reasons.map(reason => (
+                      {visibles.map(reason => {
+                        const danger = reason.tone === "danger";
+                        return (
                         <span key={reason.key} style={{
                           display:"inline-flex",
                           padding:"2px 6px",
                           borderRadius:5,
-                          background: reason.tone === "danger" ? "rgba(239,68,68,.14)" : "rgba(245,158,11,.12)",
-                          border: reason.tone === "danger" ? "1px solid rgba(239,68,68,.28)" : "1px solid rgba(245,158,11,.24)",
-                          color: reason.tone === "danger" ? "#f87171" : "#fbbf24",
+                          background: danger ? "rgba(239,68,68,.10)" : "var(--bg4)",
+                          border: danger ? "1px solid rgba(239,68,68,.22)" : "1px solid var(--border2)",
+                          color: danger ? "#ef4444" : "var(--text5)",
                           fontSize:9,
                           fontFamily:"'DM Sans',sans-serif",
                           fontWeight:800
                         }}>
                           {reason.label}
                         </span>
-                      ))}
+                        );
+                      })}
                     </div>
-                  )}
+                    );
+                  })()}
                   {p.pendiente_completar && (
-                    <div title={p.aviso_completar || "Pendiente de completar"} style={{marginTop:4,display:"inline-flex",padding:"2px 6px",borderRadius:5,background:"rgba(251,191,36,.14)",border:"1px solid rgba(251,191,36,.32)",color:"#fbbf24",fontSize:9,fontFamily:"'DM Sans',sans-serif",fontWeight:800}}>
+                    <div title={p.aviso_completar || "Pendiente de completar"} style={{marginTop:4,display:"inline-flex",padding:"2px 6px",borderRadius:5,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text5)",fontSize:9,fontFamily:"'DM Sans',sans-serif",fontWeight:800}}>
                       Completar
                     </div>
                   )}

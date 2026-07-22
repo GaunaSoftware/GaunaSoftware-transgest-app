@@ -6615,6 +6615,13 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     // provincial para Benissa, Denia, Alcoy, etc. No se equiparan entre si dos
     // municipios distintos: la provincia debe coincidir con el extremo guardado.
     if (provincia && (e === provincia || e === `provincia ${provincia}` || e === `${provincia} provincia`)) return 3;
+    // Misma provincia exacta: si la provincia del destino guardado en la tarifa
+    // coincide con la provincia del extremo actual (la ultima descarga), se
+    // aplica como tarifa provincial aunque el municipio sea distinto.
+    if (provincia) {
+      const provinciaEsperada = normalizePlaceText(inferPlaceGeo(esperado)?.provincia || "");
+      if (provinciaEsperada && provinciaEsperada === provincia) return 3;
+    }
     if (!a) return 0;
     const stop = new Set(["de","del","la","el","los","las","s","sl","sa","sau","slu","calle","av","avenida","ctra","carretera"]);
     const aTokens = new Set(a.split(/\W+/).filter(t => t.length >= 3 && !stop.has(t)));
@@ -6626,13 +6633,15 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const endpointContextFromDraft = (draft, tipo) => {
     const isCarga = tipo === "carga";
     const stops = parseStops(isCarga ? draft.puntos_carga : draft.puntos_descarga);
-    const first = stops[0] || {};
-    const mainLabel = isCarga ? draft.origen : draft.destino;
-    const labels = [mainLabel, stopAddress(first), first.ciudad, first.municipio, first.cliente_nombre].filter(Boolean);
-    const inferred = inferPlaceGeo(first, ...labels);
+    // Para la tarifa por provincia, la descarga que manda es la ULTIMA de la
+    // lista (destino final del viaje); la carga sigue siendo la primera (origen).
+    const ref = isCarga ? (stops[0] || {}) : (stops[stops.length - 1] || stops[0] || {});
+    const mainLabel = isCarga ? draft.origen : (stopAddress(ref) || draft.destino);
+    const labels = [mainLabel, stopAddress(ref), ref.ciudad, ref.municipio, ref.cliente_nombre].filter(Boolean);
+    const inferred = inferPlaceGeo(ref, ...labels);
     return {
       labels: Array.from(new Set(labels)),
-      provincia: stopRegion(first, isCarga ? draft.origen_provincia : draft.destino_provincia) || inferred?.provincia || "",
+      provincia: stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia) || inferred?.provincia || "",
     };
   };
   const routeEndpointScore = (draft, ruta, tipo) => {

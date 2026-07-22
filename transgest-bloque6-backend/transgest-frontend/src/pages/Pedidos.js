@@ -6012,7 +6012,7 @@ function PedidoTimeline({ pedido }) {
   );
 }
 
-function PedidoRentabilidadPredictiva({ pedido }) {
+function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -6050,13 +6050,26 @@ function PedidoRentabilidadPredictiva({ pedido }) {
         <div style={{fontSize:12,color:"var(--text5)"}}>Sin datos suficientes para calcular rentabilidad.</div>
       ) : (
         <>
+          {(() => {
+            // Si estamos editando, usamos el ingreso EN VIVO (incluye cargas y
+            // descargas adicionales) en vez del importe guardado, que puede estar
+            // desfasado. Recalculamos margen, margen % y EUR/km en consecuencia.
+            const ingresoBackend = Number(data.ingreso?.total || 0);
+            const ingresoTotal = Number.isFinite(ingresoLive) && ingresoLive > 0 ? ingresoLive : ingresoBackend;
+            const costeTotal = Number(data.costes?.total || 0);
+            const margenImporte = ingresoTotal - costeTotal;
+            const margenPct = ingresoTotal > 0 ? (margenImporte / ingresoTotal) * 100 : null;
+            const kmRef = (ingresoBackend > 0 && data.ingreso?.eur_km) ? ingresoBackend / Number(data.ingreso.eur_km) : null;
+            const eurKmLive = kmRef && kmRef > 0 ? ingresoTotal / kmRef : (data.ingreso?.eur_km ?? null);
+            const colorLive = margenImporte < 0 ? "#ef4444" : (margenPct != null && margenPct < 8) ? "#f59e0b" : color;
+            return (
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:8}}>
             {[
-              ["Ingreso", `${fmtRent(data.ingreso?.total)} EUR`, "#10b981"],
-              ["Coste", `${fmtRent(data.costes?.total)} EUR`, "#f59e0b"],
-              ["Margen", `${fmtRent(data.margen?.importe)} EUR`, color],
-              ["Margen %", data.margen?.pct == null ? "-" : `${fmtRent(data.margen.pct)}%`, color],
-              ["EUR/km", data.ingreso?.eur_km == null ? "-" : `${fmtRent(data.ingreso.eur_km)}`, "var(--accent)"],
+              ["Ingreso", `${fmtRent(ingresoTotal)} EUR`, "#10b981"],
+              ["Coste", `${fmtRent(costeTotal)} EUR`, "#f59e0b"],
+              ["Margen", `${fmtRent(margenImporte)} EUR`, colorLive],
+              ["Margen %", margenPct == null ? "-" : `${fmtRent(margenPct)}%`, colorLive],
+              ["EUR/km", eurKmLive == null ? "-" : `${fmtRent(eurKmLive)}`, "var(--accent)"],
             ].map(([label,value,c]) => (
               <div key={label} style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"9px 10px"}}>
                 <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:16,color:c}}>{value}</div>
@@ -6064,6 +6077,8 @@ function PedidoRentabilidadPredictiva({ pedido }) {
               </div>
             ))}
           </div>
+            );
+          })()}
           <div style={{marginTop:10,padding:"9px 11px",borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border2)",fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
             <strong style={{color:"var(--text)"}}>Recomendacion:</strong> {data.recomendacion || "-"}
           </div>
@@ -8814,7 +8829,7 @@ useEffect(() => {
               )}
             </div>
 
-            {editando?.id && <PedidoRentabilidadPredictiva pedido={editando}/>}
+            {editando?.id && <PedidoRentabilidadPredictiva pedido={editando} ingresoLive={calcImporte(form) + parseLocaleNumber(form.importe_paralizacion, 0)}/>}
             {editando?.id && <PedidoTimeline pedido={editando}/>}
 
             <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
@@ -11100,13 +11115,6 @@ export default function Pedidos() {
           <span style={{fontSize:12,fontWeight:800,color:"#60a5fa"}}>
             {selectedPedidoIds.length} seleccionado{selectedPedidoIds.length !== 1 ? "s" : ""}
           </span>
-          <button
-            onClick={copiarSeleccionadosSemanaSiguiente}
-            disabled={bulkCopying}
-            style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(59,130,246,.10)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.24)",opacity:bulkCopying?0.6:1,cursor:bulkCopying?"not-allowed":"pointer"}}
-          >
-            {bulkCopying ? "Copiando..." : "Copiar +1 semana"}
-          </button>
           <button
             onClick={solicitarRetrasoSeleccionados}
             disabled={bulkRescheduling}

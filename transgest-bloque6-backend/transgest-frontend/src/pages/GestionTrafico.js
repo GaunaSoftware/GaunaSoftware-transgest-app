@@ -4796,7 +4796,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       )}
 
       {/* â”€â”€ Grid principal â”€â”€ */}
-      <div className="tg-traffic-board" style={{ flex:1, overflowY:"auto", overflowX:"auto", display:vistaMain==="cuadrante"?"block":"none" }}>
+      <div className="tg-traffic-board" style={{ flex:1, overflowY:"auto", overflowX:"auto", maxHeight:"calc(100dvh - 210px)", minHeight:340, display:vistaMain==="cuadrante"?"block":"none" }}>
         <table style={{ borderCollapse:"collapse", tableLayout:"fixed", minWidth: COL_VEH + COL_DAY*7 }}>
           <colgroup>
             <col style={{ width:COL_VEH }}/>

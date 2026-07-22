@@ -8214,11 +8214,24 @@ useEffect(() => {
                   type="text"
                   inputMode="decimal"
                   style={S.input}
-                  value={form.precio_base_sin_combustible || ""}
+                  value={(() => {
+                    // El precio base sin gasoil debe cumplir: EUR/tn = base * (1 + %gasoil).
+                    // Si el valor guardado no cuadra con el EUR/tn y el % actuales (p. ej.
+                    // arrastrado de una tarifa antigua), mostramos el valor correcto derivado
+                    // (con % = 0, la base es el propio EUR/tn).
+                    const stored = form.precio_base_sin_combustible;
+                    const pct = parseLocaleNumber(form.recargo_combustible_pct, 0);
+                    const unit = parseLocaleNumber(form.precio_unitario, NaN);
+                    const storedNum = parseLocaleNumber(stored, NaN);
+                    const cuadra = Number.isFinite(storedNum) && Number.isFinite(unit) && Math.abs(storedNum * (1 + pct / 100) - unit) < 0.01;
+                    if (stored !== "" && stored != null && cuadra) return stored;
+                    if (Number.isFinite(unit) && unit > 0) return String(Number((pct > 0 ? unit / (1 + pct / 100) : unit).toFixed(2)));
+                    return stored || "";
+                  })()}
                   onChange={e=>setForm(p=>{
                     const base = parseLocaleNumber(e.target.value, 0);
                     const pct = parseLocaleNumber(p.recargo_combustible_pct, 0);
-                    const next = {...p,precio_base_sin_combustible:e.target.value,precio_unitario:base > 0 && pct > 0 ? Number((base * (1 + pct / 100)).toFixed(2)) : p.precio_unitario};
+                    const next = {...p,precio_base_sin_combustible:e.target.value,precio_unitario:base > 0 ? Number((base * (1 + pct / 100)).toFixed(2)) : p.precio_unitario};
                     return {...next, importe_revision_combustible:calcRevisionCombustible(next)};
                   })}
                   placeholder="Importe antes del recargo"

@@ -10782,10 +10782,11 @@ export default function Pedidos() {
     if (filtroColaborador && !pedido.colaborador_id) return false;
     return true;
   });
+  // "Muy critico" = sin asignar con la carga inminente (<24h) o ya pasada. Los
+  // "datos pendientes/completar" ya no cuentan como aviso critico (metian ruido).
   const pedidosCriticosOperativos = pedidosFiltrados.filter(({ priorityMeta }) =>
     priorityMeta.flags.overdueAssignment ||
-    priorityMeta.flags.urgentAssignment ||
-    priorityMeta.validationIssues.length > 0
+    priorityMeta.flags.urgentAssignment
   );
   const resumenCriticos = pedidosFiltrados.reduce((acc, item) => {
     const { flags, validationIssues } = item.priorityMeta;
@@ -10795,10 +10796,13 @@ export default function Pedidos() {
     if (flags.missingAssignment) acc.sinAsignacion += 1;
     return acc;
   }, { vencidos: 0, urgentes: 0, datos: 0, sinAsignacion: 0 });
+  // Avisos criticos = SOLO lo muy urgente: sin asignar con la carga ya pasada
+  // (vencido) o inminente (menos de 12 h). Lo demas (urgente 12-24h, datos
+  // pendientes) sigue marcado en la fila pero no genera aviso, para no saturar.
   const alertasCriticasPedidos = pedidos
     .filter(p => !["cancelado", "entregado"].includes(String(p.estado || "").toLowerCase()) && !pedidoTieneFacturaFinal(p))
     .map(p => ({ pedido: p, meta: getPedidoPriorityMeta(p, new Date()) }))
-    .filter(({ meta }) => meta.flags.overdueAssignment || meta.flags.urgentAssignment)
+    .filter(({ meta }) => meta.flags.overdueAssignment || (meta.flags.urgentAssignment && meta.flags.diffHours != null && meta.flags.diffHours <= 12))
     .sort((a, b) => b.meta.severity - a.meta.severity);
   const alertasCriticasPendientes = alertasCriticasPedidos.filter(
     item => !readCriticalAlerts.includes(buildPedidoCriticalAlertKey(item))

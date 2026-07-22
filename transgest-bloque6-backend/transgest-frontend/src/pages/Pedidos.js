@@ -11151,20 +11151,7 @@ export default function Pedidos() {
             <option value="">Chofer (auto del vehiculo)...</option>
             {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
           </select>
-          <span style={{fontSize:11,color:"var(--text5)"}}>o</span>
-          <datalist id="tg-bulk-matriculas">
-            {vehiculos.map(v => <option key={v.id} value={v.matricula}/>)}
-          </datalist>
-          <input
-            list="tg-bulk-matriculas"
-            value={bulkMatricula}
-            onChange={e => setBulkMatricula(e.target.value.toUpperCase())}
-            placeholder="Matricula (elige o escribe)"
-            title="Elige una matricula de la flota o escribe una a mano (sin IA) y aplicala a los seleccionados"
-            disabled={!!bulkVehiculo}
-            style={{...S.input,width:170,padding:"5px 10px",fontSize:11,opacity:bulkVehiculo?0.5:1}}
-          />
-          <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer && !String(bulkMatricula||"").trim())} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer&&!String(bulkMatricula||"").trim()))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer&&!String(bulkMatricula||"").trim()))?"not-allowed":"pointer"}}>
+          <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer)} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?"not-allowed":"pointer"}}>
             {bulkAssigning ? "Asignando..." : "Asignar"}
           </button>
           <button

@@ -239,6 +239,7 @@ const CSS = `
   .tg-modal-backdrop { overscroll-behavior:contain; }
   .tg-control-map-card { max-width:calc(100% - 28px); }
   @media (max-width: 1100px) {
+    .tg-plandiario-grid { grid-template-columns:1fr !important; }
     .tg-responsive-page [style*="grid-template-columns: repeat(4"],
     .tg-responsive-page [style*="grid-template-columns:repeat(4"] {
       grid-template-columns:repeat(2,minmax(0,1fr)) !important;

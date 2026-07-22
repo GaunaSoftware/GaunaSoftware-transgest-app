@@ -446,7 +446,7 @@ export default function PlanDiario() {
         <button onClick={cargar} style={S.btn}>Actualizar</button>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(6, minmax(140px, 1fr))", gap:14, marginBottom:18 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))", gap:14, marginBottom:18 }}>
         <Kpi label="Tractoras" value={resumen.tractoras ?? resumen.vehiculos ?? 0} tone="info" icon="truck" caption="Disponibles" />
         <Kpi label="Con trabajo" value={resumen.con_trabajo || 0} tone="ok" icon="work" caption="Asignadas hoy" />
         <Kpi label="Sin trabajo" value={resumen.sin_trabajo || 0} tone="info" icon="empty" caption="Sin asignar" />
@@ -455,9 +455,9 @@ export default function PlanDiario() {
         <Kpi label="Sin asignar" value={resumen.pedidos_sin_asignar || 0} tone={(resumen.pedidos_sin_asignar || 0) ? "warning" : "ok"} icon="users" caption="Pendientes" />
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"minmax(0, 1fr) 320px", gap:12, alignItems:"start" }}>
-        <div style={S.panel}>
-          <table style={{ width:"100%", borderCollapse:"collapse", tableLayout:"fixed" }}>
+      <div className="tg-plandiario-grid" style={{ display:"grid", gridTemplateColumns:"minmax(0, 1fr) 320px", gap:12, alignItems:"start" }}>
+        <div style={{ ...S.panel, overflowX:"auto" }}>
+          <table style={{ width:"100%", minWidth:820, borderCollapse:"collapse", tableLayout:"fixed" }}>
             <colgroup>
               <col style={{ width:116 }} />
               <col style={{ width:118 }} />

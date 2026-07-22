@@ -1109,7 +1109,11 @@ const UUID_PEDIDO_FIELDS = new Set(["cliente_id", "ruta_id", "vehiculo_id", "cho
 function normalizeStrictDateInput(value) {
   if (value === "" || value === null || value === undefined) return null;
   const raw = String(value).trim();
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  // Acepta AAAA-MM-DD y tambien ISO con hora (p. ej. "2026-07-22T00:00:00.000Z"
+  // o "2026-07-22 00:00:00") tal como puede venir de la base de datos/API; en
+  // ese caso se queda solo con la fecha. Esto evita que la asignacion multiple
+  // (que reenvia el pedido tal cual) falle con "Revisa las fechas".
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/);
   if (!match) return false;
   const year = Number(match[1]);
   const month = Number(match[2]);
@@ -1121,7 +1125,7 @@ function normalizeStrictDateInput(value) {
     parsed.getUTCMonth() !== month - 1 ||
     parsed.getUTCDate() !== day
   ) return false;
-  return raw;
+  return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
 function isValidPedidoDateInput(value) {

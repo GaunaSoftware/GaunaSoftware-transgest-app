@@ -11153,12 +11153,12 @@ export default function Pedidos() {
 
       <div style={{...S.card, overflow:"hidden",width:"100%",maxWidth:"100%",boxSizing:"border-box"}}>
         <div className="tg-responsive-scroll" style={{overflowX:"auto",width:"100%",maxWidth:"100%"}}>
-        <table style={{width:"100%",minWidth:1320,borderCollapse:"collapse"}}>
+        <table style={{width:"100%",minWidth:1060,borderCollapse:"collapse"}}>
           <thead><tr>
             <th style={{...S.th,width:42}}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
             </th>
-            {["N. Pedido","Cliente","Origen -> Destino","F. Carga","H. Carga","F. Descarga","H. Descarga","Vehiculo","Estado","Importe","Acciones"].map(h=><th key={h} style={h==="Acciones" ? {...S.th, position:"sticky", right:0, zIndex:3, boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"} : S.th}>{h}</th>)}
+            {["N. Pedido","Cliente","Origen -> Destino","Carga","Descarga","Vehiculo","Estado","Importe","Acciones"].map(h=><th key={h} style={h==="Acciones" ? {...S.th, position:"sticky", right:0, zIndex:3, boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"} : S.th}>{h}</th>)}
           </tr></thead>
           <tbody>
             {loading ? <tr><td colSpan={12} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
@@ -11323,15 +11323,15 @@ export default function Pedidos() {
                     </div>
                   )}
                 </td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{formatPedidoListDate(cargaPrincipal.fecha)||"-"}</td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>
-                  <div>{formatPedidoListTime(cargaPrincipal.hora)||"-"}</div>
-                  {cargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:3,fontFamily:"'DM Sans',sans-serif"}}>Ventana {cargaPrincipal.ventana}</div>}
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
+                  <div>{formatPedidoListDate(cargaPrincipal.fecha)||"-"}</div>
+                  {formatPedidoListTime(cargaPrincipal.hora) && <div style={{fontSize:10}}>{formatPedidoListTime(cargaPrincipal.hora)}</div>}
+                  {cargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:2,fontFamily:"'DM Sans',sans-serif"}}>{cargaPrincipal.ventana}</div>}
                 </td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{formatPedidoListDate(descargaPrincipal.fecha)||"-"}</td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>
-                  <div>{formatPedidoListTime(descargaPrincipal.hora)||"-"}</div>
-                  {descargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:3,fontFamily:"'DM Sans',sans-serif"}}>Ventana {descargaPrincipal.ventana}</div>}
+                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
+                  <div>{formatPedidoListDate(descargaPrincipal.fecha)||"-"}</div>
+                  {formatPedidoListTime(descargaPrincipal.hora) && <div style={{fontSize:10}}>{formatPedidoListTime(descargaPrincipal.hora)}</div>}
+                  {descargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:2,fontFamily:"'DM Sans',sans-serif"}}>{descargaPrincipal.ventana}</div>}
                 </td>
                 <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>
                   {p.colaborador_id ? (

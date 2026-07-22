@@ -3,10 +3,11 @@
 // ══════════════════════════════════════════════════════
 
 import { fixMojibakePayload } from "../utils/mojibake";
+import { resolveApiBase } from "../utils/serverConfig";
 
-// Fallback al backend de produccion si falta REACT_APP_API_URL en el build (si
-// no, BASE queda vacio y las peticiones van al mismo origen -> 405 en Vercel).
-const BASE = process.env.REACT_APP_API_URL || "https://transgest-backend.onrender.com";
+// El backend puede ser la nube (por defecto) o uno local/on-premise si el
+// usuario lo configura en Ajustes -> Servidor (ver utils/serverConfig.js).
+const BASE = resolveApiBase();
 
 function extractRequestId(res, data = {}) {
   return (

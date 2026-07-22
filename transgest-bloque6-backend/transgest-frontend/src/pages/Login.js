@@ -4,6 +4,7 @@ import { BRAND_NAME, getBrandDisplayName, getBrandVersionLabel } from "../brandi
 import { getLoginBrand, getPublicAppMeta, healthCheck, requestPasswordReset } from "../services/api";
 import { confirmDialog } from "../services/notify";
 import { getEmpresaPlanLocal } from "../utils/planFeatures";
+import { getConfiguredServer, setConfiguredServer, clearConfiguredServer, isDesktopApp, DEFAULT_API_URL } from "../utils/serverConfig";
 import { useTheme } from "../context/ThemeContext";
 import transgestLogoDark from "../assets/brand/transgest_logo_dark.svg";
 import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
@@ -62,6 +63,23 @@ export default function Login() {
   const [forgotIdentifier, setForgotIdentifier] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
+  const desktopApp = isDesktopApp();
+  const [srvOpen, setSrvOpen] = useState(false);
+  const [srvUrl, setSrvUrl] = useState(getConfiguredServer());
+  const servidorPersonalizado = Boolean(getConfiguredServer());
+  // El configurador solo se ofrece en el ejecutable de escritorio o si ya hay
+  // un servidor local guardado (la web en la nube no lo necesita).
+  const mostrarConfigServidor = desktopApp || servidorPersonalizado;
+
+  function guardarServidor() {
+    const guardada = setConfiguredServer(srvUrl);
+    // Recargar para que todos los modulos tomen la nueva URL de backend.
+    if (guardada || srvUrl.trim() === "") window.location.reload();
+  }
+  function usarNube() {
+    clearConfiguredServer();
+    window.location.reload();
+  }
 
   async function checkServerStatus() {
     setCheckingServer(true);
@@ -287,6 +305,17 @@ export default function Login() {
 
         <div style={S.footer}>
           © {new Date().getFullYear()} {BRAND_NAME} {versionLabel} · Todos los derechos reservados
+          {mostrarConfigServidor && (
+            <div style={{marginTop:8}}>
+              <button
+                type="button"
+                style={S.linkBtn}
+                onClick={() => { setSrvUrl(getConfiguredServer()); setSrvOpen(true); }}
+              >
+                Servidor: {servidorPersonalizado ? getConfiguredServer() : "nube (por defecto)"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
       {forgotOpen && (
@@ -317,6 +346,37 @@ export default function Login() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+      {srvOpen && (
+        <div style={{position:"fixed",inset:0,zIndex:8000,background:"rgba(15,20,32,.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
+          <div style={{width:"min(430px,96vw)",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:22,boxShadow:"var(--shadow)"}}>
+            <div style={{fontSize:17,fontWeight:900,color:"var(--text)",marginBottom:6}}>Servidor de datos</div>
+            <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:14}}>
+              Deja el campo vacio para usar el servidor en la nube (recomendado). Si tu empresa tiene una
+              instalacion propia (on-premise), escribe aqui la direccion de su servidor.
+            </div>
+            <label style={S.label}>Direccion del servidor</label>
+            <input
+              autoFocus
+              style={S.input}
+              type="text"
+              value={srvUrl}
+              onChange={e=>setSrvUrl(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&guardarServidor()}
+              placeholder="Ej: http://192.168.1.20:3000  ·  vacio = nube"
+            />
+            <div style={{marginTop:8,fontSize:11,color:"var(--text5)"}}>
+              Por defecto: {DEFAULT_API_URL}
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:16,flexWrap:"wrap"}}>
+              <button type="button" onClick={usarNube} style={{padding:"8px 13px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontWeight:800,cursor:"pointer"}}>Usar la nube</button>
+              <div style={{display:"flex",gap:8}}>
+                <button type="button" onClick={()=>setSrvOpen(false)} style={{padding:"8px 13px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontWeight:800,cursor:"pointer"}}>Cancelar</button>
+                <button type="button" onClick={guardarServidor} style={{padding:"8px 14px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontWeight:900,cursor:"pointer"}}>Guardar y recargar</button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

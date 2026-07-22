@@ -13,6 +13,7 @@ logs/
 
 # Build outputs
 dist/
+dist-desktop/
 build/
 .next/
 .vercel/

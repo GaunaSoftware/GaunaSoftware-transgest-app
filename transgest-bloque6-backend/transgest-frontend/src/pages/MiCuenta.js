@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { getToken, getUser } from "../services/api";
+import { resolveApiBase } from "../utils/serverConfig";
 
-const BASE = process.env.REACT_APP_API_URL || "https://transgest-backend.onrender.com";
+const BASE = resolveApiBase();
 const fmt  = d => d ? new Date(d).toLocaleDateString("es-ES") : "Sin límite";
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { resolveApiBase } from "../utils/serverConfig";
 
-const BASE = process.env.REACT_APP_API_URL || "https://transgest-backend.onrender.com";
+const BASE = resolveApiBase();
 
 export default function Invitacion() {
   const token = window.location.pathname.split("/").filter(Boolean).pop();

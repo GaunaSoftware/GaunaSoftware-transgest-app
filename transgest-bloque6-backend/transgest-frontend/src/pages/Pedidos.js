@@ -533,14 +533,24 @@ function buildPedidoCopyPayload(basePedido = {}, overrides = {}) {
       precio_colaborador: null,
       matricula_colaborador: null,
       remolque_matricula_colaborador: null,
+      matricula_manual: null,
+      remolque_matricula_manual: null,
       coste_gasoil: 0,
     });
+  }
+  if (merged.mantener_cargas === false) {
+    merged.puntos_carga = [];
+    merged.origen = "";
+  }
+  if (merged.mantener_descargas === false) {
+    merged.puntos_descarga = [];
+    merged.destino = "";
   }
   const {
     remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
     chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
     factura_numero, facturado, cliente_email, cliente_telefono,
-    chofer2_nombre, remolque_id, mantener_asignacion, ...formClean
+    chofer2_nombre, remolque_id, mantener_asignacion, mantener_cargas, mantener_descargas, ...formClean
   } = merged;
   const descargaPendiente = !merged.fecha_descarga && !merged.fecha_entrega;
   const puntosDescargaCopy = normalizeStopsForCopy(merged.puntos_descarga, merged.destino, "descarga")
@@ -10207,12 +10217,14 @@ export default function Pedidos() {
         const fetched = await getPedido(p.id);
         if (fetched?.id) pedidoBase = fetched;
       }
+      // Se resetea en cada apertura: no recuerda nº de copias ni las casillas.
       setCopyPlan({
         source: pedidoBase,
         fecha_carga: String(pedidoBase?.fecha_carga || new Date().toISOString().slice(0, 10)).slice(0, 10),
         copias: 1,
-        fechas_copia: normalizarFechasCopia(pedidoBase?.fecha_carga || new Date().toISOString().slice(0, 10), 1),
         mantener_asignacion: true,
+        mantener_cargas: true,
+        mantener_descargas: true,
       });
     } catch (e) {
       notify("No se pudo preparar la copia del viaje.", "error");
@@ -10222,25 +10234,27 @@ export default function Pedidos() {
   async function confirmarCopiaPedido() {
     if (!copyPlan?.source) return;
     const copias = Math.max(1, Math.min(20, Number(copyPlan.copias || 1)));
-    const fechasCopia = normalizarFechasCopia(copyPlan.fecha_carga, copias, copyPlan.fechas_copia);
-    if (fechasCopia.some(f => !f)) {
-      notify("Indica la fecha de cada copia.", "warning");
+    const fechaCarga = String(copyPlan.fecha_carga || "").slice(0, 10);
+    if (!fechaCarga) {
+      notify("Indica la fecha de carga de las copias.", "warning");
       return;
     }
     setCopySaving(true);
     try {
       const creados = [];
       for (let i = 0; i < copias; i += 1) {
-        const fechaCarga = fechasCopia[i];
+        // Todas las copias van a la MISMA fecha de carga.
         const payload = buildPedidoCopyPayload(copyPlan.source, {
           fecha_carga: fechaCarga,
           fecha_descarga: null,
           fecha_entrega: null,
           pendiente_completar: true,
           aviso_completar: copias > 1
-            ? "Viaje copiado en serie: completar fecha de descarga, revisar asignacion y precio antes de cerrar."
-            : "Viaje copiado: completar fecha de descarga, revisar asignacion y precio antes de cerrar.",
+            ? "Viaje copiado en serie: revisar antes de cerrar."
+            : "Viaje copiado: revisar antes de cerrar.",
           mantener_asignacion: !!copyPlan.mantener_asignacion,
+          mantener_cargas: copyPlan.mantener_cargas !== false,
+          mantener_descargas: copyPlan.mantener_descargas !== false,
           vehiculo_id: copyPlan.mantener_asignacion ? copyPlan.source?.vehiculo_id || null : null,
           chofer_id: copyPlan.mantener_asignacion ? copyPlan.source?.chofer_id || null : null,
           remolque_id_manual: copyPlan.mantener_asignacion ? copyPlan.source?.remolque_id || copyPlan.source?.remolque_id_manual || null : null,
@@ -11687,14 +11701,14 @@ export default function Pedidos() {
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div>
-                <label style={S.lbl}>Fecha primera copia</label>
+                <label style={S.lbl}>Fecha de carga (todas las copias)</label>
                 <input
                   type="date"
                   min="2000-01-01"
                   max="2100-12-31"
                   style={S.inp}
                   value={copyPlan.fecha_carga || ""}
-                  onChange={e=>setCopyPlan(prev=>({...prev, fecha_carga:e.target.value, fechas_copia:normalizarFechasCopia(e.target.value, prev?.copias || 1, prev?.fechas_copia)}))}
+                  onChange={e=>setCopyPlan(prev=>({...prev, fecha_carga:e.target.value}))}
                 />
               </div>
               <div>
@@ -11705,37 +11719,24 @@ export default function Pedidos() {
                   max="20"
                   style={S.inp}
                   value={copyPlan.copias || 1}
-                  onChange={e=>setCopyPlan(prev=>({...prev, copias:e.target.value, fechas_copia:normalizarFechasCopia(prev?.fecha_carga, e.target.value, prev?.fechas_copia)}))}
+                  onChange={e=>setCopyPlan(prev=>({...prev, copias:e.target.value}))}
                 />
               </div>
-              {(copyPlan.fechas_copia || normalizarFechasCopia(copyPlan.fecha_carga, copyPlan.copias)).map((fecha, idx) => (
-                <div key={`fecha-copia-${idx}`}>
-                  <label style={S.lbl}>{(Number(copyPlan.copias || 1) > 1) ? `Fecha copia ${idx + 1}` : "Fecha de copia"}</label>
-                  <input
-                    type="date"
-                    min="2000-01-01"
-                    max="2100-12-31"
-                    style={S.inp}
-                    value={fecha || ""}
-                    onChange={e=>setCopyPlan(prev=>{
-                      const fechas = normalizarFechasCopia(prev?.fecha_carga, prev?.copias || 1, prev?.fechas_copia);
-                      fechas[idx] = e.target.value;
-                      return {...prev, fecha_carga:idx===0 ? e.target.value : prev?.fecha_carga, fechas_copia:fechas};
-                    })}
-                  />
-                </div>
+            </div>
+            <div style={{display:"grid",gap:8,marginTop:14}}>
+              {[
+                ["mantener_asignacion","Mantener asignacion (vehiculo, chofer, remolque, colaborador, matriculas)"],
+                ["mantener_cargas","Mantener carga(s)"],
+                ["mantener_descargas","Mantener descarga(s)"],
+              ].map(([key,label])=>(
+                <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",border:"1px solid var(--border)",borderRadius:8,background:"var(--bg3)",cursor:"pointer"}}>
+                  <input type="checkbox" checked={copyPlan[key] !== false} onChange={e=>setCopyPlan(prev=>({...prev,[key]:e.target.checked}))} />
+                  <span style={{fontSize:12,color:"var(--text2)"}}>{label}</span>
+                </label>
               ))}
             </div>
-            <label style={{display:"flex",alignItems:"center",gap:10,marginTop:16,padding:"10px 12px",border:"1px solid var(--border)",borderRadius:8,background:"var(--bg3)"}}>
-              <input
-                type="checkbox"
-                checked={!!copyPlan.mantener_asignacion}
-                onChange={e=>setCopyPlan(prev=>({...prev, mantener_asignacion:e.target.checked}))}
-              />
-              <span style={{fontSize:12,color:"var(--text2)"}}>Copiar asignacion (vehiculo, chofer, remolque o colaborador)</span>
-            </label>
             <div style={{fontSize:11,color:"var(--text5)",marginTop:10}}>
-              Cada copia se crea en la fecha indicada. Si desmarcas la asignacion, saldran sin vehiculo, chofer, colaborador, remolque ni matriculas manuales.
+              Se crean {Math.max(1,Math.min(20,Number(copyPlan.copias||1)))} copia(s) a la misma fecha de carga. Lo que desmarques no se copia. Estas opciones se reinician cada vez.
             </div>
             <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
               <button
@@ -11750,7 +11751,7 @@ export default function Pedidos() {
                 onClick={confirmarCopiaPedido}
                 disabled={copySaving}
               >
-                {copySaving ? "Copiando..." : "Crear copias"}
+                {copySaving ? "Copiando..." : "Copiar"}
               </button>
             </div>
           </div>

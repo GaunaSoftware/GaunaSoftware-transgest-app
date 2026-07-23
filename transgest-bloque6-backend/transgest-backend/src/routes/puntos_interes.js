@@ -15,16 +15,6 @@ function emptyToNull(value) {
   return value;
 }
 
-function cleanText(value) {
-  if (value === undefined || value === null) return "";
-  return String(value).replace(/\s+/g, " ").trim();
-}
-
-function cleanOptionalText(value) {
-  const clean = cleanText(value);
-  return clean ? clean : null;
-}
-
 function numberOrNull(value) {
   const clean = emptyToNull(value);
   if (clean === null) return null;
@@ -63,35 +53,6 @@ function withComputedFields(row) {
     es_general: !row?.cliente_id,
     punto_general: !row?.cliente_id,
   };
-}
-
-async function findExistingPoint({ empresa, clienteId, direccion, nombre, ciudad, provincia }) {
-  const { rows } = await db.query(
-    `SELECT *
-       FROM puntos_interes
-      WHERE empresa_id=$1
-        AND cliente_id IS NOT DISTINCT FROM $2::uuid
-        AND activo=true
-        AND (
-          LOWER(TRIM(COALESCE(direccion,'')))=LOWER(TRIM(COALESCE($3,'')))
-          OR (
-            $5::text IS NOT NULL
-            AND
-            LOWER(TRIM(COALESCE(nombre,'')))=LOWER(TRIM(COALESCE($4,'')))
-            AND COALESCE(LOWER(TRIM(ciudad)),'')=COALESCE(LOWER(TRIM($5)),'')
-          )
-          OR (
-            $6::text IS NOT NULL
-            AND
-            LOWER(TRIM(COALESCE(nombre,'')))=LOWER(TRIM(COALESCE($4,'')))
-            AND COALESCE(LOWER(TRIM(provincia)),'')=COALESCE(LOWER(TRIM($6)),'')
-          )
-        )
-      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
-      LIMIT 1`,
-    [empresa, clienteId, direccion, nombre, ciudad, provincia]
-  );
-  return rows[0] || null;
 }
 
 router.get("/", async (req, res) => {
@@ -137,24 +98,10 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     email, notas, metadata, google_maps_url, cliente_id,
   } = req.body || {};
   const clienteId = puntoGeneralFromBody(req.body) ? null : emptyToNull(cliente_id);
-  const cleanNombre = cleanText(nombre);
-  const cleanDireccion = cleanText(direccion);
-  const cleanCiudad = cleanOptionalText(ciudad);
-  const cleanProvincia = cleanOptionalText(provincia);
 
-  if (!cleanNombre || !cleanDireccion) {
+  if (!nombre || !direccion) {
     return res.status(400).json({ error: "Nombre y direccion son obligatorios" });
   }
-
-  const already = await findExistingPoint({
-    empresa,
-    clienteId,
-    direccion: cleanDireccion,
-    nombre: cleanNombre,
-    ciudad: cleanCiudad,
-    provincia: cleanProvincia,
-  });
-  if (already) return res.status(200).json(withComputedFields(already));
 
   const { rows } = await db.query(
     `INSERT INTO puntos_interes
@@ -166,37 +113,45 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     [
       empresa,
       clienteId,
-      cleanNombre,
-      cleanOptionalText(cif),
-      cleanDireccion,
-      cleanOptionalText(codigo_postal),
-      cleanCiudad,
-      cleanProvincia,
+      nombre.trim(),
+      emptyToNull(cif),
+      direccion.trim(),
+      emptyToNull(codigo_postal),
+      emptyToNull(ciudad),
+      emptyToNull(provincia),
       emptyToNull(pais) || "España",
       numberOrNull(lat),
       numberOrNull(lng),
-      cleanOptionalText(tipo) || "ambos",
-      cleanOptionalText(ventana),
-      cleanOptionalText(contacto_nombre),
-      cleanOptionalText(contacto_telefono),
-      cleanOptionalText(email),
-      cleanOptionalText(notas),
-      normalizeMetadata(metadata, cleanOptionalText(google_maps_url)),
+      emptyToNull(tipo) || "ambos",
+      emptyToNull(ventana),
+      emptyToNull(contacto_nombre),
+      emptyToNull(contacto_telefono),
+      emptyToNull(email),
+      emptyToNull(notas),
+      normalizeMetadata(metadata, emptyToNull(google_maps_url)),
     ]
   );
 
   if (rows[0]) return res.status(201).json(withComputedFields(rows[0]));
 
-  const existing = await findExistingPoint({
-    empresa,
-    clienteId,
-    direccion: cleanDireccion,
-    nombre: cleanNombre,
-    ciudad: cleanCiudad,
-    provincia: cleanProvincia,
-  });
-  if (existing) return res.status(200).json(withComputedFields(existing));
-  return res.status(409).json({ error: "Ya existe un punto similar o no se ha podido guardar. Actualiza la lista y seleccionalo." });
+  const existing = await db.query(
+    `SELECT * FROM puntos_interes
+      WHERE empresa_id=$1
+        AND LOWER(TRIM(direccion))=LOWER(TRIM($2))
+        AND activo=true
+        AND (
+          ($3::uuid IS NULL AND cliente_id IS NULL)
+          OR ($3::uuid IS NOT NULL AND cliente_id=$3::uuid)
+        )
+      ORDER BY CASE
+        WHEN cliente_id::text = COALESCE($3::text,'') THEN 0
+        WHEN cliente_id IS NULL THEN 1
+        ELSE 2
+      END
+      LIMIT 1`,
+    [empresa, direccion, clienteId]
+  );
+  return res.status(200).json(withComputedFields(existing.rows[0]));
 });
 
 router.put("/:id", PUEDE_EDITAR, async (req, res) => {

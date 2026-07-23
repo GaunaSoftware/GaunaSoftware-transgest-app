@@ -9,9 +9,9 @@ const MIN_LAT = -85.05112878;
 const MAX_LAT = 85.05112878;
 
 const MAP_LAYERS = {
-  streets: { label: "Mapa", attribution: "OpenStreetMap contributors" },
-  relief: { label: "Relieve", attribution: "OpenTopoMap / OpenStreetMap contributors" },
-  light: { label: "Claro", attribution: "CARTO / OpenStreetMap contributors" },
+  streets: { label: "Mapa", attribution: "cartografia base" },
+  relief: { label: "Relieve", attribution: "cartografia de relieve" },
+  light: { label: "Claro", attribution: "cartografia clara" },
 };
 const MAP_BRAND = "Mapa TransGest";
 
@@ -333,7 +333,7 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
           ))}
         </div>
         <div style={{ position:"absolute", right:9, bottom:7, borderRadius:5, padding:"3px 6px", fontSize:10, color:"#0f172a", background:"rgba(255,255,255,.78)" }}>
-          {MAP_BRAND} · Datos: {MAP_LAYERS[layer]?.attribution || "OpenStreetMap contributors"}
+          {MAP_BRAND} - {MAP_LAYERS[layer]?.attribution || "cartografia base"}
         </div>
       </div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"9px 11px", flexWrap:"wrap" }}>

@@ -1494,6 +1494,40 @@ function cleanMapsUrl(value) {
   return isValidMapsUrl(raw) ? raw : "";
 }
 
+function isGoogleMapsReference(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  if (coordsFromMapsUrl(raw)) return true;
+  return /^geo:/i.test(raw) || /^https?:\/\/[^\s]*(google\.[a-z.]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl|g\.co\/)/i.test(raw);
+}
+
+function looksLikeStreetAddress(value) {
+  return /\b(calle|c\/|avda|avenida|carretera|ctra|camino|poligono|pol\.|parcela|nave|autovia|autopista|plaza|paseo|ronda|km)\b/i.test(String(value || ""));
+}
+
+function hasNumericMapCoords(draft = {}) {
+  const lat = Number(draft.lat ?? draft.latitud);
+  const lng = Number(draft.lng ?? draft.longitud ?? draft.lon);
+  return Number.isFinite(lat) && Math.abs(lat) <= 90 && Number.isFinite(lng) && Math.abs(lng) <= 180;
+}
+
+function pointLocationValidationIssue(draft = {}) {
+  const mapsUrl = String(draft.google_maps_url || "").trim();
+  if (mapsUrl && !isGoogleMapsReference(mapsUrl)) {
+    return "El enlace del punto debe ser de Google Maps o coordenadas lat,lng. Si copias un enlace, hazlo desde el pin exacto del sitio.";
+  }
+  if (coordsFromMapsUrl(mapsUrl) || hasNumericMapCoords(draft)) return "";
+  const direccion = String(draft.direccion || "").trim();
+  const ciudad = String(draft.ciudad || "").trim();
+  const provincia = String(draft.provincia || "").trim();
+  if (!direccion) return "Indica direccion o poblacion del punto.";
+  if ((ciudad || provincia) && !/^espa(?:ñ|n)a$/i.test(direccion)) return "";
+  if (looksLikeStreetAddress(direccion)) {
+    return "Para una calle concreta indica tambien poblacion y provincia, o pega un enlace de Google Maps con coordenadas.";
+  }
+  return "Indica al menos poblacion/provincia o un enlace de Google Maps con el pin del punto.";
+}
+
 function coordsFromMapsUrl(value) {
   const raw = String(value || "");
   if (!raw) return null;
@@ -3435,6 +3469,8 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     if (!form.nombre.trim()) { notify("Indica el nombre de la empresa o punto.", "warning"); return; }
     if (!form.direccion.trim()) { notify("Indica la direccion del punto.", "warning"); return; }
     const resolvedForm = await completarPuntoGeo(form);
+    const locationIssue = pointLocationValidationIssue(resolvedForm);
+    if (locationIssue) { notify(locationIssue, "warning"); return; }
     const mapsCoords = coordsFromMapsUrl(resolvedForm.google_maps_url);
     const payload = {
       ...resolvedForm,
@@ -3506,6 +3542,10 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
             const coords = coordsFromMapsUrl(p.google_maps_url);
             return coords ? {...p, lat: p.lat || coords.lat, lng: p.lng || coords.lng} : p;
           })} placeholder="https://maps.google.com/..." /></div>
+          <div style={{gridColumn:"1/-1",border:"1px solid var(--border)",background:"var(--bg3)",borderRadius:8,padding:"9px 11px",fontSize:11,color:"var(--text4)",lineHeight:1.45}}>
+            <strong style={{color:"var(--text)",display:"block",marginBottom:2}}>Criterio de ubicacion para mapas y km</strong>
+            Usa direccion + poblacion + provincia, o pega el enlace de Google Maps del pin exacto. No se guardan puntos solo con pais, ni calles sin poblacion.
+          </div>
           <div><label style={lbl}>Latitud</label><input style={inp} value={form.lat ?? ""} onChange={set("lat")} placeholder="Ej: 38.3452" /></div>
           <div><label style={lbl}>Longitud</label><input style={inp} value={form.lng ?? ""} onChange={set("lng")} placeholder="Ej: -0.4815" /></div>
           <div><label style={lbl}>Codigo postal</label><input style={inp} value={form.codigo_postal} onChange={set("codigo_postal")} /></div>
@@ -12140,4 +12180,3 @@ export default function Pedidos() {
     </div>
   );
 }
-

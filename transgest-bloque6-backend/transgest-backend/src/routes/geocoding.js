@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const db = require("../services/db");
 const { resolveApiKey, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
 const { fallbackPlaceForAddress } = require("../services/geoFallback");
-const { resolveMapsCoords } = require("../services/mapsLink");
+const { coordsFromText, resolveMapsCoords } = require("../services/mapsLink");
 const { googleGeocode } = require("../services/googleGeocode");
 const {
   countryCodeFor,
@@ -17,7 +17,7 @@ const router = express.Router();
 const ROUTE_CACHE_DAYS = Math.max(1, Number(process.env.GEO_ROUTE_CACHE_DAYS || 30));
 const EXTERNAL_TIMEOUT_MS = Math.max(2500, Number(process.env.GEO_EXTERNAL_TIMEOUT_MS || 9000));
 const MAX_ROUTE_POINTS = 12;
-const PLACE_CACHE_VERSION = "v5";
+const PLACE_CACHE_VERSION = "v6";
 let schemaPromise = null;
 let lastNominatimAt = 0;
 let nominatimQueue = Promise.resolve();
@@ -47,6 +47,8 @@ function directCoordinates(raw = {}) {
   const lng = numericCoordinate(raw.lng ?? raw.lon ?? raw.longitude ?? raw.longitud, -180, 180);
   if (lat !== null && lng !== null) return { lat, lng };
   const text = cleanText(raw.google_maps_url || raw.maps_url || raw.query || raw.label || raw.address || raw.direccion);
+  const sharedParserCoords = coordsFromText(text);
+  if (sharedParserCoords) return sharedParserCoords;
   const patterns = [
     /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
     /[?&](?:q|query|ll)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,

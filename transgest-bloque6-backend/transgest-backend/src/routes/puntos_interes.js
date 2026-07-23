@@ -1,9 +1,13 @@
 const express = require("express");
 const db = require("../services/db");
 const { requireRole } = require("../middleware/auth");
+const { fallbackPlaceForAddress } = require("../services/geoFallback");
+const { coordsFromText, isMapsUrl, resolveMapsCoords } = require("../services/mapsLink");
 
 const router = express.Router();
 const PUEDE_EDITAR = requireRole("gerente", "trafico", "administrativo");
+const DEFAULT_COUNTRY = "España";
+const STREET_ADDRESS_RE = /\b(calle|c\/|avda|avenida|carretera|ctra|camino|poligono|pol\.|parcela|nave|autovia|autopista|plaza|paseo|ronda|km)\b/i;
 
 function empresaId(req) {
   return req.empresaId || req.user?.empresa_id;
@@ -48,10 +52,15 @@ function puntoGeneralFromBody(body = {}) {
   return boolFromBody(body.punto_general ?? body.es_general ?? body.general);
 }
 
-function normalizeMetadata(metadata = {}, googleMapsUrl = null) {
+function normalizeMetadata(metadata = {}, googleMapsUrl = null, location = {}) {
   const base = metadata && typeof metadata === "object" ? { ...metadata } : {};
   if (googleMapsUrl) base.google_maps_url = String(googleMapsUrl).trim();
   else delete base.google_maps_url;
+  if (location.lat !== null && location.lat !== undefined) base.lat = location.lat;
+  if (location.lng !== null && location.lng !== undefined) base.lng = location.lng;
+  if (location.location_quality) base.location_quality = location.location_quality;
+  if (location.coords_source) base.coords_source = location.coords_source;
+  if (location.normalized_query) base.normalized_query = location.normalized_query;
   return base;
 }
 
@@ -92,6 +101,92 @@ async function findExistingPoint({ empresa, clienteId, direccion, nombre, ciudad
     [empresa, clienteId, direccion, nombre, ciudad, provincia]
   );
   return rows[0] || null;
+}
+
+function isCountryOnly(value = "") {
+  const clean = cleanText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return ["espana", "spain", "españa", "portugal", "francia", "france", "italia", "italy"].includes(clean);
+}
+
+async function normalizeLocationFields({
+  cleanDireccion,
+  cleanCiudad,
+  cleanProvincia,
+  pais,
+  lat,
+  lng,
+  google_maps_url,
+}) {
+  const googleMapsUrl = cleanOptionalText(google_maps_url);
+  if (googleMapsUrl && !isMapsUrl(googleMapsUrl) && !/^geo:/i.test(googleMapsUrl) && !coordsFromText(googleMapsUrl)) {
+    const err = new Error("El enlace del punto debe ser un enlace de Google Maps, geo: o coordenadas lat,lng.");
+    err.status = 400;
+    throw err;
+  }
+
+  let nextCiudad = cleanCiudad;
+  let nextProvincia = cleanProvincia;
+  const nextPais = cleanOptionalText(pais) || DEFAULT_COUNTRY;
+  let nextLat = numberOrNull(lat);
+  let nextLng = numberOrNull(lng);
+  let coordsSource = "";
+
+  const inlineCoords = coordsFromText(googleMapsUrl || "");
+  if (inlineCoords) {
+    nextLat = inlineCoords.lat;
+    nextLng = inlineCoords.lng;
+    coordsSource = "maps_inline";
+  } else if (googleMapsUrl) {
+    const resolvedCoords = await resolveMapsCoords(googleMapsUrl).catch(() => null);
+    if (resolvedCoords) {
+      nextLat = resolvedCoords.lat;
+      nextLng = resolvedCoords.lng;
+      coordsSource = "maps_shortlink";
+    }
+  }
+
+  const hasCoords = nextLat !== null && nextLng !== null;
+  const addressNeedsContext = STREET_ADDRESS_RE.test(cleanDireccion) && !nextCiudad && !nextProvincia && !hasCoords;
+  if (addressNeedsContext) {
+    const err = new Error("Indica poblacion y provincia para direcciones de calle, o pega un enlace de Google Maps con coordenadas.");
+    err.status = 400;
+    throw err;
+  }
+
+  if ((!nextCiudad || !nextProvincia) && !addressNeedsContext && !isCountryOnly(cleanDireccion)) {
+    const inferred = fallbackPlaceForAddress([cleanDireccion, nextCiudad, nextProvincia, nextPais].filter(Boolean).join(", "));
+    if (inferred) {
+      nextCiudad = nextCiudad || inferred.municipio;
+      nextProvincia = nextProvincia || inferred.provincia;
+      if (!hasCoords) {
+        nextLat = inferred.lat;
+        nextLng = inferred.lng;
+        coordsSource = "local_dictionary";
+      }
+    }
+  }
+
+  const hasFinalCoords = nextLat !== null && nextLng !== null;
+  if (isCountryOnly(cleanDireccion) || (!nextCiudad && !nextProvincia && !hasFinalCoords)) {
+    const err = new Error("El punto necesita poblacion/provincia o coordenadas. No se guardan puntos solo con pais o texto ambiguo.");
+    err.status = 400;
+    throw err;
+  }
+
+  return {
+    ciudad: nextCiudad,
+    provincia: nextProvincia,
+    pais: nextPais,
+    lat: nextLat,
+    lng: nextLng,
+    googleMapsUrl,
+    coords_source: coordsSource || (hasCoords ? "manual" : ""),
+    location_quality: hasFinalCoords ? "precisa" : "estructurada",
+    normalized_query: [cleanDireccion, nextCiudad, nextProvincia, nextPais].filter(Boolean).join(", "),
+  };
 }
 
 router.get("/", async (req, res) => {
@@ -146,13 +241,28 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     return res.status(400).json({ error: "Nombre y direccion son obligatorios" });
   }
 
+  let location;
+  try {
+    location = await normalizeLocationFields({
+      cleanDireccion,
+      cleanCiudad,
+      cleanProvincia,
+      pais,
+      lat,
+      lng,
+      google_maps_url,
+    });
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message || "No se pudo validar la ubicacion del punto." });
+  }
+
   const already = await findExistingPoint({
     empresa,
     clienteId,
     direccion: cleanDireccion,
     nombre: cleanNombre,
-    ciudad: cleanCiudad,
-    provincia: cleanProvincia,
+    ciudad: location.ciudad,
+    provincia: location.provincia,
   });
   if (already) return res.status(200).json(withComputedFields(already));
 
@@ -170,18 +280,18 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
       cleanOptionalText(cif),
       cleanDireccion,
       cleanOptionalText(codigo_postal),
-      cleanCiudad,
-      cleanProvincia,
-      emptyToNull(pais) || "España",
-      numberOrNull(lat),
-      numberOrNull(lng),
+      location.ciudad,
+      location.provincia,
+      location.pais,
+      location.lat,
+      location.lng,
       cleanOptionalText(tipo) || "ambos",
       cleanOptionalText(ventana),
       cleanOptionalText(contacto_nombre),
       cleanOptionalText(contacto_telefono),
       cleanOptionalText(email),
       cleanOptionalText(notas),
-      normalizeMetadata(metadata, cleanOptionalText(google_maps_url)),
+      normalizeMetadata(metadata, location.googleMapsUrl, location),
     ]
   );
 
@@ -192,8 +302,8 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     clienteId,
     direccion: cleanDireccion,
     nombre: cleanNombre,
-    ciudad: cleanCiudad,
-    provincia: cleanProvincia,
+    ciudad: location.ciudad,
+    provincia: location.provincia,
   });
   if (existing) return res.status(200).json(withComputedFields(existing));
   return res.status(409).json({ error: "Ya existe un punto similar o no se ha podido guardar. Actualiza la lista y seleccionalo." });
@@ -218,13 +328,28 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
     return res.status(400).json({ error: "Nombre y direccion son obligatorios" });
   }
 
+  let location;
+  try {
+    location = await normalizeLocationFields({
+      cleanDireccion,
+      cleanCiudad,
+      cleanProvincia,
+      pais,
+      lat,
+      lng,
+      google_maps_url,
+    });
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message || "No se pudo validar la ubicacion del punto." });
+  }
+
   const already = await findExistingPoint({
     empresa,
     clienteId,
     direccion: cleanDireccion,
     nombre: cleanNombre,
-    ciudad: cleanCiudad,
-    provincia: cleanProvincia,
+    ciudad: location.ciudad,
+    provincia: location.provincia,
   });
   if (already && String(already.id) !== String(req.params.id)) {
     return res.status(200).json(withComputedFields(already));
@@ -242,18 +367,18 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
       cleanOptionalText(cif),
       cleanDireccion,
       cleanOptionalText(codigo_postal),
-      cleanCiudad,
-      cleanProvincia,
-      emptyToNull(pais) || "España",
-      numberOrNull(lat),
-      numberOrNull(lng),
+      location.ciudad,
+      location.provincia,
+      location.pais,
+      location.lat,
+      location.lng,
       cleanOptionalText(tipo) || "ambos",
       cleanOptionalText(ventana),
       cleanOptionalText(contacto_nombre),
       cleanOptionalText(contacto_telefono),
       cleanOptionalText(email),
       cleanOptionalText(notas),
-      normalizeMetadata(metadata, emptyToNull(google_maps_url)),
+      normalizeMetadata(metadata, location.googleMapsUrl, location),
       clienteId,
       req.params.id,
       empresa,

@@ -47,19 +47,32 @@ router.get("/bi/resumen", async (req, res) => {
   const empresaId = req.empresaId || req.user?.empresa_id;
   const { desde, hasta } = rangoPeriodo(String(req.query.periodo || "90d"));
   const params = [empresaId, desde, hasta];
-  const [pedidos, facturas, clientes, rutas, incidencias] = await Promise.all([
+  const [pedidos, facturas, clientes, rutas, incidencias, documentos, estados, clientesCobro] = await Promise.all([
     db.query(`
       SELECT
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE estado='cancelado')::int AS cancelados,
         COUNT(*) FILTER (WHERE estado IN ('entregado','facturado'))::int AS completados,
+        COUNT(*) FILTER (WHERE estado IN ('pendiente'))::int AS pendientes,
+        COUNT(*) FILTER (WHERE estado IN ('confirmado','cargando','en_curso','en_ruta','descarga','descargando','espera_carga','espera_descarga'))::int AS activos,
+        COUNT(*) FILTER (WHERE estado='incidencia')::int AS incidencias,
+        COUNT(*) FILTER (WHERE pendiente_completar IS TRUE OR NULLIF(TRIM(COALESCE(aviso_completar,'')),'') IS NOT NULL)::int AS pendientes_completar,
+        COUNT(*) FILTER (WHERE estado <> 'cancelado' AND COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0) <= 0)::int AS sin_precio,
+        COUNT(*) FILTER (WHERE estado <> 'cancelado' AND COALESCE(km_ruta,0) <= 0)::int AS sin_km,
+        COUNT(*) FILTER (WHERE estado IN ('entregado','facturado') AND factura_id IS NULL)::int AS pendientes_facturar_count,
+        COUNT(*) FILTER (WHERE estado IN ('pendiente','confirmado') AND vehiculo_id IS NULL AND chofer_id IS NULL AND colaborador_id IS NULL)::int AS sin_recurso,
         COALESCE(SUM(importe),0)::numeric AS venta,
         COALESCE(SUM(importe) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS venta_realizada,
         COALESCE(SUM(importe) FILTER (WHERE estado IN ('entregado','facturado') AND factura_id IS NULL),0)::numeric AS pendiente_facturar_realizado,
+        COALESCE(AVG(NULLIF(COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0),0)) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS ticket_medio_realizado,
+        COALESCE(SUM(COALESCE(importe_paralizacion, paralizacion_importe, 0)),0)::numeric AS paralizacion,
+        COUNT(*) FILTER (WHERE COALESCE(importe_paralizacion, paralizacion_importe, 0) > 0)::int AS pedidos_con_paralizacion,
         COALESCE(SUM(precio_colaborador),0)::numeric AS coste_colaborador,
         COALESCE(SUM(precio_colaborador) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS coste_colaborador_realizado,
         COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)),0)::numeric AS km,
         COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS km_realizados,
+        COALESCE(SUM(COALESCE(km_vacio,0)),0)::numeric AS km_vacio,
+        COALESCE(SUM(COALESCE(km_vacio,0)) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS km_vacio_realizado,
         COALESCE(AVG(NULLIF(COALESCE(km_ruta,0) + COALESCE(km_vacio,0),0)),0)::numeric AS km_medio,
         COALESCE(AVG(EXTRACT(EPOCH FROM (fecha_descarga::timestamp - fecha_carga::timestamp))/86400) FILTER (WHERE fecha_descarga IS NOT NULL AND fecha_carga IS NOT NULL),0)::numeric AS dias_medio
       FROM pedidos
@@ -68,9 +81,11 @@ router.get("/bi/resumen", async (req, res) => {
     db.query(`
       SELECT
         COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE estado='cobrada')::int AS cobradas,
         COUNT(*) FILTER (WHERE estado IN ('emitida','enviada','vencida','reclamada','sin_cobrar'))::int AS pendientes,
         COUNT(*) FILTER (WHERE estado IN ('vencida','reclamada','sin_cobrar'))::int AS vencidas,
         COALESCE(SUM(total),0)::numeric AS facturado,
+        COALESCE(SUM(total) FILTER (WHERE estado='cobrada'),0)::numeric AS cobrado,
         COALESCE(SUM(total) FILTER (WHERE estado IN ('emitida','enviada','vencida','reclamada','sin_cobrar')),0)::numeric AS pendiente_cobro,
         COALESCE(SUM(total) FILTER (WHERE estado IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
       FROM facturas
@@ -139,32 +154,138 @@ router.get("/bi/resumen", async (req, res) => {
       FROM portal_solicitudes_cliente
       WHERE empresa_id=$1 AND created_at::date BETWEEN $2 AND $3
     `, params).catch(() => ({ rows:[{}] })),
+    db.query(`
+      SELECT
+        COUNT(*) FILTER (
+          WHERE p.estado IN ('entregado','facturado')
+            AND NOT EXISTS (
+              SELECT 1 FROM pedido_docs pd
+               WHERE pd.empresa_id=p.empresa_id
+                 AND pd.pedido_id=p.id
+                 AND (
+                   LOWER(COALESCE(pd.tipo,'')) LIKE '%albaran%'
+                   OR LOWER(COALESCE(pd.nombre,'')) LIKE '%albaran%'
+                   OR LOWER(COALESCE(pd.tipo,'')) LIKE '%pod%'
+                   OR LOWER(COALESCE(pd.nombre,'')) LIKE '%pod%'
+                   OR LOWER(COALESCE(pd.tipo,'')) LIKE '%cmr%'
+                   OR LOWER(COALESCE(pd.nombre,'')) LIKE '%cmr%'
+                 )
+            )
+        )::int AS pod_pendiente_realizados,
+        COUNT(*) FILTER (
+          WHERE p.estado IN ('entregado','facturado')
+            AND NOT EXISTS (
+              SELECT 1 FROM pedido_docs pd
+               WHERE pd.empresa_id=p.empresa_id
+                 AND pd.pedido_id=p.id
+            )
+        )::int AS sin_documentos_realizados,
+        COUNT(*) FILTER (
+          WHERE p.estado IN ('entregado','facturado')
+            AND p.factura_id IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM pedido_docs pd
+               WHERE pd.empresa_id=p.empresa_id
+                 AND pd.pedido_id=p.id
+                 AND (
+                   LOWER(COALESCE(pd.tipo,'')) LIKE '%albaran%'
+                   OR LOWER(COALESCE(pd.nombre,'')) LIKE '%albaran%'
+                   OR LOWER(COALESCE(pd.tipo,'')) LIKE '%pod%'
+                   OR LOWER(COALESCE(pd.nombre,'')) LIKE '%pod%'
+                   OR LOWER(COALESCE(pd.tipo,'')) LIKE '%cmr%'
+                   OR LOWER(COALESCE(pd.nombre,'')) LIKE '%cmr%'
+                 )
+            )
+        )::int AS facturable_bloqueado_docs
+      FROM pedidos p
+      WHERE p.empresa_id=$1
+        AND COALESCE(p.fecha_descarga, p.fecha_carga, p.fecha_pedido, p.created_at::date) BETWEEN $2 AND $3
+    `, params).catch(() => ({ rows:[{}] })),
+    db.query(`
+      SELECT COALESCE(NULLIF(estado::text,''),'pendiente') AS estado,
+             COUNT(*)::int AS pedidos,
+             COALESCE(SUM(COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0)),0)::numeric AS importe
+      FROM pedidos
+      WHERE empresa_id=$1
+        AND COALESCE(fecha_descarga, fecha_carga, fecha_pedido, created_at::date) BETWEEN $2 AND $3
+      GROUP BY 1
+      ORDER BY pedidos DESC, estado ASC
+    `, params).catch(() => ({ rows:[] })),
+    db.query(`
+      SELECT c.id, c.nombre,
+             COUNT(f.id)::int AS facturas,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado <> 'borrador'),0)::numeric AS facturado,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado='cobrada'),0)::numeric AS cobrado,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado IN ('emitida','enviada','vencida','reclamada','sin_cobrar')),0)::numeric AS pendiente,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
+      FROM facturas f
+      JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id
+      WHERE f.empresa_id=$1 AND f.fecha BETWEEN $2 AND $3 AND f.estado <> 'rectificada'
+      GROUP BY c.id, c.nombre
+      ORDER BY facturado DESC NULLS LAST, cobrado DESC NULLS LAST
+      LIMIT 12
+    `, params).catch(() => ({ rows:[] })),
   ]);
   const p = pedidos.rows[0] || {};
   const venta = Number(p.venta || 0);
   const ventaRealizada = Number(p.venta_realizada || 0);
   const pendienteFacturarRealizado = Number(p.pendiente_facturar_realizado || 0);
   const facturado = Number(facturas.rows[0]?.facturado || 0);
+  const cobrado = Number(facturas.rows[0]?.cobrado || 0);
   const ingresoGestionado = facturado + pendienteFacturarRealizado;
   const coste = Number(p.coste_colaborador_realizado || 0);
   const margen = ingresoGestionado - coste;
+  const docs = documentos.rows[0] || {};
+  const kmTotales = Number(p.km || 0);
+  const kmRealizados = Number(p.km_realizados || 0);
+  const kmVacio = Number(p.km_vacio || 0);
+  const kmVacioRealizado = Number(p.km_vacio_realizado || 0);
+  const totalPedidos = Number(p.total || 0);
+  const realizados = Number(p.completados || 0);
   res.json({
     periodo: { desde, hasta },
     kpis: {
-      pedidos: Number(p.total || 0),
-      completados: Number(p.completados || 0),
+      pedidos: totalPedidos,
+      completados: realizados,
+      realizados,
+      pendientes: Number(p.pendientes || 0),
+      activos: Number(p.activos || 0),
+      incidencias: Number(p.incidencias || 0),
       cancelados: Number(p.cancelados || 0),
+      cancelacion_pct: totalPedidos > 0 ? round2((Number(p.cancelados || 0) / totalPedidos) * 100) : 0,
       venta: round2(venta),
       venta_realizada: round2(ventaRealizada),
       pendiente_facturar_realizado: round2(pendienteFacturarRealizado),
+      pendientes_facturar_count: Number(p.pendientes_facturar_count || 0),
       ingreso_gestionado: round2(ingresoGestionado),
       coste_colaborador: round2(coste),
       margen: round2(margen),
       margen_pct: ingresoGestionado > 0 ? round2((margen / ingresoGestionado) * 100) : 0,
-      eur_km: Number(p.km_realizados || 0) > 0 ? round2(ingresoGestionado / Number(p.km_realizados || 0)) : 0,
+      eur_km: kmRealizados > 0 ? round2(ingresoGestionado / kmRealizados) : 0,
+      km_totales: round2(kmTotales),
+      km_realizados: round2(kmRealizados),
+      km_vacio: round2(kmVacio),
+      km_vacio_realizado: round2(kmVacioRealizado),
+      pct_km_vacio: kmTotales > 0 ? round2((kmVacio / kmTotales) * 100) : 0,
       km_medio: round2(p.km_medio),
       dias_medio: round2(p.dias_medio),
+      ticket_medio_realizado: round2(p.ticket_medio_realizado),
+      sin_precio: Number(p.sin_precio || 0),
+      sin_km: Number(p.sin_km || 0),
+      sin_recurso: Number(p.sin_recurso || 0),
+      pendientes_completar: Number(p.pendientes_completar || 0),
+      paralizacion: round2(p.paralizacion),
+      pedidos_con_paralizacion: Number(p.pedidos_con_paralizacion || 0),
+      pod_pendiente_realizados: Number(docs.pod_pendiente_realizados || 0),
+      sin_documentos_realizados: Number(docs.sin_documentos_realizados || 0),
+      facturable_bloqueado_docs: Number(docs.facturable_bloqueado_docs || 0),
       facturado: round2(facturado),
+      cobrado: round2(cobrado),
+      cobro_pct: facturado > 0 ? round2((cobrado / facturado) * 100) : 0,
+      facturas: Number(facturas.rows[0]?.total || 0),
+      facturas_cobradas: Number(facturas.rows[0]?.cobradas || 0),
+      facturas_pendientes: Number(facturas.rows[0]?.pendientes || 0),
+      facturas_vencidas: Number(facturas.rows[0]?.vencidas || 0),
       pendiente_cobro: round2(facturas.rows[0]?.pendiente_cobro),
       vencido: round2(facturas.rows[0]?.vencido),
     },
@@ -180,6 +301,15 @@ router.get("/bi/resumen", async (req, res) => {
       deuda_vencida: round2(r.deuda_vencida),
     })),
     rutas: rutas.rows.map(r => ({ ...r, venta: round2(r.venta), margen: round2(r.margen), km_medio: round2(r.km_medio) })),
+    estados: estados.rows.map(r => ({ ...r, importe: round2(r.importe) })),
+    clientes_top_facturacion: clientesCobro.rows.map(r => ({
+      ...r,
+      facturado: round2(r.facturado),
+      cobrado: round2(r.cobrado),
+      pendiente: round2(r.pendiente),
+      vencido: round2(r.vencido),
+      cobro_pct: Number(r.facturado || 0) > 0 ? round2((Number(r.cobrado || 0) / Number(r.facturado || 0)) * 100) : 0,
+    })),
     alertas: incidencias.rows[0] || {},
   });
 });
@@ -789,6 +919,7 @@ router.get("/rentabilidad-operativa", cacheMiddleware(30), async (req, res) => {
              p.estado::text AS estado,
              p.origen,
              p.destino,
+             p.factura_id,
              COALESCE(p.fecha_carga::date, p.fecha_pedido, p.created_at::date) AS fecha,
              c.nombre AS cliente_nombre,
              COALESCE(NULLIF(p.importe,0), NULLIF(p.precio_cliente_col,0), NULLIF(p.precio_unitario,0), 0)
@@ -822,6 +953,7 @@ router.get("/rentabilidad-operativa", cacheMiddleware(30), async (req, res) => {
       const margenPct = ingreso > 0 ? round2((margen / ingreso) * 100) : null;
       const km = Number(p.km_ruta || 0) + Number(p.km_vacio || 0);
       const estado = String(p.estado || "").toLowerCase();
+      const realizado = ["entregado", "facturado"].includes(estado);
       const riesgos = [];
       if (ingreso <= 0) riesgos.push({ tipo: "sin_precio", severidad: "alta", label: "Sin precio" });
       if (p.es_colaborador && coste <= 0) riesgos.push({ tipo: "colaborador_sin_coste", severidad: "alta", label: "Colaborador sin coste" });
@@ -851,6 +983,8 @@ router.get("/rentabilidad-operativa", cacheMiddleware(30), async (req, res) => {
         origen: p.origen || "",
         destino: p.destino || "",
         estado: p.estado,
+        factura_id: p.factura_id,
+        realizado,
         ingreso,
         coste,
         margen,
@@ -870,6 +1004,15 @@ router.get("/rentabilidad-operativa", cacheMiddleware(30), async (req, res) => {
       acc.coste += p.coste;
       acc.margen += p.margen;
       acc.km += Number(p.km || 0);
+      if (p.realizado) {
+        acc.realizados += 1;
+        acc.ingreso_realizado += p.ingreso;
+        if (!p.factura_id) {
+          acc.pendiente_facturar_realizado += p.ingreso;
+          acc.pendientes_facturar_count += 1;
+        }
+        if (Number(p.albaranes || 0) > 0) acc.pod_ok += 1;
+      }
       if (p.margen < 0) acc.margen_negativo += 1;
       if (p.margen_pct !== null && p.margen_pct < 8) acc.margen_bajo += 1;
       if (p.riesgos.some(r => r.tipo === "sin_precio")) acc.sin_precio += 1;
@@ -879,14 +1022,19 @@ router.get("/rentabilidad-operativa", cacheMiddleware(30), async (req, res) => {
       return acc;
     }, {
       pedidos: 0, ingreso: 0, coste: 0, margen: 0, km: 0,
+      realizados: 0, ingreso_realizado: 0, pendiente_facturar_realizado: 0, pendientes_facturar_count: 0, pod_ok: 0,
       margen_negativo: 0, margen_bajo: 0, sin_precio: 0, sin_km: 0,
       pod_pendiente: 0, cobro_vencido: 0,
     });
     resumen.ingreso = round2(resumen.ingreso);
+    resumen.ingreso_realizado = round2(resumen.ingreso_realizado);
+    resumen.pendiente_facturar_realizado = round2(resumen.pendiente_facturar_realizado);
     resumen.coste = round2(resumen.coste);
     resumen.margen = round2(resumen.margen);
     resumen.margen_pct = resumen.ingreso > 0 ? round2((resumen.margen / resumen.ingreso) * 100) : null;
     resumen.eur_km = resumen.km > 0 ? round2(resumen.ingreso / resumen.km) : null;
+    resumen.ticket_medio_realizado = resumen.realizados > 0 ? round2(resumen.ingreso_realizado / resumen.realizados) : 0;
+    resumen.pod_ok_pct = resumen.realizados > 0 ? round2((resumen.pod_ok / resumen.realizados) * 100) : 100;
     resumen.km = round2(resumen.km);
     resumen.salud = resumen.margen < 0 || resumen.margen_negativo > 0
       ? "critica"

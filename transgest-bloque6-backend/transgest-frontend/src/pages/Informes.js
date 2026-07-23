@@ -736,11 +736,22 @@ export default function Informes() {
                     {[
                       { l:"Ingreso gestionado", v:`${fmt2(biResumen.kpis?.ingreso_gestionado)} EUR`, c:"var(--accent-xl)" },
                       { l:"Facturado", v:`${fmt2(biResumen.kpis?.facturado)} EUR`, c:"var(--text)" },
+                      { l:"Cobrado", v:`${fmt2(biResumen.kpis?.cobrado)} EUR`, c:"var(--green)" },
+                      { l:"Cobro %", v:`${fmt2(biResumen.kpis?.cobro_pct)}%`, c:Number(biResumen.kpis?.cobro_pct || 0) >= 80 ? "var(--green)" : "#f59e0b" },
+                      { l:"Realizados", v:fmtN(biResumen.kpis?.realizados), c:"var(--accent-xl)" },
                       { l:"Realizado sin facturar", v:`${fmt2(biResumen.kpis?.pendiente_facturar_realizado)} EUR`, c:"#f59e0b" },
+                      { l:"Pend. facturar", v:fmtN(biResumen.kpis?.pendientes_facturar_count), c:Number(biResumen.kpis?.pendientes_facturar_count || 0) > 0 ? "#f59e0b" : "var(--green)" },
                       { l:"Margen", v:`${fmt2(biResumen.kpis?.margen)} EUR`, c:Number(biResumen.kpis?.margen || 0) >= 0 ? "var(--green)" : "var(--red)" },
                       { l:"Margen %", v:`${fmt2(biResumen.kpis?.margen_pct)}%`, c:Number(biResumen.kpis?.margen_pct || 0) >= 0 ? "var(--green)" : "var(--red)" },
                       { l:"EUR/km", v:fmt2(biResumen.kpis?.eur_km), c:"var(--accent-xl)" },
+                      { l:"Ticket medio", v:`${fmt2(biResumen.kpis?.ticket_medio_realizado)} EUR`, c:"var(--text)" },
+                      { l:"KM vacio", v:`${fmt2(biResumen.kpis?.pct_km_vacio)}%`, c:Number(biResumen.kpis?.pct_km_vacio || 0) > 20 ? "#f59e0b" : "var(--green)" },
                       { l:"Vencido", v:`${fmt2(biResumen.kpis?.vencido)} EUR`, c:Number(biResumen.kpis?.vencido || 0) > 0 ? "#ef4444" : "var(--green)" },
+                      { l:"Sin precio/km", v:`${fmtN(biResumen.kpis?.sin_precio)} / ${fmtN(biResumen.kpis?.sin_km)}`, c:Number(biResumen.kpis?.sin_precio || 0) + Number(biResumen.kpis?.sin_km || 0) > 0 ? "#f59e0b" : "var(--green)" },
+                      { l:"POD pendiente", v:fmtN(biResumen.kpis?.pod_pendiente_realizados), c:Number(biResumen.kpis?.pod_pendiente_realizados || 0) > 0 ? "#f59e0b" : "var(--green)" },
+                      { l:"Bloq. docs", v:fmtN(biResumen.kpis?.facturable_bloqueado_docs), c:Number(biResumen.kpis?.facturable_bloqueado_docs || 0) > 0 ? "#ef4444" : "var(--green)" },
+                      { l:"Sin recurso", v:fmtN(biResumen.kpis?.sin_recurso), c:Number(biResumen.kpis?.sin_recurso || 0) > 0 ? "#f59e0b" : "var(--green)" },
+                      { l:"Paralizacion", v:`${fmt2(biResumen.kpis?.paralizacion)} EUR`, c:Number(biResumen.kpis?.paralizacion || 0) > 0 ? "#f59e0b" : "var(--text)" },
                       { l:"Pedidos", v:fmtN(biResumen.kpis?.pedidos), c:"var(--text)" },
                     ].map((k,i)=>(
                       <div key={i} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px"}}>
@@ -749,7 +760,7 @@ export default function Informes() {
                       </div>
                     ))}
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"minmax(260px,1fr) minmax(260px,1fr)",gap:12}}>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
                     <div style={{minWidth:0}}>
                       <div style={{fontSize:11,fontWeight:900,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Clientes por margen y riesgo</div>
                       {(biResumen.clientes || []).slice(0,5).map(c=>(
@@ -782,6 +793,44 @@ export default function Informes() {
                         </div>
                       ))}
                       {!(biResumen.rutas || []).length && <div style={{fontSize:12,color:"var(--text5)"}}>Sin rutas en el periodo.</div>}
+                    </div>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:11,fontWeight:900,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Clientes por facturacion y cobro</div>
+                      {(biResumen.clientes_top_facturacion || []).slice(0,5).map((c,i)=>(
+                        <div key={c.id || c.nombre || i} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,borderBottom:i<Math.min((biResumen.clientes_top_facturacion || []).length,5)-1?"1px solid var(--border)":"none",padding:"7px 0"}}>
+                          <div style={{minWidth:0}}>
+                            <div style={{fontSize:12,fontWeight:800,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
+                            <div style={{fontSize:10,color:"var(--text5)"}}>
+                              {fmtN(c.facturas)} factura(s) - cobro {fmt2(c.cobro_pct)}%
+                            </div>
+                          </div>
+                          <div style={{textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:900}}>
+                            <div style={{color:"var(--accent-xl)"}}>{fmt2(c.facturado)} EUR fact.</div>
+                            <div style={{color:Number(c.vencido || 0) > 0 ? "#ef4444" : "var(--green)",marginTop:2}}>
+                              {fmt2(c.cobrado)} EUR cobr.
+                            </div>
+                            {Number(c.vencido || 0) > 0 && <div style={{color:"#ef4444",marginTop:2}}>{fmt2(c.vencido)} EUR venc.</div>}
+                          </div>
+                        </div>
+                      ))}
+                      {!(biResumen.clientes_top_facturacion || []).length && <div style={{fontSize:12,color:"var(--text5)"}}>Sin facturacion por cliente en el periodo.</div>}
+                    </div>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:11,fontWeight:900,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Estado operativo</div>
+                      {(biResumen.estados || []).slice(0,7).map((e,i)=>(
+                        <div key={e.estado || i} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,borderBottom:i<Math.min((biResumen.estados || []).length,7)-1?"1px solid var(--border)":"none",padding:"7px 0"}}>
+                          <div style={{minWidth:0}}>
+                            <div style={{fontSize:12,fontWeight:800,color:"var(--text)",textTransform:"capitalize",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                              {String(e.estado || "pendiente").replace(/_/g," ")}
+                            </div>
+                            <div style={{fontSize:10,color:"var(--text5)"}}>{fmtN(e.pedidos)} pedido(s)</div>
+                          </div>
+                          <div style={{textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:900,color:"var(--accent-xl)"}}>
+                            {fmt2(e.importe)} EUR
+                          </div>
+                        </div>
+                      ))}
+                      {!(biResumen.estados || []).length && <div style={{fontSize:12,color:"var(--text5)"}}>Sin estados en el periodo.</div>}
                     </div>
                   </div>
                 </div>
@@ -1553,10 +1602,15 @@ export default function Informes() {
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10, marginBottom:16 }}>
                       {[
                         { l:"Ingreso previsto", v:`${fmt2(resumen.ingreso)} EUR`, c:"var(--green)" },
+                        { l:"Ingreso realizado", v:`${fmt2(resumen.ingreso_realizado)} EUR`, c:"var(--accent-xl)" },
                         { l:"Coste previsto", v:`${fmt2(resumen.coste)} EUR`, c:"var(--red)" },
                         { l:"Margen", v:`${fmt2(resumen.margen)} EUR`, c:Number(resumen.margen||0)>=0?"var(--green)":"var(--red)" },
                         { l:"Margen %", v:resumen.margen_pct==null?"-":`${fmt2(resumen.margen_pct)}%`, c:saludColor },
                         { l:"EUR/km", v:resumen.eur_km==null?"-":`${fmt2(resumen.eur_km)} EUR/km`, c:"var(--accent-xl)" },
+                        { l:"Realizados", v:fmtN(resumen.realizados), c:"var(--text)" },
+                        { l:"Ticket medio", v:`${fmt2(resumen.ticket_medio_realizado)} EUR`, c:"var(--text)" },
+                        { l:"Sin facturar", v:`${fmtN(resumen.pendientes_facturar_count)} / ${fmt2(resumen.pendiente_facturar_realizado)} EUR`, c:Number(resumen.pendientes_facturar_count||0)>0?"#f59e0b":"var(--green)" },
+                        { l:"POD OK", v:`${fmt2(resumen.pod_ok_pct)}%`, c:Number(resumen.pod_ok_pct||0)>=90?"var(--green)":"#f59e0b" },
                         { l:"Datos incompletos", v:datosIncompletos, c:datosIncompletos>0?"#f59e0b":"var(--green)" },
                       ].map((k,i)=>(
                         <div key={i} style={S.card}>

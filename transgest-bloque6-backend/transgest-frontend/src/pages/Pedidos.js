@@ -1438,6 +1438,41 @@ function normalizePlaceText(value) {
     .trim();
 }
 
+function cleanMapQueryPart(value) {
+  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  return normalizePlaceText(raw) === "espana" ? "" : raw;
+}
+
+function pushUniqueMapPart(parts, value) {
+  const clean = cleanMapQueryPart(value);
+  if (!clean) return parts;
+  const normalized = normalizePlaceText(clean);
+  if (!parts.some(part => normalizePlaceText(part) === normalized)) parts.push(clean);
+  return parts;
+}
+
+function buildMapQueryFromStop(stop = {}, label = "", fallbackCountry = "España") {
+  const parts = [];
+  const direccion = stop.direccion || stop.address || "";
+  const localidad = stop.ciudad || stop.poblacion || stop.localidad || stop.municipio || "";
+  const provincia = stop.provincia || stop.region || stop.state || "";
+  const pais = stop.pais || stop.country || fallbackCountry || "España";
+  const direccionEsSoloNombre = normalizePlaceText(direccion) && normalizePlaceText(direccion) === normalizePlaceText(label);
+
+  if (!direccionEsSoloNombre) pushUniqueMapPart(parts, direccion);
+  pushUniqueMapPart(parts, localidad);
+  pushUniqueMapPart(parts, provincia);
+  pushUniqueMapPart(parts, pais);
+
+  if (!parts.length) {
+    pushUniqueMapPart(parts, label);
+    pushUniqueMapPart(parts, provincia);
+    pushUniqueMapPart(parts, pais);
+  }
+  return parts.join(", ");
+}
+
 function distinctPlaceName(name, address) {
   const cleanName = String(name || "").replace(/\s+/g, " ").trim();
   const cleanAddress = String(address || "").replace(/\s+/g, " ").trim();
@@ -6254,14 +6289,17 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   const pais = sourceStop.pais || pedido[`${side}_pais`] || "España";
   const localidad = sourceStop.ciudad || sourceStop.poblacion || sourceStop.localidad || sourceStop.municipio || "";
   const direccion = sourceStop.direccion || sourceStop.address || "";
-  const direccionEsSoloNombre = normalizePlaceText(direccion) && normalizePlaceText(direccion) === normalizePlaceText(label);
-  const query = [!direccionEsSoloNombre ? direccion : "", localidad].filter(Boolean).join(", ")
-    || localidad || direccion || label;
+  const query = buildMapQueryFromStop(sourceStop, label, pais);
   const pointDetails = {
     google_maps_url: googleMapsUrl,
     provincia,
     pais,
     query,
+    address: direccion,
+    direccion,
+    city: localidad,
+    ciudad: localidad,
+    localidad,
   };
   if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, label, hasGeo:true, ...pointDetails };
   const geo = inferPlaceGeo(sourceStop, label, pedido[`${side}_provincia`], pedido[`${side}_pais`]);
@@ -12102,8 +12140,4 @@ export default function Pedidos() {
     </div>
   );
 }
-
-
-
-
 

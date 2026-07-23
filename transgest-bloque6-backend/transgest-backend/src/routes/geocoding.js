@@ -17,7 +17,7 @@ const router = express.Router();
 const ROUTE_CACHE_DAYS = Math.max(1, Number(process.env.GEO_ROUTE_CACHE_DAYS || 30));
 const EXTERNAL_TIMEOUT_MS = Math.max(2500, Number(process.env.GEO_EXTERNAL_TIMEOUT_MS || 9000));
 const MAX_ROUTE_POINTS = 12;
-const PLACE_CACHE_VERSION = "v4";
+const PLACE_CACHE_VERSION = "v5";
 let schemaPromise = null;
 let lastNominatimAt = 0;
 let nominatimQueue = Promise.resolve();
@@ -223,7 +223,7 @@ async function geocodeGoogle(empresaId, request) {
     ...formatPlace({ municipio: place.municipio, provincia: place.provincia, pais: place.pais, lat: place.lat, lng: place.lng, label: place.label }),
     country_code: place.country_code,
   };
-  return selectBestPlaceCandidate(request, [candidate]) || candidate;
+  return selectBestPlaceCandidate(request, [candidate]);
 }
 
 async function geocodeNominatim(request) {
@@ -334,14 +334,23 @@ function normalizeRoutePoint(raw, index, total) {
   const role = cleanText(point.role || point.tipo || (index === 0 ? "origen" : index === total - 1 ? "destino" : "parada"));
   const label = cleanText(point.label || point.nombre || point.name || point.address || point.direccion || point.query);
   const hasExplicitQuery = Object.prototype.hasOwnProperty.call(point, "query");
-  const query = cleanText(hasExplicitQuery ? point.query : (point.address || point.direccion || label));
+  const address = cleanText(point.address || point.direccion);
+  const city = cleanText(point.city || point.ciudad || point.localidad || point.poblacion || point.municipio);
+  const region = cleanText(point.region || point.provincia || point.state);
+  const country = cleanText(point.country || point.pais);
+  const structuredQuery = [address, city, region, country].filter(Boolean).join(", ");
+  const query = cleanText(hasExplicitQuery ? point.query : (structuredQuery || label));
   return {
     ...point,
     role,
     label,
     query,
-    country: cleanText(point.country || point.pais),
-    region: cleanText(point.region || point.provincia || point.state),
+    address,
+    direccion: address,
+    city,
+    ciudad: city,
+    country,
+    region,
   };
 }
 

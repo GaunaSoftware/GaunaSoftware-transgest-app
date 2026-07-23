@@ -1050,6 +1050,10 @@ export const calcularRutaGeo = (points = []) => {
       role: point.role || point.tipo || "parada",
       country: point.country || point.pais || "",
       region: point.region || point.provincia || "",
+      address: point.address || point.direccion || "",
+      direccion: point.direccion || point.address || "",
+      city: point.city || point.ciudad || point.localidad || point.poblacion || point.municipio || "",
+      ciudad: point.ciudad || point.city || point.localidad || point.poblacion || point.municipio || "",
       google_maps_url: point.google_maps_url || "",
       lat: point.lat ?? point.latitude ?? point.latitud ?? null,
       lng: point.lng ?? point.lon ?? point.longitude ?? point.longitud ?? null,
@@ -1066,5 +1070,4 @@ export const calcularDistanciaGeo = (origin, destination) =>
     { label: origin, role: "origen" },
     { label: destination, role: "destino" },
   ]);
-
 

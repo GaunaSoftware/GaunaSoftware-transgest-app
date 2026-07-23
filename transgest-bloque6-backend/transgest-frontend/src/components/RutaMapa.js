@@ -28,12 +28,24 @@ function normalizedPoint(point = {}, index = 0) {
   const lng = safeCoordinate(point.lng ?? point.lon ?? point.longitude ?? point.longitud, -180, 180);
   const hasExplicitQuery = Object.prototype.hasOwnProperty.call(point, "query");
   const label = String(point.label || point.nombre || point.direccion || `Parada ${index + 1}`).trim();
+  const address = String(point.address || point.direccion || "").trim();
+  const city = String(point.city || point.ciudad || point.localidad || point.poblacion || point.municipio || "").trim();
+  const region = String(point.provincia || point.region || "").trim();
+  const country = String(point.pais || point.country || "").trim();
+  const query = String(hasExplicitQuery
+    ? (point.query || "")
+    : [address, city, region, country].filter(Boolean).join(", ") || label
+  ).trim();
   return {
     label,
-    query: String(hasExplicitQuery ? (point.query || "") : (point.address || point.direccion || point.label || point.nombre || "")).trim(),
+    query,
+    address,
+    direccion: address,
+    city,
+    ciudad: city,
     role: point.tipo || point.role || (index === 0 ? "origen" : "parada"),
-    country: point.pais || point.country || "",
-    region: point.provincia || point.region || "",
+    country,
+    region,
     google_maps_url: point.google_maps_url || "",
     title: point.title || "",
     tone: point.tone || null,

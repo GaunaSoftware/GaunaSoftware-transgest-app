@@ -9,10 +9,11 @@ const MIN_LAT = -85.05112878;
 const MAX_LAT = 85.05112878;
 
 const MAP_LAYERS = {
-  streets: { label: "Mapa", attribution: "OpenStreetMap" },
-  relief: { label: "Relieve", attribution: "OpenTopoMap / OpenStreetMap" },
-  light: { label: "Claro", attribution: "CARTO / OpenStreetMap" },
+  streets: { label: "Mapa", attribution: "OpenStreetMap contributors" },
+  relief: { label: "Relieve", attribution: "OpenTopoMap / OpenStreetMap contributors" },
+  light: { label: "Claro", attribution: "CARTO / OpenStreetMap contributors" },
 };
+const MAP_BRAND = "Mapa TransGest";
 
 function safeCoordinate(value, min, max) {
   const parsed = Number(value);
@@ -332,7 +333,7 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
           ))}
         </div>
         <div style={{ position:"absolute", right:9, bottom:7, borderRadius:5, padding:"3px 6px", fontSize:10, color:"#0f172a", background:"rgba(255,255,255,.78)" }}>
-          Datos: {MAP_LAYERS[layer]?.attribution || "OpenStreetMap"}
+          {MAP_BRAND} · Datos: {MAP_LAYERS[layer]?.attribution || "OpenStreetMap contributors"}
         </div>
       </div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"9px 11px", flexWrap:"wrap" }}>

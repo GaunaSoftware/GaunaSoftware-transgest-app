@@ -1598,6 +1598,27 @@ function sortPuntosByClienteScope(a = {}, b = {}, clienteId = "") {
   return String(a.nombre || a.direccion || "").localeCompare(String(b.nombre || b.direccion || ""), "es");
 }
 
+function puntoScopeLabel(punto = {}, clienteId = "") {
+  if (!isPuntoGeneral(punto) && clienteId && String(punto.cliente_id) === String(clienteId)) return "Cliente";
+  if (isPuntoGeneral(punto)) return "General";
+  return "Otro cliente";
+}
+
+function puntoLocationLabel(punto = {}) {
+  return [
+    punto.ciudad || punto.poblacion || punto.localidad || punto.municipio,
+    punto.provincia || punto.region,
+    punto.pais,
+  ].map(v => String(v || "").trim()).filter(Boolean).join(", ");
+}
+
+function puntoPickerLabel(punto = {}, clienteId = "") {
+  const name = punto.nombre || punto.direccion || "Punto";
+  const location = puntoLocationLabel(punto);
+  const scope = puntoScopeLabel(punto, clienteId);
+  return [name, location, scope].filter(Boolean).join(" - ");
+}
+
 function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos", includeGenerales = false } = {}) {
   return (Array.isArray(puntos) ? puntos : [])
     .filter(p => isPuntoVisibleParaCliente(p, clienteId, { includeGenerales }))
@@ -2026,11 +2047,11 @@ function calcIvaPedido(form = {}, baseOverride = null) {
   };
 }
 
-function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", style, puntos: puntosProp = null, clienteId = "", tipo = "ambos" }) {
+function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", style, puntos: puntosProp = null, clienteId = "", tipo = "ambos", includeGenerales = true }) {
   const [puntos, setPuntos] = useState(getPuntosInteres);
   const puntosDisponibles = Array.isArray(puntosProp)
-    ? filterPuntosForPedido(puntosProp, { clienteId, tipo })
-    : filterPuntosForPedido(puntos, { clienteId, tipo });
+    ? filterPuntosForPedido(puntosProp, { clienteId, tipo, includeGenerales: false })
+    : filterPuntosForPedido(puntos, { clienteId, tipo, includeGenerales });
 
   useEffect(() => {
     const refresh = () => setPuntos(getPuntosInteres());
@@ -2056,7 +2077,7 @@ function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", sty
     >
       <option value="">{placeholder}</option>
       {puntosDisponibles.map(p => (
-        <option key={p.id} value={p.id}>{p.nombre} - {p.direccion}{isPuntoGeneral(p) ? " (general)" : ""}</option>
+        <option key={p.id} value={p.id}>{puntoPickerLabel(p, clienteId)}</option>
       ))}
     </select>
   );
@@ -6800,8 +6821,9 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   }
 
   const qPoint = normalizePlaceText(pointSearch);
+  const puntosVisibles = filterPuntosForPedido(puntos, { clienteId, tipo: modo, includeGenerales: true });
   const puntosFiltrados = qPoint
-    ? puntos.filter(point => [
+    ? puntosVisibles.filter(point => [
         point.nombre,
         point.direccion,
         point.ciudad,
@@ -6809,10 +6831,18 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
         point.pais,
         point.cif,
       ].some(value => normalizePlaceText(value).includes(qPoint)))
-    : puntos;
+    : puntosVisibles;
   const crearDesdeBusqueda = () => {
     const text = pointSearch.trim();
-    setEditing({ nombre:text, direccion:text, tipo:"ambos", pais:"EspaÃ±a" });
+    setEditing({
+      nombre:text,
+      direccion:text,
+      tipo: modo || "ambos",
+      pais:"EspaÃ±a",
+      cliente_id: clienteId || "",
+      punto_general: !clienteId,
+      es_general: !clienteId,
+    });
   };
 
   return (
@@ -6821,7 +6851,9 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
         <div style={{padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
           <div>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)"}}>Puntos guardados</div>
-            <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>Catalogo independiente de clientes para origenes, destinos y paradas habituales.</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>
+              Se muestran solo los puntos de este cliente y los puntos generales reutilizables.
+            </div>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button type="button" onClick={()=>setEditing({ tipo:"ambos", pais:"España" })} style={{...S.btn,background:"var(--accent)",color:"#fff"}}>Nuevo punto</button>
@@ -6853,14 +6885,30 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
             </div>
           ) : (
             <div style={{display:"grid",gap:10}}>
-              {puntosFiltrados.map(point => (
-                <div key={point.id} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px",display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"start"}}>
+              {puntosFiltrados.map((point, idx) => {
+                const scope = puntoScopeLabel(point, clienteId);
+                const previousScope = idx > 0 ? puntoScopeLabel(puntosFiltrados[idx - 1], clienteId) : "";
+                const showScopeHeader = scope !== previousScope;
+                return (
+                <React.Fragment key={point.id}>
+                  {showScopeHeader && (
+                    <div style={{marginTop:idx ? 6 : 0,fontSize:11,fontWeight:900,letterSpacing:".08em",textTransform:"uppercase",color:"var(--text4)",display:"flex",alignItems:"center",gap:8}}>
+                      <span>{scope === "Cliente" ? "Puntos de este cliente" : "Puntos generales"}</span>
+                      <span style={{height:1,background:"var(--border)",flex:1}} />
+                    </div>
+                  )}
+                  <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"start"}}>
                   <div>
-                    <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{point.nombre}</div>
-                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion}</div>
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{point.nombre || point.direccion}</div>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:scope === "Cliente" ? "rgba(20,184,166,.12)" : "rgba(59,130,246,.12)",color:scope === "Cliente" ? "var(--accent)" : "#60a5fa",border:`1px solid ${scope === "Cliente" ? "rgba(20,184,166,.24)" : "rgba(59,130,246,.24)"}`}}>
+                        {scope}
+                      </span>
+                    </div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion || puntoLocationLabel(point) || "-"}</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
                       {point.tipo && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(59,130,246,.12)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.22)"}}>{point.tipo}</span>}
-                      {(point.pais || point.provincia) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.22)"}}>{[point.provincia, point.pais].filter(Boolean).join(", ")}</span>}
+                      {puntoLocationLabel(point) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.22)"}}>{puntoLocationLabel(point)}</span>}
                       {point.ventana && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)"}}>{point.ventana}</span>}
                       {point.google_maps_url && <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--accent)"}}>Google Maps</a>}
                     </div>
@@ -6873,7 +6921,8 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                     <button type="button" onClick={()=>removePoint(point)} style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",padding:"6px 10px"}}>Eliminar</button>
                   </div>
                 </div>
-              ))}
+                </React.Fragment>
+              );})}
             </div>
           )}
         </div>

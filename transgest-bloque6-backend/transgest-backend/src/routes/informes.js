@@ -54,12 +54,16 @@ router.get("/bi/resumen", async (req, res) => {
         COUNT(*) FILTER (WHERE estado='cancelado')::int AS cancelados,
         COUNT(*) FILTER (WHERE estado IN ('entregado','facturado'))::int AS completados,
         COALESCE(SUM(importe),0)::numeric AS venta,
+        COALESCE(SUM(importe) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS venta_realizada,
+        COALESCE(SUM(importe) FILTER (WHERE estado IN ('entregado','facturado') AND factura_id IS NULL),0)::numeric AS pendiente_facturar_realizado,
         COALESCE(SUM(precio_colaborador),0)::numeric AS coste_colaborador,
+        COALESCE(SUM(precio_colaborador) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS coste_colaborador_realizado,
         COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)),0)::numeric AS km,
+        COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS km_realizados,
         COALESCE(AVG(NULLIF(COALESCE(km_ruta,0) + COALESCE(km_vacio,0),0)),0)::numeric AS km_medio,
         COALESCE(AVG(EXTRACT(EPOCH FROM (fecha_descarga::timestamp - fecha_carga::timestamp))/86400) FILTER (WHERE fecha_descarga IS NOT NULL AND fecha_carga IS NOT NULL),0)::numeric AS dias_medio
       FROM pedidos
-      WHERE empresa_id=$1 AND COALESCE(fecha_carga, fecha_pedido, created_at::date) BETWEEN $2 AND $3
+      WHERE empresa_id=$1 AND COALESCE(fecha_descarga, fecha_carga, fecha_pedido, created_at::date) BETWEEN $2 AND $3
     `, params),
     db.query(`
       SELECT
@@ -73,19 +77,44 @@ router.get("/bi/resumen", async (req, res) => {
       WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND estado <> 'borrador'
     `, params),
     db.query(`
+      WITH pedidos_cliente AS (
+        SELECT cliente_id,
+               COUNT(*)::int AS pedidos,
+               COUNT(*) FILTER (WHERE estado IN ('entregado','facturado'))::int AS realizados,
+               COALESCE(SUM(importe),0)::numeric AS venta,
+               COALESCE(SUM(importe) FILTER (WHERE estado IN ('entregado','facturado') AND factura_id IS NULL),0)::numeric AS pendiente_facturar_realizado,
+               COALESCE(SUM(precio_colaborador) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS coste_realizado
+          FROM pedidos
+         WHERE empresa_id=$1
+           AND COALESCE(fecha_descarga,fecha_carga,fecha_pedido,created_at::date) BETWEEN $2 AND $3
+         GROUP BY cliente_id
+      ),
+      facturas_cliente AS (
+        SELECT cliente_id,
+               COUNT(*) FILTER (WHERE estado <> 'borrador')::int AS facturas,
+               COALESCE(SUM(total) FILTER (WHERE estado <> 'borrador'),0)::numeric AS facturado,
+               COALESCE(SUM(total) FILTER (WHERE estado IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS deuda_vencida
+          FROM facturas
+         WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3
+         GROUP BY cliente_id
+      )
       SELECT c.id, c.nombre,
-             COUNT(p.id)::int AS pedidos,
-             COALESCE(SUM(p.importe),0)::numeric AS venta,
-             COALESCE(SUM(p.precio_colaborador),0)::numeric AS coste,
-             COALESCE(SUM(p.importe - COALESCE(p.precio_colaborador,0)),0)::numeric AS margen,
-             COALESCE(SUM(f.total) FILTER (WHERE f.estado IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS deuda_vencida
+             COALESCE(pc.pedidos,0)::int AS pedidos,
+             COALESCE(pc.realizados,0)::int AS realizados,
+             COALESCE(fc.facturas,0)::int AS facturas,
+             COALESCE(pc.venta,0)::numeric AS venta,
+             COALESCE(fc.facturado,0)::numeric AS facturado,
+             COALESCE(pc.pendiente_facturar_realizado,0)::numeric AS pendiente_facturar_realizado,
+             (COALESCE(fc.facturado,0) + COALESCE(pc.pendiente_facturar_realizado,0))::numeric AS ingreso_gestionado,
+             COALESCE(pc.coste_realizado,0)::numeric AS coste,
+             (COALESCE(fc.facturado,0) + COALESCE(pc.pendiente_facturar_realizado,0) - COALESCE(pc.coste_realizado,0))::numeric AS margen,
+             COALESCE(fc.deuda_vencida,0)::numeric AS deuda_vencida
         FROM clientes c
-        LEFT JOIN pedidos p ON p.cliente_id=c.id AND p.empresa_id=c.empresa_id AND COALESCE(p.fecha_carga,p.fecha_pedido,p.created_at::date) BETWEEN $2 AND $3
-        LEFT JOIN facturas f ON f.cliente_id=c.id AND f.empresa_id=c.empresa_id AND f.fecha BETWEEN $2 AND $3
+        LEFT JOIN pedidos_cliente pc ON pc.cliente_id=c.id
+        LEFT JOIN facturas_cliente fc ON fc.cliente_id=c.id
        WHERE c.empresa_id=$1
-       GROUP BY c.id,c.nombre
-       HAVING COUNT(p.id)>0 OR COALESCE(SUM(f.total),0)>0
-       ORDER BY margen DESC NULLS LAST
+         AND (COALESCE(pc.pedidos,0)>0 OR COALESCE(fc.facturas,0)>0)
+       ORDER BY ingreso_gestionado DESC NULLS LAST, margen DESC NULLS LAST
        LIMIT 12
     `, params),
     db.query(`
@@ -113,8 +142,12 @@ router.get("/bi/resumen", async (req, res) => {
   ]);
   const p = pedidos.rows[0] || {};
   const venta = Number(p.venta || 0);
-  const coste = Number(p.coste_colaborador || 0);
-  const margen = venta - coste;
+  const ventaRealizada = Number(p.venta_realizada || 0);
+  const pendienteFacturarRealizado = Number(p.pendiente_facturar_realizado || 0);
+  const facturado = Number(facturas.rows[0]?.facturado || 0);
+  const ingresoGestionado = facturado + pendienteFacturarRealizado;
+  const coste = Number(p.coste_colaborador_realizado || 0);
+  const margen = ingresoGestionado - coste;
   res.json({
     periodo: { desde, hasta },
     kpis: {
@@ -122,22 +155,28 @@ router.get("/bi/resumen", async (req, res) => {
       completados: Number(p.completados || 0),
       cancelados: Number(p.cancelados || 0),
       venta: round2(venta),
+      venta_realizada: round2(ventaRealizada),
+      pendiente_facturar_realizado: round2(pendienteFacturarRealizado),
+      ingreso_gestionado: round2(ingresoGestionado),
       coste_colaborador: round2(coste),
       margen: round2(margen),
-      margen_pct: venta > 0 ? round2((margen / venta) * 100) : 0,
-      eur_km: Number(p.km || 0) > 0 ? round2(venta / Number(p.km || 0)) : 0,
+      margen_pct: ingresoGestionado > 0 ? round2((margen / ingresoGestionado) * 100) : 0,
+      eur_km: Number(p.km_realizados || 0) > 0 ? round2(ingresoGestionado / Number(p.km_realizados || 0)) : 0,
       km_medio: round2(p.km_medio),
       dias_medio: round2(p.dias_medio),
-      facturado: round2(facturas.rows[0]?.facturado),
+      facturado: round2(facturado),
       pendiente_cobro: round2(facturas.rows[0]?.pendiente_cobro),
       vencido: round2(facturas.rows[0]?.vencido),
     },
     clientes: clientes.rows.map(r => ({
       ...r,
       venta: round2(r.venta),
+      facturado: round2(r.facturado),
+      pendiente_facturar_realizado: round2(r.pendiente_facturar_realizado),
+      ingreso_gestionado: round2(r.ingreso_gestionado),
       coste: round2(r.coste),
       margen: round2(r.margen),
-      margen_pct: Number(r.venta || 0) > 0 ? round2((Number(r.margen || 0) / Number(r.venta || 0)) * 100) : 0,
+      margen_pct: Number(r.ingreso_gestionado || 0) > 0 ? round2((Number(r.margen || 0) / Number(r.ingreso_gestionado || 0)) * 100) : 0,
       deuda_vencida: round2(r.deuda_vencida),
     })),
     rutas: rutas.rows.map(r => ({ ...r, venta: round2(r.venta), margen: round2(r.margen), km_medio: round2(r.km_medio) })),

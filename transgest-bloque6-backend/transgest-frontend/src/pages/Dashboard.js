@@ -44,6 +44,34 @@ function estadoPedidoMeta(estado) {
   return ESTADO_PEDIDO[key] || { label: key ? key.replace(/_/g, " ") : "-", color:"var(--text4)" };
 }
 
+function estadoPedidoKey(p) {
+  return String(p?.estado || "").toLowerCase();
+}
+
+function pedidoRealizado(p) {
+  return ["entregado", "facturado"].includes(estadoPedidoKey(p));
+}
+
+function pedidoTieneFactura(p) {
+  return Boolean(p?.factura_id || p?.factura_numero || p?.facturado === true);
+}
+
+function importePedido(p) {
+  return Number(p?.importe || p?.precio || p?.precio_cliente_col || 0);
+}
+
+function costeOperativoPedido(p) {
+  return Number(p?.precio_colaborador || 0)
+    + Number(p?.coste_gasoil || 0)
+    + Number(p?.coste_peajes || 0)
+    + Number(p?.coste_dietas || 0)
+    + Number(p?.coste_otros || 0);
+}
+
+function fechaKpiPedido(p) {
+  return p?.fecha_descarga || p?.fecha_carga || p?.fecha_pedido || p?.created_at;
+}
+
 function navegar(view) {
   window.dispatchEvent(new CustomEvent("tms:navegar", { detail: view }));
 }
@@ -379,14 +407,18 @@ export default function Dashboard() {
 
   const {
     pedKpi, totalFacturado, cobrado, pendiente,
-    nFacturas, costeTotal, margenTotal, margenPct,
+    nFacturas, ingresoGestionado, pendienteFacturarRealizado, pedidosRealizados, eurKmRealizado,
+    costeTotal, margenTotal, margenPct,
     vDisp, vTaller, cDisp,
     estadosPed, facMensual, topClientes, alertas,
     operativos,
     today, ultPedidos, estadoColor,
   } = useMemo(() => {
-    const pedFilt = filterByPeriod(pedidos, "fecha_pedido");
-    const pedKpi = pedFilt.filter(p => ["confirmado","en_curso","descarga","entregado","facturado"].includes(String(p.estado || "").toLowerCase()));
+    const pedidosKpiPeriodo = pedidos.map(p => ({ ...p, _fecha_kpi: fechaKpiPedido(p) }));
+    const pedFilt = filterByPeriod(pedidosKpiPeriodo, "_fecha_kpi");
+    const pedKpi = pedFilt.filter(p => ["confirmado","en_curso","descarga","entregado","facturado"].includes(estadoPedidoKey(p)));
+    const pedidosRealizados = pedFilt.filter(pedidoRealizado);
+    const pedidosRealizadosSinFactura = pedidosRealizados.filter(p => !pedidoTieneFactura(p));
     const facFilt = filterByPeriod(facturas, "fecha");
   
     // ── KPIs ──
@@ -396,11 +428,13 @@ export default function Dashboard() {
     const cobrado        = facEmitidas.filter(f=>f.estado==="cobrada").reduce((s,f)=>s+Number(f.total||0),0);
     const pendiente      = facEmitidas.filter(f=>["emitida","enviada"].includes(f.estado)).reduce((s,f)=>s+Number(f.total||0),0);
     const nFacturas      = facEmitidas.length;
-    // Margen: from pedidos that have cost data
-    const costeTotal = pedKpi.reduce((s,p)=>
-      s+Number(p.coste_gasoil||0)+Number(p.coste_peajes||0)+Number(p.coste_dietas||0)+Number(p.coste_otros||0),0);
-    const margenTotal = totalFacturado - costeTotal;
-    const margenPct   = totalFacturado>0 ? (margenTotal/totalFacturado*100).toFixed(1) : null;
+    const pendienteFacturarRealizado = pedidosRealizadosSinFactura.reduce((s,p)=>s+importePedido(p),0);
+    const ingresoGestionado = totalFacturado + pendienteFacturarRealizado;
+    const costeTotal = pedidosRealizados.reduce((s,p)=>s+costeOperativoPedido(p),0);
+    const margenTotal = ingresoGestionado - costeTotal;
+    const margenPct   = ingresoGestionado>0 ? (margenTotal/ingresoGestionado*100).toFixed(1) : null;
+    const kmRealizados = pedidosRealizados.reduce((s,p)=>s+Number(p.km_ruta||0)+Number(p.km_vacio||0),0);
+    const eurKmRealizado = kmRealizados>0 ? ingresoGestionado/kmRealizados : 0;
     // Fleet stats: tractoras for operational KPIs, all vehicles for taller
     const _remIds2 = new Set(vehiculos.map(v=>v.remolque_id).filter(Boolean));
     const esTractora = v => {
@@ -452,17 +486,44 @@ export default function Dashboard() {
       facEmitidas.forEach(f => {
         if (!f.fecha) return;
         const k = f.fecha.slice(0,7); // YYYY-MM
-        meses[k] = (meses[k]||0) + Number(f.total||0);
+        if (!meses[k]) meses[k] = { facturado:0, pendiente:0 };
+        meses[k].facturado += Number(f.total||0);
+      });
+      pedidosRealizadosSinFactura.forEach(p => {
+        const fecha = fechaKpiPedido(p);
+        if (!fecha) return;
+        const k = String(fecha).slice(0,7);
+        if (!meses[k]) meses[k] = { facturado:0, pendiente:0 };
+        meses[k].pendiente += importePedido(p);
       });
       return Object.entries(meses).sort(([a],[b])=>a.localeCompare(b))
-        .map(([k,v])=>({ name: new Date(k+"-01").toLocaleDateString("es-ES",{month:"short",year:"2-digit"}), total:v }));
+        .map(([k,v])=>({ name: new Date(k+"-01").toLocaleDateString("es-ES",{month:"short",year:"2-digit"}), ...v, total:(v.facturado||0)+(v.pendiente||0) }));
     })();
   
     // ── Top clientes ──
     const topClientes = (() => {
       const map = {};
-      facEmitidas.forEach(f => { if (f.cliente_nombre) map[f.cliente_nombre] = (map[f.cliente_nombre]||0) + Number(f.total||0); });
-      return Object.entries(map).filter(([,v])=>v>0).sort(([,a],[,b])=>b-a).slice(0,5).map(([name,v])=>({ name, total:v }));
+      const ensure = name => {
+        const key = name || "Desconocido";
+        if (!map[key]) map[key] = { total:0, facturado:0, pendiente:0, cobrado:0, nfact:0, viajes_realizados:0 };
+        return map[key];
+      };
+      facEmitidas.forEach(f => {
+        const row = ensure(f.cliente_nombre);
+        const total = Number(f.total||0);
+        row.total += total;
+        row.facturado += total;
+        row.nfact += 1;
+        if (f.estado === "cobrada") row.cobrado += total;
+      });
+      pedidosRealizadosSinFactura.forEach(p => {
+        const row = ensure(p.cliente_nombre || p.cliente);
+        const importe = importePedido(p);
+        row.total += importe;
+        row.pendiente += importe;
+        row.viajes_realizados += 1;
+      });
+      return Object.entries(map).filter(([,v])=>v.total>0).sort(([,a],[,b])=>b.total-a.total).slice(0,5).map(([name,v])=>({ name, ...v }));
     })();
   
     // ── Alertas activas ──
@@ -589,7 +650,8 @@ export default function Dashboard() {
 
     return {
       pedKpi, facFilt, facEmitidas, totalFacturado, cobrado, pendiente,
-      nFacturas, costeTotal, margenTotal, margenPct,
+      nFacturas, ingresoGestionado, pendienteFacturarRealizado, pedidosRealizados, eurKmRealizado,
+      costeTotal, margenTotal, margenPct,
       vDisp, vRuta, vTaller, cDisp,
       estadosPed, facMensual, topClientes, alertas,
       operativos,
@@ -658,7 +720,7 @@ export default function Dashboard() {
                 val:`${vDisp}/${vehiculos.filter(v=>{const cl=(v.clase||v.tipo||"").toLowerCase();const mat=(v.matricula||"").toUpperCase();const rids=new Set(vehiculos.map(x=>x.remolque_id).filter(Boolean));return !cl.includes("remolque")&&!cl.includes("semirremolque")&&!cl.includes("dolly")&&!rids.has(v.id)&&!mat.startsWith("R-")&&!mat.endsWith("-R");}).length}`,
                 sub:`${vTaller} en mantenimiento`,                            color:"var(--green)" },
               { label:"CHÓFERES DISP.",    val:`${cDisp}/${choferes.length}`,  sub:`${choferes.filter(c=>c.estado==="vacaciones").length} de vacaciones`, color:"var(--text)" },
-              { label:"FACTURACIÓN TOTAL", val:`${fmt2(totalFacturado)} EUR`,     sub:`${fmtN(nFacturas)} facturas emitidas`,                  color:"#f59e0b" },
+              { label:"INGRESO GESTIONADO", val:`${fmt2(ingresoGestionado)} EUR`,     sub:`${fmtN(nFacturas)} facturas + ${fmtN(pedidosRealizados.length)} viajes realizados`,                  color:"#f59e0b" },
             ].map((k,i)=>(
               <ExecutiveKpi
                 key={i}
@@ -936,8 +998,9 @@ export default function Dashboard() {
                       <YAxis tick={{fontSize:10,fill:"var(--text4)"}} axisLine={false} tickLine={false} width={50}
                         tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:v}/>
                       <Tooltip contentStyle={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:8,fontSize:12}}
-                        formatter={v=>[`${fmt2(v)} EUR`,"Facturado"]}/>
-                      <Bar dataKey="total" fill="var(--accent-l)" radius={[4,4,0,0]}/>
+                        formatter={(v,n)=>[`${fmt2(v)} EUR`, n==="facturado" ? "Facturado" : "Realizado sin factura"]}/>
+                      <Bar dataKey="facturado" stackId="ingresos" fill="var(--accent-l)" radius={[4,4,0,0]}/>
+                      <Bar dataKey="pendiente" stackId="ingresos" fill="#f59e0b" radius={[4,4,0,0]}/>
                     </BarChart>
                   </ResponsiveContainer>
                 )
@@ -950,12 +1013,17 @@ export default function Dashboard() {
               {topClientes.length === 0
                 ? <div style={{ color:"var(--text5)", fontSize:12, padding:"24px 0", textAlign:"center" }}>Sin datos</div>
                 : topClientes.map((c,i)=>(
-                  <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                  <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8, gap:12 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                       <div style={{ width:8, height:8, borderRadius:"50%", background:COLORS[i%COLORS.length] }}/>
                       <span style={{ fontSize:12, color:"var(--text2)" }}>{c.name.length>22?c.name.slice(0,22)+"…":c.name}</span>
                     </div>
-                    <span style={{ fontSize:12, fontWeight:700, color:"var(--text)", fontFamily:"'JetBrains Mono',monospace" }}>{fmt2(c.total)} EUR</span>
+                    <div style={{ textAlign:"right", flexShrink:0 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:"var(--text)", fontFamily:"'JetBrains Mono',monospace" }}>{fmt2(c.total)} EUR</div>
+                      <div style={{ fontSize:10, color:"var(--text5)" }}>
+                        {fmt2(c.facturado)} fact.{Number(c.pendiente||0)>0 ? ` + ${fmt2(c.pendiente)} sin fact.` : ""}
+                      </div>
+                    </div>
                   </div>
                 ))
               }
@@ -968,10 +1036,15 @@ export default function Dashboard() {
             <div style={S.card}>
               <PanelTitle icon={<DashboardIcon name="money" size={17} />} title="RESUMEN FINANCIERO" />
               {[
-                { l:"Facturado",         v:`${fmt2(totalFacturado)} EUR`,  c:"var(--text)" },
+                { l:"Ingreso gestionado", v:`${fmt2(ingresoGestionado)} EUR`, c:"var(--accent-xl)" },
+                { l:"Facturado emitido", v:`${fmt2(totalFacturado)} EUR`,  c:"var(--text)" },
+                { l:"Realizado sin facturar", v:`${fmt2(pendienteFacturarRealizado)} EUR`, c:"#f59e0b" },
                 { l:"Cobrado",           v:`${fmt2(cobrado)} EUR`,         c:"var(--green)" },
                 { l:"Pendiente cobro",   v:`${fmt2(pendiente)} EUR`,       c:"#f59e0b" },
                 { l:"% cobrado",         v:`${totalFacturado>0?((cobrado/totalFacturado)*100).toFixed(1):0}%`, c:"var(--accent-xl)" },
+                ...(eurKmRealizado>0 ? [
+                  { l:"EUR/km realizado", v:`${fmt2(eurKmRealizado)} EUR/km`, c:"var(--accent-xl)" },
+                ] : []),
                 ...(costeTotal>0 ? [
                   { l:"Costes viajes",   v:`${fmt2(costeTotal)} EUR`,      c:"#ef4444" },
                   { l:"Margen bruto",    v:`${fmt2(margenTotal)} EUR${margenPct?` (${margenPct}%)` :""}`, c:margenTotal>=0?"var(--green)":"#ef4444" },

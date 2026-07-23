@@ -734,6 +734,9 @@ export default function Informes() {
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:12}}>
                     {[
+                      { l:"Ingreso gestionado", v:`${fmt2(biResumen.kpis?.ingreso_gestionado)} EUR`, c:"var(--accent-xl)" },
+                      { l:"Facturado", v:`${fmt2(biResumen.kpis?.facturado)} EUR`, c:"var(--text)" },
+                      { l:"Realizado sin facturar", v:`${fmt2(biResumen.kpis?.pendiente_facturar_realizado)} EUR`, c:"#f59e0b" },
                       { l:"Margen", v:`${fmt2(biResumen.kpis?.margen)} EUR`, c:Number(biResumen.kpis?.margen || 0) >= 0 ? "var(--green)" : "var(--red)" },
                       { l:"Margen %", v:`${fmt2(biResumen.kpis?.margen_pct)}%`, c:Number(biResumen.kpis?.margen_pct || 0) >= 0 ? "var(--green)" : "var(--red)" },
                       { l:"EUR/km", v:fmt2(biResumen.kpis?.eur_km), c:"var(--accent-xl)" },
@@ -753,10 +756,18 @@ export default function Informes() {
                         <div key={c.id || c.nombre} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,borderBottom:"1px solid var(--border)",padding:"7px 0"}}>
                           <div style={{minWidth:0}}>
                             <div style={{fontSize:12,fontWeight:800,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nombre}</div>
-                            <div style={{fontSize:10,color:"var(--text5)"}}>{fmtN(c.pedidos)} viajes · margen {fmt2(c.margen_pct)}%</div>
+                            <div style={{fontSize:10,color:"var(--text5)"}}>
+                              {fmtN(c.pedidos)} viajes · ingreso {fmt2(c.ingreso_gestionado || c.venta)} EUR · margen {fmt2(c.margen_pct)}%
+                            </div>
                           </div>
                           <div style={{textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:Number(c.deuda_vencida || 0) > 0 ? "#ef4444" : "var(--green)",fontWeight:900}}>
-                            {fmt2(c.deuda_vencida || 0)} EUR venc.
+                            {fmt2(c.facturado || 0)} EUR fact.
+                            {Number(c.pendiente_facturar_realizado || 0) > 0 && (
+                              <div style={{color:"#f59e0b",marginTop:2}}>{fmt2(c.pendiente_facturar_realizado)} EUR sin fact.</div>
+                            )}
+                            {Number(c.deuda_vencida || 0) > 0 && (
+                              <div style={{color:"#ef4444",marginTop:2}}>{fmt2(c.deuda_vencida)} EUR venc.</div>
+                            )}
                           </div>
                         </div>
                       ))}

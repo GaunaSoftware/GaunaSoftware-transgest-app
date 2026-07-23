@@ -403,11 +403,35 @@ async function applyMigrations() {
     await db.query("CREATE INDEX IF NOT EXISTS idx_ruta_precios_cliente_cliente ON ruta_precios_cliente(cliente_id)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo = true").catch(captureStartupMigrationError);
+    await db.query("DROP INDEX IF EXISTS idx_puntos_interes_empresa_dir").catch(captureStartupMigrationError);
+    await db.query("DROP INDEX IF EXISTS idx_puntos_interes_empresa_cliente_dir").catch(captureStartupMigrationError);
+    await db.query(`
+      WITH ranked AS (
+        SELECT
+          id,
+          ROW_NUMBER() OVER (
+            PARTITION BY
+              empresa_id,
+              COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid),
+              LOWER(TRIM(direccion))
+            ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
+          ) AS rn
+        FROM puntos_interes
+        WHERE activo = true
+          AND COALESCE(TRIM(direccion), '') <> ''
+      )
+      UPDATE puntos_interes p
+         SET activo = false,
+             updated_at = NOW(),
+             notas = CONCAT_WS(E'\n', NULLIF(p.notas, ''), 'Duplicado desactivado automaticamente al normalizar puntos por cliente.')
+        FROM ranked r
+       WHERE p.id = r.id
+         AND r.rn > 1
+    `).catch(captureStartupMigrationError);
     // FIX: el indice unico antiguo era (empresa_id, direccion) sin cliente_id, lo
     // que impedia que dos clientes tuvieran la misma direccion y provocaba que los
     // puntos se asociaran al cliente/general equivocado. Ahora la unicidad incluye
     // el cliente (NULL = punto general) para que cada cliente tenga su propia copia.
-    await db.query("DROP INDEX IF EXISTS idx_puntos_interes_empresa_dir").catch(captureStartupMigrationError);
     await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cli_dir ON puntos_interes(empresa_id, COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid), LOWER(TRIM(direccion))) WHERE activo = true").catch(captureStartupMigrationError);
     await db.query(`
       CREATE TABLE IF NOT EXISTS portal_solicitudes_cliente (

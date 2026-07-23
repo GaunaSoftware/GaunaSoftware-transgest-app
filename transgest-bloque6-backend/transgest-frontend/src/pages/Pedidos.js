@@ -1621,6 +1621,27 @@ function sortPuntosByClienteScope(a = {}, b = {}, clienteId = "") {
   return String(a.nombre || a.direccion || "").localeCompare(String(b.nombre || b.direccion || ""), "es");
 }
 
+function puntoScopeLabel(punto = {}, clienteId = "") {
+  if (!isPuntoGeneral(punto) && clienteId && String(punto.cliente_id) === String(clienteId)) return "Cliente";
+  if (isPuntoGeneral(punto)) return "General";
+  return "Otro cliente";
+}
+
+function puntoLocationLabel(punto = {}) {
+  return [
+    punto.ciudad || punto.poblacion || punto.localidad || punto.municipio,
+    punto.provincia || punto.region,
+    punto.pais,
+  ].map(v => String(v || "").trim()).filter(Boolean).join(", ");
+}
+
+function puntoPickerLabel(punto = {}, clienteId = "") {
+  const name = punto.nombre || punto.direccion || "Punto";
+  const location = puntoLocationLabel(punto);
+  const scope = puntoScopeLabel(punto, clienteId);
+  return [name, location, scope].filter(Boolean).join(" - ");
+}
+
 function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos", includeGenerales = false } = {}) {
   return (Array.isArray(puntos) ? puntos : [])
     .filter(p => isPuntoVisibleParaCliente(p, clienteId, { includeGenerales }))
@@ -1698,7 +1719,7 @@ function findPuntoInteresForRouteEndpoint(endpoint, clienteId, tipo = "ambos") {
     const pointTipo = String(p?.tipo || "ambos").toLowerCase();
     const typeOk = tipo === "ambos" || pointTipo === "ambos" || pointTipo === tipo;
     if (!typeOk) return false;
-    return !p?.cliente_id || !clienteId || String(p.cliente_id) === String(clienteId);
+    return !p?.cliente_id || (!!clienteId && String(p.cliente_id) === String(clienteId));
   });
   const score = (p) => {
     const haystack = normalizePlaceText([
@@ -1716,8 +1737,12 @@ function findPuntoInteresForRouteEndpoint(endpoint, clienteId, tipo = "ambos") {
     return hits >= Math.min(2, endpointTokens.length || 2) ? 50 + hits : 0;
   };
   return candidates
-    .map(p => ({ p, score: score(p) }))
-    .filter(x => x.score > 0)
+    .map(p => {
+      const rawScore = score(p);
+      const scopeBoost = clienteId && String(p.cliente_id || "") === String(clienteId) ? 1000 : 0;
+      return { p, score: rawScore + scopeBoost, rawScore };
+    })
+    .filter(x => x.rawScore > 0)
     .sort((a, b) => b.score - a.score)[0]?.p || null;
 }
 
@@ -1823,8 +1848,8 @@ function stopAddress(stop) {
   return (stop?.direccion || stop?.lugar || stop?.ciudad || "").trim();
 }
 
-function findPuntoInteresForStop(stop = {}, fallback = "") {
-  const lista = getPuntosInteres();
+function findPuntoInteresForStop(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
+  const lista = filterPuntosForPedido(getPuntosInteres(), { clienteId, tipo, includeGenerales: true });
   if (!Array.isArray(lista) || !lista.length) return null;
   const id = stop?.punto_interes_id || stop?.punto_id || stop?.point_id || stop?.id_punto;
   if (id) {
@@ -1855,8 +1880,8 @@ function findPuntoInteresForStop(stop = {}, fallback = "") {
   }) || null;
 }
 
-function stopDisplayParts(stop = {}, fallback = "") {
-  const punto = findPuntoInteresForStop(stop, fallback);
+function stopDisplayParts(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
+  const punto = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
   const puntoDireccion = punto ? (direccionCompletaPunto(punto) || punto.direccion || "") : "";
   const rawDireccion = (stopAddress(stop) || fallback || "").trim();
   let direccion = rawDireccion;
@@ -1893,8 +1918,8 @@ function likelyTownFromListText(value = "") {
   return cleanListPlace(preferred).toUpperCase();
 }
 
-function stopTownLabel(stop = {}, fallback = "") {
-  const punto = findPuntoInteresForStop(stop, fallback);
+function stopTownLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
+  const punto = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
   const source = { ...(punto || {}), ...(stop || {}) };
   const town = cleanListPlace(source.ciudad || source.poblacion || source.localidad || source.municipio || "");
   if (town) return town.toUpperCase();
@@ -1903,21 +1928,22 @@ function stopTownLabel(stop = {}, fallback = "") {
   return likelyTownFromListText(address);
 }
 
-function stopPointNameLabel(stop = {}, fallback = "") {
-  const punto = findPuntoInteresForStop(stop, fallback);
+function stopPointNameLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
+  const punto = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
   const source = { ...(punto || {}), ...(stop || {}) };
   const name = cleanListPlace(source.cliente_nombre || source.nombre || source.name || punto?.nombre || "");
-  const town = stopTownLabel(stop, fallback);
+  const town = stopTownLabel(stop, fallback, clienteId, tipo);
   if (!name) return town;
   if (!town || normalizePlaceText(name) === normalizePlaceText(town)) return name.toUpperCase();
   return `${name.toUpperCase()} - ${town}`;
 }
 
 function pedidoRouteDisplayForList(pedido = {}, cargaPrincipal = {}, descargaPrincipal = {}) {
-  const origenTown = stopTownLabel(cargaPrincipal, pedido.origen) || cleanListPlace(pedido.origen || "").toUpperCase();
-  const destinoTown = stopTownLabel(descargaPrincipal, pedido.destino) || cleanListPlace(pedido.destino || "").toUpperCase();
-  const origenPoint = stopPointNameLabel(cargaPrincipal, pedido.origen);
-  const destinoPoint = stopPointNameLabel(descargaPrincipal, pedido.destino);
+  const clienteId = pedido.cliente_id || "";
+  const origenTown = stopTownLabel(cargaPrincipal, pedido.origen, clienteId, "carga") || cleanListPlace(pedido.origen || "").toUpperCase();
+  const destinoTown = stopTownLabel(descargaPrincipal, pedido.destino, clienteId, "descarga") || cleanListPlace(pedido.destino || "").toUpperCase();
+  const origenPoint = stopPointNameLabel(cargaPrincipal, pedido.origen, clienteId, "carga");
+  const destinoPoint = stopPointNameLabel(descargaPrincipal, pedido.destino, clienteId, "descarga");
   const main = origenTown && destinoTown ? `${origenTown} -> ${destinoTown}` : cleanListPlace(`${pedido.origen || ""}${pedido.destino ? ` -> ${pedido.destino}` : ""}`) || "-";
   const detail = origenPoint && destinoPoint && (
     normalizePlaceText(origenPoint) !== normalizePlaceText(origenTown) ||
@@ -1926,12 +1952,12 @@ function pedidoRouteDisplayForList(pedido = {}, cargaPrincipal = {}, descargaPri
   return { main, detail };
 }
 
-function pedidoStopListLabel(stop = {}, fallback = "") {
-  return stopPointNameLabel(stop, fallback) || stopTownLabel(stop, fallback) || cleanListPlace(stopAddress(stop) || fallback || "Sin poblacion");
+function pedidoStopListLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
+  return stopPointNameLabel(stop, fallback, clienteId, tipo) || stopTownLabel(stop, fallback, clienteId, tipo) || cleanListPlace(stopAddress(stop) || fallback || "Sin poblacion");
 }
 
-function stopPostalLine(stop = {}, fallbackProvincia = "", fallbackPais = "España") {
-  const punto = findPuntoInteresForStop(stop, stopAddress(stop));
+function stopPostalLine(stop = {}, fallbackProvincia = "", fallbackPais = "España", clienteId = "", tipo = "ambos") {
+  const punto = findPuntoInteresForStop(stop, stopAddress(stop), clienteId, tipo);
   const source = { ...(punto || {}), ...(stop || {}) };
   const cp = String(source.codigo_postal || source.cp || source.postal_code || "").trim();
   const poblacion = String(source.ciudad || source.poblacion || source.localidad || source.municipio || "").trim();
@@ -1955,10 +1981,10 @@ function empresaPostalAddress(empresa = {}) {
 
 function hasRoutePlaceData(place) {
   if (!place) return false;
-  if (typeof place === "string") return !!place.trim();
+  if (typeof place === "string") return !!place.trim() && !isCountryOnlyDraftQuery(place);
+  const address = place.address || place.direccion || "";
   return !!(
-    place.address ||
-    place.direccion ||
+    (address && !isCountryOnlyDraftQuery(address)) ||
     cleanMapsUrl(place.google_maps_url || place.googleMapsUrl) ||
     ((place.lat ?? place.latitud) != null && (place.lng ?? place.longitud) != null)
   );
@@ -1974,10 +2000,15 @@ function routePlaceKey(place) {
   ].join("|").toLowerCase();
 }
 
-function stopToRoutePlace(stop, fallback = "", type = "Parada") {
+function stopToRoutePlace(stop, fallback = "", type = "Parada", clienteId = "") {
   const source = stop || {};
-  const { nombre, direccion } = stopDisplayParts(source, fallback);
-  const punto = findPuntoInteresForStop(source, fallback);
+  const tipo = String(type || "").toLowerCase().includes("descarga")
+    ? "descarga"
+    : String(type || "").toLowerCase().includes("carga")
+      ? "carga"
+      : "ambos";
+  const { nombre, direccion } = stopDisplayParts(source, fallback, clienteId, tipo);
+  const punto = findPuntoInteresForStop(source, fallback, clienteId, tipo);
   const routeAddress = direccionCompletaPunto(punto) || [
     direccion,
     source.codigo_postal || source.cp || source.postal_code,
@@ -2057,11 +2088,11 @@ function calcIvaPedido(form = {}, baseOverride = null) {
   };
 }
 
-function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", style, puntos: puntosProp = null, clienteId = "", tipo = "ambos" }) {
+function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", style, puntos: puntosProp = null, clienteId = "", tipo = "ambos", includeGenerales = true }) {
   const [puntos, setPuntos] = useState(getPuntosInteres);
   const puntosDisponibles = Array.isArray(puntosProp)
-    ? filterPuntosForPedido(puntosProp, { clienteId, tipo })
-    : filterPuntosForPedido(puntos, { clienteId, tipo });
+    ? filterPuntosForPedido(puntosProp, { clienteId, tipo, includeGenerales: false })
+    : filterPuntosForPedido(puntos, { clienteId, tipo, includeGenerales });
 
   useEffect(() => {
     const refresh = () => setPuntos(getPuntosInteres());
@@ -2087,7 +2118,7 @@ function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", sty
     >
       <option value="">{placeholder}</option>
       {puntosDisponibles.map(p => (
-        <option key={p.id} value={p.id}>{p.nombre} - {p.direccion}{isPuntoGeneral(p) ? " (general)" : ""}</option>
+        <option key={p.id} value={p.id}>{puntoPickerLabel(p, clienteId)}</option>
       ))}
     </select>
   );
@@ -2096,11 +2127,12 @@ function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", sty
 function getRoutePlaces(form) {
   const cargas = parseStops(form.puntos_carga);
   const descargas = parseStops(form.puntos_descarga);
+  const clienteId = form.cliente_id || "";
   const places = [
-    stopToRoutePlace(cargas[0], form.origen, "Carga"),
-    ...cargas.slice(1).map(stop => stopToRoutePlace(stop, stopAddress(stop), "Carga intermedia")),
-    stopToRoutePlace(descargas[0], form.destino, "Descarga"),
-    ...descargas.slice(1).map(stop => stopToRoutePlace(stop, stopAddress(stop), "Descarga intermedia")),
+    stopToRoutePlace(cargas[0], form.origen, "Carga", clienteId),
+    ...cargas.slice(1).map(stop => stopToRoutePlace(stop, stopAddress(stop), "Carga intermedia", clienteId)),
+    stopToRoutePlace(descargas[0], form.destino, "Descarga", clienteId),
+    ...descargas.slice(1).map(stop => stopToRoutePlace(stop, stopAddress(stop), "Descarga intermedia", clienteId)),
   ].filter(hasRoutePlaceData);
   const seen = new Set();
   return places.filter(place => {
@@ -2145,9 +2177,9 @@ function stopMapsLink(stop, fallback = "") {
   return buildMapsSearchUrl(stopAddress(stop) || fallback);
 }
 
-function buildStopMapsRows(stops, tipo, fallback = "") {
+function buildStopMapsRows(stops, tipo, fallback = "", clienteId = "") {
   return parseStops(stops).map((stop, idx) => {
-    const { nombre, direccion } = stopDisplayParts(stop, idx === 0 ? fallback : "");
+    const { nombre, direccion } = stopDisplayParts(stop, idx === 0 ? fallback : "", clienteId, String(tipo || "").toLowerCase().includes("descarga") ? "descarga" : "carga");
     return {
       label: idx === 0 ? tipo : `${tipo} ${idx + 1}`,
       nombre,
@@ -4349,8 +4381,8 @@ function OrdenCargaModal({ pedido, onClose }) {
   const referenciaPedido = pedido.referencia_cliente || pedido.numero || numOC || "";
   const cargaPrincipal = parseStops(pedido.puntos_carga)[0] || {};
   const descargaPrincipal = parseStops(pedido.puntos_descarga)[0] || {};
-  const cargaDisplay = stopDisplayParts(cargaPrincipal, pedido.origen || "");
-  const descargaDisplay = stopDisplayParts(descargaPrincipal, pedido.destino || "");
+  const cargaDisplay = stopDisplayParts(cargaPrincipal, pedido.origen || "", pedido.cliente_id || "", "carga");
+  const descargaDisplay = stopDisplayParts(descargaPrincipal, pedido.destino || "", pedido.cliente_id || "", "descarga");
   const origenOrden = cargaDisplay.direccion || pedido.origen || "";
   const destinoOrden = descargaDisplay.direccion || pedido.destino || "";
   const origenNombreOrden = cargaDisplay.nombre;
@@ -4359,8 +4391,8 @@ function OrdenCargaModal({ pedido, onClose }) {
   const condicionesPagoColaborador = formatPaymentTerms(empresa);
   const condicionesPagoCliente = formatClientPaymentTerms(empresa);
   const operativaCarga = buildOperativaCargaLabels(pedido);
-  const cargaMapsRows = buildStopMapsRows(pedido.puntos_carga, "Carga", pedido.origen);
-  const descargaMapsRows = buildStopMapsRows(pedido.puntos_descarga, "Descarga", pedido.destino);
+  const cargaMapsRows = buildStopMapsRows(pedido.puntos_carga, "Carga", pedido.origen, pedido.cliente_id || "");
+  const descargaMapsRows = buildStopMapsRows(pedido.puntos_descarga, "Descarga", pedido.destino, pedido.cliente_id || "");
   const allMapsRows = [
     ...(cargaMapsRows.length ? cargaMapsRows : (origenOrden ? [{ label:"Carga", nombre:origenNombreOrden, direccion:origenOrden, url:buildMapsSearchUrl(origenOrden) }] : [])),
     ...(descargaMapsRows.length ? descargaMapsRows : (destinoOrden ? [{ label:"Descarga", nombre:destinoNombreOrden, direccion:destinoOrden, url:buildMapsSearchUrl(destinoOrden) }] : [])),
@@ -4415,8 +4447,8 @@ function OrdenCargaModal({ pedido, onClose }) {
     const empCol  = esCol ? "#6d28d9" : "#1d4ed8";
     const empBg   = esCol ? "#ede9fe" : "#dbeafe";
     const empresaDireccion = empresaPostalAddress(empresa);
-    const cargaPostalOrden = stopPostalLine(cargaPrincipal, pedido.origen_provincia || "", pedido.origen_pais || "España");
-    const descargaPostalOrden = stopPostalLine(descargaPrincipal, pedido.destino_provincia || "", pedido.destino_pais || "España");
+    const cargaPostalOrden = stopPostalLine(cargaPrincipal, pedido.origen_provincia || "", pedido.origen_pais || "España", pedido.cliente_id || "", "carga");
+    const descargaPostalOrden = stopPostalLine(descargaPrincipal, pedido.destino_provincia || "", pedido.destino_pais || "España", pedido.cliente_id || "", "descarga");
     const albaranesDireccionPostal = empresaDireccion || "Direccion postal pendiente de configurar en Mi Empresa";
     const logoHtml = getLogoDataUrl() ? `<img src="${getLogoDataUrl()}" style="max-height:52px;max-width:160px;object-fit:contain;margin-bottom:6px;display:block" alt="">` : "";
     const emailAlbaranesColaborador = joinEmailList(
@@ -6201,7 +6233,7 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   const rawStop = stop || parseStops(isOrigen ? pedido.puntos_carga : pedido.puntos_descarga)[0] || {};
   const initialLabel = rawStop.nombre || rawStop.name || rawStop.cliente_nombre || rawStop.direccion || pedido[side] || "";
   const tipo = isOrigen ? "carga" : "descarga";
-  const puntoGuardado = findPuntoInteresForStop(rawStop, initialLabel)
+  const puntoGuardado = findPuntoInteresForStop(rawStop, initialLabel, pedido.cliente_id || "", tipo)
     || findPuntoInteresForTypedEndpoint(initialLabel || pedido[side], pedido.cliente_id || "", tipo);
   const puntoStop = puntoGuardado ? puntoToStop(puntoGuardado) : {};
   const googleMapsUrl = rawStop.google_maps_url || rawStop.googleMapsUrl || puntoStop.google_maps_url || "";
@@ -6742,6 +6774,22 @@ function fallbackRouteKm(lugares = []) {
   return Number.isFinite(roadApprox) && roadApprox > 0 ? Math.round(roadApprox) : null;
 }
 
+function routeAddressForOptimization(raw = {}) {
+  const rawAddress = raw.address || raw.direccion || raw.name || raw.nombre || "";
+  const pointId = raw.punto_interes_id || raw.id;
+  const point = pointId ? getPuntosInteres().find(p => String(p.id) === String(pointId)) : null;
+  const pointAddress = point ? direccionCompletaPunto(point) : "";
+  if (pointAddress) return pointAddress;
+
+  const inferred = inferPlaceGeo(raw, rawAddress, raw.name, raw.nombre, raw.cliente_nombre);
+  const city = raw.ciudad || raw.municipio || inferred?.municipio || "";
+  const province = raw.provincia || raw.region || inferred?.provincia || "";
+  const country = raw.pais || raw.country || inferred?.pais || "";
+  const main = city || rawAddress;
+  const address = [main, province, country].filter(Boolean).join(", ");
+  return address || resolvePuntoInteresQuery(rawAddress);
+}
+
 async function calcularKmRuta(origen, destino, puntos = null) {
   const lugares = Array.isArray(puntos) && puntos.length ? puntos : [origen, destino].filter(Boolean);
   if (lugares.length < 2) return null;
@@ -6749,9 +6797,7 @@ async function calcularKmRuta(origen, destino, puntos = null) {
   try {
     const stops = lugares.map((place, idx) => {
       const raw = typeof place === "object" && place !== null ? place : { name: String(place || "").trim(), address: String(place || "").trim() };
-      const hasCoords = Number.isFinite(Number(raw.lat ?? raw.latitud)) && Number.isFinite(Number(raw.lng ?? raw.longitud));
-      const rawAddress = raw.address || raw.direccion || raw.name || raw.nombre || "";
-      const address = hasCoords ? String(rawAddress || "").trim() : resolvePuntoInteresQuery(rawAddress);
+      const address = routeAddressForOptimization(raw);
       return {
         type: raw.type || raw.tipo || (idx === 0 ? "Carga" : idx === lugares.length - 1 ? "Descarga" : "Parada"),
         name: raw.name || raw.nombre || raw.cliente_nombre || address,
@@ -6901,11 +6947,13 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
     } else {
       notify("Punto seleccionado.", "success");
     }
+    onClose?.();
   }
 
   const qPoint = normalizePlaceText(pointSearch);
+  const puntosVisibles = filterPuntosForPedido(puntos, { clienteId, tipo: modo, includeGenerales: true });
   const puntosFiltrados = qPoint
-    ? puntos.filter(point => [
+    ? puntosVisibles.filter(point => [
         point.nombre,
         point.direccion,
         point.ciudad,
@@ -6913,10 +6961,18 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
         point.pais,
         point.cif,
       ].some(value => normalizePlaceText(value).includes(qPoint)))
-    : puntos;
+    : puntosVisibles;
   const crearDesdeBusqueda = () => {
     const text = pointSearch.trim();
-    setEditing({ nombre:text, direccion:text, tipo:"ambos", pais:"EspaÃ±a" });
+    setEditing({
+      nombre:text,
+      direccion:text,
+      tipo: modo || "ambos",
+      pais:"EspaÃ±a",
+      cliente_id: clienteId || "",
+      punto_general: !clienteId,
+      es_general: !clienteId,
+    });
   };
 
   return (
@@ -6925,7 +6981,9 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
         <div style={{padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
           <div>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)"}}>Puntos guardados</div>
-            <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>Catalogo independiente de clientes para origenes, destinos y paradas habituales.</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>
+              Se muestran solo los puntos de este cliente y los puntos generales reutilizables.
+            </div>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button type="button" onClick={()=>setEditing({ tipo:"ambos", pais:"España" })} style={{...S.btn,background:"var(--accent)",color:"#fff"}}>Nuevo punto</button>
@@ -6957,14 +7015,30 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
             </div>
           ) : (
             <div style={{display:"grid",gap:10}}>
-              {puntosFiltrados.map(point => (
-                <div key={point.id} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px",display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"start"}}>
+              {puntosFiltrados.map((point, idx) => {
+                const scope = puntoScopeLabel(point, clienteId);
+                const previousScope = idx > 0 ? puntoScopeLabel(puntosFiltrados[idx - 1], clienteId) : "";
+                const showScopeHeader = scope !== previousScope;
+                return (
+                <React.Fragment key={point.id}>
+                  {showScopeHeader && (
+                    <div style={{marginTop:idx ? 6 : 0,fontSize:11,fontWeight:900,letterSpacing:".08em",textTransform:"uppercase",color:"var(--text4)",display:"flex",alignItems:"center",gap:8}}>
+                      <span>{scope === "Cliente" ? "Puntos de este cliente" : "Puntos generales"}</span>
+                      <span style={{height:1,background:"var(--border)",flex:1}} />
+                    </div>
+                  )}
+                  <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"start"}}>
                   <div>
-                    <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{point.nombre}</div>
-                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion}</div>
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{point.nombre || point.direccion}</div>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:scope === "Cliente" ? "rgba(20,184,166,.12)" : "rgba(59,130,246,.12)",color:scope === "Cliente" ? "var(--accent)" : "#60a5fa",border:`1px solid ${scope === "Cliente" ? "rgba(20,184,166,.24)" : "rgba(59,130,246,.24)"}`}}>
+                        {scope}
+                      </span>
+                    </div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion || puntoLocationLabel(point) || "-"}</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
                       {point.tipo && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(59,130,246,.12)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.22)"}}>{point.tipo}</span>}
-                      {(point.pais || point.provincia) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.22)"}}>{[point.provincia, point.pais].filter(Boolean).join(", ")}</span>}
+                      {puntoLocationLabel(point) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.22)"}}>{puntoLocationLabel(point)}</span>}
                       {point.ventana && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)"}}>{point.ventana}</span>}
                       {point.google_maps_url && <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--accent)"}}>Google Maps</a>}
                     </div>
@@ -6977,7 +7051,8 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                     <button type="button" onClick={()=>removePoint(point)} style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",padding:"6px 10px"}}>Eliminar</button>
                   </div>
                 </div>
-              ))}
+                </React.Fragment>
+              );})}
             </div>
           )}
         </div>
@@ -7063,6 +7138,28 @@ async function maybeCrearRutaClienteDesdePedido() {
     rutasCreadasRef.current.add(routeKey);
     return rutaExistente.id || null;
   }
+  const findExistingAfterSave = async () => {
+    try {
+      const fresh = await getRutasCliente(form.cliente_id, { silentError: true });
+      if (!Array.isArray(fresh)) return null;
+      const normalized = fresh.map(r => ({
+        ...r,
+        id: r.ruta_id || r.id,
+        precio_base: r.precio_base ?? r.precio ?? 0,
+        cliente_id: form.cliente_id,
+      }));
+      setRutas(normalized);
+      return normalized
+        .filter(r =>
+          routeDraftScore(form, r) >= 43 &&
+          routeTarifaMatchesDraft(r, form) &&
+          (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
+        )
+        .sort((a,b) => routeDraftScore(form, b) - routeDraftScore(form, a))[0] || null;
+    } catch {
+      return null;
+    }
+  };
   const addRoute = await confirmDialog({
     title: "Guardar ruta del cliente",
     message: `La ruta "${form.origen} -> ${form.destino}" no existe todavia.\n\nQuieres guardarla como ruta de este cliente para reutilizarla en futuros viajes?`,
@@ -7075,9 +7172,6 @@ async function maybeCrearRutaClienteDesdePedido() {
   }
   const origenRuta = form.origen.trim().toUpperCase();
   let destinoRuta = form.destino.trim().toUpperCase();
-  // Tarifas a nivel de PROVINCIA: si el destino tiene provincia y no es ya la
-  // propia provincia, preguntamos si la tarifa aplica a toda la provincia
-  // (agrupa todos sus pueblos) o solo a este pueblo (excepcion con otro precio).
   const destinoProvincia = String(form.destino_provincia || "").trim();
   if (destinoProvincia && normalizePlaceText(destinoProvincia) !== normalizePlaceText(form.destino)) {
     const usarProvincia = await confirmDialog({
@@ -7090,9 +7184,9 @@ Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueb
     });
     if (usarProvincia) destinoRuta = destinoProvincia.toUpperCase();
   }
-  let nueva;
+  let nueva = null;
   try {
-  nueva = await crearRutaCliente(form.cliente_id, {
+    nueva = await crearRutaCliente(form.cliente_id, {
     origen: origenRuta,
     destino: destinoRuta,
     km: toNullableNumber(form.km_ruta),
@@ -7104,19 +7198,31 @@ Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueb
     notas: "Creada automaticamente desde pedido",
   }, { silentError: true });
   } catch (e) {
-    // El pedido ya se guardo; la ruta/tarifa es un extra. Si falla, se registra
-    // en consola pero no se molesta al usuario con un aviso en cada guardado.
+    const existing = await findExistingAfterSave();
+    if (existing?.id) {
+      rutasCreadasRef.current.add(routeKey);
+      setForm(p => ({...p, ruta_id: existing.id}));
+      return existing.id;
+    }
     console.warn("No se pudo crear la ruta del cliente automaticamente:", e?.message || e);
     return null;
   }
-  // Si la creacion de ruta no devolvio id (fallo silencioso o sin permiso), no
-  // seguimos: el pedido ya se guardo y no queremos avisar en falso.
-  if (!nueva?.ruta_id) return null;
-  setRutas(prev => prev.some(r => r.id === nueva.ruta_id || (
-    routeDraftScore({...form, origen:origenRuta, destino:destinoRuta}, r) >= 44 &&
+  const nuevaRutaId = nueva?.ruta_id || nueva?.id || nueva?.ruta?.id || null;
+  if (!nuevaRutaId) {
+    const existing = await findExistingAfterSave();
+    if (existing?.id) {
+      rutasCreadasRef.current.add(routeKey);
+      setForm(p => ({...p, ruta_id: existing.id}));
+      return existing.id;
+    }
+    console.warn("La API no ha devuelto el identificador de la ruta creada.");
+    return null;
+  }
+  setRutas(prev => prev.some(r => r.id === nuevaRutaId || (
+    routeDraftScore({...form, origen:origenRuta, destino:destinoRuta}, r) >= 43 &&
     (!r.cliente_id || r.cliente_id === form.cliente_id)
   )) ? prev : [...prev, {
-    id: nueva.ruta_id,
+    id: nuevaRutaId,
     origen: origenRuta,
     destino: destinoRuta,
     km: toNullableNumber(form.km_ruta),
@@ -7128,8 +7234,8 @@ Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueb
     cliente_id: form.cliente_id,
   }]);
   rutasCreadasRef.current.add(routeKey);
-  setForm(p => ({...p, ruta_id: nueva.ruta_id}));
-  return nueva.ruta_id;
+  setForm(p => ({...p, ruta_id: nuevaRutaId}));
+  return nuevaRutaId;
 }
 
 function pedidoTieneContenidoReal(draft = {}) {
@@ -7398,38 +7504,30 @@ const aplicarEndpointText = (key, tipo) => (e) => {
   setForm(p => {
     const base = { ...p, [key]: value };
     if (!["origen", "destino"].includes(key)) return base;
-    const punto = findPuntoInteresForTypedEndpoint(
-      value,
-      p.cliente_id || "",
-      tipo,
-      tipo === "carga" ? puntosCargaSugeridosModal : puntosDescargaSugeridosModal
-    );
-    if (!punto) {
+    {
       const stopsKey = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
       const regionKey = tipo === "carga" ? "origen_provincia" : "destino_provincia";
       const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
-      const { extras } = splitPrimaryAndAdditionalStops(p[stopsKey], p[key] || "");
-      base[regionKey] = "";
-      ["lat", "lng", "lon", "latitude", "longitude", "google_maps_url"].forEach(suffix => {
-        const staleKey = `${key}_${suffix}`;
-        if (Object.prototype.hasOwnProperty.call(p, staleKey)) base[staleKey] = null;
-      });
+      const { primary, extras } = splitPrimaryAndAdditionalStops(p[stopsKey], p[key] || "");
+      const inferred = isSimpleMunicipalityInput(value) ? inferPlaceGeo(value) : null;
+      const province = inferred?.provincia || primary?.provincia || p[regionKey] || "";
+      if (province && (inferred?.provincia || !p[regionKey])) base[regionKey] = province;
       base[stopsKey] = value.trim() ? [{
+        ...(primary || {}),
         direccion: value,
         es_principal: true,
         pais: p[countryKey] || "España",
-        provincia: "",
-        ciudad: "",
-        codigo_postal: "",
-        cliente_nombre: "",
-        punto_interes_id: null,
-        google_maps_url: "",
-        lat: null,
-        lng: null,
+        provincia: province,
+        ciudad: inferred?.municipio || primary?.ciudad || "",
+        codigo_postal: primary?.codigo_postal || "",
+        cliente_nombre: primary?.cliente_nombre || "",
+        punto_interes_id: primary?.punto_interes_id || null,
+        google_maps_url: primary?.google_maps_url || "",
+        lat: inferred?.lat ?? primary?.lat ?? null,
+        lng: inferred?.lng ?? primary?.lng ?? null,
       }, ...extras] : extras;
       return base;
     }
-    return tipo === "carga" ? applyPuntoCargaToDraft(base, punto) : applyPuntoDescargaToDraft(base, punto);
   });
 };
 
@@ -7443,10 +7541,43 @@ async function resolverEndpointEnFormulario(key, tipo, rawValue = null) {
   const value = String(rawValue != null ? rawValue : (form[key] || "")).trim();
   if (value.length < 2) return;
   const suggestions = tipo === "carga" ? puntosCargaSugeridosModal : puntosDescargaSugeridosModal;
-  if (findPuntoInteresForTypedEndpoint(value, form.cliente_id || "", tipo, suggestions)) return;
+  const punto = findPuntoInteresForTypedEndpoint(value, form.cliente_id || "", tipo, suggestions);
+  if (punto) {
+    setForm(current => {
+      if (normalizePlaceText(current[key]) !== normalizePlaceText(value)) return current;
+      return tipo === "carga" ? applyPuntoCargaToDraft(current, punto) : applyPuntoDescargaToDraft(current, punto);
+    });
+    return;
+  }
   const regionKey = tipo === "carga" ? "origen_provincia" : "destino_provincia";
   const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
   const stopsKey = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
+  const localGeo = isSimpleMunicipalityInput(value) ? inferPlaceGeo(value) : null;
+  if (localGeo?.lat != null && localGeo?.lng != null) {
+    setForm(current => {
+      if (normalizePlaceText(current[key]) !== normalizePlaceText(value)) return current;
+      const { primary, extras } = splitPrimaryAndAdditionalStops(current[stopsKey], current[key] || "");
+      const pais = canonicalCountry(localGeo.pais || current[countryKey] || "España") || current[countryKey] || "España";
+      const canonicalEndpoint = String(localGeo.municipio || value).toUpperCase();
+      return {
+        ...current,
+        [key]: canonicalEndpoint,
+        [regionKey]: localGeo.provincia || current[regionKey] || "",
+        [countryKey]: pais,
+        [stopsKey]: [{
+          ...(primary || {}),
+          direccion: canonicalEndpoint,
+          es_principal: true,
+          ciudad: localGeo.municipio || primary?.ciudad || "",
+          provincia: localGeo.provincia || primary?.provincia || "",
+          pais,
+          lat: Number(localGeo.lat),
+          lng: Number(localGeo.lng),
+        }, ...extras],
+      };
+    });
+    return;
+  }
   try {
     const geo = await resolveGeoPlace({
       q: value,
@@ -7616,10 +7747,6 @@ useEffect(() => {
             .tg-pedido-modal-header { position:relative; z-index:20; isolation:isolate; margin:0 0 16px; padding:0 0 12px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; max-width:100%; overflow:hidden; }
             .tg-pedido-modal-title { min-width:0; overflow-wrap:anywhere; word-break:break-word; line-height:1.25; }
             .tg-pedido-map-section { max-width:100%; min-width:0; overflow:hidden; isolation:isolate; position:relative; z-index:0; }
-            .tg-pedido-map-section .leaflet-container { max-width:100%; z-index:0; }
-            .tg-pedido-map-section .leaflet-pane,
-            .tg-pedido-map-section .leaflet-top,
-            .tg-pedido-map-section .leaflet-bottom { z-index:1; }
             .tg-pedido-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
             .tg-pedido-form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
             .tg-pedido-form-grid-4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px; }
@@ -8975,8 +9102,8 @@ function CartaPorteModal({ data, onClose }) {
   const documentoTitulo = isCmrInternacional ? "CMR Internacional" : "Carta de Porte";
   const origenGeo = [stopRegion(cargaPrincipalGeo, data.origen_provincia || ""), stopCountry(cargaPrincipalGeo, data.origen_pais || "España")].filter(Boolean).join(", ");
   const destinoGeo = [stopRegion(descargaPrincipalGeo, data.destino_provincia || ""), stopCountry(descargaPrincipalGeo, data.destino_pais || "España")].filter(Boolean).join(", ");
-  const origenPostalGeo = stopPostalLine(cargaPrincipalGeo, data.origen_provincia || "", data.origen_pais || "España");
-  const destinoPostalGeo = stopPostalLine(descargaPrincipalGeo, data.destino_provincia || "", data.destino_pais || "España");
+  const origenPostalGeo = stopPostalLine(cargaPrincipalGeo, data.origen_provincia || "", data.origen_pais || "España", data.cliente_id || "", "carga");
+  const destinoPostalGeo = stopPostalLine(descargaPrincipalGeo, data.destino_provincia || "", data.destino_pais || "España", data.cliente_id || "", "descarga");
   const documentosAnexos = Array.isArray(data.documentos_anexos) ? data.documentos_anexos : [];
   const anexosConArchivo = documentosAnexos.filter(a => a?.data_url || a?.pdf_adjunto || a?.mime);
   const [firmaMode, setFirmaMode] = React.useState(null); // null | 'remitente' | 'destinatario' | 'chofer'
@@ -11401,13 +11528,13 @@ export default function Pedidos() {
                     <div style={{display:"grid",gap:3,marginTop:6,paddingTop:6,borderTop:"1px solid var(--border)"}}>
                       {cargasAdicionales.map((stop, index) => (
                         <div key={`carga-${index}-${stop.direccion || "parada"}`} style={{fontSize:10,lineHeight:1.35,color:"var(--text4)"}}>
-                          <strong style={{color:"#0f9f95"}}>Carga {index + 2}:</strong> {pedidoStopListLabel(stop, p.origen)}
+                          <strong style={{color:"#0f9f95"}}>Carga {index + 2}:</strong> {pedidoStopListLabel(stop, p.origen, p.cliente_id || "", "carga")}
                           {pedidoStopMeta(stop) && <div style={{color:"var(--text5)"}}>{pedidoStopMeta(stop)}</div>}
                         </div>
                       ))}
                       {descargasAdicionales.map((stop, index) => (
                         <div key={`descarga-${index}-${stop.direccion || "parada"}`} style={{fontSize:10,lineHeight:1.35,color:"var(--text4)"}}>
-                          <strong style={{color:"#f59e0b"}}>Descarga {index + 2}:</strong> {pedidoStopListLabel(stop, p.destino)}
+                          <strong style={{color:"#f59e0b"}}>Descarga {index + 2}:</strong> {pedidoStopListLabel(stop, p.destino, p.cliente_id || "", "descarga")}
                           {pedidoStopMeta(stop) && <div style={{color:"var(--text5)"}}>{pedidoStopMeta(stop)}</div>}
                         </div>
                       ))}
@@ -11975,7 +12102,6 @@ export default function Pedidos() {
     </div>
   );
 }
-
 
 
 

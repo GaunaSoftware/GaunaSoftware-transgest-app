@@ -14,6 +14,7 @@ CREATE INDEX IF NOT EXISTS idx_gps_integraciones_empresa ON gps_integraciones(em
 CREATE TABLE IF NOT EXISTS puntos_interes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+  cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
   nombre VARCHAR(180) NOT NULL,
   cif VARCHAR(40),
   direccion TEXT NOT NULL,
@@ -34,7 +35,9 @@ CREATE TABLE IF NOT EXISTS puntos_interes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_dir ON puntos_interes(empresa_id, LOWER(TRIM(direccion))) WHERE activo=true;
+DROP INDEX IF EXISTS idx_puntos_interes_empresa_dir;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente_dir ON puntos_interes(empresa_id, COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid), LOWER(TRIM(direccion))) WHERE activo=true;
+CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo=true;
 CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_nombre ON puntos_interes(empresa_id, LOWER(nombre)) WHERE activo=true;
 
 CREATE TABLE IF NOT EXISTS almacenes (

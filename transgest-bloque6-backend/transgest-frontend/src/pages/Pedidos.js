@@ -1675,7 +1675,7 @@ function findPuntoInteresForRouteEndpoint(endpoint, clienteId, tipo = "ambos") {
     const pointTipo = String(p?.tipo || "ambos").toLowerCase();
     const typeOk = tipo === "ambos" || pointTipo === "ambos" || pointTipo === tipo;
     if (!typeOk) return false;
-    return !p?.cliente_id || !clienteId || String(p.cliente_id) === String(clienteId);
+    return !p?.cliente_id || (!!clienteId && String(p.cliente_id) === String(clienteId));
   });
   const score = (p) => {
     const haystack = normalizePlaceText([
@@ -1693,8 +1693,12 @@ function findPuntoInteresForRouteEndpoint(endpoint, clienteId, tipo = "ambos") {
     return hits >= Math.min(2, endpointTokens.length || 2) ? 50 + hits : 0;
   };
   return candidates
-    .map(p => ({ p, score: score(p) }))
-    .filter(x => x.score > 0)
+    .map(p => {
+      const rawScore = score(p);
+      const scopeBoost = clienteId && String(p.cliente_id || "") === String(clienteId) ? 1000 : 0;
+      return { p, score: rawScore + scopeBoost, rawScore };
+    })
+    .filter(x => x.rawScore > 0)
     .sort((a, b) => b.score - a.score)[0]?.p || null;
 }
 
@@ -1932,10 +1936,10 @@ function empresaPostalAddress(empresa = {}) {
 
 function hasRoutePlaceData(place) {
   if (!place) return false;
-  if (typeof place === "string") return !!place.trim();
+  if (typeof place === "string") return !!place.trim() && !isCountryOnlyDraftQuery(place);
+  const address = place.address || place.direccion || "";
   return !!(
-    place.address ||
-    place.direccion ||
+    (address && !isCountryOnlyDraftQuery(address)) ||
     cleanMapsUrl(place.google_maps_url || place.googleMapsUrl) ||
     ((place.lat ?? place.latitud) != null && (place.lng ?? place.longitud) != null)
   );
@@ -6619,6 +6623,22 @@ function fallbackRouteKm(lugares = []) {
   return Number.isFinite(roadApprox) && roadApprox > 0 ? Math.round(roadApprox) : null;
 }
 
+function routeAddressForOptimization(raw = {}) {
+  const rawAddress = raw.address || raw.direccion || raw.name || raw.nombre || "";
+  const pointId = raw.punto_interes_id || raw.id;
+  const point = pointId ? getPuntosInteres().find(p => String(p.id) === String(pointId)) : null;
+  const pointAddress = point ? direccionCompletaPunto(point) : "";
+  if (pointAddress) return pointAddress;
+
+  const inferred = inferPlaceGeo(raw, rawAddress, raw.name, raw.nombre, raw.cliente_nombre);
+  const city = raw.ciudad || raw.municipio || inferred?.municipio || "";
+  const province = raw.provincia || raw.region || inferred?.provincia || "";
+  const country = raw.pais || raw.country || inferred?.pais || "";
+  const main = city || rawAddress;
+  const address = [main, province, country].filter(Boolean).join(", ");
+  return address || resolvePuntoInteresQuery(rawAddress);
+}
+
 async function calcularKmRuta(origen, destino, puntos = null) {
   const lugares = Array.isArray(puntos) && puntos.length ? puntos : [origen, destino].filter(Boolean);
   if (lugares.length < 2) return null;
@@ -6626,9 +6646,7 @@ async function calcularKmRuta(origen, destino, puntos = null) {
   try {
     const stops = lugares.map((place, idx) => {
       const raw = typeof place === "object" && place !== null ? place : { name: String(place || "").trim(), address: String(place || "").trim() };
-      const hasCoords = Number.isFinite(Number(raw.lat ?? raw.latitud)) && Number.isFinite(Number(raw.lng ?? raw.longitud));
-      const rawAddress = raw.address || raw.direccion || raw.name || raw.nombre || "";
-      const address = hasCoords ? String(rawAddress || "").trim() : resolvePuntoInteresQuery(rawAddress);
+      const address = routeAddressForOptimization(raw);
       return {
         type: raw.type || raw.tipo || (idx === 0 ? "Carga" : idx === lugares.length - 1 ? "Descarga" : "Parada"),
         name: raw.name || raw.nombre || raw.cliente_nombre || address,
@@ -6778,6 +6796,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
     } else {
       notify("Punto seleccionado.", "success");
     }
+    onClose?.();
   }
 
   const qPoint = normalizePlaceText(pointSearch);
@@ -6925,7 +6944,7 @@ async function maybeCrearRutaClienteDesdePedido() {
   }
   const rutaExistente = rutasClienteActualizadas
     .filter(r =>
-      routeDraftScore(form, r) >= 44 &&
+      routeDraftScore(form, r) >= 43 &&
       (!r.cliente_id || r.cliente_id === form.cliente_id) &&
       (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
     )
@@ -6940,6 +6959,28 @@ async function maybeCrearRutaClienteDesdePedido() {
     rutasCreadasRef.current.add(routeKey);
     return rutaExistente.id || null;
   }
+  const findExistingAfterSave = async () => {
+    try {
+      const fresh = await getRutasCliente(form.cliente_id, { silentError: true });
+      if (!Array.isArray(fresh)) return null;
+      const normalized = fresh.map(r => ({
+        ...r,
+        id: r.ruta_id || r.id,
+        precio_base: r.precio_base ?? r.precio ?? 0,
+        cliente_id: form.cliente_id,
+      }));
+      setRutas(normalized);
+      return normalized
+        .filter(r =>
+          routeDraftScore(form, r) >= 43 &&
+          routeTarifaMatchesDraft(r, form) &&
+          (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
+        )
+        .sort((a,b) => routeDraftScore(form, b) - routeDraftScore(form, a))[0] || null;
+    } catch {
+      return null;
+    }
+  };
   const addRoute = await confirmDialog({
     title: "Guardar ruta del cliente",
     message: `La ruta "${form.origen} -> ${form.destino}" no existe todavia.\n\nQuieres guardarla como ruta de este cliente para reutilizarla en futuros viajes?`,
@@ -6952,7 +6993,9 @@ async function maybeCrearRutaClienteDesdePedido() {
   }
   const origenRuta = form.origen.trim().toUpperCase();
   const destinoRuta = form.destino.trim().toUpperCase();
-  const nueva = await crearRutaCliente(form.cliente_id, {
+  let nueva = null;
+  try {
+    nueva = await crearRutaCliente(form.cliente_id, {
     origen: origenRuta,
     destino: destinoRuta,
     km: toNullableNumber(form.km_ruta),
@@ -6963,11 +7006,30 @@ async function maybeCrearRutaClienteDesdePedido() {
     minimo_unidades: form.tipo_precio !== "viaje" ? toNullableNumber(form.minimo_unidades) : null,
     notas: "Creada automaticamente desde pedido",
   }, { silentError: true });
-  setRutas(prev => prev.some(r => r.id === nueva.ruta_id || (
-    routeDraftScore({...form, origen:origenRuta, destino:destinoRuta}, r) >= 44 &&
+  } catch (e) {
+    const existing = await findExistingAfterSave();
+    if (existing?.id) {
+      rutasCreadasRef.current.add(routeKey);
+      setForm(p => ({...p, ruta_id: existing.id}));
+      return existing.id;
+    }
+    throw e;
+  }
+  const nuevaRutaId = nueva?.ruta_id || nueva?.id || nueva?.ruta?.id || null;
+  if (!nuevaRutaId) {
+    const existing = await findExistingAfterSave();
+    if (existing?.id) {
+      rutasCreadasRef.current.add(routeKey);
+      setForm(p => ({...p, ruta_id: existing.id}));
+      return existing.id;
+    }
+    throw new Error("La API no ha devuelto el identificador de la ruta creada.");
+  }
+  setRutas(prev => prev.some(r => r.id === nuevaRutaId || (
+    routeDraftScore({...form, origen:origenRuta, destino:destinoRuta}, r) >= 43 &&
     (!r.cliente_id || r.cliente_id === form.cliente_id)
   )) ? prev : [...prev, {
-    id: nueva.ruta_id,
+    id: nuevaRutaId,
     origen: origenRuta,
     destino: destinoRuta,
     km: toNullableNumber(form.km_ruta),
@@ -6979,8 +7041,8 @@ async function maybeCrearRutaClienteDesdePedido() {
     cliente_id: form.cliente_id,
   }]);
   rutasCreadasRef.current.add(routeKey);
-  setForm(p => ({...p, ruta_id: nueva.ruta_id}));
-  return nueva.ruta_id;
+  setForm(p => ({...p, ruta_id: nuevaRutaId}));
+  return nuevaRutaId;
 }
 
 function pedidoTieneContenidoReal(draft = {}) {
@@ -7249,38 +7311,30 @@ const aplicarEndpointText = (key, tipo) => (e) => {
   setForm(p => {
     const base = { ...p, [key]: value };
     if (!["origen", "destino"].includes(key)) return base;
-    const punto = findPuntoInteresForTypedEndpoint(
-      value,
-      p.cliente_id || "",
-      tipo,
-      tipo === "carga" ? puntosCargaSugeridosModal : puntosDescargaSugeridosModal
-    );
-    if (!punto) {
+    {
       const stopsKey = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
       const regionKey = tipo === "carga" ? "origen_provincia" : "destino_provincia";
       const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
-      const { extras } = splitPrimaryAndAdditionalStops(p[stopsKey], p[key] || "");
-      base[regionKey] = "";
-      ["lat", "lng", "lon", "latitude", "longitude", "google_maps_url"].forEach(suffix => {
-        const staleKey = `${key}_${suffix}`;
-        if (Object.prototype.hasOwnProperty.call(p, staleKey)) base[staleKey] = null;
-      });
+      const { primary, extras } = splitPrimaryAndAdditionalStops(p[stopsKey], p[key] || "");
+      const inferred = isSimpleMunicipalityInput(value) ? inferPlaceGeo(value) : null;
+      const province = inferred?.provincia || primary?.provincia || p[regionKey] || "";
+      if (province && (inferred?.provincia || !p[regionKey])) base[regionKey] = province;
       base[stopsKey] = value.trim() ? [{
+        ...(primary || {}),
         direccion: value,
         es_principal: true,
         pais: p[countryKey] || "España",
-        provincia: "",
-        ciudad: "",
-        codigo_postal: "",
-        cliente_nombre: "",
-        punto_interes_id: null,
-        google_maps_url: "",
-        lat: null,
-        lng: null,
+        provincia: province,
+        ciudad: inferred?.municipio || primary?.ciudad || "",
+        codigo_postal: primary?.codigo_postal || "",
+        cliente_nombre: primary?.cliente_nombre || "",
+        punto_interes_id: primary?.punto_interes_id || null,
+        google_maps_url: primary?.google_maps_url || "",
+        lat: inferred?.lat ?? primary?.lat ?? null,
+        lng: inferred?.lng ?? primary?.lng ?? null,
       }, ...extras] : extras;
       return base;
     }
-    return tipo === "carga" ? applyPuntoCargaToDraft(base, punto) : applyPuntoDescargaToDraft(base, punto);
   });
 };
 
@@ -7294,10 +7348,43 @@ async function resolverEndpointEnFormulario(key, tipo, rawValue = null) {
   const value = String(rawValue != null ? rawValue : (form[key] || "")).trim();
   if (value.length < 2) return;
   const suggestions = tipo === "carga" ? puntosCargaSugeridosModal : puntosDescargaSugeridosModal;
-  if (findPuntoInteresForTypedEndpoint(value, form.cliente_id || "", tipo, suggestions)) return;
+  const punto = findPuntoInteresForTypedEndpoint(value, form.cliente_id || "", tipo, suggestions);
+  if (punto) {
+    setForm(current => {
+      if (normalizePlaceText(current[key]) !== normalizePlaceText(value)) return current;
+      return tipo === "carga" ? applyPuntoCargaToDraft(current, punto) : applyPuntoDescargaToDraft(current, punto);
+    });
+    return;
+  }
   const regionKey = tipo === "carga" ? "origen_provincia" : "destino_provincia";
   const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
   const stopsKey = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
+  const localGeo = isSimpleMunicipalityInput(value) ? inferPlaceGeo(value) : null;
+  if (localGeo?.lat != null && localGeo?.lng != null) {
+    setForm(current => {
+      if (normalizePlaceText(current[key]) !== normalizePlaceText(value)) return current;
+      const { primary, extras } = splitPrimaryAndAdditionalStops(current[stopsKey], current[key] || "");
+      const pais = canonicalCountry(localGeo.pais || current[countryKey] || "España") || current[countryKey] || "España";
+      const canonicalEndpoint = String(localGeo.municipio || value).toUpperCase();
+      return {
+        ...current,
+        [key]: canonicalEndpoint,
+        [regionKey]: localGeo.provincia || current[regionKey] || "",
+        [countryKey]: pais,
+        [stopsKey]: [{
+          ...(primary || {}),
+          direccion: canonicalEndpoint,
+          es_principal: true,
+          ciudad: localGeo.municipio || primary?.ciudad || "",
+          provincia: localGeo.provincia || primary?.provincia || "",
+          pais,
+          lat: Number(localGeo.lat),
+          lng: Number(localGeo.lng),
+        }, ...extras],
+      };
+    });
+    return;
+  }
   try {
     const geo = await resolveGeoPlace({
       q: value,

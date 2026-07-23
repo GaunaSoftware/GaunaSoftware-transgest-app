@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS puntos_interes (
   nombre VARCHAR(180) NOT NULL,
   cif VARCHAR(40),
   direccion TEXT NOT NULL,
+  direccion_key TEXT,
   codigo_postal VARCHAR(20),
   ciudad VARCHAR(120),
   provincia VARCHAR(120),
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS puntos_interes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS direccion_key TEXT;
 DROP INDEX IF EXISTS idx_puntos_interes_empresa_dir;
 DROP INDEX IF EXISTS idx_puntos_interes_empresa_cliente_dir;
 WITH ranked AS (
@@ -61,6 +63,7 @@ UPDATE puntos_interes p
 -- Unicidad por (empresa, cliente, direccion): cada cliente puede tener su propia
 -- copia de una misma direccion; cliente_id NULL = punto general compartido.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cli_dir ON puntos_interes(empresa_id, COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid), LOWER(TRIM(direccion))) WHERE activo=true;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cli_dir_key ON puntos_interes(empresa_id, COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid), direccion_key) WHERE activo=true AND direccion_key IS NOT NULL AND direccion_key <> '';
 CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo=true;
 CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_nombre ON puntos_interes(empresa_id, LOWER(nombre)) WHERE activo=true;
 

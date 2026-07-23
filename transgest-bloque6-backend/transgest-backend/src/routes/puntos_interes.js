@@ -29,6 +29,16 @@ function cleanOptionalText(value) {
   return clean ? clean : null;
 }
 
+function foldPointKey(value) {
+  return cleanText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function numberOrNull(value) {
   const clean = emptyToNull(value);
   if (clean === null) return null;
@@ -74,33 +84,36 @@ function withComputedFields(row) {
   };
 }
 
-async function findExistingPoint({ empresa, clienteId, direccion, nombre, ciudad, provincia }) {
+async function findExistingPoint({ empresa, clienteId, direccion, nombre, ciudad, provincia, direccionKey }) {
   const { rows } = await db.query(
     `SELECT *
        FROM puntos_interes
       WHERE empresa_id=$1
         AND cliente_id IS NOT DISTINCT FROM $2::uuid
         AND activo=true
-        AND (
-          LOWER(TRIM(COALESCE(direccion,'')))=LOWER(TRIM(COALESCE($3,'')))
-          OR (
-            $5::text IS NOT NULL
-            AND
-            LOWER(TRIM(COALESCE(nombre,'')))=LOWER(TRIM(COALESCE($4,'')))
-            AND COALESCE(LOWER(TRIM(ciudad)),'')=COALESCE(LOWER(TRIM($5)),'')
-          )
-          OR (
-            $6::text IS NOT NULL
-            AND
-            LOWER(TRIM(COALESCE(nombre,'')))=LOWER(TRIM(COALESCE($4,'')))
-            AND COALESCE(LOWER(TRIM(provincia)),'')=COALESCE(LOWER(TRIM($6)),'')
-          )
-        )
       ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
-      LIMIT 1`,
-    [empresa, clienteId, direccion, nombre, ciudad, provincia]
+      LIMIT 500`,
+    [empresa, clienteId]
   );
-  return rows[0] || null;
+  const wantedDireccionKey = direccionKey || foldPointKey(direccion);
+  const wantedNombreKey = foldPointKey(nombre);
+  const wantedCiudadKey = foldPointKey(ciudad);
+  const wantedProvinciaKey = foldPointKey(provincia);
+
+  return rows.find((row) => {
+    const rowDireccionKey = foldPointKey(row.direccion_key || row.direccion);
+    if (wantedDireccionKey && rowDireccionKey === wantedDireccionKey) return true;
+
+    const rowNombreKey = foldPointKey(row.nombre);
+    if (!wantedNombreKey || rowNombreKey !== wantedNombreKey) return false;
+
+    const rowCiudadKey = foldPointKey(row.ciudad);
+    const rowProvinciaKey = foldPointKey(row.provincia);
+    return (
+      (wantedCiudadKey && rowCiudadKey === wantedCiudadKey) ||
+      (wantedProvinciaKey && rowProvinciaKey === wantedProvinciaKey)
+    );
+  }) || null;
 }
 
 function isCountryOnly(value = "") {
@@ -234,6 +247,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
   const clienteId = puntoGeneralFromBody(req.body) ? null : emptyToNull(cliente_id);
   const cleanNombre = cleanText(nombre);
   const cleanDireccion = cleanText(direccion);
+  const direccionKey = foldPointKey(cleanDireccion);
   const cleanCiudad = cleanOptionalText(ciudad);
   const cleanProvincia = cleanOptionalText(provincia);
 
@@ -263,14 +277,15 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     nombre: cleanNombre,
     ciudad: location.ciudad,
     provincia: location.provincia,
+    direccionKey,
   });
   if (already) return res.status(200).json(withComputedFields(already));
 
   const { rows } = await db.query(
     `INSERT INTO puntos_interes
       (empresa_id,cliente_id,nombre,cif,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
-       contacto_nombre,contacto_telefono,email,notas,metadata)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       contacto_nombre,contacto_telefono,email,notas,direccion_key,metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -291,6 +306,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
       cleanOptionalText(contacto_telefono),
       cleanOptionalText(email),
       cleanOptionalText(notas),
+      direccionKey,
       normalizeMetadata(metadata, location.googleMapsUrl, location),
     ]
   );
@@ -304,6 +320,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     nombre: cleanNombre,
     ciudad: location.ciudad,
     provincia: location.provincia,
+    direccionKey,
   });
   if (existing) return res.status(200).json(withComputedFields(existing));
   return res.status(409).json({ error: "Ya existe un punto similar o no se ha podido guardar. Actualiza la lista y seleccionalo." });
@@ -321,6 +338,7 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
   const clienteId = puntoGeneralFromBody(req.body) ? null : emptyToNull(cliente_id);
   const cleanNombre = cleanText(nombre);
   const cleanDireccion = cleanText(direccion);
+  const direccionKey = foldPointKey(cleanDireccion);
   const cleanCiudad = cleanOptionalText(ciudad);
   const cleanProvincia = cleanOptionalText(provincia);
 
@@ -350,17 +368,18 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
     nombre: cleanNombre,
     ciudad: location.ciudad,
     provincia: location.provincia,
+    direccionKey,
   });
   if (already && String(already.id) !== String(req.params.id)) {
     return res.status(200).json(withComputedFields(already));
   }
 
   const { rows } = await db.query(
-    `UPDATE puntos_interes SET
+     `UPDATE puntos_interes SET
        nombre=$1,cif=$2,direccion=$3,codigo_postal=$4,ciudad=$5,provincia=$6,pais=$7,
        lat=$8,lng=$9,tipo=$10,ventana=$11,contacto_nombre=$12,contacto_telefono=$13,
-       email=$14,notas=$15,metadata=$16,cliente_id=$17,updated_at=NOW()
-     WHERE id=$18 AND empresa_id=$19 AND activo=true
+       email=$14,notas=$15,direccion_key=$16,metadata=$17,cliente_id=$18,updated_at=NOW()
+     WHERE id=$19 AND empresa_id=$20 AND activo=true
     RETURNING *`,
     [
       cleanNombre,
@@ -378,6 +397,7 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
       cleanOptionalText(contacto_telefono),
       cleanOptionalText(email),
       cleanOptionalText(notas),
+      direccionKey,
       normalizeMetadata(metadata, location.googleMapsUrl, location),
       clienteId,
       req.params.id,

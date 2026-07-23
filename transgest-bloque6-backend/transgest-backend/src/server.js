@@ -402,6 +402,7 @@ async function applyMigrations() {
     await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_ruta_precios_cliente_cliente ON ruta_precios_cliente(cliente_id)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS direccion_key TEXT").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo = true").catch(captureStartupMigrationError);
     await db.query("DROP INDEX IF EXISTS idx_puntos_interes_empresa_dir").catch(captureStartupMigrationError);
     await db.query("DROP INDEX IF EXISTS idx_puntos_interes_empresa_cliente_dir").catch(captureStartupMigrationError);
@@ -433,6 +434,7 @@ async function applyMigrations() {
     // puntos se asociaran al cliente/general equivocado. Ahora la unicidad incluye
     // el cliente (NULL = punto general) para que cada cliente tenga su propia copia.
     await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cli_dir ON puntos_interes(empresa_id, COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid), LOWER(TRIM(direccion))) WHERE activo = true").catch(captureStartupMigrationError);
+    await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cli_dir_key ON puntos_interes(empresa_id, COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid), direccion_key) WHERE activo = true AND direccion_key IS NOT NULL AND direccion_key <> ''").catch(captureStartupMigrationError);
     await db.query(`
       CREATE TABLE IF NOT EXISTS portal_solicitudes_cliente (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

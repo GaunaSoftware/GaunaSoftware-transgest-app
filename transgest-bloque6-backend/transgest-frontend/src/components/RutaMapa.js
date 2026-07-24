@@ -156,14 +156,19 @@ function zoomForBounds(bounds) {
   return 4;
 }
 
-function buildFrame(points = [], layer = "streets") {
+function buildFrame(points = [], layer = "streets", view = { zoomAdj: 0, panX: 0, panY: 0 }) {
   const bounds = boundsFor(points);
   const center = bounds
     ? { lat: (bounds.minLat + bounds.maxLat) / 2, lng: (bounds.minLng + bounds.maxLng) / 2 }
     : DEFAULT_CENTER;
-  const zoom = zoomForBounds(bounds);
+  // Zoom automatico para encuadrar la ruta + ajuste manual del usuario (+/-).
+  const zoom = Math.max(3, Math.min(18, zoomForBounds(bounds) + (Number(view?.zoomAdj) || 0)));
   const centerPx = project(center.lat, center.lng, zoom);
-  const start = { x: centerPx.x - VIEW_WIDTH / 2, y: centerPx.y - VIEW_HEIGHT / 2 };
+  // Desplazamiento manual (arrastrar) en pixeles de la vista.
+  const start = {
+    x: centerPx.x - VIEW_WIDTH / 2 - (Number(view?.panX) || 0),
+    y: centerPx.y - VIEW_HEIGHT / 2 - (Number(view?.panY) || 0),
+  };
   const tileCount = 2 ** zoom;
   const firstX = Math.floor(start.x / TILE_SIZE) - 1;
   const lastX = Math.floor((start.x + VIEW_WIDTH) / TILE_SIZE) + 1;
@@ -279,11 +284,46 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
   const [layer, setLayer] = useState("streets");
   const requestIdRef = useRef(0);
   const forceRef = useRef(false);
+  const [view, setView] = useState({ zoomAdj: 0, panX: 0, panY: 0 });
+  const svgRef = useRef(null);
+  const dragRef = useRef(null);
 
   function recalcular() {
     forceRef.current = true;      // fuerza saltar cache y re-geocodificar
     setRouteState({ key: "", data: null });
     setRetry(value => value + 1);
+  }
+
+  function zoomBy(delta) {
+    setView(v => ({ ...v, zoomAdj: Math.max(-3, Math.min(6, (v.zoomAdj || 0) + delta)) }));
+  }
+  function resetView() {
+    setView({ zoomAdj: 0, panX: 0, panY: 0 });
+  }
+  // Escala px-pantalla -> px-vista (viewBox con slice) para arrastrar el mapa.
+  function viewScale() {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || !rect.width || !rect.height) return 1;
+    return Math.max(VIEW_WIDTH / rect.width, VIEW_HEIGHT / rect.height);
+  }
+  function onPointerDown(e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) { /* noop */ }
+  }
+  function onPointerMove(e) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const scale = viewScale();
+    const dx = (e.clientX - drag.x) * scale;
+    const dy = (e.clientY - drag.y) * scale;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    setView(v => ({ ...v, panX: (v.panX || 0) + dx, panY: (v.panY || 0) + dy }));
+  }
+  function onPointerUp(e) {
+    dragRef.current = null;
+    try { e.currentTarget.releasePointerCapture?.(e.pointerId); } catch (_) { /* noop */ }
   }
 
   const pointKey = JSON.stringify(points.map((point, index) => normalizedPoint(point, index)));
@@ -299,8 +339,11 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
     () => [...displayPoints, ...geometry, ...(vehicleCoords ? [vehicleCoords] : [])],
     [displayPoints, geometry, vehicleCoords]
   );
-  const frame = useMemo(() => buildFrame(framePoints, layer), [framePoints, layer]);
+  const frame = useMemo(() => buildFrame(framePoints, layer, view), [framePoints, layer, view]);
   const routeLine = geometry.map(point => screenPoint(point, frame));
+
+  // Al cambiar de pedido/ruta, volver al encuadre automatico.
+  useEffect(() => { setView({ zoomAdj: 0, panX: 0, panY: 0 }); }, [pointKey]);
 
   useEffect(() => {
     let active = true;
@@ -340,8 +383,16 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
 
   return (
     <div style={{ position:"relative", zIndex:0, isolation:"isolate", border:"1px solid var(--border2)", borderRadius:8, overflow:"hidden", background:"var(--bg3)" }}>
-      <div style={{ position:"relative", width:"100%", height:"clamp(280px, 38vh, 440px)", overflow:"hidden", background:"#dbeafe" }} role="img" aria-label="Ruta y puntos operativos del pedido">
-        <svg viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`} preserveAspectRatio="xMidYMid slice" style={{ width:"100%", height:"100%", display:"block" }}>
+      <div
+        style={{ position:"relative", width:"100%", height:"clamp(280px, 38vh, 440px)", overflow:"hidden", background:"#dbeafe", cursor: dragRef.current ? "grabbing" : "grab", touchAction:"none" }}
+        role="img"
+        aria-label="Ruta y puntos operativos del pedido"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+      >
+        <svg ref={svgRef} viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`} preserveAspectRatio="xMidYMid slice" style={{ width:"100%", height:"100%", display:"block" }}>
           <FallbackMapBase layer={layer} />
           {frame.tiles.map(tile => (
             <image key={tile.key} href={tile.url} x={tile.x} y={tile.y} width={TILE_SIZE} height={TILE_SIZE} preserveAspectRatio="none" />
@@ -388,6 +439,36 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
             );
           })()}
         </svg>
+        <div
+          style={{ position:"absolute", top:10, left:10, display:"flex", flexDirection:"column", gap:5 }}
+          onPointerDown={e => e.stopPropagation()}
+        >
+          {[
+            { label:"+", act:() => zoomBy(1), aria:"Acercar" },
+            { label:"−", act:() => zoomBy(-1), aria:"Alejar" },
+          ].map(btn => (
+            <button
+              key={btn.aria}
+              type="button"
+              onClick={btn.act}
+              aria-label={btn.aria}
+              style={{ width:32, height:32, border:"1px solid rgba(15,23,42,.16)", background:"rgba(255,255,255,.92)", color:"#0f172a", borderRadius:7, fontSize:18, fontWeight:900, cursor:"pointer", boxShadow:"0 8px 20px rgba(15,23,42,.12)", lineHeight:1 }}
+            >
+              {btn.label}
+            </button>
+          ))}
+          {(view.zoomAdj !== 0 || view.panX !== 0 || view.panY !== 0) && (
+            <button
+              type="button"
+              onClick={resetView}
+              aria-label="Ajustar a la ruta"
+              title="Ajustar a la ruta"
+              style={{ width:32, height:32, border:"1px solid rgba(15,23,42,.16)", background:"rgba(255,255,255,.92)", color:"#0f766e", borderRadius:7, fontSize:14, fontWeight:900, cursor:"pointer", boxShadow:"0 8px 20px rgba(15,23,42,.12)", lineHeight:1 }}
+            >
+              &#9635;
+            </button>
+          )}
+        </div>
         <div style={{ position:"absolute", top:10, right:10, display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
           {Object.entries(MAP_LAYERS).map(([key, item]) => (
             <button

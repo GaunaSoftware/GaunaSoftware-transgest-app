@@ -941,8 +941,9 @@ function readChoferesFocus() {
 }
 
 export default function Choferes() {
-  const { puedeEditar }  = useAuth();
+  const { puedeEditar, user } = useAuth();
   const canEdit          = puedeEditar("choferes");
+  const esGerente        = user?.rol === "gerente";
   const [focusChofer]    = useState(() => readChoferesFocus());
   const [choferes,  setChoferes]  = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
@@ -1097,7 +1098,7 @@ export default function Choferes() {
                       <span style={{ ...S.badge, background: c.activo!==false ? "var(--green-dim)" : "rgba(239,68,68,.1)", color: c.activo!==false ? "var(--green)" : "var(--red)" }}>
                         {c.activo!==false ? "Activo" : "Baja"}
                       </span>
-                      {canEdit && (
+                      {esGerente && (
                         <button
                           type="button"
                           onClick={(event)=>eliminarChofer(c, event)}

@@ -530,6 +530,9 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_colaborador VARCHAR(60)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS matricula_manual VARCHAR(60)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_manual VARCHAR(60)").catch(() => {});
+      // Fecha real en que se marco como entregado/descargado (para el plan diario:
+      // si se descarga antes de la fecha programada, no arrastrar el viaje a ese dia).
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS entregado_at DATE").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_lateral BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_trasera BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_techo BOOLEAN DEFAULT false").catch(() => {});
@@ -2929,6 +2932,14 @@ async function solicitarAlbaranesAdministracionSiFaltan(pedidoId, empresaId, use
 }
 
 async function aplicarAutomatismosEntrega(pedidoId, empresaId, userId = null, options = {}) {
+  // Registrar la fecha real de entrega la primera vez que se marca entregado.
+  // El plan diario la usa para no arrastrar un viaje ya descargado a su fecha
+  // de descarga programada posterior.
+  await db.query(
+    `UPDATE pedidos SET entregado_at = COALESCE(entregado_at, CURRENT_DATE)
+      WHERE id=$1 AND empresa_id=$2 AND estado::text='entregado'`,
+    [pedidoId, empresaId]
+  ).catch(e => logger.warn("No se pudo fijar entregado_at:", e.message));
   await crearFacturaBorradorPedido(pedidoId, empresaId, userId)
     .catch(e => logger.error("No se pudo crear factura borrador automatica:", e.message));
   await vincularAlbaranesAFacturaPedido(pedidoId, empresaId);
@@ -5124,7 +5135,15 @@ async function sincronizarConjuntoChoferDesdePedido(queryClient, pedido = {}, em
 }
 
 function pedidoTieneMinimosOperativos(pedido = {}) {
-  const tieneAsignacion = Boolean(pedido.vehiculo_id || pedido.colaborador_id);
+  // Cuenta tambien la matricula a mano / de colaborador (asignacion desde fuera del
+  // pedido), no solo vehiculo de flota o colaborador. Si no, al asignar una
+  // matricula manual el pedido se quedaba en amarillo (pendiente_completar).
+  const tieneAsignacion = Boolean(
+    pedido.vehiculo_id ||
+    pedido.colaborador_id ||
+    String(pedido.matricula_manual || "").trim() ||
+    String(pedido.matricula_colaborador || "").trim()
+  );
   const importe = Number(pedido.importe || pedido.precio_cliente_col || 0);
   return Boolean(
     pedido.cliente_id &&

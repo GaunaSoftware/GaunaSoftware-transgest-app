@@ -100,7 +100,15 @@ function buildRutaPedido(p) {
 
 function buildPedidoResumen(p, fecha) {
   const carga = dateOnly(p.fecha_carga || p.fecha_pedido);
-  const descarga = dateOnly(p.fecha_descarga || p.fecha_entrega);
+  const descargaProgramada = dateOnly(p.fecha_descarga || p.fecha_entrega);
+  // Fecha efectiva de descarga: si ya se entrego, la fecha real; si no, la
+  // programada. Asi un viaje descargado antes de tiempo no aparece en su dia de
+  // descarga programado, y uno que carga el 13 y descarga el 14 sale el 14 como
+  // "descarga" salvo que se marcara descargado el 13.
+  const entregadoReal = (String(p.estado || "").toLowerCase() === "entregado" && p.entregado_at)
+    ? dateOnly(p.entregado_at)
+    : null;
+  const descarga = entregadoReal || descargaProgramada;
   const momento = carga === fecha && descarga === fecha
     ? "carga_descarga"
     : descarga === fecha
@@ -248,7 +256,12 @@ router.get("/", async (req, res, next) => {
             AND COALESCE(p.estado::text,'pendiente') NOT IN ('cancelado','facturado')
             AND (
               COALESCE(p.fecha_carga, p.fecha_pedido)::date=$2::date
-              OR COALESCE(p.fecha_descarga, p.fecha_entrega)::date=$2::date
+              OR (
+                CASE WHEN p.estado::text='entregado' AND p.entregado_at IS NOT NULL
+                     THEN p.entregado_at
+                     ELSE COALESCE(p.fecha_descarga, p.fecha_entrega)
+                END
+              )::date=$2::date
             )
           ORDER BY COALESCE(p.hora_carga, p.hora_descarga, '23:59') ASC, p.numero ASC`,
         [empresa, fecha]

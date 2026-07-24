@@ -1,7 +1,7 @@
 const express = require("express");
 const db      = require("../services/db");
 const logger  = require("../services/logger");
-const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
+const { authenticate, GERENTE_O_TRAFICO, SOLO_GERENTE } = require("../middleware/auth");
 const { crearNotificacion } = require("../services/notificaciones");
 const { validateBase64Upload } = require("../services/uploadValidation");
 const router  = express.Router();
@@ -1391,7 +1391,9 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
   } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });
 
-router.delete("/:id", GERENTE_O_TRAFICO, async (req, res) => {
+// Eliminar chofer: SOLO gerente. Si tiene pedidos asociados hace baja blanda
+// (conserva historico); si no, borrado real.
+router.delete("/:id", SOLO_GERENTE, async (req, res) => {
   try {
     await ensureChoferesTransparencySchema();
     const empresaId = req.empresaId || req.user?.empresa_id;

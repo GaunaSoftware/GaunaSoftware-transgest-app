@@ -2320,6 +2320,7 @@ function routeLonLatToWorld({ lon, lat }, zoom) {
 }
 
 function buildEmbeddedRouteMap(points, width = 720, height = 310) {
+  const maptilerKey = process.env.REACT_APP_MAPTILER_KEY || "";
   const valid = points.filter(p => Number.isFinite(Number(p.lon)) && Number.isFinite(Number(p.lat)));
   if (valid.length < 2) return null;
   const minLon = Math.min(...valid.map(p => Number(p.lon)));
@@ -2341,11 +2342,15 @@ function buildEmbeddedRouteMap(points, width = 720, height = 310) {
     for (let ty = minTileY; ty <= maxTileY; ty += 1) {
       if (ty < 0 || ty >= maxTile) continue;
       const wrappedX = ((tx % maxTile) + maxTile) % maxTile;
+      const url = maptilerKey
+        ? `https://api.maptiler.com/maps/streets-v2/${zoom}/${wrappedX}/${ty}.png?key=${encodeURIComponent(maptilerKey)}`
+        : "";
+      if (!url) continue;
       tiles.push({
         key: `${zoom}-${tx}-${ty}`,
         left: Math.round(tx * 256 - topLeft.x),
         top: Math.round(ty * 256 - topLeft.y),
-        url: `https://a.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${wrappedX}/${ty}.png`,
+        url,
       });
     }
   }
@@ -2416,6 +2421,9 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
         </div>
         {embeddedMap && (
           <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"var(--bg3)"}}>
+            {!embeddedMap.tiles.length && (
+              <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 22% 20%, rgba(20,184,166,.12), transparent 28%), linear-gradient(135deg, rgba(226,245,241,.9), rgba(239,246,255,.92))"}} />
+            )}
             {embeddedMap.tiles.map(tile => (
               <img key={tile.key} src={tile.url} alt="" draggable="false" style={{position:"absolute",left:tile.left,top:tile.top,width:256,height:256,userSelect:"none",pointerEvents:"none"}} />
             ))}
@@ -2430,7 +2438,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
               ))}
             </svg>
             <div style={{position:"absolute",right:8,bottom:8,background:"rgba(255,255,255,.86)",border:"1px solid rgba(148,163,184,.5)",borderRadius:6,padding:"3px 6px",fontSize:10,color:"#334155"}}>
-              Carto / OpenStreetMap
+              Mapa TransGest
             </div>
           </div>
         )}
@@ -5533,4 +5541,3 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos }) {
     </div>
   );
 }
-

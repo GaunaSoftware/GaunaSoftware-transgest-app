@@ -8,12 +8,16 @@ const DEFAULT_CENTER = { lat: 40.2, lng: -3.7 };
 const MIN_LAT = -85.05112878;
 const MAX_LAT = 85.05112878;
 
+const MAPTILER_KEY = process.env.REACT_APP_MAPTILER_KEY || "";
+const HAS_REAL_TILE_PROVIDER = Boolean(MAPTILER_KEY);
 const MAP_LAYERS = {
-  streets: { label: "Mapa", attribution: "cartografia base" },
-  relief: { label: "Relieve", attribution: "cartografia de relieve" },
-  light: { label: "Claro", attribution: "cartografia clara" },
+  streets: { label: "Mapa", style: "streets-v2", attribution: "MapTiler" },
+  relief: { label: "Relieve", style: "outdoor-v2", attribution: "MapTiler" },
+  light: { label: "Claro", style: "basic-v2-light", attribution: "MapTiler" },
 };
 const MAP_BRAND = "Mapa TransGest";
+const GRID_X = [96, 192, 288, 384, 480, 576, 672, 768, 864];
+const GRID_Y = [70, 140, 210, 280, 350];
 
 function safeCoordinate(value, min, max) {
   const parsed = Number(value);
@@ -88,14 +92,9 @@ function providerLabel(route) {
 }
 
 function tileUrl(layer, z, x, y) {
-  const key = process.env.REACT_APP_MAPTILER_KEY || "";
-  if (key) {
-    const style = layer === "relief" ? "outdoor-v2" : layer === "light" ? "basic-v2-light" : "streets-v2";
-    return `https://api.maptiler.com/maps/${style}/${z}/${x}/${y}.png?key=${encodeURIComponent(key)}`;
-  }
-  if (layer === "relief") return `https://a.tile.opentopomap.org/${z}/${x}/${y}.png`;
-  if (layer === "light") return `https://a.basemaps.cartocdn.com/light_all/${z}/${x}/${y}.png`;
-  return `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+  if (!MAPTILER_KEY) return "";
+  const style = MAP_LAYERS[layer]?.style || MAP_LAYERS.streets.style;
+  return `https://api.maptiler.com/maps/${style}/${z}/${x}/${y}.png?key=${encodeURIComponent(MAPTILER_KEY)}`;
 }
 
 function project(lat, lng, zoom) {
@@ -175,15 +174,85 @@ function buildFrame(points = [], layer = "streets") {
     const wrappedX = ((tx % tileCount) + tileCount) % tileCount;
     for (let ty = firstY; ty <= lastY; ty += 1) {
       if (ty < 0 || ty >= tileCount) continue;
+      const url = tileUrl(layer, zoom, wrappedX, ty);
+      if (!url) continue;
       tiles.push({
         key: `${zoom}-${tx}-${ty}-${layer}`,
         x: tx * TILE_SIZE - start.x,
         y: ty * TILE_SIZE - start.y,
-        url: tileUrl(layer, zoom, wrappedX, ty),
+        url,
       });
     }
   }
   return { zoom, start, tiles };
+}
+
+function fallbackPalette(layer) {
+  if (layer === "relief") return {
+    sea: "#c9e8f2",
+    land: "#e7f3dc",
+    road: "#d7b178",
+    road2: "#9cc7a8",
+    grid: "#87a99a",
+    label: "#45635b",
+  };
+  if (layer === "light") return {
+    sea: "#e8f2f7",
+    land: "#f7f9f6",
+    road: "#d6dee7",
+    road2: "#bfd8dc",
+    grid: "#b8c8c9",
+    label: "#64748b",
+  };
+  return {
+    sea: "#cae7ef",
+    land: "#edf4e3",
+    road: "#f1b46c",
+    road2: "#94c7b5",
+    grid: "#8fb0a2",
+    label: "#475569",
+  };
+}
+
+function FallbackMapBase({ layer }) {
+  const palette = fallbackPalette(layer);
+  return (
+    <g aria-hidden="true">
+      <rect x="0" y="0" width={VIEW_WIDTH} height={VIEW_HEIGHT} fill={palette.sea} />
+      <path
+        d="M-40 54 C92 22 157 62 249 49 C359 32 412 74 498 59 C605 41 676 24 782 61 C864 91 934 82 1004 45 L1004 430 L-40 430 Z"
+        fill={palette.land}
+      />
+      <path
+        d="M25 323 C117 285 185 310 278 268 C363 230 404 251 481 214 C573 170 624 182 705 143 C794 101 875 114 971 75"
+        fill="none"
+        stroke={palette.road}
+        strokeWidth="9"
+        strokeLinecap="round"
+        opacity=".72"
+      />
+      <path
+        d="M88 92 C192 119 245 163 326 170 C430 180 478 234 568 255 C648 275 718 310 854 302"
+        fill="none"
+        stroke={palette.road2}
+        strokeWidth="7"
+        strokeLinecap="round"
+        opacity=".58"
+      />
+      <path
+        d="M154 372 C258 313 266 253 344 206 C419 160 513 146 620 83"
+        fill="none"
+        stroke={palette.road}
+        strokeWidth="5"
+        strokeLinecap="round"
+        opacity=".48"
+      />
+      {GRID_X.map(x => <line key={`fallback-x-${x}`} x1={x} x2={x} y1="0" y2={VIEW_HEIGHT} stroke={palette.grid} strokeWidth="1" opacity=".18" />)}
+      {GRID_Y.map(y => <line key={`fallback-y-${y}`} y1={y} y2={y} x1="0" x2={VIEW_WIDTH} stroke={palette.grid} strokeWidth="1" opacity=".18" />)}
+      <text x="28" y="38" fill={palette.label} fontSize="13" fontWeight="900" opacity=".78">Mapa tecnico TransGest</text>
+      <text x="28" y="61" fill={palette.label} fontSize="10" fontWeight="700" opacity=".6">Ruta y puntos operativos</text>
+    </g>
+  );
 }
 
 function screenPoint(point, frame) {
@@ -264,7 +333,7 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
     <div style={{ position:"relative", zIndex:0, isolation:"isolate", border:"1px solid var(--border2)", borderRadius:8, overflow:"hidden", background:"var(--bg3)" }}>
       <div style={{ position:"relative", width:"100%", height:"clamp(280px, 38vh, 440px)", overflow:"hidden", background:"#dbeafe" }} role="img" aria-label="Ruta y puntos operativos del pedido">
         <svg viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`} preserveAspectRatio="xMidYMid slice" style={{ width:"100%", height:"100%", display:"block" }}>
-          <rect x="0" y="0" width={VIEW_WIDTH} height={VIEW_HEIGHT} fill="#dbeafe" />
+          <FallbackMapBase layer={layer} />
           {frame.tiles.map(tile => (
             <image key={tile.key} href={tile.url} x={tile.x} y={tile.y} width={TILE_SIZE} height={TILE_SIZE} preserveAspectRatio="none" />
           ))}
@@ -333,7 +402,7 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
           ))}
         </div>
         <div style={{ position:"absolute", right:9, bottom:7, borderRadius:5, padding:"3px 6px", fontSize:10, color:"#0f172a", background:"rgba(255,255,255,.78)" }}>
-          {MAP_BRAND} - {MAP_LAYERS[layer]?.attribution || "cartografia base"}
+          {MAP_BRAND} - {HAS_REAL_TILE_PROVIDER ? (MAP_LAYERS[layer]?.attribution || "MapTiler") : "base interna"}
         </div>
       </div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"9px 11px", flexWrap:"wrap" }}>

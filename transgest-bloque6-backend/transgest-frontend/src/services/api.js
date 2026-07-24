@@ -1041,7 +1041,7 @@ export const actualizarGpsPedido = (id, data) =>
 export const registrarGpsChoferApp = (data) =>
   apiFetch("/choferes/app/gps", { method: "POST", body: data, timeoutMs: 15000, silentSuccess: true, silentError: true });
 
-export const calcularRutaGeo = (points = []) => {
+export const calcularRutaGeo = (points = [], { force = false } = {}) => {
   const compactPoints = points.map(point => {
     const hasExplicitQuery = Object.prototype.hasOwnProperty.call(point, "query");
     return {
@@ -1059,7 +1059,8 @@ export const calcularRutaGeo = (points = []) => {
       lng: point.lng ?? point.lon ?? point.longitude ?? point.longitud ?? null,
     };
   });
-  return apiFetch(`/geocoding/route?points=${encodeURIComponent(JSON.stringify(compactPoints))}`, {
+  const refreshParam = force ? "&refresh=1" : "";
+  return apiFetch(`/geocoding/route?points=${encodeURIComponent(JSON.stringify(compactPoints))}${refreshParam}`, {
     timeoutMs: 35000,
     silentSuccess: true,
   });

@@ -278,6 +278,13 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
   const [retry, setRetry] = useState(0);
   const [layer, setLayer] = useState("streets");
   const requestIdRef = useRef(0);
+  const forceRef = useRef(false);
+
+  function recalcular() {
+    forceRef.current = true;      // fuerza saltar cache y re-geocodificar
+    setRouteState({ key: "", data: null });
+    setRetry(value => value + 1);
+  }
 
   const pointKey = JSON.stringify(points.map((point, index) => normalizedPoint(point, index)));
   const routePoints = useMemo(() => JSON.parse(pointKey), [pointKey]);
@@ -306,9 +313,11 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
       return () => { active = false; };
     }
     setErrorState({ key: pointKey, message: "" });
+    const force = forceRef.current;
+    forceRef.current = false;
     const timer = window.setTimeout(() => {
       setLoadingKey(pointKey);
-      calcularRutaGeo(routePoints)
+      calcularRutaGeo(routePoints, { force })
         .then(data => {
           if (!active || requestIdRef.current !== requestId) return;
           if (!data?.ok) throw new Error(data?.error || "No se pudo calcular la ruta");
@@ -415,9 +424,15 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
           {route?.warning && <span style={{ color:"#b45309" }}>{route.warning}</span>}
           {error && <span role="alert" style={{ color:"#64748b" }}>{error}</span>}
         </div>
-        {error && (
-          <button type="button" onClick={() => setRetry(value => value + 1)} style={{ border:"1px solid var(--border2)", background:"var(--button-bg)", color:"var(--text)", borderRadius:7, padding:"6px 10px", fontWeight:800, cursor:"pointer" }}>
-            Reintentar
+        {(routeReady || error) && (
+          <button
+            type="button"
+            onClick={recalcular}
+            disabled={loading}
+            title="Vuelve a geocodificar y recalcular la ruta ignorando la cache. Util si un punto sale en el sitio equivocado."
+            style={{ border:"1px solid var(--border2)", background:"var(--button-bg)", color:"var(--text)", borderRadius:7, padding:"6px 10px", fontWeight:800, cursor:loading?"wait":"pointer", opacity:loading?0.6:1, display:"inline-flex", alignItems:"center", gap:6 }}
+          >
+            <span style={{ fontSize:13, lineHeight:1 }}>&#8635;</span> {loading ? "Recalculando..." : "Recalcular"}
           </button>
         )}
       </div>

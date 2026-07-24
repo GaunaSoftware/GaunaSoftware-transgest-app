@@ -280,7 +280,7 @@ async function cachePlace(empresaId, queryKey, q, country, region, resolved) {
   return result;
 }
 
-async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} }) {
+async function resolvePlace({ empresaId, q, country = "", region = "", raw = {}, forceRefresh = false }) {
   const direct = directCoordinates(raw);
   if (direct) return { provider: "coordinates", ...formatPlace({ ...raw, ...direct, label: raw.label || q }) };
   // Enlace corto de Google Maps (maps.app.goo.gl): se expande por red y se usa
@@ -294,14 +294,18 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} 
     throw Object.assign(new Error("Indica una poblacion o direccion, no solo el pais"), { status: 400 });
   }
   const queryKey = normalizeKey([PLACE_CACHE_VERSION, query, request.country, request.region].filter(Boolean).join("|"));
-  const cached = await db.query(
-    "SELECT result, provider FROM geo_place_cache WHERE empresa_id=$1 AND query_key=$2 LIMIT 1",
-    [empresaId, queryKey]
-  );
-  if (cached.rows[0]?.result) {
-    const cachedPlace = { ...formatPlace(cached.rows[0].result), provider: cached.rows[0].provider || "cache" };
-    const validCached = selectBestPlaceCandidate(request, [cachedPlace]);
-    if (validCached) return validCached;
+  // Con forceRefresh (boton "Recalcular") saltamos la cache y re-geocodificamos,
+  // reescribiendo el resultado guardado.
+  if (!forceRefresh) {
+    const cached = await db.query(
+      "SELECT result, provider FROM geo_place_cache WHERE empresa_id=$1 AND query_key=$2 LIMIT 1",
+      [empresaId, queryKey]
+    );
+    if (cached.rows[0]?.result) {
+      const cachedPlace = { ...formatPlace(cached.rows[0].result), provider: cached.rows[0].provider || "cache" };
+      const validCached = selectBestPlaceCandidate(request, [cachedPlace]);
+      if (validCached) return validCached;
+    }
   }
 
   // Google primero si hay clave configurada: fiable y sin depender de la IP.
@@ -496,6 +500,9 @@ async function handleRoute(req, res, next) {
     const empresaId = req.user?.empresa_id || req.empresaId;
     if (!empresaId) return res.status(401).json({ error: "Empresa no identificada" });
     await ensureSchema();
+    const forceRefresh = ["1", "true", "yes", "si"].includes(
+      String(req.query.refresh || req.query.force || req.body?.refresh || req.body?.force || "").toLowerCase()
+    );
     const rawPoints = parseRoutePoints(req);
     const points = [];
     for (const raw of rawPoints) {
@@ -505,6 +512,7 @@ async function handleRoute(req, res, next) {
         country: raw.country,
         region: raw.region,
         raw,
+        forceRefresh,
       });
       points.push({
         ...raw,
@@ -519,7 +527,7 @@ async function handleRoute(req, res, next) {
     }
 
     const key = routeKey(points);
-    let route = await cachedRoute(empresaId, key);
+    let route = forceRefresh ? null : await cachedRoute(empresaId, key);
     let source = "cache";
     if (!route) {
       source = "live";

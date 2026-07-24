@@ -6316,8 +6316,9 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   const sourceStop = {
     ...puntoStop,
     ...rawStop,
-    lat: rawStop.lat ?? rawStop.latitud ?? rawStop.latitude ?? puntoStop.lat ?? puntoStop.latitud ?? mapsCoords?.lat ?? null,
-    lng: rawStop.lng ?? rawStop.longitud ?? rawStop.lon ?? rawStop.longitude ?? puntoStop.lng ?? puntoStop.longitud ?? mapsCoords?.lng ?? null,
+    // El enlace de Google Maps manda sobre las coordenadas guardadas (pin exacto).
+    lat: mapsCoords?.lat ?? rawStop.lat ?? rawStop.latitud ?? rawStop.latitude ?? puntoStop.lat ?? puntoStop.latitud ?? null,
+    lng: mapsCoords?.lng ?? rawStop.lng ?? rawStop.longitud ?? rawStop.lon ?? rawStop.longitude ?? puntoStop.lng ?? puntoStop.longitud ?? null,
     google_maps_url: googleMapsUrl,
     provincia: rawStop.provincia || rawStop.region || puntoStop.provincia || "",
     pais: rawStop.pais || rawStop.country || puntoStop.pais || "",

@@ -281,12 +281,19 @@ async function cachePlace(empresaId, queryKey, q, country, region, resolved) {
 }
 
 async function resolvePlace({ empresaId, q, country = "", region = "", raw = {}, forceRefresh = false }) {
+  // PRIORIDAD MAXIMA: el enlace de Google Maps (pin exacto). Si existe y da
+  // coordenadas fiables, manda sobre las coordenadas guardadas y sobre el texto.
+  // Asi un enlace correcto no queda anulado por unas coordenadas guardadas viejas.
+  const mapsUrl = raw.google_maps_url || raw.maps_url || raw.googleMapsUrl || "";
+  if (mapsUrl) {
+    const linkCoords = await resolveMapsCoords(mapsUrl).catch(() => null);
+    if (linkCoords) {
+      return { provider: "coordinates", ...formatPlace({ ...raw, lat: linkCoords.lat, lng: linkCoords.lng, label: raw.label || q }) };
+    }
+  }
+  // Coordenadas guardadas (o escritas dentro del texto).
   const direct = directCoordinates(raw);
   if (direct) return { provider: "coordinates", ...formatPlace({ ...raw, ...direct, label: raw.label || q }) };
-  // Enlace corto de Google Maps (maps.app.goo.gl): se expande por red y se usa
-  // el punto exacto, para no depender de geocodificar el texto.
-  const shortLink = await resolveMapsCoords(raw.google_maps_url || raw.maps_url || raw.googleMapsUrl || "");
-  if (shortLink) return { provider: "coordinates", ...formatPlace({ ...raw, lat: shortLink.lat, lng: shortLink.lng, label: raw.label || q }) };
   const request = parsePlaceRequest(cleanText(q), country, region);
   const query = request.query;
   if (query.length < 2) throw Object.assign(new Error("Indica una poblacion o direccion"), { status: 400 });

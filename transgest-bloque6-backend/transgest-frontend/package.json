@@ -83,7 +83,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -96,13 +97,15 @@
       "target": [
         "dmg"
       ],
-      "category": "public.app-category.business"
+      "category": "public.app-category.business",
+      "icon": "assets/icon.png"
     },
     "linux": {
       "target": [
         "AppImage"
       ],
-      "category": "Office"
+      "category": "Office",
+      "icon": "assets/icon.png"
     }
   }
 }

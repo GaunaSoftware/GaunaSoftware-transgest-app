@@ -76,9 +76,17 @@ Con eso `electron-builder` extrae `winCodeSign` y produce el instalador NSIS
 
 ## Icono
 
-Sin icono propio usa el de Electron. Para icono de empresa: añadir
-`assets/icon.ico` (256×256) — electron-builder lo toma automáticamente (carpeta
-`buildResources: assets`).
+Ya generado a partir del **logo real de TransGest**: se extrae el isotipo (la "T"
+de carretera del wordmark) y se compone en cuadrado con el degradado de marca.
+Ficheros en `assets/`: `icon.ico` (multi-resolución, Windows), `icon.png` (1024,
+mac/linux) y `icon.svg` (fuente). Ya referenciados en el bloque `build`.
+
+Regenerar (si cambia el logo):
+
+```bash
+npm i -D @resvg/resvg-js png-to-ico   # utilidades solo para esto
+node scripts/gen-desktop-icon.js
+```
 
 ## macOS / Linux
 

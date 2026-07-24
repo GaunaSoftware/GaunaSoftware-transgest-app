@@ -31,6 +31,7 @@
     "mobile:icons": "npx @capacitor/assets generate --iconBackgroundColor '#0d1017' --splashBackgroundColor '#0d1017'",
     "desktop:build": "cross-env PUBLIC_URL=./ react-scripts build",
     "desktop:run": "electron .",
+    "desktop:portable": "npm run desktop:build && node scripts/pack-desktop.js",
     "desktop:dist": "npm run desktop:build && electron-builder --win --publish never",
     "test": "react-scripts test",
     "audit:alerts": "node scripts/audit_alerts.js",
@@ -63,7 +64,8 @@
     "ajv": "^8.12.0",
     "cross-env": "^7.0.3",
     "electron": "^33.4.11",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "rcedit": "^5.0.2"
   },
   "build": {
     "extends": null,

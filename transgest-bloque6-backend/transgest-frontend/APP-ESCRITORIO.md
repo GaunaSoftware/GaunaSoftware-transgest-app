@@ -38,26 +38,33 @@ módulos resuelven la URL con `resolveApiBase()`.
 Desde `transgest-frontend/`:
 
 ```bash
-# 1. Compila la web con rutas relativas (necesario para file://)
-npm run desktop:build
+# PORTABLE con icono + zip, en un solo comando -> lo que funciona hoy en Windows
+npm run desktop:portable
+#   1) compila la web con rutas relativas (PUBLIC_URL=./)
+#   2) electron-builder --win dir  (genera dist-desktop/win-unpacked)
+#   3) rcedit incrusta assets/icon.ico + datos de versión en TransGest.exe
+#   4) zip -> dist-desktop/TransGest-portable-win-x64.zip
 
-# 2a. Versión PORTABLE (carpeta ejecutable, sin instalador) -> lo que funciona hoy
-npx electron-builder --win dir
-#     Resultado: dist-desktop/win-unpacked/TransGest.exe  (carpeta autocontenida)
-
-# 2b. Instalador NSIS (.exe de instalación) -> requiere permiso de symlinks
+# Instalador NSIS (.exe de instalación) -> requiere permiso de symlinks (ver abajo)
 npm run desktop:dist
-#     Resultado: dist-desktop/TransGest Setup 1.0.0.exe
+#   Resultado: dist-desktop/TransGest Setup 1.0.0.exe
 ```
 
 `npm run desktop:run` lanza la app con Electron sobre el último `build/` (para probar
 sin empaquetar).
 
+> **Por qué `desktop:portable` usa rcedit:** en Windows sin Modo desarrollador,
+> electron-builder falla al extraer `winCodeSign` (symlinks de macOS), lo que
+> además de bloquear el instalador **impide que incruste el icono**. El script
+> `scripts/pack-desktop.js` genera la carpeta portable igualmente y luego mete el
+> icono con `rcedit`. Con Modo desarrollador/Admin, `desktop:dist` ya lo hace todo
+> nativo y este apaño no hace falta.
+
 ## Distribuir hoy (portable)
 
-Ya generado: **`dist-desktop/TransGest-portable-win-x64.zip`** (~111 MB). El cliente
-lo descomprime y ejecuta **`TransGest.exe`** — no necesita instalar nada. Probado:
-arranca y muestra la ventana "TransGest TMS".
+Ya generado: **`dist-desktop/TransGest-portable-win-x64.zip`** (~111 MB, con el icono
+de TransGest incrustado). El cliente lo descomprime y ejecuta **`TransGest.exe`** —
+no necesita instalar nada. Probado: arranca y muestra la ventana "TransGest TMS".
 
 ## Instalador NSIS — limitación conocida (Windows)
 

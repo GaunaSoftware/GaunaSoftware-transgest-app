@@ -980,6 +980,15 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   const matriculaTractora = pedido?.matricula_colaborador || pedido?.vehiculo_matricula || pedido?.veh_matricula || pedido?.matricula || "";
   const matriculaRemolque = pedido?.remolque_matricula_colaborador || pedido?.remolque_matricula || pedido?.rem_matricula || pedido?.remolque_mat || "";
   const pesoKg = Number(pedido?.peso_kg || pedido?.kg || 0);
+  // Huella de CO2 estimada del viaje: km x consumo medio / 100 x factor diesel.
+  // Mismos valores que el informe de emisiones (cfg_precios.sostenibilidad).
+  const kmRutaDcd = Number(String(pedido?.km_ruta ?? pedido?.km ?? "").replace(",", ".")) || 0;
+  const sostenibilidadDcd = (empresa?.cfg_precios?.sostenibilidad && typeof empresa.cfg_precios.sostenibilidad === "object")
+    ? empresa.cfg_precios.sostenibilidad
+    : (empresa?.sostenibilidad && typeof empresa.sostenibilidad === "object" ? empresa.sostenibilidad : {});
+  const consumoDcd = Number(sostenibilidadDcd.consumo_l_100km) > 0 ? Number(sostenibilidadDcd.consumo_l_100km) : 32;
+  const factorDcd = Number(sostenibilidadDcd.factor_kg_co2_litro) > 0 ? Number(sostenibilidadDcd.factor_kg_co2_litro) : 2.68;
+  const co2KgDcd = kmRutaDcd > 0 ? Math.round((kmRutaDcd * consumoDcd / 100) * factorDcd) : 0;
   const codigoControl = buildCodigoControl({ empresaId, pedidoId: pedido?.id });
   const publicUrl = buildPublicUrl({ empresaId, pedidoId: pedido?.id, config, appBaseUrl });
   const verificationCode = buildPublicVerificationCode({ empresaId, pedidoId: pedido?.id });
@@ -1074,6 +1083,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       metros_lineales: pedido?.metros_lineales || null,
       embalaje: pedido?.embalaje || (pedido?.bultos ? "Bultos/palets" : ""),
       marcas_numeros: buildGoodsMarksAndReferences(pedido, cargas, descargas),
+      km_ruta: kmRutaDcd || null,
+      co2_kg: co2KgDcd || null,
     },
     vehiculo: {
       tractora: matriculaTractora,
@@ -1570,6 +1581,9 @@ async function generateDocumentoControlPdf({
   writeLine("Descarga", `${text(documento?.destino?.nombre)} - ${text(documento?.destino?.direccion)} | ${fmtDate(documento?.horarios?.fecha_descarga)} ${text(documento?.horarios?.hora_descarga || documento?.horarios?.ventana_descarga)}`);
   writeLine("Mercancia", documento?.mercancia?.descripcion);
   writeLine("Peso / bultos / ML", `${peso} | ${text(documento?.mercancia?.bultos)} | ${text(documento?.mercancia?.metros_lineales)}`);
+  if (documento?.mercancia?.co2_kg) {
+    writeLine("Huella CO2 estimada", `${Number(documento.mercancia.co2_kg).toLocaleString("es-ES")} kg (estimacion: ${documento?.mercancia?.km_ruta ? `${Number(documento.mercancia.km_ruta).toLocaleString("es-ES")} km x ` : ""}consumo medio x factor diesel; no certificada)`);
+  }
   writeLine("Vehiculo", `Tractora: ${text(documento?.vehiculo?.tractora)} | Remolque: ${text(documento?.vehiculo?.remolque)}`);
 
   writeStops("Puntos de carga", documento?.cargas);

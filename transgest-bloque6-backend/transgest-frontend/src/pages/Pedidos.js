@@ -2116,6 +2116,22 @@ function sumAdditionalStopPrices(stops) {
     }, 0);
 }
 
+// Detalle por parada adicional (desde la 2a) con precio > 0, para desglosar el
+// importe de forma clara (cada carga/descarga extra en su linea).
+function additionalStopPriceItems(stops) {
+  return parseStops(stops)
+    .slice(1)
+    .map((stop, i) => {
+      const n = parseLocaleNumber(stop?.precio ?? stop?.importe ?? stop?.precio_cliente, 0);
+      return {
+        num: i + 2, // la principal es la nº 1
+        label: String(stop?.cliente_nombre || stop?.nombre || stop?.direccion || "").replace(/\s+/g, " ").trim(),
+        precio: Number.isFinite(n) && n > 0 ? n : 0,
+      };
+    })
+    .filter(item => item.precio > 0);
+}
+
 const IVA_PEDIDO_OPTIONS = [
   { value: "general", label: "21% IVA", tipo_iva: 21, iva_regimen: "general" },
   { value: "reducido", label: "10% IVA", tipo_iva: 10, iva_regimen: "reducido" },
@@ -4229,7 +4245,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                   {d.ventana && <span style={{marginRight:8}}>{d.ventana}</span>}
                   {d.bultos && <span style={{marginRight:8}}>{d.bultos} bultos</span>}
                   {d.referencia && <span style={{marginRight:8}}>Ref. {d.referencia}</span>}
-                  {Number(d.precio||0) > 0 && <span style={{color:"var(--green)",fontWeight:700}}>+{Number(d.precio).toFixed(2)} EUR</span>}
+                  {i > 0 && Number(d.precio||0) > 0 && <span style={{color:"var(--green)",fontWeight:700}}>+{Number(d.precio).toFixed(2)} EUR</span>}
                 </div>
                 <datalist id={stopRegionListId}>
                   {stopRegions.map(region => <option key={region} value={region} />)}
@@ -4269,7 +4285,13 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     <input style={inp} disabled={disabled} value={d.ventana || ""} onChange={e=>updateStop(i,{ventana:e.target.value})} placeholder="Ventana horaria" />
                     <input type="number" min="0" style={inp} disabled={disabled} value={d.bultos || ""} onChange={e=>updateStop(i,{bultos:e.target.value})} placeholder="Bultos / palets" />
                     <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.peso_kg || ""} onChange={e=>updateStop(i,{peso_kg:e.target.value})} placeholder="Peso kg" />
-                    <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.precio || ""} onChange={e=>updateStop(i,{precio:e.target.value})} placeholder={`Precio ${label} EUR`} />
+                    {i > 0 ? (
+                      <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.precio || ""} onChange={e=>updateStop(i,{precio:e.target.value})} placeholder={`Precio extra ${label} EUR`} />
+                    ) : (
+                      <div style={{...inp, display:"flex", alignItems:"center", color:"var(--text5)", fontSize:11, background:"transparent", border:"1px dashed var(--border2)"}} title="El precio de la parada principal es el precio base del viaje (arriba). Aqui solo se cobran las paradas adicionales.">
+                        Precio en el viaje base
+                      </div>
+                    )}
                     <input className="tg-stop-grid-wide" style={inp} disabled={disabled} value={d.google_maps_url || ""} onChange={e=>updateStop(i,{google_maps_url:e.target.value})} placeholder="Enlace Google Maps (opcional)" />
                     <input className="tg-stop-grid-wide" style={inp} disabled={disabled} value={d.notas || ""} onChange={e=>updateStop(i,{notas:e.target.value})} placeholder="Notas" />
                   </div>
@@ -8530,18 +8552,43 @@ useEffect(() => {
             )}
             {(calcImporte(form)>0 || form.precio_unitario)&&(
               <div style={{background:"rgba(34,211,160,.07)",border:"1px solid rgba(34,211,160,.2)",borderRadius:8,padding:"10px 16px",marginTop:4}}>
-                {sumAdditionalStopPrices(form.puntos_carga)>0&&(
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                    <span style={{fontSize:11,color:"var(--text3)"}}>Cargas adicionales incluidas</span>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--green)"}}>+{sumAdditionalStopPrices(form.puntos_carga).toFixed(2)} EUR</span>
-                  </div>
-                )}
-                {sumAdditionalStopPrices(form.puntos_descarga)>0&&(
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                    <span style={{fontSize:11,color:"var(--text3)"}}>Descargas adicionales incluidas</span>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--green)"}}>+{sumAdditionalStopPrices(form.puntos_descarga).toFixed(2)} EUR</span>
-                  </div>
-                )}
+                {(() => {
+                  const cargaItems = additionalStopPriceItems(form.puntos_carga);
+                  const descItems = additionalStopPriceItems(form.puntos_descarga);
+                  if (!cargaItems.length && !descItems.length) return null;
+                  const extracostes = parseLocaleNumber(form.extracostes ?? form.extracostes_importe, 0);
+                  const sumExtras = [...cargaItems, ...descItems].reduce((s, it) => s + it.precio, 0) + (extracostes > 0 ? extracostes : 0);
+                  const fleteBase = calcImporte(form) - sumExtras;
+                  const row = { display:"flex", justifyContent:"space-between", marginBottom:4 };
+                  const lbl = { fontSize:11, color:"var(--text3)" };
+                  const val = { fontFamily:"'JetBrains Mono',monospace", fontWeight:700, fontSize:13, color:"var(--green)" };
+                  return (
+                    <>
+                      <div style={row}>
+                        <span style={lbl}>Flete base (viaje)</span>
+                        <span style={{ ...val, color:"var(--text2)" }}>{fleteBase.toFixed(2)} EUR</span>
+                      </div>
+                      {cargaItems.map(it => (
+                        <div key={`c-${it.num}`} style={row}>
+                          <span style={lbl}>+ Carga {it.num}{it.label ? ` · ${it.label}` : ""}</span>
+                          <span style={val}>+{it.precio.toFixed(2)} EUR</span>
+                        </div>
+                      ))}
+                      {descItems.map(it => (
+                        <div key={`d-${it.num}`} style={row}>
+                          <span style={lbl}>+ Descarga {it.num}{it.label ? ` · ${it.label}` : ""}</span>
+                          <span style={val}>+{it.precio.toFixed(2)} EUR</span>
+                        </div>
+                      ))}
+                      {extracostes > 0 && (
+                        <div style={row}>
+                          <span style={lbl}>+ Extracostes</span>
+                          <span style={val}>+{extracostes.toFixed(2)} EUR</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontSize:12,color:"var(--text2)"}}>
                     Importe viaje sin IVA

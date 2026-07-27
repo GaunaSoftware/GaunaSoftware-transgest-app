@@ -4568,6 +4568,13 @@ function OrdenCargaModal({ pedido, onClose }) {
     const routeUrl = rutaOptimizada?.maps_url || buildMapsRouteUrl(fallbackRoutePlaces);
     const routeProvider = rutaOptimizada?.provider_label || "Enlace orientativo";
     const routeKm = rutaOptimizada?.distance_km || pedido.km_ruta || pedido.km || "";
+    // Huella de CO2 estimada del viaje: km x consumo medio / 100 x factor diesel.
+    // Config en cfg_precios.sostenibilidad (mismos valores que el informe de emisiones).
+    const sostenibilidadOrden = (empresa?.cfg_precios?.sostenibilidad && typeof empresa.cfg_precios.sostenibilidad === "object") ? empresa.cfg_precios.sostenibilidad : {};
+    const consumoL100Orden = Number(sostenibilidadOrden.consumo_l_100km) > 0 ? Number(sostenibilidadOrden.consumo_l_100km) : 32;
+    const factorCo2Orden = Number(sostenibilidadOrden.factor_kg_co2_litro) > 0 ? Number(sostenibilidadOrden.factor_kg_co2_litro) : 2.68;
+    const kmCo2Orden = Number(parseLocaleNumber(routeKm, 0)) || 0;
+    const co2KgOrden = kmCo2Orden > 0 ? Math.round((kmCo2Orden * consumoL100Orden / 100) * factorCo2Orden) : 0;
     const routeDuration = rutaOptimizada?.duration_min
       ? `${Math.floor(Number(rutaOptimizada.duration_min) / 60)}h${Number(rutaOptimizada.duration_min) % 60 ? ` ${Number(rutaOptimizada.duration_min) % 60}min` : ""}`
       : "";
@@ -4874,7 +4881,9 @@ ${esCol ? `
     <div class="route-kpi"><div class="fl">Kilometros previstos</div><div class="fv">${routeKm||"Pendiente"}${routeKm?" km":""}</div></div>
     <div class="route-kpi"><div class="fl">Tiempo estimado</div><div class="fv">${routeDuration||"Pendiente"}</div></div>
     <div class="route-kpi"><div class="fl">Peso</div><div class="fv">${pedido.peso_kg||pedido.kg||"Sin dato"}${pedido.peso_kg||pedido.kg?" kg":""}</div></div>
+    <div class="route-kpi"><div class="fl">Huella CO2 estimada</div><div class="fv">${co2KgOrden>0 ? `${co2KgOrden.toLocaleString("es-ES")} kg` : "Pendiente"}</div></div>
   </div>
+  ${co2KgOrden>0 ? `<div class="muted" style="font-size:10px;margin-top:3px">Huella CO2 estimada = ${kmCo2Orden.toLocaleString("es-ES")} km x ${consumoL100Orden} L/100km x ${factorCo2Orden} kg CO2/L (diesel). Estimacion orientativa, no medicion certificada.</div>` : ""}
   <div class="sec-t">Paradas de la ruta</div>
   <ol class="route-list">${routeStopsHtml || "<li>Sin direcciones suficientes</li>"}</ol>
   <div class="route-box">

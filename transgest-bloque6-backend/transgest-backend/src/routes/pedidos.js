@@ -4608,7 +4608,6 @@ function isValidMapsUrl(value) {
 
 function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCountry = "España", fallbackRegion = "", fallbackSchedule = {}) {
   const parsed = normalizePedidoJsonList(value);
-  const seen = new Set();
   return parsed.map((stop, idx) => {
     const source = stop && typeof stop === "object" ? stop : {};
     const rawMaps = String(source.google_maps_url || source.googleMapsUrl || source.maps_url || "").trim();
@@ -4631,22 +4630,11 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCou
       lng: source.lng ?? source.longitud ?? source.metadata?.lng ?? null,
     };
   }).filter(stop => {
-    // No descartar una parada que tenga nombre de cliente/punto aunque le falte
-    // la direccion exacta (p. ej. una 2a descarga elegida por nombre).
+    // Solo se descartan paradas vacias/degeneradas (sin direccion, sin enlace, sin
+    // cliente y sin coordenadas). NO se deduplican paradas: el usuario puede tener
+    // 2 o 3 descargas al MISMO cliente/direccion y todas deben conservarse y contar
+    // (antes se colapsaban por clave direccion+cliente y se perdia la 3a descarga).
     if (!stop.direccion && !stop.google_maps_url && !stop.cliente_nombre && (stop.lat == null || stop.lng == null)) return false;
-    // Deduplicado: incluir cliente_nombre y referencia para NO colapsar dos
-    // descargas distintas que geocodifiquen al mismo punto (misma poblacion) o
-    // compartan direccion pero sean clientes distintos.
-    const key = [
-      String(stop.direccion || "").trim().toLowerCase(),
-      String(stop.cliente_nombre || "").trim().toLowerCase(),
-      String(stop.referencia || stop.referencia_cliente || "").trim().toLowerCase(),
-      String(stop.google_maps_url || "").trim().toLowerCase(),
-      stop.lat ?? "",
-      stop.lng ?? "",
-    ].join("|");
-    if (seen.has(key)) return false;
-    seen.add(key);
     return true;
   });
 }

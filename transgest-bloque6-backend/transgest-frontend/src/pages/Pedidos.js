@@ -1350,18 +1350,9 @@ function normalizeStopsForCopy(stops, fallbackAddress = "", tipo = "carga") {
     })
     .filter(stop => stop.direccion || stop.google_maps_url || (stop.lat != null && stop.lng != null));
   if (!parsed.length && fallbackAddress) parsed.push({ direccion: fallbackAddress, cliente_nombre: "", google_maps_url: "", tipo });
-  const seen = new Set();
-  return parsed.filter(stop => {
-    const key = [
-      normalizePlaceText(stop.direccion || stop.address || ""),
-      String(stop.google_maps_url || "").trim().toLowerCase(),
-      stop.lat ?? "",
-      stop.lng ?? "",
-    ].join("|");
-    if (!key.replace(/\|/g, "") || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  // No deduplicar: al copiar se conservan TODAS las paradas (2-3 descargas al
+  // mismo cliente/direccion son validas y deben mantenerse).
+  return parsed;
 }
 
 function legacyPuntosInteresLoad() {

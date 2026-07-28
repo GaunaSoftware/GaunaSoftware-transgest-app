@@ -42,9 +42,15 @@ function formatDateInputLocal(value = new Date()) {
 // campo plano apunta a un sitio realmente distinto (p.ej. destino="COLMENAR VIEJO"
 // pero la parada es "MEDIO CUDEYO"), manda la parada. Si es el mismo lugar (o una
 // direccion mas larga del mismo), se conserva el texto plano.
-function reconcileFlatEndpoint(flat, stop = {}) {
-  const stopLabel = String(stop?.direccion || stop?.nombre || stop?.cliente_nombre || "").trim();
+function reconcileFlatEndpoint(flat, stop = {}, clienteId = "", tipo = "descarga") {
   const flatClean = String(flat || "").trim();
+  // Usa la MISMA etiqueta que muestra la lista (poblacion del stop o del punto
+  // guardado que casa), no solo la direccion, para que formulario y lista digan
+  // lo mismo.
+  const stopLabel = String(
+    stopTownLabel(stop, flatClean, clienteId, tipo) ||
+    stop?.direccion || stop?.ciudad || stop?.poblacion || stop?.municipio || stop?.nombre || stop?.cliente_nombre || ""
+  ).trim();
   if (!stopLabel) return flatClean;
   if (!flatClean) return stopLabel;
   const a = normalizePlaceText(flatClean);

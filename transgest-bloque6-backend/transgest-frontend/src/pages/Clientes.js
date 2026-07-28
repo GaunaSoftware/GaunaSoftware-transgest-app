@@ -155,8 +155,15 @@ const margenRuta = r => {
   const tipo = String(r?.tarifa_tipo || r?.tipo_precio || "viaje");
   const costeKm = 0.42 + (km > 0 ? peajes / km : 0);
   const precioFinal = precio * (1 + recargo / 100);
-  const ingresoTotal = tipo === "km" ? precioFinal * km : precioFinal;
-  const ingresoKm = km > 0 ? (tipo === "km" ? precioFinal : ingresoTotal / km) : 0;
+  // Cantidad para tarifas por unidad: el minimo facturable de la tarifa (p.ej.
+  // 25 toneladas). Sin multiplicar por las unidades el ingreso salia como
+  // precio/tn suelto (0,07 EUR/km) y el margen quedaba negativo/erroneo.
+  const minUnidades = Number(r?.minimo_unidades ?? r?.minimo_facturable ?? r?.minimo ?? 0) || 0;
+  const ingresoTotal =
+    tipo === "km" ? precioFinal * km
+      : (tipo === "tonelada" || tipo === "hora") ? precioFinal * minUnidades
+        : precioFinal; // viaje = precio fijo total
+  const ingresoKm = km > 0 ? ingresoTotal / km : 0;
   const margenKm = km > 0 ? ingresoKm - costeKm : 0;
   const margen = km > 0 ? margenKm * km : ingresoTotal - peajes;
   const pct = ingresoKm > 0 ? (margenKm / ingresoKm) * 100 : 0;

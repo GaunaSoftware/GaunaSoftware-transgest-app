@@ -10,6 +10,7 @@ import {
   getTallerNeumaticos, crearTallerNeumatico, montarTallerNeumatico, bajaTallerNeumatico,
 } from "../services/api";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
+import { formatMatricula } from "../utils/formatos";
 import BarcodeScanner from "../components/BarcodeScanner";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
 import { GeoFields } from "../components/GeoFields";
@@ -497,7 +498,7 @@ function StockUnidadesPanel({ vehiculos = [], onAssigned }) {
       <div style={{display:"grid",gridTemplateColumns:"minmax(160px,.7fr) minmax(220px,1fr) auto auto",gap:8,alignItems:"end"}}>
         <label>
           <span style={S.lbl}>Matricula</span>
-          <input list="taller-matriculas" style={S.inp} value={matricula} onChange={e=>setMatricula(e.target.value.toUpperCase())} placeholder="1234-ABC" />
+          <input list="taller-matriculas" style={S.inp} value={matricula} onChange={e=>setMatricula(formatMatricula(e.target.value))} placeholder="1234-ABC" />
           <datalist id="taller-matriculas">
             {vehiculos.map(v=><option key={v.id} value={v.matricula}>{v.marca} {v.modelo}</option>)}
           </datalist>

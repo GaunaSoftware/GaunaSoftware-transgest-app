@@ -10134,14 +10134,23 @@ export default function Pedidos() {
     } catch {}
   }, [readCriticalAlerts]);
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") return undefined;
+    if (!openActionMenuPedidoId) return undefined;
     const handleClose = () => setOpenActionMenuPedidoId("");
-    window.addEventListener("click", handleClose);
-    // El menu "Mas" va en posicion fija: si se hace scroll se queda descolgado,
-    // asi que lo cerramos al hacer scroll (en cualquier contenedor).
-    window.addEventListener("scroll", handleClose, true);
-    return () => { window.removeEventListener("click", handleClose); window.removeEventListener("scroll", handleClose, true); };
-  }, []);
+    // Se adjunta en el siguiente tick y SOLO con el menu abierto, para que el
+    // mismo click que abre el menu no lo cierre (el stopPropagation de React no
+    // siempre frena el evento nativo que llega a window). El menu "Mas" va en
+    // posicion fija, asi que tambien se cierra al hacer scroll.
+    const timer = window.setTimeout(() => {
+      window.addEventListener("click", handleClose);
+      window.addEventListener("scroll", handleClose, true);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("click", handleClose);
+      window.removeEventListener("scroll", handleClose, true);
+    };
+  }, [openActionMenuPedidoId]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("tms:pedido-action-menu", { detail: { open: Boolean(openActionMenuPedidoId) } }));

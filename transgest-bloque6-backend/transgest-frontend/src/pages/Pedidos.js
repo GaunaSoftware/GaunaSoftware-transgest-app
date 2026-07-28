@@ -72,8 +72,11 @@ function withPedidoGeoDefaults(draft = {}) {
     ...draft,
     puntos_carga: puntosCarga.length ? puntosCarga : draft.puntos_carga,
     puntos_descarga: puntosDescarga.length ? puntosDescarga : draft.puntos_descarga,
-    origen: puntosCarga.length ? reconcileFlatEndpoint(draft.origen, origenPrimary) : draft.origen,
-    destino: puntosDescarga.length ? reconcileFlatEndpoint(draft.destino, destinoPrimary) : draft.destino,
+    // NOTA: no reconciliamos el texto plano origen/destino con la parada. La
+    // parada puede tener una ciudad mal geocodificada (p.ej. "Torrejon de Ardoz"
+    // -> Torrelavega) y no debe pisar lo que el usuario escribio.
+    origen: draft.origen,
+    destino: draft.destino,
     origen_pais: origenPais,
     destino_pais: destinoPais,
     origen_provincia: stopRegion(origenPrimary, draft.origen_provincia || draft.provincia_origen || ""),
@@ -7636,21 +7639,35 @@ const aplicarEndpointText = (key, tipo) => (e) => {
       const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
       const { primary, extras } = splitPrimaryAndAdditionalStops(p[stopsKey], p[key] || "");
       const inferred = isSimpleMunicipalityInput(value) ? inferPlaceGeo(value) : null;
-      const province = inferred?.provincia || primary?.provincia || p[regionKey] || "";
-      if (province && (inferred?.provincia || !p[regionKey])) base[regionKey] = province;
+      // Si el texto del extremo cambia a un lugar DISTINTO, no se hereda la
+      // geolocalizacion vieja (ciudad/poblacion/provincia/coords/punto/enlace del
+      // destino anterior): se re-geocodifica desde cero. Asi al pasar de
+      // "Torrelavega" a "Torrejon de Ardoz" no queda marcado en Cantabria.
+      const textoCambiado = normalizePlaceText(value) !== normalizePlaceText(primary?.direccion || "");
+      const geo = textoCambiado ? {} : (primary || {});
+      const province = inferred?.provincia || geo.provincia || (textoCambiado ? "" : (p[regionKey] || ""));
+      if (inferred?.provincia) base[regionKey] = inferred.provincia;
+      else if (textoCambiado) base[regionKey] = "";
       base[stopsKey] = value.trim() ? [{
         ...(primary || {}),
         direccion: value,
         es_principal: true,
         pais: p[countryKey] || "España",
         provincia: province,
-        ciudad: inferred?.municipio || primary?.ciudad || "",
-        codigo_postal: primary?.codigo_postal || "",
-        cliente_nombre: primary?.cliente_nombre || "",
-        punto_interes_id: primary?.punto_interes_id || null,
-        google_maps_url: primary?.google_maps_url || "",
-        lat: inferred?.lat ?? primary?.lat ?? null,
-        lng: inferred?.lng ?? primary?.lng ?? null,
+        ciudad: inferred?.municipio || geo.ciudad || "",
+        poblacion: geo.poblacion || "",
+        localidad: geo.localidad || "",
+        municipio: inferred?.municipio || geo.municipio || "",
+        lugar: geo.lugar || "",
+        codigo_postal: geo.codigo_postal || "",
+        cliente_nombre: geo.cliente_nombre || "",
+        punto_interes_id: geo.punto_interes_id || null,
+        google_maps_url: geo.google_maps_url || "",
+        lat: inferred?.lat ?? (geo.lat ?? null),
+        lng: inferred?.lng ?? (geo.lng ?? null),
+        latitud: geo.latitud ?? null,
+        longitud: geo.longitud ?? null,
+        metadata: geo.metadata,
       }, ...extras] : extras;
       return base;
     }
@@ -9919,12 +9936,17 @@ export default function Pedidos() {
   function abrirMenuAcciones(pedidoId, btn) {
     try {
       const r = btn.getBoundingClientRect();
-      const menuMaxH = 320;
-      const openUp = (r.bottom + menuMaxH > window.innerHeight - 12) && (r.top > window.innerHeight - r.bottom);
+      const spaceBelow = window.innerHeight - r.bottom - 12;
+      // Se abre SIEMPRE hacia abajo (misma posicion para todos los pedidos, sin
+      // "rebote"). Solo si abajo casi no hay hueco se abre hacia arriba. La altura
+      // se limita al hueco disponible y el menu hace scroll interno.
+      const openUp = spaceBelow < 180 && r.top > spaceBelow;
+      const maxHeight = Math.min(320, Math.max(160, openUp ? Math.round(r.top - 12) : Math.round(spaceBelow)));
       setActionMenuPos({
-        right: Math.max(8, window.innerWidth - r.right),
+        right: Math.max(8, Math.round(window.innerWidth - r.right)),
         top: openUp ? undefined : Math.round(r.bottom + 6),
         bottom: openUp ? Math.round(window.innerHeight - r.top + 6) : undefined,
+        maxHeight,
       });
     } catch { setActionMenuPos(null); }
     setOpenActionMenuPedidoId(pedidoId);
@@ -11853,7 +11875,7 @@ export default function Pedidos() {
                           {actionMenuOpen ? "Cerrar" : "Mas"}
                         </button>
                         {actionMenuOpen && (
-                          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:actionMenuPos?.top,bottom:actionMenuPos?.bottom,right:actionMenuPos?.right ?? 12,zIndex:3000,width:184,maxHeight:"min(320px, 60vh)",overflowY:"auto",padding:5,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.28)",display:"flex",flexDirection:"column",gap:3}}>
+                          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:actionMenuPos?.top,bottom:actionMenuPos?.bottom,right:actionMenuPos?.right ?? 12,zIndex:3000,width:184,maxHeight:actionMenuPos?.maxHeight ?? 320,overflowY:"auto",padding:5,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.28)",display:"flex",flexDirection:"column",gap:3}}>
                             {canEdit && (
                               <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirCopiarPedido(p);}}
                                 style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"6px 10px",fontSize:11}}>

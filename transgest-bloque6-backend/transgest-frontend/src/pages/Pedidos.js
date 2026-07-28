@@ -2009,11 +2009,21 @@ function likelyTownFromListText(value = "") {
 function stopTownLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
   const punto = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
   const source = { ...(punto || {}), ...(stop || {}) };
+  const direccion = cleanListPlace(stopAddress(stop) || source.direccion || fallback || "");
+  // Sin punto guardado que case, si la direccion escrita parece un municipio de
+  // verdad (poblacion simple, sin guion y pocas palabras), ESA manda: es lo que el
+  // usuario escribio y ve en el formulario, no una ciudad heredada/vieja de otra
+  // parada. Asi "fuera" (lista) y "dentro" (formulario) coinciden.
+  const pareceMunicipio = direccion
+    && !/\d|[,;]/.test(direccion)
+    && !/\b(?:autovia|autopista|avenida|av|calle|camino|carretera|ctra|km|paseo|plaza|poligono|ronda|ruta|via)\b/i.test(direccion)
+    && !direccion.includes("-")
+    && direccion.split(/\s+/).filter(Boolean).length <= 4;
+  if (!punto && pareceMunicipio) return direccion.toUpperCase();
   const town = cleanListPlace(source.ciudad || source.poblacion || source.localidad || source.municipio || "");
   if (town) return town.toUpperCase();
-  const address = cleanListPlace(stopAddress(stop) || source.direccion || fallback || "");
-  if (!address) return "";
-  return likelyTownFromListText(address);
+  if (!direccion) return "";
+  return likelyTownFromListText(direccion);
 }
 
 function stopPointNameLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {

@@ -11853,7 +11853,7 @@ export default function Pedidos() {
                           {actionMenuOpen ? "Cerrar" : "Mas"}
                         </button>
                         {actionMenuOpen && (
-                          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:actionMenuPos?.top,bottom:actionMenuPos?.bottom,right:actionMenuPos?.right ?? 12,zIndex:3000,minWidth:200,maxHeight:320,overflowY:"auto",padding:8,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.28)",display:"flex",flexDirection:"column",gap:6}}>
+                          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:actionMenuPos?.top,bottom:actionMenuPos?.bottom,right:actionMenuPos?.right ?? 12,zIndex:3000,width:184,maxHeight:"min(320px, 60vh)",overflowY:"auto",padding:5,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.28)",display:"flex",flexDirection:"column",gap:3}}>
                             {canEdit && (
                               <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirCopiarPedido(p);}}
                                 style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"6px 10px",fontSize:11}}>

@@ -36,6 +36,22 @@ function formatDateInputLocal(value = new Date()) {
   return `${y}-${m}-${day}`;
 }
 
+// Reconcilia el campo plano origen/destino con su parada principal. La parada
+// (puntos_carga/descarga[0]) es la fuente operativa (mapa, ruta, lista); si el
+// campo plano apunta a un sitio realmente distinto (p.ej. destino="COLMENAR VIEJO"
+// pero la parada es "MEDIO CUDEYO"), manda la parada. Si es el mismo lugar (o una
+// direccion mas larga del mismo), se conserva el texto plano.
+function reconcileFlatEndpoint(flat, stop = {}) {
+  const stopLabel = String(stop?.direccion || stop?.nombre || stop?.cliente_nombre || "").trim();
+  const flatClean = String(flat || "").trim();
+  if (!stopLabel) return flatClean;
+  if (!flatClean) return stopLabel;
+  const a = normalizePlaceText(flatClean);
+  const b = normalizePlaceText(stopLabel);
+  if (a && b && a !== b && !a.includes(b) && !b.includes(a)) return stopLabel;
+  return flatClean;
+}
+
 function withPedidoGeoDefaults(draft = {}) {
   const origenPaisFallback = canonicalCountry(draft.origen_pais || draft.pais_origen || "España") || "España";
   const destinoPaisFallback = canonicalCountry(draft.destino_pais || draft.pais_destino || "España") || "España";
@@ -49,6 +65,8 @@ function withPedidoGeoDefaults(draft = {}) {
     ...draft,
     puntos_carga: puntosCarga.length ? puntosCarga : draft.puntos_carga,
     puntos_descarga: puntosDescarga.length ? puntosDescarga : draft.puntos_descarga,
+    origen: puntosCarga.length ? reconcileFlatEndpoint(draft.origen, origenPrimary) : draft.origen,
+    destino: puntosDescarga.length ? reconcileFlatEndpoint(draft.destino, destinoPrimary) : draft.destino,
     origen_pais: origenPais,
     destino_pais: destinoPais,
     origen_provincia: stopRegion(origenPrimary, draft.origen_provincia || draft.provincia_origen || ""),

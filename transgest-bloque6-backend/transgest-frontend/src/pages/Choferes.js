@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { getChoferHistorialVehiculos, getTractoraPeriodos } from "../services/api";
 import { asignarRemolque } from "../services/api";
+import { formatDni, upperFromEvent } from "../utils/formatos";
 import { getChoferes, crearChofer, editarChofer, borrarChofer, getVehiculos, getNominasEmitidas, getTallerEstado, guardarTallerEstado, getChoferJornadas } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -593,7 +594,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
   const tractoras = vehiculos.filter(v => !esRemolque(v) && v.activo !== false && v.estado !== "baja");
   const remolques = vehiculos.filter(v => esRemolque(v) && v.activo !== false && v.estado !== "baja");
 
-  const f = k => e => setForm(p => ({ ...p, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value }));
+  const f = k => e => setForm(p => ({ ...p, [k]: e.target.type==="checkbox" ? e.target.checked : upperFromEvent(k, e) }));
   const onActivoChange = e => {
     const checked = e.target.checked;
     setForm(p => ({
@@ -726,7 +727,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
                 </div>
                 <div>
                   <label style={S.lbl}>DNI / NIE</label>
-                  <input style={S.inp} value={form.dni||""} onChange={f("dni")} placeholder="12345678A"/>
+                  <input style={S.inp} value={form.dni||""} onChange={e=>setForm(p=>({...p,dni:formatDni(e.target.value)}))} placeholder="12345678-A"/>
                 </div>
                 <div>
                   <label style={S.lbl}>Sexo / género para informes retributivos</label>
@@ -842,7 +843,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
               <div style={S.grid2}>
                 <div>
                   <label style={S.lbl}>Número DNI / NIE</label>
-                  <input style={S.inp} value={form.dni||""} onChange={f("dni")} placeholder="12345678A"/>
+                  <input style={S.inp} value={form.dni||""} onChange={e=>setForm(p=>({...p,dni:formatDni(e.target.value)}))} placeholder="12345678-A"/>
                 </div>
                 <div>
                   <label style={S.lbl}>Vencimiento DNI</label>

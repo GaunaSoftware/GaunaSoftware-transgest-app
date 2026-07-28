@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, actualizarKmVehiculo, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
 import PlatformDocumentsEditor, { normalizePlatformDocuments } from "../components/PlatformDocumentsEditor";
@@ -1086,7 +1087,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
   }
 
   const f = k => e => {
-    const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    const value = e.target.type === "checkbox" ? e.target.checked : upperFromEvent(k, e);
     setForm(p => {
       const next = { ...p, [k]: value };
       return k === "clase" ? normalizeVehiculoForClase(next) : next;
@@ -1226,7 +1227,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                 <div>
                   <label style={S.lbl}>Matricula *</label>
                   <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace", fontWeight:700, textTransform:"uppercase" }}
-                    value={form.matricula||""} onChange={f("matricula")} placeholder="1234 ABC"/>
+                    value={form.matricula||""} onChange={e=>setForm(p=>({...p,matricula:formatMatricula(e.target.value)}))} placeholder="1234-ABC"/>
                 </div>
                 <div>
                   <label style={S.lbl}>Clase de vehiculo *</label>

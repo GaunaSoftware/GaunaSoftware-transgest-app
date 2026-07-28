@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { formatMatricula } from "../utils/formatos";
 
 // Popup rapido de asignacion desde el boton "Asignar" de la lista de pedidos.
 // Permite elegir una matricula de la flota o escribirla a mano (asignacion
@@ -67,7 +68,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
 
         <label style={S.label}>Matricula (elige de la flota o escribe a mano)</label>
         <input list="tg-quick-matriculas" style={S.input} value={matricula} autoFocus
-          onChange={e => setMatricula(e.target.value.toUpperCase())} placeholder="Ej: 1234 ABC" />
+          onChange={e => setMatricula(formatMatricula(e.target.value))} placeholder="Ej: 1234-ABC" />
         {matricula && (
           <div style={{ fontSize: 11, color: vehMatch ? "#10b981" : "var(--text5)", marginTop: 4 }}>
             {vehMatch ? `Vehiculo de la flota: ${vehMatch.matricula}${vehMatch.marca ? ` (${vehMatch.marca})` : ""}` : "Matricula a mano (no esta en la flota)"}
@@ -76,7 +77,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
 
         <label style={S.label}>Remolque (opcional)</label>
         <input list="tg-quick-matriculas" style={S.input} value={remolque}
-          onChange={e => setRemolque(e.target.value.toUpperCase())} placeholder="Ej: R-1234" />
+          onChange={e => setRemolque(formatMatricula(e.target.value))} placeholder="Ej: R-1234-BCD" />
 
         <label style={S.label}>Chofer (opcional)</label>
         <select style={S.input} value={choferId} onChange={e => setChoferId(e.target.value)}>

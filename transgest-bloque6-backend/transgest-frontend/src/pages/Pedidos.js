@@ -19,6 +19,7 @@ import { confirmDialog, notify } from "../services/notify";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
+import { formatMatricula, formatDni, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
@@ -2770,7 +2771,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
   const [puntosCargaLoading, setPuntosCargaLoading] = useState(false);
   const [poiDraftRapido, setPoiDraftRapido] = useState(null);
   const riesgoConfirmadoRapidoRef = useRef(new Map());
-  const f = k => e => setForm(p => ({ ...p, [k]: (k === "origen" || k === "destino") ? e.target.value.toUpperCase() : e.target.value }));
+  const f = k => e => setForm(p => ({ ...p, [k]: upperFromEvent(k, e) }));
   const inp = { ...S.input, boxSizing:"border-box" };
   const quickGrid = {display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10};
   const cleanCliente = form.cliente_nombre.trim();
@@ -3283,7 +3284,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           <div>
             <label style={S.label}>Matricula colaborador</label>
             <input style={inp} value={form.matricula_colaborador} onChange={e=>{
-              const value = e.target.value.toUpperCase();
+              const value = formatMatricula(e.target.value);
               setForm(p=>({
                 ...p,
                 matricula_colaborador:value,
@@ -3314,7 +3315,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           </div>
           <div>
             <label style={S.label}>Remolque colaborador</label>
-            <input style={inp} value={form.remolque_matricula_colaborador} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:e.target.value.toUpperCase()}))} placeholder="Opcional"/>
+            <input style={inp} value={form.remolque_matricula_colaborador} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Opcional"/>
           </div>
           <div>
             <label style={S.label}>Tipo descarga</label>
@@ -7733,7 +7734,7 @@ async function resolverEndpointEnFormulario(key, tipo, rawValue = null) {
   }
 }
 
-const f = k => e => setForm(p => ({...p,[k]: (k==="origen"||k==="destino") ? e.target.value.toUpperCase() : e.target.value}));
+const f = k => e => setForm(p => ({...p,[k]: upperFromEvent(k, e)}));
 
 async function seleccionarDocsPendientes(e) {
   const files = Array.from(e.target.files || []);
@@ -8997,10 +8998,10 @@ useEffect(() => {
                       </div>
                     )}
                     <div><label style={S.label}>Matricula tractora colaborador</label>
-                      <input style={S.input} value={form.matricula_colaborador||""} onChange={e=>setForm(p=>({...p,matricula_colaborador:e.target.value.toUpperCase()}))} placeholder="Ej: 1234-ABC"/>
+                      <input style={S.input} value={form.matricula_colaborador||""} onChange={e=>setForm(p=>({...p,matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Ej: 1234-ABC"/>
                     </div>
                     <div><label style={S.label}>Matricula remolque colaborador</label>
-                      <input style={S.input} value={form.remolque_matricula_colaborador||""} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:e.target.value.toUpperCase()}))} placeholder="Opcional"/>
+                      <input style={S.input} value={form.remolque_matricula_colaborador||""} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Opcional"/>
                     </div>
                     {(form.precio_cliente_col&&form.precio_colaborador)&&(
                       <div style={{gridColumn:"1/-1",display:"flex",gap:16,background:"var(--bg3)",borderRadius:7,padding:"8px 14px",alignItems:"center"}}>
@@ -9081,7 +9082,7 @@ useEffect(() => {
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
                     <div><label style={S.label}>Nombre</label><input style={S.input} value={form.conductor_efectivo_nombre||""} onChange={f("conductor_efectivo_nombre")} placeholder="Nombre" /></div>
                     <div><label style={S.label}>Apellidos</label><input style={S.input} value={form.conductor_efectivo_apellidos||""} onChange={f("conductor_efectivo_apellidos")} placeholder="Apellidos" /></div>
-                    <div><label style={S.label}>DNI / NIE</label><input style={S.input} value={form.conductor_efectivo_dni||""} onChange={e=>setForm(p=>({...p,conductor_efectivo_dni:e.target.value.toUpperCase()}))} placeholder="Documento de identidad" /></div>
+                    <div><label style={S.label}>DNI / NIE</label><input style={S.input} value={form.conductor_efectivo_dni||""} onChange={e=>setForm(p=>({...p,conductor_efectivo_dni:formatDni(e.target.value)}))} placeholder="Documento de identidad" /></div>
                     <div><label style={S.label}>Telefono</label><input type="tel" style={S.input} value={form.conductor_efectivo_telefono||""} onChange={f("conductor_efectivo_telefono")} placeholder="Telefono" /></div>
                   </div>
                 </div>

@@ -11,6 +11,7 @@ import { getColaboradores, crearColaborador, editarColaborador,
          revisarAlertasLiquidacionesColaboradores } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
+import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { readRuntimeFocus, clearRuntimeFocus } from "../services/runtimeFocus";
 import { GeoFields } from "../components/GeoFields";
 
@@ -202,7 +203,7 @@ function ModalFacturaColab({ colaborador, viaje, factura, onClose, onSaved }) {
     notas: factura?.notas || "",
   });
   const [saving, setSaving] = useState(false);
-  const f = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const f = k => e => setForm(p=>({...p,[k]:upperFromEvent(k, e)}));
   const recalcular = (base, iva) => {
     const b = Number(base || 0);
     const pct = Number(iva || 0);
@@ -280,7 +281,7 @@ function ModalVehiculoColab({ colaboradorId, editando, onClose, onSaved }) {
     doc_tarjeta_transp:"", doc_tarjeta_exp:"", doc_seguro_venc:"", doc_itv_venc:"", doc_tacografo_venc:"",
   });
   const [saving, setSaving] = useState(false);
-  const f = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const f = k => e => setForm(p=>({...p,[k]:upperFromEvent(k, e)}));
 
   async function guardar() {
     if (!form.matricula.trim()) { notify("La matricula es obligatoria", "warning"); return; }
@@ -305,7 +306,7 @@ function ModalVehiculoColab({ colaboradorId, editando, onClose, onSaved }) {
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <Sec titulo="Identificación"/>
-          <div><label style={S.lbl}>Matricula *</label><input style={S.inp} value={form.matricula} onChange={f("matricula")} placeholder="1234-ABC"/></div>
+          <div><label style={S.lbl}>Matricula *</label><input style={S.inp} value={form.matricula} onChange={e=>setForm(p=>({...p,matricula:formatMatricula(e.target.value)}))} placeholder="1234-ABC"/></div>
           <div><label style={S.lbl}>Tipo</label>
             <select style={S.inp} value={form.tipo} onChange={f("tipo")}>
               {["Camión","Tractora","Remolque","Semirremolque","Furgón","Furgoneta"].map(t=><option key={t}>{t}</option>)}
@@ -1217,7 +1218,7 @@ function ModalColaborador({ editando, onClose, onSaved }) {
     forma_pago:"Transferencia bancaria", tipo_iva:21, iva_regimen:"general",
   });
   const [saving, setSaving] = useState(false);
-  const f = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const f = k => e => setForm(p=>({...p,[k]:upperFromEvent(k, e)}));
   const fb = k => e => setForm(p=>({...p,[k]:e.target.checked}));
   const fIva = e => {
     const opt = IVA_OPCIONES.find(o => o.value === e.target.value) || IVA_OPCIONES[0];

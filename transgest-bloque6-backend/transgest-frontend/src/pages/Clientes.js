@@ -8,6 +8,7 @@ import {
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
+import { upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 
 // ---------------------------------------------------------------------------
@@ -594,7 +595,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
   const [selPedidos,setSelPedidos]= useState(new Set());
   const [facturando,setFacturando]= useState(false);
 
-  const f  = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const f  = k => e => setForm(p=>({...p,[k]:upperFromEvent(k, e)}));
   const fIva = e => {
     const opt = TIPOS_IVA.find(o => o.value === e.target.value) || TIPOS_IVA[0];
     setForm(p=>({...p,iva_regimen:opt.value,tipo_iva:opt.pct}));

@@ -5132,14 +5132,16 @@ function pedidoTieneMinimosOperativos(pedido = {}) {
     String(pedido.matricula_manual || "").trim() ||
     String(pedido.matricula_colaborador || "").trim()
   );
-  const importe = Number(pedido.importe || pedido.precio_cliente_col || 0);
+  // El minimo OPERATIVO para dejar de estar en amarillo es: cliente, origen,
+  // destino, fecha de carga y una asignacion (vehiculo/colaborador/matricula a
+  // mano). El precio es tema de facturacion y no bloquea: al asignar desde fuera
+  // el pedido deja de estar en amarillo aunque el precio se ponga despues.
   return Boolean(
     pedido.cliente_id &&
     String(pedido.origen || "").trim() &&
     String(pedido.destino || "").trim() &&
     pedido.fecha_carga &&
-    tieneAsignacion &&
-    importe > 0
+    tieneAsignacion
   );
 }
 

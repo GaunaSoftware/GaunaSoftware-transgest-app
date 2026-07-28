@@ -11487,7 +11487,7 @@ export default function Pedidos() {
 
       <div style={{...S.card, overflow:"hidden",width:"100%",maxWidth:"100%",boxSizing:"border-box"}}>
         <div className="tg-responsive-scroll" style={{overflowX:"auto",width:"100%",maxWidth:"100%"}}>
-        <table style={{width:"100%",minWidth:1060,borderCollapse:"collapse"}}>
+        <table className="tg-pedidos-table" style={{width:"100%",minWidth:1060,borderCollapse:"collapse"}}>
           <thead><tr>
             <th style={{...S.th,width:42}}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
@@ -11591,7 +11591,7 @@ export default function Pedidos() {
                             : undefined;
               const actionMenuOpen = openActionMenuPedidoId === String(p.id);
               return (
-              <tr key={p.id} id={`pedido-row-${p.id}`} style={{
+              <tr key={p.id} id={`pedido-row-${p.id}`} className="tg-pedidos-row" style={{
                 cursor:"pointer",
                 opacity:pedidoTieneFacturaFinal(p)?0.85:1,
                 background: rowBackground,
@@ -11600,14 +11600,14 @@ export default function Pedidos() {
   if (pedidoTieneFacturaFinal(p)) abrirEditar(p);
   else abrirEditar(p);
 }}>
-                <td style={S.td} onClick={e=>e.stopPropagation()}>
+                <td className="tg-td-check" style={S.td} onClick={e=>e.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={selectedPedidoIds.includes(String(p.id))}
                     onChange={() => togglePedidoSelected(p.id)}
                   />
                 </td>
-                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)",whiteSpace:"nowrap",minWidth:104}}>
+                <td className="tg-td-num" style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)",whiteSpace:"nowrap",minWidth:104}}>
                   <div>{p.numero}</div>
                   {(() => {
                     // Sin repetir: si ya se muestra "Completar" (pendiente_completar),
@@ -11644,8 +11644,8 @@ export default function Pedidos() {
                     </div>
                   )}
                 </td>
-                <td style={{...S.td,fontWeight:600,fontSize:12}}>{p.cliente_nombre||"-"}</td>
-                <td style={{...S.td,fontSize:12,color:"var(--text2)",minWidth:190}}>
+                <td data-label="Cliente" style={{...S.td,fontWeight:600,fontSize:12}}>{p.cliente_nombre||"-"}</td>
+                <td data-label="Ruta" style={{...S.td,fontSize:12,color:"var(--text2)",minWidth:190}}>
                   <div style={{fontWeight:800,color:"var(--text)"}}>{routeDisplay.main}</div>
                   {routeDisplay.detail && (
                     <div style={{fontSize:10,lineHeight:1.35,color:"var(--text4)",marginTop:3}}>{routeDisplay.detail}</div>
@@ -11667,17 +11667,17 @@ export default function Pedidos() {
                     </div>
                   )}
                 </td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
+                <td data-label="Carga" style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
                   <div>{formatPedidoListDate(cargaPrincipal.fecha)||"-"}</div>
                   {formatPedidoListTime(cargaPrincipal.hora) && <div style={{fontSize:10}}>{formatPedidoListTime(cargaPrincipal.hora)}</div>}
                   {cargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:2,fontFamily:"'DM Sans',sans-serif"}}>{cargaPrincipal.ventana}</div>}
                 </td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
+                <td data-label="Descarga" style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
                   <div>{formatPedidoListDate(descargaPrincipal.fecha)||"-"}</div>
                   {formatPedidoListTime(descargaPrincipal.hora) && <div style={{fontSize:10}}>{formatPedidoListTime(descargaPrincipal.hora)}</div>}
                   {descargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:2,fontFamily:"'DM Sans',sans-serif"}}>{descargaPrincipal.ventana}</div>}
                 </td>
-                <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>
+                <td data-label="Vehiculo" style={{...S.td,fontSize:12,color:"var(--text2)"}}>
                   {p.colaborador_id ? (
                     <div>
                       <div style={{fontSize:10,fontWeight:700,color:"#a78bfa",marginBottom:2}}>COLABORADOR</div>
@@ -11695,7 +11695,7 @@ export default function Pedidos() {
                     </>
                   )}
                 </td>
-                <td style={S.td}>
+                <td data-label="Estado" style={S.td}>
                   <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-start"}}>
                     <Badge estado={p.estado}/>
                     {priorityMeta.validationIssues.length > 0 && (
@@ -11705,8 +11705,8 @@ export default function Pedidos() {
                     )}
                   </div>
                 </td>
-                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{Number(p.importe||0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</td>
-                <td style={{...S.td, position:"sticky", right:0, zIndex: actionMenuOpen ? 40 : 2, background: rowBackground ? `linear-gradient(${rowBackground}, ${rowBackground}), var(--card-bg, #ffffff)` : "var(--card-bg, #ffffff)", boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"}} onClick={e=>e.stopPropagation()}>
+                <td data-label="Importe" style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{Number(p.importe||0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</td>
+                <td className="tg-td-actions" style={{...S.td, position:"sticky", right:0, zIndex: actionMenuOpen ? 40 : 2, background: rowBackground ? `linear-gradient(${rowBackground}, ${rowBackground}), var(--card-bg, #ffffff)` : "var(--card-bg, #ffffff)", boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"}} onClick={e=>e.stopPropagation()}>
                   {pedidoTieneFacturaFinal(p)
                     ? <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>FACTURADO</span>

@@ -250,6 +250,35 @@ const CSS = `
     }
   }
   @media (max-width: 820px) {
+    /* Lista de pedidos como tarjetas en movil (la tabla no cabe) */
+    .tg-pedidos-table { min-width:0 !important; display:block !important; }
+    .tg-pedidos-table thead { display:none !important; }
+    .tg-pedidos-table tbody { display:block !important; }
+    .tg-pedidos-table tr { display:block !important; width:100% !important; }
+    .tg-pedidos-table td { display:block !important; }
+    .tg-pedidos-table tr.tg-pedidos-row {
+      border:1px solid var(--border) !important; border-radius:10px !important;
+      margin:0 0 10px 0 !important; padding:6px 6px 8px !important; box-shadow:none !important;
+    }
+    .tg-pedidos-table tr.tg-pedidos-row > td {
+      border:none !important; padding:4px 10px !important; position:static !important;
+      right:auto !important; width:100% !important; min-width:0 !important;
+      white-space:normal !important; box-shadow:none !important; background:transparent !important;
+      text-align:left !important;
+    }
+    .tg-pedidos-table tr.tg-pedidos-row > td[data-label]::before {
+      content: attr(data-label); display:block;
+      font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.05em;
+      color:var(--text5); margin-bottom:1px;
+    }
+    .tg-pedidos-table tr.tg-pedidos-row > td.tg-td-num {
+      border-bottom:1px solid var(--border2) !important; padding-bottom:6px !important; margin-bottom:2px !important;
+    }
+    .tg-pedidos-table tr.tg-pedidos-row > td.tg-td-check { display:none !important; }
+    .tg-pedidos-table tr.tg-pedidos-row > td.tg-td-actions {
+      border-top:1px solid var(--border2) !important; margin-top:4px !important; padding-top:8px !important;
+    }
+    .tg-pedidos-table tr:not(.tg-pedidos-row) > td { width:100% !important; }
     .tg-responsive-page {
       padding:16px !important;
       min-height:auto !important;

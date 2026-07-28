@@ -9810,10 +9810,19 @@ function openPedidoInTrafico(pedido) {
   window.dispatchEvent(new CustomEvent("tms:navegar", { detail: "gestion_trafico" }));
 }
 
+// Estados que marca el chofer haciendo los pasos del viaje. Mientras el pedido
+// esta en uno de estos, el estado no se puede cambiar desde trafico/pedidos:
+// solo el propio chofer (desde su app) o gerencia. Asi no se pisa su progreso.
+const ESTADOS_EN_CURSO_CHOFER = ["cargando", "en_curso", "espera_carga", "espera_descarga", "descarga"];
+function pedidoEnCursoPorChofer(pedido) {
+  return ESTADOS_EN_CURSO_CHOFER.includes(String(pedido?.estado || "").toLowerCase());
+}
+
 export default function Pedidos() {
   useEmpresaPerfil();
   const { puedeEditar, user } = useAuth();
   const canEdit = puedeEditar("pedidos");
+  const esGerente = String(user?.rol || "").toLowerCase() === "gerente";
   const canFacturarPedidos = ["gerente","contable","contabilidad","administrativo","administracion","admin","superadmin"]
     .includes(String(user?.rol || "").toLowerCase());
   const empresaPlan = getEmpresaPlanLocal();
@@ -11791,9 +11800,15 @@ export default function Pedidos() {
                             Asignar
                           </button>
                         )}
-                        {canEdit&&<select value={p.estado} onChange={e=>cambiarEstado(p.id,e.target.value)} style={{...S.sel,width:130,padding:"4px 8px",fontSize:11}}>
-                          {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
-                        </select>}
+                        {canEdit&&(pedidoEnCursoPorChofer(p) && !esGerente ? (
+                          <span title="El chofer esta realizando el viaje. El estado en curso solo lo cambia el chofer (desde su app) o gerencia." style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 9px",borderRadius:7,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text4)",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>
+                            En curso (chofer)
+                          </span>
+                        ) : (
+                          <select value={p.estado} onChange={e=>cambiarEstado(p.id,e.target.value)} style={{...S.sel,width:130,padding:"4px 8px",fontSize:11}}>
+                            {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
+                          </select>
+                        ))}
                         {canFacturarPedidos&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&p.estado==="entregado"&&(
                           <button style={{...S.btn,background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.2)",padding:"4px 10px",fontSize:11}} onClick={()=>setFacturando(p)}>Facturar</button>
                         )}

@@ -8483,6 +8483,17 @@ router.patch("/:id/estado",
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
       return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
     }
+    // Proteccion: cuando el chofer ya esta haciendo los pasos del viaje (en curso),
+    // nadie desde trafico/pedidos puede cambiarle el estado. Solo el propio chofer
+    // (desde su app) o gerencia. Asi no se pisa el estado real del viaje.
+    const ESTADOS_EN_CURSO_CHOFER = ["cargando", "en_curso", "espera_carga", "espera_descarga", "descarga"];
+    if (
+      ESTADOS_EN_CURSO_CHOFER.includes(String(rows[0].estado || "").toLowerCase()) &&
+      req.user?.rol !== "chofer" &&
+      req.user?.rol !== "gerente"
+    ) {
+      return res.status(403).json({ error: "El chofer esta realizando el viaje. Solo el chofer o gerencia pueden cambiar el estado mientras esta en curso." });
+    }
     await assertUnicoViajeActivoChofer({ pedido: rows[0], empresaId, estadoDestino: estado });
 
     await ensureColaboradorWorkflowSchema();

@@ -2,7 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 const db = require("../services/db");
 const { resolveApiKey, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
-const { fallbackPlaceForAddress } = require("../services/geoFallback");
+const { fallbackPlaceForAddress, fallbackMunicipioExacto } = require("../services/geoFallback");
 const { coordsFromText, resolveMapsCoords } = require("../services/mapsLink");
 const { googleGeocode } = require("../services/googleGeocode");
 const {
@@ -17,7 +17,7 @@ const router = express.Router();
 const ROUTE_CACHE_DAYS = Math.max(1, Number(process.env.GEO_ROUTE_CACHE_DAYS || 30));
 const EXTERNAL_TIMEOUT_MS = Math.max(2500, Number(process.env.GEO_EXTERNAL_TIMEOUT_MS || 9000));
 const MAX_ROUTE_POINTS = 12;
-const PLACE_CACHE_VERSION = "v8";
+const PLACE_CACHE_VERSION = "v9";
 let schemaPromise = null;
 let lastNominatimAt = 0;
 let nominatimQueue = Promise.resolve();
@@ -317,7 +317,11 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {},
 
   // Google primero si hay clave configurada: fiable y sin depender de la IP.
   let resolved = await geocodeGoogle(empresaId, request).catch(() => null);
-  const fallback = fallbackPlaceForAddress(buildQuery(query, request.country, request.region));
+  // Diccionario COMPLETO de municipios por la ciudad extraida (o la consulta si es
+  // solo poblacion): exacto y fiable, sin depender de Nominatim. Tiene prioridad
+  // sobre el fallback curado por substring.
+  const muniExacto = fallbackMunicipioExacto(request.locality || (request.localityOnly ? query : ""), request.region);
+  const fallback = muniExacto || fallbackPlaceForAddress(buildQuery(query, request.country, request.region));
   const localResolved = fallback ? selectBestPlaceCandidate(request, [{ provider: "local", ...formatPlace(fallback) }]) : null;
   if (!resolved || resolved.lat == null || resolved.lng == null) {
     if (request.localityOnly) {

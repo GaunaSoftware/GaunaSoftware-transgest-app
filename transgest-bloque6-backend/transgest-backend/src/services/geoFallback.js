@@ -97,4 +97,38 @@ function fallbackPlaceForAddress(value) {
   return place ? { ...place, label: [place.municipio, place.provincia, place.pais].filter(Boolean).join(", ") } : null;
 }
 
-module.exports = { foldGeoText, fallbackPlaceForAddress };
+// Diccionario COMPLETO de municipios de Espana (INE, ~8100) para lookup EXACTO por
+// nombre, con desambiguacion por provincia. Evita depender de Nominatim para
+// municipios conocidos. NO se usa substring (con miles de nombres daria falsos).
+// El JSON viene ordenado por poblacion desc, asi que el primero de un nombre
+// ambiguo (varios municipios homonimos) es el mas poblado.
+const MUNICIPIOS_MAP = new Map();
+try {
+  const raw = require("../data/municipios_es.json");
+  for (const row of raw) {
+    const municipio = row[0];
+    const key = foldGeoText(municipio);
+    if (!key) continue;
+    if (!MUNICIPIOS_MAP.has(key)) MUNICIPIOS_MAP.set(key, []);
+    MUNICIPIOS_MAP.get(key).push({ municipio, provincia: row[1], pais: "Espana", lat: row[2], lng: row[3] });
+  }
+} catch (_) { /* sin diccionario: se usa solo el curado + proveedores */ }
+
+function fallbackMunicipioExacto(name, provincia = "") {
+  const key = foldGeoText(name);
+  if (!key) return null;
+  const list = MUNICIPIOS_MAP.get(key);
+  if (!list || !list.length) return null;
+  const prov = foldGeoText(provincia);
+  let pick = list[0]; // el mas poblado por defecto
+  if (prov && list.length > 1) {
+    const byProv = list.find(m => {
+      const p = foldGeoText(m.provincia);
+      return p === prov || p.includes(prov) || prov.includes(p);
+    });
+    if (byProv) pick = byProv;
+  }
+  return { ...pick, label: [pick.municipio, pick.provincia, pick.pais].filter(Boolean).join(", ") };
+}
+
+module.exports = { foldGeoText, fallbackPlaceForAddress, fallbackMunicipioExacto };

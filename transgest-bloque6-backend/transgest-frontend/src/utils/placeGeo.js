@@ -62,6 +62,7 @@ const KNOWN_PLACES = {
   andorra_de_teruel: { municipio:"Andorra", provincia:"Teruel", pais:"Espana", lat:40.9766, lng:-0.4472 },
   lucena: { municipio:"Lucena", provincia:"Cordoba", pais:"Espana", lat:37.4088, lng:-4.4852 },
   torrelavit: { municipio:"Torrelavit", provincia:"Barcelona", pais:"Espana", lat:41.4460, lng:1.7290 },
+  villanueva_de_alcardete: { municipio:"Villanueva de Alcardete", provincia:"Toledo", pais:"Espana", lat:39.6316, lng:-3.0086 },
 };
 
 export function inferPlaceGeo(...values) {

@@ -16,6 +16,7 @@ const PLACES = [
   ["Alicante", "Alicante", "Espana", 38.3452, -0.4907, ["Alacant"]],
   ["San Vicente del Raspeig", "Alicante", "Espana", 38.3964, -0.5255, ["Sant Vicent del Raspeig", "San Vicente Raspeig", "San Vicente"]],
   ["Valencia", "Valencia", "Espana", 39.4699, -0.3763],
+  ["Villanueva de Alcardete", "Toledo", "Espana", 39.6316, -3.0086],
   ["Gandia", "Valencia", "Espana", 38.9680, -0.1845],
   ["Castellon", "Castellon", "Espana", 39.9864, -0.0513, ["Castello"]],
   ["Barcelona", "Barcelona", "Espana", 41.3851, 2.1734],

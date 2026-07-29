@@ -76,8 +76,20 @@ function isStreetSegment(segment = "") {
 // nombre de una calle (p.ej. "Calle Malaga") no secuestra el resultado hacia la
 // ciudad de Malaga. Devuelve "" si no hay un segmento de ciudad claro.
 function extractAddressLocality(query = "") {
-  const segments = String(query || "").split(",").map(part => part.trim()).filter(Boolean);
-  if (segments.length < 2) return "";
+  const raw = String(query || "").trim();
+  if (!raw) return "";
+  const segments = raw.split(",").map(part => part.trim()).filter(Boolean);
+  // SIN comas: en espanol la poblacion suele ir DESPUES del numero de portal.
+  // "Calle Malaga 1 San Vicente" -> "San Vicente". Asi "Malaga" (la calle) no
+  // secuestra el resultado aunque no haya comas.
+  if (segments.length < 2) {
+    const after = raw.replace(/^.*\d+[a-zA-Z]?\s+/, "").trim();
+    if (after && after.toLowerCase() !== raw.toLowerCase()) {
+      const words = normalizeGeoText(after).split(" ").filter(Boolean);
+      if (words.length >= 1 && words.length <= 4 && !countryCodeFor(normalizeGeoText(after))) return after;
+    }
+    return "";
+  }
   for (let i = segments.length - 1; i >= 0; i -= 1) {
     const seg = segments[i];
     const normalized = normalizeGeoText(seg);

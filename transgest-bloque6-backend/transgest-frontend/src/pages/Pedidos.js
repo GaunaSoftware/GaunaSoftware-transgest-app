@@ -11039,12 +11039,46 @@ export default function Pedidos() {
     }
   }
 
+  // Pedidos a los que aplica el popup "Asignar": si el pedido abierto esta dentro
+  // de una seleccion multiple, se asigna a todos los seleccionados operables; si
+  // no, solo a ese pedido.
+  function quickAssignTargets(p) {
+    if (!p) return [];
+    const operables = selectedPedidosOperables.filter(x => !pedidoTieneFacturaBorrador(x));
+    if (operables.length > 1 && operables.some(x => String(x.id) === String(p.id))) return operables;
+    return [p];
+  }
+
   async function aplicarQuickAssign(patch) {
     const p = quickAssignPedido;
     if (!p) return;
+    // Si el pedido abierto forma parte de una multiseleccion, la misma asignacion
+    // se aplica a TODOS los seleccionados (no solo al primero). Asi el popup de
+    // "Asignar" respeta la seleccion multiple.
+    const seleccion = quickAssignTargets(p);
+    const enLote = seleccion.length > 1;
     try {
-      await editarPedido(p.id, buildPedidoUpdatePayload(p, patch));
-      notify("Asignacion guardada.", "success");
+      if (enLote) {
+        let okCount = 0; const fallos = [];
+        for (const ped of seleccion) {
+          try {
+            await editarPedido(ped.id, buildPedidoUpdatePayload(ped, patch));
+            okCount++;
+          } catch (err) {
+            fallos.push(`${ped.numero || ped.id}: ${err.message || "error"}`);
+          }
+        }
+        notify(
+          fallos.length
+            ? `Asignados ${okCount} de ${seleccion.length}. Fallaron ${fallos.length}: ${fallos.slice(0, 2).join(" | ")}${fallos.length > 2 ? "..." : ""}`
+            : `Asignacion guardada en ${okCount} pedido(s).`,
+          fallos.length ? "warning" : "success"
+        );
+        setSelectedPedidoIds([]);
+      } else {
+        await editarPedido(p.id, buildPedidoUpdatePayload(p, patch));
+        notify("Asignacion guardada.", "success");
+      }
       setQuickAssignPedido(null);
       cargar();
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: p.id, source: "pedidos-quick-assign" } }));
@@ -12240,6 +12274,7 @@ export default function Pedidos() {
           pedido={quickAssignPedido}
           vehiculos={vehiculos}
           choferes={choferes}
+          bulkCount={quickAssignTargets(quickAssignPedido).length}
           onClose={()=>setQuickAssignPedido(null)}
           onAssign={aplicarQuickAssign}
         />

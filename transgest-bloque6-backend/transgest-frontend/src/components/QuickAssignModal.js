@@ -4,7 +4,7 @@ import { formatMatricula } from "../utils/formatos";
 // Popup rapido de asignacion desde el boton "Asignar" de la lista de pedidos.
 // Permite elegir una matricula de la flota o escribirla a mano (asignacion
 // propia), y opcionalmente el chofer. No abre el formulario completo del pedido.
-export default function QuickAssignModal({ pedido, vehiculos = [], choferes = [], onClose, onAssign }) {
+export default function QuickAssignModal({ pedido, vehiculos = [], choferes = [], onClose, onAssign, bulkCount = 0 }) {
   const [matricula, setMatricula] = useState(
     pedido?.vehiculo_matricula || pedido?.matricula_manual || ""
   );
@@ -13,6 +13,20 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
     pedido?.remolque_matricula || pedido?.remolque_matricula_manual || ""
   );
   const [trabajando, setTrabajando] = useState(false);
+
+  // Un vehiculo es remolque si su clase lo indica, si es el remolque de otra
+  // cabeza, o por convencion de matricula (R-1234, 1234-R). Asi el desplegable de
+  // "Matricula" ofrece solo cabezas tractoras y el de "Remolque" solo remolques.
+  const esRemolque = (v) => {
+    const clase = String(v?.clase || v?.tipo || "").toLowerCase();
+    const mat = String(v?.matricula || "").toUpperCase();
+    const esRemolqueDeAlguien = vehiculos.some(t => t.remolque_id === v?.id);
+    return clase.includes("remolque") || clase.includes("semirremolque") || clase.includes("dolly")
+      || esRemolqueDeAlguien || /^R[-_\s]/i.test(mat) || mat.endsWith("-R") || mat.endsWith("_R");
+  };
+  const tractoras = useMemo(() => vehiculos.filter(v => !esRemolque(v)), [vehiculos]);
+  const remolques = useMemo(() => vehiculos.filter(v => esRemolque(v)), [vehiculos]);
+  const esBulk = Number(bulkCount) > 1;
 
   const vehMatch = useMemo(() => {
     const m = String(matricula || "").trim().toUpperCase();
@@ -29,7 +43,8 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
       patch.vehiculo_id = vehMatch.id;
       patch.colaborador_id = "";
       patch.matricula_manual = "";
-      patch.remolque_matricula_manual = "";
+      // Conserva el remolque escrito aunque la cabeza sea de la flota.
+      if (rem) patch.remolque_matricula_manual = rem;
     } else if (mat) {
       patch.matricula_manual = mat;
       patch.vehiculo_id = "";
@@ -57,17 +72,24 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
   return (
     <div style={S.overlay} onClick={onClose}>
       <div style={S.box} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)" }}>Asignar vehiculo</div>
+        <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)" }}>
+          {esBulk ? `Asignar a ${bulkCount} pedidos` : "Asignar vehiculo"}
+        </div>
         <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>
-          Pedido {pedido?.numero || ""} · {pedido?.origen || ""} {pedido?.destino ? `-> ${pedido.destino}` : ""}
+          {esBulk
+            ? "Se aplicara la misma matricula, remolque y chofer a todos los pedidos seleccionados."
+            : <>Pedido {pedido?.numero || ""} · {pedido?.origen || ""} {pedido?.destino ? `-> ${pedido.destino}` : ""}</>}
         </div>
 
-        <datalist id="tg-quick-matriculas">
-          {vehiculos.map(v => <option key={v.id} value={v.matricula} />)}
+        <datalist id="tg-quick-tractoras">
+          {tractoras.map(v => <option key={v.id} value={v.matricula} />)}
+        </datalist>
+        <datalist id="tg-quick-remolques">
+          {remolques.map(v => <option key={v.id} value={v.matricula} />)}
         </datalist>
 
         <label style={S.label}>Matricula (elige de la flota o escribe a mano)</label>
-        <input list="tg-quick-matriculas" style={S.input} value={matricula} autoFocus
+        <input list="tg-quick-tractoras" style={S.input} value={matricula} autoFocus
           onChange={e => setMatricula(formatMatricula(e.target.value))} placeholder="Ej: 1234-ABC" />
         {matricula && (
           <div style={{ fontSize: 11, color: vehMatch ? "#10b981" : "var(--text5)", marginTop: 4 }}>
@@ -76,7 +98,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
         )}
 
         <label style={S.label}>Remolque (opcional)</label>
-        <input list="tg-quick-matriculas" style={S.input} value={remolque}
+        <input list="tg-quick-remolques" style={S.input} value={remolque}
           onChange={e => setRemolque(formatMatricula(e.target.value))} placeholder="Ej: R-1234-BCD" />
 
         <label style={S.label}>Chofer (opcional)</label>
@@ -90,7 +112,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
           <button
             style={{ ...S.btn, background: "var(--accent,#0f766e)", color: "#fff", borderColor: "var(--accent,#0f766e)", opacity: trabajando || (!matricula && !choferId) ? .6 : 1 }}
             onClick={asignar} disabled={trabajando || (!matricula && !choferId)}>
-            {trabajando ? "Asignando..." : "Asignar"}
+            {trabajando ? "Asignando..." : (esBulk ? `Asignar a ${bulkCount}` : "Asignar")}
           </button>
         </div>
       </div>

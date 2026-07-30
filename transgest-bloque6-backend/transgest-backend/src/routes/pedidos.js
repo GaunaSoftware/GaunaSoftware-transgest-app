@@ -4414,24 +4414,185 @@ function extractSupplierOrderHints(text = "") {
   };
 }
 
+// Provincias de Espana (sin acentos, mayusculas) para separar ciudad/provincia
+// en direcciones tipo "33186 EL BERRON, ASTURIAS".
+const PROVINCIAS_ES = new Set([
+  "ALAVA", "ARABA", "ALBACETE", "ALICANTE", "ALACANT", "ALMERIA", "ASTURIAS", "AVILA", "BADAJOZ",
+  "BARCELONA", "BIZKAIA", "VIZCAYA", "BURGOS", "CACERES", "CADIZ", "CANTABRIA", "CASTELLON", "CASTELLO",
+  "CIUDAD REAL", "CORDOBA", "CORUNA", "CUENCA", "GIRONA", "GERONA", "GRANADA", "GUADALAJARA", "GIPUZKOA",
+  "GUIPUZCOA", "HUELVA", "HUESCA", "JAEN", "LEON", "LLEIDA", "LERIDA", "LUGO", "MADRID", "MALAGA",
+  "MURCIA", "NAVARRA", "NAFARROA", "OURENSE", "ORENSE", "PALENCIA", "PALMAS", "PONTEVEDRA", "RIOJA",
+  "SALAMANCA", "TENERIFE", "SEGOVIA", "SEVILLA", "SORIA", "TARRAGONA", "TERUEL", "TOLEDO", "VALENCIA",
+  "VALLADOLID", "ZAMORA", "ZARAGOZA", "BALEARES", "CEUTA", "MELILLA",
+]);
+
+// Parser de importe con convencion espanola: "1.285" = 1285, "1.285,50" = 1285.5.
+// (parseLocaleNumber deja "24.791" como 24.791 al ser un unico grupo de miles.)
+function parseImporteEs(raw) {
+  let s = String(raw || "").replace(/[^\d.,]/g, "");
+  if (!s) return null;
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+// De una direccion saca CIUDAD y PROVINCIA. Busca el codigo postal (5 digitos)
+// y la ciudad que le sigue; la provincia se detecta contra el listado conocido.
+function localidadResumenEs(address = "") {
+  const a = String(address || "").replace(/\s+/g, " ").trim();
+  if (!a) return { ciudad: "", provincia: "", resumen: "" };
+  const up = a.toUpperCase();
+  let provincia = "";
+  for (const seg of up.split(/[,\n]/).map(s => s.trim())) {
+    if (PROVINCIAS_ES.has(seg)) { provincia = seg; break; }
+  }
+  if (!provincia) {
+    for (const p of PROVINCIAS_ES) {
+      if (new RegExp(`(?:^|[,\\s])${p}(?:$|[,\\s])`).test(up)) { provincia = p; break; }
+    }
+  }
+  let ciudad = "";
+  const cp = up.match(/\b\d{5}\b\s+([^,]+)/);
+  if (cp) {
+    ciudad = cp[1].trim();
+    if (provincia) ciudad = ciudad.replace(new RegExp(`\\s+${provincia}\\s*$`), "").trim();
+  }
+  const resumen = [ciudad, provincia].filter(Boolean).join(", ");
+  return { ciudad, provincia, resumen };
+}
+
+// Extractor dedicado para "Ordenes de carga" con secciones verticales (etiqueta
+// en una linea, valor en la siguiente): LUGAR DE CARGA / DIRECCIONES DE DESCARGA
+// / Kg totales / Precio acordado / Ref. pedido(s). El parser generico no vale
+// para este formato: sus regex de respaldo enganchaban con los ENCABEZADOS
+// (origen -> "KG TOTALES", destino -> "PARADA 1 DE 2") y no detectaba el precio.
+function extractOrdenCargaHints(clean = "") {
+  const text = String(clean || "");
+  if (!/lugar de carga/i.test(text)) return null;
+  if (!/direcciones?\s+de\s+descarga/i.test(text) && !/parada\s+\d+\s+de\s+\d+/i.test(text)) return null;
+
+  const PICTO = /[\u{1F000}-\u{1FAFF}\u2190-\u27BF\u2B00-\u2BFF\uFE0F\u200D]/gu;
+  const bultosTotal = [...text.matchAll(/\u{1F4E6}\s*(\d{1,4})/gu)]
+    .map(m => Number(m[1])).filter(Number.isFinite).reduce((a, b) => a + b, 0) || null;
+
+  const lines = text.split("\n")
+    .map(l => l.replace(PICTO, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const HEADERS = [
+    /^transportista\b/i, /^datos de la carga\b/i, /^lugar de carga\b/i,
+    /^direcciones?\s+de\s+descarga\b/i, /^parada\s+\d+\s+de\s+\d+/i,
+    /^obligaciones\b/i, /^kg totales\b/i, /^paradas\b/i, /^ref\.?\s*pedido/i,
+    /^precio acordado\b/i, /^fecha de carga\b/i,
+  ];
+  const isHeader = l => HEADERS.some(rx => rx.test(l));
+  const idxOf = rx => lines.findIndex(l => rx.test(l));
+  const nextHeaderAfter = i => {
+    for (let j = i + 1; j < lines.length; j += 1) if (isHeader(lines[j])) return j;
+    return lines.length;
+  };
+  // Valor de una etiqueta vertical: resto de su linea, o la siguiente linea util.
+  const valorDe = rx => {
+    const i = idxOf(rx);
+    if (i < 0) return "";
+    const same = lines[i].replace(rx, "").replace(/^[\s:\-\u00B7]+/, "").trim();
+    // Restos sin contenido real (p.ej. "(s)" de "Ref. pedido(s)") -> linea siguiente.
+    if (same && /[A-Za-z0-9]{2,}/.test(same)) return same;
+    return (lines[i + 1] || "").trim();
+  };
+  const companyPattern = /\b(?:S\.?\s*L\.?\s*U?\.?|S\.?\s*A\.?\s*U?\.?|SOCIEDAD\s+LIMITADA|SOCIEDAD\s+ANONIMA)\b/i;
+
+  // Cliente = emisor de la orden (cabecera, ANTES de TRANSPORTISTA para no coger
+  // al transportista como cliente).
+  const iTrans = idxOf(/^transportista\b/i);
+  const headerBlock = lines.slice(0, iTrans > 0 ? iTrans : 3);
+  const clienteNombre = (headerBlock.find(l => companyPattern.test(l)) || headerBlock[0] || "")
+    .split(/\u00B7|\|/)[0].replace(/\b(?:CIF|NIF).*$/i, "").trim();
+
+  // Lugar de carga (incluye lo que venga en la misma linea del encabezado).
+  const iCarga = idxOf(/^lugar de carga\b/i);
+  let cargaAddress = "";
+  if (iCarga >= 0) {
+    const same = lines[iCarga].replace(/^lugar de carga\b/i, "").replace(/^[\s:\-\u00B7]+/, "").trim();
+    cargaAddress = [same, ...lines.slice(iCarga + 1, nextHeaderAfter(iCarga))]
+      .filter(Boolean).join(", ").replace(/\s*\u2014\s*/g, " - ").replace(/\s+/g, " ").trim();
+  }
+  const cargaLoc = localidadResumenEs(cargaAddress);
+
+  // Paradas de descarga.
+  const stopIdx = lines.map((l, i) => (/^parada\s+\d+\s+de\s+\d+/i.test(l) ? i : -1)).filter(i => i >= 0);
+  const stops = [];
+  for (const sIdx of stopIdx) {
+    const block = lines.slice(sIdx + 1, nextHeaderAfter(sIdx));
+    const referencia = (block.find(l => /^[A-Z]{2}\d{2}[\/-]\d{3,6}/i.test(l)) || "").trim();
+    const util = block.filter(l => l
+      && !/^[A-Z]{2}\d{2}[\/-]\d{3,6}/i.test(l)   // ref. pedido PVxx/xxxxx
+      && !/^\d{1,4}$/.test(l)                       // contador de bultos suelto
+      && !/escanear|maps|pulsar/i.test(l));
+    const empresa = util[0] || "";
+    let addrLines = util.slice(1);
+    if (!addrLines.length) addrLines = util;
+    const address = addrLines.join(", ").replace(/\s+/g, " ").trim() || empresa;
+    const loc = localidadResumenEs(address);
+    stops.push({
+      empresa,
+      referencia,
+      direccion: (loc.resumen ? `${address}` : address).toUpperCase(),
+      ciudad: loc.ciudad,
+      provincia: loc.provincia,
+      resumen: loc.resumen,
+    });
+  }
+
+  const precio = parseImporteEs(valorDe(/^precio acordado\b/i));
+  const kg = parseImporteEs(valorDe(/^kg totales\b/i));
+  const referencia = valorDe(/^ref\.?\s*pedido/i) || (text.match(/\b[A-Z]{2}\d{2}[\/-]\d{3,6}\b/i)?.[0] || "");
+
+  const origen = (cargaLoc.resumen || cargaAddress || "").toUpperCase();
+  const destino = (stops[0]?.resumen || stops[0]?.direccion || "").toUpperCase();
+
+  return {
+    detected: true,
+    cliente_nombre: clienteNombre,
+    origen,
+    destino,
+    referencia,
+    importe: Number.isFinite(precio) && precio > 0 ? precio : null,
+    precio_unitario: Number.isFinite(precio) && precio > 0 ? precio : null,
+    peso_kg: Number.isFinite(kg) && kg > 0 ? Math.round(kg) : null,
+    bultos: bultosTotal,
+    puntos_carga: cargaAddress ? [{
+      direccion: cargaAddress.toUpperCase(), ciudad: cargaLoc.ciudad, provincia: cargaLoc.provincia,
+      fecha: "", hora: "", tipo: "carga",
+    }] : [],
+    puntos_descarga: stops.map(s => ({
+      direccion: s.direccion, ciudad: s.ciudad, provincia: s.provincia,
+      cliente_nombre: s.empresa, referencia_cliente: s.referencia,
+      fecha: "", hora: "", tipo: "descarga",
+    })),
+    paradas: stops.length,
+  };
+}
+
 function extractAiPedidoDraft(text = "") {
   const raw = String(text || "");
   const clean = normalizeAiText(raw);
   const lower = clean.toLowerCase();
   const supplierOrder = extractSupplierOrderHints(clean);
+  const orden = extractOrdenCargaHints(clean);
   const lineValue = label => {
     const rx = new RegExp(`(?:^|\\n)\\s*(?:${label})\\s*[:\\-]\\s*([^\\n]+)`, "i");
     const m = clean.match(rx);
     return m?.[1]?.trim() || "";
   };
-  const clienteNombre = lineValue("cliente|cargador|empresa|customer|shipper|from|de") || supplierOrder.cliente_nombre || pickAiMatch(clean, [
+  const clienteNombre = orden?.cliente_nombre || lineValue("cliente|cargador|empresa|customer|shipper|from|de") || supplierOrder.cliente_nombre || pickAiMatch(clean, [
     /\bcliente\s+(?:es\s+)?([A-ZÁÉÍÓÚÜÑ0-9][^\n,;]{2,80})/i,
   ]);
-  const origen = lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || pickAiMatch(clean, [
+  const origen = orden?.origen || lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || pickAiMatch(clean, [
     /\b(?:carga|recogida|origen)\s+(?:en|desde)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bdesde\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const destino = lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || pickAiMatch(clean, [
+  const destino = orden?.destino || lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || pickAiMatch(clean, [
     /\b(?:descarga|entrega|destino)\s+(?:en|a)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bhasta\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
@@ -4443,7 +4604,7 @@ function extractAiPedidoDraft(text = "") {
   const mercancia = lineValue("mercancia|mercancia / notas|producto|goods|commodity|description|carga") || supplierOrder.mercancia || pickAiMatch(clean, [
     /\bmercancia\s+(?:de\s+)?([^\n;.]{3,120})/i,
   ]);
-  const referencia = extractAiReference(clean, lineValue);
+  const referencia = orden?.referencia || extractAiReference(clean, lineValue);
   const pesoTon = lower.match(/\b(\d+(?:[,.]\d+)?)\s*(?:tn|ton|toneladas|t)\b/);
   const pesoKg = lower.match(/\b(\d{2,6}(?:[,.]\d+)?)\s*(?:kg|kilos)\b/);
   const palets = lower.match(/\b(\d{1,4})\s*(?:palets|pales|pallets|pallet|plt)\b/);
@@ -4456,9 +4617,9 @@ function extractAiPedidoDraft(text = "") {
   ]).toUpperCase().replace(/\s+/g, "-");
   const pesoKgValue = pesoTon
     ? Math.round((parseLocaleNumber(pesoTon[1]) || 0) * 1000)
-    : (pesoKg ? parseLocaleNumber(pesoKg[1]) : null);
+    : (pesoKg ? parseLocaleNumber(pesoKg[1]) : (orden?.peso_kg ?? null));
   const importeNumberRaw = String(importeRaw || "").match(/(\d+(?:[,.]\d{1,2})?)/)?.[1] || "";
-  const importe = supplierOrder.importe ?? parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
+  const importe = orden?.importe ?? supplierOrder.importe ?? parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
   const toneladas = Number.isFinite(pesoKgValue) && pesoKgValue > 0
     ? Number((pesoKgValue / 1000).toFixed(3))
     : null;
@@ -4518,7 +4679,7 @@ function extractAiPedidoDraft(text = "") {
     hora_descarga: horaDescarga || "",
     mercancia,
     peso_kg: pesoKgValue || null,
-    bultos: palets ? Number(palets[1]) : null,
+    bultos: palets ? Number(palets[1]) : (orden?.bultos ?? null),
     importe: importeCalculado || importe || null,
     precio_unitario: precioUnitario || null,
     tipo_precio: tipoPrecio,
@@ -4531,8 +4692,12 @@ function extractAiPedidoDraft(text = "") {
     _tarifa_unitaria_detectada: tarifaUnitariaDetectada,
     pendiente_completar: true,
     aviso_completar: "Borrador generado desde Bandeja IA: revisar campos, tarifa, asignacion y documentos antes de confirmar.",
-    puntos_carga: origen ? [{ direccion: origen.toUpperCase(), fecha: normalizeAiDate(fechaCargaRaw || anyDate), hora: horaCarga || "", tipo: "carga" }] : [],
-    puntos_descarga: destino ? [{ direccion: destino.toUpperCase(), fecha: normalizeAiDate(fechaDescargaRaw), hora: horaDescarga || "", tipo: "descarga" }] : [],
+    puntos_carga: orden?.puntos_carga?.length
+      ? orden.puntos_carga.map(p => ({ ...p, fecha: normalizeAiDate(fechaCargaRaw || anyDate) || p.fecha || "", hora: horaCarga || p.hora || "" }))
+      : (origen ? [{ direccion: origen.toUpperCase(), fecha: normalizeAiDate(fechaCargaRaw || anyDate), hora: horaCarga || "", tipo: "carga" }] : []),
+    puntos_descarga: orden?.puntos_descarga?.length
+      ? orden.puntos_descarga.map(p => ({ ...p, fecha: normalizeAiDate(fechaDescargaRaw) || p.fecha || "", hora: horaDescarga || p.hora || "" }))
+      : (destino ? [{ direccion: destino.toUpperCase(), fecha: normalizeAiDate(fechaDescargaRaw), hora: horaDescarga || "", tipo: "descarga" }] : []),
   };
   return draft;
 }

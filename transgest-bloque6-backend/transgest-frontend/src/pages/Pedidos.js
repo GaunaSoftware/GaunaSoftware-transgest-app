@@ -192,13 +192,16 @@ function currentWeekRangeLocal(now = new Date()) {
   };
 }
 
-function currentMonthRangeLocal(now = new Date()) {
+// Vista por defecto de Trafico: desde el inicio del mes actual (para conservar el
+// contexto del mes en curso) y SIN cortar en fin de mes, para que los viajes
+// proximos SIEMPRE se muestren aunque caigan en meses siguientes. Ventana rodante
+// de ~12 meses hacia delante (suficiente para cualquier planificacion real).
+function defaultTraficoRangeLocal(now = new Date()) {
   const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const hasta = new Date(now.getFullYear() + 1, now.getMonth() + 1, 0);
   return {
-    month: formatDateInputLocal(first),
     desde: formatDateInputLocal(first),
-    hasta: formatDateInputLocal(last),
+    hasta: formatDateInputLocal(hasta),
     label: first.toLocaleDateString("es-ES", { month: "long", year: "numeric" }),
   };
 }
@@ -9968,7 +9971,7 @@ export default function Pedidos() {
   const [autoAsignando, setAutoAsignando] = useState(null);  // pedido para autoasignacion IA
   const [colaboradores,setColaboradores]=useState([]);
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
-  const _rangoMesActual = currentMonthRangeLocal();
+  const _rangoMesActual = defaultTraficoRangeLocal();
   const filtroPeriodoActivo = filtroFechasCustom || Boolean(filtroMes);
   const vistaMesActualPorDefecto = !filtroPeriodoActivo;
 
@@ -10205,12 +10208,14 @@ export default function Pedidos() {
       if (debouncedQ) params.q = debouncedQ;
       if (filtroCliente) params.cliente_id = filtroCliente;
       const aplicarRangoFechas = filtroFechasCustom || Boolean(filtroMes);
-      const rangoMesActualCarga = currentMonthRangeLocal();
+      const rangoDefectoCarga = defaultTraficoRangeLocal();
       if (aplicarRangoFechas && filtroDesde) params.desde = filtroDesde;
       if (aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
       if (!aplicarRangoFechas) {
-        params.desde = rangoMesActualCarga.desde;
-        params.hasta = rangoMesActualCarga.hasta;
+        // Mes actual como contexto + todos los viajes siguientes (no se corta en
+        // fin de mes, para que "los proximos" salgan siempre).
+        params.desde = rangoDefectoCarga.desde;
+        params.hasta = rangoDefectoCarga.hasta;
       }
       const cargarPeriodoCompleto = !debouncedQ || groupByCliente || !filtroFechasCustom || Boolean(filtroMes);
       const effectivePage = cargarPeriodoCompleto ? 1 : page;
@@ -11454,7 +11459,7 @@ export default function Pedidos() {
             borderRadius:999,
             padding:"5px 10px",
           }}>
-            Mes actual: {_rangoMesActual.label}
+            {_rangoMesActual.label} y siguientes
           </span>
         )}
         <span style={{

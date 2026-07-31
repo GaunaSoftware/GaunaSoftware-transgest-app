@@ -8288,6 +8288,39 @@ router.post("/chofer", async (req, res) => {
   }
 });
 
+// Asocia (sin quitar a nadie) los puntos de interes usados en un pedido al
+// cliente del pedido: el punto pasa a aparecer TAMBIEN como "del cliente",
+// pudiendo estar en varios clientes a la vez y seguir siendo general/visible.
+// Solo anade el cliente a clientes_ids; nunca cambia el dueno ni borra a otros.
+async function asociarPuntosInteresUsados(empresaId, clienteId, ...stopArrays) {
+  try {
+    const cid = normalizePedidoUuid(clienteId);
+    if (!empresaId || !cid) return;
+    const ids = [];
+    for (const arr of stopArrays) {
+      for (const stop of normalizePedidoJsonList(arr)) {
+        const pid = normalizePedidoUuid(stop?.punto_interes_id || stop?.punto_id || stop?.point_id);
+        if (pid) ids.push(pid);
+      }
+    }
+    const unique = [...new Set(ids)];
+    if (!unique.length) return;
+    await db.query(
+      `UPDATE puntos_interes
+          SET clientes_ids = array_append(COALESCE(clientes_ids, '{}'), $1::uuid),
+              updated_at = NOW()
+        WHERE empresa_id = $2
+          AND id = ANY($3::uuid[])
+          AND activo = true
+          AND cliente_id IS DISTINCT FROM $1::uuid
+          AND NOT ($1::uuid = ANY(COALESCE(clientes_ids, '{}')))`,
+      [cid, empresaId, unique]
+    );
+  } catch (e) {
+    logger.warn(`No se pudieron asociar puntos de interes al cliente: ${e.message}`);
+  }
+}
+
 router.post("/", GERENTE_O_TRAFICO,
   body("cliente_id").isUUID(),
   body("importe").optional({ checkFalsy: true }).custom(value => parseLocaleNumber(value) !== null),
@@ -8621,6 +8654,7 @@ router.post("/", GERENTE_O_TRAFICO,
     });
     res.status(201).json({...pedidoCreado, remolque_matricula: remolqueMatCreado});
     webhooks.dispatch(empresaId, "pedido.creado", { pedido_id: pedidoCreado && pedidoCreado.id, numero: pedidoCreado && pedidoCreado.numero, cliente_id, origen: pedidoCreado && pedidoCreado.origen, destino: pedidoCreado && pedidoCreado.destino }).catch(() => {});
+    asociarPuntosInteresUsados(empresaId, cliente_id, pedidoCreado?.puntos_carga, pedidoCreado?.puntos_descarga);
     if (pedidoCreado && festivoAviso) {
       notificarGerenciaPedido(
         empresaId,
@@ -9184,6 +9218,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
         req.user?.id || null
       );
     }
+    asociarPuntosInteresUsados(empresaId, pedidoActualizado.cliente_id, pedidoActualizado.puntos_carga, pedidoActualizado.puntos_descarga);
     res.json(pedidoActualizado);
   } catch(e) {
     if (e.code === '42703') {

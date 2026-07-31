@@ -402,6 +402,9 @@ async function applyMigrations() {
     await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_ruta_precios_cliente_cliente ON ruta_precios_cliente(cliente_id)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
+    // Clientes que han adoptado un punto (ademas del dueno/general): un punto puede
+    // aparecer como "del cliente" en varios clientes a la vez sin dejar de ser general.
+    await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS clientes_ids UUID[] DEFAULT '{}'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS direccion_key TEXT").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo = true").catch(captureStartupMigrationError);
     await db.query("DROP INDEX IF EXISTS idx_puntos_interes_empresa_dir").catch(captureStartupMigrationError);

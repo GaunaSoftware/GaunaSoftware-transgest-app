@@ -1708,10 +1708,21 @@ function isPuntoVisibleParaCliente() {
   return true;
 }
 
+// Un punto es "del cliente" si es su dueno o si el cliente lo ha adoptado
+// (clientes_ids). Asi un punto general adoptado por 3 clientes sale como "suyo"
+// en esos 3 y sigue saliendo como "General" para el resto.
+function isPuntoDeCliente(punto = {}, clienteId = "") {
+  if (!clienteId) return false;
+  const cid = String(clienteId);
+  if (punto?.cliente_id && String(punto.cliente_id) === cid) return true;
+  const ids = Array.isArray(punto?.clientes_ids) ? punto.clientes_ids : [];
+  return ids.some(x => String(x) === cid);
+}
+
 function puntoScopeRank(punto = {}, clienteId = "") {
-  if (!isPuntoGeneral(punto) && clienteId && String(punto.cliente_id) === String(clienteId)) return 0; // del cliente
-  if (isPuntoGeneral(punto)) return 1;                                                                  // general
-  return 2;                                                                                             // de otro cliente
+  if (isPuntoDeCliente(punto, clienteId)) return 0; // del cliente (dueno o adoptado)
+  if (isPuntoGeneral(punto)) return 1;              // general
+  return 2;                                         // de otro cliente
 }
 
 function sortPuntosByClienteScope(a = {}, b = {}, clienteId = "") {
@@ -1721,7 +1732,7 @@ function sortPuntosByClienteScope(a = {}, b = {}, clienteId = "") {
 }
 
 function puntoScopeLabel(punto = {}, clienteId = "") {
-  if (!isPuntoGeneral(punto) && clienteId && String(punto.cliente_id) === String(clienteId)) return "Cliente";
+  if (isPuntoDeCliente(punto, clienteId)) return "Cliente";
   if (isPuntoGeneral(punto)) return "General";
   return "Otro cliente";
 }

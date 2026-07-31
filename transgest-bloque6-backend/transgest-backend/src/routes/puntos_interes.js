@@ -78,6 +78,7 @@ function withComputedFields(row) {
   const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
   return {
     ...row,
+    clientes_ids: Array.isArray(row?.clientes_ids) ? row.clientes_ids.map(String) : [],
     google_maps_url: metadata.google_maps_url || "",
     es_general: !row?.cliente_id,
     punto_general: !row?.cliente_id,

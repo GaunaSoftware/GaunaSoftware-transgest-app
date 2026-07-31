@@ -1700,14 +1700,22 @@ function isPuntoGeneral(punto = {}) {
   return !punto?.cliente_id;
 }
 
-function isPuntoVisibleParaCliente(punto = {}, clienteId = "", { includeGenerales = false } = {}) {
-  if (isPuntoGeneral(punto)) return !!includeGenerales;
-  return !!clienteId && String(punto.cliente_id) === String(clienteId);
+function isPuntoVisibleParaCliente() {
+  // Se muestran TODOS los puntos de la empresa (propios del cliente, generales y
+  // de otros clientes) para poder reutilizarlos sin duplicar ni crear siempre
+  // puntos nuevos. El orden prioriza los del cliente y la etiqueta indica el
+  // ambito (Cliente / General / Otro cliente).
+  return true;
+}
+
+function puntoScopeRank(punto = {}, clienteId = "") {
+  if (!isPuntoGeneral(punto) && clienteId && String(punto.cliente_id) === String(clienteId)) return 0; // del cliente
+  if (isPuntoGeneral(punto)) return 1;                                                                  // general
+  return 2;                                                                                             // de otro cliente
 }
 
 function sortPuntosByClienteScope(a = {}, b = {}, clienteId = "") {
-  const scope = (p) => (!isPuntoGeneral(p) && clienteId && String(p.cliente_id) === String(clienteId) ? 0 : 1);
-  const byScope = scope(a) - scope(b);
+  const byScope = puntoScopeRank(a, clienteId) - puntoScopeRank(b, clienteId);
   if (byScope) return byScope;
   return String(a.nombre || a.direccion || "").localeCompare(String(b.nombre || b.direccion || ""), "es");
 }

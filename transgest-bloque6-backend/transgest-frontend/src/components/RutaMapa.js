@@ -301,13 +301,18 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
     setView({ zoomAdj: 0, panX: 0, panY: 0 });
   }
   // Escala px-pantalla -> px-vista (viewBox con slice) para arrastrar el mapa.
+  // Con preserveAspectRatio "slice" el SVG se escala por max(w/VW, h/VH); un pixel
+  // de pantalla equivale a 1/ese_factor unidades de viewBox = min(VW/w, VH/h).
   function viewScale() {
     const rect = svgRef.current?.getBoundingClientRect();
     if (!rect || !rect.width || !rect.height) return 1;
-    return Math.max(VIEW_WIDTH / rect.width, VIEW_HEIGHT / rect.height);
+    return Math.min(VIEW_WIDTH / rect.width, VIEW_HEIGHT / rect.height);
   }
   function onPointerDown(e) {
     if (e.button !== undefined && e.button !== 0) return;
+    // Evita que el navegador inicie un arrastre nativo de imagen/seleccion, que
+    // secuestraba el gesto y solo dejaba mover el mapa unos pocos pixeles.
+    e.preventDefault();
     dragRef.current = { x: e.clientX, y: e.clientY };
     try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) { /* noop */ }
   }
@@ -384,9 +389,11 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
   return (
     <div style={{ position:"relative", zIndex:0, isolation:"isolate", border:"1px solid var(--border2)", borderRadius:8, overflow:"hidden", background:"var(--bg3)" }}>
       <div
-        style={{ position:"relative", width:"100%", height:"clamp(280px, 38vh, 440px)", overflow:"hidden", background:"#dbeafe", cursor: dragRef.current ? "grabbing" : "grab", touchAction:"none" }}
+        style={{ position:"relative", width:"100%", height:"clamp(280px, 38vh, 440px)", overflow:"hidden", background:"#dbeafe", cursor: dragRef.current ? "grabbing" : "grab", touchAction:"none", userSelect:"none", WebkitUserSelect:"none" }}
         role="img"
         aria-label="Ruta y puntos operativos del pedido"
+        draggable={false}
+        onDragStart={e => e.preventDefault()}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -395,7 +402,7 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
         <svg ref={svgRef} viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`} preserveAspectRatio="xMidYMid slice" style={{ width:"100%", height:"100%", display:"block" }}>
           <FallbackMapBase layer={layer} />
           {frame.tiles.map(tile => (
-            <image key={tile.key} href={tile.url} x={tile.x} y={tile.y} width={TILE_SIZE} height={TILE_SIZE} preserveAspectRatio="none" />
+            <image key={tile.key} href={tile.url} x={tile.x} y={tile.y} width={TILE_SIZE} height={TILE_SIZE} preserveAspectRatio="none" draggable={false} style={{ pointerEvents:"none" }} />
           ))}
           {routeLine.length >= 2 && (
             <>

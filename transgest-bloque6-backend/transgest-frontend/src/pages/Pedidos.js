@@ -12,7 +12,7 @@ import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRuta
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          crearColaboradorLiquidacionToken,
          getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta, resolveGeoPlace,
-         getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos } from "../services/api";
+         getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos, calcularDistanciaGeo, getChoferUltimoViaje } from "../services/api";
 import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -11054,6 +11054,37 @@ export default function Pedidos() {
     return [p];
   }
 
+  // Al asignar un chofer a un pedido desde Pedidos: si ese chofer viene de un
+  // viaje EN CURSO o FINALIZADO, calcula los km EN VACIO de posicionamiento (del
+  // destino donde queda al origen de este pedido) y pregunta si se anaden.
+  async function ofrecerKmVacioPorChoferAsignado(pedido, patch, choferId) {
+    try {
+      if (!choferId || !pedido?.id) return;
+      if (Number(pedido.km_vacio) > 0) return;                 // ya tiene km en vacio: no molestar
+      const origen = String(pedido.origen || "").trim();
+      if (!origen) return;
+      const info = await getChoferUltimoViaje(choferId, pedido.id);
+      if (!info?.hay || !info.destino) return;
+      if (String(info.destino).trim().toUpperCase() === origen.toUpperCase()) return; // mismo sitio
+      const desde = [info.destino, info.destino_provincia].filter(Boolean).join(", ");
+      const data = await calcularDistanciaGeo(desde, origen);
+      const km = Number(data?.km);
+      if (!data?.ok || !Number.isFinite(km) || km <= 0) return;
+      const kmR = Math.round(km);
+      const estadoTxt = ["entregado", "facturado"].includes(String(info.estado)) ? "finalizado" : "en curso";
+      const ok = await confirmDialog({
+        title: "Km en vacio de posicionamiento",
+        message: `El chofer viene del viaje ${info.numero || ""} (${estadoTxt}), que termina en ${info.destino}. Hay unos ${kmR.toLocaleString("es-ES")} km en vacio hasta el origen de este viaje (${origen}). Anadirlos como km en vacio?`,
+        confirmText: `Anadir ${kmR.toLocaleString("es-ES")} km`,
+        cancelText: "No anadir",
+      });
+      if (!ok) return;
+      await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, { ...patch, km_vacio: kmR }));
+      notify(`Anadidos ${kmR.toLocaleString("es-ES")} km en vacio.`, "success");
+      cargar();
+    } catch { /* no bloquea la asignacion */ }
+  }
+
   async function aplicarQuickAssign(patch) {
     const p = quickAssignPedido;
     if (!p) return;
@@ -11084,9 +11115,13 @@ export default function Pedidos() {
         await editarPedido(p.id, buildPedidoUpdatePayload(p, patch));
         notify("Asignacion guardada.", "success");
       }
+      const choferAsignado = !enLote ? (patch.chofer_id || "") : "";
       setQuickAssignPedido(null);
       cargar();
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: p.id, source: "pedidos-quick-assign" } }));
+      // Si se asigno un chofer que viene de un viaje en curso/finalizado, ofrecer
+      // anadir los km en vacio de posicionamiento (destino anterior -> este origen).
+      if (choferAsignado) ofrecerKmVacioPorChoferAsignado(p, patch, choferAsignado);
     } catch (e) {
       notify(e.message || "No se pudo asignar.", "error");
     }

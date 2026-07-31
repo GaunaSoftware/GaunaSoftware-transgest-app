@@ -6028,6 +6028,43 @@ router.get("/", async (req, res) => {
   });
 });
 
+// GET /pedidos/chofer-ultimo-viaje - ultimo viaje EN CURSO o FINALIZADO de un
+// chofer, para sugerir los km EN VACIO de posicionamiento al asignarle el
+// siguiente viaje desde Pedidos (destino donde queda -> origen del nuevo).
+router.get("/chofer-ultimo-viaje", async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const choferId = normalizePedidoUuid(req.query?.chofer_id);
+    const excluir = normalizePedidoUuid(req.query?.excluir);
+    if (!empresaId || !choferId) return res.json({ hay: false });
+    const { rows } = await db.query(
+      `SELECT id, numero, destino, destino_provincia, destino_pais, estado::text AS estado
+         FROM pedidos
+        WHERE empresa_id=$1
+          AND (chofer_id=$2 OR chofer2_id=$2)
+          AND ($3::uuid IS NULL OR id<>$3)
+          AND estado::text IN ('en_curso','descarga','entregado','facturado')
+          AND NULLIF(TRIM(COALESCE(destino,'')),'') IS NOT NULL
+        ORDER BY COALESCE(fecha_entrega, fecha_descarga, fecha_carga) DESC NULLS LAST, updated_at DESC NULLS LAST
+        LIMIT 1`,
+      [empresaId, choferId, excluir || null]
+    );
+    const p = rows[0];
+    if (!p) return res.json({ hay: false });
+    return res.json({
+      hay: true,
+      pedido_id: p.id,
+      numero: p.numero,
+      destino: p.destino,
+      destino_provincia: p.destino_provincia || "",
+      destino_pais: p.destino_pais || "",
+      estado: p.estado,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /pedidos/resumen-lista - listado operativo ligero para pantallas de trafico
 router.get("/resumen-lista", async (req, res) => {
   try {

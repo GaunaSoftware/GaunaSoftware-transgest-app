@@ -4608,12 +4608,19 @@ function OrdenCargaModal({ pedido, onClose }) {
           address: s.address || s.name || String(s || ""),
           google_maps_url: s.google_maps_url || s.maps_url || "",
         }))
-      : fallbackRoutePlaces.map((place, idx) => ({
-          type: idx === 0 ? "Carga" : idx === fallbackRoutePlaces.length - 1 ? "Descarga" : "Parada intermedia",
-          name: place?.name || "",
-          address: place?.address || place?.direccion || place?.google_maps_url || String(place || ""),
-          google_maps_url: place?.google_maps_url || place?.googleMapsUrl || "",
-        }));
+      : fallbackRoutePlaces.map((place) => {
+          // Conserva Carga/Descarga de cada parada (getRoutePlaces ya distingue
+          // cargas y descargas intermedias) para que en un grupaje se numeren como
+          // Carga 1, Carga 2, Descarga 1, Descarga 2 y no se pierdan como "Parada".
+          const t = String(place?.type || "").toLowerCase();
+          const base = t.includes("descarga") ? "Descarga" : t.includes("carga") ? "Carga" : "Parada intermedia";
+          return {
+            type: base,
+            name: place?.name || "",
+            address: place?.address || place?.direccion || place?.google_maps_url || String(place || ""),
+            google_maps_url: place?.google_maps_url || place?.googleMapsUrl || "",
+          };
+        });
     const routeUrl = rutaOptimizada?.maps_url || buildMapsRouteUrl(fallbackRoutePlaces);
     const routeProvider = rutaOptimizada?.provider_label || "Enlace orientativo";
     const routeKm = rutaOptimizada?.distance_km || pedido.km_ruta || pedido.km || "";
@@ -9047,10 +9054,10 @@ useEffect(() => {
                     <div><label style={S.label}>Matricula remolque colaborador</label>
                       <input style={S.input} value={form.remolque_matricula_colaborador||""} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Opcional"/>
                     </div>
-                    {(form.precio_cliente_col&&form.precio_colaborador)&&(
+                    {(calcImporte(form)>0&&parseLocaleNumber(form.precio_colaborador)>0)&&(
                       <div style={{gridColumn:"1/-1",display:"flex",gap:16,background:"var(--bg3)",borderRadius:7,padding:"8px 14px",alignItems:"center"}}>
-                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Beneficio viaje: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:parseLocaleNumber(form.precio_cliente_col)-parseLocaleNumber(form.precio_colaborador)>=0?"var(--green)":"var(--red)"}}>{(parseLocaleNumber(form.precio_cliente_col)-parseLocaleNumber(form.precio_colaborador)).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span></div>
-                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Margen: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#f59e0b"}}>{parseLocaleNumber(form.precio_cliente_col)>0?((1-parseLocaleNumber(form.precio_colaborador)/parseLocaleNumber(form.precio_cliente_col))*100).toFixed(1):0}%</span></div>
+                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Beneficio viaje: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:calcImporte(form)-parseLocaleNumber(form.precio_colaborador)>=0?"var(--green)":"var(--red)"}}>{(calcImporte(form)-parseLocaleNumber(form.precio_colaborador)).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span></div>
+                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Margen: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#f59e0b"}}>{calcImporte(form)>0?((1-parseLocaleNumber(form.precio_colaborador)/calcImporte(form))*100).toFixed(1):0}%</span></div>
                         {form.tipo_precio==="tonelada" && form.precio_colaborador_unitario && (
                           <div><span style={{fontSize:11,color:"var(--text5)"}}>Pago acordado: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--text2)"}}>{parseLocaleNumber(form.precio_colaborador_unitario,0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR/tn x {unidadesFacturablesPedido(form, form.minimo_colaborador_unidades).toLocaleString("es-ES")} tn</span></div>
                         )}

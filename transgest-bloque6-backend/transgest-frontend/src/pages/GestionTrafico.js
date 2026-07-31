@@ -5343,14 +5343,24 @@ function distKm([lat1,lon1], [lat2,lon2]) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-function sortParadasByProximity(pedidos) {
-  if (pedidos.length <= 1) return pedidos;
-  // Greedy nearest-neighbor: start from first carga, alternate carga/descarga by proximity
+function paradasDePedidos(pedidos = []) {
   const paradas = [];
-  pedidos.forEach(p => {
+  (Array.isArray(pedidos) ? pedidos : []).forEach(p => {
+    if (!p) return;
     paradas.push({ tipo:"carga",    ciudad:p.origen,  pedido:p, key:`c_${p.id}` });
     paradas.push({ tipo:"descarga", ciudad:p.destino, pedido:p, key:`d_${p.id}` });
   });
+  return paradas;
+}
+
+function sortParadasByProximity(pedidos) {
+  // Con 0-1 pedidos no hay nada que reordenar, pero hay que devolver PARADAS
+  // (carga+descarga), no los pedidos: el render espera parada.pedido. Devolver
+  // los pedidos aqui provocaba "Cannot read 'numero' of undefined" y dejaba la
+  // pestana de grupajes en blanco cuando un grupaje tenia un solo pedido.
+  if (!Array.isArray(pedidos) || pedidos.length <= 1) return paradasDePedidos(pedidos);
+  // Greedy nearest-neighbor: start from first carga, alternate carga/descarga by proximity
+  const paradas = paradasDePedidos(pedidos);
 
   // Sort: first all cargas by proximity to each other, then all descargas
   // Simple approach: sort cargas by proximity, keep carga-descarga pairs but order cargas by geography

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden } from "../services/api";
+import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
@@ -1160,6 +1160,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
   const [enlazandoRetorno, setEnlazandoRetorno] = useState(false);
   const [linkRetornoId, setLinkRetornoId] = useState("");
   const [linkKmVacio, setLinkKmVacio] = useState("");
+  const [calculandoKmVacio, setCalculandoKmVacio] = useState(false);
   const origenRef = useRef(null);
   const destinoRef = useRef(null);
   const fechaCargaRef = useRef(null);
@@ -1258,6 +1259,36 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
       })
       .slice(0, 80);
   }, [pedidos, pedido, form.fecha_carga, form.vehiculo_id]);
+
+  // Al elegir el retorno: calcula automaticamente los km EN VACIO de posicionamiento
+  // (destino donde queda el chofer en la ida -> origen donde carga el retorno) y
+  // pregunta si se anaden. Ej.: termina en Madrid y el retorno carga en Villarrubia
+  // -> saca los km de Madrid a Villarrubia y ofrece anadirlos al enlace.
+  async function seleccionarRetornoYSugerirKmVacio(retornoId) {
+    setLinkRetornoId(retornoId);
+    if (!retornoId) return;
+    const retorno = (pedidos || []).find(p => String(p.id) === String(retornoId));
+    const desde = String(form.destino || pedido.destino || "").trim();  // donde queda el chofer al terminar la ida
+    const hasta = String(retorno?.origen || "").trim();                 // donde carga el retorno
+    if (!desde || !hasta) return;
+    if (desde.toUpperCase() === hasta.toUpperCase()) return;             // mismo sitio: sin vacio
+    setCalculandoKmVacio(true);
+    try {
+      const data = await calcularDistanciaGeo(desde, hasta);
+      const km = Number(data?.km);
+      if (data?.ok && Number.isFinite(km) && km > 0) {
+        const kmR = Math.round(km);
+        const ok = await confirmDialog({
+          title: "Km en vacio del enlace",
+          message: `El chofer termina en ${desde} y el retorno carga en ${hasta}. Hay unos ${kmR.toLocaleString("es-ES")} km en vacio de posicionamiento entre un viaje y otro. Anadirlos como km vacio del enlace?`,
+          confirmText: `Anadir ${kmR.toLocaleString("es-ES")} km`,
+          cancelText: "No anadir",
+        });
+        if (ok) setLinkKmVacio(String(kmR));
+      }
+    } catch { /* si el calculo falla, se puede escribir a mano */ }
+    finally { setCalculandoKmVacio(false); }
+  }
 
   async function enlazarRetornoSeleccionado() {
     if (!pedido?.id || !linkRetornoId) {
@@ -1836,7 +1867,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
             <div style={{display:"grid",gridTemplateColumns:"1.5fr .7fr auto",gap:8,alignItems:"end"}}>
               <div>
                 <label style={{...lbl, marginTop:0}}>Retorno asociado</label>
-                <select style={inp} value={linkRetornoId} onChange={e => setLinkRetornoId(e.target.value)} disabled={bloquear || enlazandoRetorno}>
+                <select style={inp} value={linkRetornoId} onChange={e => seleccionarRetornoYSugerirKmVacio(e.target.value)} disabled={bloquear || enlazandoRetorno || calculandoKmVacio}>
                   <option value="">Seleccionar retorno...</option>
                   {candidatosRetorno.map(p => (
                     <option key={p.id} value={p.id}>
@@ -1848,6 +1879,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
               <div>
                 <label style={{...lbl, marginTop:0}}>Km vacio</label>
                 <input style={inp} type="number" min="0" step="0.1" value={linkKmVacio} onChange={e => setLinkKmVacio(e.target.value)} disabled={bloquear || enlazandoRetorno}/>
+                {calculandoKmVacio && <div style={{fontSize:10,color:"var(--text4)",marginTop:3}}>Calculando km en vacio...</div>}
               </div>
               <button type="button" onClick={enlazarRetornoSeleccionado} disabled={bloquear || enlazandoRetorno || !linkRetornoId}
                 style={{padding:"8px 12px",borderRadius:7,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.14)",color:"var(--accent-xl)",fontWeight:900,fontSize:11,cursor:bloquear||enlazandoRetorno||!linkRetornoId?"not-allowed":"pointer",opacity:(bloquear || enlazandoRetorno || !linkRetornoId) ? .55 : 1}}>

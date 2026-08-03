@@ -4168,7 +4168,9 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   }
   async function addParada() {
     if (!newStop.direccion.trim()) { notify("La direccion es obligatoria", "warning"); return; }
-    const resolvedStop = await resolveStopGeo({...newStop, direccion:newStop.direccion.trim(), es_adicional:true, es_principal:false}, 1);
+    // Una nueva parada hereda por defecto la fecha/hora de la parada principal
+    // (misma fecha de descarga/carga) si no se ha indicado otra.
+    const resolvedStop = await resolveStopGeo({...newStop, fecha: newStop.fecha || mainFecha || "", hora: newStop.hora || mainHora || "", direccion:newStop.direccion.trim(), es_adicional:true, es_principal:false}, 1);
     setStopsOrdenados([...stopsOrdenados, resolvedStop]);
     setNewStop(emptyStop);
     setNewStopDetailsOpen(false);
@@ -4493,7 +4495,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           )}
         </div>
       ) : (
-        <button type="button" onClick={()=>setAdding(true)} style={{padding:"8px 14px",borderRadius:7,border:"1px dashed var(--accent)",background:"rgba(20,184,166,.08)",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer",marginTop:4}}>
+        <button type="button" onClick={()=>{ setNewStop(s=>({...s, fecha: s.fecha || mainFecha || "", hora: s.hora || mainHora || ""})); setAdding(true); }} style={{padding:"8px 14px",borderRadius:7,border:"1px dashed var(--accent)",background:"rgba(20,184,166,.08)",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer",marginTop:4}}>
           + Añadir {label}
         </button>
       ))}

@@ -609,6 +609,41 @@ router.get("/fiscal/export-lote.xml", GERENTE_O_CONTABLE, async (req, res) => {
   res.send(xml);
 });
 
+// TEMP DEBUG: transacciones activas y cadena de bloqueos (diagnostico del cuelgue
+// al crear factura). Eliminar tras diagnosticar.
+router.get("/debug-db-locks", GERENTE_O_CONTABLE, async (req, res) => {
+  try {
+    const settings = await db.query("SHOW lock_timeout").catch(e => ({ rows: [{ err: e.message }] }));
+    const stmt = await db.query("SHOW statement_timeout").catch(() => ({ rows: [] }));
+    const active = await db.query(
+      `SELECT pid, state, wait_event_type, wait_event,
+              EXTRACT(EPOCH FROM now()-xact_start)::int AS xact_age_s,
+              left(regexp_replace(query, '\\s+', ' ', 'g'), 180) AS query
+         FROM pg_stat_activity
+        WHERE datname = current_database() AND pid <> pg_backend_pid() AND state <> 'idle'
+        ORDER BY xact_start NULLS LAST LIMIT 40`
+    );
+    const blocking = await db.query(
+      `SELECT b.pid AS blocked_pid,
+              EXTRACT(EPOCH FROM now()-b.query_start)::int AS blocked_s,
+              left(regexp_replace(b.query, '\\s+', ' ', 'g'), 120) AS blocked_query,
+              g.pid AS blocker_pid, g.state AS blocker_state,
+              left(regexp_replace(g.query, '\\s+', ' ', 'g'), 120) AS blocker_query
+         FROM pg_stat_activity b
+         JOIN pg_stat_activity g ON g.pid = ANY(pg_blocking_pids(b.pid))
+        LIMIT 40`
+    );
+    res.json({
+      lock_timeout: settings.rows[0],
+      statement_timeout: stmt.rows[0],
+      active: active.rows,
+      blocking: blocking.rows,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   const empresaId = req.empresaId || req.user.empresa_id;
   const { rows } = await db.query(`

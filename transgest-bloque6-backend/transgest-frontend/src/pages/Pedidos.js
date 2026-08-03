@@ -12,7 +12,7 @@ import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRuta
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          crearColaboradorLiquidacionToken,
          getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta, resolveGeoPlace,
-         getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos, calcularDistanciaGeo, getChoferUltimoViaje } from "../services/api";
+         getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos, calcularDistanciaGeo, getChoferUltimoViaje, combinarGrupaje } from "../services/api";
 import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -11040,6 +11040,34 @@ export default function Pedidos() {
     }
   }
 
+  // Junta los pedidos seleccionados en un mismo grupaje (un solo viaje): les
+  // asigna un grupaje_id comun y tipo_carga=grupaje. Luego aparecen como un unico
+  // grupo en Mesa de trafico -> Grupajes, con sus cargas/descargas ordenables, y
+  // se les puede asignar la matricula (flota propia o colaborador) desde ahi o
+  // con la asignacion en lote.
+  async function combinarSeleccionadosEnGrupaje() {
+    const lista = selectedPedidosOperables.filter(p => !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p));
+    if (lista.length < 2) { notify("Selecciona al menos 2 pedidos para agruparlos en un grupaje.", "info"); return; }
+    const ok = await confirmDialog({
+      title: "Combinar en grupaje",
+      message: `Se agruparan ${lista.length} pedidos en un mismo viaje (grupaje). Apareceran juntos en Mesa de trafico > Grupajes, respetando el orden de las descargas, y podras asignarles la matricula (propia o de colaborador).`,
+      confirmText: "Combinar en grupaje",
+    });
+    if (!ok) return;
+    setBulkAssigning(true);
+    try {
+      const res = await combinarGrupaje(lista.map(p => p.id));
+      notify(`Grupaje creado con ${res?.count || lista.length} pedidos. Revisalo en Mesa de trafico > Grupajes.`, "success");
+      setSelectedPedidoIds([]);
+      cargar();
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-grupaje-combinar" } }));
+    } catch (e) {
+      notify(e.message || "No se pudieron combinar los pedidos en un grupaje.", "error");
+    } finally {
+      setBulkAssigning(false);
+    }
+  }
+
   async function asignarSeleccionados() {
     const matriculaManual = String(bulkMatricula || "").trim().toUpperCase();
     if (!bulkVehiculo && !bulkChofer && !matriculaManual) { notify("Elige un vehiculo, un chofer o escribe una matricula para asignar.", "info"); return; }
@@ -11672,6 +11700,13 @@ export default function Pedidos() {
           <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer)} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?"not-allowed":"pointer"}}>
             {bulkAssigning ? "Asignando..." : "Asignar"}
           </button>
+          {selectedPedidoIds.length >= 2 && (
+            <button onClick={combinarSeleccionadosEnGrupaje} disabled={bulkAssigning}
+              title="Junta los pedidos seleccionados en un mismo viaje (grupaje), respetando el orden de descargas. Luego se asignan matriculas en Mesa de trafico > Grupajes."
+              style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.3)",opacity:bulkAssigning?0.6:1,cursor:bulkAssigning?"not-allowed":"pointer"}}>
+              Combinar en grupaje
+            </button>
+          )}
           <button
             onClick={() => setSelectedPedidoIds([])}
             style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)"}}

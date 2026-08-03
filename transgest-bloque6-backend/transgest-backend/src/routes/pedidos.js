@@ -6065,6 +6065,51 @@ router.get("/chofer-ultimo-viaje", async (req, res) => {
   }
 });
 
+// POST /pedidos/grupaje/combinar - junta varios pedidos en un mismo viaje
+// (grupaje): les pone un grupaje_id comun y tipo_carga='grupaje'. Si alguno ya
+// esta en un grupaje, se reutiliza ese id. Luego aparecen como un solo grupo en
+// la pestana Grupajes, con sus cargas/descargas ordenables y asignables.
+router.post("/grupaje/combinar", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const ids = [...new Set((Array.isArray(req.body?.pedido_ids) ? req.body.pedido_ids : []).map(normalizePedidoUuid).filter(Boolean))];
+    if (ids.length < 2) return res.status(400).json({ error: "Selecciona al menos 2 pedidos para agruparlos en un grupaje." });
+    const { rows } = await db.query(
+      "SELECT id, grupaje_id, factura_id FROM pedidos WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
+      [empresaId, ids]
+    );
+    if (rows.length !== ids.length) return res.status(404).json({ error: "Alguno de los pedidos no existe o no pertenece a la empresa." });
+    if (rows.some(p => p.factura_id)) return res.status(400).json({ error: "No se pueden agrupar pedidos ya facturados." });
+    const grupajeId = rows.map(p => p.grupaje_id).find(Boolean) || crypto.randomUUID();
+    await db.query(
+      "UPDATE pedidos SET grupaje_id=$1::uuid, tipo_carga='grupaje', updated_at=NOW() WHERE empresa_id=$2 AND id = ANY($3::uuid[])",
+      [grupajeId, empresaId, ids]
+    );
+    for (const id of ids) {
+      logPedidoEvento(id, empresaId, "grupaje.combinado", { grupaje_id: grupajeId, pedidos: ids }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+    }
+    return res.json({ ok: true, grupaje_id: grupajeId, count: ids.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /pedidos/grupaje/separar - saca pedidos de su grupaje.
+router.post("/grupaje/separar", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const ids = [...new Set((Array.isArray(req.body?.pedido_ids) ? req.body.pedido_ids : []).map(normalizePedidoUuid).filter(Boolean))];
+    if (!ids.length) return res.status(400).json({ error: "Sin pedidos." });
+    await db.query(
+      "UPDATE pedidos SET grupaje_id=NULL, updated_at=NOW() WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
+      [empresaId, ids]
+    );
+    return res.json({ ok: true, count: ids.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /pedidos/resumen-lista - listado operativo ligero para pantallas de trafico
 router.get("/resumen-lista", async (req, res) => {
   try {

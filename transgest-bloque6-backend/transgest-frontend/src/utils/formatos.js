@@ -3,29 +3,37 @@
 // ══════════════════════════════════════════════════════
 // Formatean mientras se escribe: ponen el guion y pasan a MAYUSCULAS.
 
-// Matricula espanola. Detecta:
-//   - Remolque:  R + 4 digitos + 3 letras     -> R-4348-BDC
-//   - Moderna:   4 digitos + 3 letras          -> 4857-MBR
-//   - Antigua:   1-2 letras + 4 digitos + 1-2 letras -> M-1234-AB
+// Matricula. Pone guiones automaticamente SOLO si encaja con un formato espanol
+// conocido; si no (internacional, combo con "/", etc.) se respeta tal cual:
+//   - Remolque:  R + 4 digitos + 3 letras            -> R-4348-BDC
+//   - Moderna:   4 digitos + 3 letras                 -> 4857-MBR
+//   - Antigua:   1-2 letras + 4 digitos + 1-2 letras  -> M-1234-AB
+//   - Internacional / combo: AEHQ302/AOAF223, etc.    -> tal cual (mayusculas)
 export function formatMatricula(raw) {
-  const s = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (!s) return "";
-  // Remolque (empieza por R seguido de numero)
-  if (s[0] === "R" && /[0-9]/.test(s[1] || "")) {
-    const m = s.slice(1).match(/^(\d{0,4})([A-Z]{0,3})/);
-    const d = m[1];
-    const l = m[2];
-    return "R" + (d ? "-" + d : "") + (l ? "-" + l : "");
+  const up = String(raw || "").toUpperCase();
+  if (!up.trim()) return "";
+  const s = up.replace(/[^A-Z0-9]/g, "");
+  const tieneSeparador = /[/+]/.test(up); // combo tractora/remolque o internacional
+  if (!tieneSeparador) {
+    // Remolque: R + digitos + letras
+    if (/^R\d{1,4}[A-Z]{0,3}$/.test(s)) {
+      const m = s.slice(1).match(/^(\d{0,4})([A-Z]{0,3})/);
+      return "R" + (m[1] ? "-" + m[1] : "") + (m[2] ? "-" + m[2] : "");
+    }
+    // Moderna: digitos + letras
+    if (/^\d{1,4}[A-Z]{0,3}$/.test(s)) {
+      const m = s.match(/^(\d{0,4})([A-Z]{0,3})/);
+      return m[1] + (m[2] ? "-" + m[2] : "");
+    }
+    // Antigua provincial: letras + digitos + letras
+    if (/^[A-Z]{1,2}\d{1,4}[A-Z]{0,2}$/.test(s)) {
+      const m = s.match(/^([A-Z]{1,2})(\d{0,4})([A-Z]{0,2})/);
+      return m[1] + (m[2] ? "-" + m[2] : "") + (m[3] ? "-" + m[3] : "");
+    }
   }
-  // Moderna (empieza por digito)
-  if (/^[0-9]/.test(s)) {
-    const m = s.match(/^(\d{0,4})([A-Z]{0,3})/);
-    return m[1] + (m[2] ? "-" + m[2] : "");
-  }
-  // Antigua provincial (empieza por letra)
-  const m = s.match(/^([A-Z]{1,2})(\d{0,4})([A-Z]{0,2})/);
-  if (m) return m[1] + (m[2] ? "-" + m[2] : "") + (m[3] ? "-" + m[3] : "");
-  return s;
+  // Internacional / combo / formato no reconocido: se respeta tal cual (solo
+  // mayusculas y caracteres validos, conservando "/", "+", "-" y espacios).
+  return up.replace(/[^A-Z0-9/+\- ]/g, "").replace(/\s+/g, " ");
 }
 
 // DNI (8 digitos + letra) o NIE (X/Y/Z + 7 digitos + letra).

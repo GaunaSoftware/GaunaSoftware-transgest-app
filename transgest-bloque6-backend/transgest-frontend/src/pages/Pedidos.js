@@ -1700,12 +1700,14 @@ function isPuntoGeneral(punto = {}) {
   return !punto?.cliente_id;
 }
 
-function isPuntoVisibleParaCliente() {
-  // Se muestran TODOS los puntos de la empresa (propios del cliente, generales y
-  // de otros clientes) para poder reutilizarlos sin duplicar ni crear siempre
-  // puntos nuevos. El orden prioriza los del cliente y la etiqueta indica el
-  // ambito (Cliente / General / Otro cliente).
-  return true;
+function isPuntoVisibleParaCliente(punto = {}, clienteId = "", { includeGenerales = false } = {}) {
+  // Para los selectores en linea ("escribe o elige") se muestran los puntos DEL
+  // cliente (dueno o adoptado) y, si se pide, los generales; NO los de otros
+  // clientes. El listado completo (boton "Puntos") usa el flag `todos` para
+  // mostrarlos TODOS y poder reutilizarlos sin duplicar.
+  if (isPuntoDeCliente(punto, clienteId)) return true;
+  if (isPuntoGeneral(punto)) return !!includeGenerales;
+  return false;
 }
 
 // Un punto es "del cliente" si es su dueno o si el cliente lo ha adoptado
@@ -1752,9 +1754,9 @@ function puntoPickerLabel(punto = {}, clienteId = "") {
   return [name, location, scope].filter(Boolean).join(" - ");
 }
 
-function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos", includeGenerales = false } = {}) {
+function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos", includeGenerales = false, todos = false } = {}) {
   return (Array.isArray(puntos) ? puntos : [])
-    .filter(p => isPuntoVisibleParaCliente(p, clienteId, { includeGenerales }))
+    .filter(p => todos || isPuntoVisibleParaCliente(p, clienteId, { includeGenerales }))
     .filter(p => {
       if (tipo === "carga") return isCargaPoint(p);
       if (tipo === "descarga") return isDescargaPoint(p);
@@ -6861,6 +6863,23 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
       .filter(item => item.score > 0)
       .sort((a,b) => b.score - a.score || String(a.ruta.id || "").localeCompare(String(b.ruta.id || "")))[0]?.ruta || null;
   };
+  // Si hay una tarifa/ruta guardada vinculada pero el ORIGEN cuadra y el DESTINO
+  // ya NO (p.ej. se cargo la tarifa Alicante->San Vicente y luego se cambio el
+  // destino a Canovelles), se desvincula para no arrastrar un precio que no
+  // corresponde a este viaje, y se avisa para revisar el precio. Al limpiar
+  // ruta_id el efecto no vuelve a dispararse.
+  useEffect(() => {
+    if (!form.ruta_id || !form.origen || !form.destino) return;
+    const ruta = rutas.find(r => String(r.id) === String(form.ruta_id));
+    if (!ruta || !ruta.origen || !ruta.destino) return;
+    const origenScore = routeEndpointScore(form, ruta, "carga");
+    const destinoScore = routeEndpointScore(form, ruta, "descarga");
+    if (origenScore > 0 && destinoScore === 0) {
+      setForm(p => ({ ...p, ruta_id: "" }));
+      notify(`La tarifa guardada (${ruta.origen} -> ${ruta.destino}) no cuadra con el destino "${form.destino}". Se desvincula la tarifa: revisa el precio de este viaje.`, "warning");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.ruta_id, form.origen, form.destino, rutas]);
   const tipoVehiculoDeTexto = (value) => {
     const txt = normalizarTipoRuta(value);
     if (!txt) return "cualquiera";
@@ -7119,7 +7138,9 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   }
 
   const qPoint = normalizePlaceText(pointSearch);
-  const puntosVisibles = filterPuntosForPedido(puntos, { clienteId, tipo: modo, includeGenerales: true });
+  // El listado completo (boton "Puntos") muestra TODOS los puntos de la empresa
+  // para reutilizarlos; al elegir uno que no es del cliente, se le asocia.
+  const puntosVisibles = filterPuntosForPedido(puntos, { clienteId, tipo: modo, includeGenerales: true, todos: true });
   const puntosFiltrados = qPoint
     ? puntosVisibles.filter(point => [
         point.nombre,

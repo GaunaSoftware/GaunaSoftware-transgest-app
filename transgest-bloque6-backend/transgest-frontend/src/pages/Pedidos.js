@@ -4705,18 +4705,23 @@ function OrdenCargaModal({ pedido, onClose }) {
   <div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#1d4ed8;margin-bottom:6px">Condiciones de pago del servicio</div>
   <div><strong>Forma de pago:</strong> ${htmlEscape(condicionesPagoCliente)}</div>
 </div>`;
-    const mapsRowsHtml = allMapsRows.map((item) => `
+    const renderMapStop = (item) => `
       <div class="map-stop">
         <div class="fl">${htmlEscape(item.label)}</div>
         <div class="fv">${htmlEscape(item.nombre || item.direccion || "-")}</div>
         ${item.nombre && item.direccion ? `<div class="map-address">${htmlEscape(item.direccion)}</div>` : ""}
         ${item.url ? `<a class="map-button" href="${htmlEscape(item.url)}">Abrir ${htmlEscape(item.label)} en Google Maps</a><div class="route-link" style="font-size:9.5px;margin-top:4px">${htmlEscape(item.url)}</div>` : ""}
-      </div>
-    `).join("");
-    const mapsBlock = mapsRowsHtml ? `
+      </div>`;
+    // Cargas a la izquierda, descargas a la derecha (una columna por tipo).
+    const cargasMapsCol = allMapsRows.filter(r => /^carga/i.test(String(r.label || "")));
+    const descargasMapsCol = allMapsRows.filter(r => !/^carga/i.test(String(r.label || "")));
+    const mapsBlock = allMapsRows.length ? `
 <div class="sec">
   <div class="sec-t">Ubicaciones Google Maps</div>
-  <div class="map-grid">${mapsRowsHtml}</div>
+  <div class="map-grid">
+    <div class="map-col"><div class="map-col-t">Cargas</div>${cargasMapsCol.map(renderMapStop).join("") || `<div class="map-col-empty">Sin cargas</div>`}</div>
+    <div class="map-col"><div class="map-col-t">Descargas</div>${descargasMapsCol.map(renderMapStop).join("") || `<div class="map-col-empty">Sin descargas</div>`}</div>
+  </div>
 </div>` : "";
     const dcdBlock = docControl?.documento ? `
 <div class="sec">
@@ -4797,7 +4802,10 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
 .route-box{border:1px solid #dbeafe;background:#eff6ff;border-radius:12px;padding:12px 14px;margin-top:12px;font-size:11.5px;color:#1f2937}
 .route-warn{border-color:#fde68a;background:#fffbeb;color:#92400e}
 .route-link{color:#0f766e;word-break:break-all;font-weight:700}
-.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.map-col{display:flex;flex-direction:column;gap:10px}
+.map-col-t{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:#64748b;padding-bottom:2px}
+.map-col-empty{font-size:10px;color:#94a3b8}
 .map-stop{background:#eff6ff;border:1px solid #bfdbfe;border-radius:11px;padding:10px 12px;break-inside:avoid}
 .map-address{font-size:11px;color:#475569;margin-top:3px}
 .map-button{display:inline-block;margin-top:8px;background:#2563eb;color:#fff;text-decoration:none;border-radius:7px;padding:7px 10px;font-size:10.5px;font-weight:900}
@@ -5553,17 +5561,24 @@ ${esCol ? `
           {allMapsRows.length > 0 && (
             <div style={{...S2.kv,gridColumn:"1/-1"}}>
               <div style={S2.lbl}>Google Maps para colaborador</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
-                {allMapsRows.map((item, idx)=>(
-                  <div key={`${item.label}-${idx}`} style={{border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg4)"}}>
-                    <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>{item.label}</div>
-                    <div style={{...S2.val,fontSize:12,marginTop:3}}>{item.nombre || item.direccion || "-"}</div>
-                    {item.nombre && item.direccion && <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{item.direccion}</div>}
-                    {item.url && (
-                      <a href={item.url} target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:7,padding:"6px 10px",borderRadius:7,background:"rgba(59,130,246,.12)",border:"1px solid rgba(59,130,246,.24)",color:"var(--accent)",fontSize:11,fontWeight:800,textDecoration:"none"}}>
-                        Abrir en Google Maps
-                      </a>
-                    )}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,alignItems:"start"}}>
+                {/* Cargas a la izquierda, descargas a la derecha. */}
+                {[["Cargas", allMapsRows.filter(r=>/^carga/i.test(String(r.label||"")))],
+                  ["Descargas", allMapsRows.filter(r=>!/^carga/i.test(String(r.label||"")))]].map(([titulo, items])=>(
+                  <div key={titulo} style={{display:"flex",flexDirection:"column",gap:8}}>
+                    <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>{titulo}</div>
+                    {items.length ? items.map((item, idx)=>(
+                      <div key={`${item.label}-${idx}`} style={{border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg4)"}}>
+                        <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>{item.label}</div>
+                        <div style={{...S2.val,fontSize:12,marginTop:3}}>{item.nombre || item.direccion || "-"}</div>
+                        {item.nombre && item.direccion && <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{item.direccion}</div>}
+                        {item.url && (
+                          <a href={item.url} target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:7,padding:"6px 10px",borderRadius:7,background:"rgba(59,130,246,.12)",border:"1px solid rgba(59,130,246,.24)",color:"var(--accent)",fontSize:11,fontWeight:800,textDecoration:"none"}}>
+                            Abrir en Google Maps
+                          </a>
+                        )}
+                      </div>
+                    )) : <div style={{fontSize:11,color:"var(--text5)"}}>Sin {String(titulo).toLowerCase()}</div>}
                   </div>
                 ))}
               </div>

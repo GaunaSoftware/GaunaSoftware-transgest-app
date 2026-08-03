@@ -22,6 +22,22 @@ pool.on("error", (err) => {
   logger.error("PostgreSQL pool error: " + err.message);
 });
 
+// Los timeouts via el parametro `options` (-c ...) NO se aplican de forma fiable
+// en algunos proveedores/poolers (p.ej. Render), lo que dejaba transacciones
+// colgadas indefinidamente esperando un lock (crear factura se quedaba cargando
+// sin responder). Se aplican de forma explicita por sesion en cada conexion:
+//  - lock_timeout: una espera de lock falla rapido en vez de colgarse.
+//  - idle_in_transaction_session_timeout: mata transacciones abiertas y quietas
+//    (que retenian locks) liberando el bloqueo.
+//  - statement_timeout: corta consultas desbocadas.
+pool.on("connect", (client) => {
+  client.query(
+    `SET statement_timeout = ${DB_STATEMENT_TIMEOUT_MS}; ` +
+    `SET lock_timeout = ${DB_LOCK_TIMEOUT_MS}; ` +
+    `SET idle_in_transaction_session_timeout = ${DB_IDLE_IN_TX_TIMEOUT_MS};`
+  ).catch((err) => logger.warn("No se pudieron aplicar timeouts de sesion PostgreSQL: " + err.message));
+});
+
 // Helper: query
 async function query(text, params) {
   const start = Date.now();
@@ -45,7 +61,7 @@ async function transaction(fn) {
     await client.query("COMMIT");
     return result;
   } catch (err) {
-    await client.query("ROLLBACK");
+    try { await client.query("ROLLBACK"); } catch (_) { /* conexion ya rota: se libera igual */ }
     throw err;
   } finally {
     client.release();

@@ -581,7 +581,7 @@ export async function descargarJornadaDiariaInforme() {
 }
 export const getFacturacionFiscalResumen = () => apiFetch("/facturas/fiscal/resumen");
 export const procesarColaFiscalFacturas = (data={}) => apiFetch("/facturas/fiscal/procesar-cola", { method:"POST", body:data });
-export const crearFactura   = (data)      => apiFetch("/facturas", { method:"POST", body:data });
+export const crearFactura   = (data)      => apiFetch("/facturas", { method:"POST", body:data, timeoutMs:60000 });
 export const procesarReclamacionesFacturas = (data={}) => apiFetch("/facturas/reclamaciones/procesar", { method:"POST", body:data });
 export const cambiarEstadoFactura = (id, estado, motivo) =>
   apiFetch(`/facturas/${id}/estado`, { method:"PATCH", body:{ estado, motivo } });

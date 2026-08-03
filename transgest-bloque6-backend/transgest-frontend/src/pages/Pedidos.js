@@ -4289,10 +4289,12 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               </span>
               <div className="tg-stop-card-body" style={{flex:1}}>
                 <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                  <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{stopAddress(d)}</span>
+                  {/* En negrita el nombre de la empresa; si no hay empresa (es una
+                      poblacion), la poblacion/direccion queda en negrita. */}
+                  <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{d.cliente_nombre || stopAddress(d)}</span>
                 </div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
-                  {d.cliente_nombre && <span style={{marginRight:8}}>{d.cliente_nombre}</span>}
+                  {d.cliente_nombre && stopAddress(d) && <span style={{marginRight:8}}>{stopAddress(d)}</span>}
                   {d.fecha && <span style={{marginRight:8}}>{new Date(d.fecha).toLocaleDateString("es-ES")}</span>}
                   {d.hora && <span style={{marginRight:8}}>{d.hora}</span>}
                   {d.ventana && <span style={{marginRight:8}}>{d.ventana}</span>}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, separarGrupaje } from "../services/api";
+import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, separarGrupaje, getColaboradores, crearColaborador } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
@@ -2498,6 +2498,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   const [pedidosGrupajeActivos, setPedidosGrupajeActivos] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
   const [choferes,  setChoferes]  = useState([]);
+  const [colaboradores, setColaboradores] = useState([]);
   const [rutas, setRutas] = useState([]);
   const [incidenciasViaje, setIncidenciasViaje] = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -2550,7 +2551,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       const hasta = semana[6].toISOString().slice(0,10);
       const desdeCarga = addDaysLocal(semana[0], -45).toISOString().slice(0,10);
       const hastaCarga = addDaysLocal(semana[6], 75).toISOString().slice(0,10);
-      const [p, pg, v, c, r, cfgEmpresa, notifs] = await Promise.all([
+      const [p, pg, v, c, r, cfgEmpresa, notifs, col] = await Promise.all([
         getPedidosResumenLista({ desde: desdeCarga, hasta: hastaCarga, limit: 1000 }, { timeoutMs: 45000, silentError: true }),
         getPedidosResumenLista({
           tipo_carga: "grupaje",
@@ -2563,6 +2564,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         getRutas().catch(() => []),
         getEmpresaConfig().catch(() => ({})),
         getNotificaciones(80).catch(() => ({ data: [] })),
+        getColaboradores().catch(() => []),
       ]);
       const pedidosData = Array.isArray(p?.data) ? p.data : Array.isArray(p) ? p : [];
       setPedidos(pedidosData);
@@ -2583,6 +2585,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       try { window.__TMS_CFG_TRAFICO = cfg; } catch {}
       setVehiculos(Array.isArray(v) ? v : []);
       setChoferes(Array.isArray(c) ? c : []);
+      setColaboradores(Array.isArray(col?.data) ? col.data : Array.isArray(col) ? col : []);
       setRutas(Array.isArray(r) ? r : []);
       const avisos = Array.isArray(notifs?.data) ? notifs.data : [];
       setIncidenciasViaje(avisos.filter(n =>
@@ -5298,7 +5301,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         />
       )}
 
-      {vistaMain==="grupajes" && <CuadranteCascada pedidos={pedidosGrupaje} vehiculos={vehiculos} choferes={choferes} allPedidos={pedidos} onReload={cargar}/>}
+      {vistaMain==="grupajes" && <CuadranteCascada pedidos={pedidosGrupaje} vehiculos={vehiculos} choferes={choferes} colaboradores={colaboradores} allPedidos={pedidos} onReload={cargar}/>}
       {vistaMain==="optimizacion" && <OptimizacionRutas pedidos={pedidos} vehiculos={vehiculos} choferes={choferes} soloLecturaChofer={esModoChoferOptimizacion}/>}
     </div>
   );
@@ -5414,7 +5417,7 @@ function sortParadasByProximity(pedidos) {
   return sorted;
 }
 
-function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos, onReload }) {
+function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], allPedidos, onReload }) {
   // Group pedidos by grupaje_id
   const byGrupaje = useMemo(() => {
     const grouped = {};
@@ -5477,6 +5480,9 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos, onReload }
   const [asignaGid, setAsignaGid] = useState("");   // grupo con el panel de asignacion abierto
   const [asignaMat, setAsignaMat] = useState("");
   const [asignaChofer, setAsignaChofer] = useState("");
+  const [asignaColab, setAsignaColab] = useState("");   // colaborador (subcontrata) elegido
+  const [creandoColab, setCreandoColab] = useState(false);
+  const [nuevoColabNombre, setNuevoColabNombre] = useState("");
   const tractorasGrupaje = useMemo(() => (vehiculos || []).filter(v => {
     const clase = String(v.clase || v.tipo || "").toLowerCase();
     const mat = String(v.matricula || "").toUpperCase();
@@ -5526,23 +5532,51 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos, onReload }
     finally { setTrabajandoGrupaje(false); }
   }
 
+  async function crearColaboradorGrupaje() {
+    const nombre = String(nuevoColabNombre || "").trim();
+    if (!nombre) { notify("Escribe el nombre del colaborador.", "info"); return; }
+    setTrabajandoGrupaje(true);
+    try {
+      const nuevo = await crearColaborador({
+        tipo: "empresa",
+        nombre,
+        notas: "Creado desde grupajes. Pendiente de completar datos fiscales, contacto, pago y documentacion.",
+        pendiente_revision: true,
+        origen_creacion: "grupajes",
+      });
+      const id = nuevo?.id || nuevo?.data?.id || "";
+      setCreandoColab(false); setNuevoColabNombre("");
+      if (id) setAsignaColab(id);
+      notify("Colaborador creado y seleccionado.", "success");
+      onReload?.();
+    } catch (e) { notify(e.message || "No se pudo crear el colaborador.", "error"); }
+    finally { setTrabajandoGrupaje(false); }
+  }
+
   async function asignarMatriculaGrupaje(gid) {
     const peds = byGrupaje[gid] || [];
     const m = String(asignaMat || "").trim().toUpperCase();
-    if (!m && !asignaChofer) { notify("Escribe una matricula o elige un chofer.", "info"); return; }
-    const veh = m ? vehiculos.find(v => String(v.matricula || "").toUpperCase() === m) : null;
-    const patch = {};
-    if (veh) { patch.vehiculo_id = veh.id; patch.colaborador_id = ""; patch.matricula_manual = ""; patch.chofer_id = asignaChofer || veh.chofer_id || ""; }
-    else if (m) { patch.matricula_manual = m; patch.vehiculo_id = ""; patch.chofer_id = asignaChofer || ""; }
-    else { patch.chofer_id = asignaChofer; }
+    let patch = null;
+    if (asignaColab) {
+      // Colaborador (subcontrata): se limpia flota/chofer propio; la matricula, si
+      // se pone, se guarda como matricula del colaborador.
+      patch = { colaborador_id: asignaColab, vehiculo_id: "", chofer_id: "" };
+      if (m) patch.matricula_colaborador = m;
+    } else {
+      const veh = m ? vehiculos.find(v => String(v.matricula || "").toUpperCase() === m) : null;
+      if (veh) patch = { vehiculo_id: veh.id, colaborador_id: "", matricula_manual: "", chofer_id: asignaChofer || veh.chofer_id || "" };
+      else if (m) patch = { matricula_manual: m, vehiculo_id: "", colaborador_id: "", chofer_id: asignaChofer || "" };
+      else if (asignaChofer) patch = { chofer_id: asignaChofer };
+    }
+    if (!patch) { notify("Escribe una matricula, elige un chofer o un colaborador.", "info"); return; }
     setTrabajandoGrupaje(true);
     try {
       const fallos = [];
       for (const p of peds) {
         try { await editarPedido(p.id, patch); } catch (err) { fallos.push(p.numero || p.id); }
       }
-      notify(fallos.length ? `Asignado a ${peds.length - fallos.length} de ${peds.length}.` : `Matricula asignada al grupaje (${peds.length} pedido/s).`, fallos.length ? "warning" : "success");
-      setAsignaGid(""); setAsignaMat(""); setAsignaChofer("");
+      notify(fallos.length ? `Asignado a ${peds.length - fallos.length} de ${peds.length}.` : `Asignado al grupaje (${peds.length} pedido/s).`, fallos.length ? "warning" : "success");
+      setAsignaGid(""); setAsignaMat(""); setAsignaChofer(""); setAsignaColab(""); setCreandoColab(false); setNuevoColabNombre("");
       onReload?.();
     } finally { setTrabajandoGrupaje(false); }
   }
@@ -5616,20 +5650,47 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos, onReload }
                 </div>
               </div>
               {asignaGid===gid && (
-                <div style={{background:"var(--bg3)",borderBottom:"1px solid var(--border2)",padding:"10px 16px",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                  <span style={{fontSize:11,color:"var(--text5)"}}>Matricula (flota o a mano):</span>
-                  <input list="tg-grupaje-tractoras" value={asignaMat} onChange={e=>setAsignaMat(e.target.value.toUpperCase())} placeholder="Ej: 1234-ABC"
-                    style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,width:150,outline:"none"}}/>
-                  <select value={asignaChofer} onChange={e=>setAsignaChofer(e.target.value)}
-                    style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,outline:"none"}}>
-                    <option value="">Chofer (auto del vehiculo)</option>
-                    {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
-                  </select>
-                  <button onClick={()=>asignarMatriculaGrupaje(gid)} disabled={trabajandoGrupaje}
-                    style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.14)",color:"var(--accent)",fontWeight:800,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
-                    {trabajandoGrupaje ? "Asignando..." : `Asignar a ${peds.length} pedido/s`}
-                  </button>
-                  <span style={{fontSize:10,color:"var(--text5)"}}>Si la matricula no es de la flota, se guarda como matricula a mano (colaborador).</span>
+                <div style={{background:"var(--bg3)",borderBottom:"1px solid var(--border2)",padding:"10px 16px",display:"flex",flexDirection:"column",gap:8}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:"var(--text5)",minWidth:70}}>Flota / a mano:</span>
+                    <input list="tg-grupaje-tractoras" value={asignaMat} onChange={e=>setAsignaMat(e.target.value.toUpperCase())} placeholder={asignaColab ? "Matricula del colaborador (opcional)" : "Ej: 1234-ABC"}
+                      style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,width:200,outline:"none"}}/>
+                    <select value={asignaChofer} onChange={e=>setAsignaChofer(e.target.value)} disabled={!!asignaColab}
+                      style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,outline:"none",opacity:asignaColab?.5:1}}>
+                      <option value="">Chofer (auto del vehiculo)</option>
+                      {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
+                    </select>
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:"var(--text5)",minWidth:70}}>o Colaborador:</span>
+                    <select value={asignaColab} onChange={e=>setAsignaColab(e.target.value)}
+                      style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,outline:"none",minWidth:200}}>
+                      <option value="">Sin colaborador (flota / a mano)</option>
+                      {colaboradores.map(c => <option key={c.id} value={c.id}>{c.nombre || c.cif || c.id}</option>)}
+                    </select>
+                    {!creandoColab ? (
+                      <button type="button" onClick={()=>setCreandoColab(true)}
+                        style={{padding:"6px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        + Nuevo colaborador
+                      </button>
+                    ) : (
+                      <>
+                        <input value={nuevoColabNombre} onChange={e=>setNuevoColabNombre(e.target.value)} placeholder="Nombre del colaborador"
+                          style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,width:200,outline:"none"}}/>
+                        <button type="button" onClick={crearColaboradorGrupaje} disabled={trabajandoGrupaje}
+                          style={{padding:"6px 10px",borderRadius:7,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.14)",color:"#10b981",fontSize:11,fontWeight:800,cursor:"pointer"}}>Crear</button>
+                        <button type="button" onClick={()=>{setCreandoColab(false);setNuevoColabNombre("");}}
+                          style={{padding:"6px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,cursor:"pointer"}}>Cancelar</button>
+                      </>
+                    )}
+                  </div>
+                  <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                    <button onClick={()=>asignarMatriculaGrupaje(gid)} disabled={trabajandoGrupaje}
+                      style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.14)",color:"var(--accent)",fontWeight:800,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
+                      {trabajandoGrupaje ? "Asignando..." : `Asignar a ${peds.length} pedido/s`}
+                    </button>
+                    <span style={{fontSize:10,color:"var(--text5)"}}>{asignaColab ? "Se asigna como colaborador (subcontrata). El precio pactado se completa en el pedido." : "Si la matricula no es de la flota, se guarda como matricula a mano."}</span>
+                  </div>
                 </div>
               )}
 

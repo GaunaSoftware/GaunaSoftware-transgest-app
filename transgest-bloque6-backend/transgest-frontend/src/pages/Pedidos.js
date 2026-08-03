@@ -21,7 +21,7 @@ import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../service
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
 import { formatMatricula, formatDni, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
-import { inferPlaceGeo } from "../utils/placeGeo";
+import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
 
 let puntosInteresCache = [];
@@ -6836,12 +6836,18 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     // provincial para Benissa, Denia, Alcoy, etc. No se equiparan entre si dos
     // municipios distintos: la provincia debe coincidir con el extremo guardado.
     if (provincia && (e === provincia || e === `provincia ${provincia}` || e === `${provincia} provincia`)) return 3;
-    // Misma provincia exacta: si la provincia del destino guardado en la tarifa
-    // coincide con la provincia del extremo actual (la ultima descarga), se
-    // aplica como tarifa provincial aunque el municipio sea distinto.
+    // Misma provincia: si la provincia del destino guardado en la tarifa coincide
+    // con la provincia del extremo actual (la ultima descarga), se aplica como
+    // tarifa provincial aunque el municipio sea distinto. La provincia de la
+    // tarifa se resuelve con el mapa completo de municipios (p.ej. Onda ->
+    // Castellon), no solo con el diccionario pequeno.
     if (provincia) {
-      const provinciaEsperada = normalizePlaceText(inferPlaceGeo(esperado)?.provincia || "");
-      if (provinciaEsperada && provinciaEsperada === provincia) return 3;
+      const provinciaEsperada = normalizePlaceText(provinciaDeLugar(esperado) || "");
+      const compat = provinciaEsperada && (
+        provinciaEsperada === provincia ||
+        (provinciaEsperada.length >= 5 && provincia.length >= 5 && (provinciaEsperada.includes(provincia) || provincia.includes(provinciaEsperada)))
+      );
+      if (compat) return 3;
     }
     if (!a) return 0;
     const stop = new Set(["de","del","la","el","los","las","s","sl","sa","sau","slu","calle","av","avenida","ctra","carretera"]);
@@ -6862,7 +6868,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     const inferred = inferPlaceGeo(ref, ...labels);
     return {
       labels: Array.from(new Set(labels)),
-      provincia: stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia) || inferred?.provincia || "",
+      provincia: stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia) || inferred?.provincia || provinciaDeLugar(mainLabel) || provinciaDeLugar(ref.ciudad || ref.municipio || "") || "",
     };
   };
   const routeEndpointScore = (draft, ruta, tipo) => {

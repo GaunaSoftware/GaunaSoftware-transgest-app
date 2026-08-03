@@ -57,6 +57,13 @@ async function transaction(fn) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // SET LOCAL dentro de la transaccion: a diferencia del SET de sesion, esto SI
+    // se aplica aunque la conexion pase por un pooler en modo transaccion (Render).
+    // Evita que la transaccion se quede esperando un lock indefinidamente (crear
+    // factura se quedaba cargando sin responder): la espera falla a los 5s.
+    try {
+      await client.query(`SET LOCAL lock_timeout = ${DB_LOCK_TIMEOUT_MS}; SET LOCAL statement_timeout = ${DB_STATEMENT_TIMEOUT_MS};`);
+    } catch (_) { /* si el proveedor no lo permite, se continua sin ello */ }
     const result = await fn(client);
     await client.query("COMMIT");
     return result;

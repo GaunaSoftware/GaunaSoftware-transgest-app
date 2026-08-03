@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { calcularRutaGeo } from "../services/api";
 
 const TILE_SIZE = 256;
@@ -276,7 +276,7 @@ function pointTitle(point, index) {
   return point.title || (String(point.role || point.tipo || "").toLowerCase().includes("descarga") ? `Descarga ${index + 1}` : `Parada ${index + 1}`);
 }
 
-export default function RutaMapa({ points = [], vehiclePosition = null }) {
+function RutaMapa({ points = [], vehiclePosition = null }) {
   const [routeState, setRouteState] = useState({ key: "", data: null });
   const [loadingKey, setLoadingKey] = useState("");
   const [errorState, setErrorState] = useState({ key: "", message: "" });
@@ -527,3 +527,20 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
     </div>
   );
 }
+
+// Solo re-renderiza el mapa cuando cambian de verdad los puntos GEOGRAFICOS o la
+// posicion del vehiculo. Asi editar fechas, precio u otros campos del pedido no
+// hace que el mapa se re-encuadre y "pegue saltos" mientras se rellena el viaje.
+function rutaMapaPointsKey(pts = []) {
+  return JSON.stringify((Array.isArray(pts) ? pts : []).map((p, i) => {
+    const n = normalizedPoint(p, i);
+    return [n.query, n.address, n.city, n.region, n.country, n.lat, n.lng, n.google_maps_url, n.role, n.tone?.color || ""];
+  }));
+}
+
+function rutaMapaPropsEqual(prev, next) {
+  return rutaMapaPointsKey(prev.points) === rutaMapaPointsKey(next.points)
+    && JSON.stringify(validLatLng(prev.vehiclePosition || {})) === JSON.stringify(validLatLng(next.vehiclePosition || {}));
+}
+
+export default memo(RutaMapa, rutaMapaPropsEqual);

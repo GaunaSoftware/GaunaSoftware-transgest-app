@@ -3931,6 +3931,10 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const mainHora = tipo === "carga" ? form.hora_carga : form.hora_descarga;
   const fallbackPais = tipo === "carga" ? (form.origen_pais || "España") : (form.destino_pais || "España");
   const fallbackProvincia = tipo === "carga" ? (form.origen_provincia || "") : (form.destino_provincia || "");
+  // El usuario (o el programa al calcular) ya ha fijado la provincia: la
+  // inferencia automatica desde el texto de origen/destino NO debe pisarla,
+  // ni siquiera cuando el campo se vacia para reescribirlo.
+  const provinciaManual = tipo === "carga" ? !!form.origen_provincia_manual : !!form.destino_provincia_manual;
   const inferStopGeo = (stop = {}, idx = 0) => {
     const inferred = inferPlaceGeo(stop, stopAddress(stop), stop.cliente_nombre, stop.direccion, stop.pais);
     const manualProvincia = !!stop.provincia_manual;
@@ -3971,26 +3975,29 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     : (mainLugar ? inferStopGeo({ direccion: mainLugar, fecha: mainFecha || "", hora: mainHora || "", pais: fallbackPais, provincia: fallbackProvincia, tipo, es_principal: true, es_adicional: false }, 0) : null);
   const stopsOrdenados = effectivePrimary ? [effectivePrimary, ...paradas] : paradas;
   useEffect(() => {
+    if (provinciaManual) return;
     const inferred = inferPlaceGeo(mainLugar);
     if (!mainLugar || !inferred?.provincia) return;
     setForm(p => {
       if (tipo === "carga") {
-        if (p.origen_provincia && normalizePlaceText(p.origen_provincia) === normalizePlaceText(inferred.provincia)) return p;
+        // Solo rellena si esta vacia: nunca sobreescribe una provincia ya puesta.
+        if (p.origen_provincia_manual || p.origen_provincia) return p;
         return {
           ...p,
           origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "España") || "España",
           origen_provincia: inferred.provincia,
         };
       }
-      if (p.destino_provincia && normalizePlaceText(p.destino_provincia) === normalizePlaceText(inferred.provincia)) return p;
+      if (p.destino_provincia_manual || p.destino_provincia) return p;
       return {
         ...p,
         destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "España") || "España",
         destino_provincia: inferred.provincia,
       };
     });
-  }, [mainLugar, setForm, tipo]);
+  }, [mainLugar, setForm, tipo, provinciaManual]);
   useEffect(() => {
+    if (provinciaManual) return;
     let alive = true;
     async function run() {
       if (!mainLugar || fallbackProvincia) return;
@@ -3998,24 +4005,24 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       if (!alive || !inferred?.provincia) return;
       setForm(p => {
         if (tipo === "carga") {
-          if (p.origen_provincia && normalizePlaceText(p.origen_provincia) === normalizePlaceText(inferred.provincia)) return p;
+          if (p.origen_provincia_manual || p.origen_provincia) return p;
           return {
             ...p,
-            origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "EspaÃ±a") || "EspaÃ±a",
+            origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "España") || "España",
             origen_provincia: inferred.provincia,
           };
         }
-        if (p.destino_provincia && normalizePlaceText(p.destino_provincia) === normalizePlaceText(inferred.provincia)) return p;
+        if (p.destino_provincia_manual || p.destino_provincia) return p;
         return {
           ...p,
-          destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "EspaÃ±a") || "EspaÃ±a",
+          destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "España") || "España",
           destino_provincia: inferred.provincia,
         };
       });
     }
     run();
     return () => { alive = false; };
-  }, [fallbackPais, fallbackProvincia, mainLugar, setForm, tipo]);
+  }, [fallbackPais, fallbackProvincia, mainLugar, setForm, tipo, provinciaManual]);
   const puntosFiltrados = filterPuntosForPedido(puntosInteres, { clienteId: form.cliente_id || "", tipo });
   const puntosListId = `puntos-${tipo}-${pedidoId || "nuevo"}`;
   const countryListId = `paises-${tipo}-${pedidoId || "nuevo"}`;
@@ -4148,12 +4155,16 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
         updated.hora_carga = first.hora || "";
         updated.origen_pais = stopCountryInputValue(first, p.origen_pais || "España");
         updated.origen_provincia = stopRegion(first, p.origen_provincia || "");
+        // Si el usuario ha tocado la provincia de la parada principal, se marca
+        // como manual para que la inferencia automatica no la vuelva a pisar.
+        updated.origen_provincia_manual = !!first.provincia_manual;
       } else {
         updated.destino = stopAddress(first) || "";
         updated.fecha_descarga = first.fecha || "";
         updated.hora_descarga = first.hora || "";
         updated.destino_pais = stopCountryInputValue(first, p.destino_pais || "España");
         updated.destino_provincia = stopRegion(first, p.destino_provincia || "");
+        updated.destino_provincia_manual = !!first.provincia_manual;
       }
       updated.cmr_tipo = cmrTypeForPedidoStops(updated);
       const totalCarga = tipo === "carga" ? sumStopWeights(stopsToStore) : sumStopWeights(updated.puntos_carga);
@@ -6897,6 +6908,10 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     if (!form.ruta_id || !form.origen || !form.destino) return;
     const ruta = rutas.find(r => String(r.id) === String(form.ruta_id));
     if (!ruta || !ruta.origen || !ruta.destino) return;
+    // No desvincular mientras se esta tecleando el destino: hasta que el destino
+    // no tiene provincia cogida, un score 0 es transitorio y provocaria un falso
+    // aviso "la tarifa no cuadra".
+    if (!endpointContextFromDraft(form, "descarga").provincia) return;
     const origenScore = routeEndpointScore(form, ruta, "carga");
     const destinoScore = routeEndpointScore(form, ruta, "descarga");
     if (origenScore > 0 && destinoScore === 0) {
@@ -7939,7 +7954,14 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
   return next;
 };
 
-const rutaTarifaSugerida = form.cliente_id && form.origen && form.destino
+// La tarifa NO se intenta relacionar mientras se escribe origen/destino (con
+// dos letras no puede acertar y ademas descuadra la carga). Solo se asocia
+// cuando el programa ya tiene cogidas AMBAS provincias (origen y destino), que
+// es cuando el emparejado por provincia es fiable.
+const provinciasCogidas =
+  !!endpointContextFromDraft(form, "carga").provincia &&
+  !!endpointContextFromDraft(form, "descarga").provincia;
+const rutaTarifaSugerida = form.cliente_id && form.origen && form.destino && provinciasCogidas
   ? bestRouteForDraft(form, rutasCompatibles, true)
   : null;
 

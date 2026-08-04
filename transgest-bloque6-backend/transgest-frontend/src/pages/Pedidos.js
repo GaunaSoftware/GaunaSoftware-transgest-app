@@ -6874,13 +6874,27 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     // Para la tarifa por provincia, la descarga que manda es la ULTIMA de la
     // lista (destino final del viaje); la carga sigue siendo la primera (origen).
     const ref = isCarga ? (stops[0] || {}) : (stops[stops.length - 1] || stops[0] || {});
-    const mainLabel = isCarga ? draft.origen : (stopAddress(ref) || draft.destino);
-    const labels = [mainLabel, stopAddress(ref), ref.ciudad, ref.municipio, ref.cliente_nombre].filter(Boolean);
-    const inferred = inferPlaceGeo(ref, ...labels);
-    return {
-      labels: Array.from(new Set(labels)),
-      provincia: stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia) || inferred?.provincia || provinciaDeLugar(mainLabel) || provinciaDeLugar(ref.ciudad || ref.municipio || "") || "",
-    };
+    // La tarifa se empareja por POBLACION + PROVINCIA, nunca por el nombre de la
+    // empresa. Una misma empresa (p.ej. CEMENTOS CAPA) puede cargar/descargar en
+    // pueblos distintos; lo que define la tarifa es el pueblo y su provincia. Por
+    // eso, si el punto es una empresa (tiene cliente_nombre), NO se usan ni ese
+    // nombre ni el texto libre origen/destino para el nombre: solo la poblacion.
+    const esEmpresa = !!ref.cliente_nombre;
+    const poblacion = ref.ciudad || ref.municipio || ref.poblacion || ref.localidad || "";
+    const textoLibre = isCarga ? draft.origen : draft.destino;
+    const labels = Array.from(new Set([
+      poblacion,
+      esEmpresa ? "" : textoLibre,
+      esEmpresa ? "" : stopAddress(ref),
+    ].filter(Boolean)));
+    const inferred = labels.length ? inferPlaceGeo(ref, ...labels) : null;
+    const provincia =
+      stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia)
+      || provinciaDeLugar(poblacion)
+      || (esEmpresa ? "" : provinciaDeLugar(textoLibre))
+      || inferred?.provincia
+      || "";
+    return { labels, provincia };
   };
   const routeEndpointScore = (draft, ruta, tipo) => {
     const ctx = endpointContextFromDraft(draft, tipo);
@@ -6892,11 +6906,23 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     const destinoScore = routeEndpointScore(draft, ruta, "descarga");
     return origenScore && destinoScore ? (origenScore * 10) + destinoScore : 0;
   };
+  // Una tarifa ENCAJA con el viaje cuando el origen Y el destino coinciden al
+  // menos por PROVINCIA (score 3) o exactamente (4). Score 1 = ese extremo no
+  // esta definido en la tarifa (comodin) y se admite mientras el otro extremo si
+  // coincida por provincia. Score 2 (solo tokens sueltos) NO basta: evita falsos
+  // positivos. El score numerico se sigue usando solo para RANKING (exacto por
+  // encima de provincia). Mismo criterio en vivo y al guardar.
+  const routeEndpointsMatch = (draft, ruta) => {
+    const o = routeEndpointScore(draft, ruta, "carga");
+    const d = routeEndpointScore(draft, ruta, "descarga");
+    const ok = (s) => s >= 3 || s === 1;
+    return ok(o) && ok(d) && (o >= 3 || d >= 3);
+  };
   const bestRouteForDraft = (draft, candidates = rutasCompatibles, requireTarifaMatch = false) => {
     return candidates
       .filter(r => !requireTarifaMatch || routeTarifaMatchesDraft(r, draft))
+      .filter(r => routeEndpointsMatch(draft, r))
       .map(r => ({ ruta:r, score:routeDraftScore(draft, r) }))
-      .filter(item => item.score > 0)
       .sort((a,b) => b.score - a.score || String(a.ruta.id || "").localeCompare(String(b.ruta.id || "")))[0]?.ruta || null;
   };
   // Si hay una tarifa/ruta guardada vinculada pero el ORIGEN cuadra y el DESTINO
@@ -7352,7 +7378,7 @@ async function maybeCrearRutaClienteDesdePedido() {
   }
   const rutaExistente = rutasClienteActualizadas
     .filter(r =>
-      routeDraftScore(form, r) >= 43 &&
+      routeEndpointsMatch(form, r) &&
       (!r.cliente_id || r.cliente_id === form.cliente_id) &&
       (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
     )
@@ -7380,7 +7406,7 @@ async function maybeCrearRutaClienteDesdePedido() {
       setRutas(normalized);
       return normalized
         .filter(r =>
-          routeDraftScore(form, r) >= 43 &&
+          routeEndpointsMatch(form, r) &&
           routeTarifaMatchesDraft(r, form) &&
           (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
         )
@@ -7389,9 +7415,26 @@ async function maybeCrearRutaClienteDesdePedido() {
       return null;
     }
   };
+  // Para la tarifa se guarda la POBLACION (o la provincia), nunca el nombre de
+  // la empresa: una misma empresa puede cargar/descargar en pueblos distintos.
+  const tarifaEndpointLabel = (tipo) => {
+    const isCarga = tipo === "carga";
+    const stops = parseStops(isCarga ? form.puntos_carga : form.puntos_descarga);
+    const ref = isCarga ? (stops[0] || {}) : (stops[stops.length - 1] || stops[0] || {});
+    const textoLibre = String(isCarga ? form.origen : form.destino).trim();
+    if (ref.cliente_nombre) {
+      const poblacion = String(ref.ciudad || ref.municipio || ref.poblacion || ref.localidad || "").trim();
+      if (poblacion) return poblacion;
+      const prov = String(isCarga ? form.origen_provincia : form.destino_provincia).trim();
+      if (prov) return prov;
+    }
+    return textoLibre;
+  };
+  const origenRutaBase = tarifaEndpointLabel("carga").toUpperCase();
+  const destinoRutaBase = tarifaEndpointLabel("descarga").toUpperCase();
   const addRoute = await confirmDialog({
     title: "Guardar ruta del cliente",
-    message: `La ruta "${form.origen} -> ${form.destino}" no existe todavia.\n\nQuieres guardarla como ruta de este cliente para reutilizarla en futuros viajes?`,
+    message: `La ruta "${origenRutaBase} -> ${destinoRutaBase}" no existe todavia.\n\nQuieres guardarla como ruta de este cliente para reutilizarla en futuros viajes?`,
     confirmText: "Guardar ruta",
     cancelText: "No guardar",
   });
@@ -7399,17 +7442,17 @@ async function maybeCrearRutaClienteDesdePedido() {
     rutasCreadasRef.current.add(routeKey);
     return null;
   }
-  const origenRuta = form.origen.trim().toUpperCase();
-  let destinoRuta = form.destino.trim().toUpperCase();
+  const origenRuta = origenRutaBase;
+  let destinoRuta = destinoRutaBase;
   const destinoProvincia = String(form.destino_provincia || "").trim();
-  if (destinoProvincia && normalizePlaceText(destinoProvincia) !== normalizePlaceText(form.destino)) {
+  if (destinoProvincia && normalizePlaceText(destinoProvincia) !== normalizePlaceText(destinoRuta)) {
     const usarProvincia = await confirmDialog({
       title: "Ambito de la tarifa",
-      message: `Puedes guardar esta tarifa para toda la provincia de ${destinoProvincia} (aplicara a todos sus pueblos) o solo para ${form.destino.trim()}.
+      message: `Puedes guardar esta tarifa para toda la provincia de ${destinoProvincia} (aplicara a todos sus pueblos) o solo para ${destinoRuta}.
 
 Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueblo (excepcion).`,
       confirmText: `Provincia ${destinoProvincia}`,
-      cancelText: `Solo ${form.destino.trim()}`,
+      cancelText: `Solo ${destinoRuta}`,
     });
     if (usarProvincia) destinoRuta = destinoProvincia.toUpperCase();
   }
@@ -7448,7 +7491,7 @@ Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueb
     return null;
   }
   setRutas(prev => prev.some(r => r.id === nuevaRutaId || (
-    routeDraftScore({...form, origen:origenRuta, destino:destinoRuta}, r) >= 43 &&
+    routeEndpointsMatch({...form, origen:origenRuta, destino:destinoRuta}, r) &&
     (!r.cliente_id || r.cliente_id === form.cliente_id)
   )) ? prev : [...prev, {
     id: nuevaRutaId,

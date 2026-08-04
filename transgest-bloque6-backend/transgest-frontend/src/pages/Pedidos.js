@@ -1120,18 +1120,40 @@ function routeTarifaMatchesDraft(ruta = {}, draft = {}) {
   return true;
 }
 
-function formatRutaTarifaLabel(ruta = {}) {
+function formatRutaTarifaLabel(ruta = {}, incluirOrigen = true) {
   const tipos = { viaje:"EUR/viaje", kg:"EUR/100kg", tonelada:"EUR/tn", km:"EUR/km", hora:"EUR/h", palet:"EUR/palet" };
   const precio = parseLocaleNumber(ruta.precio_base ?? ruta.precio, 0);
   const minimo = normalizeMinimoUnidadesRuta(ruta, ruta.tarifa_tipo);
   const recargo = parseLocaleNumber(ruta.recargo_combustible_pct, 0);
   return [
-    `${ruta.origen || "Origen"} -> ${ruta.destino || "Destino"}`,
+    incluirOrigen
+      ? `${ruta.origen || "Origen"} -> ${ruta.destino || "Destino"}`
+      : `${ruta.destino || "Destino"}`,
     precio > 0 ? `${precio.toLocaleString("es-ES", { maximumFractionDigits: 4 })} ${tipos[ruta.tarifa_tipo] || ruta.tarifa_tipo || "EUR/viaje"}` : "sin precio",
     ruta.km ? `${ruta.km} km` : "",
     minimo ? `min. ${minimo}` : "",
     recargo ? `+${recargo.toLocaleString("es-ES")} % gasoil` : "",
   ].filter(Boolean).join(" | ");
+}
+
+// Agrupa las tarifas por ORIGEN para que el selector no sea una lista plana de
+// cientos de rutas: cada origen es un <optgroup> con sus destinos dentro. Asi
+// un cliente con muchas tarifas del mismo origen queda ordenado y navegable.
+function groupRutasByOrigen(rutas = []) {
+  const grupos = new Map();
+  for (const r of Array.isArray(rutas) ? rutas : []) {
+    const clave = String(r.origen || "").trim().toUpperCase() || "SIN ORIGEN";
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(r);
+  }
+  return Array.from(grupos.entries())
+    .sort((a, b) => a[0].localeCompare(b[0], "es"))
+    .map(([origen, items]) => ({
+      origen,
+      rutas: items.slice().sort((x, y) =>
+        String(x.destino || "").localeCompare(String(y.destino || ""), "es")
+      ),
+    }));
 }
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
@@ -3224,7 +3246,13 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                   else setForm(p => ({ ...p, ruta_id: "" }));
                 }} disabled={rutasLoading}>
                   <option value="">{rutasLoading ? "Cargando tarifas..." : rutasCliente.length ? "Selecciona tarifa del cliente" : "Sin tarifas guardadas"}</option>
-                  {rutasCliente.map(r => <option key={r.id || r.ruta_id} value={r.id || r.ruta_id}>{formatRutaTarifaLabel(r)}</option>)}
+                  {groupRutasByOrigen(rutasCliente).map(g => (
+                    <optgroup key={g.origen} label={g.origen}>
+                      {g.rutas.map(r => (
+                        <option key={r.id || r.ruta_id} value={r.id || r.ruta_id}>{formatRutaTarifaLabel(r, false)}</option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
                 <div style={{fontSize:11,color:rutasCliente.length ? "#f59e0b" : "var(--text5)",marginTop:4}}>
                   {rutasCliente.length ? "Opcional: si no eliges tarifa, se creara marcado para revisar ruta/precio." : "No hay tarifas guardadas; puedes completar el precio manualmente."}
@@ -6874,25 +6902,28 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     // Para la tarifa por provincia, la descarga que manda es la ULTIMA de la
     // lista (destino final del viaje); la carga sigue siendo la primera (origen).
     const ref = isCarga ? (stops[0] || {}) : (stops[stops.length - 1] || stops[0] || {});
-    // La tarifa se empareja por POBLACION + PROVINCIA, nunca por el nombre de la
-    // empresa. Una misma empresa (p.ej. CEMENTOS CAPA) puede cargar/descargar en
-    // pueblos distintos; lo que define la tarifa es el pueblo y su provincia. Por
-    // eso, si el punto es una empresa (tiene cliente_nombre), NO se usan ni ese
-    // nombre ni el texto libre origen/destino para el nombre: solo la poblacion.
-    const esEmpresa = !!ref.cliente_nombre;
+    // La tarifa se empareja PREFERENTEMENTE por POBLACION + PROVINCIA: una misma
+    // empresa (p.ej. CEMENTOS CAPA) puede cargar/descargar en pueblos distintos y
+    // lo que define la tarifa es el pueblo y su provincia. Se prioriza la
+    // poblacion (ciudad/municipio) como etiqueta, pero se MANTIENE tambien el
+    // nombre de la empresa y el texto libre como etiquetas de reserva para no
+    // romper las tarifas antiguas guardadas con el nombre de la empresa.
     const poblacion = ref.ciudad || ref.municipio || ref.poblacion || ref.localidad || "";
-    const textoLibre = isCarga ? draft.origen : draft.destino;
+    const textoLibre = isCarga ? draft.origen : (stopAddress(ref) || draft.destino);
     const labels = Array.from(new Set([
       poblacion,
-      esEmpresa ? "" : textoLibre,
-      esEmpresa ? "" : stopAddress(ref),
+      textoLibre,
+      stopAddress(ref),
+      ref.ciudad,
+      ref.municipio,
+      ref.cliente_nombre,
     ].filter(Boolean)));
-    const inferred = labels.length ? inferPlaceGeo(ref, ...labels) : null;
+    const inferred = inferPlaceGeo(ref, ...labels);
     const provincia =
       stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia)
       || provinciaDeLugar(poblacion)
-      || (esEmpresa ? "" : provinciaDeLugar(textoLibre))
       || inferred?.provincia
+      || provinciaDeLugar(textoLibre)
       || "";
     return { labels, provincia };
   };
@@ -8336,15 +8367,19 @@ useEffect(() => {
   });
 }} style={S.sel}>
                   <option value="">Sin ruta / Manual</option>
-                  {rutas.map(r=>{
-                    const compatible = rutaCompatibleConConjunto(r);
-                    const tipoReq = r.tipo_vehiculo && r.tipo_vehiculo !== "cualquiera" ? ` (${r.tipo_vehiculo})` : "";
-                    return (
-                      <option key={r.id} value={r.id} disabled={!compatible}>
-                        {r.origen} -> {r.destino}{tipoReq}{!compatible ? " - requiere cambio de remolque" : ""}
-                      </option>
-                    );
-                  })}
+                  {groupRutasByOrigen(rutas).map(g => (
+                    <optgroup key={g.origen} label={g.origen}>
+                      {g.rutas.map(r=>{
+                        const compatible = rutaCompatibleConConjunto(r);
+                        const tipoReq = r.tipo_vehiculo && r.tipo_vehiculo !== "cualquiera" ? ` (${r.tipo_vehiculo})` : "";
+                        return (
+                          <option key={r.id} value={r.id} disabled={!compatible}>
+                            {r.destino}{tipoReq}{!compatible ? " - requiere cambio de remolque" : ""}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  ))}
                 </select>
                 <div style={{marginTop:6,fontSize:11,color:"var(--text5)"}}>
                   Al seleccionar una ruta se cargan automaticamente origen, destino, km, precio, minimo facturable y recargo.

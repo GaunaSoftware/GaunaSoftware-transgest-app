@@ -1,6 +1,6 @@
 import { getLogoDataUrl } from "../services/logoHelper";
 import { useState, useEffect, useCallback } from "react";
-import { borrarNoche, borrarRepostaje, crearNoche, crearRepostaje, getNominasEmitidas, getChoferes, getChoferConfig, getGasoilConfig, getNochesVehiculo, getPedidos, getRepostajes, getVehiculos, getTallerEstado, setChoferConfig, setGasoilConfig } from "../services/api";
+import { borrarNoche, borrarRepostaje, crearNoche, crearRepostaje, getNominasEmitidas, getChoferes, getChoferConfig, getGasoilConfig, getNochesVehiculo, getPedidosTodos, getRepostajes, getVehiculos, getTallerEstado, setChoferConfig, setGasoilConfig } from "../services/api";
 import { getChoferConfigSync, useChoferConfig } from "../hooks/useChoferConfig";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { notify } from "../services/notify";
@@ -378,7 +378,7 @@ export default function HojasRuta(){
     async function load(){
       setLoading(true);
       try{
-        const[v,p,c,t]=await Promise.all([getVehiculos().catch(()=>[]),getPedidos().catch(()=>[]),getChoferes().catch(()=>[]),getTallerEstado().catch(()=>null)]);
+        const[v,p,c,t]=await Promise.all([getVehiculos().catch(()=>[]),getPedidosTodos({}, { silentError: true }).catch(()=>[]),getChoferes().catch(()=>[]),getTallerEstado().catch(()=>null)]);
         const vArr=Array.isArray(v)?v:[];
         const pArr=Array.isArray(p)?p:(Array.isArray(p?.data)?p.data:[]);
         setVehiculos(vArr);setPedidos(pArr);setChoferes(Array.isArray(c)?c:[]);

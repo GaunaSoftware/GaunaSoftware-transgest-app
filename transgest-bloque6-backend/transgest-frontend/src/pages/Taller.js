@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  getVehiculos, getAlertasDocVehiculos, actualizarKmVehiculo, getPedidos,
+  getVehiculos, getAlertasDocVehiculos, actualizarKmVehiculo, getPedidosTodos,
   getTallerEstado, guardarTallerEstado,
   getTallerSolicitudes, actualizarTallerSolicitud,
   getTallerPiezas, getTallerPiezaPorCodigo, crearTallerPieza, editarTallerPieza,
@@ -2534,7 +2534,7 @@ export default function Taller() {
 
   useEffect(() => {
     getVehiculos().then(v=>{ setVehiculos(Array.isArray(v)?v:[]); }).catch(()=>{});
-    getPedidos().then(p=>{ setPedidos(Array.isArray(p)?p:[]); }).catch(()=>{});
+    getPedidosTodos({}, { silentError: true }).then(p=>{ setPedidos(Array.isArray(p)?p:[]); }).catch(()=>{});
     getAlertasDocVehiculos().then(a=>setAlertasDoc(Array.isArray(a)?a:[])).catch(()=>{});
     cargarSolicitudesTaller();
     cargarEstadoCompartidoTaller();

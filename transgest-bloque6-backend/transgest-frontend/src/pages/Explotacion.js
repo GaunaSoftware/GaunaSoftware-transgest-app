@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getVehiculos, getPedidos, getTallerEstado, getKmVacioVehiculo, crearKmVacioVehiculo } from "../services/api";
+import { getVehiculos, getPedidosTodos, getTallerEstado, getKmVacioVehiculo, crearKmVacioVehiculo } from "../services/api";
 import { notify } from "../services/notify";
 
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -91,7 +91,7 @@ export default function Explotacion() {
   }
 
   useEffect(() => {
-    Promise.all([getVehiculos(), getPedidos({}), getTallerEstado().catch(()=>null)])
+    Promise.all([getVehiculos(), getPedidosTodos({}, { silentError: true }).catch(()=>[]), getTallerEstado().catch(()=>null)])
       .then(async ([v,p,t])=>{
         const vehiculosArr = Array.isArray(v)?v:[];
         setVehiculos(vehiculosArr);

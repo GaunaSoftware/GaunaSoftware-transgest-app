@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { getObjetivos, setObjetivo } from "../services/api";
-import { getPedidos, getVehiculos, getChoferes, getFacturas } from "../services/api";
+import { getPedidosTodos, getVehiculos, getChoferes, getFacturas } from "../services/api";
 import { notify } from "../services/notify";
 
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -105,7 +105,7 @@ export default function Objetivos(){
   useEffect(()=>{
     setLoading(true);
     Promise.all([
-      getPedidos().catch(()=>[]),
+      getPedidosTodos({}, { silentError: true }).catch(()=>[]),
       getFacturas().catch(()=>[]),
       getVehiculos().catch(()=>[]),
       getChoferes().catch(()=>[]),

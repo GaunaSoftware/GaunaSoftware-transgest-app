@@ -10067,7 +10067,13 @@ export default function Pedidos() {
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
   const _rangoMesActual = defaultTraficoRangeLocal();
   const filtroPeriodoActivo = filtroFechasCustom || Boolean(filtroMes);
-  const vistaMesActualPorDefecto = !filtroPeriodoActivo;
+  // Al acotar por busqueda/cliente/estado concreto se muestra todo el historico,
+  // asi que la etiqueta "mes actual y siguientes" ya no aplica en ese caso.
+  const filtroAcotaHistorico =
+    Boolean(debouncedQ) ||
+    Boolean(filtroCliente) ||
+    (filtroEst !== "todos" && filtroEst !== "activos");
+  const vistaMesActualPorDefecto = !filtroPeriodoActivo && !filtroAcotaHistorico;
 
   useEffect(() => {
     savePedidosCollapsedGroups(collapsedClientes);
@@ -10303,9 +10309,18 @@ export default function Pedidos() {
       if (filtroCliente) params.cliente_id = filtroCliente;
       const aplicarRangoFechas = filtroFechasCustom || Boolean(filtroMes);
       const rangoDefectoCarga = defaultTraficoRangeLocal();
+      // Cuando se acota por busqueda de texto, por cliente o por un estado
+      // concreto (p.ej. al pinchar "En ruta" en el Dashboard, o al buscar un
+      // cliente), el usuario quiere ver TODO ese subconjunto -todo el historico-
+      // y no solo el mes en curso. El rango por defecto (mes actual + los
+      // siguientes) es unicamente para la vista general sin acotar.
+      const filtroAcotaHistorico =
+        Boolean(debouncedQ) ||
+        Boolean(filtroCliente) ||
+        (filtroEst !== "todos" && filtroEst !== "activos");
       if (aplicarRangoFechas && filtroDesde) params.desde = filtroDesde;
       if (aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
-      if (!aplicarRangoFechas) {
+      if (!aplicarRangoFechas && !filtroAcotaHistorico) {
         // Mes actual como contexto + todos los viajes siguientes (no se corta en
         // fin de mes, para que "los proximos" salgan siempre).
         params.desde = rangoDefectoCarga.desde;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { getFacturas, getPedidos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos } from "../services/api";
+import { getFacturasTodas, getPedidosTodos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import { confirmDialog, notify } from "../services/notify";
@@ -357,8 +357,8 @@ export default function Dashboard() {
       try {
       const _tout = (p, ms=8000) => Promise.race([p, new Promise(r=>setTimeout(()=>r([]),ms))]);
         const [p, f, v, c, ex, cfg, taller, palets] = await Promise.all([
-          _tout(getPedidos({}, { timeoutMs: 45000, silentError: true }).catch(()=>[]), 45000),
-          getFacturas().catch(()=>[]),
+          _tout(getPedidosTodos({}, { timeoutMs: 45000, silentError: true }).catch(()=>[]), 45000),
+          getFacturasTodas({}, { silentError: true }).catch(()=>[]),
           getVehiculos().catch(()=>[]),
           getChoferes().catch(()=>[]),
           getExcepcionesOperativas().catch(()=>null),

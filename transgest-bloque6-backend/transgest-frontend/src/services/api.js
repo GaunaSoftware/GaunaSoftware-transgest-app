@@ -428,6 +428,27 @@ export const revocarClienteIntegracionToken = (id, tokenId) => apiFetch(`/client
 
 // ── Pedidos ───────────────────────────────────────────
 export const getPedidos     = (params={}, options = {}) => apiFetch(`/pedidos?${new URLSearchParams(params)}`, options);
+// Trae TODOS los pedidos paginando. El endpoint /pedidos pagina a 50 por
+// defecto; los dashboards e informes que agregan por periodo necesitan el
+// conjunto completo (si no, los KPIs solo cuentan los primeros 50 pedidos).
+// Pide la pagina 1, lee total_pages y trae el resto en paralelo. Devuelve un
+// array plano. Tope de seguridad de 40 paginas (20.000 pedidos).
+export async function getPedidosTodos(params = {}, options = {}) {
+  const limit = 500;
+  const first = await apiFetch(`/pedidos?${new URLSearchParams({ ...params, page: 1, limit })}`, options);
+  if (Array.isArray(first)) return first; // respuesta antigua sin paginacion
+  const data = Array.isArray(first?.data) ? first.data : [];
+  const totalPages = Math.min(Number(first?.total_pages) || 1, 40);
+  if (totalPages <= 1) return data;
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, k) =>
+      apiFetch(`/pedidos?${new URLSearchParams({ ...params, page: k + 2, limit })}`, options)
+        .then(r => (Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : []))
+        .catch(() => [])
+    )
+  );
+  return rest.reduce((acc, arr) => acc.concat(arr), data);
+}
 export async function getPedidosResumenLista(params = {}, options = {}) {
   try {
     return await apiFetch(`/pedidos/resumen-lista?${new URLSearchParams(params)}`, options);
@@ -534,6 +555,24 @@ export const guardarPlanDiarioOrden = (data) =>
 
 // ── Facturas ──────────────────────────────────────────
 export const getFacturas    = (params={}) => apiFetch(`/facturas?${new URLSearchParams(params)}`);
+// Trae TODAS las facturas paginando (mismo motivo que getPedidosTodos: el
+// endpoint pagina a 50 y los KPIs de ingresos necesitan el conjunto completo).
+export async function getFacturasTodas(params = {}, options = {}) {
+  const limit = 500;
+  const first = await apiFetch(`/facturas?${new URLSearchParams({ ...params, page: 1, limit })}`, options);
+  if (Array.isArray(first)) return first;
+  const data = Array.isArray(first?.data) ? first.data : [];
+  const totalPages = Math.min(Number(first?.pagination?.totalPages) || 1, 40);
+  if (totalPages <= 1) return data;
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, k) =>
+      apiFetch(`/facturas?${new URLSearchParams({ ...params, page: k + 2, limit })}`, options)
+        .then(r => (Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : []))
+        .catch(() => [])
+    )
+  );
+  return rest.reduce((acc, arr) => acc.concat(arr), data);
+}
 export const getFactura     = (id)        => apiFetch(`/facturas/${id}`);
 export const getFacturaFiscal = (id)      => apiFetch(`/facturas/${id}/fiscal`);
 export const reencolarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/requeue`, { method:"POST", body:{} });

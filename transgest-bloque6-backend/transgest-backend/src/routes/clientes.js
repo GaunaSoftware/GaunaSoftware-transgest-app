@@ -516,7 +516,7 @@ async function getRutasClienteRows(clienteId, empresaId) {
             rc.iva_pct,
             rc.notas AS precio_notas,
             cli.minimo_facturable_toneladas AS cliente_minimo_facturable_toneladas,
-            r.id, r.origen, r.destino, r.km, r.peajes, r.tiempo_h, r.tipo_vehiculo,
+            r.id, r.origen, r.destino, r.km, r.peajes, r.tiempo_h, r.tipo_vehiculo, r.grupo_id,
             COALESCE(rc.tarifa_tipo, r.tarifa_tipo, 'viaje') AS tarifa_tipo,
             COALESCE(rc.precio, r.precio_base, 0) AS precio_base,
             COALESCE(rc.minimo_facturable, r.minimo_facturable) AS minimo_facturable,
@@ -1233,6 +1233,73 @@ router.delete("/:id/rutas/:rid", invalidateCache("rutas", "clientes"), async (re
     if (!rowCount) return res.status(404).json({ error: "Ruta del cliente no encontrada" });
     res.json({ ok: true });
   } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// POST /clientes/:id/rutas/agrupar - asociar varias tarifas en un grupo. Los
+// miembros comparten precio: el primer id de la lista (la tarifa sobre la que se
+// suelta) marca el precio y se copia al resto. Cada tarifa mantiene su propio
+// origen/destino, de modo que al emparejar pedidos cualquiera del grupo encaja y
+// da el mismo precio.
+router.post("/:id/rutas/agrupar", invalidateCache("rutas", "clientes"), async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    if (!(await assertClienteEmpresa(req.params.id, empresaId))) {
+      return res.status(404).json({ error: "Cliente no encontrado" });
+    }
+    const rutaIds = Array.isArray(req.body?.ruta_ids) ? req.body.ruta_ids.map(String).filter(Boolean) : [];
+    if (rutaIds.length < 2) return res.status(400).json({ error: "Se necesitan al menos dos tarifas para agrupar" });
+    const rows = await getRutasClienteRows(req.params.id, empresaId);
+    const byId = new Map(rows.map(r => [String(r.id), r]));
+    const validos = rutaIds.filter(id => byId.has(id));
+    if (validos.length < 2) return res.status(400).json({ error: "Tarifas no encontradas para este cliente" });
+    // Reutiliza un grupo existente entre las seleccionadas si lo hay; si no, nuevo.
+    const grupoExistente = validos.map(id => byId.get(id)?.grupo_id).find(Boolean);
+    const grupoId = grupoExistente || (await db.query("SELECT gen_random_uuid() AS g")).rows[0].g;
+    await db.query(
+      "UPDATE rutas SET grupo_id=$1 WHERE id = ANY($2::uuid[]) AND (empresa_id=$3 OR empresa_id IS NULL)",
+      [grupoId, validos, empresaId]
+    );
+    // Precio compartido del grupo, tomado de la primera tarifa (la de destino).
+    const target = byId.get(validos[0]);
+    if (target) {
+      const precio = numericOrNull(target.precio_base) || 0;
+      const tipo = target.tarifa_tipo || "viaje";
+      const minF = numericOrNull(target.minimo_facturable);
+      const minU = numericOrNull(target.minimo_unidades);
+      const recargo = numericOrNull(target.recargo_combustible_pct) || 0;
+      for (const id of validos.filter(x => x !== validos[0])) {
+        await db.query(
+          "UPDATE rutas SET tarifa_tipo=$2, precio_base=$3, minimo_facturable=$4, minimo_unidades=$5, recargo_combustible_pct=$6 WHERE id=$1 AND (empresa_id=$7 OR empresa_id IS NULL)",
+          [id, tipo, precio, minF, minU, recargo, empresaId]
+        );
+        await db.query(
+          "UPDATE ruta_precios_cliente SET precio=$1, tarifa_tipo=$2, minimo_facturable=$3, minimo_unidades=$4, recargo_combustible_pct=$5 WHERE ruta_id=$6 AND cliente_id=$7",
+          [precio, tipo, minF, minU, recargo, id, req.params.id]
+        );
+      }
+    }
+    res.json({ ok: true, grupo_id: grupoId, ruta_ids: validos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /clientes/:id/rutas/desagrupar - sacar tarifas de su grupo
+router.post("/:id/rutas/desagrupar", invalidateCache("rutas", "clientes"), async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    if (!(await assertClienteEmpresa(req.params.id, empresaId))) {
+      return res.status(404).json({ error: "Cliente no encontrado" });
+    }
+    const rutaIds = Array.isArray(req.body?.ruta_ids) ? req.body.ruta_ids.map(String).filter(Boolean) : [];
+    if (!rutaIds.length) return res.status(400).json({ error: "Sin tarifas" });
+    const rows = await getRutasClienteRows(req.params.id, empresaId);
+    const validos = rutaIds.filter(id => rows.some(r => String(r.id) === id));
+    if (!validos.length) return res.status(400).json({ error: "Tarifas no encontradas para este cliente" });
+    await db.query(
+      "UPDATE rutas SET grupo_id=NULL WHERE id = ANY($1::uuid[]) AND (empresa_id=$2 OR empresa_id IS NULL)",
+      [validos, empresaId]
+    );
+    res.json({ ok: true, ruta_ids: validos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;

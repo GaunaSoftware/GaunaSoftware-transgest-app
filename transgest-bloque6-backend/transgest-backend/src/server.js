@@ -377,6 +377,9 @@ async function applyMigrations() {
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    // Grupos de tarifas: varias rutas (distintos puntos de carga/descarga) que se
+    // asocian y comparten precio. Comparten un mismo grupo_id.
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS grupo_id UUID").catch(captureStartupMigrationError);
     await db.query("UPDATE rutas SET activa=true WHERE activa IS NULL").catch(captureStartupMigrationError);
     await db.query(`
       CREATE TABLE IF NOT EXISTS ruta_precios_cliente (

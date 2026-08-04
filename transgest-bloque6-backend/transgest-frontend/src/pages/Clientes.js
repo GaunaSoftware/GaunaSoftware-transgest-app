@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   getClientes, crearCliente, editarCliente, borrarCliente,
   getRutasCliente, getRutasClienteSalud, crearRutaCliente, editarRutaCliente, borrarRutaCliente,
+  agruparRutasCliente, desagruparRutasCliente,
   getPedidosCliente, crearFacturaMultiple, getRutas, marcarClienteRevisado,
   crearPortalUsuarioCliente, getClienteIntegracionTokens, crearClienteIntegracionToken, revocarClienteIntegracionToken,
   getFacturas, getPortalSolicitudesAdmin, getPuntosInteres, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
@@ -135,6 +136,29 @@ const TIPO_VEHICULO_RUTA = [
 const ESTADO_COLOR = {pendiente:"#fb8c3a",confirmado:"#3b6ef5",espera_carga:"#eab308",cargando:"#14b8a6",en_curso:"#22d3ee",espera_descarga:"#d946ef",descarga:"#a78bfa",entregado:"var(--green)",cancelado:"#f05252",incidencia:"#fbbf24"};
 const LABEL_ESTADO = {pendiente:"Pendiente",confirmado:"Confirmado",espera_carga:"Espera carga",cargando:"Cargando",en_curso:"En curso",espera_descarga:"Espera descarga",descarga:"En descarga",entregado:"Entregado",cancelado:"Cancelado",incidencia:"Incidencia"};
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
+const GRUPO_COLORES = ["#3b6ef5","#10b981","#f59e0b","#a855f7","#ef4444","#06b6d4","#ec4899","#84cc16"];
+// Ordena las tarifas dejando juntas las de un mismo grupo (asociadas, comparten
+// precio) y asigna un color por grupo para pintarlas relacionadas. Las sueltas
+// van despues.
+function ordenarRutasPorGrupo(rutas = []) {
+  const grupos = new Map();
+  const sueltas = [];
+  for (const r of Array.isArray(rutas) ? rutas : []) {
+    const g = r.grupo_id ? String(r.grupo_id) : "";
+    if (!g) { sueltas.push(r); continue; }
+    if (!grupos.has(g)) grupos.set(g, []);
+    grupos.get(g).push(r);
+  }
+  const colorIdx = new Map();
+  Array.from(grupos.keys()).forEach((g, i) => colorIdx.set(g, i));
+  const ordenadas = [];
+  for (const [g, items] of grupos) {
+    const color = GRUPO_COLORES[colorIdx.get(g) % GRUPO_COLORES.length];
+    items.forEach((r, j) => ordenadas.push({ ruta: r, grupoColor: color, grupoId: g, esGrupo: true, primeroDelGrupo: j === 0, tamGrupo: items.length }));
+  }
+  for (const r of sueltas) ordenadas.push({ ruta: r, grupoColor: null, grupoId: "", esGrupo: false, primeroDelGrupo: false, tamGrupo: 0 });
+  return ordenadas;
+}
 const fmtTarifaRuta = r => {
   const tipo = String(r?.tarifa_tipo || r?.tipo_precio || "viaje");
   const precio = Number(r?.precio_base ?? r?.precio ?? 0);
@@ -585,6 +609,11 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
   const [editRuta,  setEditRuta]  = useState(null);
   const [formRuta,  setFormRuta]  = useState({});
   const [rutasResaltadas, setRutasResaltadas] = useState(new Set());
+  // Arrastrar-para-agrupar tarifas (estilo iPhone): se arrastra una fila sobre
+  // otra para asociarlas en un grupo que comparte precio.
+  const [dragRutaId, setDragRutaId] = useState(null);
+  const [dropRutaId, setDropRutaId] = useState(null);
+  const [agrupando, setAgrupando] = useState(false);
 
   // Historial pedidos
   const [pedidos,   setPedidos]   = useState([]);
@@ -730,6 +759,34 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
     setEditRuta(ruta);
     setFormRuta(rutaEditPayload(ruta));
     setModalRuta(true);
+  }
+
+  // Soltar una tarifa (dragRutaId) sobre otra (target): se asocian en un grupo
+  // que comparte precio (el de la tarifa de destino, la de abajo).
+  async function agruparConTarifa(target) {
+    const origenId = dragRutaId;
+    setDragRutaId(null);
+    setDropRutaId(null);
+    if (!origenId || !target?.id || String(origenId) === String(target.id)) return;
+    setAgrupando(true);
+    try {
+      // El primer id marca el precio del grupo: usamos la tarifa de destino.
+      await agruparRutasCliente(cliente.id, [String(target.id), String(origenId)]);
+      notify("Tarifas agrupadas: comparten precio.", "success");
+      await cargarRutas();
+    } catch (e) { notify(e.message, "error"); }
+    finally { setAgrupando(false); }
+  }
+
+  async function desagruparTarifa(ruta) {
+    if (!ruta?.id) return;
+    setAgrupando(true);
+    try {
+      await desagruparRutasCliente(cliente.id, [String(ruta.id)]);
+      notify("Tarifa sacada del grupo.", "success");
+      await cargarRutas();
+    } catch (e) { notify(e.message, "error"); }
+    finally { setAgrupando(false); }
   }
 
   function rutasFromIssue(issue = {}) {
@@ -1221,6 +1278,11 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
               <div>
                 <div style={{fontSize:12,color:"var(--text4)"}}>Rutas pactadas con este cliente, con su tarifa real, minimo y recargo de combustible.</div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>Aqui se define el precio que luego usan pedidos, trafico y facturacion.</div>
+                {canEdit && (
+                  <div style={{fontSize:11,color:"var(--accent-xl)",marginTop:4}}>
+                    Arrastra una tarifa sobre otra para agruparlas (como en el movil): quedan asociadas y comparten precio. Un pedido cuyo origen/destino caiga en cualquiera del grupo cogera ese precio.
+                  </div>
+                )}
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid var(--border)",padding:"6px 12px",fontSize:12}}
@@ -1311,11 +1373,33 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                   {["Origen","Destino","Km","Tipo vehiculo","Tarifa","Minimo","Combustible","EUR/km","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}
                 </tr></thead>
                 <tbody>
-                  {rutas.map(r=>{
+                  {ordenarRutasPorGrupo(rutas).map(({ ruta:r, grupoColor, esGrupo, primeroDelGrupo, tamGrupo })=>{
                     const resaltada = rutasResaltadas.has(String(r.id));
+                    const esDropTarget = canEdit && dropRutaId===String(r.id) && dragRutaId && dragRutaId!==String(r.id);
                     return (
-                    <tr key={r.id} style={{background:resaltada ? "rgba(59,110,245,.12)" : "transparent",outline:resaltada ? "2px solid rgba(59,110,245,.35)" : "none",outlineOffset:-2}}>
-                      <td style={{...S.td,fontWeight:600}}>{r.origen}</td>
+                    <tr key={r.id}
+                      draggable={canEdit && !agrupando}
+                      onDragStart={()=>setDragRutaId(String(r.id))}
+                      onDragOver={canEdit ? (e)=>{ e.preventDefault(); if(dropRutaId!==String(r.id)) setDropRutaId(String(r.id)); } : undefined}
+                      onDragLeave={()=>setDropRutaId(cur=>cur===String(r.id)?null:cur)}
+                      onDrop={canEdit ? (e)=>{ e.preventDefault(); agruparConTarifa(r); } : undefined}
+                      onDragEnd={()=>{ setDragRutaId(null); setDropRutaId(null); }}
+                      title={canEdit ? "Arrastra esta tarifa sobre otra para agruparlas (compartiran precio)" : undefined}
+                      style={{
+                        background: esDropTarget ? "rgba(59,110,245,.20)" : resaltada ? "rgba(59,110,245,.12)" : "transparent",
+                        outline: esDropTarget ? "2px dashed #3b6ef5" : resaltada ? "2px solid rgba(59,110,245,.35)" : "none",
+                        outlineOffset:-2,
+                        cursor: canEdit ? "grab" : "default",
+                        opacity: dragRutaId===String(r.id) ? .5 : 1,
+                      }}>
+                      <td style={{...S.td,fontWeight:600,borderLeft:esGrupo?`4px solid ${grupoColor}`:"4px solid transparent"}}>
+                        {esGrupo && primeroDelGrupo && (
+                          <span style={{display:"inline-block",fontSize:9,fontWeight:900,textTransform:"uppercase",color:grupoColor,background:`${grupoColor}1f`,border:`1px solid ${grupoColor}55`,borderRadius:6,padding:"1px 6px",marginRight:6}}>
+                            Grupo {tamGrupo}
+                          </span>
+                        )}
+                        {r.origen}
+                      </td>
                       <td style={{...S.td,fontWeight:600}}>{r.destino}</td>
                       <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"var(--accent-xl)"}}>{r.km||"-"}</td>
                       <td style={{...S.td,color:"var(--text2)"}}>{TIPO_VEHICULO_RUTA.find(t=>t.v===(r.tipo_vehiculo||"cualquiera"))?.l || r.tipo_vehiculo || "Cualquiera"}</td>
@@ -1336,9 +1420,14 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                         })() : "-"}
                       </td>
                       <td style={S.td}>
-                        {canEdit&&<div style={{display:"flex",gap:6}}>
+                        {canEdit&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                           <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"3px 9px",fontSize:11}}
                             onClick={()=>abrirRuta(r)}>Editar</button>
+                          {esGrupo && (
+                            <button style={{...S.btn,background:`${grupoColor}1f`,color:grupoColor,border:`1px solid ${grupoColor}55`,padding:"3px 9px",fontSize:11}}
+                              disabled={agrupando}
+                              onClick={()=>desagruparTarifa(r)}>Desagrupar</button>
+                          )}
                           <button style={{...S.btn,background:"rgba(240,82,82,.1)",color:"#f05252",padding:"3px 9px",fontSize:11}}
                             onClick={()=>eliminarRuta(r)}>X</button>
                         </div>}

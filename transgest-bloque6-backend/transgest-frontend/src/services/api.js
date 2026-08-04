@@ -837,6 +837,10 @@ export const getRutasClienteSalud = (cid)     => apiFetch(`/clientes/${cid}/ruta
 export const crearRutaCliente  = (cid, data, options = {}) => apiFetch(`/clientes/${cid}/rutas`, { method:"POST", body:data, ...options });
 export const editarRutaCliente = (cid,rid,data)=>apiFetch(`/clientes/${cid}/rutas/${rid}`, { method:"PUT", body:data });
 export const borrarRutaCliente = (cid, rid)   => apiFetch(`/clientes/${cid}/rutas/${rid}`, { method:"DELETE" });
+// Agrupar/desagrupar tarifas del cliente. En agrupar, el primer id de la lista
+// (la tarifa sobre la que se suelta) marca el precio compartido del grupo.
+export const agruparRutasCliente   = (cid, rutaIds = []) => apiFetch(`/clientes/${cid}/rutas/agrupar`, { method:"POST", body:{ ruta_ids: rutaIds } });
+export const desagruparRutasCliente = (cid, rutaIds = []) => apiFetch(`/clientes/${cid}/rutas/desagrupar`, { method:"POST", body:{ ruta_ids: rutaIds } });
 
 // ── Pedidos por cliente ───────────────────────────────
 export const getPedidosCliente = (cid, params={}) => apiFetch(`/pedidos?cliente_id=${cid}&${new URLSearchParams(params)}`);

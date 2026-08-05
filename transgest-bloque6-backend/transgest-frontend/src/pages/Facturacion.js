@@ -2756,7 +2756,7 @@ export default function Facturacion() {
       <div style={{...S.card,marginBottom:22,borderColor:"rgba(20,184,166,.24)",background:"linear-gradient(135deg, rgba(20,184,166,.07), var(--card-bg))"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
           <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"var(--text)"}}>Resumen general financiero</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"var(--text)"}}>Resumen general financiero</div>
             <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Cobros, pagos, fiscalidad, soporte documental y caja prevista en una sola lectura.</div>
           </div>
           <span style={{fontSize:11,color:pendiente>0?"#f59e0b":"var(--green)",fontWeight:900}}>
@@ -2765,9 +2765,9 @@ export default function Facturacion() {
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
           {resumenGestionFinanciera.map(item=>(
-            <div key={item.label} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 12px"}}>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:17,fontWeight:900,color:item.color}}>{item.value}</div>
-              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",marginTop:4}}>{item.label}</div>
+            <div key={item.label} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 12px",minWidth:0}}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:600,color:item.color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.value}</div>
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",marginTop:4}}>{item.label}</div>
               <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{item.detail}</div>
             </div>
           ))}

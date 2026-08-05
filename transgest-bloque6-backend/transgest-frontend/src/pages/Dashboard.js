@@ -314,7 +314,7 @@ function ExecutiveKpi({ icon, iconBg, iconColor, value, label, sub, valueColor }
         {icon}
       </div>
       <div style={{minWidth:0}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:26,fontWeight:900,color:valueColor || "var(--text)",lineHeight:1.05}}>{value}</div>
+        <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:26,fontWeight:600,color:valueColor || "var(--text)",lineHeight:1.1,fontVariantNumeric:"tabular-nums",letterSpacing:"-.01em"}}>{value}</div>
         <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginTop:5}}>{label}</div>
         <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{sub}</div>
       </div>
@@ -750,7 +750,7 @@ export default function Dashboard() {
               <button key={item.key} onClick={()=>abrirPedidosConEstado(item.estado, { title:item.label, count:item.value, operativo:item.key })}
                 style={{...S.card,padding:"14px 16px",textAlign:"left",cursor:"pointer",borderColor:`${item.color}44`,background:`linear-gradient(135deg, ${item.color}12, var(--card-bg) 60%)`,fontFamily:"'DM Sans',sans-serif"}}>
                 <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:item.color}}>{item.label}</div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontSize:25,fontWeight:900,color:"var(--text)",marginTop:5}}>{fmtN(item.value)}</div>
+                <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:25,fontWeight:600,color:"var(--text)",marginTop:5,fontVariantNumeric:"tabular-nums",letterSpacing:"-.01em"}}>{fmtN(item.value)}</div>
                 <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{item.sub}</div>
               </button>
             ))}

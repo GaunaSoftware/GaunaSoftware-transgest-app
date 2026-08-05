@@ -23,6 +23,7 @@ import { formatMatricula, formatDni, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
+import EndpointAutocomplete from "../components/EndpointAutocomplete";
 
 let puntosInteresCache = [];
 const AI_INBOX_MAX_FILE_BYTES = 6 * 1024 * 1024;
@@ -8405,21 +8406,17 @@ useEffect(() => {
               <div><label style={S.label}>Referencia cliente</label><input style={S.input} value={form.referencia_cliente||""} onChange={f("referencia_cliente")} placeholder="Ref. pedido del cliente"/></div>
               <div>
                 <label style={S.label}>Origen (carga) *</label>
-                <input
-                  style={S.input}
+                <EndpointAutocomplete
+                  inputStyle={S.input}
                   value={form.origen||""}
                   onChange={aplicarEndpointText("origen", "carga")}
                   onBlur={e=>resolverEndpointEnFormulario("origen", "carga", e.currentTarget.value)}
-                  list={cargaEndpointListId}
                   placeholder="Escribe o elige un punto de carga"
+                  suggestions={puntosCargaSugeridosModal}
+                  getValue={p => p.nombre || p.direccion}
+                  getLabel={p => direccionCompletaPunto(p) || p.direccion || p.nombre}
+                  onPick={p => setForm(x => applyPuntoCargaToDraft(x, p))}
                 />
-                <datalist id={cargaEndpointListId}>
-                  {puntosCargaSugeridosModal.map(p => (
-                    <option key={`${p.id}-carga`} value={p.nombre || p.direccion}>
-                      {direccionCompletaPunto(p) || p.direccion || p.nombre}
-                    </option>
-                  ))}
-                </datalist>
                 {form.cliente_id && (
                   <div style={{marginTop:6}}>
                     {puntosCargaClienteModal.length > 0 ? (
@@ -8458,21 +8455,17 @@ useEffect(() => {
               </div>
               <div>
                 <label style={S.label}>Destino (entrega) *</label>
-                <input
-                  style={S.input}
+                <EndpointAutocomplete
+                  inputStyle={S.input}
                   value={form.destino||""}
                   onChange={aplicarEndpointText("destino", "descarga")}
                   onBlur={e=>resolverEndpointEnFormulario("destino", "descarga", e.currentTarget.value)}
-                  list={descargaEndpointListId}
                   placeholder="Escribe o elige un punto de descarga"
+                  suggestions={puntosDescargaSugeridosModal}
+                  getValue={p => p.nombre || p.direccion}
+                  getLabel={p => direccionCompletaPunto(p) || p.direccion || p.nombre}
+                  onPick={p => setForm(x => applyPuntoDescargaToDraft(x, p))}
                 />
-                <datalist id={descargaEndpointListId}>
-                  {puntosDescargaSugeridosModal.map(p => (
-                    <option key={`${p.id}-descarga`} value={p.nombre || p.direccion}>
-                      {direccionCompletaPunto(p) || p.direccion || p.nombre}
-                    </option>
-                  ))}
-                </datalist>
                 <div className="tg-pedido-actions-row">
                   <PuntoInteresPicker
                     placeholder="Usar punto como destino"

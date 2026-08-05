@@ -964,11 +964,13 @@ router.post("/", GERENTE_O_CONTABLE,
          cobrosConfig.dias_entre_reclamaciones, String(referencia_cliente || "").trim() || null]
       );
 
-      // Insertar líneas
+      // Insertar líneas. Se rellena tambien "importe" (columna legacy NOT NULL):
+      // importe de la linea = cantidad * precio unitario.
       for (const [i, l] of lineas.entries()) {
+        const importeLinea = Number(l.cantidad || 0) * Number(l.precio_unit || 0);
         await client.query(
-          `INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, orden) VALUES ($1,$2,$3,$4,$5)`,
-          [fac.id, l.concepto, l.cantidad, l.precio_unit, i]
+          `INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, importe, orden) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [fac.id, l.concepto, l.cantidad, l.precio_unit, importeLinea, i]
         );
       }
 

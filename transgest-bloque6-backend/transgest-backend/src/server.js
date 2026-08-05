@@ -581,6 +581,9 @@ async function applyMigrations() {
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
     // Tablas de detalle de la factura: columnas que usa el INSERT del alta.
     await db.query("ALTER TABLE factura_lineas ADD COLUMN IF NOT EXISTS orden INTEGER DEFAULT 0").catch(captureStartupMigrationError);
+    // La columna legacy "importe" es NOT NULL; con DEFAULT 0 no rompe si alguna
+    // ruta inserta lineas sin calcular el importe.
+    await db.query("ALTER TABLE factura_lineas ALTER COLUMN importe SET DEFAULT 0").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE factura_extracostes ADD COLUMN IF NOT EXISTS tipo VARCHAR(40)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ALTER COLUMN vencimiento TYPE VARCHAR(80) USING vencimiento::text").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE").catch(captureStartupMigrationError);

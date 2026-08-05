@@ -2183,8 +2183,10 @@ function sumStopWeights(stops) {
 // tanto para cargas como para descargas. La primera parada es el origen/destino
 // principal, cuyo importe ya va en el precio base del viaje.
 function sumAdditionalStopPrices(stops) {
+  // Suma el precio EXTRA de cualquier parada que lo tenga. No se excluye la
+  // primera por indice: si al reordenar una descarga con precio pasa a ser la
+  // principal, su precio debe seguir contando (antes se perdia con slice(1)).
   return parseStops(stops)
-    .slice(1)
     .reduce((total, stop) => {
       const n = parseLocaleNumber(stop?.precio ?? stop?.importe ?? stop?.precio_cliente, 0);
       return total + (Number.isFinite(n) && n > 0 ? n : 0);
@@ -2195,11 +2197,10 @@ function sumAdditionalStopPrices(stops) {
 // importe de forma clara (cada carga/descarga extra en su linea).
 function additionalStopPriceItems(stops) {
   return parseStops(stops)
-    .slice(1)
     .map((stop, i) => {
       const n = parseLocaleNumber(stop?.precio ?? stop?.importe ?? stop?.precio_cliente, 0);
       return {
-        num: i + 2, // la principal es la nº 1
+        num: i + 1, // la parada nº1 es la principal
         label: String(stop?.cliente_nombre || stop?.nombre || stop?.direccion || "").replace(/\s+/g, " ").trim(),
         precio: Number.isFinite(n) && n > 0 ? n : 0,
       };
@@ -4341,7 +4342,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                   {d.ventana && <span style={{marginRight:8}}>{d.ventana}</span>}
                   {d.bultos && <span style={{marginRight:8}}>{d.bultos} bultos</span>}
                   {d.referencia && <span style={{marginRight:8}}>Ref. {d.referencia}</span>}
-                  {i > 0 && Number(d.precio||0) > 0 && <span style={{color:"var(--green)",fontWeight:700}}>+{Number(d.precio).toFixed(2)} EUR</span>}
+                  {Number(d.precio||0) > 0 && <span style={{color:"var(--green)",fontWeight:700}}>+{Number(d.precio).toFixed(2)} EUR</span>}
                 </div>
                 <datalist id={stopRegionListId}>
                   {stopRegions.map(region => <option key={region} value={region} />)}
@@ -4381,7 +4382,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     <input style={inp} disabled={disabled} value={d.ventana || ""} onChange={e=>updateStop(i,{ventana:e.target.value})} placeholder="Ventana horaria" />
                     <input type="number" min="0" style={inp} disabled={disabled} value={d.bultos || ""} onChange={e=>updateStop(i,{bultos:e.target.value})} placeholder="Bultos / palets" />
                     <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.peso_kg || ""} onChange={e=>updateStop(i,{peso_kg:e.target.value})} placeholder="Peso kg" />
-                    {i > 0 ? (
+                    {(i > 0 || Number(d.precio||0) > 0) ? (
                       <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.precio || ""} onChange={e=>updateStop(i,{precio:e.target.value})} placeholder={`Precio extra ${label} EUR`} />
                     ) : (
                       <div style={{...inp, display:"flex", alignItems:"center", color:"var(--text5)", fontSize:11, background:"transparent", border:"1px dashed var(--border2)"}} title="El precio de la parada principal es el precio base del viaje (arriba). Aqui solo se cobran las paradas adicionales.">
@@ -9084,9 +9085,11 @@ useEffect(() => {
                   <div style={{flex:1,fontSize:12,color:"var(--text3)"}}>Viaje compartido entre dos choferes. El importe se repartira a partes iguales en las hojas de ruta.</div>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
                     <label style={{fontSize:11,color:"var(--text4)"}}>% chofer 1:</label>
-                    <input type="number" min="0" max="100" style={{...S.input,width:60,padding:"4px 8px",fontSize:12}} value={form.reparto_chofer1||50} onChange={f("reparto_chofer1")}/>
+                    <input type="number" min="0" max="100" style={{...S.input,width:60,padding:"4px 8px",fontSize:12}} value={form.reparto_chofer1??50}
+                      onChange={e=>{ const v=Math.max(0,Math.min(100,Number(e.target.value)||0)); setForm(p=>({...p, reparto_chofer1:v})); }}/>
                     <label style={{fontSize:11,color:"var(--text4)"}}>% chofer 2:</label>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--accent)"}}>{100-Number(form.reparto_chofer1||50)}%</span>
+                    <input type="number" min="0" max="100" style={{...S.input,width:60,padding:"4px 8px",fontSize:12}} value={100-Number(form.reparto_chofer1??50)}
+                      onChange={e=>{ const v2=Math.max(0,Math.min(100,Number(e.target.value)||0)); setForm(p=>({...p, reparto_chofer1:100-v2})); }}/>
                   </div>
                 </div>
               )}

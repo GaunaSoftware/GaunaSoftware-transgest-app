@@ -572,7 +572,16 @@ async function applyMigrations() {
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS iva_regimen VARCHAR(30) NOT NULL DEFAULT 'general'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS observaciones TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS notas_internas TEXT").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS created_by UUID").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS updated_by UUID").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS forma_pago VARCHAR(80)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS base_imponible NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS tipo_iva NUMERIC DEFAULT 21").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS cuota_iva NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    // Tablas de detalle de la factura: columnas que usa el INSERT del alta.
+    await db.query("ALTER TABLE factura_lineas ADD COLUMN IF NOT EXISTS orden INTEGER DEFAULT 0").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE factura_extracostes ADD COLUMN IF NOT EXISTS tipo VARCHAR(40)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ALTER COLUMN vencimiento TYPE VARCHAR(80) USING vencimiento::text").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE").catch(captureStartupMigrationError);
     await db.query("UPDATE facturas SET vencimiento=fecha_vencimiento::text WHERE vencimiento IS NULL AND fecha_vencimiento IS NOT NULL").catch(captureStartupMigrationError);

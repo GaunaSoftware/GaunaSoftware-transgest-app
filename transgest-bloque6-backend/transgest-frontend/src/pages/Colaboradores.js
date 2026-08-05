@@ -243,7 +243,7 @@ function ModalFacturaColab({ colaborador, viaje, factura, onClose, onSaved }) {
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(640px,96vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)",marginBottom:4}}>
           {factura?.id ? "Completar factura recibida" : "Registrar factura recibida"}
@@ -297,7 +297,7 @@ function ModalVehiculoColab({ colaboradorId, editando, onClose, onSaved }) {
   const Sec = ({titulo}) => <div style={{gridColumn:"1/-1",borderTop:"1px solid var(--border2)",paddingTop:4,marginTop:8,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent)"}}>{titulo}</div>;
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)",marginBottom:4}}>
           {editando?"Editar vehiculo":"Añadir vehiculo al colaborador"}
@@ -1237,7 +1237,7 @@ function ModalColaborador({ editando, onClose, onSaved }) {
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)",marginBottom:16}}>
           {editando?"Editar colaborador":"Nuevo colaborador"}

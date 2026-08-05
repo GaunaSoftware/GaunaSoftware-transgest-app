@@ -211,7 +211,7 @@ export default function WebPublica() {
         </section>
       </main>
       {access && (
-        <div style={S.modalOverlay} onClick={e => e.target === e.currentTarget && setAccess(null)}>
+        <div style={S.modalOverlay} onMouseDown={e=>e.target===e.currentTarget && setAccess(null)}>
           <div style={S.modal} role="dialog" aria-modal="true" aria-labelledby="access-title">
             <button type="button" aria-label="Cerrar" onClick={() => setAccess(null)} style={S.modalClose}>×</button>
             <span style={S.kickerDark}>Acceso privado</span>

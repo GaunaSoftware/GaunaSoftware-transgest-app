@@ -81,7 +81,7 @@ function ModalAviso({ chofer, aviso, onClose, onSaved }) {
   }
 
   return (
-    <div style={{...S.modal,zIndex:200}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{...S.modal,zIndex:200}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(440px,96vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>
           {esNuevo?"Nuevo aviso":"Editar aviso"} - {chofer.nombre}
@@ -150,7 +150,7 @@ function FichaChofer({ chofer, onClose, onSaved, vehiculos=[] }) {
   const avisosHist     = avisos.filter(a =>  a.fecha_fin  && new Date(a.fecha_fin)  < ahora);
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18}}>
           <div>
@@ -327,7 +327,7 @@ function ModalAdjudicarVacaciones({ choferes, onClose, onSaved }) {
     finally { setSaving(false); }
   }
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(520px,96vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--text)",marginBottom:14}}>Adjudicar vacaciones</div>
         <label style={S.lbl}>Chofer</label>

@@ -426,7 +426,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
   }
 
   return(
-    <div className="tg-palets-modal-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="tg-palets-modal-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <style>{`
         .tg-palets-modal { width:min(720px,100%); max-height:calc(100dvh - 24px); display:flex; flex-direction:column; overflow:hidden; }
         .tg-palets-modal-body { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable; }
@@ -2092,7 +2092,7 @@ function AlmacenPropio() {
 
       {/* Modal movimiento */}
       {modal==="movimiento" && selMercan && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setModal(false)}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setModal(false)}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(560px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:14}}>
               {movEditando?.id ? "Editar movimiento" : form.tipo==="entrada" ? "Entrada" : "Salida"} - {selMercan.nombre}
@@ -2458,7 +2458,7 @@ ${dep.notas?`<div style="font-size:11px;color:#555;margin-top:8px">Notas: ${dep.
       {modal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,
           display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-          onClick={e=>e.target===e.currentTarget&&setModal(false)}>
+          onMouseDown={e=>e.target===e.currentTarget&&setModal(false)}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,
             padding:22,width:"min(520px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,

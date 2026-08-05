@@ -1043,7 +1043,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         {/* Cabecera */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
@@ -1439,7 +1439,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
               </div>
             )}
             {modalRuta && (
-              <div style={{...S.modal,zIndex:200}} onClick={e=>e.target===e.currentTarget&&setModalRuta(false)}>
+              <div style={{...S.modal,zIndex:200}} onMouseDown={e=>e.target===e.currentTarget&&setModalRuta(false)}>
                 <div style={{...S.mbox,width:"min(620px,96vw)"}}>
                   <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:18,color:"var(--text)"}}>{editRuta?"Editar ruta":"Nueva ruta para "+form.nombre}</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>

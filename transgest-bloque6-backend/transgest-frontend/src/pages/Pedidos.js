@@ -3592,7 +3592,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   }
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.76)",zIndex:2600,display:"flex",alignItems:"center",justifyContent:"center",padding:12,overflow:"auto"}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.76)",zIndex:2600,display:"flex",alignItems:"center",justifyContent:"center",padding:12,overflow:"auto"}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,width:"min(660px,calc(100vw - 24px))",maxHeight:"calc(100dvh - 24px)",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,.35)"}}>
         <div style={{position:"sticky",top:0,zIndex:2,background:"var(--bg2)",borderBottom:"1px solid var(--border)",padding:"16px 18px 12px",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
           <div>
@@ -5267,7 +5267,7 @@ ${esCol ? `
   }
 
   return (
-    <div style={S2.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S2.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S2.box}>
         <div style={{height:7,background:esColaborador?"linear-gradient(90deg,#7c3aed,#10b981,#f59e0b)":"linear-gradient(90deg,var(--accent),#10b981,#f59e0b)"}}/>
         <div style={S2.body}>
@@ -7263,7 +7263,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   };
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",zIndex:2500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",zIndex:2500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,width:"min(880px,96vw)",maxHeight:"92vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <div style={{padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
           <div>
@@ -9764,7 +9764,7 @@ ${anexosHtml}
   const fmtD = v => v ? new Date(v).toLocaleDateString("es-ES") : "-";
 
   return (
-    <div style={O.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={O.overlay} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={O.modal}>
         <div style={O.header}>
           <div>
@@ -12354,7 +12354,7 @@ export default function Pedidos() {
       )}
 
       {copyPlan && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget && !copySaving && setCopyPlan(null)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget && !copySaving && setCopyPlan(null)}>
           <div style={{...S.mbox, width:"min(520px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:16,color:"var(--text)"}}>
               Copiar viaje
@@ -12425,7 +12425,7 @@ export default function Pedidos() {
       )}
 
       {delayRequest && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget && cerrarSelectorRetraso(null)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget && cerrarSelectorRetraso(null)}>
           <div style={{...S.mbox, width:"min(440px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:10,color:"var(--text)"}}>
               Retrasar carga
@@ -12467,7 +12467,7 @@ export default function Pedidos() {
       )}
 
       {incidenciaSelector && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&setIncidenciaSelector(null)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setIncidenciaSelector(null)}>
           <div style={{...S.mbox,width:"min(620px,96vw)",maxHeight:"min(760px,92vh)",overflowY:"auto"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,marginBottom:8}}>
               <div>
@@ -12583,7 +12583,7 @@ export default function Pedidos() {
 
       {/* Modal facturar */}
       {facturando&&(
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&setFacturando(null)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setFacturando(null)}>
           <div style={{...S.mbox,width:"min(520px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:16,color:"var(--text)"}}>Emitir factura</div>
             <div style={{background:"rgba(59,110,245,.07)",border:"1px solid rgba(59,110,245,.15)",borderRadius:8,padding:"12px 16px",marginBottom:16}}>

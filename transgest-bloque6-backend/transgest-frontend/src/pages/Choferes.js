@@ -675,7 +675,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
   ];
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:14,
                     width:"min(780px,98vw)", maxHeight:"97vh", display:"flex", flexDirection:"column" }}>
 

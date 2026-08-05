@@ -1552,7 +1552,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
     <div
       style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.82)", zIndex:300,
                display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      onMouseDown={e => e.target === e.currentTarget && onClose()}
     >
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:13,
                     padding:22, width:"min(560px,96vw)", maxHeight:"92vh", overflowY:"auto" }}>
@@ -5167,7 +5167,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       {addTripCell && (
         <div
           style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.78)", zIndex:280, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
-          onClick={e => e.target === e.currentTarget && !addTripSaving && setAddTripCell(null)}
+          onMouseDown={e => e.target === e.currentTarget && !addTripSaving && setAddTripCell(null)}
         >
           <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:12, padding:18, width:"min(520px,96vw)", boxShadow:"0 24px 60px rgba(0,0,0,.35)" }}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"flex-start", marginBottom:12 }}>

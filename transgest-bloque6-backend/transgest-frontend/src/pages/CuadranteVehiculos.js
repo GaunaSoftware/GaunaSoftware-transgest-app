@@ -95,7 +95,7 @@ function FichaVehiculo({ vehiculo, onClose, onSaved }) {
   ];
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
           <div>

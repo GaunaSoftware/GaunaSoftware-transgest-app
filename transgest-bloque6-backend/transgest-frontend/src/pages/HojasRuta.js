@@ -76,7 +76,7 @@ function ModalGasoil({vehiculo,onClose}){
   function addP(){if(!np.desde||!np.hasta||!np.precio){notify("Completa todos los campos", "warning");return;}setCfg(p=>({...p,periodos:[...(p.periodos||[]),{...np,id:"gp_"+Date.now()}]}));setNp({desde:"",hasta:"",precio:""});}
   function delP(id){setCfg(p=>({...p,periodos:(p.periodos||[]).filter(x=>x.id!==id)}));}
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(520px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>&#9981; Gasoil — {vehiculo.matricula}</div>
@@ -155,7 +155,7 @@ function ModalLitros({vehiculo,fechaDesde,fechaHasta,onClose}){
   function del(id){borrarRepostaje(id).then(()=>setLista(p=>p.filter(x=>x.id!==id))).catch(e=>notify("Error: "+e.message, "error"));}
   const total=lista.reduce((s,x)=>s+Number(x.litros||0),0);
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose(total)}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose(total)}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(480px,96vw)",maxHeight:"88vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Litros repostados — {vehiculo.matricula}</div>
@@ -218,7 +218,7 @@ function ModalNoches({vehiculo,choferConfig={},fechaDesde,fechaHasta,onClose}){
   function del(id){borrarNoche(id).then(()=>setLista(p=>p.filter(x=>x.id!==id))).catch(e=>notify("Error: "+e.message, "error"));}
   const total=lista.reduce((s,x)=>s+Number(x.importe||0),0);
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose(total)}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose(total)}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(480px,96vw)",maxHeight:"88vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Noches — {vehiculo.matricula}</div>
@@ -298,7 +298,7 @@ function ModalChoferExt({chofer,onClose}){
     }
   }
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(680px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Config. {chofer.nombre} {chofer.apellidos||""}</div>

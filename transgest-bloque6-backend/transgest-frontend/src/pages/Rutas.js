@@ -503,7 +503,7 @@ export default function Rutas(){
 
       {/* Modal Ruta */}
       {modal&&(
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&setModal(false)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setModal(false)}>
           <div style={S.mbox}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,color:"var(--text)",marginBottom:20}}>
               {editando?"Editar ruta":"Nueva ruta"}
@@ -583,7 +583,7 @@ export default function Rutas(){
 
       {/* Modal Precios */}
       {showPrecios&&(
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&setShowPrecios(null)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setShowPrecios(null)}>
           <div style={{...S.mbox,width:"min(1080px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:4}}>
               Tarifa de ruta - {showPrecios.origen} -> {showPrecios.destino}

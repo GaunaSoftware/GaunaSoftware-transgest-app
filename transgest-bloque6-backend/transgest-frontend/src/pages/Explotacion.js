@@ -36,7 +36,7 @@ function ModalKmVacio({vehiculo, onClose, onSaved}) {
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>
           Registrar km en vacío - {vehiculo.matricula}

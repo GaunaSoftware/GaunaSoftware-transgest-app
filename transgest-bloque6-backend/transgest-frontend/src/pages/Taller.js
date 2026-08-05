@@ -423,7 +423,7 @@ function ModalPieza({editando, stockActual = [], onClose, onSaved}) {
     tallerSave(d); onSaved();
   }
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(520px,96vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editando?"Editar pieza":"Nueva pieza al stock"}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -576,7 +576,7 @@ function UnidadesPiezaModal({ pieza, onClose }) {
 
   const stockUnits = unidades.filter(u => u.estado === "stock");
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(820px,96vw)"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:14}}>
           <div>
@@ -1007,7 +1007,7 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>
           {editando?"Editar intervencion":"Nueva intervencion"}
@@ -2067,7 +2067,7 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
 
       {/* MODAL AÑADIR STOCK */}
       {modalStock && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setModalStock(false)}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setModalStock(false)}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(460px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:16}}>Añadir neumáticos al stock</div>
             {[
@@ -2944,7 +2944,7 @@ export default function Taller() {
 
       {/* Modal Proveedor */}
       {modalProv && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&recargarProv()}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&recargarProv()}>
           <div style={{...S.mbox,width:"min(600px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editProv?"Editar proveedor/taller":"Nuevo proveedor / taller"}</div>
             <ModalProveedorForm editando={editProv} proveedores={proveedores} onSaved={guardarProveedores} onClose={recargarProv}/>
@@ -2954,7 +2954,7 @@ export default function Taller() {
 
       {/* Modal Aviso mantenimiento */}
       {modalAviso && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&recargarAvisos()}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&recargarAvisos()}>
           <div style={{...S.mbox,width:"min(520px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editAviso?"Editar aviso":"Nuevo aviso de mantenimiento"}</div>
             <ModalAvisoForm editando={editAviso} tipos={TIPOS_INT} avisosMant={avisosMant} onSaved={guardarAvisosMantenimiento} onClose={recargarAvisos}/>
@@ -3235,7 +3235,7 @@ function TareasMecanicos({ vehiculos, tareas = [], onChange }) {
 
       {/* Modal nueva tarea */}
       {modal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setModal(false)}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setModal(false)}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(480px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:14}}>Nueva tarea de mecanico</div>
 

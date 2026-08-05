@@ -292,7 +292,7 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
   }
 
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.76)", zIndex:250, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.76)", zIndex:250, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, width:"min(620px,96vw)", padding:20, maxHeight:"92vh", overflowY:"auto" }}>
         <div style={{ fontFamily:"'Syne',sans-serif", fontSize:18, fontWeight:800, color:"var(--text)", marginBottom:16 }}>
           {evento ? "Editar tarea / evento" : "Nueva tarea / evento"}

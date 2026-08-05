@@ -548,7 +548,7 @@ Responde SOLO con el JSON, sin texto adicional.`;
 
       {/* Modal añadir documento */}
       {modalDoc && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&setModalDoc(false)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setModalDoc(false)}>
           <div style={S.mbox}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:4,color:"var(--text)"}}>
               Añadir documento

@@ -660,7 +660,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:`1px solid ${esRect?"rgba(249,115,22,.4)":"var(--border2)"}`,borderRadius:14,width:"min(820px,97vw)",maxHeight:"96vh",overflowY:"auto",display:"flex",flexDirection:"column"}}>
         {/* Toolbar */}
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 18px",borderBottom:"1px solid #141a28",flexShrink:0}}>
@@ -1236,7 +1236,7 @@ function ModalCorregirPedidoFactura({ pedido, onClose, onSaved }) {
 
   const input = {...S.inp,padding:"8px 10px",fontSize:12};
   return (
-    <div style={{position:"fixed",inset:0,zIndex:360,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,zIndex:360,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{width:"min(760px,96vw)",maxHeight:"92vh",overflowY:"auto",background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:20}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
           <div>
@@ -1324,7 +1324,7 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
   }
 
   return (
-    <div style={{...S.modal,zIndex:300}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{...S.modal,zIndex:300}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid rgba(249,115,22,.3)",borderRadius:14,padding:26,width:"min(540px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"#f97316",marginBottom:6}}>Factura rectificativa</div>
         <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Rectifica: <strong style={{color:"var(--text2)"}}>{facturaOriginal.numero}</strong> - {facturaOriginal.cliente_nombre} - {fmt2(facturaOriginal.total)} EUR</div>
@@ -1629,7 +1629,7 @@ function ModalFacturarMultiple({ onClose }) {
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:22,width:"min(760px,96vw)",maxHeight:"93vh",overflowY:"auto"}}>
 
         {/* Header */}
@@ -1973,7 +1973,7 @@ function ModalFacturarMultiple({ onClose }) {
         )}
 
         {refEdit && (
-          <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(15,23,42,.42)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setRefEdit(null)}>
+          <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(15,23,42,.42)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setRefEdit(null)}>
             <div style={{width:"min(420px,96vw)",background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,boxShadow:"0 24px 64px rgba(15,23,42,.28)",padding:18}}>
               <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:800,color:"var(--text)",marginBottom:6}}>Referencia cliente</div>
               <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.4,marginBottom:12}}>
@@ -3553,7 +3553,7 @@ export default function Facturacion() {
       )}
 
       {pagoProveedorEdit && (
-        <div style={{...S.modal,zIndex:260}} onClick={e=>e.target===e.currentTarget&&setPagoProveedorEdit(null)}>
+        <div style={{...S.modal,zIndex:260}} onMouseDown={e=>e.target===e.currentTarget&&setPagoProveedorEdit(null)}>
           <div style={{background:"var(--bg2)",border:"1px solid #1e2d45",borderRadius:10,width:"min(760px,96vw)",maxHeight:"90vh",overflow:"auto",padding:18}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
               <div>

@@ -888,7 +888,7 @@ function ModalChoferPicker({ vehiculoId, matricula, estado, choferes, onConfirm,
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(400px,95vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"var(--text)",marginBottom:4}}>
           Cambiar a En Ruta
@@ -1167,7 +1167,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
   ];
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:14,
                     width:"min(920px,calc(100vw - 24px))", maxWidth:"calc(100vw - 24px)", maxHeight:"97vh", display:"flex", flexDirection:"column", overflow:"hidden" }}>
 

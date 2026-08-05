@@ -45,7 +45,7 @@ function ModalGastoEstr({editando,onClose}){
   }
   const inp=S.inp;const lbl=S.lbl;
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(480px,96vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"var(--text)",marginBottom:14}}>{editando?"Editar gasto":"Nuevo gasto de estructura"}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>

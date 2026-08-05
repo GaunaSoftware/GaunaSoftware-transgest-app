@@ -2840,7 +2840,7 @@ export default function Empresa() {
       )}
 
       {modalAviso && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setModalAviso(false)}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setModalAviso(false)}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(480px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"var(--text)",marginBottom:14}}>{editAviso ? "Editar aviso" : "Nuevo aviso personalizado"}</div>
             <AvisoCfgForm

@@ -427,7 +427,7 @@ export default function ControlTower() {
       {statusPicker && (
         <div
           style={{position:"fixed",inset:0,zIndex:420,background:"rgba(15,23,42,.58)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-          onClick={e => e.target === e.currentTarget && setStatusPicker(null)}
+          onMouseDown={e=>e.target===e.currentTarget && setStatusPicker(null)}
         >
           <div style={{width:"min(680px,96vw)",maxHeight:"82vh",overflowY:"auto",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,padding:18,boxShadow:"0 24px 70px rgba(15,23,42,.24)"}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>

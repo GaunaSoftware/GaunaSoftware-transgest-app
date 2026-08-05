@@ -2074,6 +2074,24 @@ export default function Facturacion() {
   const [pagoProveedorEdit, setPagoProveedorEdit] = useState(null);
   const [pagoProveedorForm, setPagoProveedorForm] = useState({});
   const [capitalActual, setCapitalActual] = useState(0);
+  // Viajes entregados sin facturar (todos los clientes), para verlos de un
+  // vistazo sin entrar a Pedidos. Seccion desplegable en el area de facturas.
+  const [sinFacturar, setSinFacturar] = useState([]);
+  const [sinFacturarLoad, setSinFacturarLoad] = useState(false);
+  const [sinFacturarOpen, setSinFacturarOpen] = useState(false);
+  const cargarSinFacturar = useCallback(() => {
+    setSinFacturarLoad(true);
+    getPedidos({ facturado: "false", estado: "entregado", limit: 1000 })
+      .then(d => setSinFacturar(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : []))
+      .catch(() => setSinFacturar([]))
+      .finally(() => setSinFacturarLoad(false));
+  }, []);
+  useEffect(() => { cargarSinFacturar(); }, [cargarSinFacturar]);
+  const sinFacturarOrdenados = useMemo(() => [...sinFacturar].sort((a, b) =>
+    String(a.cliente_nombre || "").localeCompare(String(b.cliente_nombre || "")) ||
+    String(a.fecha_descarga || a.fecha_carga || "").localeCompare(String(b.fecha_descarga || b.fecha_carga || ""))
+  ), [sinFacturar]);
+  const sinFacturarTotal = useMemo(() => sinFacturar.reduce((s, p) => s + Number(p.importe || p.precio || 0), 0), [sinFacturar]);
   const [cobrosCfg,    setCobrosCfg]    = useState({
     dias_revision_post_vencimiento: 1,
     dias_entre_reclamaciones: 7,
@@ -3279,6 +3297,10 @@ export default function Facturacion() {
             Facturar pedidos de cliente
           </button>
         )}
+        <button onClick={()=>setSinFacturarOpen(v=>!v)}
+          style={{...S.btn,background:sinFacturarOpen?"rgba(245,158,11,.16)":"var(--bg3)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.28)"}}>
+          {sinFacturarOpen ? "v" : ">"} Viajes sin facturar ({sinFacturar.length})
+        </button>
         <button
           onClick={()=>setAgruparCliente(v=>!v)}
           style={{...S.btn,background:agruparCliente?"rgba(34,211,160,.12)":"var(--bg3)",color:agruparCliente?"var(--green)":"var(--text4)",border:"1px solid rgba(34,211,160,.22)"}}
@@ -3287,6 +3309,45 @@ export default function Facturacion() {
         </button>
         <span style={{marginLeft:"auto",fontSize:11,color:"var(--text5)"}}>Doble clic o boton Ver para abrir la factura</span>
       </div>
+      {sinFacturarOpen && (
+        <div style={{border:"1px solid rgba(245,158,11,.28)",borderRadius:10,background:"var(--bg2)",marginBottom:16,overflow:"hidden"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"10px 14px",borderBottom:"1px solid var(--border)",background:"rgba(245,158,11,.06)"}}>
+            <div>
+              <div style={{fontWeight:800,color:"var(--text)"}}>Viajes entregados sin facturar</div>
+              <div style={{fontSize:11,color:"var(--text5)"}}>Todos los clientes. Usa "Facturar pedidos de cliente" para emitir.</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"#f59e0b",fontSize:15}}>{fmt2(sinFacturarTotal)} EUR</div>
+                <div style={{fontSize:11,color:"var(--text5)"}}>{sinFacturar.length} viaje(s)</div>
+              </div>
+              <button onClick={cargarSinFacturar} title="Actualizar" style={{...S.btn,background:"var(--bg3)",color:"var(--text3)",border:"1px solid var(--border)",padding:"5px 10px",fontSize:12}}>Actualizar</button>
+            </div>
+          </div>
+          {sinFacturarLoad ? (
+            <div style={{padding:16,textAlign:"center",color:"var(--text5)",fontSize:12}}>Cargando...</div>
+          ) : sinFacturar.length===0 ? (
+            <div style={{padding:16,textAlign:"center",color:"var(--text5)",fontSize:12}}>No hay viajes entregados pendientes de facturar.</div>
+          ) : (
+            <div style={{maxHeight:340,overflowY:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead><tr>{["Fecha","Nº","Cliente","Ruta","Importe"].map(h=><th key={h} style={{...S.th,position:"sticky",top:0,background:"var(--bg2)",zIndex:1}}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {sinFacturarOrdenados.map(p=>(
+                    <tr key={p.id} style={{borderBottom:"1px solid var(--border2)"}}>
+                      <td style={{...S.td,whiteSpace:"nowrap",color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{(p.fecha_descarga||p.fecha_carga) ? new Date(p.fecha_descarga||p.fecha_carga).toLocaleDateString("es-ES") : "-"}</td>
+                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"var(--accent-xl)"}}>{p.numero||"-"}</td>
+                      <td style={{...S.td,fontWeight:700,color:"var(--text)"}}>{p.cliente_nombre||"-"}</td>
+                      <td style={{...S.td,color:"var(--text3)"}}>{(p.origen||"?")+" -> "+(p.destino||"?")}</td>
+                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)",textAlign:"right",whiteSpace:"nowrap"}}>{fmt2(Number(p.importe||p.precio||0))} EUR</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
         {fiscalQuickFilters.map((item) => {
           const active = fiscalEstadoFiltro === item.key || (item.key === "todos" && fiscalEstadoFiltro === "todos");
@@ -3579,7 +3640,7 @@ export default function Facturacion() {
         </div>
       )}
 
-      {modalMulti && <ModalFacturarMultiple onClose={()=>{setModalMulti(false);cargar();}}/>}
+      {modalMulti && <ModalFacturarMultiple onClose={()=>{setModalMulti(false);cargar();cargarSinFacturar();}}/>}
       {pedidoCorreccion && (
         <ModalCorregirPedidoFactura
           pedido={pedidoCorreccion}

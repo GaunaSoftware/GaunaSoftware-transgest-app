@@ -136,6 +136,8 @@ async function ensureEmailTables() {
   await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
   await db.query("ALTER TABLE empresa_smtp_config ADD COLUMN IF NOT EXISTS ai_inbox_enabled BOOLEAN NOT NULL DEFAULT false").catch(() => {});
   await db.query("ALTER TABLE empresa_smtp_config ADD COLUMN IF NOT EXISTS ai_inbox_email VARCHAR(255)").catch(() => {});
+  // Correo al que avisar cuando un usuario solicita restablecer contrasena.
+  await db.query("ALTER TABLE platform_smtp_config ADD COLUMN IF NOT EXISTS reset_notify_email VARCHAR(180)").catch(() => {});
 }
 
 function publicPlatformEmailConfig(row = {}) {
@@ -149,6 +151,7 @@ function publicPlatformEmailConfig(row = {}) {
     smtp_from: row.smtp_from || "",
     smtp_from_nombre: row.smtp_from_nombre || "Gauna - TransGest",
     reply_to: row.reply_to || "",
+    reset_notify_email: row.reset_notify_email || "",
     activo: row.activo !== false,
     last_test_at: row.last_test_at || null,
     last_test_ok: row.last_test_ok,
@@ -177,11 +180,11 @@ async function savePlatformEmailConfig(data = {}, userId = null) {
   const secure = data.smtp_secure !== undefined ? !!data.smtp_secure : String(data.smtp_port) === "465";
   await db.query(`
     INSERT INTO platform_smtp_config
-      (id,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_encrypted,smtp_from,smtp_from_nombre,reply_to,activo,updated_by,updated_at)
-    VALUES (true,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+      (id,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_encrypted,smtp_from,smtp_from_nombre,reply_to,reset_notify_email,activo,updated_by,updated_at)
+    VALUES (true,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
     ON CONFLICT (id) DO UPDATE SET
       smtp_host=$1,smtp_port=$2,smtp_secure=$3,smtp_user=$4,smtp_pass_encrypted=$5,smtp_from=$6,smtp_from_nombre=$7,reply_to=$8,
-      activo=$9,updated_by=$10,updated_at=NOW()
+      reset_notify_email=$9,activo=$10,updated_by=$11,updated_at=NOW()
   `, [
     String(data.smtp_host || "").trim(),
     Number.isFinite(port) ? port : 587,
@@ -191,6 +194,7 @@ async function savePlatformEmailConfig(data = {}, userId = null) {
     String(data.smtp_from || "").trim(),
     String(data.smtp_from_nombre || "Gauna - TransGest").trim(),
     String(data.reply_to || data.smtp_from || "").trim(),
+    String(data.reset_notify_email || "").trim(),
     data.activo !== false,
     userId,
   ]);
@@ -374,6 +378,24 @@ function htmlEscape(value) {
 }
 
 const PLANTILLAS = {
+  solicitud_reset_password: (data) => ({
+    asunto: `Solicitud de restablecer contraseña — ${data.identifier || ""}`,
+    html: `<div style="${BASE_STYLE}">
+      ${HEADER("Solicitud de restablecer contraseña")}
+      <div style="background:#fff;border-radius:0 0 10px 10px;padding:24px 28px;border:1px solid #e2e8f0;border-top:none;">
+        <p>Un usuario ha solicitado restablecer su contraseña. Revísalo y gestiónalo desde el panel de superadmin.</p>
+        <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+          <tr style="background:#f1f5f9"><td style="padding:8px 12px;font-weight:600;width:160px;">Usuario / email</td><td style="padding:8px 12px;">${data.identifier || "-"}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;">Nombre</td><td style="padding:8px 12px;">${data.nombre || "-"}</td></tr>
+          <tr style="background:#f1f5f9"><td style="padding:8px 12px;font-weight:600;">Empresa</td><td style="padding:8px 12px;">${data.empresa || "-"}</td></tr>
+          <tr><td style="padding:8px 12px;font-weight:600;">Rol</td><td style="padding:8px 12px;">${data.rol || "-"}</td></tr>
+          <tr style="background:#f1f5f9"><td style="padding:8px 12px;font-weight:600;">Fecha</td><td style="padding:8px 12px;">${data.fecha || ""}</td></tr>
+        </table>
+        <p style="color:#64748b;font-size:13px;">Aviso enviado al correo configurado en Superadmin &gt; Correo.</p>
+      </div>
+      ${FOOTER}
+    </div>`,
+  }),
   pedido_confirmado: (data) => ({
     asunto: `✓ Pedido confirmado ${data.numero} — ${data.ruta}`,
     html: `<div style="${BASE_STYLE}">

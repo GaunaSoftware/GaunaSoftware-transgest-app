@@ -9,6 +9,7 @@ const stripe   = require("../services/stripe");
 const { userJwtSecret } = require("../services/jwtSecrets");
 const { authenticate, getSubscriptionState, normalizePermissionsForRole } = require("../middleware/auth");
 const { ensurePasswordPolicySchema, assertPasswordNotReused, rememberPasswordHash } = require("../services/passwordPolicy");
+const { enviarEmail, getPlatformEmailConfig } = require("../services/email");
 const ensureDemoShowcase = require("../../scripts/ensure_demo_showcase");
 
 const router = express.Router();
@@ -220,6 +221,28 @@ router.post("/forgot-password",
         ]
       );
       logger.info(`Solicitud de recuperacion de contrasena: ${raw}${user ? ` (${user.empresa_nombre || user.empresa_id})` : " (sin usuario localizado)"}`);
+      // Aviso por email al correo configurado en Superadmin (best-effort).
+      try {
+        const cfg = await getPlatformEmailConfig(false);
+        const notify = String(cfg?.reset_notify_email || "").trim();
+        if (notify) {
+          await enviarEmail({
+            trigger: "solicitud_reset_password",
+            destinatario: notify,
+            plantilla: "solicitud_reset_password",
+            force_platform: true,
+            datos: {
+              identifier: raw,
+              nombre: user?.nombre || "",
+              empresa: user?.empresa_nombre || "",
+              rol: user?.rol || "",
+              fecha: new Date().toLocaleString("es-ES"),
+            },
+          });
+        }
+      } catch (mailErr) {
+        logger.warn("No se pudo avisar del reset por email: " + mailErr.message);
+      }
       res.json({
         ok: true,
         message: "Solicitud recibida. Un administrador revisara el reset de contrasena.",

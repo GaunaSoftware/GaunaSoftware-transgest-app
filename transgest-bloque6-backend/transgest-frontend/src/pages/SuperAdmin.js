@@ -494,7 +494,7 @@ function UsuariosAdmin({ saFetchFn }) {
 
 function CorreoGaunaAdmin({ saFetchFn }) {
   const [status, setStatus] = useState(null);
-  const [form, setForm] = useState({ smtp_host:"", smtp_port:"587", smtp_secure:false, smtp_user:"", smtp_pass:"", smtp_from:"", smtp_from_nombre:"Gauna - TransGest", reply_to:"", activo:true });
+  const [form, setForm] = useState({ smtp_host:"", smtp_port:"587", smtp_secure:false, smtp_user:"", smtp_pass:"", smtp_from:"", smtp_from_nombre:"Gauna - TransGest", reply_to:"", reset_notify_email:"", activo:true });
   const [destinatario, setDestinatario] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
@@ -514,6 +514,7 @@ function CorreoGaunaAdmin({ saFetchFn }) {
           smtp_from: cfg.smtp_from || "",
           smtp_from_nombre: cfg.smtp_from_nombre || "Gauna - TransGest",
           reply_to: cfg.reply_to || "",
+          reset_notify_email: cfg.reset_notify_email || "",
           activo: cfg.activo !== false,
         }));
       })
@@ -589,6 +590,7 @@ function CorreoGaunaAdmin({ saFetchFn }) {
         <div><label style={label}>Remitente</label><input style={input} value={form.smtp_from} onChange={f("smtp_from")} placeholder="correo@gauna..."/></div>
         <div><label style={label}>Nombre remitente</label><input style={input} value={form.smtp_from_nombre} onChange={f("smtp_from_nombre")} placeholder="Gauna - TransGest"/></div>
         <div><label style={label}>Reply-to</label><input style={input} value={form.reply_to} onChange={f("reply_to")} placeholder="opcional"/></div>
+        <div><label style={label}>Aviso solicitudes de reset</label><input style={input} value={form.reset_notify_email} onChange={f("reset_notify_email")} placeholder="correo@empresa.com (avisos de reset de contrasena)"/></div>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
         <button onClick={guardar} disabled={loading} style={{padding:"8px 14px",borderRadius:7,border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.14)",color:"#85B7EB",fontWeight:800,cursor:"pointer"}}>

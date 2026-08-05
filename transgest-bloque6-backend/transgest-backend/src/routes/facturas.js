@@ -902,6 +902,10 @@ router.post("/", GERENTE_O_CONTABLE,
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
+    // Sin este try/catch, si algo dentro lanza un error el rechazo de la promesa
+    // queda sin capturar y Express NUNCA responde: el cliente se queda cargando
+    // indefinidamente (era la causa de "no crea el borrador, se queda cargando").
+    try {
     const { cliente_id, serie, fecha, fecha_vencimiento, estado, forma_pago, vencimiento,
             lineas, extracostes = [], pedidos_ids = [], observaciones, notas_internas,
             referencia_cliente } = req.body;
@@ -1092,6 +1096,10 @@ router.post("/", GERENTE_O_CONTABLE,
         webhooks.dispatch(empresaId, "factura.emitida", { factura_id: fac.id, numero: fac.numero, estado: fac.estado, total: fac.total, cliente_id }).catch(() => {});
       }
     });
+    } catch (e) {
+      logger.error("Error creando factura: " + (e && (e.stack || e.message) ? (e.stack || e.message) : e));
+      if (!res.headersSent) res.status(500).json({ error: e.message || "No se pudo crear la factura" });
+    }
   }
 );
 

@@ -1305,6 +1305,35 @@ async function applyMigrations() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `).catch(captureStartupMigrationError);
+
+    // ── Recuperacion de acceso de SUPERADMIN por variable de entorno ──
+    // Si se definen SUPERADMIN_BOOTSTRAP_EMAIL y SUPERADMIN_BOOTSTRAP_PASSWORD,
+    // al arrancar se crea ese superadmin (o se le resetea la contrasena). Sirve
+    // para recuperar el acceso si se olvida la contrasena, sin tocar la BD. La
+    // contrasena la fija el operador en el entorno (Render); el codigo solo la
+    // hashea. Recomendado: quitar las variables despues de recuperar el acceso.
+    try {
+      const saEmail = String(process.env.SUPERADMIN_BOOTSTRAP_EMAIL || "").trim().toLowerCase();
+      const saPass = String(process.env.SUPERADMIN_BOOTSTRAP_PASSWORD || "");
+      if (saEmail && saPass) {
+        const bcryptSa = require("bcryptjs");
+        const hash = await bcryptSa.hash(saPass, 12);
+        const { rows: saExist } = await db.query("SELECT id FROM superadmins WHERE LOWER(email)=$1", [saEmail]);
+        if (saExist[0]) {
+          await db.query("UPDATE superadmins SET password_hash=$1, activo=true WHERE id=$2", [hash, saExist[0].id]);
+          logger.info(`[startup] Superadmin ${saEmail}: contrasena restablecida por variable de entorno.`);
+        } else {
+          await db.query(
+            "INSERT INTO superadmins (nombre,email,password_hash,rol,activo) VALUES ($1,$2,$3,'superadmin',true)",
+            ["Superadmin", saEmail, hash]
+          );
+          logger.info(`[startup] Superadmin ${saEmail}: creado por variable de entorno.`);
+        }
+      }
+    } catch (e) {
+      logger.error("[startup] bootstrap superadmin fallo (se continua): " + e.message);
+    }
+
     logger.info("✅ DB indexes + schema ready");
   } catch (e) {
     logger.error("[startup] migration failure: " + e.message);

@@ -354,8 +354,10 @@ app.use((err, req, res, next) => {
 
 // ── DB migrations on startup ──────────────────────────
 function captureStartupMigrationError(error) {
-  logger.error("[startup] DDL fallido: " + error.message);
-  throw error;
+  // NO abortar el arranque por una migracion fallida: un solo ALTER que falle no
+  // debe tumbar toda la API (crash-loop). Se registra y se continua; los handlers
+  // ya devuelven errores controlados si faltara una columna.
+  logger.error("[startup] DDL fallido (se continua): " + error.message);
 }
 
 async function applyMigrations() {
@@ -584,6 +586,18 @@ async function applyMigrations() {
     // La columna legacy "importe" es NOT NULL; con DEFAULT 0 no rompe si alguna
     // ruta inserta lineas sin calcular el importe.
     await db.query("ALTER TABLE factura_lineas ALTER COLUMN importe SET DEFAULT 0").catch(captureStartupMigrationError);
+    // La tabla factura_extracostes no existia; se crea (la usa el INSERT del alta
+    // de factura). El ALTER posterior queda como red de seguridad.
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS factura_extracostes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        factura_id UUID NOT NULL REFERENCES facturas(id) ON DELETE CASCADE,
+        tipo VARCHAR(40),
+        concepto TEXT,
+        importe NUMERIC DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `).catch(captureStartupMigrationError);
     await db.query("ALTER TABLE factura_extracostes ADD COLUMN IF NOT EXISTS tipo VARCHAR(40)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ALTER COLUMN vencimiento TYPE VARCHAR(80) USING vencimiento::text").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE").catch(captureStartupMigrationError);

@@ -7,7 +7,7 @@ import { getLogoDataUrl } from "../services/logoHelper";
 import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPedidoDocAChofer, enviarTodosPedidoDocsAChofer, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
-         crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
+         crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente, editarRutaCliente,
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          crearColaboradorLiquidacionToken,
@@ -7418,6 +7418,36 @@ async function maybeCrearRutaClienteDesdePedido() {
     .sort((a,b) => routeDraftScore(form, b) - routeDraftScore(form, a))[0];
   if (rutaExistente) {
     if (!routeTarifaMatchesDraft(rutaExistente, form)) {
+      // Si lo unico que no cuadra es el TIPO de tarifa (p.ej. la guardada esta en
+      // "viaje" y el pedido es por "tonelada"), se ACTUALIZA la tarifa al tipo del
+      // pedido en vez de dejarla desincronizada (para que no vuelva a cargar mal).
+      const tipoRuta = String(rutaExistente.tarifa_tipo || "viaje");
+      const tipoDraft = String(form.tipo_precio || "viaje");
+      const draftTieneTarifa = parseLocaleNumber(form.precio_unitario, 0) > 0
+        || parseLocaleNumber(form.minimo_unidades, 0) > 0
+        || parseLocaleNumber(form.importe_minimo, 0) > 0;
+      if (draftTieneTarifa && tipoRuta !== tipoDraft) {
+        try {
+          await editarRutaCliente(form.cliente_id, rutaExistente.id, {
+            origen: rutaExistente.origen,
+            destino: rutaExistente.destino,
+            km: toNullableNumber(rutaExistente.km ?? form.km_ruta),
+            tipo_vehiculo: rutaExistente.tipo_vehiculo || tipoRutaActual || "cualquiera",
+            tarifa_tipo: tipoDraft,
+            precio_base: toFiniteNumber(form.precio_unitario, calcImporte(form)),
+            recargo_combustible_pct: toNullableNumber(form.recargo_combustible_pct),
+            minimo_facturable: tipoDraft === "viaje" ? toNullableNumber(form.importe_minimo) : null,
+            minimo_unidades: tipoDraft !== "viaje" ? toNullableNumber(form.minimo_unidades) : null,
+            notas: rutaExistente.notas || "",
+          });
+          if (!form.ruta_id) setForm(p => ({ ...p, ruta_id: rutaExistente.id }));
+          rutasCreadasRef.current.add(routeKey);
+          notify(`Tarifa de la ruta actualizada a ${tipoDraft === "tonelada" ? "por tonelada" : tipoDraft === "km" ? "por km" : tipoDraft === "hora" ? "por hora" : tipoDraft}.`, "success");
+          return rutaExistente.id || null;
+        } catch (e) {
+          console.warn("No se pudo actualizar el tipo de la tarifa:", e?.message || e);
+        }
+      }
       rutasCreadasRef.current.add(routeKey);
       notify("Existe una ruta con ese origen/destino, pero tiene otra tarifa. No se ha vinculado automaticamente.", "info");
       return null;

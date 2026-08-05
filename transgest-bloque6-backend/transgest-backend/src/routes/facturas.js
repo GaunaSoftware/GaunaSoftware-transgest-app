@@ -609,54 +609,6 @@ router.get("/fiscal/export-lote.xml", GERENTE_O_CONTABLE, async (req, res) => {
   res.send(xml);
 });
 
-// [TEMP] Diagnostico del cuelgue al crear borrador de factura. Mide pool,
-// actividad de la BD y si el SELECT ... FOR UPDATE del numero se bloquea.
-router.get("/_diag-borrador", GERENTE_O_CONTABLE, async (req, res) => {
-  const empresaId = req.empresaId || req.user.empresa_id;
-  const out = { pool: {}, actividad: [], for_update: null };
-  try {
-    out.pool = {
-      total: db.pool.totalCount,
-      idle: db.pool.idleCount,
-      waiting: db.pool.waitingCount,
-    };
-    const { rows: act } = await db.query(
-      `SELECT pid, state, wait_event_type AS wtype, wait_event AS wevent,
-              ROUND(EXTRACT(EPOCH FROM (now()-xact_start))::numeric,1) AS xact_age_s,
-              LEFT(regexp_replace(query, '\\s+', ' ', 'g'), 90) AS q
-         FROM pg_stat_activity
-        WHERE datname = current_database() AND pid <> pg_backend_pid()
-        ORDER BY xact_start NULLS LAST LIMIT 30`
-    );
-    out.actividad = act;
-    // Intento del FOR UPDATE con timeouts de sesion de 6s: si se bloquea, debe
-    // abortar a los ~6s (prueba que el timeout funciona y que hay un lock). Si
-    // no aborta, el timeout NO se aplica (pooler).
-    const client = await db.pool.connect();
-    const t0 = Date.now();
-    try {
-      await client.query("SET statement_timeout = 6000");
-      await client.query("SET lock_timeout = 6000");
-      await client.query("BEGIN");
-      const anio = new Date().getFullYear();
-      await client.query(
-        `SELECT numero FROM facturas WHERE serie=$1 AND EXTRACT(year FROM fecha)=$2 AND empresa_id=$3 ORDER BY numero DESC LIMIT 1 FOR UPDATE`,
-        ["A", anio, empresaId]
-      );
-      await client.query("COMMIT");
-      out.for_update = { estado: "ok", ms: Date.now() - t0 };
-    } catch (e) {
-      await client.query("ROLLBACK").catch(() => {});
-      out.for_update = { estado: "error", ms: Date.now() - t0, error: e.message };
-    } finally {
-      client.release();
-    }
-    res.json(out);
-  } catch (e) {
-    res.status(500).json({ error: e.message, out });
-  }
-});
-
 router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   const empresaId = req.empresaId || req.user.empresa_id;
   const { rows } = await db.query(`

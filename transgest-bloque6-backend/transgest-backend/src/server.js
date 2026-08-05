@@ -565,6 +565,11 @@ async function applyMigrations() {
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS aviso_cobro_dias INTEGER NOT NULL DEFAULT 7").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS vencimiento VARCHAR(80)").catch(captureStartupMigrationError);
+    // IRPF y regimen de IVA en la factura. Faltaban y el INSERT de POST /facturas
+    // los referencia: sin ellos, crear cualquier factura/borrador fallaba.
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS tipo_irpf NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS cuota_irpf NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS iva_regimen VARCHAR(30) NOT NULL DEFAULT 'general'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ALTER COLUMN vencimiento TYPE VARCHAR(80) USING vencimiento::text").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE").catch(captureStartupMigrationError);
     await db.query("UPDATE facturas SET vencimiento=fecha_vencimiento::text WHERE vencimiento IS NULL AND fecha_vencimiento IS NOT NULL").catch(captureStartupMigrationError);

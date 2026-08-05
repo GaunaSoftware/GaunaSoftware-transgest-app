@@ -2767,8 +2767,8 @@ export default function Facturacion() {
           {resumenGestionFinanciera.map(item=>(
             <div key={item.label} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 12px",minWidth:0}}>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:600,color:item.color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.value}</div>
-              <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",marginTop:4}}>{item.label}</div>
-              <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{item.detail}</div>
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.label}</div>
+              <div style={{fontSize:11,color:"var(--text4)",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}} title={item.detail}>{item.detail}</div>
             </div>
           ))}
         </div>

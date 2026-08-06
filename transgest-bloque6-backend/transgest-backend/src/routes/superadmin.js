@@ -862,6 +862,40 @@ router.get("/public/app-meta", async (req, res) => {
   }
 });
 
+// [TEMP] Diagnostico del bootstrap de superadmin (no expone contrasenas). Se
+// retira despues de resolver el acceso.
+router.get("/public/bootstrap-status", async (_req, res) => {
+  const mask = (e) => {
+    const s = String(e || "").toLowerCase();
+    return s ? s.replace(/^(.{2}).*(@.*)$/, "$1***$2") : "";
+  };
+  const out = {
+    env_email_set: false,
+    env_email_masked: "",
+    env_pass_set: false,
+    superadmin_exists_for_env_email: false,
+    superadmins_total: 0,
+    superadmins: [],
+  };
+  try {
+    const envEmail = String(process.env.SUPERADMIN_BOOTSTRAP_EMAIL || "").trim().toLowerCase();
+    out.env_email_set = !!envEmail;
+    out.env_email_masked = mask(envEmail);
+    out.env_pass_set = !!String(process.env.SUPERADMIN_BOOTSTRAP_PASSWORD || "");
+    const c = await db.query("SELECT COUNT(*)::int AS n FROM superadmins").catch(() => ({ rows: [{ n: 0 }] }));
+    out.superadmins_total = c.rows[0]?.n || 0;
+    if (envEmail) {
+      const r = await db.query("SELECT 1 FROM superadmins WHERE LOWER(email)=$1 AND activo=true LIMIT 1", [envEmail]).catch(() => ({ rows: [] }));
+      out.superadmin_exists_for_env_email = r.rows.length > 0;
+    }
+    const all = await db.query("SELECT email, activo FROM superadmins ORDER BY created_at LIMIT 10").catch(() => ({ rows: [] }));
+    out.superadmins = all.rows.map((x) => ({ email: mask(x.email), activo: x.activo }));
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: e.message, out });
+  }
+});
+
 // ── GET /superadmin/empresas — Listar todas las empresas ─────────────────
 router.get("/correo/status", superAuth, async (_req, res) => {
   const cfg = await getPlatformEmailConfig(false);

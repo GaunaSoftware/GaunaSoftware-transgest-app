@@ -839,7 +839,10 @@ router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: "Email y contraseña requeridos" });
   try {
-    const { rows } = await db.query("SELECT * FROM superadmins WHERE email=$1 AND activo=true", [email]);
+    // Comparacion de email insensible a mayusculas/espacios: el email puede
+    // estar guardado en otra caja (p.ej. el bootstrap lo guarda en minusculas).
+    const emailNorm = String(email).trim().toLowerCase();
+    const { rows } = await db.query("SELECT * FROM superadmins WHERE LOWER(email)=$1 AND activo=true", [emailNorm]);
     if (!rows[0]) {
       await bcrypt.compare(password, SUPERADMIN_DUMMY_HASH);
       return res.status(401).json({ error: "Credenciales incorrectas" });

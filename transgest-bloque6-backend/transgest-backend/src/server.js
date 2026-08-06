@@ -662,6 +662,9 @@ async function applyMigrations() {
     await db.query("CREATE INDEX IF NOT EXISTS idx_factura_eventos_fiscales_registro ON factura_eventos_fiscales(registro_id, created_at DESC)").catch(captureStartupMigrationError);
     // Schema additions
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS email_admin VARCHAR(200)").catch(captureStartupMigrationError);
+    // Nombre fiscal (razon social). Lo usan login-brand y la facturacion; faltaba
+    // la columna y generaba 'column e.razon_social does not exist' en cada login.
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS razon_social VARCHAR(255)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS dominio VARCHAR(100)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'basico'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'activo'").catch(captureStartupMigrationError);

@@ -4932,15 +4932,18 @@ function normalizeTraficoConfig(config = {}) {
     : [];
   const tiposRaw = Array.isArray(raw.tipos_viaje) ? raw.tipos_viaje : [];
   const tipos = [...new Set(tiposRaw.map(normalizeTipoViaje).filter(Boolean))];
+  const etiquetasRaw = Array.isArray(raw.etiquetas) ? raw.etiquetas : [];
+  const etiquetas = [...new Set(etiquetasRaw.map(e => String(e || "").trim()).filter(Boolean))];
   return {
     vehiculo_ids: vehiculoIds,
     tipos_viaje: tipos.length ? tipos : ["normal", "salida", "retorno"],
+    etiquetas,
   };
 }
 
 function traficoConfigIsOpen(config = {}) {
   const cfg = normalizeTraficoConfig(config);
-  return cfg.vehiculo_ids.length === 0 && cfg.tipos_viaje.length >= 3;
+  return cfg.vehiculo_ids.length === 0 && cfg.tipos_viaje.length >= 3 && cfg.etiquetas.length === 0;
 }
 
 function traficoConfigMatchesPedido(config = {}, pedido = {}, targetTipo = null) {
@@ -5894,6 +5897,11 @@ router.get("/", async (req, res) => {
     if (scope.tipos_viaje.length && scope.tipos_viaje.length < 3) {
       where.push(`COALESCE(p.tipo_viaje,'normal') = ANY($${i++}::text[])`);
       params.push(scope.tipos_viaje);
+    }
+    // Perfil por etiquetas: solo ve pedidos con alguna de sus etiquetas.
+    if (scope.etiquetas.length) {
+      where.push(`COALESCE(p.etiquetas,'{}') && $${i++}::text[]`);
+      params.push(scope.etiquetas);
     }
   }
   if (desde)      { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) >= $${i++}`);  params.push(desde); }
@@ -8562,6 +8570,7 @@ router.post("/", GERENTE_O_TRAFICO,
         precio_colaborador_unitario: req.body.precio_colaborador_unitario !== undefined ? (req.body.precio_colaborador_unitario ?? null) : undefined,
         minimo_colaborador_unidades: req.body.minimo_colaborador_unidades !== undefined ? (req.body.minimo_colaborador_unidades ?? null) : undefined,
         reparto_chofer1: req.body.reparto_chofer1 ?? 50,
+        etiquetas: Array.isArray(req.body.etiquetas) ? [...new Set(req.body.etiquetas.map(e => String(e || "").trim()).filter(Boolean))] : undefined,
         referencia_cliente: req.body.referencia_cliente ?? null,
         matricula_colaborador: req.body.matricula_colaborador !== undefined ? (req.body.matricula_colaborador ? String(req.body.matricula_colaborador).trim().toUpperCase() : null) : undefined,
         remolque_matricula_colaborador: req.body.remolque_matricula_colaborador !== undefined ? (req.body.remolque_matricula_colaborador ? String(req.body.remolque_matricula_colaborador).trim().toUpperCase() : null) : undefined,
@@ -9054,6 +9063,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     precio_colaborador_unitario: body.precio_colaborador_unitario !== undefined ? (body.precio_colaborador_unitario ?? null) : undefined,
     minimo_colaborador_unidades: body.minimo_colaborador_unidades !== undefined ? (body.minimo_colaborador_unidades ?? null) : undefined,
     reparto_chofer1: body.reparto_chofer1 ?? 50,
+    etiquetas: Array.isArray(body.etiquetas) ? [...new Set(body.etiquetas.map(e => String(e || "").trim()).filter(Boolean))] : undefined,
     referencia_cliente: body.referencia_cliente ?? null,
     matricula_colaborador: body.matricula_colaborador !== undefined ? (body.matricula_colaborador ? String(body.matricula_colaborador).trim().toUpperCase() : null) : undefined,
     remolque_matricula_colaborador: body.remolque_matricula_colaborador !== undefined ? (body.remolque_matricula_colaborador ? String(body.remolque_matricula_colaborador).trim().toUpperCase() : null) : undefined,

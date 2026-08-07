@@ -4181,8 +4181,11 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       const updated = {...p, [key]: stopsToStore};
       if (tipo === "carga") {
         updated.origen = stopAddress(first) || "";
-        updated.fecha_carga = first.fecha || "";
-        updated.hora_carga = first.hora || "";
+        // La fecha/hora de la parada de carga se lleva al campo de arriba (junto
+        // a Fecha pedido) automaticamente; si la parada no tiene, se conserva lo
+        // que ya hubiera puesto el usuario arriba (no se borra).
+        updated.fecha_carga = first.fecha || p.fecha_carga || "";
+        updated.hora_carga = first.hora || p.hora_carga || "";
         updated.origen_pais = stopCountryInputValue(first, p.origen_pais || "España");
         updated.origen_provincia = stopRegion(first, p.origen_provincia || "");
         // Si el usuario ha tocado la provincia de la parada principal, se marca
@@ -4190,8 +4193,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
         updated.origen_provincia_manual = !!first.provincia_manual;
       } else {
         updated.destino = stopAddress(first) || "";
-        updated.fecha_descarga = first.fecha || "";
-        updated.hora_descarga = first.hora || "";
+        updated.fecha_descarga = first.fecha || p.fecha_descarga || "";
+        updated.hora_descarga = first.hora || p.hora_descarga || "";
         updated.destino_pais = stopCountryInputValue(first, p.destino_pais || "España");
         updated.destino_provincia = stopRegion(first, p.destino_provincia || "");
         updated.destino_provincia_manual = !!first.provincia_manual;

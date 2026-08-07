@@ -749,6 +749,11 @@ async function applyMigrations() {
       END $$;
     `).catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(captureStartupMigrationError);
+    // Etiquetas de trafico del pedido (tipo de vehiculo + operativas). Sirven
+    // para separar vistas por perfil de tráfico.
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS etiquetas TEXT[] NOT NULL DEFAULT '{}'").catch(captureStartupMigrationError);
+    // Etiquetas de trafico configurables por empresa (lista + mapa clase->etiqueta).
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_etiquetas_trafico JSONB NOT NULL DEFAULT '{}'::jsonb").catch(captureStartupMigrationError);
     await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'incidencia'").catch(captureStartupMigrationError);
     await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'espera_carga'").catch(captureStartupMigrationError);
     await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'cargando'").catch(captureStartupMigrationError);

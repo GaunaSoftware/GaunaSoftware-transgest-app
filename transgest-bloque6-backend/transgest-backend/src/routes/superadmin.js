@@ -890,6 +890,18 @@ router.get("/public/bootstrap-status", async (_req, res) => {
     }
     const all = await db.query("SELECT email, activo FROM superadmins ORDER BY created_at LIMIT 10").catch(() => ({ rows: [] }));
     out.superadmins = all.rows.map((x) => ({ email: mask(x.email), activo: x.activo }));
+    // Prueba definitiva: ¿la contrasena guardada coincide con la variable de
+    // entorno actual? (no expone la contrasena, solo un booleano).
+    out.stored_hash_matches_env_password = null;
+    const envPass = String(process.env.SUPERADMIN_BOOTSTRAP_PASSWORD || "");
+    if (envEmail && envPass) {
+      const r = await db.query("SELECT password_hash FROM superadmins WHERE LOWER(email)=$1 AND activo=true LIMIT 1", [envEmail]).catch(() => ({ rows: [] }));
+      if (r.rows[0]?.password_hash) {
+        out.stored_hash_matches_env_password = await bcrypt.compare(envPass, r.rows[0].password_hash).catch(() => false);
+      }
+    }
+    // ¿Se puede firmar un token superadmin? (detecta problemas del JWT secret).
+    try { require("../services/jwtSecrets"); out.jwt_secret_set = !!(process.env.SUPERADMIN_JWT_SECRET || process.env.JWT_SECRET); } catch (_) { out.jwt_secret_set = false; }
     res.json(out);
   } catch (e) {
     res.status(500).json({ error: e.message, out });

@@ -1171,6 +1171,22 @@ const DATE_PEDIDO_FIELDS = new Set(["fecha_pedido", "fecha_carga", "fecha_entreg
 const TIME_PEDIDO_FIELDS = new Set(["hora_carga", "hora_descarga"]);
 const UUID_PEDIDO_FIELDS = new Set(["cliente_id", "ruta_id", "vehiculo_id", "chofer_id", "chofer2_id", "colaborador_id", "remolque_id"]);
 
+// Auto-etiquetas por vehiculo: si una etiqueta del catalogo tiene "auto_match" y
+// el tipo/clase del vehiculo lo contiene, se aplica sola al asignar el vehiculo.
+function foldEtiquetaTexto(s){return String(s||"").normalize("NFD").split("").filter(function(ch){var c=ch.charCodeAt(0);return c<768||c>879;}).join("").toLowerCase();}
+function autoEtiquetasVehiculo(catalogo, veh){
+  if(!veh) return [];
+  const hay = foldEtiquetaTexto([veh.clase,veh.tipo,veh.carroceria,veh.modelo,veh.descripcion,veh.matricula].filter(Boolean).join(" "));
+  return (Array.isArray(catalogo)?catalogo:[])
+    .filter(et=>{const m=foldEtiquetaTexto(et&&et.auto_match).trim(); return m && hay.includes(m);})
+    .map(et=>String((et&&et.nombre)||"").trim()).filter(Boolean);
+}
+function mergeEtiquetas(prev, add){
+  const set = new Set((Array.isArray(prev)?prev:[]).map(String).filter(Boolean));
+  (Array.isArray(add)?add:[]).forEach(e=>{const n=String(e||"").trim(); if(n) set.add(n);});
+  return [...set];
+}
+
 function normalizeStrictDateInput(value) {
   if (value === "" || value === null || value === undefined) return null;
   const raw = String(value).trim();
@@ -6640,6 +6656,19 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [choferPasosMapa, setChoferPasosMapa] = useState(null);
   const [clientes, setClientes] = useState(clientesProp || []);
   const [rutas,    setRutas]    = useState(rutas_prop || []);
+  const [etiquetasCatalogo, setEtiquetasCatalogo] = useState(() => {
+    const cat = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG?.cfg_trafico?.etiquetas_catalogo);
+    return Array.isArray(cat) ? cat.filter(e => e && String(e.nombre || "").trim()) : [];
+  });
+  useEffect(() => {
+    let alive = true;
+    getEmpresaConfig().then(d => {
+      if (!alive) return;
+      const cat = d?.cfg_trafico?.etiquetas_catalogo;
+      setEtiquetasCatalogo(Array.isArray(cat) ? cat.filter(e => e && String(e.nombre || "").trim()) : []);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -8577,6 +8606,32 @@ useEffect(() => {
               </div>
             </div>
 
+            {etiquetasCatalogo.length > 0 && (
+              <div style={{margin:"2px 0 12px"}}>
+                <label style={S.label}>Etiquetas del viaje (perfil)</label>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {etiquetasCatalogo.map(et=>{
+                    const nombre = String(et.nombre||"").trim();
+                    if(!nombre) return null;
+                    const activa = Array.isArray(form.etiquetas) && form.etiquetas.map(String).includes(nombre);
+                    return (
+                      <button type="button" key={nombre}
+                        onClick={()=>setForm(p=>{
+                          const list = Array.isArray(p.etiquetas)?p.etiquetas.map(String).filter(Boolean):[];
+                          const set = new Set(list);
+                          set.has(nombre)?set.delete(nombre):set.add(nombre);
+                          return {...p, etiquetas:[...set]};
+                        })}
+                        style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:20,border:`1px solid ${activa?(et.color||"var(--accent)"):"var(--border2)"}`,background:activa?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:activa?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                        <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"#14b8a6",display:"inline-block"}}/>
+                        {nombre}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div style={S.sec}>Distancias</div>
             <div className="tg-pedido-form-grid-2" style={{marginBottom:10}}>
               <div>
@@ -9000,6 +9055,8 @@ useEffect(() => {
                   const vid = e.target.value;
                   const veh = vehiculosLocal.find(v=>v.id===vid);
                   const prevVeh = vehiculosLocal.find(v=>v.id===form.vehiculo_id);
+                  const remolqueAuto = vehiculosLocal.find(v=>v.id===(veh&&veh.remolque_id));
+                  const autoEt = vid ? [...autoEtiquetasVehiculo(etiquetasCatalogo, veh), ...autoEtiquetasVehiculo(etiquetasCatalogo, remolqueAuto)] : [];
                   setForm(p=>{
                     const choferEraDelAnterior = !p.chofer_id || p.chofer_id === prevVeh?.chofer_id;
                     const remolqueEraDelAnterior = !p.remolque_id_manual || p.remolque_id_manual === prevVeh?.remolque_id;
@@ -9012,6 +9069,7 @@ useEffect(() => {
                       remolque_id_manual: remolqueEraDelAnterior ? (veh?.remolque_id || "") : p.remolque_id_manual,
                       matricula_manual: vid ? "" : p.matricula_manual,
                       remolque_matricula_manual: vid ? "" : p.remolque_matricula_manual,
+                      etiquetas: vid ? mergeEtiquetas(p.etiquetas, autoEt) : p.etiquetas,
                     };
                   });
                   // Mostrar aviso operacional si el vehiculo tiene notas

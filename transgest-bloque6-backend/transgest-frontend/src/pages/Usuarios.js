@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getUsuarios, crearUsuario, editarUsuario, resetPassword, getChoferes, getVehiculos, getClientes } from "../services/api";
+import { getUsuarios, crearUsuario, editarUsuario, resetPassword, getChoferes, getVehiculos, getClientes, getEmpresaConfig } from "../services/api";
 import { notify, promptDialog } from "../services/notify";
 import { FormField, ModalShell, StatusBadge } from "../components/ui";
 
@@ -157,9 +157,11 @@ function normalizarTraficoConfigUI(config) {
   const raw = config && typeof config === "object" && !Array.isArray(config) ? config : {};
   const vehiculo_ids = Array.isArray(raw.vehiculo_ids) ? raw.vehiculo_ids.map(String).filter(Boolean) : [];
   const tipos = Array.isArray(raw.tipos_viaje) ? raw.tipos_viaje.map(v => String(v).toLowerCase()).filter(Boolean) : [];
+  const etiquetas = Array.isArray(raw.etiquetas) ? raw.etiquetas.map(e => String(e || "").trim()).filter(Boolean) : [];
   return {
     vehiculo_ids: [...new Set(vehiculo_ids)],
     tipos_viaje: tipos.length ? [...new Set(tipos)] : ["normal", "salida", "retorno"],
+    etiquetas: [...new Set(etiquetas)],
   };
 }
 
@@ -200,8 +202,16 @@ export default function Usuarios() {
   const [errors,setErrors]=useState({});
   const [saving,setSaving]=useState(false);
   const [credencialCreada,setCredencialCreada]=useState(null);
+  const [etiquetasCatalogo,setEtiquetasCatalogo]=useState([]);
 
   const cargar=async()=>{setLoading(true);try{const [d,c,v,cl]=await Promise.all([getUsuarios(), getChoferes().catch(()=>[]), getVehiculos().catch(()=>[]), getClientes("", "true", 1, 500, { silentError:true }).catch(()=>[])]);setUsuarios(Array.isArray(d)?d:[]);setChoferes(Array.isArray(c)?c:[]);setVehiculos(Array.isArray(v)?v:[]);setClientes(Array.isArray(cl?.data)?cl.data:Array.isArray(cl)?cl:[]);}catch(e){}finally{setLoading(false);}};
+  useEffect(()=>{getEmpresaConfig().then(d=>{const cat=d?.cfg_trafico?.etiquetas_catalogo;setEtiquetasCatalogo(Array.isArray(cat)?cat.filter(e=>e&&String(e.nombre||"").trim()):[]);}).catch(()=>{});},[]);
+  const toggleEtiquetaScope = (nombre) => setForm(p=>{
+    const cfg = normalizarTraficoConfigUI(p.trafico_config);
+    const set = new Set(cfg.etiquetas);
+    set.has(nombre) ? set.delete(nombre) : set.add(nombre);
+    return { ...p, trafico_config: { ...cfg, etiquetas: [...set] } };
+  });
   useEffect(()=>{cargar();},[]);
   const f=k=>e=>{
     const value = e.target.value;
@@ -558,6 +568,33 @@ export default function Usuarios() {
                 </div>
                 <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45,marginTop:8}}>
                   Si no seleccionas matriculas, el usuario ve todas. Si seleccionas algunas, solo vera esas y recibira avisos de ida/retorno para esas matriculas.
+                </div>
+                <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed var(--border2)"}}>
+                  <label style={{...S.label,marginTop:0}}>Etiquetas visibles (perfiles)</label>
+                  {etiquetasCatalogo.length === 0 ? (
+                    <div style={{fontSize:11,color:"var(--text5)"}}>No hay etiquetas configuradas. Créalas en <b>Empresa → Tráfico</b>.</div>
+                  ) : (
+                    <>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        {etiquetasCatalogo.map(et=>{
+                          const nombre = String(et.nombre||"").trim();
+                          if(!nombre) return null;
+                          const cfg = normalizarTraficoConfigUI(form.trafico_config);
+                          const active = cfg.etiquetas.includes(nombre);
+                          return (
+                            <button type="button" key={nombre} onClick={()=>toggleEtiquetaScope(nombre)}
+                              style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:20,border:`1px solid ${active?(et.color||"var(--accent)"):"var(--border2)"}`,background:active?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:active?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                              <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"#14b8a6",display:"inline-block"}}/>
+                              {nombre}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45,marginTop:8}}>
+                        Si no marcas ninguna etiqueta, verá pedidos de cualquier etiqueta. Si marcas algunas, solo verá los pedidos que tengan al menos una de ellas.
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}

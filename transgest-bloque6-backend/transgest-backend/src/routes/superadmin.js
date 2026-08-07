@@ -890,6 +890,9 @@ router.get("/public/bootstrap-status", async (_req, res) => {
     }
     const all = await db.query("SELECT email, activo FROM superadmins ORDER BY created_at LIMIT 10").catch(() => ({ rows: [] }));
     out.superadmins = all.rows.map((x) => ({ email: mask(x.email), activo: x.activo }));
+    // Email completo del superadmin (es la cuenta del propio operador, no una
+    // clave) para que sepa con exactitud con que email entrar.
+    out.superadmin_email_full = all.rows[0] ? String(all.rows[0].email || "").toLowerCase() : "";
     // Prueba definitiva: ¿la contrasena guardada coincide con la variable de
     // entorno actual? (no expone la contrasena, solo un booleano).
     out.stored_hash_matches_env_password = null;

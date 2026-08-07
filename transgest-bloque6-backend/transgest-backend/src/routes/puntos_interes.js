@@ -254,7 +254,7 @@ router.get("/", async (req, res) => {
        FROM puntos_interes
       WHERE ${where.join(" AND ")}
       ORDER BY ${cliente_id && includeGeneral ? `CASE WHEN cliente_id=$${params.length} THEN 0 ELSE 1 END, ` : ""}nombre ASC
-      LIMIT 200`,
+      LIMIT 5000`,
     params
   );
   res.json(rows.map(withComputedFields));

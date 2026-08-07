@@ -1431,7 +1431,7 @@ function legacyPuntosInteresLoad() {
 }
 
 function setPuntosInteresCache(next, { broadcast = true } = {}) {
-  puntosInteresCache = Array.isArray(next) ? next.slice(-200) : [];
+  puntosInteresCache = Array.isArray(next) ? next.slice(-5000) : [];
   if (typeof window !== "undefined") {
     window.__TMS_PUNTOS_INTERES = puntosInteresCache;
     if (broadcast) window.dispatchEvent(new Event("tms:puntos-interes"));
@@ -1442,7 +1442,7 @@ function setPuntosInteresCache(next, { broadcast = true } = {}) {
 function getPuntosInteres() {
   if (puntosInteresCache.length) return puntosInteresCache;
   if (typeof window !== "undefined" && Array.isArray(window.__TMS_PUNTOS_INTERES)) {
-    puntosInteresCache = window.__TMS_PUNTOS_INTERES.slice(-200);
+    puntosInteresCache = window.__TMS_PUNTOS_INTERES.slice(-5000);
   }
   return puntosInteresCache;
 }
@@ -1699,7 +1699,7 @@ function savePuntoInteres(punto) {
       : (p.direccion || "").trim().toLowerCase() !== direccion.toLowerCase()
     ),
     normalizado,
-  ].slice(-200);
+  ].slice(-5000);
   return setPuntosInteresCache(next);
 }
 
@@ -7250,7 +7250,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
     const next = setPuntosInteresCache([
       ...current.filter(p => String(p.id) !== String(normalized.id)),
       normalized,
-    ].slice(-250));
+    ].slice(-5000));
     setPuntos(next);
     onApply?.(next);
     return { point: normalized, changed: true, cloned: clone };
@@ -7343,7 +7343,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                 <React.Fragment key={point.id}>
                   {showScopeHeader && (
                     <div style={{marginTop:idx ? 6 : 0,fontSize:11,fontWeight:900,letterSpacing:".08em",textTransform:"uppercase",color:"var(--text4)",display:"flex",alignItems:"center",gap:8}}>
-                      <span>{scope === "Cliente" ? "Puntos de este cliente" : "Puntos generales"}</span>
+                      <span>{scope === "Cliente" ? "Puntos de este cliente" : scope === "General" ? "Puntos generales" : "Puntos de otros clientes"}</span>
                       <span style={{height:1,background:"var(--border)",flex:1}} />
                     </div>
                   )}

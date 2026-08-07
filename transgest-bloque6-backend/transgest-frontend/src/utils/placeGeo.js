@@ -30,8 +30,9 @@ export function provinciaDeLugar(text = "") {
   if (known?.provincia) return known.provincia;
   const folded = foldPlaceName(raw);
   if (municipiosProvincia[folded]) return municipiosProvincia[folded];
-  // Direccion "Calle X, Municipio": prueba cada tramo, del final al principio.
-  const partes = raw.split(",").map(s => foldPlaceName(s)).filter(Boolean);
+  // Direccion "Calle X, Municipio" o nombre bilingue "Valencia/Valencia": prueba
+  // cada tramo (separados por coma o barra), del final al principio.
+  const partes = raw.split(/[,/]/).map(s => foldPlaceName(s)).filter(Boolean);
   for (let i = partes.length - 1; i >= 0; i -= 1) {
     if (municipiosProvincia[partes[i]]) return municipiosProvincia[partes[i]];
   }

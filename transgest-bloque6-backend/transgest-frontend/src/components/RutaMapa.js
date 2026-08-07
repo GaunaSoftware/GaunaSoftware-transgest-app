@@ -350,6 +350,21 @@ function RutaMapa({ points = [], vehiclePosition = null }) {
   // Al cambiar de pedido/ruta, volver al encuadre automatico.
   useEffect(() => { setView({ zoomAdj: 0, panX: 0, panY: 0 }); }, [pointKey]);
 
+  // Zoom con la rueda del raton sobre el mapa. Se usa un listener nativo NO
+  // pasivo para poder hacer preventDefault y evitar que se desplace la pagina o
+  // el formulario mientras se hace zoom.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 1 : -1;
+      setView(v => ({ ...v, zoomAdj: Math.max(-3, Math.min(6, (v.zoomAdj || 0) + delta)) }));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
   useEffect(() => {
     let active = true;
     const requestId = requestIdRef.current + 1;

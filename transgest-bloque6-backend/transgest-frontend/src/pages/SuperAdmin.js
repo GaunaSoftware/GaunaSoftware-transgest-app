@@ -2910,6 +2910,29 @@ export default function SuperAdmin(){
     }
   }
 
+  async function toggleBloqueoEmpresa(empresa) {
+    const bloquear = !empresa.bloqueo_manual;
+    const ok = await confirmDialog({
+      title: bloquear ? "Bloquear por impago" : "Desbloquear empresa",
+      message: bloquear
+        ? `Se bloqueara ${empresa.nombre}. Sus usuarios no podran usar el programa: al entrar veran una pantalla que obliga al pago. ¿Continuar?`
+        : `Se reactivara ${empresa.nombre} y sus usuarios podran volver a usar el programa con normalidad.`,
+      confirmText: bloquear ? "Bloquear" : "Desbloquear",
+      tone: bloquear ? "danger" : "default",
+    });
+    if (!ok) return;
+    try {
+      await saFetch(`/empresas/${empresa.id}`, {
+        method: "PATCH",
+        body: bloquear ? { bloqueo_manual: true, bloqueo_motivo: "impago" } : { bloqueo_manual: false, bloqueo_motivo: "" },
+      });
+      notify(bloquear ? "Empresa bloqueada. Sus usuarios veran la pantalla de pago." : "Empresa desbloqueada.", "success");
+      await cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo actualizar el bloqueo", "error");
+    }
+  }
+
   async function crearEmpresaDemo() {
     const ok = await confirmDialog({
       title: "Crear empresa demo",
@@ -3230,7 +3253,10 @@ export default function SuperAdmin(){
                             {e.cif&&<div style={{fontSize:10,color:"#475569"}}>{e.cif}</div>}
                           </td>
                           <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${PLAN_COLOR[e.plan]}20`,color:PLAN_COLOR[e.plan],border:`1px solid ${PLAN_COLOR[e.plan]}40`}}>{e.plan}</span></td>
-                          <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${ESTADO_COLOR[e.estado]}18`,color:ESTADO_COLOR[e.estado]}}>{e.estado}</span></td>
+                          <td style={S.td}>
+                            <span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${ESTADO_COLOR[e.estado]}18`,color:ESTADO_COLOR[e.estado]}}>{e.estado}</span>
+                            {e.bloqueo_manual && <div style={{marginTop:4,padding:"2px 7px",borderRadius:20,fontSize:9,fontWeight:800,background:"rgba(239,68,68,.15)",color:"#f87171",display:"inline-block",letterSpacing:".04em"}}>BLOQUEADA{e.bloqueo_motivo?` · ${e.bloqueo_motivo}`:""}</div>}
+                          </td>
                           <td style={S.td}>
                             <div style={{fontSize:11,color:e.metodo_pago==="pendiente"?"#fbbf24":"#94a3b8",fontWeight:700}}>{e.metodo_pago || "pendiente"}</div>
                             {e.email_facturacion&&<div style={{fontSize:10,color:"#64748b",marginTop:2}}>{e.email_facturacion}</div>}
@@ -3262,6 +3288,9 @@ export default function SuperAdmin(){
                               <button onClick={()=>resetPasswordEmpresa(e)} style={{...S.btn,background:"rgba(20,184,166,.10)",color:"#5eead4",border:"1px solid rgba(20,184,166,.22)"}}>Clave</button>
                               <button onClick={()=>reinvitarEmpresa(e)} style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#85B7EB",border:"1px solid rgba(59,130,246,.22)"}}>Invitar</button>
                               <button onClick={()=>enviarAvisoPagoEmpresa(e, "auto")} style={{...S.btn,background:"rgba(245,158,11,.10)",color:"#fbbf24",border:"1px solid rgba(245,158,11,.22)"}}>Aviso pago</button>
+                              <button onClick={()=>toggleBloqueoEmpresa(e)} style={{...S.btn, ...(e.bloqueo_manual
+                                ? {background:"rgba(16,185,129,.14)",color:"#34d399",border:"1px solid rgba(16,185,129,.3)"}
+                                : {background:"rgba(239,68,68,.12)",color:"#f87171",border:"1px solid rgba(239,68,68,.3)"})}}>{e.bloqueo_manual ? "Desbloquear" : "Bloquear"}</button>
                               <button onClick={()=>setEditando(e)} style={{...S.btn,background:"#1e2d45",color:"#94a3b8",border:"1px solid #1c2740"}}>Gestionar</button>
                             </div>
                           </td>

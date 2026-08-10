@@ -142,7 +142,9 @@
 .sa-theme-light .sa-content [style*="background: rgb(30, 45, 69)"],
 .sa-theme-light .sa-content [style*="background: rgb(30, 42, 69)"],
 .sa-theme-light .sa-content [style*="background: rgb(21, 36, 58)"],
-.sa-theme-light .sa-content [style*="background: rgb(30, 42, 71)"] { background: var(--sa-panel-raised) !important; }
+.sa-theme-light .sa-content [style*="background: rgb(30, 42, 71)"],
+.sa-theme-light .sa-content [style*="background: rgb(15, 23, 42)"],
+.sa-theme-light .sa-content [style*="background: rgb(30, 41, 59)"] { background: var(--sa-panel-raised) !important; }
 .sa-theme-light .sa-content [style*="color: rgb(203, 213, 225)"] { color: var(--sa-text-soft) !important; }
 .sa-theme-light .sa-content [style*="border: 1px solid rgb(51, 65, 85)"],
 .sa-theme-light .sa-content [style*="border: 1px solid rgb(30, 41, 59)"],

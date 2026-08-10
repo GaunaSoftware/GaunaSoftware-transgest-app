@@ -4186,7 +4186,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   function setStopsOrdenados(nextStops) {
     setForm(p => {
       const stopsToStore = nextStops
-        .filter(stop => stopAddress(stop) || stop?.cliente_nombre || stop?.google_maps_url)
+        .filter((stop, idx) => idx === editingStopIndex || stopAddress(stop) || stop?.cliente_nombre || stop?.google_maps_url)
         .map((stop, idx) => inferStopGeo({
           ...stop,
           tipo,
@@ -4237,7 +4237,14 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     setAdding(false);
   }
   function updateStop(idx, patch) {
-    const next = stopsOrdenados.map((stop, i) => i === idx ? inferStopGeo({ ...stop, ...patch }, i) : stop);
+    // Si el usuario reescribe la direccion a mano, esta pisando el punto que se
+    // hubiera emparejado: se limpia el residuo (poblacion/nombre/ids del punto)
+    // para que 'direccion' mande y el campo se pueda vaciar de verdad (antes,
+    // stopAddress caia a ciudad/lugar y "resucitaba" el punto anterior).
+    const patchFinal = ("direccion" in patch)
+      ? { ...patch, lugar: "", ciudad: "", nombre: "", cliente_nombre: "", punto_interes_id: null, punto_id: null, point_id: null, id_punto: null }
+      : patch;
+    const next = stopsOrdenados.map((stop, i) => i === idx ? inferStopGeo({ ...stop, ...patchFinal }, i) : stop);
     setStopsOrdenados(next);
   }
   function removeStop(idx) {

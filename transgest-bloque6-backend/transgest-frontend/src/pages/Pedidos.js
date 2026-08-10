@@ -4000,7 +4000,11 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       stopAddress(local),
       local.cliente_nombre
     );
-    return inferStopGeo(resolved, idx);
+    // La geolocalizacion puede inferir una poblacion (ciudad) por coincidencia de
+    // una sola palabra (p. ej. "Teruel" -> "Andorra de Teruel"). No dejamos que
+    // invente la poblacion del texto: solo conservamos provincia/pais/coordenadas
+    // para el mapa; la ubicacion escrita por el usuario (en 'direccion') manda.
+    return { ...inferStopGeo(resolved, idx), ciudad: stop.ciudad || "" };
   };
   const completarNewStopGeo = async () => {
     const next = await resolveStopGeo(newStop, stopsOrdenados.length ? 1 : 0);
@@ -4494,7 +4498,6 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             </datalist>
             <input
               className="tg-stop-address"
-              list={puntosListId}
               style={inp}
               placeholder={tipo === "carga" ? "Poblacion o punto de carga *" : "Poblacion o punto de descarga *"}
               value={newStop.direccion}

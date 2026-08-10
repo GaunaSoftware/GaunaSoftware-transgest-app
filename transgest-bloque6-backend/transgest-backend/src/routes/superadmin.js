@@ -862,32 +862,6 @@ router.get("/public/app-meta", async (req, res) => {
   }
 });
 
-// TEMPORAL: diagnostico de recuperacion de superadmin. NO expone secretos (email
-// enmascarado, sin contrasenas). Se elimina en cuanto se recupera el acceso.
-router.get("/public/bootstrap-status", async (_req, res) => {
-  try {
-    const saEmail = String(process.env.SUPERADMIN_BOOTSTRAP_EMAIL || "").trim().toLowerCase();
-    const saPass = String(process.env.SUPERADMIN_BOOTSTRAP_PASSWORD || "");
-    const mask = (e) => { const s = String(e || ""); const [u, d] = s.split("@"); return (u ? u[0] + "***" : "") + (d ? "@" + d : ""); };
-    const { rows } = await db.query("SELECT email, activo, password_hash FROM superadmins ORDER BY created_at ASC NULLS FIRST");
-    const norm = (e) => String(e || "").trim().toLowerCase();
-    const rowEnv = saEmail ? rows.find(r => norm(r.email) === saEmail) : null;
-    let hashMatches = null;
-    if (saEmail && saPass) hashMatches = rowEnv ? await bcrypt.compare(saPass, rowEnv.password_hash) : false;
-    res.json({
-      superadmins_count: rows.length,
-      superadmins: rows.map(r => ({ email_masked: mask(r.email), activo: r.activo })),
-      bootstrap_email_set: !!saEmail,
-      bootstrap_password_set: !!saPass,
-      bootstrap_password_len: saPass.length,
-      bootstrap_password_trimmed_len: saPass.trim().length,
-      bootstrap_email_masked: saEmail ? mask(saEmail) : "",
-      bootstrap_email_matches_existing: saEmail ? !!rowEnv : null,
-      stored_hash_matches_bootstrap_password: hashMatches,
-    });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // ── GET /superadmin/empresas — Listar todas las empresas ─────────────────
 router.get("/correo/status", superAuth, async (_req, res) => {
   const cfg = await getPlatformEmailConfig(false);

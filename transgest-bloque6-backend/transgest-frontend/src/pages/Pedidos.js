@@ -1186,6 +1186,14 @@ function mergeEtiquetas(prev, add){
   (Array.isArray(add)?add:[]).forEach(e=>{const n=String(e||"").trim(); if(n) set.add(n);});
   return [...set];
 }
+function etiquetaColorFromCatalog(nombre){
+  try {
+    const cat = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && window.__TMS_EMPRESA_CONFIG.cfg_trafico && window.__TMS_EMPRESA_CONFIG.cfg_trafico.etiquetas_catalogo) || [];
+    const key = String(nombre || "").trim().toLowerCase();
+    const hit = Array.isArray(cat) ? cat.find(e => String((e && e.nombre) || "").trim().toLowerCase() === key) : null;
+    return (hit && hit.color) || "#14b8a6";
+  } catch { return "#14b8a6"; }
+}
 
 function normalizeStrictDateInput(value) {
   if (value === "" || value === null || value === undefined) return null;
@@ -12112,7 +12120,22 @@ export default function Pedidos() {
                     </div>
                   )}
                 </td>
-                <td data-label="Cliente" style={{...S.td,fontWeight:600,fontSize:12}}>{p.cliente_nombre||"-"}</td>
+                <td data-label="Cliente" style={{...S.td,fontWeight:600,fontSize:12}}>
+                  <div>{p.cliente_nombre||"-"}</div>
+                  {Array.isArray(p.etiquetas) && p.etiquetas.length > 0 && (
+                    <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:4}}>
+                      {p.etiquetas.map(et => {
+                        const color = etiquetaColorFromCatalog(et);
+                        return (
+                          <span key={et} title={et} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:20,background:`${color}1f`,border:`1px solid ${color}66`,color:"var(--text2)",fontSize:9,fontWeight:800,fontFamily:"'DM Sans',sans-serif"}}>
+                            <span style={{width:6,height:6,borderRadius:"50%",background:color,display:"inline-block"}}/>
+                            {et}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </td>
                 <td data-label="Ruta" style={{...S.td,fontSize:12,color:"var(--text2)",minWidth:190}}>
                   <div style={{fontWeight:800,color:"var(--text)"}}>{routeDisplay.main}</div>
                   {routeDisplay.detail && (

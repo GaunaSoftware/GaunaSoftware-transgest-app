@@ -583,7 +583,7 @@ export default function Usuarios() {
                           const active = cfg.etiquetas.includes(nombre);
                           return (
                             <button type="button" key={nombre} onClick={()=>toggleEtiquetaScope(nombre)}
-                              style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:20,border:`1px solid ${active?(et.color||"var(--accent)"):"var(--border2)"}`,background:active?`${et.color||"var(--accent-l)"}22`:"var(--bg4)",color:active?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                              style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:20,border:`1px solid ${active?(et.color||"var(--accent)"):"var(--border2)"}`,background:active?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:active?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
                               <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"var(--accent-l)",display:"inline-block"}}/>
                               {nombre}
                             </button>

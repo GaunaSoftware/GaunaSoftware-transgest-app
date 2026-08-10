@@ -1191,7 +1191,7 @@ function etiquetaColorFromCatalog(nombre){
     const cat = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && window.__TMS_EMPRESA_CONFIG.cfg_trafico && window.__TMS_EMPRESA_CONFIG.cfg_trafico.etiquetas_catalogo) || [];
     const key = String(nombre || "").trim().toLowerCase();
     const hit = Array.isArray(cat) ? cat.find(e => String((e && e.nombre) || "").trim().toLowerCase() === key) : null;
-    return (hit && hit.color) || "var(--accent-l)";
+    return (hit && hit.color) || "#14b8a6";
   } catch { return "var(--accent-l)"; }
 }
 
@@ -8640,7 +8640,7 @@ useEffect(() => {
                           set.has(nombre)?set.delete(nombre):set.add(nombre);
                           return {...p, etiquetas:[...set]};
                         })}
-                        style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:20,border:`1px solid ${activa?(et.color||"var(--accent)"):"var(--border2)"}`,background:activa?`${et.color||"var(--accent-l)"}22`:"var(--bg4)",color:activa?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                        style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:20,border:`1px solid ${activa?(et.color||"var(--accent)"):"var(--border2)"}`,background:activa?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:activa?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
                         <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"var(--accent-l)",display:"inline-block"}}/>
                         {nombre}
                       </button>

@@ -425,8 +425,8 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
 
   const chip = (label, value, tone, icon) => (
     <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:9,padding:"15px 18px",display:"flex",alignItems:"center",gap:14,minHeight:62,boxShadow:"var(--shadow-sm)"}}>
-      <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:`${tone || "var(--accent)"}14`,color:tone || "var(--accent)",flexShrink:0}}>
-        <UiIcon name={icon} color={tone || "var(--accent)"} size={23} />
+      <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:`${tone || "#0f766e"}14`,color:tone || "#0f766e",flexShrink:0}}>
+        <UiIcon name={icon} color={tone || "#0f766e"} size={23} />
       </div>
       <div>
         <div style={{fontSize:10,color:"var(--text4)",fontWeight:900,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</div>

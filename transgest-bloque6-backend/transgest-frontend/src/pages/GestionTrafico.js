@@ -2445,7 +2445,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
             <path d={path} fill="none" stroke="#14b8a6" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
             {svgPts.map((p, idx) => (
               <g key={idx}>
-                <circle cx={p.x} cy={p.y} r="14" fill={idx===0?"var(--accent)":idx===svgPts.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
+                <circle cx={p.x} cy={p.y} r="14" fill={idx===0?"#0f766e":idx===svgPts.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
                 <text x={p.x} y={p.y+4} textAnchor="middle" fontSize="11" fontWeight="900" fill="#fff">{idx+1}</text>
               </g>
             ))}
@@ -2464,7 +2464,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
               <path d={embeddedPath} fill="none" stroke="#0f766e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
               {embeddedMap.projected.map((p, idx) => (
                 <g key={idx}>
-                  <circle cx={p.x} cy={p.y} r="13" fill={idx===0?"var(--accent)":idx===embeddedMap.projected.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
+                  <circle cx={p.x} cy={p.y} r="13" fill={idx===0?"#0f766e":idx===embeddedMap.projected.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
                   <text x={p.x} y={p.y+4} textAnchor="middle" fontSize="11" fontWeight="900" fill="#fff">{idx+1}</text>
                 </g>
               ))}

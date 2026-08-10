@@ -11,7 +11,7 @@ import {
 
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtN = n => Number(n||0).toLocaleString("es-ES");
-const COLORS = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#f97316","#06b6d4","#84cc16","#ec4899","var(--accent-l)"];
+const COLORS = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#f97316","#06b6d4","#84cc16","#ec4899","#14b8a6"];
 
 const S = {
   page:  { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },

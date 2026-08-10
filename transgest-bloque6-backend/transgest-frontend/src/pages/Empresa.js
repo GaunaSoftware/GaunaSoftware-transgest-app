@@ -355,7 +355,7 @@ export default function Empresa() {
   }, [tab, cargarCalendarioLaboral]);
 
   function addEtiquetaTrafico() {
-    const palette = ["var(--accent-l)","#f59e0b","#3b82f6","#ef4444","#8b5cf6","#10b981","#ec4899","#0ea5e9"];
+    const palette = ["#14b8a6","#f59e0b","#3b82f6","#ef4444","#8b5cf6","#10b981","#ec4899","#0ea5e9"];
     setCfgTrafico(p=>{
       const list = Array.isArray(p.etiquetas_catalogo)?p.etiquetas_catalogo:[];
       return {...p, etiquetas_catalogo:[...list,{nombre:"",color:palette[list.length%palette.length],auto_match:""}]};
@@ -380,7 +380,7 @@ export default function Empresa() {
     try {
       const seen = new Set();
       const etiquetasLimpias = (Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[])
-        .map(e=>({nombre:String(e?.nombre||"").trim(), color:e?.color||"var(--accent-l)", auto_match:String(e?.auto_match||"").trim().toLowerCase()}))
+        .map(e=>({nombre:String(e?.nombre||"").trim(), color:e?.color||"#14b8a6", auto_match:String(e?.auto_match||"").trim().toLowerCase()}))
         .filter(e=>{ const k=e.nombre.toLowerCase(); if(!e.nombre||seen.has(k)) return false; seen.add(k); return true; });
       const next = {...cfgTrafico,etiquetas_catalogo:etiquetasLimpias,paises_trabajo:getEnabledEuropeCountries({cfg_trafico:cfgTrafico})};
       await setConfigTrafico(next);
@@ -2867,7 +2867,7 @@ export default function Empresa() {
             <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:12}}>
               {(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).map((et,idx)=>(
                 <div key={idx} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:9,padding:"8px 10px"}}>
-                  <input type="color" value={et.color||"var(--accent-l)"} onChange={e=>updateEtiquetaTrafico(idx,{color:e.target.value})} title="Color" style={{width:34,height:30,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
+                  <input type="color" value={et.color||"#14b8a6"} onChange={e=>updateEtiquetaTrafico(idx,{color:e.target.value})} title="Color" style={{width:34,height:30,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
                   <input value={et.nombre||""} onChange={e=>updateEtiquetaTrafico(idx,{nombre:e.target.value})} placeholder="Nombre (Bañera, Salida...)" style={{flex:"1 1 150px",minWidth:120,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
                   <input value={et.auto_match||""} onChange={e=>updateEtiquetaTrafico(idx,{auto_match:e.target.value})} placeholder="Auto por vehículo (opcional): bañera, lona..." style={{flex:"2 1 220px",minWidth:160,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
                   <button type="button" onClick={()=>removeEtiquetaTrafico(idx)} title="Eliminar" style={{width:30,height:30,borderRadius:7,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.1)",color:"#ef4444",fontSize:13,fontWeight:900,cursor:"pointer"}}>✕</button>

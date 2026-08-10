@@ -193,7 +193,7 @@ function buscarTarifaRutaPedido(pedido, rutas = []) {
 const EC = {
   en_curso:   { label:"En Curso",   color:"#f97316", bg:"rgba(249,115,22,.18)",  border:"rgba(249,115,22,.5)"  },
   espera_carga: { label:"Espera carga", color:"#eab308", bg:"rgba(234,179,8,.16)", border:"rgba(234,179,8,.45)" },
-  cargando: { label:"Cargando", color:"#14b8a6", bg:"rgba(20,184,166,.16)", border:"rgba(20,184,166,.45)" },
+  cargando: { label:"Cargando", color:"var(--accent-l)", bg:"var(--accent-a16)", border:"var(--accent-a45)" },
   espera_descarga: { label:"Espera descarga", color:"#d946ef", bg:"rgba(217,70,239,.16)", border:"rgba(217,70,239,.45)" },
   descarga: { label:"En descarga", color:"#a78bfa", bg:"rgba(167,139,250,.16)", border:"rgba(167,139,250,.45)" },
   confirmado: { label:"Confirmado", color:"#3b82f6", bg:"rgba(59,130,246,.18)",  border:"rgba(59,130,246,.5)"  },
@@ -799,13 +799,13 @@ function printRoutePlan(plan) {
 <style>
 body{font-family:Segoe UI,Arial,sans-serif;background:#f1f5f9;color:#111827;margin:0;padding:24px}
 .sheet{max-width:780px;margin:0 auto;background:#fff;border:1px solid #dbe3ef;border-radius:16px;padding:28px;box-shadow:0 24px 70px rgba(15,23,42,.12)}
-.top{border-left:5px solid #0f766e;padding-left:14px;margin-bottom:22px}
+.top{border-left:5px solid var(--accent);padding-left:14px;margin-bottom:22px}
 h1{font-size:25px;margin:0;color:#0f172a}.muted{color:#64748b;font-size:12px;margin-top:4px}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
 .kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:11px}.lbl{font-size:10px;color:#64748b;text-transform:uppercase;font-weight:800;letter-spacing:.06em}.val{font-size:17px;font-weight:900;margin-top:4px}
 ol{padding-left:22px}li{margin-bottom:12px}li div{font-weight:800;margin-top:2px}small{display:block;color:#64748b;margin-top:2px}
 .box{border:1px solid #dbeafe;background:#eff6ff;border-radius:12px;padding:13px 16px;margin-top:16px}.warn{border-color:#fde68a;background:#fffbeb}
-a{color:#0f766e;word-break:break-all}@media print{@page{margin:1.05cm;size:A4}body{background:#fff;padding:0}.sheet{border:0;box-shadow:none;border-radius:0}}
+a{color:var(--accent);word-break:break-all}@media print{@page{margin:1.05cm;size:A4}body{background:#fff;padding:0}.sheet{border:0;box-shadow:none;border-radius:0}}
 </style></head><body><main class="sheet">
 <div class="top"><h1>Ruta recomendada para camion</h1><div class="muted">Pedido ${htmlSafe(plan.pedido.numero || "")} - ${htmlSafe(plan.modoLabel)}</div></div>
 <div class="grid">
@@ -950,7 +950,7 @@ function TripCard({
         </div>
       )}
       {String(pedido.tipo_viaje || "normal") !== "normal" && (
-        <div title={pedido.viaje_enlazado_id ? "Viaje enlazado ida-retorno" : "Tipo de viaje"} style={{display:"inline-flex",marginBottom:3,marginLeft:pedido.pendiente_completar ? 4 : 0,padding:"1px 5px",borderRadius:3,background:"rgba(20,184,166,.10)",border:"1px solid rgba(20,184,166,.28)",color:"var(--accent-xl)",fontSize:9,fontWeight:900}}>
+        <div title={pedido.viaje_enlazado_id ? "Viaje enlazado ida-retorno" : "Tipo de viaje"} style={{display:"inline-flex",marginBottom:3,marginLeft:pedido.pendiente_completar ? 4 : 0,padding:"1px 5px",borderRadius:3,background:"var(--accent-a10)",border:"1px solid var(--accent-a28)",color:"var(--accent-xl)",fontSize:9,fontWeight:900}}>
           {tipoViajeLabel(pedido.tipo_viaje)}
         </div>
       )}
@@ -1581,7 +1581,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
                   {isControlTowerFocus ? (focusContext.title || focusContext.action || "Aviso de Control Tower") : "Abierto desde Pedidos"}
                 </div>
                 {isControlTowerFocus && focusContext.action && (
-                  <div style={{display:"inline-flex",marginTop:5,padding:"2px 8px",borderRadius:20,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",fontSize:10,fontWeight:900}}>
+                  <div style={{display:"inline-flex",marginTop:5,padding:"2px 8px",borderRadius:20,border:"1px solid var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-xl)",fontSize:10,fontWeight:900}}>
                     Accion elegida: {focusContext.action}
                   </div>
                 )}
@@ -1672,7 +1672,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
         </div>
 
         {!finanzasModal.sinPrecio && (
-          <div style={{background:finanzasModal.margen < 0 ? "rgba(239,68,68,.08)" : "rgba(20,184,166,.08)",border:`1px solid ${finanzasModal.margen < 0 ? "rgba(239,68,68,.28)" : "rgba(20,184,166,.24)"}`,borderRadius:10,padding:"10px 12px",marginBottom:14}}>
+          <div style={{background:finanzasModal.margen < 0 ? "rgba(239,68,68,.08)" : "var(--accent-a08)",border:`1px solid ${finanzasModal.margen < 0 ? "rgba(239,68,68,.28)" : "var(--accent-a24)"}`,borderRadius:10,padding:"10px 12px",marginBottom:14}}>
             <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:finanzasModal.margen < 0 ? "#ef4444" : "var(--accent-xl)",marginBottom:8}}>Rentabilidad</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
               {[
@@ -1815,8 +1815,8 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
           </div>
         )}
         <div style={{
-          background:"rgba(20,184,166,.08)",
-          border:"1px solid rgba(20,184,166,.24)",
+          background:"var(--accent-a08)",
+          border:"1px solid var(--accent-a24)",
           borderRadius:8,
           padding:"10px 12px",
           marginBottom:12
@@ -1828,7 +1828,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
                 Enlaza una salida con su retorno para calcular km en vacio, km cargados y precio total.
               </div>
             </div>
-            <span style={{fontSize:10,fontWeight:900,color:"var(--accent-xl)",border:"1px solid rgba(20,184,166,.30)",borderRadius:20,padding:"3px 8px"}}>
+            <span style={{fontSize:10,fontWeight:900,color:"var(--accent-xl)",border:"1px solid var(--accent-a30)",borderRadius:20,padding:"3px 8px"}}>
               {tipoViajeLabel(form.tipo_viaje || pedido.tipo_viaje)}
             </span>
           </div>
@@ -1882,7 +1882,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
                 {calculandoKmVacio && <div style={{fontSize:10,color:"var(--text4)",marginTop:3}}>Calculando km en vacio...</div>}
               </div>
               <button type="button" onClick={enlazarRetornoSeleccionado} disabled={bloquear || enlazandoRetorno || !linkRetornoId}
-                style={{padding:"8px 12px",borderRadius:7,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.14)",color:"var(--accent-xl)",fontWeight:900,fontSize:11,cursor:bloquear||enlazandoRetorno||!linkRetornoId?"not-allowed":"pointer",opacity:(bloquear || enlazandoRetorno || !linkRetornoId) ? .55 : 1}}>
+                style={{padding:"8px 12px",borderRadius:7,border:"1px solid var(--accent-a30)",background:"var(--accent-a14)",color:"var(--accent-xl)",fontWeight:900,fontSize:11,cursor:bloquear||enlazandoRetorno||!linkRetornoId?"not-allowed":"pointer",opacity:(bloquear || enlazandoRetorno || !linkRetornoId) ? .55 : 1}}>
                 {enlazandoRetorno ? "Enlazando..." : "Enlazar"}
               </button>
             </div>
@@ -2207,7 +2207,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
             const stops = pedidoRouteStops(p);
             return (
               <button key={p.id} onClick={()=>setSelectedId(p.id)}
-                style={{...card,textAlign:"left",cursor:"pointer",borderColor:active?"var(--accent)":"var(--border)",background:active?"rgba(20,184,166,.08)":"var(--bg2)"}}>
+                style={{...card,textAlign:"left",cursor:"pointer",borderColor:active?"var(--accent)":"var(--border)",background:active?"var(--accent-a08)":"var(--bg2)"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
                   <div style={{fontWeight:900,color:"var(--text)",fontSize:13}}>{p.numero || "Pedido"}</div>
                   <div style={{fontSize:11,color:"var(--text5)"}}>{Number(p.km_ruta||p.km||0) ? `${Number(p.km_ruta||p.km).toLocaleString("es-ES")} km` : "km pendiente"}</div>
@@ -2281,7 +2281,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {plan.stops.map((s, idx)=>(
                     <div key={`${s.address}-${idx}`} style={{display:"grid",gridTemplateColumns:"34px 1fr",gap:10,alignItems:"start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:10}}>
-                      <div style={{height:28,width:28,borderRadius:6,background:idx===0?"#0f766e":idx===plan.stops.length-1?"#f97316":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>{idx+1}</div>
+                      <div style={{height:28,width:28,borderRadius:6,background:idx===0?"var(--accent)":idx===plan.stops.length-1?"#f97316":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>{idx+1}</div>
                       <div>
                         <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase"}}>{s.type}</div>
                         <div style={{fontSize:13,color:"var(--text)",fontWeight:900,marginTop:2}}>{s.name || s.address}</div>
@@ -2303,7 +2303,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                 </div>
                 {puedeEnviarRuta && (
                   <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>
-                    <button style={{...btn,borderColor:"rgba(20,184,166,.35)",background:"rgba(20,184,166,.10)",color:"#14b8a6"}} onClick={()=>enviarRuta("chofer_app")} disabled={sendLoading==="chofer_app" || !selected?.chofer_id}>
+                    <button style={{...btn,borderColor:"var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-l)"}} onClick={()=>enviarRuta("chofer_app")} disabled={sendLoading==="chofer_app" || !selected?.chofer_id}>
                       {sendLoading==="chofer_app" ? "Enviando..." : selected?.chofer_id ? "Enviar a app del chofer" : "Asigna chofer para enviar a app"}
                     </button>
                     <button style={btn} onClick={()=>enviarRuta("chofer")} disabled={sendLoading==="chofer"}>{sendLoading==="chofer" ? "Enviando..." : "Enviar por email al chofer"}</button>
@@ -2328,7 +2328,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                 <div style={{background:"rgba(245,158,11,.1)",border:"1px solid rgba(245,158,11,.35)",borderRadius:8,padding:12,color:"var(--text3)",fontSize:12,lineHeight:1.55,marginBottom:10}}>
                   Revisar antes de salir: galibo, MMA, restricciones urbanas, ADR si aplica, accesos a muelle, horario de carga/descarga y zonas de espera.
                 </div>
-                <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.25)",borderRadius:8,padding:12}}>
+                <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a25)",borderRadius:8,padding:12}}>
                   <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",marginBottom:6}}>Recomendaciones</div>
                   <ul style={{margin:"0 0 0 18px",padding:0,color:"var(--text3)",fontSize:12,lineHeight:1.65}}>
                     {plan.recomendaciones.map((r,i)=><li key={i}>{r}</li>)}
@@ -2433,11 +2433,11 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
         <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
           <button onClick={()=>onPreferencia("rapida")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa rapida</button>
           <button onClick={()=>onPreferencia("eficiente")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa eficiente</button>
-          <button disabled={!hasCoords} style={{padding:"5px 9px",borderRadius:6,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.1)",color:"#14b8a6",fontSize:11,fontWeight:900,cursor:hasCoords?"default":"not-allowed",opacity:hasCoords?1:.55}}>Mapa real</button>
+          <button disabled={!hasCoords} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-l)",fontSize:11,fontWeight:900,cursor:hasCoords?"default":"not-allowed",opacity:hasCoords?1:.55}}>Mapa real</button>
         </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:hasCoords ? "1fr 1fr" : "1fr",gap:10}}>
-        <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"radial-gradient(circle at 20% 20%, rgba(20,184,166,.14), transparent 26%), linear-gradient(135deg, rgba(15,23,42,.88), rgba(30,41,59,.64))"}}>
+        <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"radial-gradient(circle at 20% 20%, var(--accent-a14), transparent 26%), linear-gradient(135deg, rgba(15,23,42,.88), rgba(30,41,59,.64))"}}>
           <svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",height:"100%",display:"block",minHeight:310}}>
             {[0,1,2,3,4].map(i => <line key={`v${i}`} x1={pad+i*(w-pad*2)/4} x2={pad+i*(w-pad*2)/4} y1={pad} y2={h-pad} stroke="rgba(148,163,184,.12)" strokeWidth="1"/>)}
             {[0,1,2,3].map(i => <line key={`h${i}`} y1={pad+i*(h-pad*2)/3} y2={pad+i*(h-pad*2)/3} x1={pad} x2={w-pad} stroke="rgba(148,163,184,.12)" strokeWidth="1"/>)}
@@ -2445,7 +2445,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
             <path d={path} fill="none" stroke="#14b8a6" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
             {svgPts.map((p, idx) => (
               <g key={idx}>
-                <circle cx={p.x} cy={p.y} r="14" fill={idx===0?"#0f766e":idx===svgPts.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
+                <circle cx={p.x} cy={p.y} r="14" fill={idx===0?"var(--accent)":idx===svgPts.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
                 <text x={p.x} y={p.y+4} textAnchor="middle" fontSize="11" fontWeight="900" fill="#fff">{idx+1}</text>
               </g>
             ))}
@@ -2454,7 +2454,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
         {embeddedMap && (
           <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"var(--bg3)"}}>
             {!embeddedMap.tiles.length && (
-              <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 22% 20%, rgba(20,184,166,.12), transparent 28%), linear-gradient(135deg, rgba(226,245,241,.9), rgba(239,246,255,.92))"}} />
+              <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 22% 20%, var(--accent-a12), transparent 28%), linear-gradient(135deg, rgba(226,245,241,.9), rgba(239,246,255,.92))"}} />
             )}
             {embeddedMap.tiles.map(tile => (
               <img key={tile.key} src={tile.url} alt="" draggable="false" style={{position:"absolute",left:tile.left,top:tile.top,width:256,height:256,userSelect:"none",pointerEvents:"none"}} />
@@ -2464,7 +2464,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
               <path d={embeddedPath} fill="none" stroke="#0f766e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
               {embeddedMap.projected.map((p, idx) => (
                 <g key={idx}>
-                  <circle cx={p.x} cy={p.y} r="13" fill={idx===0?"#0f766e":idx===embeddedMap.projected.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
+                  <circle cx={p.x} cy={p.y} r="13" fill={idx===0?"var(--accent)":idx===embeddedMap.projected.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
                   <text x={p.x} y={p.y+4} textAnchor="middle" fontSize="11" fontWeight="900" fill="#fff">{idx+1}</text>
                 </g>
               ))}
@@ -2478,7 +2478,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
         {stops.map((s, idx)=>(
           <div key={`${s.address}-${idx}`} style={{display:"flex",alignItems:"center",gap:6,border:"1px solid var(--border)",borderRadius:7,padding:"5px 8px",fontSize:11,color:"var(--text4)",background:"var(--bg4)",maxWidth:260}}>
-            <span style={{width:18,height:18,borderRadius:5,background:idx===0?"#0f766e":idx===stops.length-1?"#f97316":"#3b82f6",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",flexShrink:0}}>{idx+1}</span>
+            <span style={{width:18,height:18,borderRadius:5,background:idx===0?"var(--accent)":idx===stops.length-1?"#f97316":"#3b82f6",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",flexShrink:0}}>{idx+1}</span>
             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.address}</span>
           </div>
         ))}
@@ -4998,7 +4998,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                             const ok = await copyTextToClipboard(buildChoferCopyData(chofer, v));
                             notify(ok ? "Datos del chofer copiados." : "No se pudieron copiar los datos del chofer.", ok ? "success" : "error");
                           }}
-                          style={{marginLeft:"auto",padding:"2px 6px",borderRadius:5,border:"1px solid rgba(20,184,166,.25)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",fontSize:10,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+                          style={{marginLeft:"auto",padding:"2px 6px",borderRadius:5,border:"1px solid var(--accent-a25)",background:"var(--accent-a10)",color:"var(--accent-xl)",fontSize:10,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
                         >
                           Copiar
                         </button>
@@ -5095,7 +5095,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                               padding:trips.length ? "4px 6px" : "9px 6px",
                               borderRadius:7,
                               border:"1px dashed var(--border2)",
-                              background:trips.length ? "rgba(20,184,166,.06)" : "transparent",
+                              background:trips.length ? "var(--accent-a06)" : "transparent",
                               color:trips.length ? "var(--accent-xl)" : "var(--text5)",
                               fontSize:trips.length ? 10 : 11,
                               fontWeight:800,
@@ -5181,7 +5181,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
             </div>
 
             {viajesYaCargadosEnCelda.length > 0 && (
-              <div style={{ border:"1px solid rgba(20,184,166,.24)", background:"rgba(20,184,166,.07)", borderRadius:10, padding:10, marginBottom:12 }}>
+              <div style={{ border:"1px solid var(--accent-a24)", background:"var(--accent-a07)", borderRadius:10, padding:10, marginBottom:12 }}>
                 <div style={{ fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:".07em", color:"var(--accent-xl)", marginBottom:7 }}>
                   Viajes ya cargados en esta matricula
                 </div>
@@ -5236,8 +5236,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                       onClick={() => setAddTripExistingId(p.id)}
                       style={{
                         textAlign:"left",
-                        border:`1px solid ${String(addTripExistingId) === String(p.id) ? "rgba(20,184,166,.45)" : "var(--border2)"}`,
-                        background:String(addTripExistingId) === String(p.id) ? "rgba(20,184,166,.10)" : "var(--bg3)",
+                        border:`1px solid ${String(addTripExistingId) === String(p.id) ? "var(--accent-a45)" : "var(--border2)"}`,
+                        background:String(addTripExistingId) === String(p.id) ? "var(--accent-a10)" : "var(--bg3)",
                         borderRadius:8,
                         padding:"8px 10px",
                         cursor:"pointer",
@@ -5263,7 +5263,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
               <button type="button" onClick={() => setAddTripCell(null)} disabled={addTripSaving} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid var(--border2)", background:"var(--bg4)", color:"var(--text3)", fontWeight:800, fontSize:12, cursor:addTripSaving ? "not-allowed" : "pointer", fontFamily:"'DM Sans',sans-serif" }}>
                 Cancelar
               </button>
-              <button type="button" onClick={asignarViajeExistenteACelda} disabled={addTripSaving || !addTripExistingId} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid rgba(20,184,166,.35)", background:addTripExistingId ? "var(--accent)" : "var(--bg4)", color:addTripExistingId ? "#fff" : "var(--text5)", fontWeight:900, fontSize:12, cursor:addTripSaving || !addTripExistingId ? "not-allowed" : "pointer", fontFamily:"'DM Sans',sans-serif", opacity:addTripSaving ? .7 : 1 }}>
+              <button type="button" onClick={asignarViajeExistenteACelda} disabled={addTripSaving || !addTripExistingId} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid var(--accent-a35)", background:addTripExistingId ? "var(--accent)" : "var(--bg4)", color:addTripExistingId ? "#fff" : "var(--text5)", fontWeight:900, fontSize:12, cursor:addTripSaving || !addTripExistingId ? "not-allowed" : "pointer", fontFamily:"'DM Sans',sans-serif", opacity:addTripSaving ? .7 : 1 }}>
                 {addTripSaving ? "Anadiendo..." : "Anadir existente"}
               </button>
             </div>
@@ -5634,7 +5634,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                 <span style={{fontSize:11,color:"var(--text5)",marginLeft:4}}>{peds.length} pedido{peds.length!==1?"s":""} - {Number(kgTotal).toLocaleString("es-ES")} kg - {Number(impTotal).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span>
                 <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
                   <button onClick={()=>{ setAsignaGid(asignaGid===gid?"":gid); setAsignaMat(veh?.matricula||primerPed?.matricula_manual||""); setAsignaChofer(primerPed?.chofer_id||""); }} disabled={trabajandoGrupaje}
-                    style={{padding:"3px 10px",borderRadius:5,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.12)",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                    style={{padding:"3px 10px",borderRadius:5,border:"1px solid var(--accent-a35)",background:"var(--accent-a12)",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer"}}>
                     Asignar matricula
                   </button>
                   {esGrupoReal && (
@@ -5686,7 +5686,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                   </div>
                   <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                     <button onClick={()=>asignarMatriculaGrupaje(gid)} disabled={trabajandoGrupaje}
-                      style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.14)",color:"var(--accent)",fontWeight:800,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
+                      style={{padding:"6px 12px",borderRadius:7,border:"1px solid var(--accent-a35)",background:"var(--accent-a14)",color:"var(--accent)",fontWeight:800,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
                       {trabajandoGrupaje ? "Asignando..." : `Asignar a ${peds.length} pedido/s`}
                     </button>
                     <span style={{fontSize:10,color:"var(--text5)"}}>{asignaColab ? "Se asigna como colaborador (subcontrata). El precio pactado se completa en el pedido." : "Si la matricula no es de la flota, se guarda como matricula a mano."}</span>

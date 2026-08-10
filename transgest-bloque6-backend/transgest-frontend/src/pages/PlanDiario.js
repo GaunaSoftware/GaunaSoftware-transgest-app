@@ -498,8 +498,8 @@ export default function PlanDiario() {
                     <td
                       style={{
                         ...S.td,
-                        background: dragOverRow === String(row.id) ? "rgba(20,184,166,.08)" : S.td.background,
-                        outline: dragOverRow === String(row.id) ? "2px dashed rgba(20,184,166,.35)" : "none",
+                        background: dragOverRow === String(row.id) ? "var(--accent-a08)" : S.td.background,
+                        outline: dragOverRow === String(row.id) ? "2px dashed var(--accent-a35)" : "none",
                         outlineOffset:-4,
                       }}
                       onDragOver={e => { e.preventDefault(); setDragOverRow(String(row.id)); }}

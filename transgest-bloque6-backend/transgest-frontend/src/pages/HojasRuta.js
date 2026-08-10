@@ -549,7 +549,7 @@ export default function HojasRuta(){
                   <div style={{fontSize:15,fontWeight:900,color:"var(--accent-xl)"}}>{chofer.nombre} {chofer.apellidos||""}</div>
                   <div style={{fontSize:13,color:"var(--text5)",marginTop:3}}>{choferExt.salario_base?"Salario: "+fmt2(choferExt.salario_base)+" EUR":"Sin salario base"}{choferExt.incentivo_pct?" - Incentivo: "+choferExt.incentivo_pct+"%":""}</div>
                 </div>
-                <button onClick={()=>setModalChofer(true)} style={{...S.btn,background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.20)",color:"var(--accent-xl)",fontSize:12}}>Config.</button>
+                <button onClick={()=>setModalChofer(true)} style={{...S.btn,background:"var(--accent-a08)",border:"1px solid var(--accent-a20)",color:"var(--accent-xl)",fontSize:12}}>Config.</button>
               </div>
             )}
           </div>
@@ -574,13 +574,13 @@ export default function HojasRuta(){
                     <tr key={l}><td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{l}</td><td style={{...S.td,color:"var(--text5)",fontSize:11}}>{d}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{v} EUR</td></tr>
                   ))}
                   <tr style={{background:"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"#ef4444"}} colSpan={2}>TOTAL COSTES</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:15,color:"#ef4444"}}>{fmt2(hoja.totalCostes)} EUR</td></tr>
-                  <tr style={{background:hoja.margen>=0?"linear-gradient(90deg, rgba(20,184,166,.12), rgba(20,184,166,.05))":"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"var(--accent-xl)"}} colSpan={2}>MARGEN BRUTO</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:16,color:hoja.margen>=0?"var(--accent-xl)":"#ef4444"}}>{fmt2(hoja.margen)} EUR</td></tr>
+                  <tr style={{background:hoja.margen>=0?"linear-gradient(90deg, var(--accent-a12), var(--accent-a05))":"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"var(--accent-xl)"}} colSpan={2}>MARGEN BRUTO</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:16,color:hoja.margen>=0?"var(--accent-xl)":"#ef4444"}}>{fmt2(hoja.margen)} EUR</td></tr>
                 </tbody></table>
               </div>
               <div style={{...S.card,padding:"20px 24px"}}>
                 <div style={{fontWeight:900,fontSize:13,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".04em",marginBottom:14}}>Viajes del periodo ({hoja.viajes})</div>
                 {hoja.pedVeh.length===0?(<div style={{padding:"32px 20px",textAlign:"center",color:"var(--text5)",display:"flex",alignItems:"center",justifyContent:"center",gap:20}}>
-                  <div style={{width:58,height:58,borderRadius:"50%",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center"}}><RouteSheetIcon icon="doc" /></div>
+                  <div style={{width:58,height:58,borderRadius:"50%",background:"var(--accent-a10)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center"}}><RouteSheetIcon icon="doc" /></div>
                   <div style={{textAlign:"left"}}><div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>Sin viajes en este periodo</div><div style={{fontSize:11,marginTop:4}}>Aun no se han registrado viajes en el rango de fechas seleccionado.</div></div>
                 </div>):(
                   <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>N</th><th style={S.th}>Fecha</th><th style={S.th}>Origen / Destino</th><th style={S.th}>Cliente</th><th style={S.th}>Km</th><th style={S.th}>Km vacio</th><th style={S.th}>Importe</th></tr></thead><tbody>

@@ -77,7 +77,7 @@ export default function Contabilidad() {
         </p>
         {state.status === "loading" && (
           <div style={{ height:4, borderRadius:99, overflow:"hidden", background:"#edf2f7" }}>
-            <div style={{ width:"45%", height:"100%", background:"#0f766e" }} />
+            <div style={{ width:"45%", height:"100%", background:"var(--accent)" }} />
           </div>
         )}
         {state.status !== "loading" && (
@@ -86,7 +86,7 @@ export default function Contabilidad() {
               <a
                 href={state.launchUrl}
                 style={{
-                  border:"1px solid #0f766e", background:"#0f766e", color:"#fff",
+                  border:"1px solid var(--accent)", background:"var(--accent)", color:"#fff",
                   borderRadius:6, padding:"10px 14px", fontWeight:800, cursor:"pointer",
                   textDecoration:"none",
                 }}

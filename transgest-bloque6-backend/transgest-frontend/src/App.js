@@ -133,7 +133,7 @@ function LaunchSplash({ rol = "" }) {
               {messages[step] || messages[0]}...
             </div>
             <div style={{width:160,height:3,borderRadius:999,background:"rgba(204,251,241,.16)",overflow:"hidden"}}>
-              <div style={{width:`${(step + 1) * 34}%`,height:"100%",borderRadius:999,background:"#14b8a6",transition:"width .45s ease"}} />
+              <div style={{width:`${(step + 1) * 34}%`,height:"100%",borderRadius:999,background:"var(--accent-l)",transition:"width .45s ease"}} />
             </div>
           </div>
         </div>
@@ -755,7 +755,7 @@ function GlobalGuidedModulePanel({ mission, onClose, onOpenModule }) {
   return (
     <>
     <style>{`
-      .tg-guided-module-panel { position:fixed; right:18px; bottom:18px; z-index:9300; width:min(380px,calc(100vw - 36px)); background:var(--bg2); border:1px solid rgba(20,184,166,.34); border-radius:10px; box-shadow:0 20px 55px rgba(0,0,0,.28); padding:14px; font-family:'DM Sans',sans-serif; }
+      .tg-guided-module-panel { position:fixed; right:18px; bottom:18px; z-index:9300; width:min(380px,calc(100vw - 36px)); background:var(--bg2); border:1px solid var(--accent-a34); border-radius:10px; box-shadow:0 20px 55px rgba(0,0,0,.28); padding:14px; font-family:'DM Sans',sans-serif; }
       .tg-guided-steps { display:grid; gap:6px; }
       @media (max-width: 640px) {
         .tg-guided-module-panel { left:0 !important; right:0 !important; bottom:0 !important; width:100vw !important; max-width:100vw !important; max-height:48dvh !important; overflow:auto !important; border-radius:14px 14px 0 0 !important; padding:12px 14px 16px !important; }
@@ -765,11 +765,11 @@ function GlobalGuidedModulePanel({ mission, onClose, onOpenModule }) {
       }
     `}</style>
     {targetRect && (
-      <div aria-hidden="true" style={{position:"fixed",zIndex:9290,top:targetRect.top,left:targetRect.left,width:targetRect.width,height:targetRect.height,border:"2px solid var(--accent)",borderRadius:10,boxShadow:"0 0 0 9999px rgba(2,6,23,.32), 0 0 0 6px rgba(20,184,166,.18)",pointerEvents:"none",transition:"all .18s ease"}} />
+      <div aria-hidden="true" style={{position:"fixed",zIndex:9290,top:targetRect.top,left:targetRect.left,width:targetRect.width,height:targetRect.height,border:"2px solid var(--accent)",borderRadius:10,boxShadow:"0 0 0 9999px rgba(2,6,23,.32), 0 0 0 6px var(--accent-a18)",pointerEvents:"none",transition:"all .18s ease"}} />
     )}
     <div className="tg-guided-module-panel">
       <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
-        <div style={{width:34,height:34,borderRadius:9,background:complete?"rgba(16,185,129,.16)":"rgba(20,184,166,.14)",color:complete?"#10b981":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>
+        <div style={{width:34,height:34,borderRadius:9,background:complete?"rgba(16,185,129,.16)":"var(--accent-a14)",color:complete?"#10b981":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>
           {complete ? "OK" : step + 1}
         </div>
         <div style={{flex:1,minWidth:0}}>
@@ -791,7 +791,7 @@ function GlobalGuidedModulePanel({ mission, onClose, onOpenModule }) {
           const done = idx < step;
           const isCurrent = idx === step && !complete;
           return (
-            <div key={title} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 8px",borderRadius:7,border:`1px solid ${isCurrent ? "rgba(20,184,166,.32)" : "var(--border)"}`,background:isCurrent ? "rgba(20,184,166,.08)" : "transparent"}}>
+            <div key={title} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 8px",borderRadius:7,border:`1px solid ${isCurrent ? "var(--accent-a32)" : "var(--border)"}`,background:isCurrent ? "var(--accent-a08)" : "transparent"}}>
               <span style={{width:18,height:18,borderRadius:999,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,background:done?"rgba(16,185,129,.16)":"var(--bg4)",color:done?"#10b981":"var(--text5)"}}>{done ? "✓" : ""}</span>
               <span style={{fontSize:11,fontWeight:850,color:done?"#10b981":"var(--text3)"}}>{title}</span>
             </div>
@@ -1038,7 +1038,7 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
               <div style={{display:"grid",gap:6,justifyItems:"center",padding:"6px 4px 2px"}}>
                 <button
                   onClick={() => setVisibleCount(count => Math.min(items.length, count + pageSize))}
-                  style={{padding:"7px 12px",borderRadius:8,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.10)",color:"#0f766e",fontSize:11,fontWeight:900,cursor:"pointer"}}
+                  style={{padding:"7px 12px",borderRadius:8,border:"1px solid var(--accent-a28)",background:"var(--accent-a10)",color:"var(--accent)",fontSize:11,fontWeight:900,cursor:"pointer"}}
                 >
                   {"Cargar m\u00e1s avisos"}
                 </button>
@@ -1113,7 +1113,7 @@ function StartupTasksPanel({ data, onClose, onOpenAgenda, onComplete, onSnooze }
   if (!data?.visible) return null;
   const sections = [
     ["pasadas", "Pasadas", data.pasadas || [], "#ef4444"],
-    ["hoy", "Hoy", data.hoy || [], "#0f766e"],
+    ["hoy", "Hoy", data.hoy || [], "var(--accent)"],
     ["manana", "Mañana", data.manana || [], "#f59e0b"],
   ].filter(([, , items]) => items.length);
   if (!sections.length) return null;
@@ -1996,7 +1996,7 @@ function AccountingLaunchRoute() {
           <button
             type="button"
             onClick={() => window.location.replace("/")}
-            style={{border:"1px solid #0f766e",background:"#0f766e",color:"#fff",borderRadius:6,padding:"10px 14px",fontWeight:800,cursor:"pointer"}}
+            style={{border:"1px solid var(--accent)",background:"var(--accent)",color:"#fff",borderRadius:6,padding:"10px 14px",fontWeight:800,cursor:"pointer"}}
           >
             Volver a TransGest
           </button>

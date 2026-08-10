@@ -54,8 +54,8 @@ function FinanceIcon({ icon = "wallet" }) {
 }
 
 function FinanceKpi({ label, value, color, icon }) {
-  const softBg = String(color).startsWith("#") ? `${color}12` : "rgba(20,184,166,.10)";
-  const softBorder = String(color).startsWith("#") ? `${color}22` : "rgba(20,184,166,.22)";
+  const softBg = String(color).startsWith("#") ? `${color}12` : "var(--accent-a10)";
+  const softBorder = String(color).startsWith("#") ? `${color}22` : "var(--accent-a22)";
   return (
     <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"26px 28px",display:"flex",alignItems:"center",gap:20,minHeight:106,boxShadow:"0 12px 34px rgba(15,23,42,.05)"}}>
       <div style={{width:58,height:58,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",color,background:softBg,border:`1px solid ${softBorder}`,flexShrink:0}}>
@@ -2736,7 +2736,7 @@ export default function Facturacion() {
     <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",marginBottom:24}}>
         <div style={{display:"flex",gap:18,alignItems:"flex-start"}}>
-          <div style={{width:46,height:46,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"rgba(20,184,166,.10)",border:"1px solid rgba(20,184,166,.20)",color:"var(--accent-xl)",flexShrink:0}}>
+          <div style={{width:46,height:46,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"var(--accent-a10)",border:"1px solid var(--accent-a20)",color:"var(--accent-xl)",flexShrink:0}}>
             <FinanceIcon icon="wallet" />
           </div>
           <div>
@@ -2747,14 +2747,14 @@ export default function Facturacion() {
       </div>
 
       {focusFactura?.source === "control_tower" && !focusFactura?.factura_id && (
-        <div style={{...S.card,marginBottom:14,borderColor:"rgba(20,184,166,.35)",background:"rgba(20,184,166,.07)"}}>
+        <div style={{...S.card,marginBottom:14,borderColor:"var(--accent-a35)",background:"var(--accent-a07)"}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
             <div style={{flex:"1 1 320px"}}>
               <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--accent-xl)",marginBottom:5}}>Control Tower</div>
               <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>{focusFactura.title || focusFactura.action || "Accion financiera pendiente"}</div>
               <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.4}}>{focusFactura.description || "Revisa esta senal desde facturacion."}</div>
             </div>
-            <span style={{fontSize:11,fontWeight:900,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",borderRadius:20,padding:"4px 9px"}}>
+            <span style={{fontSize:11,fontWeight:900,border:"1px solid var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-xl)",borderRadius:20,padding:"4px 9px"}}>
               {focusFactura.action || focusFactura.action_key || "Revisar"}
             </span>
           </div>
@@ -2771,7 +2771,7 @@ export default function Facturacion() {
         ].map((k,i)=><FinanceKpi key={i} label={k.l} value={k.v} color={k.c} icon={k.icon} />)}
       </div>
 
-      <div style={{...S.card,marginBottom:22,borderColor:"rgba(20,184,166,.24)",background:"linear-gradient(135deg, rgba(20,184,166,.07), var(--card-bg))"}}>
+      <div style={{...S.card,marginBottom:22,borderColor:"var(--accent-a24)",background:"linear-gradient(135deg, var(--accent-a07), var(--card-bg))"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
           <div>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"var(--text)"}}>Resumen general financiero</div>

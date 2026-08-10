@@ -4,7 +4,7 @@ import { resolveApiBase } from "../utils/serverConfig";
 const BASE = resolveApiBase();
 
 const REGISTRO_PLANES = [
-  { id:"lite",        nombre:"Lite",        precio:49,  veh:"DCD", usr:"2", color:"#0f766e",
+  { id:"lite",        nombre:"Lite",        precio:49,  veh:"DCD", usr:"2", color:"var(--accent)",
     features:["App chofer","Clientes, rutas y pedidos","DCD con QR"] },
   { id:"basico",      nombre:"Basico",      precio:99,  veh:"Ilimitados", usr:"ilimitados", color:"#6b7280",
     features:["Vehiculos ilimitados","Usuarios ilimitados","Pedidos y trafico","Facturacion operativa"] },

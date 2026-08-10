@@ -425,8 +425,8 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
 
   const chip = (label, value, tone, icon) => (
     <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:9,padding:"15px 18px",display:"flex",alignItems:"center",gap:14,minHeight:62,boxShadow:"var(--shadow-sm)"}}>
-      <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:`${tone || "#0f766e"}14`,color:tone || "#0f766e",flexShrink:0}}>
-        <UiIcon name={icon} color={tone || "#0f766e"} size={23} />
+      <div style={{width:42,height:42,borderRadius:10,display:"grid",placeItems:"center",background:`${tone || "var(--accent)"}14`,color:tone || "var(--accent)",flexShrink:0}}>
+        <UiIcon name={icon} color={tone || "var(--accent)"} size={23} />
       </div>
       <div>
         <div style={{fontSize:10,color:"var(--text4)",fontWeight:900,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</div>
@@ -439,7 +439,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
     <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"24px 26px",marginBottom:18,boxShadow:"var(--shadow-sm)"}}>
       <div style={{display:"flex",gap:18,alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",marginBottom:18}}>
         <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
-          <div style={{width:50,height:50,borderRadius:12,display:"grid",placeItems:"center",background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",boxShadow:"0 14px 28px rgba(15,118,110,.22)"}}>
+          <div style={{width:50,height:50,borderRadius:12,display:"grid",placeItems:"center",background:"linear-gradient(135deg,var(--accent),#0d9488)",color:"#fff",boxShadow:"0 14px 28px rgba(15,118,110,.22)"}}>
             <UiIcon name="pin" color="#fff" size={26} />
           </div>
           <div>
@@ -473,7 +473,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
               Pegar listado
             </button>
           )}
-          <button onClick={()=>setOpen(o=>!o)} style={{...S.btn,background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",border:"1px solid #0f766e"}}>
+          <button onClick={()=>setOpen(o=>!o)} style={{...S.btn,background:"linear-gradient(135deg,var(--accent),#0d9488)",color:"#fff",border:"1px solid var(--accent)"}}>
             {open ? "Cerrar enlaces" : "Gestionar enlaces"}
           </button>
         </div>
@@ -501,11 +501,11 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(185px,1fr))",gap:12,marginTop:12}}>
         {chip("Vehiculos", status?.counts?.activos ?? vehiculos.length, "#475569", "truck")}
         {chip("Enlazados", status?.counts?.enlazados ?? mapped, "#10b981", "link")}
-        {chip("Pendientes", status?.counts?.pendientes ?? pendientes, (status?.counts?.pendientes ?? pendientes) ? "#0f766e" : "#10b981", "clock")}
-        {chip("Senal reciente", status?.counts?.senal_reciente ?? 0, (status?.counts?.senal_reciente ?? 0) ? "#0f766e" : "#64748b", "signal")}
+        {chip("Pendientes", status?.counts?.pendientes ?? pendientes, (status?.counts?.pendientes ?? pendientes) ? "var(--accent)" : "#10b981", "clock")}
+        {chip("Senal reciente", status?.counts?.senal_reciente ?? 0, (status?.counts?.senal_reciente ?? 0) ? "var(--accent)" : "#64748b", "signal")}
         {chip("Sin senal", status?.counts?.sin_senal_reciente ?? 0, (status?.counts?.sin_senal_reciente ?? 0) ? "#ef4444" : "#10b981", "signalOff")}
         {chip("Nunca recibida", status?.counts?.nunca_senal ?? 0, (status?.counts?.nunca_senal ?? 0) ? "#f97316" : "#10b981", "signalOff")}
-        {chip("Proveedor activo", GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin proveedor", "#0f766e", "database")}
+        {chip("Proveedor activo", GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin proveedor", "var(--accent)", "database")}
       </div>
 
       {(status?.last_position || status?.webhook) && (
@@ -522,7 +522,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
             </div>
           )}
           {status?.webhook && (
-            <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.24)",borderRadius:8,padding:"9px 11px"}}>
+            <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a24)",borderRadius:8,padding:"9px 11px"}}>
               <div style={{fontSize:10,color:"#34d399",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Webhook GPS</div>
               <div style={{fontSize:12,color:"var(--text)",fontWeight:800,marginTop:4}}>
                 {status.webhook.activo ? "Activo" : "Inactivo"} - {status.webhook.token_mask || "sin token"}
@@ -620,7 +620,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
             const dirty = dirtyLinks.some(x => x.v.id === v.id);
             const focused = String(focusGps?.vehiculo_id || "") === String(v.id);
             return (
-              <div id={`gps-link-${v.id}`} key={v.id} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,alignItems:"center",background:focused?"rgba(20,184,166,.10)":"var(--bg3)",border:`1px solid ${focused ? "rgba(20,184,166,.60)" : dirty ? "rgba(16,185,129,.35)" : "var(--border)"}`,boxShadow:focused?"0 0 0 2px rgba(20,184,166,.14)":undefined,borderRadius:8,padding:10}}>
+              <div id={`gps-link-${v.id}`} key={v.id} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,alignItems:"center",background:focused?"var(--accent-a10)":"var(--bg3)",border:`1px solid ${focused ? "var(--accent-a60)" : dirty ? "rgba(16,185,129,.35)" : "var(--border)"}`,boxShadow:focused?"0 0 0 2px var(--accent-a14)":undefined,borderRadius:8,padding:10}}>
                 <div>
                   <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:"var(--accent-xl)",fontSize:13}}>{v.matricula}</div>
                   <div style={{fontSize:11,color:"var(--text4)"}}>
@@ -730,7 +730,7 @@ function TabGpsHistorial({ vehiculo }) {
         <div style={{fontSize:12,fontWeight:800,color:"var(--text3)",textTransform:"uppercase",letterSpacing:".06em"}}>Historial de posiciones</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
           {isMovildata && (
-            <button type="button" onClick={sincronizarMovildataVehiculo} disabled={syncingMovildata || loading} style={{...S.btn,background:"rgba(20,184,166,.12)",color:"#0f766e",border:"1px solid rgba(20,184,166,.28)"}}>
+            <button type="button" onClick={sincronizarMovildataVehiculo} disabled={syncingMovildata || loading} style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a28)"}}>
               {syncingMovildata ? "Sincronizando..." : "Movildata 7 dias"}
             </button>
           )}
@@ -1950,7 +1950,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
             <button key={id}
               onClick={() => { setFiltroTipo(id); setFiltroEstado("todos"); }}
               style={{ ...S.btn,
-                background: filtroTipo===id ? "linear-gradient(135deg,#0f766e,#0d9488)" : "transparent",
+                background: filtroTipo===id ? "linear-gradient(135deg,var(--accent),#0d9488)" : "transparent",
                 color:      filtroTipo===id ? "#fff" : "var(--text3)",
                 border:     "none",
                 padding: "7px 13px", fontSize:12, borderRadius:7, boxShadow:"none",
@@ -1994,7 +1994,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
         {canEdit && (
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginLeft:"auto"}}>
             {filtroTipo !== "remolques" && (
-              <button style={{ ...S.btn, background:"linear-gradient(135deg,#0f766e,#0d9488)", color:"#fff", border:"1px solid #0f766e" }}
+              <button style={{ ...S.btn, background:"linear-gradient(135deg,var(--accent),#0d9488)", color:"#fff", border:"1px solid var(--accent)" }}
                 onClick={() => abrirNuevoVehiculo("Tractora")}>
                 + Nueva tractora
               </button>
@@ -2053,13 +2053,13 @@ export default function Vehiculos({ initialTipo = "todos" }) {
               const esRemolque = esRemolqueVehiculo(v, vehiculos);
               return (
                 <div key={v.id} id={`vehiculo-card-${v.id}`} style={{
-                                          background:String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.10)" : "rgba(255,255,255,.96)",
-                                          border:`1px solid ${String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.65)" : "#dbe5ec"}`,
+                                          background:String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "var(--accent-a10)" : "rgba(255,255,255,.96)",
+                                          border:`1px solid ${String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "var(--accent-a65)" : "#dbe5ec"}`,
                                           borderRadius:12, padding:16,
                                           cursor:"pointer", transition:"border-color .15s, box-shadow .15s", boxShadow:"0 12px 26px rgba(15,23,42,.05)" }}
                   onClick={() => { setEditando(v); setModal(true); }}
                   onMouseEnter={e => e.currentTarget.style.borderColor="var(--accent-l)"}
-                  onMouseLeave={e => e.currentTarget.style.borderColor=String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.65)" : "#dbe5ec"}>
+                  onMouseLeave={e => e.currentTarget.style.borderColor=String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "var(--accent-a65)" : "#dbe5ec"}>
 
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
                     <div>
@@ -2079,7 +2079,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
                     <span style={{ background:"#f1f5f9", padding:"3px 9px", borderRadius:10, border:"1px solid #e2e8f0" }}>
                       {claseCorta(v.clase)}
                     </span>
-                    <span style={{ background:esRemolque?"rgba(139,92,246,.10)":"rgba(20,184,166,.10)", color:esRemolque?"#8b5cf6":"#0f766e", padding:"3px 9px", borderRadius:10, border:`1px solid ${esRemolque?"rgba(139,92,246,.25)":"rgba(20,184,166,.25)"}`, fontWeight:800 }}>
+                    <span style={{ background:esRemolque?"rgba(139,92,246,.10)":"var(--accent-a10)", color:esRemolque?"#8b5cf6":"var(--accent)", padding:"3px 9px", borderRadius:10, border:`1px solid ${esRemolque?"rgba(139,92,246,.25)":"var(--accent-a25)"}`, fontWeight:800 }}>
                       {esRemolque ? "Remolque" : "Tractora"}
                     </span>
                     {!esRemolque && v.combustible && <span style={{ color:"var(--text5)" }}>{v.combustible}</span>}
@@ -2101,7 +2101,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
                         </div>
                       </>
                     ) : (
-                      <div style={{gridColumn:"1/-1",background:v.tractora_id ? "rgba(20,184,166,.08)" : "rgba(245,158,11,.08)",border:`1px solid ${v.tractora_id ? "rgba(20,184,166,.22)" : "rgba(245,158,11,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
+                      <div style={{gridColumn:"1/-1",background:v.tractora_id ? "var(--accent-a08)" : "rgba(245,158,11,.08)",border:`1px solid ${v.tractora_id ? "var(--accent-a22)" : "rgba(245,158,11,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
                         <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Asignacion del remolque</div>
                         <div style={{fontSize:12,fontWeight:800,color:v.tractora_id ? "var(--text)" : "#f59e0b"}}>
                           {v.tractora_matricula ? `${v.tractora_matricula}${v.tractora_chofer_nombre ? ` · ${v.tractora_chofer_nombre}` : ""}` : "Libre / a espera de tractora"}

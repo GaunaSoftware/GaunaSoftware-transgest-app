@@ -14,7 +14,7 @@ const SEV = {
   alta: { label:"Alta", color:"#f97316", bg:"rgba(249,115,22,.08)", border:"rgba(249,115,22,.35)" },
   media: { label:"Media", color:"#f59e0b", bg:"rgba(245,158,11,.08)", border:"rgba(245,158,11,.35)" },
   baja: { label:"Baja", color:"#3b82f6", bg:"rgba(59,130,246,.08)", border:"rgba(59,130,246,.32)" },
-  info: { label:"Info", color:"var(--accent-xl)", bg:"rgba(20,184,166,.09)", border:"rgba(20,184,166,.28)" },
+  info: { label:"Info", color:"var(--accent-xl)", bg:"var(--accent-a09)", border:"var(--accent-a28)" },
 };
 
 const PERIODS = { hoy:"Hoy", "7d":"Proximos 7 dias", mes:"Este mes" };
@@ -131,7 +131,7 @@ function TowerItem({ item }) {
         <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:2}}>
           {item.next_actions.slice(0, 4).map(action=>(
             <button key={action.key || action.label} onClick={()=>abrirAccion(item, action)}
-              style={{fontSize:10,fontWeight:800,border:`1px solid ${action.primary ? "rgba(20,184,166,.35)" : "var(--border)"}`,background:action.primary ? "rgba(20,184,166,.10)" : "var(--bg3)",color:action.primary ? "var(--accent-xl)" : "var(--text4)",borderRadius:20,padding:"3px 8px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              style={{fontSize:10,fontWeight:800,border:`1px solid ${action.primary ? "var(--accent-a35)" : "var(--border)"}`,background:action.primary ? "var(--accent-a10)" : "var(--bg3)",color:action.primary ? "var(--accent-xl)" : "var(--text4)",borderRadius:20,padding:"3px 8px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               {action.label}
             </button>
           ))}
@@ -173,7 +173,7 @@ function MapMovedPanel({ item }) {
         <button
           type="button"
           onClick={() => abrirViajeEnTrafico(item, { action:"Ver mapa del pedido", action_key:"mapa_pedido" })}
-          style={{border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.12)",color:"var(--accent-xl)",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+          style={{border:"1px solid var(--accent-a35)",background:"var(--accent-a12)",color:"var(--accent-xl)",borderRadius:8,padding:"8px 12px",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
         >
           Abrir pedido
         </button>
@@ -198,10 +198,10 @@ function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
               onClick={() => total > 0 && onStatusClick?.(row)}
               disabled={total <= 0}
               style={{
-                border:`1px solid ${selectedKey === row.key ? "rgba(20,184,166,.48)" : "var(--border)"}`,
+                border:`1px solid ${selectedKey === row.key ? "var(--accent-a48)" : "var(--border)"}`,
                 borderRadius:8,
                 padding:"9px 10px",
-                background:selectedKey === row.key ? "rgba(20,184,166,.10)" : "var(--bg3)",
+                background:selectedKey === row.key ? "var(--accent-a10)" : "var(--bg3)",
                 cursor:total > 0 ? "pointer" : "default",
                 textAlign:"left",
                 fontFamily:"'DM Sans',sans-serif",

@@ -110,7 +110,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
           <button style={S.btn} onClick={onClose} disabled={trabajando}>Cancelar</button>
           <button
-            style={{ ...S.btn, background: "var(--accent,#0f766e)", color: "#fff", borderColor: "var(--accent,#0f766e)", opacity: trabajando || (!matricula && !choferId) ? .6 : 1 }}
+            style={{ ...S.btn, background: "var(--accent,var(--accent))", color: "#fff", borderColor: "var(--accent,var(--accent))", opacity: trabajando || (!matricula && !choferId) ? .6 : 1 }}
             onClick={asignar} disabled={trabajando || (!matricula && !choferId)}>
             {trabajando ? "Asignando..." : (esBulk ? `Asignar a ${bulkCount}` : "Asignar")}
           </button>

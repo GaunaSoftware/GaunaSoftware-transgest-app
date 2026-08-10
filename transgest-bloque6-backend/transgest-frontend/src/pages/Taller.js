@@ -299,7 +299,7 @@ function resumenGastoTaller(reparaciones = []) {
   }, { total:0, mes:0, manoObra:0, piezas:0 });
 }
 
-function TallerIcon({ name = "tool", color = "#0f766e", size = 24 }) {
+function TallerIcon({ name = "tool", color = "var(--accent)", size = 24 }) {
   const common = { fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round" };
   const shapes = {
     tool: <path {...common} d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l2.6-2.6a6 6 0 0 1-7.9 7.9l-6.8 6.8a2 2 0 0 1-2.8-2.8l6.8-6.8a6 6 0 0 1 7.9-7.9l-2.8 2.8Z" />,
@@ -1846,16 +1846,16 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
         </select>
         {["diagrama","stock","estadisticas"].map(t=>(
           <button key={t} onClick={()=>setTabN(t)}
-            style={{...btn,background:tabN===t?"linear-gradient(135deg,#0f766e,#0d9488)":"#f1f5f9",color:tabN===t?"#fff":"#64748b",border:"1px solid #dbe5ec"}}>
+            style={{...btn,background:tabN===t?"linear-gradient(135deg,var(--accent),#0d9488)":"#f1f5f9",color:tabN===t?"#fff":"#64748b",border:"1px solid #dbe5ec"}}>
             {t==="diagrama"?"Diagrama":t==="stock"?"Stock":"Estadisticas"}
           </button>
         ))}
-        <button onClick={()=>setModalStock(true)} style={{...btn,background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",border:"1px solid #0f766e",marginLeft:"auto"}}>
+        <button onClick={()=>setModalStock(true)} style={{...btn,background:"linear-gradient(135deg,var(--accent),#0d9488)",color:"#fff",border:"1px solid var(--accent)",marginLeft:"auto"}}>
           + Añadir al stock
         </button>
         {/* Stock badge */}
         <div style={{fontSize:14,color:"#64748b"}}>
-          Stock: <strong style={{color:stock.length>0?"#0f766e":"#ef4444"}}>{stock.reduce((s,x)=>s+x.cantidad,0)} ud.</strong>
+          Stock: <strong style={{color:stock.length>0?"var(--accent)":"#ef4444"}}>{stock.reduce((s,x)=>s+x.cantidad,0)} ud.</strong>
         </div>
       </div>
 
@@ -2666,10 +2666,10 @@ export default function Taller() {
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:18,marginBottom:28}}>
         {[
           {l:"Total intervenciones",  v:taller.reparaciones.length, c:"#0f2a6b", icon:"tool", bg:"#dcfce7"},
-          {l:"Coste este mes",        v:`${fmt2(costoMes)} EUR`,       c:"#0f766e", icon:"money", bg:"#d1fae5", title:`Mano de obra: ${fmt2(gastoTaller.manoObra)} EUR - Piezas: ${fmt2(gastoTaller.piezas)} EUR`},
+          {l:"Coste este mes",        v:`${fmt2(costoMes)} EUR`,       c:"var(--accent)", icon:"money", bg:"#d1fae5", title:`Mano de obra: ${fmt2(gastoTaller.manoObra)} EUR - Piezas: ${fmt2(gastoTaller.piezas)} EUR`},
           ...(vehiculosEnTaller.length>0?[{l:`Lucro cesante (${vehiculosEnTaller.length} veh.)`,v:`${fmt2(lucroTotal)} EUR`,c:"#ef4444",title:"Ingresos perdidos por vehículos en taller"}]:[]),
           {l:"Piezas en stock",       v:stockTotalUnidades,          c:"#7c3aed", icon:"cube", bg:"#ede9fe"},
-          {l:"Stock bajo minimo",     v:stockBajo.length,             c:stockBajo.length>0?"#2563eb":"#0f766e", icon:"layers", bg:"#dbeafe"},
+          {l:"Stock bajo minimo",     v:stockBajo.length,             c:stockBajo.length>0?"#2563eb":"var(--accent)", icon:"layers", bg:"#dbeafe"},
           ...(()=>{
             const cnt = {};
             taller.reparaciones.forEach(r=>{ if(r.vehiculo_matricula) cnt[r.vehiculo_matricula]=(cnt[r.vehiculo_matricula]||0)+1; });
@@ -2698,7 +2698,7 @@ export default function Taller() {
       {/* Tabs */}
       <div style={{display:"flex",gap:20,borderBottom:"1px solid #dbe5ec",marginBottom:16,overflowX:"auto"}}>
         {[["reparaciones","Intervenciones"],[`stock`,`Stock${stockBajo.length>0?` (${stockBajo.length} bajo minimo)`:""}`],["trazabilidad","Trazabilidad piezas"],["neumaticos","Neumaticos"],["proveedores","Talleres / Proveedores"],["avisos_mant","Avisos mantenimiento"],["solicitudes","Solicitudes choferes"],["tareas","Tareas mecanicos"]].map(([id,l])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{...S.tab,borderBottomColor:tab===id?"#0f766e":"transparent",color:tab===id?"#0f766e":"#64748b",padding:"12px 0",fontSize:14,fontWeight:900,whiteSpace:"nowrap"}}>{l}</button>
+          <button key={id} onClick={()=>setTab(id)} style={{...S.tab,borderBottomColor:tab===id?"var(--accent)":"transparent",color:tab===id?"var(--accent)":"#64748b",padding:"12px 0",fontSize:14,fontWeight:900,whiteSpace:"nowrap"}}>{l}</button>
         ))}
       </div>
 

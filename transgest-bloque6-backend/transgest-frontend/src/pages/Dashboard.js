@@ -28,7 +28,7 @@ const ESTADO_PEDIDO = {
   pendiente: { label:"Pendiente", color:"var(--text4)" },
   confirmado: { label:"Confirmado", color:"var(--accent-l)" },
   espera_carga: { label:"Espera carga", color:"#eab308" },
-  cargando: { label:"Cargando", color:"#14b8a6" },
+  cargando: { label:"Cargando", color:"var(--accent-l)" },
   en_curso: { label:"En ruta", color:"#f59e0b" },
   espera_descarga: { label:"Espera descarga", color:"#d946ef" },
   descarga: { label:"En descarga", color:"#a78bfa" },
@@ -327,7 +327,7 @@ function PanelTitle({ icon, title, action }) {
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:14}}>
       <div style={{display:"flex",alignItems:"center",gap:12,minWidth:0}}>
         {icon && (
-          <span style={{width:30,height:30,borderRadius:9,border:"1px solid rgba(15,118,110,.18)",background:"rgba(20,184,166,.07)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,flexShrink:0}}>
+          <span style={{width:30,height:30,borderRadius:9,border:"1px solid rgba(15,118,110,.18)",background:"var(--accent-a07)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,flexShrink:0}}>
             {icon}
           </span>
         )}
@@ -731,8 +731,8 @@ export default function Dashboard() {
                   <DashboardIcon name="euro" size={25} />,
                 ][i]}
                 iconBg={[
-                  "linear-gradient(135deg,#0f766e,#14b8a6)",
-                  "rgba(20,184,166,.22)",
+                  "linear-gradient(135deg,var(--accent),var(--accent-l))",
+                  "var(--accent-a22)",
                   "rgba(245,158,11,.24)",
                   "rgba(249,115,22,.28)",
                 ][i]}
@@ -806,7 +806,7 @@ export default function Dashboard() {
                         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:8}}>
                           {p.quick_actions.slice(0,3).map(action=>(
                             <button key={action.key || action.label} onClick={()=>abrirControlAnalysisAction(p, action)}
-                              style={{fontSize:10,fontWeight:800,border:`1px solid ${action.primary ? "rgba(20,184,166,.35)" : "var(--border)"}`,background:action.primary ? "rgba(20,184,166,.10)" : "var(--bg3)",color:action.primary ? "var(--accent-xl)" : "var(--text4)",borderRadius:20,padding:"2px 7px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                              style={{fontSize:10,fontWeight:800,border:`1px solid ${action.primary ? "var(--accent-a35)" : "var(--border)"}`,background:action.primary ? "var(--accent-a10)" : "var(--bg3)",color:action.primary ? "var(--accent-xl)" : "var(--text4)",borderRadius:20,padding:"2px 7px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                               {action.label}
                             </button>
                           ))}

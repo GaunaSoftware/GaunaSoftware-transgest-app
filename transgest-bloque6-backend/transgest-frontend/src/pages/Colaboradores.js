@@ -1036,7 +1036,7 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
           </button>
         )}
         {canEdit && (
-          <button onClick={crearAccesoOperativo} style={{...S.btn,background:"rgba(15,118,110,.12)",color:"#0f766e",border:"1px solid rgba(15,118,110,.25)"}}>
+          <button onClick={crearAccesoOperativo} style={{...S.btn,background:"rgba(15,118,110,.12)",color:"var(--accent)",border:"1px solid rgba(15,118,110,.25)"}}>
             Acceso operativo
           </button>
         )}

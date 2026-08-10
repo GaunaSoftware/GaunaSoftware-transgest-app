@@ -10,7 +10,7 @@ const EC = {
   pendiente:  { l:"Pendiente",   c:"#9ca3af", bg:"rgba(156,163,175,.15)" },
   confirmado: { l:"Confirmado",  c:"#3b82f6", bg:"rgba(59,130,246,.15)" },
   espera_carga: { l:"Espera carga", c:"#eab308", bg:"rgba(234,179,8,.15)" },
-  cargando: { l:"Cargando", c:"#14b8a6", bg:"rgba(20,184,166,.15)" },
+  cargando: { l:"Cargando", c:"var(--accent-l)", bg:"var(--accent-a15)" },
   en_curso:   { l:"En ruta",     c:"#f97316", bg:"rgba(249,115,22,.15)" },
   espera_descarga: { l:"Espera descarga", c:"#d946ef", bg:"rgba(217,70,239,.15)" },
   descarga:   { l:"Descargando", c:"#a78bfa", bg:"rgba(167,139,250,.15)" },
@@ -1775,7 +1775,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                     </button>
                     <button
                       onClick={verQrDocumentoControl}
-                      style={{gridColumn:"1/-1",padding:"13px",borderRadius:8,border:"1px solid rgba(20,184,166,.38)",background:"rgba(20,184,166,.12)",color:"#2dd4bf",fontSize:13,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      style={{gridColumn:"1/-1",padding:"13px",borderRadius:8,border:"1px solid var(--accent-a38)",background:"var(--accent-a12)",color:"#2dd4bf",fontSize:13,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Ver QR
                     </button>
                     <button
@@ -1970,19 +1970,19 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       {qrVisible&&(
         <div style={{position:"fixed",inset:0,background:"rgba(2,6,23,.96)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
           <div style={{width:"min(390px,94vw)",background:"#fff",color:"#111827",borderRadius:12,padding:18,textAlign:"center",boxShadow:"0 24px 80px rgba(0,0,0,.45)"}}>
-            <div style={{fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"#0f766e",marginBottom:4}}>Documento de control digital</div>
+            <div style={{fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent)",marginBottom:4}}>Documento de control digital</div>
             <div style={{fontSize:18,fontWeight:900,marginBottom:4}}>{pedido.numero || dcd?.referencia_pedido || "Viaje"}</div>
             <div style={{fontSize:11,color:"#64748b",marginBottom:12}}>Muestra este QR para abrir el documento alojado en el servidor.</div>
             {docControl?.qr?.data_url ? (
               <img src={docControl.qr.data_url} alt="QR documento de control" style={{width:"min(300px,78vw)",height:"min(300px,78vw)",objectFit:"contain",border:"1px solid #e5e7eb",borderRadius:8,padding:10,background:"#fff"}}/>
             ) : (
-              <div style={{border:"1px solid #e5e7eb",borderRadius:8,padding:14,fontSize:12,wordBreak:"break-all",color:"#0f766e"}}>
+              <div style={{border:"1px solid #e5e7eb",borderRadius:8,padding:14,fontSize:12,wordBreak:"break-all",color:"var(--accent)"}}>
                 {docControl?.qr?.url || docControlSupportUrl}
               </div>
             )}
             <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:900,marginTop:10,color:"#0f172a"}}>{dcd?.codigo_control || ""}</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:14}}>
-              <button onClick={()=>abrirDocumentoControl(false)} style={{padding:"11px",borderRadius:8,border:"1px solid #99f6e4",background:"#ccfbf1",color:"#0f766e",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Abrir DCD</button>
+              <button onClick={()=>abrirDocumentoControl(false)} style={{padding:"11px",borderRadius:8,border:"1px solid #99f6e4",background:"#ccfbf1",color:"var(--accent)",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Abrir DCD</button>
               <button onClick={()=>setQrVisible(false)} style={{padding:"11px",borderRadius:8,border:"1px solid #cbd5e1",background:"#f8fafc",color:"#334155",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Cerrar</button>
             </div>
           </div>
@@ -2186,7 +2186,7 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
           )}
 
           {capacidades && !capacidades.puede_mecanico && capacidades.puede_taller_externo && (
-            <div style={{padding:"9px 11px",borderRadius:8,background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.22)",color:"#14b8a6",fontSize:12,fontWeight:800,marginBottom:14}}>
+            <div style={{padding:"9px 11px",borderRadius:8,background:"var(--accent-a08)",border:"1px solid var(--accent-a22)",color:"var(--accent-l)",fontSize:12,fontWeight:800,marginBottom:14}}>
               Se enviara a taller externo.
             </div>
           )}
@@ -2277,7 +2277,7 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
                       {estadoMeta.l}
                     </span>
                     {s.canal && (
-                      <span style={{fontSize:10,padding:"3px 8px",borderRadius:10,fontWeight:800,background:"rgba(20,184,166,.12)",color:"#14b8a6"}}>
+                      <span style={{fontSize:10,padding:"3px 8px",borderRadius:10,fontWeight:800,background:"var(--accent-a12)",color:"var(--accent-l)"}}>
                         {s.canal === "taller_externo" ? (s.proveedor_nombre || "Taller") : "Mecanico"}
                       </span>
                     )}
@@ -2987,10 +2987,10 @@ function NuevoViajeChofer({ onCreado }) {
               </div>
               {clientes.slice(0, form.cliente_nombre.trim() ? 8 : 5).map(cliente => (
                 <button key={cliente.id} type="button" onClick={()=>seleccionarCliente(cliente)}
-                  style={{textAlign:"left",padding:"8px 10px",borderRadius:8,border:`1px solid ${form.cliente_id===cliente.id ? "rgba(20,184,166,.45)" : "var(--border2)"}`,background:form.cliente_id===cliente.id ? "rgba(20,184,166,.10)" : "var(--bg3)",color:"var(--text)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  style={{textAlign:"left",padding:"8px 10px",borderRadius:8,border:`1px solid ${form.cliente_id===cliente.id ? "var(--accent-a45)" : "var(--border2)"}`,background:form.cliente_id===cliente.id ? "var(--accent-a10)" : "var(--bg3)",color:"var(--text)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   {cliente.nombre}
                   {cliente.cif ? <span style={{fontWeight:600,color:"var(--text5)"}}> · {cliente.cif}</span> : null}
-                  {Number(cliente.cargas_total || 0) > 0 ? <span style={{fontWeight:700,color:"#14b8a6"}}> · {cliente.cargas_total} cargas</span> : null}
+                  {Number(cliente.cargas_total || 0) > 0 ? <span style={{fontWeight:700,color:"var(--accent-l)"}}> · {cliente.cargas_total} cargas</span> : null}
                 </button>
               ))}
             </div>
@@ -3007,13 +3007,13 @@ function NuevoViajeChofer({ onCreado }) {
           )}
           <input value={form.origen} onChange={e=>set("origen", e.target.value)} placeholder="Origen / punto de carga" style={inputStyle}/>
           {form.cliente_id && (
-            <div style={{display:"grid",gap:7,background:"rgba(20,184,166,.06)",border:"1px solid rgba(20,184,166,.18)",borderRadius:8,padding:9}}>
+            <div style={{display:"grid",gap:7,background:"var(--accent-a06)",border:"1px solid var(--accent-a18)",borderRadius:8,padding:9}}>
               <div style={{fontSize:11,color:"var(--text4)",fontWeight:800}}>
                 {loadingPuntos ? "Cargando puntos de carga..." : puntosCarga.length ? "Puntos de carga del cliente" : "Este cliente no tiene puntos de carga guardados."}
               </div>
               {puntosCarga.slice(0, 6).map(punto => (
                 <button key={punto.id} type="button" onClick={()=>seleccionarPuntoCarga(punto)}
-                  style={{textAlign:"left",padding:"8px 9px",borderRadius:8,border:`1px solid ${String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "rgba(20,184,166,.45)" : "rgba(20,184,166,.18)"}`,background:String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "rgba(20,184,166,.12)" : "var(--bg3)",color:"var(--text)",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  style={{textAlign:"left",padding:"8px 9px",borderRadius:8,border:`1px solid ${String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "var(--accent-a45)" : "var(--accent-a18)"}`,background:String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "var(--accent-a12)" : "var(--bg3)",color:"var(--text)",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   {punto.nombre || punto.direccion}
                   <span style={{display:"block",fontSize:10,fontWeight:700,color:"var(--text5)",marginTop:2}}>{direccionCompletaPuntoChofer(punto) || punto.direccion}</span>
                   {punto.pendiente_revision ? <span style={{display:"inline-block",fontSize:10,fontWeight:900,color:"#f59e0b",marginTop:4}}>Pendiente de revision trafico</span> : null}
@@ -3021,7 +3021,7 @@ function NuevoViajeChofer({ onCreado }) {
               ))}
               {form.origen.trim() && (
                 <button type="button" onClick={crearPuntoCargaPendiente} disabled={creatingPunto}
-                  style={{padding:"10px",borderRadius:8,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#14b8a6",fontSize:12,fontWeight:900,cursor:creatingPunto?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  style={{padding:"10px",borderRadius:8,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",color:"var(--accent-l)",fontSize:12,fontWeight:900,cursor:creatingPunto?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   {creatingPunto ? "Creando punto..." : "Crear punto de carga para revisar"}
                 </button>
               )}
@@ -3049,7 +3049,7 @@ function NuevoViajeChofer({ onCreado }) {
           </div>
           <input value={form.referencia_cliente} onChange={e=>set("referencia_cliente", e.target.value)} placeholder="Referencia cliente" style={inputStyle}/>
           <textarea value={form.notas} onChange={e=>set("notas", e.target.value)} placeholder="Notas" rows={3} style={{...inputStyle,resize:"none"}}/>
-          <button onClick={guardar} disabled={saving} style={{padding:"13px",borderRadius:8,border:"none",background:"#0f766e",color:"#fff",fontSize:13,fontWeight:900,cursor:saving?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          <button onClick={guardar} disabled={saving} style={{padding:"13px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:900,cursor:saving?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
             {saving ? "Creando..." : "Crear viaje y DCD"}
           </button>
         </div>
@@ -3547,12 +3547,12 @@ export default function AppChofer(){
           {routeNotifications.map(n => {
             const rutaUrl = n?.data?.route_url || n?.data?.maps_url || "";
             return (
-              <div key={n.id} style={{background:"rgba(20,184,166,.10)",border:"1px solid rgba(20,184,166,.28)",borderRadius:10,padding:"10px 12px"}}>
+              <div key={n.id} style={{background:"var(--accent-a10)",border:"1px solid var(--accent-a28)",borderRadius:10,padding:"10px 12px"}}>
                 <div style={{fontSize:12,fontWeight:900,color:"#2dd4bf"}}>{n.titulo || "Ruta enviada"}</div>
                 <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.4,marginTop:3}}>{n.mensaje || "Tienes una ruta recomendada pendiente de revisar."}</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,marginTop:9}}>
                   <button onClick={()=>rutaUrl && window.open(rutaUrl, "_blank", "noopener,noreferrer")} disabled={!rutaUrl}
-                    style={{padding:"9px 10px",borderRadius:8,border:"1px solid rgba(20,184,166,.36)",background:rutaUrl ? "#0f766e" : "var(--border2)",color:"#fff",fontSize:12,fontWeight:900,cursor:rutaUrl?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
+                    style={{padding:"9px 10px",borderRadius:8,border:"1px solid var(--accent-a36)",background:rutaUrl ? "var(--accent)" : "var(--border2)",color:"#fff",fontSize:12,fontWeight:900,cursor:rutaUrl?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
                     Abrir ruta
                   </button>
                   <button onClick={()=>marcarRutaNotificacionLeida(n.id)}

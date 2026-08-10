@@ -7,18 +7,18 @@ import { getEmpresaPlanLocal } from "../utils/planFeatures";
 import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
 
 const ROL_LABEL = { gerente:"Gerente", contable:"Contable", trafico:"Tráfico", visualizador:"Visualizador", chofer:"Chófer", cliente:"Cliente" };
-const ROL_COLOR = { gerente:"#0f766e", contable:"#10b981", trafico:"#f97316", visualizador:"#64746f", chofer:"#f97316", cliente:"#14b8a6" };
+const ROL_COLOR = { gerente:"var(--accent)", contable:"#10b981", trafico:"#f97316", visualizador:"#64746f", chofer:"#f97316", cliente:"var(--accent-l)" };
 
 const GRUPO_COLOR = {
-  Principal:     "#0f766e",
-  Operaciones:   "#14b8a6",
-  "Trabajo diario": "#14b8a6",
-  Trafico:       "#14b8a6",
-  Flota:         "#14b8a6",
-  "Flota y almacen": "#14b8a6",
+  Principal:     "var(--accent)",
+  Operaciones:   "var(--accent-l)",
+  "Trabajo diario": "var(--accent-l)",
+  Trafico:       "var(--accent-l)",
+  Flota:         "var(--accent-l)",
+  "Flota y almacen": "var(--accent-l)",
   Finanzas:      "#10b981",
-  Comercial:     "#14b8a6",
-  "Comercial y red": "#14b8a6",
+  Comercial:     "var(--accent-l)",
+  "Comercial y red": "var(--accent-l)",
   "Administracion y finanzas": "#10b981",
   Gestión:       "#6b7280",
   "Gestión documental": "#6b7280",
@@ -38,7 +38,7 @@ const CSS = `
   .tg-nav-item { position:relative; display:flex; align-items:center; gap:10px; padding:9px 12px 9px 14px; margin:2px 10px; border-radius:8px; cursor:pointer; transition:background .12s, color .12s, transform .12s; font-size:13px; color:rgba(255,255,255,.67); font-weight:650; border:1px solid transparent; background:none; width:calc(100% - 20px); text-align:left; }
   .tg-nav-item, .tg-nav-subitem { text-decoration:none; box-sizing:border-box; }
   .tg-nav-item:hover { background:rgba(255,255,255,.07); color:#fff; transform:translateX(2px); }
-  .tg-nav-item.active { background:rgba(20,184,166,.14); color:#fff; border-color:rgba(20,184,166,.22); box-shadow:inset 3px 0 0 var(--accent-l); }
+  .tg-nav-item.active { background:var(--accent-a14); color:#fff; border-color:var(--accent-a22); box-shadow:inset 3px 0 0 var(--accent-l); }
   .tg-nav-item-icon { width:18px; height:18px; flex-shrink:0; display:flex; align-items:center; justify-content:center; opacity:.9; color:var(--accent-xl); }
   .tg-nav-item-label { flex:1; }
   .tg-sidebar.collapsed .tg-brand-wordmark, .tg-sidebar.collapsed .tg-brand-pill, .tg-sidebar.collapsed .tg-nav-group, .tg-sidebar.collapsed .tg-nav-item-label, .tg-sidebar.collapsed .tg-nav-badge, .tg-sidebar.collapsed .tg-nav-chevron, .tg-sidebar.collapsed .tg-nav-sub, .tg-sidebar.collapsed .tg-sidebar-user-copy { display:none !important; }
@@ -55,9 +55,9 @@ const CSS = `
   .tg-nav-sub { overflow:hidden; margin:1px 12px 4px 22px; padding-left:9px; border-left:1px solid rgba(255,255,255,.08); }
   .tg-nav-subitem { display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:7px; cursor:pointer; font-size:12px; color:rgba(255,255,255,.52); font-weight:600; transition:background .12s, color .12s; border:none; background:none; width:100%; text-align:left; }
   .tg-nav-subitem:hover { background:rgba(255,255,255,.06); color:rgba(255,255,255,.82); }
-  .tg-nav-subitem.active { color:var(--accent-xl); background:rgba(20,184,166,.11); }
+  .tg-nav-subitem.active { color:var(--accent-xl); background:var(--accent-a11); }
   .tg-nav-dot { width:5px; height:5px; border-radius:50%; background:var(--border2); flex-shrink:0; transition:background .12s; }
-  .tg-nav-subitem.active .tg-nav-dot { background:var(--accent-l); box-shadow:0 0 6px rgba(20,184,166,.45); }
+  .tg-nav-subitem.active .tg-nav-dot { background:var(--accent-l); box-shadow:0 0 6px var(--accent-a45); }
   .tg-topbar { height:58px; background:var(--topbar-bg); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 20px 0 18px; gap:12px; flex-shrink:0; font-family:'DM Sans',sans-serif; box-shadow:0 8px 24px rgba(10,20,18,.035); backdrop-filter:blur(14px); }
   .tg-sidebar-toggle, .tg-mobile-menu-btn { width:34px; height:34px; border:1px solid var(--border2); border-radius:8px; background:var(--bg2); color:var(--text3); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all .15s; flex-shrink:0; }
   .tg-sidebar-toggle { margin:0 16px 10px; }
@@ -67,7 +67,7 @@ const CSS = `
   .tg-sidebar-backdrop { display:none; }
   .tg-main { margin-left:252px; width:calc(100% - 252px); display:flex; flex-direction:column; height:100vh; overflow:hidden; background:var(--bg); }
   .tg-main.sidebar-collapsed { margin-left:76px; width:calc(100% - 76px); }
-  .tg-content { flex:1; overflow-y:auto; overflow-x:hidden; background:radial-gradient(circle at 14% 0%, rgba(20,184,166,.10), transparent 28%), linear-gradient(180deg,var(--bg),var(--bg3)); display:flex; flex-direction:column; overscroll-behavior:contain; }
+  .tg-content { flex:1; overflow-y:auto; overflow-x:hidden; background:radial-gradient(circle at 14% 0%, var(--accent-a10), transparent 28%), linear-gradient(180deg,var(--bg),var(--bg3)); display:flex; flex-direction:column; overscroll-behavior:contain; }
   .tg-content * { box-sizing:border-box; }
   .tg-content img, .tg-content svg, .tg-content canvas { max-width:100%; }
   .tg-content::-webkit-scrollbar { width:5px; }
@@ -520,7 +520,7 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
         )}
         {showSolicitudesBadge && (
           <span style={{ fontSize:9, fontWeight:900, padding:"2px 6px", borderRadius:20,
-                         background:"rgba(20,184,166,.18)", color:"#5eead4",
+                         background:"var(--accent-a18)", color:"#5eead4",
                          flexShrink:0, animation:"pulse 2s infinite" }}>
             {solicitudesPendientes}
           </span>
@@ -691,7 +691,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
                 width:38,
                 height:38,
                 borderRadius:10,
-                background:"rgba(20,184,166,.18)",
+                background:"var(--accent-a18)",
                 border:"1px solid rgba(94,234,212,.18)",
                 alignItems:"center",
                 justifyContent:"center",
@@ -714,7 +714,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
                 minHeight:24,
                 padding:"0 10px",
                 borderRadius:999,
-                background:"rgba(20,184,166,.14)",
+                background:"var(--accent-a14)",
                 border:"1px solid rgba(94,234,212,.18)",
                 color:"rgba(204,251,241,.9)",
                 fontSize:10,
@@ -771,7 +771,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
             <div style={{ display:"flex", alignItems:"center", gap:9 }}>
               <div style={{
                 width:30, height:30, borderRadius:7, flexShrink:0,
-                background: ROL_COLOR[user?.rol] || "#0f766e",
+                background: ROL_COLOR[user?.rol] || "var(--accent)",
                 display:"flex", alignItems:"center", justifyContent:"center",
                 fontSize:11, fontWeight:800, color:"#fff", fontFamily:"'Syne',sans-serif",
               }}>
@@ -781,7 +781,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
                 <div style={{ fontSize:12, fontWeight:600, color:"#ffffff", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                   {user?.nombre?.split(" ")[0]}
                 </div>
-                <div style={{ fontSize:10, color:ROL_COLOR[user?.rol]||"#14b8a6", fontWeight:700 }}>{ROL_LABEL[user?.rol]}</div>
+                <div style={{ fontSize:10, color:ROL_COLOR[user?.rol]||"var(--accent-l)", fontWeight:700 }}>{ROL_LABEL[user?.rol]}</div>
               </div>
               <button onClick={logout} title="Cerrar sesión"
                 style={{ background:"none", border:"none", padding:4, cursor:"pointer", color:"rgba(255,255,255,0.5)",
@@ -881,7 +881,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
                             borderRadius:7, border:"1px solid var(--border)" }}>
                 <div style={{
                   width:24, height:24, borderRadius:6, flexShrink:0,
-                  background: ROL_COLOR[user?.rol] || "#0f766e",
+                  background: ROL_COLOR[user?.rol] || "var(--accent)",
                   display:"flex", alignItems:"center", justifyContent:"center",
                   fontSize:9, fontWeight:800, color:"#fff", fontFamily:"'Syne',sans-serif",
                 }}>

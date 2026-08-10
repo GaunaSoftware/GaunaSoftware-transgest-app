@@ -763,7 +763,7 @@ const LABEL_ESTADO = {
   descarga:"En descarga", entregado:"Entregado", cancelado:"Cancelado", incidencia:"Incidencia"
 };
 const COLOR_ESTADO = {
-  pendiente:"#fb8c3a", confirmado:"#3b6ef5", espera_carga:"#eab308", cargando:"#14b8a6", en_curso:"#22d3ee", espera_descarga:"#d946ef",
+  pendiente:"#fb8c3a", confirmado:"#3b6ef5", espera_carga:"#eab308", cargando:"var(--accent-l)", en_curso:"#22d3ee", espera_descarga:"#d946ef",
   descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#ef4444", incidencia:"#fbbf24"
 };
 const INCIDENCIA_TIPOS_PEDIDO = [
@@ -1191,8 +1191,8 @@ function etiquetaColorFromCatalog(nombre){
     const cat = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && window.__TMS_EMPRESA_CONFIG.cfg_trafico && window.__TMS_EMPRESA_CONFIG.cfg_trafico.etiquetas_catalogo) || [];
     const key = String(nombre || "").trim().toLowerCase();
     const hit = Array.isArray(cat) ? cat.find(e => String((e && e.nombre) || "").trim().toLowerCase() === key) : null;
-    return (hit && hit.color) || "#14b8a6";
-  } catch { return "#14b8a6"; }
+    return (hit && hit.color) || "var(--accent-l)";
+  } catch { return "var(--accent-l)"; }
 }
 
 function normalizeStrictDateInput(value) {
@@ -3456,7 +3456,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
             <label style={S.label}>ML</label>
             <input type="text" inputMode="decimal" style={inp} value={form.metros_lineales || ""} onChange={f("metros_lineales")} placeholder="Metros lineales"/>
           </div>
-          <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.22)",borderRadius:8,padding:"8px 10px"}}>
+          <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a22)",borderRadius:8,padding:"8px 10px"}}>
             <label style={S.label}>EUR/km venta</label>
             {(() => {
               const eurKm = precioKmPedidoInfo(form);
@@ -4355,7 +4355,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               }}
               style={{
                 background:"var(--bg4)",
-                border:`1px solid ${dragIdx !== null && dragIdx !== i ? "rgba(20,184,166,.38)" : "var(--border2)"}`,
+                border:`1px solid ${dragIdx !== null && dragIdx !== i ? "var(--accent-a38)" : "var(--border2)"}`,
                 borderRadius:8,
                 padding:"8px 12px",
                 display:"flex",
@@ -4471,7 +4471,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{p.nombre || "Punto sin nombre"}</div>
                     <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>{p.direccion || "-"}{p.ciudad ? ` · ${p.ciudad}` : ""}</div>
                     <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
-                      <button type="button" onClick={()=>usarPuntoBuscado(p, "principal")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--accent)",background:"rgba(20,184,166,.08)",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Usar principal</button>
+                      <button type="button" onClick={()=>usarPuntoBuscado(p, "principal")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--accent)",background:"var(--accent-a08)",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Usar principal</button>
                       <button type="button" onClick={()=>usarPuntoBuscado(p, "adicional")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Anadir parada</button>
                     </div>
                   </div>
@@ -4573,7 +4573,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           )}
         </div>
       ) : (
-        <button type="button" onClick={()=>{ setNewStop(s=>({...s, fecha: s.fecha || mainFecha || "", hora: s.hora || mainHora || ""})); setAdding(true); }} style={{padding:"8px 14px",borderRadius:7,border:"1px dashed var(--accent)",background:"rgba(20,184,166,.08)",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer",marginTop:4}}>
+        <button type="button" onClick={()=>{ setNewStop(s=>({...s, fecha: s.fecha || mainFecha || "", hora: s.hora || mainHora || ""})); setAdding(true); }} style={{padding:"8px 14px",borderRadius:7,border:"1px dashed var(--accent)",background:"var(--accent-a08)",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer",marginTop:4}}>
           + Añadir {label}
         </button>
       ))}
@@ -4870,7 +4870,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
 .firma-lbl{font-size:8.5px;font-weight:900;text-transform:uppercase;color:#64748b;letter-spacing:.06em}
 .firma-name{font-size:11px;color:#111827;font-weight:700;margin-top:4px}
 .route-sheet{page-break-before:always;margin-top:24px;padding-top:10px}
-.route-head{border-left:5px solid #0f766e;padding-left:14px;margin-bottom:18px}
+.route-head{border-left:5px solid var(--accent);padding-left:14px;margin-bottom:18px}
 .route-head h2{font-size:24px;color:#0f172a;margin:0 0 4px}
 .route-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;margin:16px 0}
 .route-kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:11px}
@@ -4879,7 +4879,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
 .route-list div{font-size:13px;color:#111827;font-weight:800;margin-top:2px}
 .route-box{border:1px solid #dbeafe;background:#eff6ff;border-radius:12px;padding:12px 14px;margin-top:12px;font-size:11.5px;color:#1f2937}
 .route-warn{border-color:#fde68a;background:#fffbeb;color:#92400e}
-.route-link{color:#0f766e;word-break:break-all;font-weight:700}
+.route-link{color:var(--accent);word-break:break-all;font-weight:700}
 .map-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
 .map-col{display:flex;flex-direction:column;gap:10px}
 .map-col-t{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:#64748b;padding-bottom:2px}
@@ -4920,7 +4920,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
         return `<div class="f"><div class="fl" style="color:${color}">${htmlEscape(label)}</div><div class="fv">${htmlEscape(s.cliente_nombre || stopAddress(s) || "-")}${s.cliente_nombre && stopAddress(s) ? `<div class="map-address">${htmlEscape(stopAddress(s))}</div>` : ""}${meta ? `<div style="font-size:10px;color:#6b7280;margin-top:2px">${htmlEscape(meta)}</div>` : ""}${extra ? `<div style="font-size:10px;color:#6b7280;margin-top:1px">${htmlEscape(extra)}</div>` : ""}${s.notas ? `<div style="font-size:10px;color:#6b7280;margin-top:1px">${htmlEscape(s.notas)}</div>` : ""}</div></div>`;
       };
       return `<div class="g2" style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1">
-        ${cargasAdic.map((s,i)=>row(`Carga adicional ${i+2}`, s, "#0f766e")).join("")}
+        ${cargasAdic.map((s,i)=>row(`Carga adicional ${i+2}`, s, "var(--accent)")).join("")}
         ${descargasAdic.map((s,i)=>row(`Descarga adicional ${i+2}`, s, "#b45309")).join("")}
       </div>`;
     })()}
@@ -5397,7 +5397,7 @@ ${esCol ? `
               {docControl?.documento && (
                 <button
                   onClick={descargarExportDocControl}
-                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.10)",color:"#2dd4bf",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid var(--accent-a28)",background:"var(--accent-a10)",color:"#2dd4bf",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                   Export JSON eFTI/eCMR
                 </button>
               )}
@@ -5467,7 +5467,7 @@ ${esCol ? `
                     )}
                     {docControl.repositorio.export_url && (
                       <button type="button" onClick={()=>window.open(docControl.repositorio.export_url, "_blank", "noopener,noreferrer")}
-                        style={{padding:"6px 10px",borderRadius:7,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.10)",color:"#2dd4bf",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+                        style={{padding:"6px 10px",borderRadius:7,border:"1px solid var(--accent-a28)",background:"var(--accent-a10)",color:"#2dd4bf",fontSize:12,fontWeight:800,cursor:"pointer"}}>
                         Export archivado
                       </button>
                     )}
@@ -5481,7 +5481,7 @@ ${esCol ? `
                 </summary>
                 <div style={{marginTop:10}}>
               {docControlExpediente && (
-                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(20,184,166,.07)",border:"1px solid rgba(20,184,166,.20)",fontSize:12,color:"var(--text3)"}}>
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"var(--accent-a07)",border:"1px solid var(--accent-a20)",fontSize:12,color:"var(--text3)"}}>
                   <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap",marginBottom:8}}>
                     <div>
                       <div style={{fontWeight:900,color:"var(--text)",marginBottom:3}}>Expediente DCD/eCMR</div>
@@ -5540,7 +5540,7 @@ ${esCol ? `
                     <button onClick={descargarPaqueteRegulatorio} style={{border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.10)",color:"var(--accent)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Paquete regulatorio
                     </button>
-                    <button onClick={descargarDossierRegulatorioPdf} style={{border:"1px solid rgba(15,118,110,.30)",background:"rgba(15,118,110,.10)",color:"#0f766e",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    <button onClick={descargarDossierRegulatorioPdf} style={{border:"1px solid rgba(15,118,110,.30)",background:"rgba(15,118,110,.10)",color:"var(--accent)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Dossier PDF
                     </button>
                     {["efti","ecmr","diwass"].map(type => (
@@ -5548,7 +5548,7 @@ ${esCol ? `
                         JSON {type.toUpperCase()}
                       </button>
                     ))}
-                    <button onClick={()=>crearBorradorTransmisionRegulatoria("efti")} style={{border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#0f766e",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    <button onClick={()=>crearBorradorTransmisionRegulatoria("efti")} style={{border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",color:"var(--accent)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Borrador envío eFTI
                     </button>
                   </div>
@@ -6576,7 +6576,7 @@ function pedidoPointTone({ tipo, pedido = {}, pasos = {} }) {
       return { key:"ok", label:"Carga OK", color:"#10b981", bg:"rgba(16,185,129,.17)", border:"rgba(16,185,129,.55)" };
     }
     if (estado === "cargando" || pasos.carga_proceso || pasos.carga_iniciada) {
-      return { key:"activo", label:"En carga", color:"#14b8a6", bg:"rgba(20,184,166,.16)", border:"rgba(20,184,166,.55)" };
+      return { key:"activo", label:"En carga", color:"var(--accent-l)", bg:"var(--accent-a16)", border:"var(--accent-a55)" };
     }
     if (estado === "espera_carga") {
       return { key:"espera", label:"Espera carga", color:"#eab308", bg:"rgba(234,179,8,.16)", border:"rgba(234,179,8,.5)" };
@@ -6640,7 +6640,7 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Ruta operativa</div>
           <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Ruta, paradas y posicion conocida del vehiculo.</div>
         </div>
-        <span style={{fontSize:10,fontWeight:900,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
+        <span style={{fontSize:10,fontWeight:900,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
           {currentLabel}
         </span>
       </div>
@@ -7340,7 +7340,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
               type="button"
               onClick={crearDesdeBusqueda}
               disabled={!pointSearch.trim()}
-              style={{...S.btn,background:pointSearch.trim()?"rgba(20,184,166,.12)":"var(--bg4)",color:pointSearch.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",cursor:pointSearch.trim()?"pointer":"not-allowed"}}
+              style={{...S.btn,background:pointSearch.trim()?"var(--accent-a12)":"var(--bg4)",color:pointSearch.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",cursor:pointSearch.trim()?"pointer":"not-allowed"}}
             >
               Crear desde busqueda
             </button>
@@ -7369,21 +7369,21 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                   <div>
                     <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                       <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{point.nombre || point.direccion}</div>
-                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:scope === "Cliente" ? "rgba(20,184,166,.12)" : "rgba(59,130,246,.12)",color:scope === "Cliente" ? "var(--accent)" : "#60a5fa",border:`1px solid ${scope === "Cliente" ? "rgba(20,184,166,.24)" : "rgba(59,130,246,.24)"}`}}>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:scope === "Cliente" ? "var(--accent-a12)" : "rgba(59,130,246,.12)",color:scope === "Cliente" ? "var(--accent)" : "#60a5fa",border:`1px solid ${scope === "Cliente" ? "var(--accent-a24)" : "rgba(59,130,246,.24)"}`}}>
                         {scope}
                       </span>
                     </div>
                     <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion || puntoLocationLabel(point) || "-"}</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
                       {point.tipo && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(59,130,246,.12)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.22)"}}>{point.tipo}</span>}
-                      {puntoLocationLabel(point) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.22)"}}>{puntoLocationLabel(point)}</span>}
+                      {puntoLocationLabel(point) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a22)"}}>{puntoLocationLabel(point)}</span>}
                       {point.ventana && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)"}}>{point.ventana}</span>}
                       {point.google_maps_url && <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--accent)"}}>Google Maps</a>}
                     </div>
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                     {onSelectPoint && (
-                      <button type="button" onClick={()=>selectPoint(point)} style={{...S.btn,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.28)",padding:"6px 10px"}}>Seleccionar</button>
+                      <button type="button" onClick={()=>selectPoint(point)} style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a28)",padding:"6px 10px"}}>Seleccionar</button>
                     )}
                     <button type="button" onClick={()=>setEditing(point)} style={{...S.btn,background:"transparent",color:"var(--accent)",border:"1px solid var(--border2)",padding:"6px 10px"}}>Editar</button>
                     <button type="button" onClick={()=>removePoint(point)} style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",padding:"6px 10px"}}>Eliminar</button>
@@ -8640,8 +8640,8 @@ useEffect(() => {
                           set.has(nombre)?set.delete(nombre):set.add(nombre);
                           return {...p, etiquetas:[...set]};
                         })}
-                        style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:20,border:`1px solid ${activa?(et.color||"var(--accent)"):"var(--border2)"}`,background:activa?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:activa?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
-                        <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"#14b8a6",display:"inline-block"}}/>
+                        style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:20,border:`1px solid ${activa?(et.color||"var(--accent)"):"var(--border2)"}`,background:activa?`${et.color||"var(--accent-l)"}22`:"var(--bg4)",color:activa?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                        <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"var(--accent-l)",display:"inline-block"}}/>
                         {nombre}
                       </button>
                     );
@@ -9681,8 +9681,8 @@ ${anexosConArchivo.map((a, idx) => `
   .status{display:inline-block;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700}
   .badge-ok{background:#d1fae5;color:#065f46}
   .badge-warn{background:#fef3c7;color:#92400e}
-  .cmr-note{border-color:#0f766e;background:#f0fdfa;margin-bottom:12px}
-  .cmr-note h2{color:#0f766e;border-bottom-color:#0f766e}
+  .cmr-note{border-color:var(--accent);background:#f0fdfa;margin-bottom:12px}
+  .cmr-note h2{color:var(--accent);border-bottom-color:var(--accent)}
   .page-break{break-before:page;page-break-before:always}
   .anexo-box{margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
   .anexo-img{display:block;max-width:100%;max-height:920px;margin:10px auto 0;border:1px solid #ddd;object-fit:contain}
@@ -9880,8 +9880,8 @@ ${anexosHtml}
 
         <div style={O.body}>
           {isCmrInternacional && (
-            <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.24)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
-              <div style={{fontSize:12,fontWeight:800,color:"#0f766e"}}>CMR internacional</div>
+            <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a24)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:800,color:"var(--accent)"}}>CMR internacional</div>
               <div style={{fontSize:11,color:"var(--text3)",marginTop:4}}>
                 Se genera como transporte internacional porque el pais de carga o descarga no es España. Revisa documentos aduaneros e instrucciones antes de imprimir o firmar.
               </div>
@@ -10086,9 +10086,9 @@ function GuidedPedidoTutorialPanel({ active, progress, onStart, onClose }) {
   const current = GUIDED_PEDIDO_STEPS.find(step => !progress?.[step.key]) || GUIDED_PEDIDO_STEPS[GUIDED_PEDIDO_STEPS.length - 1];
   const complete = doneCount === GUIDED_PEDIDO_STEPS.length;
   return (
-    <div style={{position:"fixed",right:18,bottom:18,zIndex:520,width:"min(380px,calc(100vw - 36px))",background:"var(--bg2)",border:"1px solid rgba(20,184,166,.35)",borderRadius:10,boxShadow:"0 20px 55px rgba(0,0,0,.28)",padding:14,fontFamily:"'DM Sans',sans-serif"}}>
+    <div style={{position:"fixed",right:18,bottom:18,zIndex:520,width:"min(380px,calc(100vw - 36px))",background:"var(--bg2)",border:"1px solid var(--accent-a35)",borderRadius:10,boxShadow:"0 20px 55px rgba(0,0,0,.28)",padding:14,fontFamily:"'DM Sans',sans-serif"}}>
       <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
-        <div style={{width:34,height:34,borderRadius:9,background:complete?"rgba(16,185,129,.16)":"rgba(20,184,166,.14)",color:complete?"#10b981":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>
+        <div style={{width:34,height:34,borderRadius:9,background:complete?"rgba(16,185,129,.16)":"var(--accent-a14)",color:complete?"#10b981":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>
           {complete ? "OK" : doneCount + 1}
         </div>
         <div style={{flex:1,minWidth:0}}>
@@ -10110,7 +10110,7 @@ function GuidedPedidoTutorialPanel({ active, progress, onStart, onClose }) {
           const done = !!progress?.[step.key];
           const isCurrent = step.key === current.key && !complete;
           return (
-            <div key={step.key} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 8px",borderRadius:7,border:`1px solid ${isCurrent ? "rgba(20,184,166,.32)" : "var(--border)"}`,background:isCurrent ? "rgba(20,184,166,.08)" : "transparent"}}>
+            <div key={step.key} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 8px",borderRadius:7,border:`1px solid ${isCurrent ? "var(--accent-a32)" : "var(--border)"}`,background:isCurrent ? "var(--accent-a08)" : "transparent"}}>
               <span style={{width:18,height:18,borderRadius:999,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,background:done?"rgba(16,185,129,.16)":"var(--bg4)",color:done?"#10b981":"var(--text5)"}}>{done ? "✓" : ""}</span>
               <span style={{fontSize:11,fontWeight:850,color:done?"#10b981":"var(--text3)"}}>{step.title}</span>
             </div>
@@ -11721,7 +11721,7 @@ export default function Pedidos() {
                       </button>
                       {needsAssignment && (
                       <button onClick={e=>{e.stopPropagation();setQuickAssignPedido(p);}}
-                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(20,184,166,.4)",background:"rgba(20,184,166,.12)",color:"var(--accent)",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--accent-a40)",background:"var(--accent-a12)",color:"var(--accent)",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
                           Asignar
                         </button>
                       )}
@@ -11808,7 +11808,7 @@ export default function Pedidos() {
           <span style={{
             fontSize:11,
             fontWeight:900,
-            color:"#0f766e",
+            color:"var(--accent)",
             background:"rgba(16,185,129,.10)",
             border:"1px solid rgba(16,185,129,.24)",
             borderRadius:999,
@@ -11942,7 +11942,7 @@ export default function Pedidos() {
             <option value="">Chofer (auto del vehiculo)...</option>
             {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
           </select>
-          <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer)} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?"not-allowed":"pointer"}}>
+          <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer)} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a30)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?"not-allowed":"pointer"}}>
             {bulkAssigning ? "Asignando..." : "Asignar"}
           </button>
           {selectedPedidoIds.length >= 2 && (

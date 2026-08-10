@@ -133,7 +133,7 @@ const TIPO_VEHICULO_RUTA = [
   {v:"caja",l:"Caja cerrada"},
   {v:"adr",l:"ADR"},
 ];
-const ESTADO_COLOR = {pendiente:"#fb8c3a",confirmado:"#3b6ef5",espera_carga:"#eab308",cargando:"#14b8a6",en_curso:"#22d3ee",espera_descarga:"#d946ef",descarga:"#a78bfa",entregado:"var(--green)",cancelado:"#f05252",incidencia:"#fbbf24"};
+const ESTADO_COLOR = {pendiente:"#fb8c3a",confirmado:"#3b6ef5",espera_carga:"#eab308",cargando:"var(--accent-l)",en_curso:"#22d3ee",espera_descarga:"#d946ef",descarga:"#a78bfa",entregado:"var(--green)",cancelado:"#f05252",incidencia:"#fbbf24"};
 const LABEL_ESTADO = {pendiente:"Pendiente",confirmado:"Confirmado",espera_carga:"Espera carga",cargando:"Cargando",en_curso:"En curso",espera_descarga:"Espera descarga",descarga:"En descarga",entregado:"Entregado",cancelado:"Cancelado",incidencia:"Incidencia"};
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const GRUPO_COLORES = ["#3b6ef5","#10b981","#f59e0b","#a855f7","#ef4444","#06b6d4","#ec4899","#84cc16"];
@@ -1838,7 +1838,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                   </div>
                 </div>
               ))}
-              <button type="button" style={{...S.btn,width:"100%",justifyContent:"center",marginTop:4,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)"}}
+              <button type="button" style={{...S.btn,width:"100%",justifyContent:"center",marginTop:4,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a30)"}}
                 onClick={()=>copiarAccesoPortal(`Usuario: ${portalCredsModal.usuario?.username || portalCredsModal.usuario?.email || ""}\nContrasena temporal: ${portalCredsModal.password_temporal}`,"Credenciales")}>Copiar todo</button>
               <button type="button" style={{...S.btn,width:"100%",justifyContent:"center",marginTop:10,background:"var(--accent)",color:"#fff"}} onClick={cerrarAccesoPortal}>He guardado la credencial</button>
             </div>

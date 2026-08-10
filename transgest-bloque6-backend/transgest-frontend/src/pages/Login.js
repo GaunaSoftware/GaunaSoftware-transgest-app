@@ -13,14 +13,14 @@ const IS_DEMO = process.env.REACT_APP_DEMO_MODE === "true";
 
 const S = {
   bg: { minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center",
-        background:"var(--bg)", backgroundImage:"radial-gradient(ellipse 62% 48% at 50% -12%, rgba(20,184,166,.20) 0%, transparent 70%), radial-gradient(ellipse 40% 34% at 12% 92%, rgba(245,158,11,.10) 0%, transparent 65%)" },
+        background:"var(--bg)", backgroundImage:"radial-gradient(ellipse 62% 48% at 50% -12%, var(--accent-a20) 0%, transparent 70%), radial-gradient(ellipse 40% 34% at 12% 92%, rgba(245,158,11,.10) 0%, transparent 65%)" },
   card: { width:430, background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:16,
           padding:36, boxShadow:"var(--shadow)", position:"relative", overflow:"hidden" },
   logo: { textAlign:"center", marginBottom:28, display:"flex", flexDirection:"column", alignItems:"center", gap:8 },
   logoBox: { display:"flex", flexDirection:"column", alignItems:"center", gap:12, width:"100%" },
   logoImage: { width:"100%", maxWidth:290, height:"auto", display:"block" },
   companyLogoImage: { width:"100%", maxWidth:230, maxHeight:120, objectFit:"contain", display:"block" },
-  logoEdition: { display:"inline-flex", alignItems:"center", minHeight:28, padding:"0 12px", borderRadius:999, background:"rgba(15,118,110,.12)", color:"#0f766e", fontSize:11, fontWeight:900, letterSpacing:".04em", border:"1px solid rgba(15,118,110,.18)" },
+  logoEdition: { display:"inline-flex", alignItems:"center", minHeight:28, padding:"0 12px", borderRadius:999, background:"rgba(15,118,110,.12)", color:"var(--accent)", fontSize:11, fontWeight:900, letterSpacing:".04em", border:"1px solid rgba(15,118,110,.18)" },
   logoSub:  { fontSize:12, color:"var(--text4)", marginTop:2 },
   err: { background:"rgba(240,82,82,.1)", border:"1px solid rgba(240,82,82,.25)",
          borderRadius:8, padding:"9px 12px", color:"#fca5a5", fontSize:13, marginBottom:14 },

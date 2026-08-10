@@ -297,7 +297,7 @@ export default function Excepciones() {
           <div style={S.sub}>Trabajo pendiente priorizado para que nada importante se quede escondido.</div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
-          <button style={{...S.btn,background:"rgba(20,184,166,.12)",color:"var(--accent-xl)",borderColor:"rgba(20,184,166,.25)"}} onClick={descargarInforme}>
+          <button style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent-xl)",borderColor:"var(--accent-a25)"}} onClick={descargarInforme}>
             Descargar informe
           </button>
           <button style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",borderColor:"rgba(16,185,129,.25)"}} onClick={cargar}>
@@ -323,7 +323,7 @@ export default function Excepciones() {
         ))}
       </div>
 
-      <div style={{...S.card,marginBottom:14,borderColor:"rgba(20,184,166,.24)",background:"linear-gradient(135deg, rgba(20,184,166,.07), var(--card-bg))"}}>
+      <div style={{...S.card,marginBottom:14,borderColor:"var(--accent-a24)",background:"linear-gradient(135deg, var(--accent-a07), var(--card-bg))"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
           <div>
             <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Gestion operativa de excepciones</div>
@@ -475,7 +475,7 @@ export default function Excepciones() {
                     </button>
                   </>
                 ) : (
-                  <button style={{...S.btn,color:"var(--accent-xl)",borderColor:"rgba(20,184,166,.35)",background:"rgba(20,184,166,.1)"}} onClick={()=>actualizar(item, "abierta")}>
+                  <button style={{...S.btn,color:"var(--accent-xl)",borderColor:"var(--accent-a35)",background:"var(--accent-a10)"}} onClick={()=>actualizar(item, "abierta")}>
                     Reabrir
                   </button>
                 )}

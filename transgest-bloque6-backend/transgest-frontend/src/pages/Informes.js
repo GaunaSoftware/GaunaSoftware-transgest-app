@@ -11,7 +11,7 @@ import {
 
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtN = n => Number(n||0).toLocaleString("es-ES");
-const COLORS = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#f97316","#06b6d4","#84cc16","#ec4899","#14b8a6"];
+const COLORS = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#f97316","#06b6d4","#84cc16","#ec4899","var(--accent-l)"];
 
 const S = {
   page:  { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },
@@ -673,7 +673,7 @@ export default function Informes() {
                 ))}
               </div>
 
-              <div style={{...S.card,borderColor:"rgba(20,184,166,.25)",background:"linear-gradient(135deg, rgba(20,184,166,.08), var(--card-bg))"}}>
+              <div style={{...S.card,borderColor:"var(--accent-a25)",background:"linear-gradient(135deg, var(--accent-a08), var(--card-bg))"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
                   <div>
                     <div style={S.sec}>VISION GERENCIA</div>

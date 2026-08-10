@@ -485,7 +485,7 @@ function RutaMapa({ points = [], vehiclePosition = null }) {
               onClick={resetView}
               aria-label="Ajustar a la ruta"
               title="Ajustar a la ruta"
-              style={{ width:32, height:32, border:"1px solid rgba(15,23,42,.16)", background:"rgba(255,255,255,.92)", color:"#0f766e", borderRadius:7, fontSize:14, fontWeight:900, cursor:"pointer", boxShadow:"0 8px 20px rgba(15,23,42,.12)", lineHeight:1 }}
+              style={{ width:32, height:32, border:"1px solid rgba(15,23,42,.16)", background:"rgba(255,255,255,.92)", color:"var(--accent)", borderRadius:7, fontSize:14, fontWeight:900, cursor:"pointer", boxShadow:"0 8px 20px rgba(15,23,42,.12)", lineHeight:1 }}
             >
               &#9635;
             </button>
@@ -499,7 +499,7 @@ function RutaMapa({ points = [], vehiclePosition = null }) {
               onClick={() => setLayer(key)}
               style={{
                 border:"1px solid rgba(15,23,42,.16)",
-                background:layer === key ? "#0f766e" : "rgba(255,255,255,.88)",
+                background:layer === key ? "var(--accent)" : "rgba(255,255,255,.88)",
                 color:layer === key ? "#fff" : "#0f172a",
                 borderRadius:7,
                 padding:"6px 9px",

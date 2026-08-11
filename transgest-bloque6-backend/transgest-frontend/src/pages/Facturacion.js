@@ -3314,7 +3314,7 @@ export default function Facturacion() {
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"10px 14px",borderBottom:"1px solid var(--border)",background:"rgba(245,158,11,.06)"}}>
             <div>
               <div style={{fontWeight:800,color:"var(--text)"}}>Viajes entregados sin facturar</div>
-              <div style={{fontSize:11,color:"var(--text5)"}}>Todos los clientes. Usa "Facturar pedidos de cliente" para emitir.</div>
+              <div style={{fontSize:11,color:"var(--text5)"}}>Todos los clientes y de cualquier fecha (backlog completo, no solo el periodo). Usa "Facturar pedidos de cliente" para emitir.</div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
               <div style={{textAlign:"right"}}>
@@ -3343,6 +3343,12 @@ export default function Facturacion() {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr style={{position:"sticky",bottom:0,background:"var(--bg3)",borderTop:"2px solid rgba(245,158,11,.4)"}}>
+                    <td colSpan={4} style={{...S.td,fontWeight:900,color:"var(--text)",textAlign:"right"}}>TOTAL a facturar ({sinFacturar.length} viaje{sinFacturar.length!==1?"s":""})</td>
+                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:"#f59e0b",textAlign:"right",whiteSpace:"nowrap",fontSize:14}}>{fmt2(sinFacturarTotal)} EUR</td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}

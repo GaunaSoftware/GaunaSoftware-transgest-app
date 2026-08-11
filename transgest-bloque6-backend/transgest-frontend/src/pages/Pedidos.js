@@ -767,6 +767,11 @@ const COLOR_ESTADO = {
   descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#ef4444", incidencia:"#fbbf24"
 };
 const INCIDENCIA_TIPOS_PEDIDO = [
+  { v:"cancelado_cliente", l:"Cancelado por el cliente" },
+  { v:"duplicado", l:"Pedido duplicado" },
+  { v:"error_datos", l:"Error en los datos del pedido" },
+  { v:"no_realizado", l:"Viaje no realizado" },
+  { v:"sin_completar", l:"Sin marcar entregado (plazo superado)" },
   { v:"taller", l:"Camion en taller" },
   { v:"carga", l:"Problema en carga" },
   { v:"descarga", l:"Problema en descarga" },

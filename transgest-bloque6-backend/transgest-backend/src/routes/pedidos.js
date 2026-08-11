@@ -56,6 +56,12 @@ const INCIDENCIA_PEDIDO_TIPOS = {
   trafico: "Trafico",
   paralizacion: "Paralizacion",
   gps: "GPS / localizacion",
+  // Motivos generales/administrativos
+  cancelado_cliente: "Cancelado por el cliente",
+  duplicado: "Pedido duplicado",
+  error_datos: "Error en los datos del pedido",
+  no_realizado: "Viaje no realizado",
+  sin_completar: "Sin marcar entregado (plazo superado)",
   otro: "Otro",
   operativa: "Operativa",
 };
@@ -72,6 +78,11 @@ function normalizePedidoIncidenciaTipo(value) {
   if (["trafico", "planificacion"].includes(raw)) return "trafico";
   if (["paralizacion", "espera"].includes(raw)) return "paralizacion";
   if (["gps", "localizacion", "ubicacion"].includes(raw)) return "gps";
+  if (["cancelado_cliente", "cancelado_por_cliente", "anulado_cliente"].includes(raw)) return "cancelado_cliente";
+  if (["duplicado", "repetido"].includes(raw)) return "duplicado";
+  if (["error_datos", "error_pedido", "datos_erroneos"].includes(raw)) return "error_datos";
+  if (["no_realizado", "no_show", "no_presentado"].includes(raw)) return "no_realizado";
+  if (["sin_completar", "plazo_superado", "entrega_vencida", "vencido_entrega"].includes(raw)) return "sin_completar";
   if (["otro", "otros"].includes(raw)) return "otro";
   return "operativa";
 }
@@ -3027,6 +3038,54 @@ function startAlbaranesReminderScheduler() {
     }, 24 * 60 * 60 * 1000);
     logger.info("[Albaranes] Scheduler iniciado - recordatorios cada 24h");
   }
+}
+
+// Auto-incidencia: si un pedido activo supera su fecha de entrega prevista sin
+// marcarse como entregado (por defecto 2 dias), pasa a estado 'incidencia' con
+// tipo 'sin_completar'. Configurable por empresa en cfg_trafico:
+//   auto_incidencia: "false" para desactivar; auto_incidencia_dias: "1"/"2"/...
+async function procesarPedidosEntregaVencida() {
+  const { rows } = await db.query(`
+    UPDATE pedidos p
+       SET estado='incidencia',
+           incidencia_tipo='sin_completar',
+           incidencia_descripcion=COALESCE(NULLIF(p.incidencia_descripcion,''), 'Sin marcar como entregado: ha superado su fecha de entrega prevista.'),
+           incidencia_origen='automatica',
+           incidencia_creada_at=NOW(),
+           incidencia_automatica=true,
+           notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(p.notas,''), 'INCIDENCIA AUTOMATICA: entrega vencida sin completar'))
+      FROM empresas e
+     WHERE e.id = p.empresa_id
+       AND COALESCE(e.estado,'activo') = 'activo'
+       AND COALESCE(e.cfg_trafico->>'auto_incidencia','true') <> 'false'
+       AND LOWER(COALESCE(p.estado,'')) IN ('pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga')
+       AND COALESCE(p.pendiente_completar,false) = false
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga) IS NOT NULL
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= CURRENT_DATE - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[0-9]+$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 2 END)
+       -- Solo vencidos recientes: evita marcar datos historicos antiguos de golpe.
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date >= CURRENT_DATE - 60
+     RETURNING p.id
+  `).catch(e => { logger.warn("Auto-incidencia por entrega vencida fallo:", e.message); return { rows: [] }; });
+  return { marcados: rows.length };
+}
+
+let pedidosVencidosSchedulerStarted = false;
+function startPedidosVencidosScheduler() {
+  if (pedidosVencidosSchedulerStarted) return;
+  pedidosVencidosSchedulerStarted = true;
+  const run = async () => {
+    const r = await procesarPedidosEntregaVencida();
+    if (r.marcados) logger.info(`[Incidencias] Auto-incidencia entrega vencida: ${r.marcados} pedido(s) marcados`);
+  };
+  try {
+    const cron = require("node-cron");
+    cron.schedule("15 7 * * *", () => { run().catch(e => logger.warn("[Incidencias] Scheduler fallo:", e.message)); }, { timezone: "Europe/Madrid" });
+    logger.info("[Incidencias] Scheduler iniciado - revision diaria de entregas vencidas a las 07:15");
+  } catch (e) {
+    setInterval(() => { run().catch(err => logger.warn("[Incidencias] Scheduler fallo:", err.message)); }, 12 * 60 * 60 * 1000);
+    logger.info("[Incidencias] Scheduler iniciado - revision cada 12h");
+  }
+  setTimeout(() => run().catch(e => logger.warn("[Incidencias] Ejecucion inicial fallo:", e.message)), 30000);
 }
 
 async function createColaboradorToken(pedido, accion, horas = 360) {
@@ -9799,6 +9858,7 @@ table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid
 });
 
 router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
+router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
 
 module.exports = router;

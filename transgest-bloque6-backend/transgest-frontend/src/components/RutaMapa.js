@@ -290,7 +290,9 @@ function RutaMapa({ points = [], vehiclePosition = null }) {
 
   function recalcular() {
     forceRef.current = true;      // fuerza saltar cache y re-geocodificar
-    setRouteState({ key: "", data: null });
+    // No se vacia la ruta actual: se mantiene visible mientras se recalcula para
+    // que el mapa no parpadee ni se re-encuadre (el indicador "Recalculando..."
+    // ya informa de que esta en curso).
     setRetry(value => value + 1);
   }
 
@@ -340,9 +342,13 @@ function RutaMapa({ points = [], vehiclePosition = null }) {
   const displayPoints = useMemo(() => resolvedDisplayPoints(route, routePoints), [route, routePoints]);
   const geometry = useMemo(() => geometryFromRoute(route, displayPoints), [route, displayPoints]);
   const vehicleCoords = useMemo(() => validLatLng(vehiclePosition || {}), [vehiclePosition]);
+  // El encuadre se calcula SOLO con los marcadores (origen, paradas, destino) y la
+  // posicion del vehiculo, NO con la geometria completa de la ruta. Asi, cuando la
+  // ruta se recalcula (refresco), el mapa NO se re-encuadra ni "pega saltos": la
+  // linea de ruta se dibuja dentro del encuadre ya fijado por los puntos.
   const framePoints = useMemo(
-    () => [...displayPoints, ...geometry, ...(vehicleCoords ? [vehicleCoords] : [])],
-    [displayPoints, geometry, vehicleCoords]
+    () => [...displayPoints, ...(vehicleCoords ? [vehicleCoords] : [])],
+    [displayPoints, vehicleCoords]
   );
   const frame = useMemo(() => buildFrame(framePoints, layer, view), [framePoints, layer, view]);
   const routeLine = geometry.map(point => screenPoint(point, frame));

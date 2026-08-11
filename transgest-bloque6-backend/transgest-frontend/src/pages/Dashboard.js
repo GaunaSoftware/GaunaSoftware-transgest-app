@@ -75,7 +75,8 @@ function fechaKpiPedido(p) {
   // el viaje fuera del periodo, aunque se haya entregado hoy.
   const estado = String(p?.estado || "").toLowerCase();
   if (estado === "entregado" || estado === "facturado") {
-    return p?.entregado_at || p?.firma_fecha || p?.fecha_descarga || p?.fecha_carga || p?.fecha_pedido || p?.created_at;
+    // facturacion_mes: mes elegido al entregar fuera de su mes (manda sobre todo).
+    return p?.facturacion_mes || p?.entregado_at || p?.firma_fecha || p?.fecha_descarga || p?.fecha_carga || p?.fecha_pedido || p?.created_at;
   }
   return p?.fecha_descarga || p?.fecha_carga || p?.fecha_pedido || p?.created_at;
 }

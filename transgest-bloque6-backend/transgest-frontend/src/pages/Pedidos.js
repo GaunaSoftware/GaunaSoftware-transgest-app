@@ -10258,6 +10258,7 @@ export default function Pedidos() {
   }
   const [whatsappSending, setWhatsappSending] = useState("");
   const [incidenciaSelector, setIncidenciaSelector] = useState(null);
+  const [facturacionMesSelector, setFacturacionMesSelector] = useState(null);
   const delayResolverRef = React.useRef(null);
   const [delayRequest, setDelayRequest] = useState(null);
   const [autoAsignando, setAutoAsignando] = useState(null);  // pedido para autoasignacion IA
@@ -10769,6 +10770,17 @@ export default function Pedidos() {
       setIncidenciaSelector({ pedidoId:id, tipo:"", detalle:"" });
       return;
     }
+    // Entrega fuera de su mes (p. ej. cerrado tarde por incidencia): preguntar si
+    // se factura en el mes actual o en la prevision del mes siguiente.
+    if (estado === "entregado" && !extra.__facturacionResuelta) {
+      const mesRef = String(p?.fecha_descarga || p?.fecha_entrega || p?.fecha_pedido || p?.fecha_carga || "").slice(0, 7);
+      const ahora = new Date();
+      const mesActual = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`;
+      if (mesRef && mesRef < mesActual) {
+        setFacturacionMesSelector({ pedidoId: id, mesRef, mesActual });
+        return;
+      }
+    }
     // Optimistic update - UI responds instantly
     setPedidos(prev => prev.map(x => x.id===id ? {
       ...x,
@@ -10783,6 +10795,7 @@ export default function Pedidos() {
     try {
       const payloadExtra = { ...extra };
       delete payloadExtra.__fromCancelFlow;
+      delete payloadExtra.__facturacionResuelta;
       await cambiarEstadoPedido(id, estado, payloadExtra);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: id, estado, source: "pedidos-estado" } }));
       // No need to full reload - optimistic update is correct
@@ -12597,6 +12610,41 @@ export default function Pedidos() {
           </div>
         </div>
       )}
+
+      {facturacionMesSelector && (() => {
+        const nombreMes = (ym) => { const [y,m]=String(ym||"").slice(0,7).split("-").map(Number); return (y&&m)? new Date(y,m-1,1).toLocaleDateString("es-ES",{month:"long",year:"numeric"}) : String(ym||""); };
+        const [ay,am] = facturacionMesSelector.mesActual.split("-").map(Number);
+        const currFirst = `${facturacionMesSelector.mesActual}-01`;
+        const nd = new Date(ay, am, 1);
+        const nextFirst = `${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,"0")}-01`;
+        const aplicar = (fm) => { const pid = facturacionMesSelector.pedidoId; setFacturacionMesSelector(null); cambiarEstado(pid, "entregado", { __facturacionResuelta:true, facturacion_mes: fm }); };
+        return (
+          <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setFacturacionMesSelector(null)}>
+            <div style={{...S.mbox,width:"min(560px,96vw)"}}>
+              <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:800,color:"var(--text)"}}>Entrega fuera de su mes</div>
+              <div style={{fontSize:13,color:"var(--text4)",marginTop:6,lineHeight:1.6}}>
+                Este viaje corresponde a <b style={{color:"var(--text)"}}>{nombreMes(facturacionMesSelector.mesRef)}</b> pero lo marcas como entregado en <b style={{color:"var(--text)"}}>{nombreMes(facturacionMesSelector.mesActual)}</b>. ¿En qué mes se factura?
+              </div>
+              <div style={{display:"grid",gap:10,marginTop:18}}>
+                <button type="button" onClick={()=>aplicar(currFirst)}
+                  style={{textAlign:"left",padding:"12px 14px",borderRadius:9,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",cursor:"pointer"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"var(--accent-xl)"}}>Facturar en el mes actual ({nombreMes(currFirst)})</div>
+                  <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>Se registra como viaje realizado del mes en curso y se factura este mes.</div>
+                </button>
+                <button type="button" onClick={()=>aplicar(nextFirst)}
+                  style={{textAlign:"left",padding:"12px 14px",borderRadius:9,border:"1px solid var(--border2)",background:"var(--bg3)",cursor:"pointer"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>Previsión del mes siguiente ({nombreMes(nextFirst)})</div>
+                  <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>El mes anterior ya está cerrado: se deja para facturar en la previsión del mes que viene.</div>
+                </button>
+              </div>
+              <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}>
+                <button type="button" onClick={()=>setFacturacionMesSelector(null)}
+                  style={{padding:"8px 14px",borderRadius:8,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:13,cursor:"pointer"}}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {incidenciaSelector && (
         <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setIncidenciaSelector(null)}>

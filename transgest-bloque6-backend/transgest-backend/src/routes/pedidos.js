@@ -8919,6 +8919,17 @@ router.patch("/:id/estado",
       );
     }
 
+    // Mes de facturacion elegido al entregar fuera de su mes (facturar este mes
+    // o dejarlo para la prevision del mes siguiente). Se guarda como el dia 1 del
+    // mes elegido; el dashboard y facturacion lo usan para situar el viaje.
+    if (estado === "entregado" && typeof req.body.facturacion_mes === "string") {
+      const fm = req.body.facturacion_mes.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(fm)) {
+        await db.query("UPDATE pedidos SET facturacion_mes=$1 WHERE id=$2 AND empresa_id=$3", [fm, req.params.id, empresaId])
+          .catch(e => logger.warn("facturacion_mes no guardado:", e.message));
+      }
+    }
+
     if (estado === "descarga" && rows[0].vehiculo_id && rows[0].destino) {
       await db.query(
         "UPDATE vehiculos SET ubicacion_actual=$1, ubicacion_fuente='ultima_descarga', ubicacion_ts=NOW() WHERE id=$2 AND empresa_id=$3",

@@ -393,7 +393,13 @@ export default function Empresa() {
       const etiquetasLimpias = (Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[])
         .map(e=>({nombre:String(e?.nombre||"").trim(), color:e?.color||"#14b8a6", auto_match:String(e?.auto_match||"").trim().toLowerCase()}))
         .filter(e=>{ const k=e.nombre.toLowerCase(); if(!e.nombre||seen.has(k)) return false; seen.add(k); return true; });
-      const next = {...cfgTrafico,etiquetas_catalogo:etiquetasLimpias,paises_trabajo:getEnabledEuropeCountries({cfg_trafico:cfgTrafico})};
+      const numOr = (v, def) => { const n = Number(v); return (v === "" || v == null || !Number.isFinite(n) || n <= 0) ? def : n; };
+      const next = {...cfgTrafico,
+        velocidad_media: numOr(cfgTrafico.velocidad_media, 80),
+        tiempo_descarga: numOr(cfgTrafico.tiempo_descarga, 60),
+        horas_pausa: numOr(cfgTrafico.horas_pausa, 4.5),
+        min_pausa: numOr(cfgTrafico.min_pausa, 45),
+        etiquetas_catalogo:etiquetasLimpias,paises_trabajo:getEnabledEuropeCountries({cfg_trafico:cfgTrafico})};
       await setConfigTrafico(next);
       setCfgTrafico(next);
       if (typeof window !== "undefined") window.__TMS_EMPRESA_CONFIG = {...(window.__TMS_EMPRESA_CONFIG || {}), cfg_trafico:next};
@@ -2802,7 +2808,7 @@ export default function Empresa() {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
             <div><label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10}}>Velocidad media camión (km/h)</label>
               <input type="number" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
-                value={cfgTrafico.velocidad_media||80} onChange={e=>setCfgTrafico(p=>({...p,velocidad_media:Number(e.target.value)}))}/>
+                value={cfgTrafico.velocidad_media ?? ""} placeholder="80" onChange={e=>setCfgTrafico(p=>({...p,velocidad_media: e.target.value === "" ? "" : Number(e.target.value)}))}/>
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 80 km/h</div>
               <div style={{marginTop:8,padding:"9px 11px",background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.15)",borderRadius:8,fontSize:11,color:"var(--text3)",lineHeight:1.45}}>
                 Ejemplo: Madrid->Barcelona (620 km) = 620÷80 = 7,75h + 1 pausa de 45min = <strong>8h 30min</strong> de tránsito
@@ -2810,17 +2816,17 @@ export default function Empresa() {
             </div>
             <div><label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10}}>Tiempo descarga (minutos)</label>
               <input type="number" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
-                value={cfgTrafico.tiempo_descarga||60} onChange={e=>setCfgTrafico(p=>({...p,tiempo_descarga:Number(e.target.value)}))}/>
+                value={cfgTrafico.tiempo_descarga ?? ""} placeholder="60" onChange={e=>setCfgTrafico(p=>({...p,tiempo_descarga: e.target.value === "" ? "" : Number(e.target.value)}))}/>
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 60 min (1 hora)</div>
             </div>
             <div><label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10}}>Pausa obligatoria cada (horas)</label>
               <input type="number" step="0.5" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
-                value={cfgTrafico.horas_pausa||4.5} onChange={e=>setCfgTrafico(p=>({...p,horas_pausa:Number(e.target.value)}))}/>
+                value={cfgTrafico.horas_pausa ?? ""} placeholder="4.5" onChange={e=>setCfgTrafico(p=>({...p,horas_pausa: e.target.value === "" ? "" : Number(e.target.value)}))}/>
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 4,5 h (normativa)</div>
             </div>
             <div><label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10}}>Duración pausa (minutos)</label>
               <input type="number" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
-                value={cfgTrafico.min_pausa||45} onChange={e=>setCfgTrafico(p=>({...p,min_pausa:Number(e.target.value)}))}/>
+                value={cfgTrafico.min_pausa ?? ""} placeholder="45" onChange={e=>setCfgTrafico(p=>({...p,min_pausa: e.target.value === "" ? "" : Number(e.target.value)}))}/>
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 45 min</div>
             </div>
           </div>
@@ -2831,7 +2837,7 @@ export default function Empresa() {
                 <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>Solo los paises activados apareceran en los puntos de carga y descarga de Pedidos.</div>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:["España"]}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Solo Espana</button>
+                <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:["España"]}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Solo España</button>
                 <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:EUROPE_COUNTRIES}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Activar Europa</button>
               </div>
             </div>

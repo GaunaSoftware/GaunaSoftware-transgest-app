@@ -2859,6 +2859,30 @@ export default function Empresa() {
             </span>
           </label>
 
+          <div style={{marginTop:16,padding:"12px 14px",borderRadius:9,border:"1px solid var(--border2)",background:"var(--bg4)"}}>
+            <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+              <input
+                type="checkbox"
+                checked={cfgTrafico.auto_incidencia !== "false" && cfgTrafico.auto_incidencia !== false}
+                onChange={e=>setCfgTrafico(p=>({...p,auto_incidencia:e.target.checked?"true":"false"}))}
+                style={{marginTop:2,accentColor:"var(--accent)"}}
+              />
+              <span>
+                <span style={{display:"block",fontSize:13,fontWeight:900,color:"var(--text)"}}>Marcar incidencia automatica si vence la entrega</span>
+                <span style={{display:"block",fontSize:11,color:"var(--text4)",marginTop:2}}>Los viajes activos que superen su fecha de entrega prevista sin marcarse como entregados pasan solos a incidencia.</span>
+              </span>
+            </label>
+            {(cfgTrafico.auto_incidencia !== "false" && cfgTrafico.auto_incidencia !== false) && (
+              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,paddingLeft:28}}>
+                <span style={{fontSize:12,color:"var(--text3)"}}>Avisar tras</span>
+                <input type="number" min="1" max="60" value={cfgTrafico.auto_incidencia_dias || 1}
+                  onChange={e=>setCfgTrafico(p=>({...p,auto_incidencia_dias:String(Math.max(1,Math.min(60,Number(e.target.value)||1)))}))}
+                  style={{width:64,padding:"6px 8px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:13,textAlign:"center"}}/>
+                <span style={{fontSize:12,color:"var(--text3)"}}>dia(s) de la fecha de entrega.</span>
+              </div>
+            )}
+          </div>
+
           <div style={{marginTop:20,paddingTop:18,borderTop:"1px solid var(--border2)"}}>
             <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Etiquetas de tráfico (perfiles)</div>
             <div style={{fontSize:11,color:"var(--text4)",marginTop:3,lineHeight:1.5,maxWidth:660}}>

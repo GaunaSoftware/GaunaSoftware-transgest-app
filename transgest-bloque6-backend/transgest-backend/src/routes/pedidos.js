@@ -3041,7 +3041,7 @@ function startAlbaranesReminderScheduler() {
 }
 
 // Auto-incidencia: si un pedido activo supera su fecha de entrega prevista sin
-// marcarse como entregado (por defecto 2 dias), pasa a estado 'incidencia' con
+// marcarse como entregado (por defecto 1 dia), pasa a estado 'incidencia' con
 // tipo 'sin_completar'. Configurable por empresa en cfg_trafico:
 //   auto_incidencia: "false" para desactivar; auto_incidencia_dias: "1"/"2"/...
 async function procesarPedidosEntregaVencida() {
@@ -3061,7 +3061,7 @@ async function procesarPedidosEntregaVencida() {
        AND LOWER(p.estado::text) IN ('pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga')
        AND COALESCE(p.pendiente_completar,false) = false
        AND COALESCE(p.fecha_entrega, p.fecha_descarga) IS NOT NULL
-       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= CURRENT_DATE - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[0-9]+$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 2 END)
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= CURRENT_DATE - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[1-9][0-9]*$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 1 END)
        -- Solo vencidos recientes: evita marcar datos historicos antiguos de golpe.
        AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date >= CURRENT_DATE - 60
      RETURNING p.id

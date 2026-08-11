@@ -34,22 +34,58 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
     return vehiculos.find(v => String(v.matricula || "").toUpperCase() === m) || null;
   }, [matricula, vehiculos]);
 
+  const matriculaVehiculo = (id) => {
+    const v = vehiculos.find(x => String(x.id) === String(id));
+    return v?.matricula ? formatMatricula(v.matricula) : "";
+  };
+
+  // Al poner la tractora: si tiene conjunto (remolque/chofer), se rellenan solos.
+  function onMatriculaChange(raw) {
+    const val = formatMatricula(raw);
+    setMatricula(val);
+    const veh = vehiculos.find(v => String(v.matricula || "").toUpperCase() === val.trim().toUpperCase());
+    if (!veh) return;
+    if (veh.remolque_id) {
+      const rem = matriculaVehiculo(veh.remolque_id);
+      if (rem) setRemolque(rem);
+    }
+    const choferConjunto = veh.chofer_id || choferes.find(c => String(c.vehiculo_id) === String(veh.id))?.id;
+    if (choferConjunto) setChoferId(choferConjunto);
+  }
+
+  // Al poner el chofer sin tractora: se usan las matriculas de su vehiculo (las del chofer).
+  function onChoferChange(id) {
+    setChoferId(id);
+    if (!id) return;
+    const chofer = choferes.find(c => String(c.id) === String(id));
+    const veh = chofer?.vehiculo_id ? vehiculos.find(v => String(v.id) === String(chofer.vehiculo_id)) : null;
+    if (!veh) return;
+    if (!String(matricula || "").trim()) setMatricula(formatMatricula(veh.matricula || ""));
+    if (!String(remolque || "").trim() && veh.remolque_id) {
+      const rem = matriculaVehiculo(veh.remolque_id);
+      if (rem) setRemolque(rem);
+    }
+  }
+
   async function asignar() {
     const mat = String(matricula || "").trim().toUpperCase();
     const rem = String(remolque || "").trim().toUpperCase();
     if (!mat && !choferId) { return; }
+    const remVeh = rem ? vehiculos.find(v => String(v.matricula || "").toUpperCase() === rem) : null;
     const patch = {};
     if (vehMatch) {
       patch.vehiculo_id = vehMatch.id;
       patch.colaborador_id = "";
       patch.matricula_manual = "";
-      // Conserva el remolque escrito aunque la cabeza sea de la flota.
-      if (rem) patch.remolque_matricula_manual = rem;
     } else if (mat) {
       patch.matricula_manual = mat;
       patch.vehiculo_id = "";
       patch.colaborador_id = "";
-      patch.remolque_matricula_manual = rem;
+    }
+    if (mat || rem) {
+      // Si el remolque es de la flota, se enlaza por id (conjunto); si no, a mano.
+      if (remVeh) { patch.remolque_id_manual = remVeh.id; patch.remolque_matricula_manual = ""; }
+      else { patch.remolque_id_manual = ""; patch.remolque_matricula_manual = rem; }
     }
     if (choferId) patch.chofer_id = choferId;
     else if (vehMatch && vehMatch.chofer_id) patch.chofer_id = vehMatch.chofer_id;
@@ -90,7 +126,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
 
         <label style={S.label}>Matricula (elige de la flota o escribe a mano)</label>
         <input list="tg-quick-tractoras" style={S.input} value={matricula} autoFocus
-          onChange={e => setMatricula(formatMatricula(e.target.value))} placeholder="Ej: 1234-ABC" />
+          onChange={e => onMatriculaChange(e.target.value)} placeholder="Ej: 1234-ABC" />
         {matricula && (
           <div style={{ fontSize: 11, color: vehMatch ? "#10b981" : "var(--text5)", marginTop: 4 }}>
             {vehMatch ? `Vehiculo de la flota: ${vehMatch.matricula}${vehMatch.marca ? ` (${vehMatch.marca})` : ""}` : "Matricula a mano (no esta en la flota)"}
@@ -102,7 +138,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
           onChange={e => setRemolque(formatMatricula(e.target.value))} placeholder="Ej: R-1234-BCD" />
 
         <label style={S.label}>Chofer (opcional)</label>
-        <select style={S.input} value={choferId} onChange={e => setChoferId(e.target.value)}>
+        <select style={S.input} value={choferId} onChange={e => onChoferChange(e.target.value)}>
           <option value="">{vehMatch && vehMatch.chofer_id ? "Auto del vehiculo" : "Sin asignar"}</option>
           {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || ""} {c.apellidos || ""}</option>)}
         </select>

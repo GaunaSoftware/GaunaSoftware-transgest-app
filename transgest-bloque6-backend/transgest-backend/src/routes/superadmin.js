@@ -1749,6 +1749,48 @@ router.delete("/empresas/:id", superAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── DELETE /superadmin/empresas/:id/purgar — BORRADO DEFINITIVO ──────────
+// Elimina la empresa y TODOS sus datos (cascada por empresa_id + barrido). Doble
+// seguridad: debe estar CANCELADA y hay que enviar el nombre exacto para confirmar.
+router.delete("/empresas/:id/purgar", superAuth, async (req, res) => {
+  const empresaId = req.params.id;
+  try {
+    const { rows } = await db.query("SELECT id, nombre, estado FROM empresas WHERE id=$1", [empresaId]);
+    const empresa = rows[0];
+    if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
+    if (String(empresa.estado || "").toLowerCase() !== "cancelado") {
+      return res.status(409).json({ error: "Cancela la empresa antes de eliminarla definitivamente." });
+    }
+    const confirmar = String(req.body?.confirmar_nombre || "").trim();
+    if (confirmar !== String(empresa.nombre || "").trim()) {
+      return res.status(400).json({ error: "El nombre de confirmacion no coincide con el de la empresa." });
+    }
+    // Datos que NO cascadean (FK ON DELETE SET NULL): se purgan antes para que no
+    // queden huerfanos con empresa_id=NULL. Los audit_log se conservan como rastro.
+    for (const t of ["email_log", "password_reset_requests"]) {
+      try { await db.query(`DELETE FROM "${t}" WHERE empresa_id=$1`, [empresaId]); } catch (_) { /* tabla puede no existir */ }
+    }
+    // Borrado principal: la FK ON DELETE CASCADE por empresa_id arrastra ~todas las
+    // tablas (pedidos, clientes, vehiculos, facturas, usuarios, rutas, ...).
+    await db.query("DELETE FROM empresas WHERE id=$1", [empresaId]);
+    // Barrido de seguridad: cualquier tabla con columna empresa_id sin cascada que
+    // aun contenga filas de esta empresa (las SET NULL ya estan a NULL y no casan).
+    const { rows: tbls } = await db.query(
+      "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='empresa_id'"
+    );
+    for (const t of tbls) {
+      const name = String(t.table_name || "");
+      if (!/^[a-z_][a-z0-9_]*$/i.test(name)) continue;
+      try { await db.query(`DELETE FROM "${name}" WHERE empresa_id=$1`, [empresaId]); } catch (_) { /* noop */ }
+    }
+    logger.warn(`Empresa "${empresa.nombre}" (${empresaId}) ELIMINADA DEFINITIVAMENTE con todos sus datos por superadmin ${req.superadmin.email}`);
+    res.json({ ok: true, deleted: empresa.nombre });
+  } catch (e) {
+    logger.error("Error al purgar empresa " + empresaId + ": " + e.message);
+    res.status(500).json({ error: "No se pudo eliminar la empresa: " + e.message });
+  }
+});
+
 // ── POST /superadmin/facturas-suscripcion — Emitir factura a empresa ─────
 router.post("/empresas/:id/impersonar", superAuth, async (req, res) => {
   let { rows } = await db.query(

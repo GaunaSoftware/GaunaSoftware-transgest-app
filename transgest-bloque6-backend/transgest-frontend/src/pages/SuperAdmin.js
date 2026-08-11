@@ -243,7 +243,47 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
     iban_facturacion: empresa.iban_facturacion || "",
   });
   const [loading,setLoading]=useState(false); const [err,setErr]=useState("");
+  const [purgeName,setPurgeName]=useState(""); const [purging,setPurging]=useState(false);
+  const cancelada = String(form.estado||"").toLowerCase()==="cancelado";
   const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+  async function cancelarEmpresa(){
+    const ok = await confirmDialog({
+      title:"Cancelar empresa",
+      message:`${empresa.nombre} dejara de estar disponible: sus usuarios no podran usar el programa. Los datos se conservan hasta que la elimines definitivamente. ¿Continuar?`,
+      confirmText:"Cancelar empresa",
+      tone:"danger",
+    });
+    if(!ok) return;
+    setPurging(true); setErr("");
+    try{
+      await saFetch("/empresas/"+empresa.id,{method:"PATCH",body:{estado:"cancelado"}});
+      setForm(p=>({...p,estado:"cancelado"}));
+      notify("Empresa cancelada. Ya no esta disponible.","success");
+      onGuardado?.();
+    }catch(e){ setErr(e.message||"No se pudo cancelar"); }
+    finally{ setPurging(false); }
+  }
+  async function purgarEmpresa(){
+    if(purgeName.trim()!==String(empresa.nombre||"").trim()){
+      setErr("Escribe el nombre EXACTO de la empresa para confirmar el borrado.");
+      return;
+    }
+    const ok = await confirmDialog({
+      title:"Eliminar definitivamente",
+      message:`Se borrara ${empresa.nombre} y TODOS sus datos (pedidos, clientes, vehiculos, facturas, usuarios...). Esta accion NO se puede deshacer. ¿Eliminar definitivamente?`,
+      confirmText:"Eliminar y borrar datos",
+      tone:"danger",
+    });
+    if(!ok) return;
+    setPurging(true); setErr("");
+    try{
+      await saFetch("/empresas/"+empresa.id+"/purgar",{method:"DELETE",body:{confirmar_nombre:purgeName.trim()}});
+      notify(`Empresa "${empresa.nombre}" eliminada con todos sus datos.`,"success");
+      onGuardado?.();
+      onClose?.();
+    }catch(e){ setErr(e.message||"No se pudo eliminar"); }
+    finally{ setPurging(false); }
+  }
   async function guardar(){
     setLoading(true); setErr("");
     const body = { ...form, fecha_vencimiento: form.fecha_vencimiento || null };
@@ -395,6 +435,33 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
               </button>
             ))}
           </div>
+        </div>
+
+        <div style={{marginTop:18,borderTop:"1px solid rgba(239,68,68,.3)",paddingTop:14}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"#f87171",marginBottom:10}}>
+            Zona de peligro
+          </div>
+          {!cancelada ? (
+            <>
+              <div style={{fontSize:12,color:"#94a3b8",marginBottom:10,lineHeight:1.6}}>
+                Cancela la empresa para que deje de estar disponible (sus usuarios no podran usar el programa). Los datos se conservan; podras eliminarla definitivamente despues.
+              </div>
+              <button onClick={cancelarEmpresa} disabled={purging} style={{...btnExport,background:"rgba(245,158,11,.12)",color:"#fbbf24",border:"1px solid rgba(245,158,11,.35)",fontWeight:700,opacity:purging?0.6:1}}>
+                Cancelar empresa (dejar de estar disponible)
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{fontSize:12,color:"#fca5a5",marginBottom:10,lineHeight:1.6}}>
+                Empresa cancelada. Para <strong>eliminarla y borrar TODOS sus datos</strong> (pedidos, clientes, vehiculos, facturas, usuarios...) de forma <strong>irreversible</strong>, escribe su nombre exacto y confirma.
+              </div>
+              <input value={purgeName} onChange={e=>setPurgeName(e.target.value)} placeholder={empresa.nombre} style={{...inp,marginBottom:8,borderColor:"rgba(239,68,68,.4)"}}/>
+              <button onClick={purgarEmpresa} disabled={purging||purgeName.trim()!==String(empresa.nombre||"").trim()}
+                style={{...btnExport,background:"rgba(239,68,68,.15)",color:"#fca5a5",border:"1px solid rgba(239,68,68,.45)",fontWeight:800,opacity:(purging||purgeName.trim()!==String(empresa.nombre||"").trim())?0.5:1,cursor:(purging||purgeName.trim()!==String(empresa.nombre||"").trim())?"not-allowed":"pointer"}}>
+                {purging?"Eliminando...":"Eliminar definitivamente y borrar datos"}
+              </button>
+            </>
+          )}
         </div>
 
         <div style={{display:"flex",gap:10,marginTop:16,justifyContent:"flex-end"}}>

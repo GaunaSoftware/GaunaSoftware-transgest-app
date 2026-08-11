@@ -2436,7 +2436,7 @@ export default function Empresa() {
             </div>
           </div>
 
-          <div style={S.section}>
+          <div style={{...S.section, ...(esSuperadmin ? {} : {display:"none"})}}>
             <div style={S.secTitle}>Normativa rectificativas (AEAT)</div>
             <div style={{ fontSize:12, color:"var(--text3)", lineHeight:1.7 }}>
               <p style={{ marginBottom:8 }}>Según el <strong style={{ color:"var(--text2)" }}>Art. 15 RD 1619/2012</strong>, es <strong style={{ color:"#f97316" }}>obligatorio</strong> emitir factura rectificativa cuando:</p>

@@ -165,6 +165,11 @@ function esClaseRemolque(clase = "") {
   return c.includes("remolque") || c.includes("semirremolque") || c.includes("dolly");
 }
 
+// Preferencia (por navegador) para ocultar todo lo de GPS en Vehiculos.
+function gpsOculto() {
+  try { return localStorage.getItem("tms_ocultar_gps") === "1"; } catch { return false; }
+}
+
 function marcasPorClase(clase = "") {
   return esClaseRemolque(clase) ? MARCAS_REMOLQUES : MARCAS_TRACTORAS;
 }
@@ -268,7 +273,7 @@ function mergeVehiculoState(rows = [], updated) {
   return current.map(v => String(v.id) === String(updated.id) ? { ...v, ...updated } : v);
 }
 
-function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncProvider, onSync, onReload }) {
+function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncProvider, onSync, onReload, hidden = false }) {
   const [focusGps, setFocusGps] = useState(() => readGpsFocus());
   const [open, setOpen] = useState(() => Boolean(readGpsFocus()));
   const [importOpen, setImportOpen] = useState(false);
@@ -450,6 +455,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
     </div>
   );
 
+  if (hidden) return null;
   return (
     <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"24px 26px",marginBottom:18,boxShadow:"var(--shadow-sm)"}}>
       <div style={{display:"flex",gap:18,alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",marginBottom:18}}>
@@ -1176,7 +1182,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
     { id:"economico",      l:"Compra / Venta" },
     { id:"docs",           l:"Documentacion" },
     { id:"plataformas",    l:"Plataformas" },
-    { id:"gps",            l:"GPS" },
+    ...(gpsOculto() ? [] : [{ id:"gps", l:"GPS" }]),
     { id:"conjunto",       l:"Conjunto / Chofer" },
     ...(editando ? [{ id:"historial", l:"Historial" }] : []),
   ];
@@ -1779,6 +1785,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
   const [editando,  setEditando]  = useState(null);
   const [initialClaseModal, setInitialClaseModal] = useState("Tractora");
   const [filtroTipo,   setFiltroTipo]   = useState(initialTipo || "todos");
+  const [ocultarGps,   setOcultarGps]   = useState(gpsOculto);
   const [filtroEstado, setFiltroEstado] = useState("todos");
   const [gpsSyncing, setGpsSyncing] = useState(false);
   const [gpsProviders, setGpsProviders] = useState([]);
@@ -1968,7 +1975,17 @@ export default function Vehiculos({ initialTipo = "todos" }) {
             ["baja",      "Bajas"],
           ].map(([id, label]) => (
             <button key={id}
-              onClick={() => { setFiltroTipo(id); setFiltroEstado("todos"); }}
+              onClick={() => {
+                setFiltroEstado("todos");
+                // Tractoras/Remolques tienen entrada propia en el menu lateral: se
+                // navega para que el lateral tambien cambie de resaltado. Todos/Bajas
+                // no tienen equivalente, se filtran en local.
+                if (id === "tractoras" || id === "remolques") {
+                  window.dispatchEvent(new CustomEvent("tms:navegar", { detail: `vehiculos_${id}` }));
+                } else {
+                  setFiltroTipo(id);
+                }
+              }}
               style={{ ...S.btn,
                 background: filtroTipo===id ? "linear-gradient(135deg,var(--accent),#0d9488)" : "transparent",
                 color:      filtroTipo===id ? "#fff" : "var(--text3)",
@@ -1979,6 +1996,13 @@ export default function Vehiculos({ initialTipo = "todos" }) {
             </button>
           ))}
         </div>
+
+        <button
+          onClick={() => { const v = !ocultarGps; setOcultarGps(v); try { localStorage.setItem("tms_ocultar_gps", v ? "1" : "0"); } catch {} }}
+          title="Mostrar u ocultar todo lo relativo a GPS (panel y pestana del vehiculo)"
+          style={{ ...S.btn, marginLeft:"auto", background: ocultarGps ? "var(--bg3)" : "var(--accent-a10)", color: ocultarGps ? "var(--text4)" : "var(--accent-xl)", border:`1px solid ${ocultarGps ? "var(--border2)" : "var(--accent-a30)"}`, fontSize:12, padding:"7px 12px" }}>
+          {ocultarGps ? "Mostrar GPS" : "Ocultar GPS"}
+        </button>
 
         {/* Subfiltro estado - separador visual, solo si no es "baja" */}
         {filtroTipo !== "baja" && (
@@ -2040,6 +2064,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
       </div>
 
         <GpsMappingPanel
+          hidden={ocultarGps}
           vehiculos={vehiculosActivos}
           providers={gpsProviders}
           status={gpsStatus}

@@ -3304,7 +3304,7 @@ export default function SuperAdmin(){
                   <thead><tr>
                     <th style={S.th}>Empresa</th><th style={S.th}>Plan</th><th style={S.th}>Estado</th>
                     <th style={S.th}>Pago</th><th style={S.th}>Uso</th><th style={S.th}>Implantacion</th><th style={S.th}>Pedidos</th>
-                    <th style={S.th}>Registro</th><th style={S.th}>Vencimiento</th><th style={S.th}></th>
+                    <th style={S.th}>Registro</th><th style={S.th}>Vencimiento</th><th style={{...S.th,position:"sticky",right:0,background:"var(--sa-panel)",zIndex:3}}>Acciones</th>
                   </tr></thead>
                   <tbody>
                     {empresasFiltradas.map(e=>{
@@ -3349,8 +3349,8 @@ export default function SuperAdmin(){
                               {vencida?"Vencida ":proxima?"Proxima ":""}{e.fecha_vencimiento?fmtDate(e.fecha_vencimiento):"Sin limite"}
                             </span>
                           </td>
-                          <td style={{...S.td,textAlign:"right"}}>
-                            <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                          <td style={{...S.td,textAlign:"right",position:"sticky",right:0,background:"var(--sa-panel)",zIndex:2,boxShadow:"-8px 0 12px -8px rgba(15,23,42,.18)"}}>
+                            <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap",maxWidth:230,marginLeft:"auto"}}>
                               <button onClick={()=>entrarEmpresa(e)} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"#34d399",border:"1px solid rgba(16,185,129,.25)"}}>Entrar</button>
                               <button onClick={()=>resetPasswordEmpresa(e)} style={{...S.btn,background:"rgba(20,184,166,.10)",color:"#5eead4",border:"1px solid rgba(20,184,166,.22)"}}>Clave</button>
                               <button onClick={()=>reinvitarEmpresa(e)} style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#85B7EB",border:"1px solid rgba(59,130,246,.22)"}}>Invitar</button>

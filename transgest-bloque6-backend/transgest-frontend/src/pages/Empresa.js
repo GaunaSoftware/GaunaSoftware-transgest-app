@@ -93,6 +93,17 @@ export default function Empresa() {
   const [logoMime, setLogoMime]     = useState("image/png");
   const [logoUploading, setLogoUploading] = useState(false);
   const esGerente = user?.rol === "gerente";
+  // Sesion de superadmin (soporte) impersonando la empresa: solo entonces se
+  // muestran los ajustes tecnicos/sensibles (Tesoreria, Email, WhatsApp, VERIFACTU
+  // /SII). Para el gerente normal quedan ocultos: los gestiona el superadmin.
+  const esSuperadmin = (() => {
+    try {
+      const t = getToken();
+      if (!t || t.split(".").length < 2) return false;
+      const payload = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      return !!payload.superadmin_impersonation;
+    } catch { return false; }
+  })();
   const empresaPlan = normalizePlan(user?.plan || getEmpresaPlanLocal());
   const puedePersonalizarColores = canUseCompanyPalette(empresaPlan);
 
@@ -726,14 +737,17 @@ export default function Empresa() {
 
   const TABS = [
     { id:"empresa", l:"Datos fiscales" },
-    { id:"tesoreria", l:"Tesoreria" },
+    ...(esSuperadmin ? [{ id:"tesoreria", l:"Tesoreria" }] : []),
     { id:"sostenibilidad", l:"Sostenibilidad / CO2" },
     { id:"factura", l:"Configuración facturas" },
-    { id:"email",   l:"Email / Notificaciones" },
-    { id:"whatsapp", l:"WhatsApp" },
+    ...(esSuperadmin ? [{ id:"email", l:"Email / Notificaciones" }, { id:"whatsapp", l:"WhatsApp" }] : []),
     { id:"avisos_cfg", l:"Avisos personalizados" },
     { id:"trafico_cfg", l:"Config. Tráfico" },
   ];
+  useEffect(() => {
+    if (!TABS.some(t => t.id === tab)) setTab("empresa");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, esSuperadmin]);
 
   const activePalette = normalizePaletteConfig(empresa.paleta_colores);
 
@@ -1670,7 +1684,7 @@ export default function Empresa() {
             </div>
           </div>
 
-          <div style={S.section}>
+          <div style={{...S.section, ...(esSuperadmin ? {} : {display:"none"})}}>
             <div style={S.secTitle}>AEAT - VERIFACTU / SII</div>
             <div style={S.info}>
               Configura el modo fiscal de esta empresa. Al emitir facturas, TransGest ya deja creado el registro fiscal y la cola de envio correspondiente.

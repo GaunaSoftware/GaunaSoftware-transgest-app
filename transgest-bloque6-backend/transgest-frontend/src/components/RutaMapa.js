@@ -285,6 +285,7 @@ function RutaMapa({ points = [], vehiclePosition = null }) {
   const requestIdRef = useRef(0);
   const forceRef = useRef(false);
   const [view, setView] = useState({ zoomAdj: 0, panX: 0, panY: 0 });
+  const [frozenFrame, setFrozenFrame] = useState({ key: null, points: null });
   const svgRef = useRef(null);
   const dragRef = useRef(null);
 
@@ -342,14 +343,27 @@ function RutaMapa({ points = [], vehiclePosition = null }) {
   const displayPoints = useMemo(() => resolvedDisplayPoints(route, routePoints), [route, routePoints]);
   const geometry = useMemo(() => geometryFromRoute(route, displayPoints), [route, displayPoints]);
   const vehicleCoords = useMemo(() => validLatLng(vehiclePosition || {}), [vehiclePosition]);
-  // El encuadre se calcula SOLO con los marcadores (origen, paradas, destino) y la
-  // posicion del vehiculo, NO con la geometria completa de la ruta. Asi, cuando la
-  // ruta se recalcula (refresco), el mapa NO se re-encuadra ni "pega saltos": la
-  // linea de ruta se dibuja dentro del encuadre ya fijado por los puntos.
-  const framePoints = useMemo(
+  // Punto medio del encuadre: se ajusta a la RUTA COMPLETA la primera vez que se
+  // calcula para un conjunto de puntos y, a partir de ahi, se CONSERVA ese encuadre
+  // en los refrescos (no se re-encuadra ni "pega saltos"). Al cambiar los puntos se
+  // vuelve a ajustar. El encuadre congelado guarda solo la extension geografica; el
+  // zoom/arrastre manual (view) y la capa se siguen aplicando encima.
+  const markerFramePoints = useMemo(
     () => [...displayPoints, ...(vehicleCoords ? [vehicleCoords] : [])],
     [displayPoints, vehicleCoords]
   );
+  const routeFramePoints = useMemo(
+    () => [...markerFramePoints, ...geometry],
+    [markerFramePoints, geometry]
+  );
+  useEffect(() => {
+    if (geometry.length >= 2 && frozenFrame.key !== pointKey) {
+      setFrozenFrame({ key: pointKey, points: routeFramePoints });
+    }
+  }, [geometry.length, pointKey, routeFramePoints, frozenFrame.key]);
+  const framePoints = (frozenFrame.key === pointKey && frozenFrame.points)
+    ? frozenFrame.points
+    : markerFramePoints;
   const frame = useMemo(() => buildFrame(framePoints, layer, view), [framePoints, layer, view]);
   const routeLine = geometry.map(point => screenPoint(point, frame));
 

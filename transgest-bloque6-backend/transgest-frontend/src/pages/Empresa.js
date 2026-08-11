@@ -741,7 +741,6 @@ export default function Empresa() {
     { id:"sostenibilidad", l:"Sostenibilidad / CO2" },
     { id:"factura", l:"Configuración facturas" },
     ...(esSuperadmin ? [{ id:"email", l:"Email / Notificaciones" }, { id:"whatsapp", l:"WhatsApp" }] : []),
-    { id:"avisos_cfg", l:"Avisos personalizados" },
     { id:"trafico_cfg", l:"Config. Tráfico" },
   ];
   useEffect(() => {

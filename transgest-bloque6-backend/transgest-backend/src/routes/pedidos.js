@@ -3058,7 +3058,7 @@ async function procesarPedidosEntregaVencida() {
      WHERE e.id = p.empresa_id
        AND COALESCE(e.estado,'activo') = 'activo'
        AND COALESCE(e.cfg_trafico->>'auto_incidencia','true') <> 'false'
-       AND LOWER(COALESCE(p.estado,'')) IN ('pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga')
+       AND LOWER(p.estado::text) IN ('pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga')
        AND COALESCE(p.pendiente_completar,false) = false
        AND COALESCE(p.fecha_entrega, p.fecha_descarga) IS NOT NULL
        AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= CURRENT_DATE - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[0-9]+$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 2 END)

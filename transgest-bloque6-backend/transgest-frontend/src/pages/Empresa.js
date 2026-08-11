@@ -2832,7 +2832,7 @@ export default function Empresa() {
                 <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>Solo los paises activados apareceran en los puntos de carga y descarga de Pedidos.</div>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:["EspaÃ±a"]}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Solo Espana</button>
+                <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:["España"]}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Solo Espana</button>
                 <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:EUROPE_COUNTRIES}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Activar Europa</button>
               </div>
             </div>
@@ -2850,7 +2850,7 @@ export default function Empresa() {
                         const next = e.target.checked
                           ? Array.from(new Set([...current, canonical]))
                           : current.filter(x => x !== canonical);
-                        return {...prev,paises_trabajo:next.length ? next : ["EspaÃ±a"]};
+                        return {...prev,paises_trabajo:next.length ? next : ["España"]};
                       })}
                       style={{accentColor:"var(--accent)"}}
                     />

@@ -148,10 +148,10 @@ export function getEnabledEuropeCountries(config = null) {
   const raw = cfg?.cfg_trafico?.paises_trabajo || cfg?.paises_trabajo || [];
   const selected = Array.isArray(raw) ? raw.map(canonicalCountry).filter(Boolean) : [];
   const valid = selected.filter(country => EUROPE_COUNTRIES.includes(country));
-  return valid.length ? Array.from(new Set(valid)) : ["EspaÃ±a"];
+  return valid.length ? Array.from(new Set(valid)) : ["España"];
 }
 
-export function isCountryEnabled(country = "EspaÃ±a", config = null) {
-  const canonical = canonicalCountry(country) || "EspaÃ±a";
+export function isCountryEnabled(country = "España", config = null) {
+  const canonical = canonicalCountry(country) || "España";
   return getEnabledEuropeCountries(config).includes(canonical);
 }

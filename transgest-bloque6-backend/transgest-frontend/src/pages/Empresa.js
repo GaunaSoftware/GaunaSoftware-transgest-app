@@ -2226,7 +2226,7 @@ export default function Empresa() {
             )}
           </div>
 
-          <div style={S.section}>
+          <div style={{...S.section, ...(esSuperadmin ? {} : {display:"none"})}}>
             <div style={S.secTitle}>Documento de Control Digital (DeCA)</div>
             <div style={S.info}>
               Preparacion del documento de control electronico para transporte por carretera. Puedes trabajar con codigo numerico o con QR enlazado a una URL HTTPS en un dominio comunicado.

@@ -6763,7 +6763,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [form,       setForm]       = useState(
     editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""}))
-      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", metros_lineales:"13.65", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
   );
   const [mapPedidoDraft, setMapPedidoDraft] = useState(() => form);
   const [saving,     setSaving]     = useState(false);
@@ -6802,7 +6802,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     if (hydratedPedidoKeyRef.current === editandoKey) return;
     const nextForm = editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({ ...editando, remolque_id_manual: editando.remolque_id || "" }))
-      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, carga_techo:false, intercambio_palets:false, requiere_cinchas:true });
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", metros_lineales:"13.65", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, carga_techo:false, intercambio_palets:false, requiere_cinchas:true });
     hydratedPedidoKeyRef.current = editandoKey;
     setForm(nextForm);
     setColaboradorBusqueda("");
@@ -7042,6 +7042,11 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   };
   const vehiculoActual = vehiculosLocal.find(v => v.id === form.vehiculo_id);
   const remolqueActual = vehiculosLocal.find(v => v.id === (form.remolque_id_manual || vehiculoActual?.remolque_id));
+  // Aviso si la carga (metros lineales) supera los metros de carga del remolque
+  // asignado (p. ej. viaje de 13,65 m en una plataforma de 11 m).
+  const cargaMetrosLineales = parseFloat(String(form.metros_lineales ?? "").replace(",", ".")) || 0;
+  const remolqueMetrosCarga = parseFloat(String(remolqueActual?.metros_carga ?? "").replace(",", ".")) || 0;
+  const avisoCargaExcedeRemolque = !!remolqueActual && remolqueMetrosCarga > 0 && cargaMetrosLineales > 0 && cargaMetrosLineales > remolqueMetrosCarga + 0.01;
   const tipoRemolqueActual = tipoVehiculoDeTexto([remolqueActual?.clase, remolqueActual?.tipo, remolqueActual?.marca, remolqueActual?.modelo, remolqueActual?.notas_operacion].filter(Boolean).join(" "));
   const rutaCompatibleConConjunto = (ruta) => {
     const requerido = tipoVehiculoDeTexto(ruta?.tipo_vehiculo);
@@ -9166,6 +9171,11 @@ useEffect(() => {
                  form.remolque_id_manual !== vehiculosLocal.find(v=>v.id===form.vehiculo_id)?.remolque_id && (
                   <div style={{marginTop:4,fontSize:11,color:"#fbbf24",padding:"4px 9px",background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.2)",borderRadius:6}}>
                     Aviso: Distinto al conjunto habitual - al guardar se actualizara el conjunto de la tractora
+                  </div>
+                )}
+                {avisoCargaExcedeRemolque && (
+                  <div style={{marginTop:4,fontSize:11,color:"#f87171",fontWeight:700,padding:"5px 9px",background:"rgba(239,68,68,.09)",border:"1px solid rgba(239,68,68,.28)",borderRadius:6}}>
+                    Aviso: la carga ({cargaMetrosLineales.toString().replace(".", ",")} m) supera los metros de carga del remolque {remolqueActual?.matricula ? `(${remolqueActual.matricula}, ${remolqueMetrosCarga.toString().replace(".", ",")} m)` : `(${remolqueMetrosCarga.toString().replace(".", ",")} m)`}. Revisa la asignacion.
                   </div>
                 )}
               </div>

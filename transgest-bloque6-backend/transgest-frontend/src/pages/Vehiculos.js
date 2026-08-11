@@ -195,6 +195,21 @@ function normalizeVehiculoForClase(data = {}) {
   return next;
 }
 
+// Longitud de carga (metros lineales) estandar de un semirremolque para
+// carrocerias tipo tautliner/lona, plataforma lisa o lateral bajo.
+const METROS_CARGA_ESTANDAR = "13.65";
+function carroceriaUsaMedidaEstandar(form = {}) {
+  const c = String(form.tipo_carroceria || "").toLowerCase();
+  return c.includes("tautliner") || c.includes("lona") || c.includes("plataforma") || !!form.lateral_bajo;
+}
+function aplicarMedidasEstandarCarga(next = {}) {
+  // Rellena la medida estandar solo si esta vacia (no pisa lo que ponga el usuario).
+  if (carroceriaUsaMedidaEstandar(next) && !String(next.metros_carga || "").trim()) {
+    next.metros_carga = METROS_CARGA_ESTANDAR;
+  }
+  return next;
+}
+
 const TIPO_COMBUSTIBLE = ["Diesel","AdBlue/Diesel","GNL (Gas Natural)","GNC","Electrico","Hibrido","Gasolina"];
 
 const GPS_PROVIDER_LABELS = {
@@ -1012,7 +1027,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
     velocidad_max_kmh:"", homologacion_co2:"",
     tipo_carroceria:"", apertura_lateral:"", techo_elevable:false,
     temperatura_min_c:"", temperatura_max_c:"", capacidad_palets:"", volumen_m3:"",
-    lateral_bajo:false, piso_movil:false,
+    lateral_bajo:false, piso_movil:false, metros_carga:"",
     // Compra / Venta
     fecha_compra:"", valor_compra:"", financiacion:"",
     concesionario:"", numero_pedido_compra:"",
@@ -1438,7 +1453,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                   <div style={S.grid3}>
                     <div>
                       <label style={S.lbl}>Tipo de carroceria</label>
-                      <select value={form.tipo_carroceria||""} onChange={f("tipo_carroceria")} style={S.sel}>
+                      <select value={form.tipo_carroceria||""} onChange={e=>setForm(p=>aplicarMedidasEstandarCarga({...p,tipo_carroceria:e.target.value}))} style={S.sel}>
                         <option value="">Sin especificar</option>
                         {CARROCERIAS_REMOLQUE.map(c=><option key={c} value={c}>{c}</option>)}
                       </select>
@@ -1459,12 +1474,17 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                       <label style={S.lbl}>Volumen (m3)</label>
                       <input type="number" min="0" step="0.01" style={S.inp} value={form.volumen_m3||""} onChange={f("volumen_m3")} placeholder="90"/>
                     </div>
+                    <div>
+                      <label style={S.lbl}>Metros de carga (LDM)</label>
+                      <input type="text" inputMode="decimal" style={S.inp} value={form.metros_carga||""} onChange={f("metros_carga")} placeholder="13,65"/>
+                      <div style={{fontSize:10,color:"var(--text5)",marginTop:3}}>Longitud util de carga en metros. Estandar 13,65 en tautliner, lateral bajo y plataforma.</div>
+                    </div>
                     <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>
                       <input type="checkbox" checked={!!form.techo_elevable} onChange={f("techo_elevable")}/>
                       Techo elevable
                     </label>
                     <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>
-                      <input type="checkbox" checked={!!form.lateral_bajo} onChange={f("lateral_bajo")}/>
+                      <input type="checkbox" checked={!!form.lateral_bajo} onChange={e=>setForm(p=>aplicarMedidasEstandarCarga({...p,lateral_bajo:e.target.checked}))}/>
                       Lateral bajo / lowboy
                     </label>
                     <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>

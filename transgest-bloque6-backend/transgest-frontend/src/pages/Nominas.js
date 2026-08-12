@@ -156,29 +156,38 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
   const incentivo    = ingresosVeh>0 ? (ingresosVeh*incentivoPct/100) : 0;
   const plusActividad= Number(ext.plus_actividad||0);
 
+  // b0: un 0 (o valor no numerico) se muestra como campo vacio, para poder teclear
+  // sin arrastrar el "0" delante. Los valores reales (>0) se muestran tal cual.
+  const b0 = v => { const n = Number(v); return n ? n : ""; };
   const [form, setForm] = useState({
-    salario_base:    Number(baseAnterior?.salario_base ?? ext.salario_base ?? 0),
-    incentivos:      incentivo,
-    noches:          totalNoches,
-    plus_actividad:  Number(baseAnterior?.plus_actividad ?? plusActividad),
-    horas_extra:     Number(baseAnterior?.horas_extra ?? ext.ultima_nomina_horas_extra ?? 0),
-    otros_plus:      Number(ext.ultima_nomina_otros_plus ?? 0),
-    irpf_pct:        Number(baseAnterior?.irpf_pct ?? ext.ultima_nomina_irpf_pct ?? ext.irpf_pct ?? 15),
-    anticipos:       Number(ext.ultima_nomina_anticipos ?? 0),
-    embargos:        Number(ext.ultima_nomina_embargos ?? 0),
-    otros_descuentos:Number(ext.ultima_nomina_otros_descuentos ?? 0),
+    salario_base:    b0(baseAnterior?.salario_base ?? ext.salario_base ?? 0),
+    incentivos:      b0(incentivo),
+    noches:          b0(totalNoches),
+    plus_actividad:  b0(baseAnterior?.plus_actividad ?? plusActividad),
+    horas_extra:     b0(baseAnterior?.horas_extra ?? ext.ultima_nomina_horas_extra ?? 0),
+    otros_plus:      b0(ext.ultima_nomina_otros_plus ?? 0),
+    irpf_pct:        b0(baseAnterior?.irpf_pct ?? ext.ultima_nomina_irpf_pct ?? ext.irpf_pct ?? 15),
+    anticipos:       b0(ext.ultima_nomina_anticipos ?? 0),
+    embargos:        b0(ext.ultima_nomina_embargos ?? 0),
+    otros_descuentos:b0(ext.ultima_nomina_otros_descuentos ?? 0),
+    pagas_extra:     b0(baseAnterior?.pagas_extra ?? ext.pagas_extra ?? 0),
+    pagas_extra_prorratear: Boolean(baseAnterior?.pagas_extra_prorratear ?? ext.pagas_extra_prorratear ?? false),
     notas:           String(baseAnterior?.notas ?? ext.ultima_nomina_notas ?? ""),
   });
-  const f = k => e => setForm(p=>({...p,[k]:Number(e.target.value)||0}));
+  // Se guarda el texto crudo del input (permite vaciar el 0 y teclear sin que se
+  // quede pegado "01200"); num() lo convierte a numero para calcular y enviar.
+  const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const f = k => e => setForm(p=>({...p,[k]: e.target.value }));
   const fn = k => e => setForm(p=>({...p,[k]:e.target.value}));
 
   // Cálculo nómina
-  const devengos = form.salario_base + form.incentivos + form.noches + form.plus_actividad + form.horas_extra + form.otros_plus;
+  const pagaExtraProrrateo = form.pagas_extra_prorratear ? num(form.pagas_extra) / 12 : 0;
+  const devengos = num(form.salario_base) + num(form.incentivos) + num(form.noches) + num(form.plus_actividad) + num(form.horas_extra) + num(form.otros_plus) + pagaExtraProrrateo;
   const ss_trabajador = devengos * (SS_PCG/100);
   const ss_empresa    = devengos * (SS_EMP/100);
   const base_irpf     = devengos - ss_trabajador;
-  const irpf          = base_irpf * (form.irpf_pct/100);
-  const liquido       = devengos - ss_trabajador - irpf - form.anticipos - form.embargos - form.otros_descuentos;
+  const irpf          = base_irpf * (num(form.irpf_pct)/100);
+  const liquido       = devengos - ss_trabajador - irpf - num(form.anticipos) - num(form.embargos) - num(form.otros_descuentos);
   const coste_empresa = devengos + ss_empresa;
 
   async function emitir(){
@@ -188,21 +197,31 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
       confirmText: "Emitir",
     });
     if(!ok) return;
+    // Snapshot numerico del formulario (los inputs guardan texto crudo).
+    const nf = {
+      salario_base: num(form.salario_base), incentivos: num(form.incentivos),
+      noches: num(form.noches), plus_actividad: num(form.plus_actividad),
+      horas_extra: num(form.horas_extra), otros_plus: num(form.otros_plus),
+      irpf_pct: num(form.irpf_pct), anticipos: num(form.anticipos),
+      embargos: num(form.embargos), otros_descuentos: num(form.otros_descuentos),
+      pagas_extra: num(form.pagas_extra), pagas_extra_prorratear: !!form.pagas_extra_prorratear,
+      pagas_extra_prorrateo: pagaExtraProrrateo, notas: form.notas || "",
+    };
     const nomina = {
       id:"nom_"+Date.now(), periodo, fecha_emision: new Date().toISOString().slice(0,10),
       chofer_id:chofer.id, vehiculo_id:vehiculo?.id||null,
-      ...form, devengos, ss_trabajador, ss_empresa, base_irpf, irpf, liquido, coste_empresa,
+      ...nf, devengos, ss_trabajador, ss_empresa, base_irpf, irpf, liquido, coste_empresa,
       ingresos_vehiculo: ingresosVeh, viajes: pedVeh.length,
     };
     const notasConJornada = [form.notas, resumenJornadaNotas, avisosJornada.length ? `Avisos: ${avisosJornada.join(" | ")}` : ""].filter(Boolean).join("\n");
     const saved = await crearNominaEmitida({
       chofer_id: chofer.id,
       periodo,
-      salario_base: form.salario_base,
-      plus_actividad: form.plus_actividad,
-      horas_extra: form.horas_extra,
+      salario_base: nf.salario_base,
+      plus_actividad: nf.plus_actividad,
+      horas_extra: nf.horas_extra,
       noches: nochesLista.length,
-      importe_noches: form.noches,
+      importe_noches: nf.noches,
       ss_empresa,
       ss_trabajador,
       irpf,
@@ -211,26 +230,28 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
       notas: notasConJornada || null,
     });
     await saveChoferConfigBackend(chofer.id, {
-      salario_base: form.salario_base,
-      plus_actividad: form.plus_actividad,
-      irpf_pct: form.irpf_pct,
-      ultima_nomina_horas_extra: form.horas_extra,
-      ultima_nomina_otros_plus: form.otros_plus,
-      ultima_nomina_anticipos: form.anticipos,
-      ultima_nomina_embargos: form.embargos,
-      ultima_nomina_otros_descuentos: form.otros_descuentos,
+      salario_base: nf.salario_base,
+      plus_actividad: nf.plus_actividad,
+      irpf_pct: nf.irpf_pct,
+      pagas_extra: nf.pagas_extra,
+      pagas_extra_prorratear: nf.pagas_extra_prorratear,
+      ultima_nomina_horas_extra: nf.horas_extra,
+      ultima_nomina_otros_plus: nf.otros_plus,
+      ultima_nomina_anticipos: nf.anticipos,
+      ultima_nomina_embargos: nf.embargos,
+      ultima_nomina_otros_descuentos: nf.otros_descuentos,
       ultima_nomina_notas: form.notas || "",
     }).catch(() => {});
     const nominaGuardada = {
       ...nomina,
       ...saved,
-      irpf_pct: form.irpf_pct,
-      incentivos: form.incentivos,
-      otros_plus: form.otros_plus,
-      anticipos: form.anticipos,
-      embargos: form.embargos,
-      otros_descuentos: form.otros_descuentos,
-      noches: form.noches,
+      irpf_pct: nf.irpf_pct,
+      incentivos: nf.incentivos,
+      otros_plus: nf.otros_plus,
+      anticipos: nf.anticipos,
+      embargos: nf.embargos,
+      otros_descuentos: nf.otros_descuentos,
+      noches: nf.noches,
       notas: notasConJornada,
     };
     imprimirNomina(nominaGuardada);
@@ -240,7 +261,7 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
   function imprimirNomina(nomina){
     const empresa = getEmpresaPerfilSync();
     const w = window.open("","_blank","width=800,height=1000");
-    const n = nomina || { ...form, devengos, ss_trabajador, ss_empresa, base_irpf, irpf, liquido, coste_empresa };
+    const n = nomina || { ...form, pagas_extra_prorrateo: pagaExtraProrrateo, devengos, ss_trabajador, ss_empresa, base_irpf, irpf, liquido, coste_empresa };
     w.document.write(`<!DOCTYPE html><html><head><title>Nómina ${periodo} — ${chofer.nombre}</title>
     <style>
       body{font-family:Arial,sans-serif;padding:28px;color:#111;font-size:12px;max-width:700px;margin:0 auto}
@@ -281,6 +302,7 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
         ${n.plus_actividad>0?`<tr><td>Plus de actividad</td><td>—</td><td class="right">${fmt2(n.plus_actividad)} €</td></tr>`:""}
         ${n.horas_extra>0?`<tr><td>Horas extra</td><td>—</td><td class="right">${fmt2(n.horas_extra)} €</td></tr>`:""}
         ${n.otros_plus>0?`<tr><td>Otros pluses</td><td>—</td><td class="right">${fmt2(n.otros_plus)} €</td></tr>`:""}
+        ${n.pagas_extra_prorrateo>0?`<tr><td>Prorrateo pagas extra (1/12 anual)</td><td>—</td><td class="right">${fmt2(n.pagas_extra_prorrateo)} €</td></tr>`:""}
         <tr class="total-row"><td>TOTAL DEVENGOS</td><td></td><td class="right">${fmt2(n.devengos)} €</td></tr>
       </tbody>
     </table>
@@ -381,6 +403,22 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
                 <input type="number" step="0.01" style={inp} value={form[k]} onChange={handler(k)} onFocus={e=>e.target.select()}/>
               </div>
             ))}
+
+            {/* Pagas extra */}
+            <div style={{marginBottom:8,padding:"8px 10px",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7}}>
+              <label style={lbl}>Pagas extra (importe anual, €)</label>
+              <input type="number" step="0.01" style={inp} value={form.pagas_extra} onChange={f("pagas_extra")} onFocus={e=>e.target.select()} placeholder="p. ej. dos pagas: total del año"/>
+              <label style={{display:"flex",alignItems:"center",gap:7,marginTop:8,cursor:"pointer",fontSize:12,fontWeight:600,color:"var(--text4)"}}>
+                <input type="checkbox" checked={!!form.pagas_extra_prorratear} onChange={e=>setForm(p=>({...p,pagas_extra_prorratear:e.target.checked}))} style={{width:16,height:16,cursor:"pointer"}}/>
+                Prorratear en las 12 mensualidades
+              </label>
+              {form.pagas_extra_prorratear && (
+                <div style={{fontSize:10,color:"var(--text5)",marginTop:4,textAlign:"right"}}>
+                  +{fmt2(pagaExtraProrrateo)} € / mes se suman a devengos
+                </div>
+              )}
+            </div>
+
             <div style={{background:"rgba(16,185,129,.1)",border:"1px solid rgba(16,185,129,.2)",borderRadius:7,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
               <span style={{fontSize:12,fontWeight:700,color:"var(--text4)"}}>Total devengos</span>
               <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:"#10b981"}}>{fmt2(devengos)} €</span>

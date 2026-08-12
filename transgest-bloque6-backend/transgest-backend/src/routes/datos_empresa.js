@@ -243,6 +243,8 @@ function ensureLiquidacionChoferSchema() {
       await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS disponibilidad_mensual NUMERIC(10,2) NOT NULL DEFAULT 0");
       await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS convenio_notas TEXT");
       await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS convenio_importado_nombre VARCHAR(180)");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS pagas_extra NUMERIC(10,2) NOT NULL DEFAULT 0");
+      await db.query("ALTER TABLE chofer_config ADD COLUMN IF NOT EXISTS pagas_extra_prorratear BOOLEAN NOT NULL DEFAULT false");
       await db.query("ALTER TABLE vehiculo_noches ADD COLUMN IF NOT EXISTS tipo_dieta VARCHAR(30) NOT NULL DEFAULT 'nacional'");
     })().catch(err => {
       liquidacionChoferSchemaReady = null;
@@ -1373,15 +1375,15 @@ router.put("/chofer-config/:chofer_id", async (req,res) => {
     await ensureLiquidacionChoferSchema();
     const chofer = await assertChoferEmpresa(req.params.chofer_id, EID(req));
     if (!chofer) return res.status(404).json({ error: "Chofer no encontrado" });
-    const {salario_base,precio_noche,plus_actividad,irpf_pct,ss_empresa_pct,ss_trabajador_pct,convenio,incentivo_pct,precio_km,km_pago_tipo,dieta_local,dieta_nacional,dieta_internacional,disponibilidad_diaria,disponibilidad_mensual,convenio_notas,convenio_importado_nombre} = req.body;
+    const {salario_base,precio_noche,plus_actividad,irpf_pct,ss_empresa_pct,ss_trabajador_pct,convenio,incentivo_pct,precio_km,km_pago_tipo,dieta_local,dieta_nacional,dieta_internacional,disponibilidad_diaria,disponibilidad_mensual,convenio_notas,convenio_importado_nombre,pagas_extra,pagas_extra_prorratear} = req.body;
     await db.query(
       `INSERT INTO chofer_config (chofer_id,empresa_id,salario_base,precio_noche,plus_actividad,irpf_pct,ss_empresa_pct,ss_trabajador_pct,convenio,incentivo_pct,
-        precio_km,km_pago_tipo,dieta_local,dieta_nacional,dieta_internacional,disponibilidad_diaria,disponibilidad_mensual,convenio_notas,convenio_importado_nombre,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW())
+        precio_km,km_pago_tipo,dieta_local,dieta_nacional,dieta_internacional,disponibilidad_diaria,disponibilidad_mensual,convenio_notas,convenio_importado_nombre,pagas_extra,pagas_extra_prorratear,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW())
        ON CONFLICT (chofer_id) DO UPDATE SET salario_base=$3,precio_noche=$4,plus_actividad=$5,irpf_pct=$6,ss_empresa_pct=$7,ss_trabajador_pct=$8,convenio=$9,incentivo_pct=$10,
-         precio_km=$11,km_pago_tipo=$12,dieta_local=$13,dieta_nacional=$14,dieta_internacional=$15,disponibilidad_diaria=$16,disponibilidad_mensual=$17,convenio_notas=$18,convenio_importado_nombre=$19,updated_at=NOW()`,
+         precio_km=$11,km_pago_tipo=$12,dieta_local=$13,dieta_nacional=$14,dieta_internacional=$15,disponibilidad_diaria=$16,disponibilidad_mensual=$17,convenio_notas=$18,convenio_importado_nombre=$19,pagas_extra=$20,pagas_extra_prorratear=$21,updated_at=NOW()`,
       [req.params.chofer_id,EID(req),salario_base||null,precio_noche||40,plus_actividad||0,irpf_pct||0,ss_empresa_pct||29.9,ss_trabajador_pct||6.35,convenio||null,incentivo_pct||0,
-       precio_km||0,["todos","cargado","vacio"].includes(km_pago_tipo)?km_pago_tipo:"todos",dieta_local||0,dieta_nacional||precio_noche||40,dieta_internacional||0,disponibilidad_diaria||0,disponibilidad_mensual||0,convenio_notas||null,convenio_importado_nombre||null]
+       precio_km||0,["todos","cargado","vacio"].includes(km_pago_tipo)?km_pago_tipo:"todos",dieta_local||0,dieta_nacional||precio_noche||40,dieta_internacional||0,disponibilidad_diaria||0,disponibilidad_mensual||0,convenio_notas||null,convenio_importado_nombre||null,pagas_extra||0,pagas_extra_prorratear===true]
     );
     res.json({ok:true});
   } catch(e) { res.status(500).json({error:e.message}); }

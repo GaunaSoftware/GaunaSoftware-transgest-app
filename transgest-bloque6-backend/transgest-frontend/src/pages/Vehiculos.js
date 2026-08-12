@@ -1020,7 +1020,17 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("vehiculos");
   const [tab,    setTab]    = useState("identificacion");
-  const [form,   setForm]   = useState(editando ? { ...editando } : {
+  const [form,   setForm]   = useState(editando ? {
+    ...editando,
+    // Las fechas llegan del backend como ISO (2027-05-10T00:00:00Z) y un input
+    // type=date solo acepta YYYY-MM-DD: se recortan para que se vean al reabrir
+    // y no se guarden vacias. Aplica igual a tractoras y remolques (mismo modal).
+    fecha_matriculacion: String(editando.fecha_matriculacion || "").slice(0, 10),
+    fecha_itv:           String(editando.fecha_itv || "").slice(0, 10),
+    fecha_seguro:        String(editando.fecha_seguro || "").slice(0, 10),
+    fecha_compra:        String(editando.fecha_compra || "").slice(0, 10),
+    fecha_venta:         String(editando.fecha_venta || "").slice(0, 10),
+  } : {
     // Identificacion
     matricula:"", clase:initialClase || "Tractora", marca:"", modelo:"", anio:"",
     color:"", numero_bastidor:"", numero_motor:"",

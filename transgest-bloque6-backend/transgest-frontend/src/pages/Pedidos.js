@@ -38,28 +38,6 @@ function formatDateInputLocal(value = new Date()) {
   return `${y}-${m}-${day}`;
 }
 
-// Reconcilia el campo plano origen/destino con su parada principal. La parada
-// (puntos_carga/descarga[0]) es la fuente operativa (mapa, ruta, lista); si el
-// campo plano apunta a un sitio realmente distinto (p.ej. destino="COLMENAR VIEJO"
-// pero la parada es "MEDIO CUDEYO"), manda la parada. Si es el mismo lugar (o una
-// direccion mas larga del mismo), se conserva el texto plano.
-function reconcileFlatEndpoint(flat, stop = {}, clienteId = "", tipo = "descarga") {
-  const flatClean = String(flat || "").trim();
-  // Usa la MISMA etiqueta que muestra la lista (poblacion del stop o del punto
-  // guardado que casa), no solo la direccion, para que formulario y lista digan
-  // lo mismo.
-  const stopLabel = String(
-    stopTownLabel(stop, flatClean, clienteId, tipo) ||
-    stop?.direccion || stop?.ciudad || stop?.poblacion || stop?.municipio || stop?.nombre || stop?.cliente_nombre || ""
-  ).trim();
-  if (!stopLabel) return flatClean;
-  if (!flatClean) return stopLabel;
-  const a = normalizePlaceText(flatClean);
-  const b = normalizePlaceText(stopLabel);
-  if (a && b && a !== b && !a.includes(b) && !b.includes(a)) return stopLabel;
-  return flatClean;
-}
-
 function withPedidoGeoDefaults(draft = {}) {
   const origenPaisFallback = canonicalCountry(draft.origen_pais || draft.pais_origen || "España") || "España";
   const destinoPaisFallback = canonicalCountry(draft.destino_pais || draft.pais_destino || "España") || "España";
@@ -444,15 +422,6 @@ function sumarDiasISO(fecha, dias) {
   if (Number.isNaN(base.getTime())) return String(fecha).slice(0, 10);
   base.setDate(base.getDate() + Number(dias || 0));
   return base.toISOString().slice(0, 10);
-}
-
-function normalizarFechasCopia(fechaBase, copias, actuales = []) {
-  const total = Math.max(1, Math.min(20, Number(copias || 1)));
-  const base = String(fechaBase || new Date().toISOString().slice(0, 10)).slice(0, 10);
-  return Array.from({ length: total }, (_, idx) => {
-    const current = String(actuales[idx] || "").slice(0, 10);
-    return current || (idx === 0 ? base : "");
-  });
 }
 
 function descargaAntesQueCarga(fechaCarga, fechaDescarga) {
@@ -4340,7 +4309,6 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       {stopsOrdenados.length > 0 && (
         <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
           {stopsOrdenados.map((d, i) => {
-            const isPrimary = i === 0;
             const isDragging = dragIdx === i;
             const stopPais = stopCountryInputValue(d, "España");
             const stopRegions = getRegionsForCountry(stopPais);
@@ -7079,8 +7047,6 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     : [];
   const puntosCargaSugeridosModal = filterPuntosForPedido(puntosInteresModal, { clienteId: form.cliente_id || "", tipo: "carga" });
   const puntosDescargaSugeridosModal = filterPuntosForPedido(puntosInteresModal, { clienteId: form.cliente_id || "", tipo: "descarga" });
-  const cargaEndpointListId = `pedido-origen-puntos-${editando?.id || "nuevo"}`;
-  const descargaEndpointListId = `pedido-destino-puntos-${editando?.id || "nuevo"}`;
 
   useEffect(() => {
     if (editando?.id || !bloqueoClienteModal || !form.cliente_id) return;
@@ -11185,49 +11151,6 @@ export default function Pedidos() {
     const days = await pedirDiasRetraso("los pedidos criticos visibles", 1);
     if (days == null) return;
     await reprogramarCriticosDias(days);
-  }
-
-  async function copiarSeleccionadosSemanaSiguiente() {
-    const lista = selectedPedidosOperables;
-    if (!lista.length) {
-      notify("Selecciona pedidos editables para copiarlos.", "info");
-      return;
-    }
-    const ok = await confirmDialog({
-      title: "Copiar pedidos seleccionados",
-      message: `Se copiaran ${lista.length} pedido(s) seleccionados a la semana siguiente manteniendo, si existe, la asignacion actual.\n\nLas copias quedaran como pendientes para revisarlas antes de cerrar.`,
-      confirmText: "Copiar seleccionados",
-    });
-    if (!ok) return;
-    setBulkCopying(true);
-    try {
-      for (const pedido of lista) {
-        let pedidoBase = pedido;
-        if (pedido?.id) {
-          const fetched = await getPedido(pedido.id);
-          if (fetched?.id) pedidoBase = fetched;
-        }
-        await crearPedido(buildPedidoCopyPayload(pedidoBase, {
-          fecha_carga: sumarDiasISO(pedidoBase?.fecha_carga, 7),
-          fecha_descarga: pedidoBase?.fecha_descarga
-            ? sumarDiasISO(pedidoBase.fecha_descarga, 7)
-            : sumarDiasISO(pedidoBase?.fecha_carga, 7),
-          pendiente_completar: true,
-          aviso_completar: "Viaje copiado desde seleccion multiple: revisar fechas, asignacion y precio antes de cerrar.",
-          estado: "pendiente",
-        }));
-      }
-      notify(`Se han copiado ${lista.length} pedido(s) seleccionados.`, "success");
-      setSelectedPedidoIds([]);
-      cargar();
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-copy-selected" } }));
-      }
-    } catch (e) {
-      notify(e.message || "No se pudieron copiar los pedidos seleccionados.", "error");
-    } finally {
-      setBulkCopying(false);
-    }
   }
 
   async function reprogramarSeleccionadosDias(offsetDays = 1) {

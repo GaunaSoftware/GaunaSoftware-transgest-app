@@ -276,7 +276,7 @@ function pointTitle(point, index) {
   return point.title || (String(point.role || point.tipo || "").toLowerCase().includes("descarga") ? `Descarga ${index + 1}` : `Parada ${index + 1}`);
 }
 
-function RutaMapa({ points = [], vehiclePosition = null }) {
+function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) {
   const [routeState, setRouteState] = useState({ key: "", data: null });
   const [loadingKey, setLoadingKey] = useState("");
   const [errorState, setErrorState] = useState({ key: "", message: "" });
@@ -302,6 +302,9 @@ function RutaMapa({ points = [], vehiclePosition = null }) {
   }
   function resetView() {
     setView({ zoomAdj: 0, panX: 0, panY: 0 });
+    // Re-encuadra a los puntos actuales (util cuando el marco se ha conservado
+    // estable mientras se editaban origen/destino/paradas).
+    setFrozenFrame({ key: null, points: null });
   }
   // Escala px-pantalla -> px-vista (viewBox con slice) para arrastrar el mapa.
   // Con preserveAspectRatio "slice" el SVG se escala por max(w/VW, h/VH); un pixel
@@ -357,18 +360,24 @@ function RutaMapa({ points = [], vehiclePosition = null }) {
     [markerFramePoints, geometry]
   );
   useEffect(() => {
-    if (geometry.length >= 2 && frozenFrame.key !== pointKey) {
+    if (geometry.length < 2) return;
+    if (stableFrame) {
+      // Encuadre estable: se ajusta solo la primera vez; despues se conserva
+      // aunque cambien origen/destino/paradas (no re-encuadra ni pega saltos).
+      if (frozenFrame.key === null) setFrozenFrame({ key: pointKey, points: routeFramePoints });
+    } else if (frozenFrame.key !== pointKey) {
       setFrozenFrame({ key: pointKey, points: routeFramePoints });
     }
-  }, [geometry.length, pointKey, routeFramePoints, frozenFrame.key]);
-  const framePoints = (frozenFrame.key === pointKey && frozenFrame.points)
-    ? frozenFrame.points
-    : markerFramePoints;
+  }, [geometry.length, pointKey, routeFramePoints, frozenFrame.key, stableFrame]);
+  const framePoints = stableFrame
+    ? (frozenFrame.points || markerFramePoints)
+    : ((frozenFrame.key === pointKey && frozenFrame.points) ? frozenFrame.points : markerFramePoints);
   const frame = useMemo(() => buildFrame(framePoints, layer, view), [framePoints, layer, view]);
   const routeLine = geometry.map(point => screenPoint(point, frame));
 
-  // Al cambiar de pedido/ruta, volver al encuadre automatico.
-  useEffect(() => { setView({ zoomAdj: 0, panX: 0, panY: 0 }); }, [pointKey]);
+  // Al cambiar de pedido/ruta, volver al encuadre automatico. En modo estable
+  // (edicion de pedido) NO se resetea: se conserva el zoom/arrastre del usuario.
+  useEffect(() => { if (!stableFrame) setView({ zoomAdj: 0, panX: 0, panY: 0 }); }, [pointKey, stableFrame]);
 
   // Zoom con la rueda del raton sobre el mapa. Se usa un listener nativo NO
   // pasivo para poder hacer preventDefault y evitar que se desplace la pagina o
@@ -574,7 +583,8 @@ function rutaMapaPointsKey(pts = []) {
 }
 
 function rutaMapaPropsEqual(prev, next) {
-  return rutaMapaPointsKey(prev.points) === rutaMapaPointsKey(next.points)
+  return prev.stableFrame === next.stableFrame
+    && rutaMapaPointsKey(prev.points) === rutaMapaPointsKey(next.points)
     && JSON.stringify(validLatLng(prev.vehiclePosition || {})) === JSON.stringify(validLatLng(next.vehiclePosition || {}));
 }
 

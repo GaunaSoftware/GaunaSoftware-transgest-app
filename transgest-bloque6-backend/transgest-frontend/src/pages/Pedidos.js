@@ -6600,7 +6600,7 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
           {currentLabel}
         </span>
       </div>
-      <RutaMapa points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} />
+      <RutaMapa key={pedido?.id || "nuevo"} points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame />
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginTop:9}}>
         {mapPoints.map(point => (
           <div key={`card-${point.tipo}-${point.index}-${point.label}`} style={{border:`1px solid ${point.tone.border}`,borderRadius:8,padding:"8px 10px",background:point.tone.bg}}>
@@ -11034,7 +11034,7 @@ export default function Pedidos() {
         aviso_completar: "Asignacion limpiada desde pedidos: volver a planificar recurso y horario operativo.",
       }));
       notify(`Asignacion limpiada en ${pedido.numero || "el pedido"}.`, "success");
-      cargar();
+      cargar({ silent: true });
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: pedido.id, source: "pedidos-clear-assignment" } }));
       }
@@ -11370,7 +11370,7 @@ export default function Pedidos() {
       if (!ok) return;
       await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, { ...patch, km_vacio: kmR }));
       notify(`Anadidos ${kmR.toLocaleString("es-ES")} km en vacio.`, "success");
-      cargar();
+      cargar({ silent: true });
     } catch { /* no bloquea la asignacion */ }
   }
 
@@ -11406,7 +11406,7 @@ export default function Pedidos() {
       }
       const choferAsignado = !enLote ? (patch.chofer_id || "") : "";
       setQuickAssignPedido(null);
-      cargar();
+      cargar({ silent: true });
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: p.id, source: "pedidos-quick-assign" } }));
       // Si se asigno un chofer que viene de un viaje en curso/finalizado, ofrecer
       // anadir los km en vacio de posicionamiento (destino anterior -> este origen).
@@ -12689,7 +12689,7 @@ export default function Pedidos() {
                 colaborador_nombre: "",
                 precio_colaborador: null,
               }));
-              cargar();
+              cargar({ silent: true });
             } catch(e) { notify("Error al asignar: " + e.message, "error"); }
           }}
         />

@@ -15,6 +15,18 @@ const fiscalScheduler = require("../services/fiscalScheduler");
 const router = express.Router();
 router.use(authenticate);
 
+// Redondeo a 2 decimales para importes de factura. Elimina restos de coma
+// flotante (178.4999999997 -> 178.50) y redondea al alza en el medio-céntimo
+// (x,xx5), como exige la facturación. Se aplica al calcular la factura para que
+// base, cuota IVA/IRPF y total sean valores de 2 decimales que reconcilian entre
+// sí (base·tipo/100 = cuota, base + IVA − IRPF = total), evitando descuadres de
+// céntimo que VERI*FACTU/SII cruzan.
+function round2(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.round((x + (x >= 0 ? 1e-9 : -1e-9)) * 100) / 100;
+}
+
 function ivaRegimenFromPct(tipoIva, ivaRegimen) {
   const regimen = String(ivaRegimen || "").trim().toLowerCase();
   if (regimen) return regimen;
@@ -925,8 +937,10 @@ router.post("/", GERENTE_O_CONTABLE,
       const numero  = `${serie}-${año}-${String(lastNum + 1).padStart(4, "0")}`;
 
       // Calcular totales
-      const base = lineas.reduce((s, l) => s + (l.cantidad * l.precio_unit), 0)
-                 + (extracostes||[]).reduce((s, e) => s + parseFloat(e.importe || 0), 0);
+      const base = round2(
+        lineas.reduce((s, l) => s + round2(Number(l.cantidad || 0) * Number(l.precio_unit || 0)), 0)
+        + (extracostes||[]).reduce((s, e) => s + round2(parseFloat(e.importe || 0)), 0)
+      );
       const { rows: cliRows } = await client.query(
         "SELECT tipo_iva, iva_regimen, tipo_irpf, forma_pago, vencimiento FROM clientes WHERE id=$1 AND empresa_id=$2",
         [cliente_id, empresaId]
@@ -935,9 +949,9 @@ router.post("/", GERENTE_O_CONTABLE,
       const tipoIva  = cliRows[0]?.tipo_iva !== undefined && cliRows[0]?.tipo_iva !== null ? Number(cliRows[0].tipo_iva) : 21;
       const ivaRegimen = ivaRegimenFromPct(tipoIva, cliRows[0]?.iva_regimen);
       const tipoIrpf = cliRows[0]?.tipo_irpf || 0;
-      const cuotaIva  = base * tipoIva  / 100;
-      const cuotaIrpf = base * tipoIrpf / 100;
-      const total     = base + cuotaIva - cuotaIrpf;
+      const cuotaIva  = round2(base * tipoIva  / 100);
+      const cuotaIrpf = round2(base * tipoIrpf / 100);
+      const total     = round2(base + cuotaIva - cuotaIrpf);
       const clienteVencimiento = String(vencimiento || cliRows[0]?.vencimiento || "30 dias").trim();
       const facturaFecha = fecha || new Date();
       const fechaVencimientoFinal = fecha_vencimiento || addDaysDateOnly(facturaFecha, parseClientePaymentDays(clienteVencimiento));
@@ -967,7 +981,7 @@ router.post("/", GERENTE_O_CONTABLE,
       // Insertar líneas. Se rellena tambien "importe" (columna legacy NOT NULL):
       // importe de la linea = cantidad * precio unitario.
       for (const [i, l] of lineas.entries()) {
-        const importeLinea = Number(l.cantidad || 0) * Number(l.precio_unit || 0);
+        const importeLinea = round2(Number(l.cantidad || 0) * Number(l.precio_unit || 0));
         await client.query(
           `INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, importe, orden) VALUES ($1,$2,$3,$4,$5,$6)`,
           [fac.id, l.concepto, l.cantidad, l.precio_unit, importeLinea, i]

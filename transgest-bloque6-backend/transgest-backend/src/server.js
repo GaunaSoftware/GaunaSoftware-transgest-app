@@ -63,6 +63,10 @@ const integrationRoutes   = require("./routes/integration");
 const webhooksRoutes      = require("./routes/webhooks");
 
 const app  = express();
+// Hace que los errores de handlers async lleguen al gestor de errores global
+// (Express 4 no lo hace por si solo: sin esto, un handler async que lanza deja
+// la peticion colgada). Debe aplicarse antes de atender peticiones.
+require("./middleware/asyncErrors")(logger);
 const PORT = process.env.PORT || 3001;
 let httpServer = null;
 let shuttingDown = false;

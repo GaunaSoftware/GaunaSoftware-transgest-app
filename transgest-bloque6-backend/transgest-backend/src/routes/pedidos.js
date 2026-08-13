@@ -6,6 +6,7 @@ const crypto  = require("crypto");
 const zlib = require("zlib");
 const pdfParse = require("pdf-parse");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
+const { parseLocaleNumber } = require("../utils/number");
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
 const { crearNotificacion, notificarUsuariosCliente } = require("../services/notificaciones");
@@ -3785,20 +3786,6 @@ function normalizePedidoUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw)
     ? raw
     : null;
-}
-
-function parseLocaleNumber(value) {
-  if (value === "" || value === null || value === undefined) return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  let raw = String(value).trim().replace(/\s+/g, "");
-  if (!raw) return null;
-  const hasComma = raw.includes(",");
-  const hasDot = raw.includes(".");
-  if (hasComma && hasDot) raw = raw.replace(/\./g, "").replace(",", ".");
-  else if (hasComma) raw = raw.replace(",", ".");
-  else if (hasDot && /^\d{1,3}(\.\d{3}){2,}$/.test(raw)) raw = raw.replace(/\./g, "");
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
 }
 
 function normalizePaisPedido(value, fallback = "España") {

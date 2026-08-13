@@ -2,6 +2,7 @@ import { useDebounce } from "../hooks/useDebounce";
 import AdrPanel from "../components/AdrPanel";
 import QuickAssignModal from "../components/QuickAssignModal";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
+import { parseLocaleNumber } from "../utils/number";
 import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
 import { getLogoDataUrl } from "../services/logoHelper";
 import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPedidoDocAChofer, enviarTodosPedidoDocsAChofer, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
@@ -1210,24 +1211,6 @@ function normalizePesoKgInput(value) {
   const kg = parseLocaleNumber(raw, NaN);
   if ((raw.includes(",") || raw.includes(".")) && Number.isFinite(kg) && kg > 0 && kg < 1000) return Math.round(kg * 1000);
   return Number.isFinite(kg) ? kg : null;
-}
-
-function parseLocaleNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  let raw = String(value).trim().replace(/\s+/g, "");
-  if (!raw) return fallback;
-  const hasComma = raw.includes(",");
-  const hasDot = raw.includes(".");
-  if (hasComma && hasDot) {
-    raw = raw.replace(/\./g, "").replace(",", ".");
-  } else if (hasComma) {
-    raw = raw.replace(",", ".");
-  } else if (hasDot && /^\d{1,3}(\.\d{3}){2,}$/.test(raw)) {
-    raw = raw.replace(/\./g, "");
-  }
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
 }
 
 function compactNumberInput(value) {

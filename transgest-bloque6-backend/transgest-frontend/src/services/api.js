@@ -420,6 +420,7 @@ export const getCliente   = (id)      => apiFetch(`/clientes/${id}`);
 export const getClienteRiesgoOperativo = (id, options = {}) => apiFetch(`/clientes/${id}/riesgo-operativo`, options);
 export const crearCliente = (data)    => apiFetch("/clientes", { method:"POST", body:data, timeoutMs:30000, silentSuccess:true });
 export const editarCliente= (id,data) => apiFetch(`/clientes/${id}`, { method:"PUT", body:data, timeoutMs:30000, silentSuccess:true });
+export const setClienteMercanciaHabitual = (id, mercancia_habitual) => apiFetch(`/clientes/${id}/mercancia-habitual`, { method:"PATCH", body:{ mercancia_habitual }, silentSuccess:true });
 export const borrarCliente= (id)      => apiFetch(`/clientes/${id}`, { method:"DELETE" });
 export const crearPortalUsuarioCliente = (id, data={}) => apiFetch(`/clientes/${id}/portal-user`, { method:"POST", body:data });
 export const getClienteIntegracionTokens = (id) => apiFetch(`/clientes/${id}/integracion-tokens`);

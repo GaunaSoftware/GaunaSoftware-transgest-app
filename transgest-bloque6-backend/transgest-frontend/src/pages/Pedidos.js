@@ -9,7 +9,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente, editarRutaCliente,
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
-         crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
+         crearCliente, setClienteMercanciaHabitual, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          crearColaboradorLiquidacionToken,
          getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta, resolveGeoPlace,
          getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos, calcularDistanciaGeo, getChoferUltimoViaje, combinarGrupaje } from "../services/api";
@@ -7868,6 +7868,26 @@ async function guardar() {
         enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
       }
       notify("Pedido creado correctamente.", "success");
+      // Si esta mercancia ya se repite bastante en este cliente, ofrecer fijarla como habitual
+      const sugMerc = pedidoGuardado?.sugerencia_mercancia_habitual;
+      if (sugMerc && sugMerc.mercancia && form.cliente_id) {
+        const okFijar = await confirmDialog({
+          title: "Mercancia habitual del cliente",
+          message: `Este cliente ya lleva ${sugMerc.veces} pedidos con "${sugMerc.mercancia}". Quieres fijarla como mercancia habitual? Se rellenara sola al crear nuevos pedidos de este cliente (siempre podras cambiarla).`,
+          confirmText: "Fijar como habitual",
+          cancelText: "Ahora no",
+          tone: "success",
+        });
+        if (okFijar) {
+          try {
+            await setClienteMercanciaHabitual(form.cliente_id, sugMerc.mercancia);
+            setClientes(prev => prev.map(c => c.id === form.cliente_id ? { ...c, mercancia_habitual: sugMerc.mercancia } : c));
+            notify(`"${sugMerc.mercancia}" fijada como mercancia habitual del cliente.`, "success");
+          } catch (e) {
+            notify("No se pudo fijar la mercancia habitual: " + (e.message || ""), "warning");
+          }
+        }
+      }
       initialFormRef.current = pedidoDraftSignature(form);
       onSaved();
       return;
@@ -8056,6 +8076,8 @@ function aplicarColaborador(col) {
     ...p,
     colaborador_id: col?.id || "",
     colaborador_nombre: col?.nombre || "",
+    // Excluyente con transporte propio: al poner colaborador se quita el camion/chofer asignado
+    ...(col?.id ? { vehiculo_id:"", chofer_id:"", chofer2_id:"", remolque_id_manual:"", matricula_manual:"", remolque_matricula_manual:"" } : {}),
     precio_cliente_col: col?.id ? (impActual || p.precio_cliente_col || "") : "",
     coste_gasoil: col?.id ? 0 : p.coste_gasoil,
   }));
@@ -8330,6 +8352,8 @@ useEffect(() => {
                                 iva_regimen: c.iva_regimen || ivaOptionValue({ tipo_iva: c.tipo_iva ?? p.tipo_iva }),
                                 ventana_carga: p.ventana_carga || c.horario_carga || "",
                                 ventana_descarga: p.ventana_descarga || c.horario_descarga || "",
+                                // Mercancia habitual del cliente (si no hay una escrita ya)
+                                mercancia: p.mercancia || c.mercancia_habitual || "",
                               }));
                               setNombreBusqueda("");
                               setShowSuggestions(false);
@@ -9093,6 +9117,8 @@ useEffect(() => {
                     return {
                       ...p,
                       vehiculo_id: vid,
+                      // Camion propio y colaborador son excluyentes: al asignar vehiculo se quita el colaborador
+                      ...(vid ? { colaborador_id:"", colaborador_nombre:"", precio_cliente_col:"", precio_colaborador:"", precio_colaborador_unitario:"", minimo_colaborador_unidades:"" } : {}),
                       chofer_id: choferEraDelAnterior ? choferDelVehiculo : p.chofer_id,
                       remolque_id_manual: remolqueEraDelAnterior ? (veh?.remolque_id || "") : p.remolque_id_manual,
                       matricula_manual: vid ? "" : p.matricula_manual,
@@ -9139,7 +9165,7 @@ useEffect(() => {
                     </span>
                   )}
                 </label>
-                <select value={form.chofer_id||""} onChange={f("chofer_id")} style={S.sel}>
+                <select value={form.chofer_id||""} onChange={e=>{ const cid=e.target.value; setForm(p=>({ ...p, chofer_id:cid, ...(cid && p.colaborador_id ? { colaborador_id:"", colaborador_nombre:"", precio_cliente_col:"", precio_colaborador:"" } : {}) })); }} style={S.sel}>
                   <option value="">Sin asignar</option>
                   {choferesLocal.map(c=><option key={c.id} value={c.id}>{c.nombre} {c.apellidos||""}</option>)}
                 </select>
@@ -9266,6 +9292,8 @@ useEffect(() => {
                         ...p,
                         colaborador_id: e.target.value,
                         colaborador_nombre: col?.nombre||"",
+                        // Excluyente con transporte propio: al poner colaborador se quita el camion/chofer asignado
+                        ...(e.target.value ? { vehiculo_id:"", chofer_id:"", chofer2_id:"", remolque_id_manual:"", matricula_manual:"", remolque_matricula_manual:"" } : {}),
                         // Siempre sincronizar precio del viaje -> lo que cobramos al colaborador
                         precio_cliente_col: e.target.value ? (impActual || p.precio_cliente_col || "") : "",
                         precio_colaborador: e.target.value ? (importeColaboradorCalculado({ ...p, colaborador_id: e.target.value }) || p.precio_colaborador || "") : "",
@@ -9418,6 +9446,13 @@ useEffect(() => {
 
               <div style={{gridColumn:"1/-1"}}><label style={S.label}>Notas / Instrucciones</label>
                 <textarea style={{...S.input,height:64,resize:"vertical"}} value={form.notas||""} onChange={f("notas")}/>
+                <label style={{display:"flex",alignItems:"center",gap:8,marginTop:7,cursor:form.notas?"pointer":"default",fontSize:12,color:form.notas?"var(--text3)":"var(--text5)"}}>
+                  <input type="checkbox" checked={!!form.nota_visible} disabled={!form.notas}
+                    onChange={e=>setForm(p=>({...p,nota_visible:e.target.checked}))}
+                    style={{width:15,height:15,cursor:form.notas?"pointer":"default",accentColor:"var(--accent)"}}/>
+                  Dejar nota visible en el pedido
+                  <span style={{fontSize:10,color:"var(--text5)"}}>- aparece al pasar el raton por encima del pedido en la lista</span>
+                </label>
               </div>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={S.label}>
@@ -12113,6 +12148,13 @@ export default function Pedidos() {
                 </td>
                 <td className="tg-td-num" style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)",whiteSpace:"nowrap",minWidth:104}}>
                   <div>{p.numero}</div>
+                  {p.nota_visible && p.notas ? (
+                    <div title={p.notas} onClick={e=>e.stopPropagation()}
+                      style={{display:"inline-flex",alignItems:"center",gap:4,marginTop:4,maxWidth:120,padding:"2px 7px",borderRadius:5,background:"rgba(251,191,36,.12)",border:"1px solid rgba(251,191,36,.3)",color:"#d97706",fontSize:9,fontFamily:"'DM Sans',sans-serif",fontWeight:800,cursor:"help"}}>
+                      <span>NOTA</span>
+                      <span style={{fontWeight:600,opacity:.85,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.notas}</span>
+                    </div>
+                  ) : null}
                   {(() => {
                     // Sin repetir: si ya se muestra "Completar" (pendiente_completar),
                     // no repetimos "Datos pendientes". Y solo "Vencido" va en color de
@@ -12736,6 +12778,10 @@ export default function Pedidos() {
                 vehiculo_id: asig.vehiculo_id || autoAsignando.vehiculo_id,
                 chofer_id: asig.chofer_id || autoAsignando.chofer_id,
                 remolque_id_manual: asig.remolque_id_manual,
+                // Asignar transporte propio quita el colaborador (excluyentes)
+                colaborador_id: "",
+                colaborador_nombre: "",
+                precio_colaborador: null,
               }));
               cargar();
             } catch(e) { notify("Error al asignar: " + e.message, "error"); }

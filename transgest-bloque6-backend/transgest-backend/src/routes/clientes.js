@@ -331,6 +331,7 @@ async function persistClienteExtendedFields(clienteId, empresaId, data = {}) {
     modo_facturacion: data.modo_facturacion || "por_viaje",
     bloqueado: Boolean(data.bloqueado),
     bloqueo_motivo: data.bloqueo_motivo || null,
+    mercancia_habitual: data.mercancia_habitual === undefined ? undefined : (String(data.mercancia_habitual || "").trim() || null),
     pendiente_revision: data.pendiente_revision === undefined ? undefined : Boolean(data.pendiente_revision),
     updated_at: columns.has("updated_at") ? new Date() : undefined,
   };
@@ -1084,6 +1085,20 @@ router.patch("/:id/revision", async (req,res) => {
     );
     res.json({ok:true});
   } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// PATCH /clientes/:id/mercancia-habitual — fijar/quitar la mercancia habitual del cliente
+router.patch("/:id/mercancia-habitual", GERENTE_O_CONTABLE, async (req,res) => {
+  try {
+    const empresaId = req.empresaId||req.user.empresa_id;
+    const val = String(req.body?.mercancia_habitual || "").trim().slice(0,200) || null;
+    const { rows } = await db.query(
+      "UPDATE clientes SET mercancia_habitual=$1 WHERE id=$2 AND empresa_id=$3 RETURNING id, mercancia_habitual",
+      [val, req.params.id, empresaId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
+    res.json(rows[0]);
+  } catch(e) { res.status(500).json({ error: "No se pudo guardar la mercancia habitual", request_id: req.id }); }
 });
 
 // GET /clientes/:id/rutas — listar rutas del cliente

@@ -707,6 +707,7 @@ async function applyMigrations() {
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pendiente_revision BOOLEAN DEFAULT false").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS mercancia_habitual TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS calle VARCHAR(200)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS num_ext VARCHAR(30)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS codigo_postal VARCHAR(20)").catch(captureStartupMigrationError);
@@ -1011,6 +1012,7 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_hash VARCHAR(64)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS foto_entrega TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS condiciones_adicionales TEXT").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nota_visible BOOLEAN NOT NULL DEFAULT false").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ultima_posicion VARCHAR(100)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS posicion_ts TIMESTAMPTZ").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(captureStartupMigrationError);

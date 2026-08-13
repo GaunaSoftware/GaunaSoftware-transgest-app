@@ -8657,6 +8657,7 @@ router.post("/", GERENTE_O_TRAFICO,
         coste_otros: req.body.coste_otros !== undefined ? (req.body.coste_otros ?? 0) : undefined,
         coste_notas: req.body.coste_notas !== undefined ? (req.body.coste_notas ?? null) : undefined,
         condiciones_adicionales: req.body.condiciones_adicionales !== undefined ? (req.body.condiciones_adicionales ?? null) : undefined,
+        nota_visible: req.body.nota_visible !== undefined ? !!req.body.nota_visible : undefined,
         importe_minimo: req.body.importe_minimo !== undefined ? (parseLocaleNumber(req.body.importe_minimo) || 0) : undefined,
         minimo_unidades: req.body.minimo_unidades !== undefined ? (parseLocaleNumber(req.body.minimo_unidades) || 0) : undefined,
         importe_paralizacion: req.body.importe_paralizacion !== undefined ? (parseLocaleNumber(req.body.importe_paralizacion) || 0) : undefined,
@@ -8765,7 +8766,25 @@ router.post("/", GERENTE_O_TRAFICO,
       pedidoCreado = pedido;
       remolqueMatCreado = remolque_mat;
     });
-    res.status(201).json({...pedidoCreado, remolque_matricula: remolqueMatCreado});
+    // Sugerir fijar la mercancia como habitual del cliente si se repite lo suficiente
+    // y el cliente todavia no la tiene fijada. No debe romper la creacion.
+    let sugerenciaMercancia = null;
+    try {
+      const merc = String(pedidoCreado?.mercancia || "").trim();
+      if (merc && cliente_id) {
+        const cli = await db.query("SELECT mercancia_habitual FROM clientes WHERE id=$1 AND empresa_id=$2", [cliente_id, empresaId]);
+        const yaFijada = String(cli.rows[0]?.mercancia_habitual || "").trim().toLowerCase();
+        if (yaFijada !== merc.toLowerCase()) {
+          const cnt = await db.query(
+            "SELECT COUNT(*)::int AS n FROM pedidos WHERE empresa_id=$1 AND cliente_id=$2 AND lower(trim(mercancia))=lower(trim($3))",
+            [empresaId, cliente_id, merc]
+          );
+          const veces = cnt.rows[0]?.n || 0;
+          if (veces >= 3) sugerenciaMercancia = { mercancia: merc, veces };
+        }
+      }
+    } catch (e) { /* la sugerencia es opcional */ }
+    res.status(201).json({...pedidoCreado, remolque_matricula: remolqueMatCreado, sugerencia_mercancia_habitual: sugerenciaMercancia});
     webhooks.dispatch(empresaId, "pedido.creado", { pedido_id: pedidoCreado && pedidoCreado.id, numero: pedidoCreado && pedidoCreado.numero, cliente_id, origen: pedidoCreado && pedidoCreado.origen, destino: pedidoCreado && pedidoCreado.destino }).catch(() => {});
     asociarPuntosInteresUsados(empresaId, cliente_id, pedidoCreado?.puntos_carga, pedidoCreado?.puntos_descarga);
     if (pedidoCreado && festivoAviso) {
@@ -9181,6 +9200,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     foto_entrega:           body.foto_entrega           !== undefined ? (body.foto_entrega           ?? null) : undefined,
     // Condiciones del encargo
     condiciones_adicionales: body.condiciones_adicionales !== undefined ? (body.condiciones_adicionales ?? null) : undefined,
+    nota_visible: body.nota_visible !== undefined ? !!body.nota_visible : undefined,
     // Minimo facturable + paralizacion
     importe_minimo:         body.importe_minimo         !== undefined ? (parseLocaleNumber(body.importe_minimo) || 0) : undefined,
     minimo_unidades:        body.minimo_unidades        !== undefined ? (parseLocaleNumber(body.minimo_unidades) || 0) : undefined,

@@ -6082,14 +6082,18 @@ router.get("/", async (req, res) => {
   });
 });
 
-// GET /pedidos/chofer-ultimo-viaje - ultimo viaje EN CURSO o FINALIZADO de un
-// chofer, para sugerir los km EN VACIO de posicionamiento al asignarle el
-// siguiente viaje desde Pedidos (destino donde queda -> origen del nuevo).
+// GET /pedidos/chofer-ultimo-viaje - viaje del chofer que PRECEDE al que se le
+// esta asignando, para sugerir los km EN VACIO de posicionamiento (destino donde
+// queda -> origen del nuevo). Si se pasa antes_de (fecha de carga del nuevo
+// viaje), se elige el viaje del chofer que TERMINA justo antes de esa fecha (el
+// predecesor cronologico real), asi no importa en que orden se graben los viajes.
+// Sin antes_de, se comporta como antes (el ultimo viaje por fecha).
 router.get("/chofer-ultimo-viaje", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
     const choferId = normalizePedidoUuid(req.query?.chofer_id);
     const excluir = normalizePedidoUuid(req.query?.excluir);
+    const antesDe = normalizePedidoDate(req.query?.antes_de);
     if (!empresaId || !choferId) return res.json({ hay: false });
     const { rows } = await db.query(
       `SELECT id, numero, destino, destino_provincia, destino_pais, estado::text AS estado
@@ -6099,9 +6103,10 @@ router.get("/chofer-ultimo-viaje", async (req, res) => {
           AND ($3::uuid IS NULL OR id<>$3)
           AND estado::text IN ('en_curso','descarga','entregado','facturado')
           AND NULLIF(TRIM(COALESCE(destino,'')),'') IS NOT NULL
+          AND ($4::date IS NULL OR COALESCE(fecha_entrega, fecha_descarga, fecha_carga) <= $4::date)
         ORDER BY COALESCE(fecha_entrega, fecha_descarga, fecha_carga) DESC NULLS LAST, updated_at DESC NULLS LAST
         LIMIT 1`,
-      [empresaId, choferId, excluir || null]
+      [empresaId, choferId, excluir || null, antesDe || null]
     );
     const p = rows[0];
     if (!p) return res.json({ hay: false });

@@ -11361,7 +11361,10 @@ export default function Pedidos() {
       if (Number(pedido.km_vacio) > 0) return;                 // ya tiene km en vacio: no molestar
       const origen = String(pedido.origen || "").trim();
       if (!origen) return;
-      const info = await getChoferUltimoViaje(choferId, pedido.id);
+      // Fecha de carga del viaje nuevo: el backend elige el viaje del chofer que
+      // termina justo antes de esta fecha (predecesor real), no el ultimo grabado.
+      const cargaFecha = String(pedido.fecha_carga || parseStops(pedido.puntos_carga)[0]?.fecha || "").slice(0, 10);
+      const info = await getChoferUltimoViaje(choferId, pedido.id, cargaFecha);
       if (!info?.hay || !info.destino) return;
       if (String(info.destino).trim().toUpperCase() === origen.toUpperCase()) return; // mismo sitio
       const desde = [info.destino, info.destino_provincia].filter(Boolean).join(", ");

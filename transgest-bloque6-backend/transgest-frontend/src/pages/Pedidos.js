@@ -4,7 +4,7 @@ import QuickAssignModal from "../components/QuickAssignModal";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
 import { parseLocaleNumber } from "../utils/number";
 import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
-import { getLogoDataUrl } from "../services/logoHelper";
+import { getLogoDataUrl, ensureLogoCargado } from "../services/logoHelper";
 import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPedidoDocAChofer, enviarTodosPedidoDocsAChofer, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
@@ -4562,6 +4562,15 @@ function OrdenCargaModal({ pedido, onClose }) {
   const { user } = useAuth();
   const esGerente = user?.rol === "gerente";
   const empresa = useEmpresaPerfil();
+  // El logo puede no estar aun en cache si no se ha abierto "Mi Empresa": se
+  // carga bajo demanda y se fuerza el re-render para que salga en la orden.
+  const [logoUrl, setLogoUrl] = useState(() => getLogoDataUrl());
+  useEffect(() => {
+    if (logoUrl) return;
+    let alive = true;
+    ensureLogoCargado().then(() => { if (alive) setLogoUrl(getLogoDataUrl()); });
+    return () => { alive = false; };
+  }, [logoUrl]);
   const numOC = getOrdenCargaNumero(pedido, docControl);
   const pagoColaboradorTonelada = getPagoColaboradorPorTonelada(pedido);
   const pagoColaboradorTotalCerrado = getPagoColaboradorTotalCerrado(pedido);
@@ -4638,7 +4647,7 @@ function OrdenCargaModal({ pedido, onClose }) {
     const cargaPostalOrden = stopPostalLine(cargaPrincipal, pedido.origen_provincia || "", pedido.origen_pais || "España", pedido.cliente_id || "", "carga");
     const descargaPostalOrden = stopPostalLine(descargaPrincipal, pedido.destino_provincia || "", pedido.destino_pais || "España", pedido.cliente_id || "", "descarga");
     const albaranesDireccionPostal = empresaDireccion || "Direccion postal pendiente de configurar en Mi Empresa";
-    const logoHtml = getLogoDataUrl() ? `<img src="${getLogoDataUrl()}" style="max-height:52px;max-width:160px;object-fit:contain;margin-bottom:6px;display:block" alt="">` : "";
+    const logoHtml = logoUrl ? `<img src="${logoUrl}" style="max-height:52px;max-width:160px;object-fit:contain;margin-bottom:6px;display:block" alt="">` : "";
     const emailAlbaranesColaborador = joinEmailList(
       [empresa.emails_albaranes, empresa.email],
       "Email de albaranes pendiente de configurar en Mi Empresa"

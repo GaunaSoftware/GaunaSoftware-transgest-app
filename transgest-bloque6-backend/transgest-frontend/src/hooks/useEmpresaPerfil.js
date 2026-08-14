@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getEmpresa, saveEmpresa, getEmpresaBackend } from "../services/api";
+import { ensureLogoCargado } from "../services/logoHelper";
 
 export const EMPRESA_DEFAULTS = {
   razon_social: "",
@@ -37,6 +38,10 @@ export function getEmpresaPerfilSync() {
 
 export async function hydrateEmpresaPerfil() {
   const local = getEmpresaPerfilSync();
+  // Asegura que el logo este cargado en cache para las impresiones (orden de
+  // carga, factura, nomina...), aunque no se haya abierto "Mi Empresa". Guardada:
+  // solo hace la peticion una vez.
+  ensureLogoCargado();
   try {
     const remote = await getEmpresaBackend();
     if (remote && typeof remote === "object" && Object.keys(remote).length) {

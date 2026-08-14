@@ -16,7 +16,7 @@ import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRuta
          getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos, calcularDistanciaGeo, getChoferUltimoViaje, combinarGrupaje } from "../services/api";
 import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { useAuth } from "../context/AuthContext";
-import { confirmDialog, notify } from "../services/notify";
+import { confirmDialog, promptDialog, notify } from "../services/notify";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
@@ -11352,36 +11352,40 @@ export default function Pedidos() {
     return [p];
   }
 
-  // Al asignar un chofer a un pedido desde Pedidos: si ese chofer viene de un
-  // viaje EN CURSO o FINALIZADO, calcula los km EN VACIO de posicionamiento (del
-  // destino donde queda al origen de este pedido) y pregunta si se anaden.
+  // Al asignar un chofer a un pedido desde Pedidos: calcula los km EN VACIO de
+  // posicionamiento hasta el origen de este viaje. El punto de partida se decide
+  // por cascada en el backend (robusta al orden de grabacion): GPS del camion si
+  // es reciente y el viaje sale pronto -> destino del viaje anterior por fecha ->
+  // base de la empresa. Los km se muestran editables antes de anadirlos.
   async function ofrecerKmVacioPorChoferAsignado(pedido, patch, choferId) {
     try {
       if (!choferId || !pedido?.id) return;
       if (Number(pedido.km_vacio) > 0) return;                 // ya tiene km en vacio: no molestar
       const origen = String(pedido.origen || "").trim();
       if (!origen) return;
-      // Fecha de carga del viaje nuevo: el backend elige el viaje del chofer que
-      // termina justo antes de esta fecha (predecesor real), no el ultimo grabado.
       const cargaFecha = String(pedido.fecha_carga || parseStops(pedido.puntos_carga)[0]?.fecha || "").slice(0, 10);
-      const info = await getChoferUltimoViaje(choferId, pedido.id, cargaFecha);
-      if (!info?.hay || !info.destino) return;
-      if (String(info.destino).trim().toUpperCase() === origen.toUpperCase()) return; // mismo sitio
-      const desde = [info.destino, info.destino_provincia].filter(Boolean).join(", ");
+      const info = await getChoferUltimoViaje(choferId, pedido.id, cargaFecha, patch?.vehiculo_id || "");
+      const desde = String(info?.desde || "").trim();
+      if (!info?.hay || !desde) return;
+      if (desde.toUpperCase() === origen.toUpperCase()) return; // mismo sitio
       const data = await calcularDistanciaGeo(desde, origen);
       const km = Number(data?.km);
       if (!data?.ok || !Number.isFinite(km) || km <= 0) return;
       const kmR = Math.round(km);
-      const estadoTxt = ["entregado", "facturado"].includes(String(info.estado)) ? "finalizado" : "en curso";
-      const ok = await confirmDialog({
+      const fuenteTxt = info.desde_label || desde;
+      const kmStr = await promptDialog({
         title: "Km en vacio de posicionamiento",
-        message: `El chofer viene del viaje ${info.numero || ""} (${estadoTxt}), que termina en ${info.destino}. Hay unos ${kmR.toLocaleString("es-ES")} km en vacio hasta el origen de este viaje (${origen}). Anadirlos como km en vacio?`,
-        confirmText: `Anadir ${kmR.toLocaleString("es-ES")} km`,
+        message: `Posicion antes del viaje: ${fuenteTxt}.\nHasta el origen (${origen}) hay unos ${kmR.toLocaleString("es-ES")} km en vacio.\nAjusta los km si hace falta (0 = no anadir).`,
+        inputType: "number",
+        defaultValue: String(kmR),
+        confirmText: "Anadir km",
         cancelText: "No anadir",
       });
-      if (!ok) return;
-      await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, { ...patch, km_vacio: kmR }));
-      notify(`Anadidos ${kmR.toLocaleString("es-ES")} km en vacio.`, "success");
+      if (kmStr === null || kmStr === undefined) return;       // cancelado
+      const kmFinal = Math.max(0, Math.round(Number(String(kmStr).replace(",", ".")) || 0));
+      if (kmFinal <= 0) return;
+      await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, { ...patch, km_vacio: kmFinal }));
+      notify(`Anadidos ${kmFinal.toLocaleString("es-ES")} km en vacio.`, "success");
       cargar({ silent: true });
     } catch { /* no bloquea la asignacion */ }
   }

@@ -6092,9 +6092,39 @@ router.get("/chofer-ultimo-viaje", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
     const choferId = normalizePedidoUuid(req.query?.chofer_id);
+    const vehiculoId = normalizePedidoUuid(req.query?.vehiculo_id);
     const excluir = normalizePedidoUuid(req.query?.excluir);
     const antesDe = normalizePedidoDate(req.query?.antes_de);
     if (!empresaId || !choferId) return res.json({ hay: false });
+
+    // Cascada para el punto de partida del posicionamiento en vacio, robusta al
+    // orden en que se graban los viajes: 1) GPS del camion si es reciente y el
+    // viaje sale pronto, 2) destino del viaje anterior por fecha, 3) base empresa.
+
+    // -- Fecha de carga cercana a hoy? (para decidir si el GPS actual es relevante)
+    let cargaCercana = true;
+    if (antesDe) {
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      const d = new Date(`${antesDe}T00:00:00`);
+      const diffDias = Math.round((d.getTime() - hoy.getTime()) / 86400000);
+      cargaCercana = diffDias >= -1 && diffDias <= 2;
+    }
+
+    // 1) GPS del vehiculo asignado (ubicacion reciente <= 2 dias)
+    if (vehiculoId && cargaCercana) {
+      const gps = await db.query(
+        "SELECT ubicacion_actual, ubicacion_ts FROM vehiculos WHERE id=$1 AND empresa_id=$2",
+        [vehiculoId, empresaId]
+      );
+      const v = gps.rows[0];
+      const ubic = String(v?.ubicacion_actual || "").trim();
+      const tsMs = v?.ubicacion_ts ? new Date(v.ubicacion_ts).getTime() : 0;
+      if (ubic && tsMs && (Date.now() - tsMs) <= 2 * 86400000) {
+        return res.json({ hay: true, fuente: "gps", desde: ubic, desde_label: `GPS del camion: ${ubic}` });
+      }
+    }
+
+    // 2) Viaje anterior por fecha (predecesor cronologico real)
     const { rows } = await db.query(
       `SELECT id, numero, destino, destino_provincia, destino_pais, estado::text AS estado
          FROM pedidos
@@ -6109,16 +6139,26 @@ router.get("/chofer-ultimo-viaje", async (req, res) => {
       [empresaId, choferId, excluir || null, antesDe || null]
     );
     const p = rows[0];
-    if (!p) return res.json({ hay: false });
-    return res.json({
-      hay: true,
-      pedido_id: p.id,
-      numero: p.numero,
-      destino: p.destino,
-      destino_provincia: p.destino_provincia || "",
-      destino_pais: p.destino_pais || "",
-      estado: p.estado,
-    });
+    if (p) {
+      const desde = [p.destino, p.destino_provincia].filter(Boolean).join(", ");
+      return res.json({
+        hay: true, fuente: "viaje", desde,
+        desde_label: `Viaje ${p.numero || ""} (${p.destino})`.replace(/\s+\(/, " ("),
+        pedido_id: p.id, numero: p.numero, destino: p.destino,
+        destino_provincia: p.destino_provincia || "", destino_pais: p.destino_pais || "", estado: p.estado,
+      });
+    }
+
+    // 3) Base de la empresa (domicilio/municipio del perfil)
+    const emp = await db.query("SELECT cfg_precios FROM empresas WHERE id=$1", [empresaId]);
+    const perfil = emp.rows[0]?.cfg_precios?.empresa_perfil || emp.rows[0]?.cfg_precios || {};
+    const baseDesde = [perfil.municipio, perfil.provincia].filter(x => String(x || "").trim()).join(", ")
+      || String(perfil.domicilio || "").trim();
+    if (baseDesde) {
+      return res.json({ hay: true, fuente: "base", desde: baseDesde, desde_label: `Base de la empresa: ${baseDesde}` });
+    }
+
+    return res.json({ hay: false });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

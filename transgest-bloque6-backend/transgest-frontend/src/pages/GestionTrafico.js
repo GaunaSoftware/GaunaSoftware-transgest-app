@@ -2652,8 +2652,9 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
           const fetched = await getPedido(focusPedido.pedido_id);
           if (cancelled || !fetched?.id) return;
           setPedidos(prev => prev.some(p => String(p.id) === String(fetched.id)) ? prev : [fetched, ...prev]);
+          // "Ver en trafico": solo resalta el pedido en el tablero; la edicion se
+          // hace en Pedidos (no se abre editor aqui para no duplicarlo ni rebotar).
           setFocusContext(focusPedido);
-          await abrirViaje(fetched);
           clearRuntimeFocus("tms_trafico_focus");
           setFocusPedido(null);
         } catch {}
@@ -2665,7 +2666,6 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     }
     const t = window.setTimeout(() => {
       setFocusContext(focusPedido);
-      abrirViaje(found).catch(() => {});
       clearRuntimeFocus("tms_trafico_focus");
       setFocusPedido(null);
     }, 180);
@@ -3277,19 +3277,17 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   }
 
   async function abrirViaje(pedido) {
-    let pedidoCompleto = pedido;
-    if (pedido?.id) {
-      try {
-        const fetched = await getPedido(pedido.id);
-        if (fetched?.id) pedidoCompleto = fetched;
-      } catch (e) {
-        notify("No se pudo recargar el viaje completo. Se abre la version disponible.", "warning");
-      }
-    }
-    setEditViaje({
-      ...pedidoCompleto,
-      ...(pedidoTieneFacturaFinal(pedidoCompleto) ? { _readonly: true } : {}),
+    if (!pedido?.id) return;
+    // El detalle y la edicion del pedido viven en Pedidos: la mesa de trafico no
+    // duplica el editor. Se abre el MISMO editor de Pedidos con foco en el pedido
+    // (y en la incidencia si la tiene). La mesa queda para asignar/organizar rapido.
+    setRuntimeFocus("tms_pedidos_focus", {
+      source: "gestion_trafico",
+      pedido_id: pedido.id,
+      numero: pedido.numero || "",
+      estado: pedido.estado || "",
     });
+    window.dispatchEvent(new CustomEvent("tms:navegar", { detail: "pedidos" }));
   }
 
   function syncPedidoLocal(pedidoId, patch = {}) {
@@ -5191,8 +5189,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                       key={p.id}
                       type="button"
                       onClick={() => {
-                        setEditViaje(p);
-                        setFocusContext({ pedido_id:p.id, fecha_carga:fechaPedido(p), source:"add_trip_cell" });
+                        abrirViaje(p);
                         setAddTripCell(null);
                       }}
                       style={{

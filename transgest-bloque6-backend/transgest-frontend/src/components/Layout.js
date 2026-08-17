@@ -243,6 +243,17 @@ const CSS = `
        para que la tabla de flota tenga ancho completo y no se corte NOTAS. */
     .tg-plandiario-grid { grid-template-columns:1fr !important; }
   }
+  @media (max-width: 1400px) {
+    /* Barras de la mesa de trafico (pestanas, leyenda de estados, navegacion de
+       semana): en portatil no caben en una linea y se cortaban por la derecha
+       ("Solo criticos"). Se hacen desplazables en horizontal en vez de recortarse. */
+    .tg-traffic-tabs,
+    .tg-traffic-legend,
+    .tg-traffic-weeknav { overflow-x:auto; overflow-y:hidden; flex-wrap:nowrap !important; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+    .tg-traffic-tabs > *,
+    .tg-traffic-legend > *,
+    .tg-traffic-weeknav > * { flex:0 0 auto; }
+  }
   @media (max-width: 1100px) {
     .tg-responsive-page [style*="grid-template-columns: repeat(4"],
     .tg-responsive-page [style*="grid-template-columns:repeat(4"] {

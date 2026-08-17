@@ -312,15 +312,17 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
               <option value="operativa">Operativa</option>
             </select>
           </div>
-          <div>
-            <label style={S.label}>{esGerente ? "Asignado a" : "Solicitar a"}</label>
-            <select style={S.input} value={form.asignado_a} onChange={f("asignado_a")}>
-              <option value="">Yo / sin asignar</option>
-              {usuarios
-                .filter(u => String(u.rol || "").toLowerCase() !== "chofer")
-                .map(u => <option key={u.id} value={u.id}>{u.nombre || u.username || u.email} · {u.rol}</option>)}
-            </select>
-          </div>
+          {esGerente && (
+            <div>
+              <label style={S.label}>Asignado a</label>
+              <select style={S.input} value={form.asignado_a} onChange={f("asignado_a")}>
+                <option value="">Yo / sin asignar</option>
+                {usuarios
+                  .filter(u => String(u.rol || "").toLowerCase() !== "chofer")
+                  .map(u => <option key={u.id} value={u.id}>{u.nombre || u.username || u.email} · {u.rol}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label style={S.label}>Inicio</label>
             <input type={form.todo_dia ? "date" : "datetime-local"} style={S.input} value={form.todo_dia ? form.fecha_inicio.slice(0,10) : form.fecha_inicio} onChange={f("fecha_inicio")} />

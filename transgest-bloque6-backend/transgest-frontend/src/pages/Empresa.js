@@ -365,11 +365,17 @@ export default function Empresa() {
     cargarCalendarioLaboral(false);
   }, [tab, cargarCalendarioLaboral]);
 
-  function addEtiquetaTrafico() {
+  // Tipo de etiqueta: "categoria" (de vehiculo, se auto-pone por el tipo de camion)
+  // o "perfil" (de viaje, manual). Retrocompatible: las etiquetas antiguas sin
+  // tipo se clasifican por si tienen "auto por vehiculo" (categoria) o no (perfil).
+  const etiquetaTipo = (e) => e?.tipo === "perfil" ? "perfil"
+    : e?.tipo === "categoria" ? "categoria"
+    : (String(e?.auto_match || "").trim() ? "categoria" : "perfil");
+  function addEtiquetaTrafico(tipo = "categoria") {
     const palette = ["#14b8a6","#f59e0b","#3b82f6","#ef4444","#8b5cf6","#10b981","#ec4899","#0ea5e9"];
     setCfgTrafico(p=>{
       const list = Array.isArray(p.etiquetas_catalogo)?p.etiquetas_catalogo:[];
-      return {...p, etiquetas_catalogo:[...list,{nombre:"",color:palette[list.length%palette.length],auto_match:""}]};
+      return {...p, etiquetas_catalogo:[...list,{nombre:"",color:palette[list.length%palette.length],auto_match:"",tipo}]};
     });
   }
   function updateEtiquetaTrafico(idx, patch) {
@@ -391,7 +397,7 @@ export default function Empresa() {
     try {
       const seen = new Set();
       const etiquetasLimpias = (Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[])
-        .map(e=>({nombre:String(e?.nombre||"").trim(), color:e?.color||"#14b8a6", auto_match:String(e?.auto_match||"").trim().toLowerCase()}))
+        .map(e=>{ const tipo = etiquetaTipo(e); return {nombre:String(e?.nombre||"").trim(), color:e?.color||"#14b8a6", tipo, auto_match: tipo==="perfil" ? "" : String(e?.auto_match||"").trim().toLowerCase()}; })
         .filter(e=>{ const k=e.nombre.toLowerCase(); if(!e.nombre||seen.has(k)) return false; seen.add(k); return true; });
       const numOr = (v, def) => { const n = Number(v); return (v === "" || v == null || !Number.isFinite(n) || n <= 0) ? def : n; };
       const next = {...cfgTrafico,
@@ -2903,25 +2909,46 @@ export default function Empresa() {
           </div>
 
           <div style={{marginTop:20,paddingTop:18,borderTop:"1px solid var(--border2)"}}>
-            <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Etiquetas de tráfico (perfiles)</div>
+            <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Etiquetas de tráfico</div>
             <div style={{fontSize:11,color:"var(--text4)",marginTop:3,lineHeight:1.5,maxWidth:660}}>
-              Crea etiquetas para clasificar los viajes (p. ej. <b>Bañera</b>, <b>Lona</b>, <b>Salida</b>, <b>Retorno</b>). Luego, en Usuarios, defines qué etiquetas ve cada usuario de tráfico, y en cada pedido marcas las suyas. Si rellenas <b>«Auto por vehículo»</b> con un texto (ej. <i>bañera</i>), la etiqueta se pondrá sola al asignar un vehículo cuyo tipo/clase contenga ese texto.
+              Dos grupos que puedes <b>combinar</b> al dar acceso a cada usuario de tráfico en Usuarios (verá los pedidos con cualquiera de las etiquetas que le marques). Las <b>categorías de vehículo</b> (bañera, lona, cisterna) se ponen solas al asignar un camión cuyo tipo/clase contenga el texto de «Auto por vehículo». Los <b>perfiles de viaje</b> (salida, retorno…) se marcan a mano en cada pedido.
             </div>
-            <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:12}}>
-              {(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).map((et,idx)=>(
+
+            {/* Categorías de vehículo */}
+            <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",margin:"14px 0 4px"}}>Categorías de vehículo</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).map((et,idx)=> etiquetaTipo(et)!=="categoria" ? null : (
                 <div key={idx} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:9,padding:"8px 10px"}}>
                   <input type="color" value={et.color||"#14b8a6"} onChange={e=>updateEtiquetaTrafico(idx,{color:e.target.value})} title="Color" style={{width:34,height:30,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
-                  <input value={et.nombre||""} onChange={e=>updateEtiquetaTrafico(idx,{nombre:e.target.value})} placeholder="Nombre (Bañera, Salida...)" style={{flex:"1 1 150px",minWidth:120,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
-                  <input value={et.auto_match||""} onChange={e=>updateEtiquetaTrafico(idx,{auto_match:e.target.value})} placeholder="Auto por vehículo (opcional): bañera, lona..." style={{flex:"2 1 220px",minWidth:160,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
+                  <input value={et.nombre||""} onChange={e=>updateEtiquetaTrafico(idx,{nombre:e.target.value})} placeholder="Nombre (Bañera, Lona, Cisterna...)" style={{flex:"1 1 150px",minWidth:120,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
+                  <input value={et.auto_match||""} onChange={e=>updateEtiquetaTrafico(idx,{auto_match:e.target.value})} placeholder="Auto por vehículo: bañera, lona..." style={{flex:"2 1 220px",minWidth:160,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
                   <button type="button" onClick={()=>removeEtiquetaTrafico(idx)} title="Eliminar" style={{width:30,height:30,borderRadius:7,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.1)",color:"#ef4444",fontSize:13,fontWeight:900,cursor:"pointer"}}>✕</button>
                 </div>
               ))}
-              {(!Array.isArray(cfgTrafico.etiquetas_catalogo)||cfgTrafico.etiquetas_catalogo.length===0) && (
-                <div style={{fontSize:11,color:"var(--text5)"}}>Aún no hay etiquetas. Añade la primera para empezar a clasificar viajes por perfil.</div>
+              {!(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).some(e=>etiquetaTipo(e)==="categoria") && (
+                <div style={{fontSize:11,color:"var(--text5)"}}>Sin categorías. Añade una (ej. Bañera, con «bañera» en auto por vehículo).</div>
               )}
             </div>
-            <button type="button" onClick={addEtiquetaTrafico} style={{marginTop:10,padding:"6px 12px",borderRadius:7,border:"1px dashed var(--border2)",background:"transparent",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer"}}>
-              + Añadir etiqueta
+            <button type="button" onClick={()=>addEtiquetaTrafico("categoria")} style={{marginTop:8,padding:"6px 12px",borderRadius:7,border:"1px dashed var(--border2)",background:"transparent",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+              + Añadir categoría
+            </button>
+
+            {/* Perfiles de viaje */}
+            <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",margin:"18px 0 4px"}}>Perfiles de viaje</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).map((et,idx)=> etiquetaTipo(et)!=="perfil" ? null : (
+                <div key={idx} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:9,padding:"8px 10px"}}>
+                  <input type="color" value={et.color||"#14b8a6"} onChange={e=>updateEtiquetaTrafico(idx,{color:e.target.value})} title="Color" style={{width:34,height:30,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
+                  <input value={et.nombre||""} onChange={e=>updateEtiquetaTrafico(idx,{nombre:e.target.value})} placeholder="Nombre (Salida, Retorno...)" style={{flex:"1 1 200px",minWidth:120,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
+                  <button type="button" onClick={()=>removeEtiquetaTrafico(idx)} title="Eliminar" style={{width:30,height:30,borderRadius:7,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.1)",color:"#ef4444",fontSize:13,fontWeight:900,cursor:"pointer"}}>✕</button>
+                </div>
+              ))}
+              {!(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).some(e=>etiquetaTipo(e)==="perfil") && (
+                <div style={{fontSize:11,color:"var(--text5)"}}>Sin perfiles. Añade uno (ej. Salida, Retorno).</div>
+              )}
+            </div>
+            <button type="button" onClick={()=>addEtiquetaTrafico("perfil")} style={{marginTop:8,padding:"6px 12px",borderRadius:7,border:"1px dashed var(--border2)",background:"transparent",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+              + Añadir perfil
             </button>
           </div>
 

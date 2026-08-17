@@ -570,31 +570,47 @@ export default function Usuarios() {
                   Si no seleccionas matriculas, el usuario ve todas. Si seleccionas algunas, solo vera esas y recibira avisos de ida/retorno para esas matriculas.
                 </div>
                 <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed var(--border2)"}}>
-                  <label style={{...S.label,marginTop:0}}>Etiquetas visibles (perfiles)</label>
+                  <label style={{...S.label,marginTop:0}}>Etiquetas visibles (categorías + perfiles)</label>
                   {etiquetasCatalogo.length === 0 ? (
                     <div style={{fontSize:11,color:"var(--text5)"}}>No hay etiquetas configuradas. Créalas en <b>Empresa → Tráfico</b>.</div>
-                  ) : (
-                    <>
-                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                        {etiquetasCatalogo.map(et=>{
-                          const nombre = String(et.nombre||"").trim();
-                          if(!nombre) return null;
-                          const cfg = normalizarTraficoConfigUI(form.trafico_config);
-                          const active = cfg.etiquetas.includes(nombre);
-                          return (
-                            <button type="button" key={nombre} onClick={()=>toggleEtiquetaScope(nombre)}
-                              style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:20,border:`1px solid ${active?(et.color||"var(--accent)"):"var(--border2)"}`,background:active?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:active?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
-                              <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"var(--accent-l)",display:"inline-block"}}/>
-                              {nombre}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45,marginTop:8}}>
-                        Si no marcas ninguna etiqueta, verá pedidos de cualquier etiqueta. Si marcas algunas, solo verá los pedidos que tengan al menos una de ellas.
-                      </div>
-                    </>
-                  )}
+                  ) : (()=>{
+                    const etiquetaTipo = (e) => e?.tipo === "perfil" ? "perfil" : e?.tipo === "categoria" ? "categoria" : (String(e?.auto_match||"").trim() ? "categoria" : "perfil");
+                    const cfg = normalizarTraficoConfigUI(form.trafico_config);
+                    const grupoLabel = {fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",marginBottom:5};
+                    const chip = (et)=>{
+                      const nombre = String(et.nombre||"").trim();
+                      if(!nombre) return null;
+                      const active = cfg.etiquetas.includes(nombre);
+                      return (
+                        <button type="button" key={nombre} onClick={()=>toggleEtiquetaScope(nombre)}
+                          style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:20,border:`1px solid ${active?(et.color||"var(--accent)"):"var(--border2)"}`,background:active?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:active?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                          <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"var(--accent-l)",display:"inline-block"}}/>
+                          {nombre}
+                        </button>
+                      );
+                    };
+                    const cats = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="categoria" && String(e.nombre||"").trim());
+                    const perfs = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="perfil" && String(e.nombre||"").trim());
+                    return (
+                      <>
+                        {cats.length>0 && (
+                          <>
+                            <div style={grupoLabel}>Categorías de vehículo</div>
+                            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{cats.map(chip)}</div>
+                          </>
+                        )}
+                        {perfs.length>0 && (
+                          <>
+                            <div style={{...grupoLabel,marginTop:10}}>Perfiles de viaje</div>
+                            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{perfs.map(chip)}</div>
+                          </>
+                        )}
+                        <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45,marginTop:8}}>
+                          Puedes combinar de los dos grupos. Si no marcas ninguna, verá pedidos de cualquier etiqueta. Si marcas algunas, solo verá los que tengan al menos una (sea categoría o perfil).
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}

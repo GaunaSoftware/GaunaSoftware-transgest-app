@@ -8618,9 +8618,11 @@ useEffect(() => {
 
             {etiquetasCatalogo.length > 0 && (
               <div style={{margin:"2px 0 12px"}}>
-                <label style={S.label}>Etiquetas del viaje (perfil)</label>
-                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  {etiquetasCatalogo.map(et=>{
+                <label style={S.label}>Etiquetas del viaje</label>
+                {(()=>{
+                  const etiquetaTipo = (e) => e?.tipo === "perfil" ? "perfil" : e?.tipo === "categoria" ? "categoria" : (String(e?.auto_match||"").trim() ? "categoria" : "perfil");
+                  const grupoLabel = {fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",margin:"4px 0 4px"};
+                  const chip = (et)=>{
                     const nombre = String(et.nombre||"").trim();
                     if(!nombre) return null;
                     const activa = Array.isArray(form.etiquetas) && form.etiquetas.map(String).includes(nombre);
@@ -8637,8 +8639,22 @@ useEffect(() => {
                         {nombre}
                       </button>
                     );
-                  })}
-                </div>
+                  };
+                  const cats = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="categoria" && String(e.nombre||"").trim());
+                  const perfs = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="perfil" && String(e.nombre||"").trim());
+                  return (
+                    <>
+                      {cats.length>0 && (<>
+                        <div style={grupoLabel}>Categorias de vehiculo</div>
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{cats.map(chip)}</div>
+                      </>)}
+                      {perfs.length>0 && (<>
+                        <div style={{...grupoLabel,marginTop:8}}>Perfiles de viaje</div>
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{perfs.map(chip)}</div>
+                      </>)}
+                    </>
+                  );
+                })()}
               </div>
             )}
 

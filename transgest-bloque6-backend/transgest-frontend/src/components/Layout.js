@@ -238,8 +238,12 @@ const CSS = `
   .tg-responsive-scroll { overflow:auto; -webkit-overflow-scrolling:touch; }
   .tg-modal-backdrop { overscroll-behavior:contain; }
   .tg-control-map-card { max-width:calc(100% - 28px); }
-  @media (max-width: 1100px) {
+  @media (max-width: 1360px) {
+    /* En portatil (sobre todo con zoom): la columna lateral de avisos baja debajo
+       para que la tabla de flota tenga ancho completo y no se corte NOTAS. */
     .tg-plandiario-grid { grid-template-columns:1fr !important; }
+  }
+  @media (max-width: 1100px) {
     .tg-responsive-page [style*="grid-template-columns: repeat(4"],
     .tg-responsive-page [style*="grid-template-columns:repeat(4"] {
       grid-template-columns:repeat(2,minmax(0,1fr)) !important;

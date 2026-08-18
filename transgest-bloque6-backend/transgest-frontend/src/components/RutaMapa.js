@@ -92,9 +92,11 @@ function providerLabel(route) {
 }
 
 function tileUrl(layer, z, x, y) {
-  if (!MAPTILER_KEY) return "";
   const style = MAP_LAYERS[layer]?.style || MAP_LAYERS.streets.style;
-  return `https://api.maptiler.com/maps/${style}/${z}/${x}/${y}.png?key=${encodeURIComponent(MAPTILER_KEY)}`;
+  if (MAPTILER_KEY) return `https://api.maptiler.com/maps/${style}/${z}/${x}/${y}.png?key=${encodeURIComponent(MAPTILER_KEY)}`;
+  // Sin clave MapTiler configurada: teselas gratuitas de OpenStreetMap, para que el
+  // mapa cargue igualmente (el CSP permite imagenes de cualquier host https).
+  return `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
 }
 
 function project(lat, lng, zoom) {

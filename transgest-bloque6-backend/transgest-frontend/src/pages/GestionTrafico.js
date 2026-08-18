@@ -2376,7 +2376,7 @@ function buildEmbeddedRouteMap(points, width = 720, height = 310) {
       const wrappedX = ((tx % maxTile) + maxTile) % maxTile;
       const url = maptilerKey
         ? `https://api.maptiler.com/maps/streets-v2/${zoom}/${wrappedX}/${ty}.png?key=${encodeURIComponent(maptilerKey)}`
-        : "";
+        : `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${ty}.png`;
       if (!url) continue;
       tiles.push({
         key: `${zoom}-${tx}-${ty}`,

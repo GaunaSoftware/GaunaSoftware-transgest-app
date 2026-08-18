@@ -2068,7 +2068,13 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
     if (!selected?.id) return undefined;
     getRutaOptimizadaPedido(selected.id)
       .then(data => {
-        if (!alive || !data) return;
+        if (!alive) return;
+        if (!data) {
+          // No hay ruta guardada: se calcula sola al seleccionar el pedido para que
+          // el mapa real cargue sin tener que pulsar "Calcular" a mano.
+          if (Array.isArray(plan?.stops) && plan.stops.length >= 2) calcularConApi();
+          return;
+        }
         setApiPlan({
           ...data,
           pedido_id: selected.id,
@@ -2081,7 +2087,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
           truck: data.truck || {},
         });
       })
-      .catch(() => {});
+      .catch(() => { if (alive && Array.isArray(plan?.stops) && plan.stops.length >= 2) calcularConApi(); });
     return () => { alive = false; };
   }, [selected?.id]);
 

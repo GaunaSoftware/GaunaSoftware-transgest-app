@@ -2148,13 +2148,14 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
     }
   }
 
-  async function calcularConApi() {
+  async function calcularConApi(prefOverride) {
     if (!plan) return;
+    const pref = typeof prefOverride === "string" ? prefOverride : preferencia;
     setApiLoading(true);
     try {
       const data = await optimizarRuta({
         pedido_id: selected.id,
-        preference: preferencia,
+        preference: pref,
         stops: plan.stops,
         truck: {
           height_m: Number(vehiculo?.altura_m || 4),
@@ -2263,7 +2264,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
               planUrl={planUrl}
               onPreferencia={next => {
                 setPreferencia(next);
-                setTimeout(() => notify(`Criterio cambiado a ${next}. Pulsa Calcular para guardar la alternativa.`, "success"), 50);
+                calcularConApi(next);
               }}
             />
 
@@ -2442,7 +2443,8 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
           <button disabled={!hasCoords} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-l)",fontSize:11,fontWeight:900,cursor:hasCoords?"default":"not-allowed",opacity:hasCoords?1:.55}}>Mapa real</button>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:hasCoords ? "1fr 1fr" : "1fr",gap:10}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
+        {!embeddedMap && (
         <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"radial-gradient(circle at 20% 20%, var(--accent-a14), transparent 26%), linear-gradient(135deg, rgba(15,23,42,.88), rgba(30,41,59,.64))"}}>
           <svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",height:"100%",display:"block",minHeight:310}}>
             {[0,1,2,3,4].map(i => <line key={`v${i}`} x1={pad+i*(w-pad*2)/4} x2={pad+i*(w-pad*2)/4} y1={pad} y2={h-pad} stroke="rgba(148,163,184,.12)" strokeWidth="1"/>)}
@@ -2457,6 +2459,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
             ))}
           </svg>
         </div>
+        )}
         {embeddedMap && (
           <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"var(--bg3)"}}>
             {!embeddedMap.tiles.length && (

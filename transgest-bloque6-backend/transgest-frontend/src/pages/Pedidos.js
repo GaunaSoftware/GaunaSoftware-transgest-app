@@ -9291,10 +9291,31 @@ useEffect(() => {
                         value={form.precio_cliente_col||""}
                         onChange={e=>{
                           const v = e.target.value;
-                          setForm(p=>({
-                            ...p,
-                            precio_cliente_col: v,
-                          }));
+                          setForm(p=>{
+                            // "Lo que cobramos al cliente" ES el total del viaje: al
+                            // editarlo, el importe del pedido pasa a valer eso. Se
+                            // despeja el precio unitario segun el tipo de tarifa (sin
+                            // cambiar el tipo, para no ocultar los campos por tonelada
+                            // del colaborador) y se descuentan extracostes/paradas para
+                            // que el total (base+extras) coincida con lo tecleado.
+                            const nv = parseLocaleNumber(v, NaN);
+                            if (!Number.isFinite(nv)) return { ...p, precio_cliente_col: v };
+                            const extras = parseLocaleNumber(p.extracostes ?? p.extracostes_importe, 0)
+                              + sumAdditionalStopPrices(p.puntos_descarga)
+                              + sumAdditionalStopPrices(p.puntos_carga);
+                            const base = Math.max(0, nv - extras);
+                            const cant = parseLocaleNumber(p.cantidad, 0);
+                            const minU = parseLocaleNumber(p.minimo_unidades, 0);
+                            const units = minU > 0 ? Math.max(cant, minU) : cant;
+                            const tipo = p.tipo_precio || "viaje";
+                            if (tipo !== "viaje" && units > 0) {
+                              const precioUnit = tipo === "kg" ? (base * 100 / units) : (base / units);
+                              return { ...p, precio_cliente_col: v, precio_unitario: String(Number(precioUnit.toFixed(4))) };
+                            }
+                            // Tarifa por viaje (o por unidad sin cantidad aun): precio de
+                            // viaje cerrado = base.
+                            return { ...p, precio_cliente_col: v, tipo_precio: "viaje", precio_unitario: String(Number(base.toFixed(2))), importe_minimo: "" };
+                          });
                         }}
                         placeholder="Ej: 850"/>
                     </div>

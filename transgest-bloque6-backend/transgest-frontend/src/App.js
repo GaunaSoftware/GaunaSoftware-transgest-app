@@ -271,6 +271,28 @@ function filtrarModulosPorPermisos(modulos, permisos, rol) {
   }).filter(Boolean);
 }
 
+// Modulos ocultos en produccion pero disponibles en local (para seguir
+// desarrollandolos). "contabilidad" se oculta en el build de produccion; en
+// local (npm start, NODE_ENV=development) sigue visible. Para reactivarlo en
+// produccion puntualmente, definir REACT_APP_CONTABILIDAD=true en el entorno.
+const MODULOS_OCULTOS = (process.env.NODE_ENV === "production" && process.env.REACT_APP_CONTABILIDAD !== "true")
+  ? new Set(["contabilidad"])
+  : new Set();
+
+function ocultarModulos(modulos) {
+  if (!MODULOS_OCULTOS.size) return modulos;
+  return modulos.map(grupo => {
+    const items = (grupo.items || []).map(item => {
+      if (item.children) {
+        const children = item.children.filter(c => !MODULOS_OCULTOS.has(c.id));
+        return children.length ? { ...item, children } : null;
+      }
+      return MODULOS_OCULTOS.has(item.id) ? null : item;
+    }).filter(Boolean);
+    return items.length ? { ...grupo, items } : null;
+  }).filter(Boolean);
+}
+
 const ROLES_PORTAL_CERRADO = new Set(["chofer", "cliente", "cliente_portal", "colaborador", "mecanico", "responsable_taller"]);
 
 function modulosBaseParaUsuario(user) {
@@ -1770,7 +1792,7 @@ function AppInner() {
 
   const modulosBase = modulosBaseParaUsuario(user);
   const modulosPlan = empresaPlan ? filtrarModulosPorPlan(modulosBase, empresaPlan) : modulosBase;
-  const modulos = filtrarModulosPorPermisos(modulosPlan, user.permisos, user.rol);
+  const modulos = ocultarModulos(filtrarModulosPorPermisos(modulosPlan, user.permisos, user.rol));
   const modulosVisibles = new Set(
     modulos.flatMap(grupo => (grupo.items || []).flatMap(item => item.children ? item.children.map(child => child.id) : [item.id]))
   );

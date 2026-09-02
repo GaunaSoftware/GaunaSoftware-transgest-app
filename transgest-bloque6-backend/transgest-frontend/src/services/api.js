@@ -462,6 +462,11 @@ export async function getPedidosResumenLista(params = {}, options = {}) {
 }
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
 export const getPedidoIdaRetorno = (id)   => apiFetch(`/pedidos/${id}/ida-retorno`);
+// Disponibilidad de vehiculos y choferes para una fecha (quien esta libre y, si
+// no lo esta, por que): se usa al asignar para atenuar los ocupados.
+export const getDisponibilidadRecursos = (fecha = "", excluirPedidoId = "") =>
+  apiFetch(`/pedidos/disponibilidad?fecha=${encodeURIComponent(fecha)}${excluirPedidoId ? `&excluir=${encodeURIComponent(excluirPedidoId)}` : ""}`, { silentError: true });
+
 export const getChoferUltimoViaje = (choferId, excluirPedidoId = "", antesDe = "", vehiculoId = "") =>
   apiFetch(`/pedidos/chofer-ultimo-viaje?chofer_id=${encodeURIComponent(choferId)}${excluirPedidoId ? `&excluir=${encodeURIComponent(excluirPedidoId)}` : ""}${antesDe ? `&antes_de=${encodeURIComponent(antesDe)}` : ""}${vehiculoId ? `&vehiculo_id=${encodeURIComponent(vehiculoId)}` : ""}`, { silentError: true });
 export const combinarGrupaje = (pedidoIds = []) => apiFetch("/pedidos/grupaje/combinar", { method: "POST", body: { pedido_ids: pedidoIds } });

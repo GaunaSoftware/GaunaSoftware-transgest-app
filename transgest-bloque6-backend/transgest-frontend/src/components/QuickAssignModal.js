@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatMatricula } from "../utils/formatos";
+import { getDisponibilidadRecursos } from "../services/api";
 
 // Popup rapido de asignacion desde el boton "Asignar" de la lista de pedidos.
 // Permite elegir una matricula de la flota o escribirla a mano (asignacion
@@ -27,6 +28,31 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
   const tractoras = useMemo(() => vehiculos.filter(v => !esRemolque(v)), [vehiculos]);
   const remolques = useMemo(() => vehiculos.filter(v => esRemolque(v)), [vehiculos]);
   const esBulk = Number(bulkCount) > 1;
+
+  // Disponibilidad para la fecha del viaje: quien esta libre y, si no, por que.
+  // Los ocupados NO se ocultan (a veces hay que asignarlos igual): salen
+  // atenuados y con el motivo.
+  const [disp, setDisp] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    const fecha = String(pedido?.fecha_carga || pedido?.fecha_pedido || "").slice(0, 10);
+    getDisponibilidadRecursos(fecha, pedido?.id || "")
+      .then(d => { if (vivo) setDisp(d); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [pedido?.id, pedido?.fecha_carga, pedido?.fecha_pedido]);
+
+  const dispVehiculo = useMemo(() => {
+    const mapa = new Map();
+    (disp?.vehiculos || []).forEach(v => mapa.set(String(v.id), v));
+    return mapa;
+  }, [disp]);
+  const dispChofer = useMemo(() => {
+    const mapa = new Map();
+    (disp?.choferes || []).forEach(c => mapa.set(String(c.id), c));
+    return mapa;
+  }, [disp]);
+  const estadoDe = (mapa, id) => mapa.get(String(id)) || null;
 
   const vehMatch = useMemo(() => {
     const m = String(matricula || "").trim().toUpperCase();
@@ -103,6 +129,27 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
     label: { display: "block", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text5,#94a3b8)", margin: "12px 0 4px" },
     input: { width: "100%", boxSizing: "border-box", background: "var(--bg4,#fff)", border: "1px solid var(--border2,#cfdbe5)", color: "var(--text,#0f172a)", padding: "9px 12px", borderRadius: 8, fontSize: 13, outline: "none" },
     btn: { padding: "9px 16px", borderRadius: 8, border: "1px solid var(--border2)", background: "var(--bg3)", color: "var(--text)", fontWeight: 800, fontSize: 13, cursor: "pointer" },
+    ayuda: { fontSize: 10, color: "var(--text5)", margin: "8px 0 5px" },
+    chips: { display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 96, overflowY: "auto", marginTop: 5 },
+    // Ocupado = atenuado, pero sigue siendo clicable (a veces hay que asignarlo).
+    chip: (libre, sel) => ({
+      display: "inline-flex", alignItems: "center", gap: 5,
+      padding: "4px 9px", borderRadius: 999, cursor: "pointer",
+      border: `1px solid ${sel ? "var(--accent)" : libre ? "rgba(16,185,129,.35)" : "var(--border2)"}`,
+      background: sel ? "var(--accent-a12)" : libre ? "rgba(16,185,129,.08)" : "var(--bg3)",
+      color: libre ? "var(--text)" : "var(--text5)",
+      opacity: libre ? 1 : .65,
+      fontSize: 11, fontWeight: 800, fontFamily: "'JetBrains Mono',monospace",
+    }),
+    punto: (libre) => ({
+      width: 7, height: 7, borderRadius: "50%", display: "inline-block",
+      background: libre ? "#10b981" : "#94a3b8",
+    }),
+    avisoOcupado: {
+      marginTop: 5, fontSize: 11, fontWeight: 700, color: "#b45309",
+      background: "rgba(245,158,11,.10)", border: "1px solid rgba(245,158,11,.28)",
+      borderRadius: 7, padding: "5px 9px",
+    },
   };
 
   return (
@@ -132,6 +179,33 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
             {vehMatch ? `Vehiculo de la flota: ${vehMatch.matricula}${vehMatch.marca ? ` (${vehMatch.marca})` : ""}` : "Matricula a mano (no esta en la flota)"}
           </div>
         )}
+        {vehMatch && estadoDe(dispVehiculo, vehMatch.id) && !estadoDe(dispVehiculo, vehMatch.id).disponible && (
+          <div style={S.avisoOcupado}>Ojo: {estadoDe(dispVehiculo, vehMatch.id).motivo}</div>
+        )}
+
+        {/* Flota con disponibilidad para la fecha del viaje */}
+        {tractoras.length > 0 && (
+          <>
+            <div style={S.ayuda}>
+              {disp ? "Verde = libre ese dia. Gris = ocupado (puedes asignarlo igual)." : "Comprobando disponibilidad..."}
+            </div>
+            <div style={S.chips}>
+              {tractoras.map(v => {
+                const est = estadoDe(dispVehiculo, v.id);
+                const libre = !est || est.disponible;
+                const sel = String(v.matricula || "").toUpperCase() === String(matricula || "").toUpperCase();
+                return (
+                  <button key={v.id} type="button" title={est?.motivo || "Disponible"}
+                    onClick={() => onMatriculaChange(v.matricula)}
+                    style={S.chip(libre, sel)}>
+                    <span style={S.punto(libre)} />
+                    {v.matricula}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         <label style={S.label}>Remolque (opcional)</label>
         <input list="tg-quick-remolques" style={S.input} value={remolque}
@@ -140,8 +214,32 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
         <label style={S.label}>Chofer (opcional)</label>
         <select style={S.input} value={choferId} onChange={e => onChoferChange(e.target.value)}>
           <option value="">{vehMatch && vehMatch.chofer_id ? "Auto del vehiculo" : "Sin asignar"}</option>
-          {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || ""} {c.apellidos || ""}</option>)}
+          {choferes.map(c => {
+            const est = estadoDe(dispChofer, c.id);
+            const sufijo = est && !est.disponible ? ` - ocupado: ${est.motivo}` : "";
+            return <option key={c.id} value={c.id}>{`${c.nombre || ""} ${c.apellidos || ""}`.trim()}{sufijo}</option>;
+          })}
         </select>
+        {choferId && estadoDe(dispChofer, choferId) && !estadoDe(dispChofer, choferId).disponible && (
+          <div style={S.avisoOcupado}>Ojo: {estadoDe(dispChofer, choferId).motivo}</div>
+        )}
+        {choferes.length > 0 && (
+          <div style={S.chips}>
+            {choferes.map(c => {
+              const est = estadoDe(dispChofer, c.id);
+              const libre = !est || est.disponible;
+              const sel = String(c.id) === String(choferId);
+              return (
+                <button key={c.id} type="button" title={est?.motivo || "Disponible"}
+                  onClick={() => onChoferChange(String(c.id))}
+                  style={S.chip(libre, sel)}>
+                  <span style={S.punto(libre)} />
+                  {(c.nombre || "").split(" ")[0]} {(c.apellidos || "").split(" ")[0]}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
           <button style={S.btn} onClick={onClose} disabled={trabajando}>Cancelar</button>

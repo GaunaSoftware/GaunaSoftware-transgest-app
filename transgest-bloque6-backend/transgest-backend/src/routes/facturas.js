@@ -11,6 +11,7 @@ const { processPendingFiscalQueue } = require("../services/fiscalProcessor");
 const { getVerifactiRecordStatus } = require("../services/fiscalProviderVerifacti");
 const { markQueueAccepted, markQueuePending, markQueueError, logFiscalEvent } = require("../services/fiscalQueueState");
 const fiscalScheduler = require("../services/fiscalScheduler");
+const contabilidadExport = require("../services/contabilidadExport");
 
 const router = express.Router();
 router.use(authenticate);
@@ -619,6 +620,66 @@ router.get("/fiscal/export-lote.xml", GERENTE_O_CONTABLE, async (req, res) => {
   res.setHeader("Content-Type", "application/xml; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="lote-fiscal-transgest-${new Date().toISOString().slice(0,10)}.xml"`);
   res.send(xml);
+});
+
+// GET /facturas/export/contabilidad — exporta las facturas emitidas al formato
+// de importacion del programa de contabilidad externo.
+//   formato=contasol -> APU.xlsx  (CONTASOL / FACTUSOL, Software DELSOL)
+//   formato=a3       -> SUENLACE.DAT (a3ASESOR |eco |con, Wolters Kluwer)
+//   formato=csv      -> mismo contenido que APU en CSV, para revisarlo
+// Ninguno de los dos programas ofrece API: ambos importan por fichero.
+router.get("/export/contabilidad", GERENTE_O_CONTABLE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  const { desde, hasta, formato = "contasol" } = req.query;
+  const params = [empresaId];
+  // Solo facturas realmente emitidas: un borrador no debe entrar en contabilidad.
+  const where = ["f.empresa_id=$1", "f.estado::text <> 'borrador'"];
+  if (desde) { params.push(desde); where.push(`f.fecha >= $${params.length}`); }
+  if (hasta) { params.push(hasta); where.push(`f.fecha <= $${params.length}`); }
+  const { rows } = await db.query(
+    `SELECT f.id, f.numero, f.serie, f.fecha, f.cliente_id,
+            f.base_imponible, f.tipo_iva, f.cuota_iva, f.tipo_irpf, f.cuota_irpf, f.total,
+            c.nombre AS cliente_nombre, c.cif AS cliente_cif, c.cp AS cliente_cp
+       FROM facturas f
+       JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY f.fecha ASC, f.numero ASC
+      LIMIT 5000`,
+    params
+  );
+  const facturas = rows.map(r => ({
+    ...r,
+    fecha: r.fecha ? String(r.fecha instanceof Date ? r.fecha.toISOString() : r.fecha).slice(0, 10) : "",
+  }));
+  // Cuentas y numeracion configurables por query (plan contable del cliente).
+  const opciones = {
+    digitos: req.query.digitos,
+    diario: req.query.diario,
+    asiento_inicial: req.query.asiento_inicial,
+    codigo_empresa: req.query.codigo_empresa,
+    cuenta_cliente: req.query.cuenta_cliente,
+    cuenta_ventas: req.query.cuenta_ventas,
+    cuenta_iva: req.query.cuenta_iva,
+    cuenta_retencion: req.query.cuenta_retencion,
+  };
+  const sufijo = new Date().toISOString().slice(0, 10);
+  if (String(formato).toLowerCase() === "a3") {
+    const dat = contabilidadExport.buildA3Suenlace(facturas, opciones);
+    res.setHeader("Content-Type", "text/plain; charset=ISO-8859-1");
+    res.setHeader("Content-Disposition", `attachment; filename="SUENLACE.DAT"`);
+    return res.send(dat);
+  }
+  if (String(formato).toLowerCase() === "csv") {
+    const csv = contabilidadExport.buildContasolApuCsv(facturas, opciones);
+    res.setHeader("Content-Type", "text/csv; charset=ISO-8859-1");
+    res.setHeader("Content-Disposition", `attachment; filename="APU-${sufijo}.csv"`);
+    return res.send(csv);
+  }
+  const xlsx = contabilidadExport.buildContasolApuXlsx(facturas, opciones);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  // CONTASOL exige que el fichero de apuntes se llame APU.
+  res.setHeader("Content-Disposition", `attachment; filename="APU.xlsx"`);
+  return res.send(xlsx);
 });
 
 router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {

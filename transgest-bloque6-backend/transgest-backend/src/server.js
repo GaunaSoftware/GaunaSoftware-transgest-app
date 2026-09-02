@@ -1183,6 +1183,8 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS paralizacion_horas NUMERIC(6,2) DEFAULT 0").catch(captureStartupMigrationError);
           await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_colaborador NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS matricula_colaborador VARCHAR(60)").catch(captureStartupMigrationError);
+    // El proveedor puede rechazar el viaje desde su portal (enlace temporal).
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_rechazado_at TIMESTAMPTZ").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_colaborador VARCHAR(60)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_nombre VARCHAR(120)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_apellidos VARCHAR(180)").catch(captureStartupMigrationError);

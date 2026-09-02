@@ -5,7 +5,7 @@ import { getDisponibilidadRecursos } from "../services/api";
 // Popup rapido de asignacion desde el boton "Asignar" de la lista de pedidos.
 // Permite elegir una matricula de la flota o escribirla a mano (asignacion
 // propia), y opcionalmente el chofer. No abre el formulario completo del pedido.
-export default function QuickAssignModal({ pedido, vehiculos = [], choferes = [], onClose, onAssign, bulkCount = 0 }) {
+export default function QuickAssignModal({ pedido, vehiculos = [], choferes = [], onClose, onAssign, bulkCount = 0, fechasLote = [] }) {
   const [matricula, setMatricula] = useState(
     pedido?.vehiculo_matricula || pedido?.matricula_manual || ""
   );
@@ -41,6 +41,11 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
       .catch(() => {});
     return () => { vivo = false; };
   }, [pedido?.id, pedido?.fecha_carga, pedido?.fecha_pedido]);
+
+  // En lote los pedidos pueden ser de dias distintos: la disponibilidad que se
+  // muestra es la del dia del pedido de referencia, asi que hay que avisarlo.
+  const fechasDistintas = useMemo(() => [...new Set((fechasLote || []).filter(Boolean))], [fechasLote]);
+  const loteVariasFechas = esBulk && fechasDistintas.length > 1;
 
   const dispVehiculo = useMemo(() => {
     const mapa = new Map();
@@ -189,6 +194,12 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
             <div style={S.ayuda}>
               {disp ? "Verde = libre ese dia. Gris = ocupado (puedes asignarlo igual)." : "Comprobando disponibilidad..."}
             </div>
+            {loteVariasFechas && (
+              <div style={S.avisoOcupado}>
+                Los {bulkCount} pedidos seleccionados son de {fechasDistintas.length} dias distintos.
+                La disponibilidad mostrada es la del {String(pedido?.fecha_carga || pedido?.fecha_pedido || "").slice(0, 10)}.
+              </div>
+            )}
             <div style={S.chips}>
               {tractoras.map(v => {
                 const est = estadoDe(dispVehiculo, v.id);

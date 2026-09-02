@@ -11370,7 +11370,7 @@ export default function Pedidos() {
         fallos.length ? "warning" : "success"
       );
       setSelectedPedidoIds([]); setBulkVehiculo(""); setBulkChofer(""); setBulkMatricula("");
-      cargar();
+      cargar({ silent: true });
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-assign" } }));
     } catch (e) {
       notify(e.message || "No se pudieron asignar los pedidos seleccionados.", "error");
@@ -11513,7 +11513,7 @@ export default function Pedidos() {
         fallos.length ? "warning" : "success"
       );
       setSelectedPedidoIds(prev => prev.filter(id => invalidos.some(item => item.pedido.id === id)));
-      cargar();
+      cargar({ silent: true });
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-state", estado: bulkEstado } }));
       }
@@ -12721,6 +12721,7 @@ export default function Pedidos() {
           vehiculos={vehiculos}
           choferes={choferes}
           bulkCount={quickAssignTargets(quickAssignPedido).length}
+          fechasLote={quickAssignTargets(quickAssignPedido).map(p => String(p.fecha_carga || p.fecha_pedido || "").slice(0, 10)).filter(Boolean)}
           onClose={()=>setQuickAssignPedido(null)}
           onAssign={aplicarQuickAssign}
         />

@@ -509,6 +509,33 @@ async function logPedidoEventoPortal(pedidoId, empresaId, tipo, detalle = {}) {
   ).catch(() => {});
 }
 
+// Si el proveedor rechaza el viaje desde su portal hay que enterarse YA, porque
+// el viaje se queda sin transportista.
+async function notificarGerenciaColaboradorRechazo(pedido, token, motivo = "") {
+  if (!pedido?.empresa_id) return;
+  await ensureNotificacionesSchema().catch(() => {});
+  const usuarios = await db.query(
+    `SELECT id FROM usuarios
+      WHERE empresa_id=$1 AND activo IS DISTINCT FROM false
+        AND rol::text IN ('gerente','trafico') LIMIT 30`,
+    [pedido.empresa_id]
+  ).catch(() => ({ rows: [] }));
+  const quien = token?.colaborador_nombre || token?.nombre || "El proveedor";
+  await Promise.all((usuarios.rows || []).map(u => crearNotificacion({
+    empresa_id: pedido.empresa_id,
+    usuario_id: u.id,
+    tipo: "colaborador_rechaza_viaje",
+    titulo: "Un proveedor ha rechazado un viaje",
+    mensaje: `${quien} ha rechazado el viaje ${pedido.numero || pedido.id}${motivo ? `: ${motivo}` : ""}. Hay que reasignarlo.`,
+    data: {
+      pedido_id: pedido.id,
+      view: "pedidos",
+      motivo: motivo || null,
+      dedupe_key: `colaborador_rechaza:${pedido.id}`,
+    },
+  }).catch(() => {})));
+}
+
 async function notificarAlbaranProveedor(empresaId, pedido = {}, colaborador = {}, documento = {}) {
   if (documento.skip_notificacion) return;
   const usuarios = await db.query(
@@ -1041,7 +1068,21 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
           + '<label>Matricula remolque<input data-driver-field="remolque" value="' + escapeHtml(pedido.remolque_matricula_colaborador || '') + '" autocomplete="off"></label>'
           + '</div><button type="button" class="btn btn-primary" data-action="save-driver" data-pedido-id="' + escapeHtml(tripId) + '">Guardar datos del viaje</button>'
           + '</div>';
+        // Aceptar o rechazar el viaje: lo primero, antes de ponerse en marcha.
+        var aceptado = !!pedido.colaborador_precio_confirmado;
+        var rechazado = !!pedido.colaborador_rechazado_at;
+        var decision = rechazado
+          ? '<div class="card" style="margin-bottom:12px"><h3>Viaje rechazado</h3>'
+            + '<p>Has rechazado este viaje. Si fue un error, avisa a la empresa o vuelve a aceptarlo.</p>'
+            + '<button type="button" class="btn btn-primary" data-run-action="aceptar_viaje" data-pedido-id="' + escapeHtml(tripId) + '">Aceptar el viaje</button></div>'
+          : (aceptado
+            ? '<div class="card" style="margin-bottom:12px"><h3>Viaje aceptado</h3><p class="ok">Has aceptado este transporte. Continua con los datos del conductor.</p></div>'
+            : '<div class="card" style="margin-bottom:12px"><h3>1. Aceptas este viaje?</h3>'
+              + '<p>Confirma que lo haces tu, o rechazalo para que la empresa lo reasigne cuanto antes.</p>'
+              + '<button type="button" class="btn btn-primary" data-run-action="aceptar_viaje" data-pedido-id="' + escapeHtml(tripId) + '">Acepto el viaje</button> '
+              + '<button type="button" class="btn" data-run-action="rechazar_viaje" data-pedido-id="' + escapeHtml(tripId) + '">No puedo hacerlo</button></div>');
         box.innerHTML = '<div class="trip-badges" style="margin-bottom:12px"><span class="' + statusClass(workflow.status) + '">' + escapeHtml(String(workflow.status || "pendiente").replace("_"," ")) + '</span><span class="badge badge-neutral">' + escapeHtml(String(pedido.estado || "pendiente").replace("_"," ")) + '</span></div>'
+          + decision
           + driverForm
           + '<div class="progress">'
           + steps.map((step) => {
@@ -1072,6 +1113,8 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
       }
       async function runAction(tripId, action){
         const status = document.getElementById('op-status-' + tripId);
+        // Rechazar deja el viaje sin transportista: se confirma antes.
+        if (action === 'rechazar_viaje' && !window.confirm('Vas a rechazar este viaje. La empresa tendra que reasignarlo. Continuar?')) return;
         if (status) status.innerHTML = '<span class="warn">Guardando cambio...</span>';
         const res = await fetch('/api/v1/colaboradores/public/portal/' + encodeURIComponent(TOKEN) + '/pedidos/' + encodeURIComponent(tripId) + '/operativa', {
           method: 'POST',
@@ -1444,6 +1487,7 @@ async function getPortalProveedorPedido(tokenValue, pedidoId) {
             p.conductor_efectivo_nombre, p.conductor_efectivo_apellidos,
             p.conductor_efectivo_dni, p.conductor_efectivo_telefono,
             p.matricula_colaborador, p.remolque_matricula_colaborador,
+            p.colaborador_precio_confirmado, p.colaborador_rechazado_at,
             c.nombre AS cliente_nombre,
             co.nombre AS colaborador_nombre
        FROM pedidos p
@@ -1630,6 +1674,35 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
       pasos: pasosGuardados,
       workflow: buildPortalProveedorOperativa(rows[0], pasosGuardados),
     };
+  }
+  // Aceptar o rechazar el viaje: es lo primero que hace el proveedor al recibir
+  // el enlace, antes de ponerse en marcha. Si rechaza se avisa a la empresa.
+  if (action === "aceptar_viaje" || action === "rechazar_viaje") {
+    const acepta = action === "aceptar_viaje";
+    const { rows } = await db.query(
+      acepta
+        ? `UPDATE pedidos
+              SET colaborador_precio_confirmado=true,
+                  colaborador_precio_confirmado_at=NOW(),
+                  colaborador_rechazado_at=NULL,
+                  estado=CASE WHEN estado::text='pendiente' THEN 'confirmado'::estado_pedido ELSE estado END
+            WHERE id=$1 AND empresa_id=$2 RETURNING *`
+        : `UPDATE pedidos
+              SET colaborador_rechazado_at=NOW(),
+                  colaborador_precio_confirmado=false
+            WHERE id=$1 AND empresa_id=$2 RETURNING *`,
+      [pedido.id, pedido.empresa_id]
+    );
+    if (!rows[0]) throw Object.assign(new Error("No se pudo registrar la respuesta."), { status: 404 });
+    const motivo = String(body?.motivo || "").trim().slice(0, 300);
+    await logPedidoEventoPortal(pedido.id, pedido.empresa_id,
+      acepta ? "colaborador_portal.viaje_aceptado" : "colaborador_portal.viaje_rechazado",
+      { motivo: motivo || null }).catch(() => {});
+    if (!acepta) {
+      await notificarGerenciaColaboradorRechazo(pedido, ctx?.token, motivo).catch(() => {});
+    }
+    const pasosResp = await getPortalProveedorChoferPasos(pedido.id, pedido.empresa_id);
+    return { pedido: rows[0], pasos: pasosResp, workflow: buildPortalProveedorOperativa(rows[0], pasosResp) };
   }
   switch (String(action || "")) {
     case "posicionar_carga":

@@ -462,6 +462,11 @@ export async function getPedidosResumenLista(params = {}, options = {}) {
 }
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
 export const getPedidoIdaRetorno = (id)   => apiFetch(`/pedidos/${id}/ida-retorno`);
+// Enlace temporal del portal del proveedor para un viaje (valido 7 dias tras la
+// descarga). Devuelve { url, dias_validez }.
+export const crearPortalProveedor = (pedidoId) =>
+  apiFetch(`/pedidos/${pedidoId}/portal-proveedor`, { method: "POST" });
+
 // Disponibilidad de vehiculos y choferes para una fecha (quien esta libre y, si
 // no lo esta, por que): se usa al asignar para atenuar los ocupados.
 export const getDisponibilidadRecursos = (fecha = "", excluirPedidoId = "") =>

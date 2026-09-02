@@ -1,4 +1,5 @@
 import { getLogoDataUrl } from "../services/logoHelper";
+import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
 import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -2037,8 +2038,10 @@ function monthBounds(value = new Date()) {
 }
 
 export default function Facturacion() {
-  const { puedeEditar } = useAuth();
+  const { puedeEditar, user } = useAuth();
   const canEdit           = puedeEditar("facturas");
+  // Los ajustes contables (programa y cuentas) los cambia solo gerencia.
+  const esGerenteFacturacion = String(user?.rol || "").toLowerCase() === "gerente";
   const aiDisponible      = planHasFeature(getEmpresaPlanLocal(), "ai");
   const [activeFacturacionTab, setActiveFacturacionTab] = useState("facturas");
   const [focusFactura]    = useState(() => readFacturacionFocus());
@@ -3309,6 +3312,7 @@ export default function Facturacion() {
         </button>
         <span style={{marginLeft:"auto",fontSize:11,color:"var(--text5)"}}>Doble clic o boton Ver para abrir la factura</span>
       </div>
+      {canEdit && <ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} />}
       {sinFacturarOpen && (
         <div style={{border:"1px solid rgba(245,158,11,.28)",borderRadius:10,background:"var(--bg2)",marginBottom:16,overflow:"hidden"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"10px 14px",borderBottom:"1px solid var(--border)",background:"rgba(245,158,11,.06)"}}>

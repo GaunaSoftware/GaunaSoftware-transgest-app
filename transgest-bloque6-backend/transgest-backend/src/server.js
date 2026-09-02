@@ -605,6 +605,25 @@ async function applyMigrations() {
     await db.query("ALTER TABLE factura_extracostes ADD COLUMN IF NOT EXISTS tipo VARCHAR(40)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ALTER COLUMN vencimiento TYPE VARCHAR(80) USING vencimiento::text").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE").catch(captureStartupMigrationError);
+    // Traspaso a contabilidad externa (Contasol/Factusol, a3...): marca que la
+    // factura ya se volco, para no duplicar asientos en el siguiente envio.
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS contabilidad_exportada_at TIMESTAMPTZ").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS contabilidad_lote_id UUID").catch(captureStartupMigrationError);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS contabilidad_export_lotes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        formato VARCHAR(30) NOT NULL DEFAULT 'contasol',
+        desde DATE,
+        hasta DATE,
+        total_facturas INTEGER NOT NULL DEFAULT 0,
+        importe_total NUMERIC(14,2) NOT NULL DEFAULT 0,
+        creado_por UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `).catch(captureStartupMigrationError);
+    await db.query("CREATE INDEX IF NOT EXISTS idx_contabilidad_lotes_empresa ON contabilidad_export_lotes(empresa_id, created_at DESC)").catch(captureStartupMigrationError);
+    await db.query("CREATE INDEX IF NOT EXISTS idx_facturas_contab_pendientes ON facturas(empresa_id, contabilidad_exportada_at)").catch(captureStartupMigrationError);
     await db.query("UPDATE facturas SET vencimiento=fecha_vencimiento::text WHERE vencimiento IS NULL AND fecha_vencimiento IS NOT NULL").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_facturas_revision_cobro ON facturas(empresa_id, revision_cobro_at) WHERE estado <> 'cobrada'").catch(captureStartupMigrationError);
     await db.query(`

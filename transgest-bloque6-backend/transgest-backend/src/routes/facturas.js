@@ -12,6 +12,7 @@ const { getVerifactiRecordStatus } = require("../services/fiscalProviderVerifact
 const { markQueueAccepted, markQueuePending, markQueueError, logFiscalEvent } = require("../services/fiscalQueueState");
 const fiscalScheduler = require("../services/fiscalScheduler");
 const contabilidadExport = require("../services/contabilidadExport");
+const { ensureAccountingIntegrationSettingsTable } = require("../services/accountingIntegrationsCatalog");
 
 const router = express.Router();
 router.use(authenticate);
@@ -622,20 +623,60 @@ router.get("/fiscal/export-lote.xml", GERENTE_O_CONTABLE, async (req, res) => {
   res.send(xml);
 });
 
-// GET /facturas/export/contabilidad — exporta las facturas emitidas al formato
-// de importacion del programa de contabilidad externo.
-//   formato=contasol -> APU.xlsx  (CONTASOL / FACTUSOL, Software DELSOL)
-//   formato=a3       -> SUENLACE.DAT (a3ASESOR |eco |con, Wolters Kluwer)
-//   formato=csv      -> mismo contenido que APU en CSV, para revisarlo
-// Ninguno de los dos programas ofrece API: ambos importan por fichero.
-router.get("/export/contabilidad", GERENTE_O_CONTABLE, async (req, res) => {
-  const empresaId = req.empresaId || req.user.empresa_id;
-  const { desde, hasta, formato = "contasol" } = req.query;
+// ── Traspaso a contabilidad externa (Contasol/Factusol, a3ASESOR) ─────────
+// Flujo del dia a dia:
+//   1. Se configura UNA vez el programa contable y las cuentas (config).
+//   2. Cada cierre (mes/semana) se mira el resumen de facturas PENDIENTES.
+//   3. Se descarga el fichero en el formato del programa configurado.
+//   4. Se confirma el lote: las facturas quedan marcadas y no se vuelven a
+//      exportar, evitando asientos duplicados. Un lote se puede deshacer.
+const CONTAB_CONFIG_DEFECTO = {
+  programa: "contasol",
+  digitos: contabilidadExport.CUENTAS_DEFECTO.digitos,
+  diario: 1,
+  codigo_empresa: 1,
+  cuenta_cliente: contabilidadExport.CUENTAS_DEFECTO.cliente,
+  cuenta_ventas: contabilidadExport.CUENTAS_DEFECTO.ventas,
+  cuenta_iva: contabilidadExport.CUENTAS_DEFECTO.iva_repercutido,
+  cuenta_retencion: contabilidadExport.CUENTAS_DEFECTO.retencion,
+};
+
+async function leerConfigContabilidad(empresaId) {
+  try {
+    const { rows } = await db.query(
+      "SELECT metadata FROM accounting_external_integration_configs WHERE empresa_id=$1 LIMIT 1",
+      [empresaId]
+    );
+    const guardada = rows[0]?.metadata?.export_contable;
+    return { ...CONTAB_CONFIG_DEFECTO, ...(guardada && typeof guardada === "object" ? guardada : {}) };
+  } catch {
+    return { ...CONTAB_CONFIG_DEFECTO };
+  }
+}
+
+// Las opciones de la peticion mandan sobre la config guardada.
+function opcionesExport(config, query = {}) {
+  const pick = (k) => (query[k] !== undefined && query[k] !== "" ? query[k] : config[k]);
+  return {
+    digitos: pick("digitos"),
+    diario: pick("diario"),
+    codigo_empresa: pick("codigo_empresa"),
+    cuenta_cliente: pick("cuenta_cliente"),
+    cuenta_ventas: pick("cuenta_ventas"),
+    cuenta_iva: pick("cuenta_iva"),
+    cuenta_retencion: pick("cuenta_retencion"),
+    asiento_inicial: query.asiento_inicial,
+  };
+}
+
+// Facturas candidatas al traspaso. Por defecto solo las PENDIENTES (no
+// exportadas todavia), que es lo que evita duplicar asientos.
+async function facturasParaContabilidad(empresaId, query = {}) {
   const params = [empresaId];
-  // Solo facturas realmente emitidas: un borrador no debe entrar en contabilidad.
   const where = ["f.empresa_id=$1", "f.estado::text <> 'borrador'"];
-  if (desde) { params.push(desde); where.push(`f.fecha >= $${params.length}`); }
-  if (hasta) { params.push(hasta); where.push(`f.fecha <= $${params.length}`); }
+  if (query.desde) { params.push(query.desde); where.push(`f.fecha >= $${params.length}`); }
+  if (query.hasta) { params.push(query.hasta); where.push(`f.fecha <= $${params.length}`); }
+  if (String(query.pendientes ?? "1") !== "0") where.push("f.contabilidad_exportada_at IS NULL");
   const { rows } = await db.query(
     `SELECT f.id, f.numero, f.serie, f.fecha, f.cliente_id,
             f.base_imponible, f.tipo_iva, f.cuota_iva, f.tipo_irpf, f.cuota_irpf, f.total,
@@ -647,29 +688,162 @@ router.get("/export/contabilidad", GERENTE_O_CONTABLE, async (req, res) => {
       LIMIT 5000`,
     params
   );
-  const facturas = rows.map(r => ({
+  return rows.map(r => ({
     ...r,
     fecha: r.fecha ? String(r.fecha instanceof Date ? r.fecha.toISOString() : r.fecha).slice(0, 10) : "",
   }));
-  // Cuentas y numeracion configurables por query (plan contable del cliente).
-  const opciones = {
-    digitos: req.query.digitos,
-    diario: req.query.diario,
-    asiento_inicial: req.query.asiento_inicial,
-    codigo_empresa: req.query.codigo_empresa,
-    cuenta_cliente: req.query.cuenta_cliente,
-    cuenta_ventas: req.query.cuenta_ventas,
-    cuenta_iva: req.query.cuenta_iva,
-    cuenta_retencion: req.query.cuenta_retencion,
+}
+
+// GET config del traspaso contable de la empresa.
+router.get("/export/contabilidad/config", GERENTE_O_CONTABLE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  res.json(await leerConfigContabilidad(empresaId));
+});
+
+// PUT config (programa contable + cuentas). Se guarda en el registro de
+// integraciones contables de la empresa (metadata.export_contable).
+router.put("/export/contabilidad/config", SOLO_GERENTE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  const body = req.body || {};
+  const programasValidos = ["contasol", "factusol", "a3", "csv"];
+  const limpiarCuenta = (v, def) => {
+    const s = String(v == null ? "" : v).replace(/\D/g, "").slice(0, 12);
+    return s || def;
   };
+  const entero = (v, def, min, max) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) && n >= min && n <= max ? n : def;
+  };
+  const config = {
+    programa: programasValidos.includes(String(body.programa || "").toLowerCase())
+      ? String(body.programa).toLowerCase() : CONTAB_CONFIG_DEFECTO.programa,
+    digitos: entero(body.digitos, CONTAB_CONFIG_DEFECTO.digitos, 3, 12),
+    diario: entero(body.diario, CONTAB_CONFIG_DEFECTO.diario, 1, 999),
+    codigo_empresa: entero(body.codigo_empresa, CONTAB_CONFIG_DEFECTO.codigo_empresa, 1, 99999),
+    cuenta_cliente: limpiarCuenta(body.cuenta_cliente, CONTAB_CONFIG_DEFECTO.cuenta_cliente),
+    cuenta_ventas: limpiarCuenta(body.cuenta_ventas, CONTAB_CONFIG_DEFECTO.cuenta_ventas),
+    cuenta_iva: limpiarCuenta(body.cuenta_iva, CONTAB_CONFIG_DEFECTO.cuenta_iva),
+    cuenta_retencion: limpiarCuenta(body.cuenta_retencion, CONTAB_CONFIG_DEFECTO.cuenta_retencion),
+  };
+  // La tabla de integraciones contables se crea bajo demanda.
+  await ensureAccountingIntegrationSettingsTable();
+  await db.query(`
+    INSERT INTO accounting_external_integration_configs (empresa_id, metadata, updated_by, updated_at)
+    VALUES ($1, jsonb_build_object('export_contable', $2::jsonb), $3, NOW())
+    ON CONFLICT (empresa_id) DO UPDATE SET
+      metadata = COALESCE(accounting_external_integration_configs.metadata,'{}'::jsonb)
+                 || jsonb_build_object('export_contable', $2::jsonb),
+      updated_by = $3,
+      updated_at = NOW()
+  `, [empresaId, JSON.stringify(config), req.user?.id || null]);
+  res.json(config);
+});
+
+// GET resumen: que hay pendiente de volcar a contabilidad.
+router.get("/export/contabilidad/resumen", GERENTE_O_CONTABLE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  const config = await leerConfigContabilidad(empresaId);
+  const facturas = await facturasParaContabilidad(empresaId, req.query);
+  const importe = facturas.reduce((s, f) => s + Number(f.total || 0), 0);
+  const { rows: ultimos } = await db.query(
+    `SELECT id, formato, desde, hasta, total_facturas, importe_total, created_at
+       FROM contabilidad_export_lotes
+      WHERE empresa_id=$1 ORDER BY created_at DESC LIMIT 10`,
+    [empresaId]
+  ).catch(() => ({ rows: [] }));
+  res.json({
+    config,
+    pendientes: facturas.length,
+    importe_total: Math.round(importe * 100) / 100,
+    primera_fecha: facturas[0]?.fecha || null,
+    ultima_fecha: facturas[facturas.length - 1]?.fecha || null,
+    facturas: facturas.slice(0, 200).map(f => ({
+      id: f.id, numero: f.numero, fecha: f.fecha, cliente: f.cliente_nombre, total: Number(f.total || 0),
+    })),
+    ultimos_lotes: ultimos,
+  });
+});
+
+// GET historial de lotes traspasados.
+router.get("/export/contabilidad/lotes", GERENTE_O_CONTABLE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  const { rows } = await db.query(
+    `SELECT l.*, u.nombre AS creado_por_nombre
+       FROM contabilidad_export_lotes l
+       LEFT JOIN usuarios u ON u.id = l.creado_por
+      WHERE l.empresa_id=$1 ORDER BY l.created_at DESC LIMIT 100`,
+    [empresaId]
+  );
+  res.json(rows);
+});
+
+// POST confirmar lote: marca las facturas como ya traspasadas para que no
+// vuelvan a salir en el proximo fichero (evita asientos duplicados).
+router.post("/export/contabilidad/lotes", GERENTE_O_CONTABLE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  const body = req.body || {};
+  const config = await leerConfigContabilidad(empresaId);
+  const formato = String(body.formato || config.programa || "contasol").toLowerCase();
+  const facturas = await facturasParaContabilidad(empresaId, {
+    desde: body.desde, hasta: body.hasta, pendientes: body.pendientes,
+  });
+  const ids = Array.isArray(body.factura_ids) && body.factura_ids.length
+    ? facturas.filter(f => body.factura_ids.includes(f.id)).map(f => f.id)
+    : facturas.map(f => f.id);
+  if (!ids.length) return res.status(400).json({ error: "No hay facturas pendientes de traspasar a contabilidad." });
+  const importe = facturas.filter(f => ids.includes(f.id)).reduce((s, f) => s + Number(f.total || 0), 0);
+  const { rows } = await db.query(
+    `INSERT INTO contabilidad_export_lotes
+       (empresa_id, formato, desde, hasta, total_facturas, importe_total, creado_por)
+     VALUES ($1,$2,$3::date,$4::date,$5,$6,$7) RETURNING *`,
+    [empresaId, formato, body.desde || null, body.hasta || null, ids.length,
+     Math.round(importe * 100) / 100, req.user?.id || null]
+  );
+  const lote = rows[0];
+  await db.query(
+    `UPDATE facturas SET contabilidad_exportada_at=NOW(), contabilidad_lote_id=$1
+      WHERE empresa_id=$2 AND id = ANY($3::uuid[])`,
+    [lote.id, empresaId, ids]
+  );
+  res.status(201).json({ ...lote, facturas_marcadas: ids.length });
+});
+
+// DELETE deshacer un lote: las facturas vuelven a quedar pendientes.
+router.delete("/export/contabilidad/lotes/:id", SOLO_GERENTE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  const { rowCount } = await db.query(
+    "DELETE FROM contabilidad_export_lotes WHERE id=$1 AND empresa_id=$2",
+    [req.params.id, empresaId]
+  );
+  if (!rowCount) return res.status(404).json({ error: "Lote no encontrado" });
+  await db.query(
+    `UPDATE facturas SET contabilidad_exportada_at=NULL, contabilidad_lote_id=NULL
+      WHERE empresa_id=$1 AND contabilidad_lote_id=$2`,
+    [empresaId, req.params.id]
+  );
+  res.json({ ok: true });
+});
+
+// GET /facturas/export/contabilidad — genera el fichero de importacion.
+//   formato=contasol|factusol -> APU.xlsx  (Software DELSOL)
+//   formato=a3                -> SUENLACE.DAT (a3ASESOR |eco |con)
+//   formato=csv               -> mismo contenido en CSV, para revisarlo
+// Por defecto usa el programa configurado y solo las facturas pendientes.
+// No marca nada: el marcado se confirma con POST .../lotes.
+router.get("/export/contabilidad", GERENTE_O_CONTABLE, async (req, res) => {
+  const empresaId = req.empresaId || req.user.empresa_id;
+  const config = await leerConfigContabilidad(empresaId);
+  const formato = String(req.query.formato || config.programa || "contasol").toLowerCase();
+  const facturas = await facturasParaContabilidad(empresaId, req.query);
+  const opciones = opcionesExport(config, req.query);
   const sufijo = new Date().toISOString().slice(0, 10);
-  if (String(formato).toLowerCase() === "a3") {
+  if (formato === "a3") {
     const dat = contabilidadExport.buildA3Suenlace(facturas, opciones);
     res.setHeader("Content-Type", "text/plain; charset=ISO-8859-1");
     res.setHeader("Content-Disposition", `attachment; filename="SUENLACE.DAT"`);
     return res.send(dat);
   }
-  if (String(formato).toLowerCase() === "csv") {
+  if (formato === "csv") {
     const csv = contabilidadExport.buildContasolApuCsv(facturas, opciones);
     res.setHeader("Content-Type", "text/csv; charset=ISO-8859-1");
     res.setHeader("Content-Disposition", `attachment; filename="APU-${sufijo}.csv"`);

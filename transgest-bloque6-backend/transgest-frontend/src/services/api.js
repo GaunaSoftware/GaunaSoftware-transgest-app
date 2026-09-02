@@ -580,6 +580,40 @@ export const reencolarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/r
 export const sincronizarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/sincronizar`, { method:"POST", body:{} });
 export const facturaFiscalXmlUrl = (id) => `${BASE}/api/v1/facturas/${encodeURIComponent(id)}/fiscal/xml`;
 export const facturasFiscalLoteXmlUrl = (params={}) => `${BASE}/api/v1/facturas/fiscal/export-lote.xml?${new URLSearchParams(params)}`;
+// ── Traspaso de facturas a la contabilidad externa (Contasol/Factusol, a3) ──
+export const getContabilidadExportConfig  = ()      => apiFetch("/facturas/export/contabilidad/config");
+export const setContabilidadExportConfig  = (data)  => apiFetch("/facturas/export/contabilidad/config", { method:"PUT", body:data });
+export const getContabilidadExportResumen = (params={}) => apiFetch(`/facturas/export/contabilidad/resumen?${new URLSearchParams(params)}`);
+export const getContabilidadExportLotes   = ()      => apiFetch("/facturas/export/contabilidad/lotes");
+export const confirmarContabilidadLote    = (data)  => apiFetch("/facturas/export/contabilidad/lotes", { method:"POST", body:data });
+export const borrarContabilidadLote       = (id)    => apiFetch(`/facturas/export/contabilidad/lotes/${id}`, { method:"DELETE" });
+
+// Descarga el fichero de contabilidad con la sesion actual y lo guarda en disco
+// (no se puede usar un enlace normal: la API exige cabecera Authorization).
+export async function descargarContabilidadExport(params = {}) {
+  const token = getToken();
+  const res = await fetch(apiUrl(`/facturas/export/contabilidad?${new URLSearchParams(params)}`), {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    const data = await parseApiResponse(res);
+    const message = data.error || data.message || `Error ${res.status}`;
+    notifyError(message, res.status);
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  const filename = filenameFromDisposition(res.headers.get("content-disposition")) || "contabilidad";
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  return { filename, size: blob.size };
+}
+
 export const getControlCobros = ()        => apiFetch("/facturas/control-cobros");
 export const getBloqueosDocumentalesCobro = () => apiFetch("/facturas/bloqueos-documentales");
 export const getControlCobrosConfig = ()  => apiFetch("/facturas/control-cobros/config");

@@ -1039,6 +1039,9 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ultima_posicion VARCHAR(100)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS posicion_ts TIMESTAMPTZ").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
+    // Proveedor habitual invitado: usuario ligado a un colaborador, que solo ve
+    // los viajes que tiene asignados ese colaborador.
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS colaborador_id UUID REFERENCES colaboradores(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
     await db.query(`
       CREATE TABLE IF NOT EXISTS route_optimizations (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

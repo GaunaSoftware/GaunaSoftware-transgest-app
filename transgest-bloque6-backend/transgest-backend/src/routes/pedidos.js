@@ -5934,6 +5934,15 @@ router.get("/", async (req, res) => {
     where.push(`(p.chofer_id = $${i} OR p.chofer2_id = $${i++})`);
     params.push(chofer_id);
   }
+  // Proveedor invitado: solo ve los viajes asignados a SU colaborador. Si el
+  // usuario no esta ligado a ninguno, no ve nada (nunca toda la empresa).
+  if (req.user?.rol === "colaborador") {
+    if (!req.user?.colaborador_id) {
+      return res.json({ data: [], page: Number(page) || 1, limit: Number(limit) || 50, total: 0, total_pages: 0 });
+    }
+    where.push(`p.colaborador_id = $${i++}`);
+    params.push(req.user.colaborador_id);
+  }
   if (req.user?.rol === "trafico" && !traficoConfigIsOpen(req.user.trafico_config)) {
     const scope = normalizeTraficoConfig(req.user.trafico_config);
     if (scope.vehiculo_ids.length) {
@@ -6341,6 +6350,14 @@ router.get("/resumen-lista", async (req, res) => {
       }
     }
     if (cliente_id) { where.push(`p.cliente_id = $${i++}`); params.push(cliente_id); }
+    // Proveedor invitado: solo SUS viajes (nunca los del resto de la empresa).
+    if (req.user?.rol === "colaborador") {
+      if (!req.user?.colaborador_id) {
+        return res.json({ data: [], pagination: { total: 0, page: pageN, limit: limitN, totalPages: 0, hasNext: false, hasPrev: pageN > 1 } });
+      }
+      where.push(`p.colaborador_id = $${i++}`);
+      params.push(req.user.colaborador_id);
+    }
     if (req.user?.rol === "chofer") {
       const access = await getChoferAccessForUser(req.user, empresaId);
       if (!access.choferIds.length && !access.vehiculoIds.length) {
@@ -7689,6 +7706,11 @@ router.get("/:id", async (req, res) => {
   `, [req.params.id, empresaId]);
   if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
   if (req.user?.rol === "chofer" && !(await usuarioPuedeGestionarPedido(req, rows[0]))) {
+    return res.status(403).json({ error: "No puedes acceder a este pedido" });
+  }
+  // Proveedor invitado: solo puede abrir los viajes de SU colaborador.
+  if (req.user?.rol === "colaborador"
+      && String(rows[0].colaborador_id || "") !== String(req.user?.colaborador_id || " ")) {
     return res.status(403).json({ error: "No puedes acceder a este pedido" });
   }
 

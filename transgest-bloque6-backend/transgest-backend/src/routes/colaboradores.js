@@ -2,6 +2,7 @@ const { cacheMiddleware } = require("../services/cache");
 // src/routes/colaboradores.js
 const express = require("express");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 const db      = require("../services/db");
 const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
 const { crearNotificacion, ensureNotificacionesSchema } = require("../services/notificaciones");
@@ -507,6 +508,24 @@ async function logPedidoEventoPortal(pedidoId, empresaId, tipo, detalle = {}) {
      VALUES ($1,$2,$3,'colaborador_portal',$4)`,
     [pedidoId, empresaId, tipo, JSON.stringify(detalle || {})]
   ).catch(() => {});
+}
+
+// ── Usuario invitado del proveedor habitual ──────────────────────────────
+// Para el proveedor recurrente: en vez de un enlace por viaje, una cuenta con
+// contrasena que ve TODOS sus viajes (y solo los suyos: el filtro por
+// colaborador_id esta en el listado y en el detalle de pedidos).
+function passwordTemporalProveedor() {
+  return `Proveedor${Math.random().toString(36).slice(2, 8)}${Math.floor(10 + Math.random() * 89)}`;
+}
+
+function usernameProveedor(colaborador) {
+  const limpio = String(colaborador.cif || colaborador.nombre || "proveedor")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 24) || "proveedor";
+  return `prov_${limpio}_${String(colaborador.id).slice(0, 8)}`;
 }
 
 // Si el proveedor rechaza el viaje desde su portal hay que enterarse YA, porque
@@ -2775,6 +2794,78 @@ router.patch("/:id/revision", GERENTE_O_TRAFICO, async (req,res) => {
     await limpiarNotificacionesColaboradorRevision(empresaId, req.params.id);
     res.json(rows[0]);
   } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /colaboradores/:id/portal-user - ver si el proveedor ya tiene cuenta.
+router.get("/:id/portal-user", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const { rows } = await db.query(
+      `SELECT id, nombre, username, rol, activo, colaborador_id
+         FROM usuarios
+        WHERE empresa_id=$1 AND colaborador_id=$2 AND rol::text='colaborador'
+        ORDER BY created_at ASC LIMIT 1`,
+      [empresaId, req.params.id]
+    );
+    res.json({ existe: !!rows[0], usuario: rows[0] || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /colaboradores/:id/portal-user - invita al proveedor habitual: crea (o
+// resetea) una cuenta con contrasena temporal ligada a ese colaborador. Solo ve
+// sus propios viajes. Con reset_password=true se genera una clave nueva.
+router.post("/:id/portal-user", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const col = await db.query(
+      "SELECT id, nombre, cif, email FROM colaboradores WHERE id=$1 AND empresa_id=$2 AND activo=true",
+      [req.params.id, empresaId]
+    );
+    const colaborador = col.rows[0];
+    if (!colaborador) return res.status(404).json({ error: "Proveedor no encontrado" });
+
+    const existente = await db.query(
+      `SELECT id, nombre, username, rol, activo
+         FROM usuarios
+        WHERE empresa_id=$1 AND colaborador_id=$2 AND rol::text='colaborador'
+        ORDER BY created_at ASC LIMIT 1`,
+      [empresaId, colaborador.id]
+    );
+    if (existente.rows[0] && !req.body?.reset_password) {
+      return res.json({ existe: true, usuario: existente.rows[0] });
+    }
+
+    const password = passwordTemporalProveedor();
+    const hash = await bcrypt.hash(password, 12);
+    if (existente.rows[0]) {
+      const { rows } = await db.query(
+        `UPDATE usuarios
+            SET password_hash=$1, debe_cambiar_password=true, activo=true
+          WHERE id=$2 AND empresa_id=$3
+          RETURNING id, nombre, username, rol, activo`,
+        [hash, existente.rows[0].id, empresaId]
+      );
+      return res.json({ existe: true, reset: true, password_temporal: password, usuario: rows[0] });
+    }
+    // Acceso minimo: sus viajes, sus documentos y su cuenta.
+    const permisos = { modulos: {
+      pedidos: { ver: true, editar: true },
+      documentos: { ver: true, editar: true },
+      mi_cuenta: { ver: true, editar: true },
+    } };
+    const { rows } = await db.query(
+      `INSERT INTO usuarios
+        (nombre,email,username,password_hash,rol,empresa_id,colaborador_id,perfil,permisos,debe_cambiar_password)
+       VALUES ($1,$2,$3,$4,'colaborador',$5,$6,'Portal proveedor',$7,true)
+       RETURNING id, nombre, username, rol, activo`,
+      [`${colaborador.nombre} (Proveedor)`, null, usernameProveedor(colaborador), hash,
+       empresaId, colaborador.id, permisos]
+    );
+    res.status(201).json({ creado: true, password_temporal: password, usuario: rows[0] });
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "Ya existe un usuario con ese identificador." });
     res.status(500).json({ error: e.message });
   }
 });

@@ -482,7 +482,7 @@ async function authenticate(req, res, next) {
     const payload = jwt.verify(token, userJwtSecret(), { algorithms: ["HS256"] });
 
     const { rows } = await db.query(
-      `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id,
+      `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id, u.colaborador_id,
               u.perfil, u.permisos, u.trafico_config, u.password_changed_at,
               e.plan, e.estado AS empresa_estado, e.fecha_vencimiento,
               e.bloqueo_manual, e.bloqueo_motivo

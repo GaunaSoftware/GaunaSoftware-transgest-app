@@ -6164,6 +6164,114 @@ router.get("/chofer-ultimo-viaje", async (req, res) => {
   }
 });
 
+// GET /pedidos/disponibilidad - para una fecha, dice que vehiculos y choferes
+// estan libres y, si no lo estan, por que. Se usa al asignar (boton Asignar y
+// formulario del pedido) para mostrar atenuados los ocupados con su motivo, sin
+// impedir asignarlos si hace falta.
+router.get("/disponibilidad", async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    if (!empresaId) return res.json({ fecha: null, vehiculos: [], choferes: [] });
+    const fecha = normalizePedidoDate(req.query?.fecha) || new Date().toISOString().slice(0, 10);
+    const excluir = normalizePedidoUuid(req.query?.excluir);
+
+    // Un recurso esta ocupado si tiene otro viaje vivo cuyo rango de fechas
+    // (carga -> descarga) incluye la fecha consultada.
+    const ocupacionSql = (campo) => `
+      SELECT p.numero, p.origen, p.destino,
+             COALESCE(p.fecha_carga, p.fecha_pedido) AS desde,
+             COALESCE(p.fecha_descarga, p.fecha_entrega, p.fecha_carga, p.fecha_pedido) AS hasta
+        FROM pedidos p
+       WHERE p.empresa_id = $1
+         AND p.${campo} = r.id
+         AND ($2::uuid IS NULL OR p.id <> $2::uuid)
+         AND LOWER(p.estado::text) NOT IN ('cancelado','entregado','facturado')
+         AND COALESCE(p.fecha_carga, p.fecha_pedido) <= $3::date
+         AND COALESCE(p.fecha_descarga, p.fecha_entrega, p.fecha_carga, p.fecha_pedido) >= $3::date
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido) ASC
+       LIMIT 1`;
+
+    const [vehRes, chofRes] = await Promise.all([
+      db.query(`
+        SELECT r.id, r.matricula, r.clase, r.tipo, r.activo, r.estado::text AS estado,
+               r.fecha_itv, r.fecha_seguro, o.numero AS ocupado_numero,
+               o.origen AS ocupado_origen, o.destino AS ocupado_destino
+          FROM vehiculos r
+          LEFT JOIN LATERAL (${ocupacionSql("vehiculo_id")}) o ON TRUE
+         WHERE r.empresa_id = $1
+         ORDER BY r.matricula ASC`, [empresaId, excluir || null, fecha]),
+      db.query(`
+        SELECT r.id, r.nombre, r.apellidos, r.activo,
+               o.numero AS ocupado_numero, o.origen AS ocupado_origen, o.destino AS ocupado_destino
+          FROM choferes r
+          LEFT JOIN LATERAL (${ocupacionSql("chofer_id")}) o ON TRUE
+         WHERE r.empresa_id = $1
+         ORDER BY r.nombre ASC`, [empresaId, excluir || null, fecha]),
+    ]);
+
+    // Vacaciones aparte: si la tabla no existe todavia, no debe dejar la lista de
+    // choferes vacia (solo se pierde ese motivo).
+    const vacRes = await db.query(`
+      SELECT chofer_id FROM chofer_vacaciones_solicitudes
+       WHERE empresa_id = $1
+         AND LOWER(estado) IN ('aprobada','aprobado','aceptada')
+         AND fecha_inicio <= $2::date AND fecha_fin >= $2::date`,
+      [empresaId, fecha]
+    ).catch(() => ({ rows: [] }));
+    const deVacaciones = new Set(vacRes.rows.map(v => String(v.chofer_id)));
+
+    const venceAntes = (valor) => {
+      const iso = valor ? String(valor instanceof Date ? valor.toISOString() : valor).slice(0, 10) : "";
+      return iso && iso < fecha;
+    };
+
+    const vehiculos = vehRes.rows.map(v => {
+      const motivos = [];
+      if (v.activo === false) motivos.push({ nivel: "duro", texto: "Vehiculo de baja" });
+      if (String(v.estado || "").toLowerCase() === "taller") motivos.push({ nivel: "duro", texto: "En taller" });
+      if (v.ocupado_numero) {
+        motivos.push({
+          nivel: "duro",
+          texto: `En el viaje ${v.ocupado_numero}${v.ocupado_destino ? ` (${v.ocupado_origen || ""} - ${v.ocupado_destino})` : ""}`,
+        });
+      }
+      if (venceAntes(v.fecha_itv)) motivos.push({ nivel: "aviso", texto: "ITV caducada" });
+      if (venceAntes(v.fecha_seguro)) motivos.push({ nivel: "aviso", texto: "Seguro caducado" });
+      return {
+        id: v.id,
+        matricula: v.matricula,
+        clase: v.clase || v.tipo || "",
+        disponible: !motivos.some(m => m.nivel === "duro"),
+        motivos,
+        motivo: motivos.map(m => m.texto).join(" | "),
+      };
+    });
+
+    const choferes = chofRes.rows.map(c => {
+      const motivos = [];
+      if (c.activo === false) motivos.push({ nivel: "duro", texto: "Chofer inactivo" });
+      if (deVacaciones.has(String(c.id))) motivos.push({ nivel: "duro", texto: "De vacaciones" });
+      if (c.ocupado_numero) {
+        motivos.push({
+          nivel: "duro",
+          texto: `En el viaje ${c.ocupado_numero}${c.ocupado_destino ? ` (${c.ocupado_origen || ""} - ${c.ocupado_destino})` : ""}`,
+        });
+      }
+      return {
+        id: c.id,
+        nombre: `${c.nombre || ""} ${c.apellidos || ""}`.trim(),
+        disponible: !motivos.some(m => m.nivel === "duro"),
+        motivos,
+        motivo: motivos.map(m => m.texto).join(" | "),
+      };
+    });
+
+    res.json({ fecha, vehiculos, choferes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /pedidos/grupaje/combinar - junta varios pedidos en un mismo viaje
 // (grupaje): les pone un grupaje_id comun y tipo_carga='grupaje'. Si alguno ya
 // esta en un grupaje, se reutiliza ese id. Luego aparecen como un solo grupo en

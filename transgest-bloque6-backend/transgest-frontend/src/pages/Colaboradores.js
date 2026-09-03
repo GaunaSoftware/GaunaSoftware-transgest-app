@@ -7,6 +7,7 @@ import { getColaboradores, crearColaborador, editarColaborador,
          getColaboradorDocumentos, crearColaboradorDocumento, borrarColaboradorDocumento,
          getColaboradorAccionesPendientes, descargarColaboradorInformeAcciones,
          marcarColaboradorRevisado, crearColaboradorLiquidacionToken, getColaboradorLiquidacionTokens,
+         crearColaboradorPortalUser,
          revocarColaboradorLiquidacionToken, enviarColaboradorLiquidacionEmail,
          revisarAlertasLiquidacionesColaboradores } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -856,6 +857,52 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
     return crearAccesoColaborador("operativa");
   }
 
+  // Proveedor habitual: cuenta con contrasena que ve TODOS sus viajes (y solo
+  // los suyos). Alternativa al enlace por viaje, para los que trabajan a diario.
+  async function invitarUsuarioProveedor() {
+    if (!canEdit) return;
+    try {
+      const previo = await crearColaboradorPortalUser(colaborador.id, {});
+      if (previo?.existe && !previo?.password_temporal) {
+        const reset = await confirmDialog({
+          title: "Este proveedor ya tiene cuenta",
+          message: `Usuario: ${previo.usuario?.username || "-"}
+
+Quieres generar una contrasena nueva? La anterior dejara de funcionar.`,
+          confirmText: "Generar contrasena nueva",
+          cancelText: "Cerrar",
+          tone: "warning",
+        });
+        if (!reset) return;
+        const nuevo = await crearColaboradorPortalUser(colaborador.id, { reset_password: true });
+        return mostrarCredencialesProveedor(nuevo);
+      }
+      return mostrarCredencialesProveedor(previo);
+    } catch (e) {
+      notify(e.message || "No se pudo crear el acceso del proveedor.", "error");
+    }
+  }
+
+  async function mostrarCredencialesProveedor(data) {
+    const usuario = data?.usuario?.username || "";
+    const pass = data?.password_temporal || "";
+    if (!usuario || !pass) { notify("No se recibieron las credenciales.", "warning"); return; }
+    const texto = `Usuario: ${usuario}
+Contrasena: ${pass}`;
+    if (navigator.clipboard) await navigator.clipboard.writeText(texto).catch(() => {});
+    await confirmDialog({
+      title: "Acceso de proveedor creado",
+      message: `Pasale estos datos al proveedor (se han copiado al portapapeles).
+
+${texto}
+
+Tendra que cambiar la contrasena al entrar. Solo vera los viajes que le asignes.`,
+      confirmText: "Entendido",
+      cancelText: "Cerrar",
+      tone: "success",
+    });
+  }
+
   async function enviarLiquidacionEmail() {
     if (!canEdit) return;
     if (!String(colaborador.email || "").trim()) {
@@ -1038,6 +1085,12 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
         {canEdit && (
           <button onClick={crearAccesoOperativo} style={{...S.btn,background:"rgba(15,118,110,.12)",color:"var(--accent)",border:"1px solid rgba(15,118,110,.25)"}}>
             Acceso operativo
+          </button>
+        )}
+        {canEdit && (
+          <button onClick={invitarUsuarioProveedor} title="Crea una cuenta con contrasena para el proveedor habitual: vera todos SUS viajes"
+            style={{...S.btn,background:"rgba(168,85,247,.12)",color:"#a855f7",border:"1px solid rgba(168,85,247,.25)"}}>
+            Invitar como usuario
           </button>
         )}
         {canEdit && (

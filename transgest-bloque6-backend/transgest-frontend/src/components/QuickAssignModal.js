@@ -5,7 +5,11 @@ import { getDisponibilidadRecursos } from "../services/api";
 // Popup rapido de asignacion desde el boton "Asignar" de la lista de pedidos.
 // Permite elegir una matricula de la flota o escribirla a mano (asignacion
 // propia), y opcionalmente el chofer. No abre el formulario completo del pedido.
-export default function QuickAssignModal({ pedido, vehiculos = [], choferes = [], onClose, onAssign, bulkCount = 0, fechasLote = [] }) {
+export default function QuickAssignModal({ pedido, vehiculos = [], choferes = [], colaboradores = [], onClose, onAssign, bulkCount = 0, fechasLote = [] }) {
+  // Se puede asignar a flota propia (matricula + chofer) O a un proveedor
+  // externo: son excluyentes, por eso van en dos modos.
+  const [modo, setModo] = useState(pedido?.colaborador_id ? "proveedor" : "propio");
+  const [colaboradorId, setColaboradorId] = useState(pedido?.colaborador_id || "");
   const [matricula, setMatricula] = useState(
     pedido?.vehiculo_matricula || pedido?.matricula_manual || ""
   );
@@ -28,6 +32,8 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
   const tractoras = useMemo(() => vehiculos.filter(v => !esRemolque(v)), [vehiculos]);
   const remolques = useMemo(() => vehiculos.filter(v => esRemolque(v)), [vehiculos]);
   const esBulk = Number(bulkCount) > 1;
+  // En modo proveedor basta con elegir proveedor; en modo propio, matricula o chofer.
+  const puedeAsignar = modo === "proveedor" ? !!colaboradorId : (!!matricula || !!choferId);
 
   // Disponibilidad para la fecha del viaje: quien esta libre y, si no, por que.
   // Los ocupados NO se ocultan (a veces hay que asignarlos igual): salen
@@ -99,6 +105,24 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
   }
 
   async function asignar() {
+    // Proveedor externo: excluyente con la flota propia, asi que se limpia todo
+    // lo de transporte propio al asignarlo.
+    if (modo === "proveedor") {
+      if (!colaboradorId) return;
+      const col = colaboradores.find(c => String(c.id) === String(colaboradorId));
+      setTrabajando(true);
+      try {
+        await onAssign({
+          colaborador_id: colaboradorId,
+          colaborador_nombre: col?.nombre || "",
+          vehiculo_id: "", chofer_id: "", chofer2_id: "",
+          matricula_manual: "", remolque_matricula_manual: "", remolque_id_manual: "",
+        });
+      } finally {
+        setTrabajando(false);
+      }
+      return;
+    }
     const mat = String(matricula || "").trim().toUpperCase();
     const rem = String(remolque || "").trim().toUpperCase();
     if (!mat && !choferId) { return; }
@@ -161,7 +185,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
     <div style={S.overlay} onClick={onClose}>
       <div style={S.box} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)" }}>
-          {esBulk ? `Asignar a ${bulkCount} pedidos` : "Asignar vehiculo"}
+          {esBulk ? `Asignar a ${bulkCount} pedidos` : (modo === "proveedor" ? "Asignar proveedor" : "Asignar vehiculo")}
         </div>
         <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>
           {esBulk
@@ -169,6 +193,39 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
             : <>Pedido {pedido?.numero || ""} · {pedido?.origen || ""} {pedido?.destino ? `-> ${pedido.destino}` : ""}</>}
         </div>
 
+        {/* Flota propia o proveedor externo: son excluyentes */}
+        <div style={{ display: "flex", gap: 6, marginTop: 14 }}>
+          {[["propio", "Flota propia"], ["proveedor", "Proveedor externo"]].map(([v, l]) => (
+            <button key={v} type="button" onClick={() => setModo(v)}
+              style={{
+                flex: 1, padding: "7px 10px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 800,
+                border: `1px solid ${modo === v ? "var(--accent)" : "var(--border2)"}`,
+                background: modo === v ? "var(--accent-a12)" : "var(--bg3)",
+                color: modo === v ? "var(--accent)" : "var(--text4)",
+              }}>{l}</button>
+          ))}
+        </div>
+
+        {modo === "proveedor" ? (
+          <>
+            <label style={S.label}>Proveedor / transportista externo</label>
+            <select style={S.input} value={colaboradorId} onChange={e => setColaboradorId(e.target.value)}>
+              <option value="">Selecciona un proveedor</option>
+              {colaboradores.map(c => (
+                <option key={c.id} value={c.id}>{c.nombre}{c.cif ? ` - ${c.cif}` : ""}</option>
+              ))}
+            </select>
+            <div style={{ ...S.ayuda, marginTop: 8 }}>
+              Al asignarlo se quita el camion propio. Despues, desde el pedido, puedes generar
+              su enlace de acceso para que confirme, ponga su matricula y conductor, marque estados
+              y suba los albaranes.
+            </div>
+            {colaboradores.length === 0 && (
+              <div style={S.avisoOcupado}>No hay proveedores dados de alta. Crealos en Colaboradores.</div>
+            )}
+          </>
+        ) : (
+        <>
         <datalist id="tg-quick-tractoras">
           {tractoras.map(v => <option key={v.id} value={v.matricula} />)}
         </datalist>
@@ -251,12 +308,14 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
             })}
           </div>
         )}
+        </>
+        )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
           <button style={S.btn} onClick={onClose} disabled={trabajando}>Cancelar</button>
           <button
-            style={{ ...S.btn, background: "var(--accent,var(--accent))", color: "#fff", borderColor: "var(--accent,var(--accent))", opacity: trabajando || (!matricula && !choferId) ? .6 : 1 }}
-            onClick={asignar} disabled={trabajando || (!matricula && !choferId)}>
+            style={{ ...S.btn, background: "var(--accent,var(--accent))", color: "#fff", borderColor: "var(--accent,var(--accent))", opacity: trabajando || !puedeAsignar ? .6 : 1 }}
+            onClick={asignar} disabled={trabajando || !puedeAsignar}>
             {trabajando ? "Asignando..." : (esBulk ? `Asignar a ${bulkCount}` : "Asignar")}
           </button>
         </div>

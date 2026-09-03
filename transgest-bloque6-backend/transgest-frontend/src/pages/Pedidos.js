@@ -12720,6 +12720,7 @@ export default function Pedidos() {
           pedido={quickAssignPedido}
           vehiculos={vehiculos}
           choferes={choferes}
+          colaboradores={colaboradores}
           bulkCount={quickAssignTargets(quickAssignPedido).length}
           fechasLote={quickAssignTargets(quickAssignPedido).map(p => String(p.fecha_carga || p.fecha_pedido || "").slice(0, 10)).filter(Boolean)}
           onClose={()=>setQuickAssignPedido(null)}

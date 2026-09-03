@@ -729,6 +729,9 @@ export const crearColaborador = (data)    => apiFetch("/colaboradores", { method
 export const editarColaborador= (id,data) => apiFetch(`/colaboradores/${id}`, { method:"PUT", body:data });
 export const borrarColaborador= (id)      => apiFetch(`/colaboradores/${id}`, { method:"DELETE" });
 export const crearColaboradorLiquidacionToken = (id, data={}) => apiFetch(`/colaboradores/${id}/liquidacion-token`, { method:"POST", body:data });
+// Proveedor habitual invitado: cuenta con contrasena que solo ve SUS viajes.
+export const getColaboradorPortalUser  = (id)       => apiFetch(`/colaboradores/${id}/portal-user`);
+export const crearColaboradorPortalUser = (id, data={}) => apiFetch(`/colaboradores/${id}/portal-user`, { method:"POST", body:data });
 export const enviarColaboradorLiquidacionEmail = (id, data={}) => apiFetch(`/colaboradores/${id}/liquidacion-email`, { method:"POST", body:data });
 export const getColaboradorLiquidacionTokens = (id) => apiFetch(`/colaboradores/${id}/liquidacion-tokens`);
 export const revocarColaboradorLiquidacionToken = (id, tokenId) => apiFetch(`/colaboradores/${id}/liquidacion-tokens/${tokenId}`, { method:"DELETE" });

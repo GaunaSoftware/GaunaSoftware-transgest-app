@@ -25,3 +25,27 @@ export function parseLocaleNumber(value, fallback = 0) {
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
 }
+
+// ── Peso: kilos o toneladas en el mismo campo ────────────────────────────
+// El campo de peso admite las dos cosas segun lo que escriba el usuario:
+//   890  -> son KILOS      (0,89 tn)
+//   8,9  -> son TONELADAS  (8.900 kg)
+// El corte esta en 45 porque ningun camion transporta mas de ~45 toneladas
+// (el maximo legal de un megacamion son 44 t de masa total), asi que cualquier
+// cifra por encima solo puede estar en kilos.
+// ANTES el corte estaba en 1000 y por eso 890 kg se tomaban como 890 TONELADAS,
+// lo que multiplicaba por mil el precio de una tarifa por tonelada.
+export const MAX_TONELADAS_CAMION = 45;
+
+export function toneladasDesdePeso(value) {
+  const n = parseLocaleNumber(value, 0);
+  if (!(n > 0)) return 0;
+  const toneladas = n <= MAX_TONELADAS_CAMION ? n : n / 1000;
+  return Number(toneladas.toFixed(3));
+}
+
+export function kilosDesdePeso(value) {
+  const n = parseLocaleNumber(value, 0);
+  if (!(n > 0)) return 0;
+  return n <= MAX_TONELADAS_CAMION ? n * 1000 : n;
+}

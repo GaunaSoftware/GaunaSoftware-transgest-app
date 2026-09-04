@@ -2,7 +2,7 @@ import { useDebounce } from "../hooks/useDebounce";
 import AdrPanel from "../components/AdrPanel";
 import QuickAssignModal from "../components/QuickAssignModal";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
-import { parseLocaleNumber } from "../utils/number";
+import { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } from "../utils/number";
 import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
 import { getLogoDataUrl, ensureLogoCargado } from "../services/logoHelper";
 import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPedidoDocAChofer, enviarTodosPedidoDocsAChofer, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
@@ -1065,9 +1065,8 @@ function cantidadSugeridaPorTipo(form, tipo = form?.tipo_precio) {
   if (!tipo || tipo === "viaje") return "";
   if (tipo === "kg") return parseLocaleNumber(form?.peso_kg || form?.kg, 0) || "";
   if (tipo === "tonelada") {
-    const peso = parseLocaleNumber(form?.peso_kg || form?.kg, 0);
-    const toneladas = peso > 0 && peso < 1000 ? peso : peso / 1000;
-    return toneladas ? Number(toneladas.toFixed(3)) : "";
+    const toneladas = toneladasDesdePeso(form?.peso_kg || form?.kg);
+    return toneladas || "";
   }
   if (tipo === "km") return parseLocaleNumber(form?.km_ruta || form?.km, 0) || "";
   if (tipo === "palet") return parseLocaleNumber(form?.bultos, 0) || "";
@@ -1078,7 +1077,8 @@ function normalizeMinimoUnidadesRuta(ruta = {}, tarifaTipo = ruta?.tarifa_tipo) 
   const raw = ruta.minimo_unidades ?? ruta.minimo_facturable ?? "";
   const value = parseLocaleNumber(raw, NaN);
   if (!Number.isFinite(value) || value <= 0) return "";
-  if (tarifaTipo === "tonelada" && value >= 1000) {
+  if (tarifaTipo === "tonelada" && value > MAX_TONELADAS_CAMION) {
+    // Un minimo por encima de 45 solo puede venir expresado en kilos.
     return Number((value / 1000).toFixed(3));
   }
   return value;
@@ -1261,8 +1261,8 @@ function normalizePedidoTarifaDraft(draft = {}) {
     }
     const cantidad = parseLocaleNumber(next.cantidad, NaN);
     const peso = parseLocaleNumber(next.peso_kg || next.kg, NaN);
-    if (Number.isFinite(peso) && peso > 0 && (!Number.isFinite(cantidad) || cantidad <= 0 || (cantidad < 1 && peso >= 1000))) {
-      next.cantidad = peso < 1000 ? peso : Number((peso / 1000).toFixed(3));
+    if (Number.isFinite(peso) && peso > 0 && (!Number.isFinite(cantidad) || cantidad <= 0 || (cantidad < 1 && peso > MAX_TONELADAS_CAMION))) {
+      next.cantidad = toneladasDesdePeso(peso);
     }
   }
   return next;
@@ -1310,7 +1310,7 @@ function normalizePesoKgDraft(draft = {}) {
   if (!Number.isFinite(normalized)) return draft;
   const next = { ...draft, peso_kg: normalized };
   if (String(next.tipo_precio || "") === "tonelada") {
-    const toneladas = normalized < 1000 ? normalized : Number((normalized / 1000).toFixed(3));
+    const toneladas = toneladasDesdePeso(normalized);
     next.cantidad = toneladas || next.cantidad || "";
   }
   return syncPrecioClienteCol(syncPrecioColaboradorCalc(next));

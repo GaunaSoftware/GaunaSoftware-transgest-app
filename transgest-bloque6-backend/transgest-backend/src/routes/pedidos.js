@@ -6,7 +6,7 @@ const crypto  = require("crypto");
 const zlib = require("zlib");
 const pdfParse = require("pdf-parse");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
-const { parseLocaleNumber } = require("../utils/number");
+const { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } = require("../utils/number");
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
 const { crearNotificacion, notificarUsuariosCliente } = require("../services/notificaciones");
@@ -3917,8 +3917,8 @@ function normalizePedidoTarifaFields(fieldMap = {}) {
   const cantidad = parseLocaleNumber(next.cantidad);
   const pesoKg = parseLocaleNumber(next.peso_kg);
   if (Number.isFinite(pesoKg) && pesoKg > 0) {
-    const toneladas = pesoKg < 1000 ? pesoKg : Number((pesoKg / 1000).toFixed(3));
-    if (!Number.isFinite(cantidad) || cantidad <= 0 || (cantidad < 1 && pesoKg >= 1000)) {
+    const toneladas = toneladasDesdePeso(pesoKg);
+    if (!Number.isFinite(cantidad) || cantidad <= 0 || (cantidad < 1 && pesoKg > MAX_TONELADAS_CAMION)) {
       next.cantidad = toneladas;
     }
   }
@@ -4763,7 +4763,8 @@ function normalizeRouteMinimumUnits(route = {}, tarifaTipo = route?.tarifa_tipo)
   const raw = route.minimo_unidades ?? route.minimo_facturable;
   const value = parseLocaleNumber(raw);
   if (!Number.isFinite(value) || value <= 0) return 0;
-  if (String(tarifaTipo || "").toLowerCase() === "tonelada" && value >= 1000) {
+  if (String(tarifaTipo || "").toLowerCase() === "tonelada" && value > MAX_TONELADAS_CAMION) {
+    // Un minimo por encima de 45 solo puede venir expresado en kilos.
     return Number((value / 1000).toFixed(3));
   }
   return value;

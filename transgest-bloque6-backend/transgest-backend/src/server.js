@@ -1008,6 +1008,14 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS km_vacio NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS volumen NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metros_lineales NUMERIC(10,2)").catch(captureStartupMigrationError);
+    // Detalle de la carga para el grupaje (ocupacion real del remolque).
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS palets_tipo VARCHAR(20)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS palets_cantidad INTEGER").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS palets_apilables BOOLEAN DEFAULT false").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_largo_m NUMERIC(8,2)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_ancho_m NUMERIC(8,2)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_alto_m NUMERIC(8,2)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS temperatura_c NUMERIC(5,1)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS facturacion_mes DATE").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_precio VARCHAR(50) DEFAULT 'viaje'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(10,2)").catch(captureStartupMigrationError);

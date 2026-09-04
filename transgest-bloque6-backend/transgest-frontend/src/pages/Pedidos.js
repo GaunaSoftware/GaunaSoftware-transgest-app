@@ -8780,6 +8780,28 @@ useEffect(() => {
                 />
               </div>
               <div><label style={S.label}>Bultos / Palets</label><input type="text" inputMode="decimal" style={S.input} value={form.bultos||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,bultos:e.target.value})))}/></div>
+              {/* Detalle de la carga: con esto el grupaje calcula la ocupacion
+                  real del remolque (metros lineales, peso y palets). */}
+              <div><label style={S.label}>Tipo de palet</label>
+                <select style={S.sel} value={form.palets_tipo||""} onChange={f("palets_tipo")}>
+                  <option value="">Sin especificar</option>
+                  <option value="europeo">Europeo (120x80)</option>
+                  <option value="americano">Americano (120x100)</option>
+                  <option value="medio">Medio palet (80x60)</option>
+                  <option value="granel">Sin paletizar / granel</option>
+                </select>
+              </div>
+              <div><label style={S.label}>N. de palets</label><input type="text" inputMode="numeric" style={S.input} value={form.palets_cantidad||""} onChange={f("palets_cantidad")} placeholder="Ej: 12"/></div>
+              <div style={{display:"flex",alignItems:"flex-end",paddingBottom:6}}>
+                <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"var(--text3)",cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!form.palets_apilables} onChange={e=>setForm(p=>({...p,palets_apilables:e.target.checked}))}/>
+                  Se pueden apilar
+                </label>
+              </div>
+              <div><label style={S.label}>Largo carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_largo_m||""} onChange={f("carga_largo_m")} placeholder="Solo si no va paletizada"/></div>
+              <div><label style={S.label}>Ancho carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_ancho_m||""} onChange={f("carga_ancho_m")}/></div>
+              <div><label style={S.label}>Alto carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_alto_m||""} onChange={f("carga_alto_m")}/></div>
+              <div><label style={S.label}>Temperatura (C)</label><input type="text" inputMode="decimal" style={S.input} value={form.temperatura_c||""} onChange={f("temperatura_c")} placeholder="Ej: -18 (vacio = sin frio)"/></div>
               <div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>
               <div><label style={S.label}>ML</label><input type="text" inputMode="decimal" style={S.input} value={form.metros_lineales||""} onChange={f("metros_lineales")} placeholder="Metros lineales"/></div>
             </div>

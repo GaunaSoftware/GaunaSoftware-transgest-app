@@ -3,6 +3,7 @@ import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getP
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
+import RemolqueGrupaje from "../components/RemolqueGrupaje";
 import { inferPlaceGeo } from "../utils/placeGeo";
 
 // â”€â”€ Calculadora de tiempo de conducciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -5697,6 +5698,16 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                     </button>
                     <span style={{fontSize:10,color:"var(--text5)"}}>{asignaColab ? "Se asigna como colaborador (subcontrata). El precio pactado se completa en el pedido." : "Si la matricula no es de la flota, se guarda como matricula a mano."}</span>
                   </div>
+                </div>
+              )}
+
+              {/* Ocupacion del remolque: solo tiene sentido si hay grupaje real */}
+              {esGrupoReal && (
+                <div style={{padding:"0 16px 12px"}}>
+                  <RemolqueGrupaje
+                    pedidos={peds}
+                    vehiculo={vehiculos.find(v => String(v.matricula || "").toUpperCase() === String(primerPed?.vehiculo_matricula || primerPed?.matricula || "").toUpperCase()) || null}
+                  />
                 </div>
               )}
 

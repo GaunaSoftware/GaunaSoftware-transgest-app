@@ -3766,6 +3766,9 @@ function getMissingColumn(error) {
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
   "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
+  // Detalle de carga del grupaje
+  "palets_tipo", "palets_cantidad", "palets_apilables",
+  "carga_largo_m", "carga_ancho_m", "carga_alto_m", "temperatura_c",
   "cantidad", "precio_unitario", "extracostes_importe",
   "tipo_iva",
   "km_vacio_enlace",

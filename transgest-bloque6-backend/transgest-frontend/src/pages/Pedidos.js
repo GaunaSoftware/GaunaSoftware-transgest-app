@@ -10217,6 +10217,11 @@ export default function Pedidos() {
   const aiVisualPlanActivo = planHasFeature(empresaPlan, "ai");
   const aiDisponible = planHasFeature(empresaPlan, "ai");
   const [focusPedido] = useState(() => readPedidosFocus());
+  // El foco es de UN SOLO USO: ya se ha volcado en el estado inicial (filtro de
+  // estado, busqueda...). Si no se limpia aqui, vive en memoria toda la sesion y
+  // cada vez que se vuelve a entrar en Pedidos re-aplica el filtro (p.ej. el de
+  // incidencias del Dashboard) aunque lo hayas quitado con Reset.
+  useEffect(() => { clearRuntimeFocus("tms_pedidos_focus"); }, []);
   const focusNuevoAplicadoRef = useRef(false);
   const [guidedPedido, setGuidedPedido] = useState(() => {
     const focus = readGuidedPedidoTutorial();
@@ -10298,6 +10303,8 @@ export default function Pedidos() {
     setOpenActionMenuPedidoId(pedidoId);
   }
   const [whatsappSending, setWhatsappSending] = useState("");
+  // Pedido cuyo submenu de "Avisar" esta desplegado.
+  const [avisarAbiertoPedidoId, setAvisarAbiertoPedidoId] = useState("");
   const [incidenciaSelector, setIncidenciaSelector] = useState(null);
   const [facturacionMesSelector, setFacturacionMesSelector] = useState(null);
   const delayResolverRef = React.useRef(null);
@@ -10669,25 +10676,29 @@ export default function Pedidos() {
 
   useEffect(() => {
     if (!focusPedido?.pedido_id || loading) return;
+    // El pedido puede NO estar en la lista cargada (otro rango de fechas u otra
+    // pagina): venir de Control Tower a una incidencia antigua es el caso tipico.
+    // Antes se salia sin hacer nada y quedaba Pedidos abierto SIN abrir el viaje;
+    // ahora se pide por id igualmente y la lista solo sirve de respaldo.
     const found = pedidos.find(p => String(p.id) === String(focusPedido.pedido_id));
-    if (!found) return;
     let alive = true;
     const t = window.setTimeout(() => {
       document.getElementById(`pedido-row-${focusPedido.pedido_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
       const focusText = `${focusPedido.type || ""} ${focusPedido.title || ""} ${focusPedido.action || ""} ${focusPedido.action_key || ""}`.toLowerCase();
-      const focusIncidencia = focusText.includes("incidencia") || String(found.estado || "").toLowerCase() === "incidencia";
-      getPedido(found.id)
+      const focusIncidencia = focusText.includes("incidencia") || String(found?.estado || focusPedido.estado || "").toLowerCase() === "incidencia";
+      getPedido(focusPedido.pedido_id)
         .then(full => {
           if (!alive) return;
-          setEditando({ ...(full || found), _focus_incidencia: focusIncidencia });
+          setEditando({ ...(full || found || { id: focusPedido.pedido_id, numero: focusPedido.numero || "" }), _focus_incidencia: focusIncidencia });
           setModal(true);
           clearRuntimeFocus("tms_pedidos_focus");
         })
         .catch(() => {
           if (!alive) return;
+          clearRuntimeFocus("tms_pedidos_focus");
+          if (!found) { notify("No se pudo abrir el pedido indicado.", "error"); return; }
           setEditando({ ...found, _focus_incidencia: focusIncidencia });
           setModal(true);
-          clearRuntimeFocus("tms_pedidos_focus");
         });
     }, 180);
     return () => {
@@ -12373,37 +12384,48 @@ export default function Pedidos() {
                                 {reprogrammingPedidoId === String(p.id) ? "Limpiando..." : "Limpiar asignacion"}
                               </button>
                             )}
-                            {p.cliente_telefono&&(
-                              <button
-                                style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
-                                disabled={whatsappSending === `${p.id}:cliente`}
-                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "cliente");}}>
-                                {whatsappSending === `${p.id}:cliente` ? "Registrando..." : "WhatsApp cliente (estado)"}
-                              </button>
-                            )}
-                            {p.chofer_id&&(
-                              <button
-                                style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
-                                disabled={whatsappSending === `${p.id}:chofer`}
-                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "chofer");}}>
-                                {whatsappSending === `${p.id}:chofer` ? "Registrando..." : "WhatsApp chofer"}
-                              </button>
-                            )}
-                            {p.chofer_id&&(
-                              <button
-                                style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.1)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)",padding:"6px 10px",fontSize:11}}
-                                disabled={whatsappSending === `${p.id}:app_chofer`}
-                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");notificarChoferAppAccion(p);}}>
-                                {whatsappSending === `${p.id}:app_chofer` ? "Enviando..." : "App chofer"}
-                              </button>
-                            )}
-                            {p.colaborador_telefono&&(
-                              <button
-                                style={{...S.btn,textAlign:"left",background:"rgba(34,197,94,.1)",color:"#22c55e",border:"1px solid rgba(34,197,94,.25)",padding:"6px 10px",fontSize:11}}
-                                disabled={whatsappSending === `${p.id}:colaborador`}
-                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "colaborador");}}>
-                                {whatsappSending === `${p.id}:colaborador` ? "Registrando..." : "WhatsApp colaborador"}
-                              </button>
+                            {/* Un solo boton "Avisar": al pulsarlo despliega los
+                                destinatarios disponibles, en vez de ocupar 4 lineas. */}
+                            {(p.cliente_telefono || p.chofer_id || p.colaborador_telefono)&&(
+                              <>
+                                <button
+                                  style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
+                                  disabled={String(whatsappSending || "").startsWith(`${p.id}:`)}
+                                  onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId(v => v === String(p.id) ? "" : String(p.id));}}>
+                                  {String(whatsappSending || "").startsWith(`${p.id}:`)
+                                    ? "Enviando..."
+                                    : `Avisar ${avisarAbiertoPedidoId === String(p.id) ? "^" : "v"}`}
+                                </button>
+                                {avisarAbiertoPedidoId === String(p.id) && (
+                                  <div style={{display:"flex",flexDirection:"column",gap:4,paddingLeft:10,borderLeft:"2px solid rgba(37,211,102,.3)",marginLeft:4}}>
+                                    {p.cliente_telefono&&(
+                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"5px 9px",fontSize:11}}
+                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "cliente");}}>
+                                        WhatsApp al cliente (estado)
+                                      </button>
+                                    )}
+                                    {p.chofer_id&&(
+                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"5px 9px",fontSize:11}}
+                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "chofer");}}>
+                                        WhatsApp al chofer
+                                      </button>
+                                    )}
+                                    {p.chofer_id&&(
+                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)",padding:"5px 9px",fontSize:11}}
+                                        title="Aviso dentro de la aplicacion movil del chofer (no es WhatsApp)"
+                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");notificarChoferAppAccion(p);}}>
+                                        Aviso en la app del chofer
+                                      </button>
+                                    )}
+                                    {p.colaborador_telefono&&(
+                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#22c55e",border:"1px solid rgba(34,197,94,.25)",padding:"5px 9px",fontSize:11}}
+                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "colaborador");}}>
+                                        WhatsApp al proveedor
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </>
                             )}
                             {canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&(
                               <button style={{...S.btn,textAlign:"left",background:"rgba(99,102,241,.1)",color:"#818cf8",border:"1px solid rgba(99,102,241,.2)",padding:"6px 10px",fontSize:11}}

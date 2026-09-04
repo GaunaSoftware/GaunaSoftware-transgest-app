@@ -3766,9 +3766,9 @@ function getMissingColumn(error) {
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
   "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
-  // Detalle de carga del grupaje
-  "palets_tipo", "palets_cantidad", "palets_apilables",
-  "carga_largo_m", "carga_ancho_m", "carga_alto_m", "temperatura_c",
+  // Detalle de carga del grupaje (solo los realmente numericos: palets_tipo es
+  // texto y palets_apilables booleano, no deben pasar por conversion numerica).
+  "palets_cantidad", "carga_largo_m", "carga_ancho_m", "carga_alto_m", "temperatura_c",
   "cantidad", "precio_unitario", "extracostes_importe",
   "tipo_iva",
   "km_vacio_enlace",
@@ -9298,6 +9298,14 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     bultos: body.bultos ?? null,
     volumen: body.volumen ?? null,
     metros_lineales: body.metros_lineales ?? null,
+    // Detalle de la carga (ocupacion real del remolque en los grupajes)
+    palets_tipo: body.palets_tipo ?? null,
+    palets_cantidad: body.palets_cantidad ?? null,
+    palets_apilables: body.palets_apilables === undefined ? undefined : Boolean(body.palets_apilables),
+    carga_largo_m: body.carga_largo_m ?? null,
+    carga_ancho_m: body.carga_ancho_m ?? null,
+    carga_alto_m: body.carga_alto_m ?? null,
+    temperatura_c: body.temperatura_c ?? null,
     importe: body.importe,
     notas: body.notas ?? null,
     km_ruta: body.km_ruta ?? null,

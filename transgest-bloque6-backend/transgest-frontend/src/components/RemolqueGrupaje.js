@@ -8,23 +8,29 @@ import { useMemo } from "react";
 // Trailer estandar espanol, usado solo si el vehiculo no trae sus medidas.
 export const REMOLQUE_DEFECTO = { metros: 13.6, peso: 24000, palets: 33 };
 
-// Metros lineales que ocupa un palet segun su tipo, colocado en el sentido
-// normal de carga (dos por fila a lo ancho del remolque).
-const ML_POR_PALET = {
-  europeo: 0.4,    // 120x80: 2 por fila -> 0,80 m de fondo entre 2
-  americano: 0.5,  // 120x100: 2 por fila -> 1,00 m de fondo entre 2
-  medio: 0.2,      // medio palet 80x60
+// Ocupacion de los palets en el remolque. IMPORTANTE: no se multiplica lineal
+// (palets x metros), porque un palet suelto ocupa FILA ENTERA igual que dos.
+// Se cuenta por filas: 13 palets europeos no son 5,20 m sino 7 filas x 0,80 =
+// 5,60 m. Medidas para un remolque estandar de 2,40-2,45 m de ancho interior:
+//   - Europeo 120x80  -> 2 por fila (2 x 1,20 = 2,40 de ancho), fila de 0,80 m
+//   - Americano 120x100 -> 2 por fila (2 x 1,00 = 2,00), fila de 1,20 m
+//   - Medio palet 80x60 -> 3 por fila (3 x 0,80 = 2,40), fila de 0,60 m
+const FILA_PALET = {
+  europeo:   { porFila: 2, fondo: 0.80 },
+  americano: { porFila: 2, fondo: 1.20 },
+  medio:     { porFila: 3, fondo: 0.60 },
 };
 
 export function mlDeCarga(p) {
   const ml = Number(p?.metros_lineales || 0);
   if (ml > 0) return ml;
-  // Sin ML declarados: se estiman con el tipo y el numero de palets.
+  // Sin ML declarados: se calculan por filas completas segun el tipo de palet.
   const n = Number(p?.palets_cantidad || 0);
   if (n > 0) {
-    const unit = ML_POR_PALET[String(p?.palets_tipo || "europeo")] ?? ML_POR_PALET.europeo;
-    // Si se pueden apilar ocupan la mitad de suelo (dos alturas).
-    return n * unit * (p?.palets_apilables ? 0.5 : 1);
+    const cfg = FILA_PALET[String(p?.palets_tipo || "europeo")] || FILA_PALET.europeo;
+    // Apilables: caben dos alturas, asi que hacen falta la mitad de filas.
+    const unidadesEnSuelo = p?.palets_apilables ? Math.ceil(n / 2) : n;
+    return Math.ceil(unidadesEnSuelo / cfg.porFila) * cfg.fondo;
   }
   // Mercancia sin paletizar: se usa el largo declarado.
   return Number(p?.carga_largo_m || 0);

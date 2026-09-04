@@ -2,6 +2,8 @@ const { paginatedResponse } = require("../services/paginate");
 const { cacheMiddleware, invalidateCache } = require("../services/cache");
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const { crearNotificacion, ensureNotificacionesSchema } = require("../services/notificaciones");
+const logger = require("../services/logger");
 const crypto = require("crypto");
 const { body, validationResult } = require("express-validator");
 const db      = require("../services/db");
@@ -497,6 +499,34 @@ function portalUsername(cliente) {
   return `portal_${clean}_${String(cliente.id).slice(0, 8)}`;
 }
 
+// Cuando se da de alta un cliente con datos clave sin rellenar (tipico del alta
+// rapida desde un pedido), administracion tiene que enterarse para completarlo.
+// Antes solo se marcaba pendiente_revision, pero no llegaba ningun aviso.
+async function avisarClientePendienteRevision(empresaId, cliente, faltan = [], creadoPor = null) {
+  if (!empresaId || !cliente?.id) return;
+  await ensureNotificacionesSchema().catch(() => {});
+  const { rows } = await db.query(
+    `SELECT id FROM usuarios
+      WHERE empresa_id=$1 AND activo IS DISTINCT FROM false
+        AND rol::text IN ('gerente','administrativo','contable') LIMIT 30`,
+    [empresaId]
+  ).catch(() => ({ rows: [] }));
+  const detalle = faltan.length ? ` Faltan: ${faltan.join(", ")}.` : "";
+  await Promise.all((rows || []).map(u => crearNotificacion({
+    empresa_id: empresaId,
+    usuario_id: u.id,
+    tipo: "cliente_pendiente_revision",
+    titulo: "Cliente nuevo sin completar",
+    mensaje: `${cliente.nombre || "Un cliente"} se ha creado con datos incompletos.${detalle}`,
+    data: {
+      cliente_id: cliente.id,
+      view: "clientes",
+      dedupe_key: `cliente_pendiente_revision:${cliente.id}`,
+    },
+    created_by: creadoPor,
+  }).catch(() => null)));
+}
+
 function tempPassword() {
   return `Portal${Math.random().toString(36).slice(2, 8)}${Math.floor(10 + Math.random() * 89)}`;
 }
@@ -971,6 +1001,18 @@ router.post("/", GERENTE_O_CONTABLE,
       throw err;
     }
     res.status(201).json(created);
+    // Aviso a administracion (despues de responder: no debe retrasar el alta).
+    if (incompleto) {
+      const faltan = [
+        !String(req.body?.cif || "").trim() && "CIF/NIF",
+        !email?.trim() && "Email",
+        !telefono?.trim() && "Telefono",
+        (!cp?.trim() && !codigo_postal?.trim()) && "Codigo postal",
+        !ciudad?.trim() && "Ciudad",
+      ].filter(Boolean);
+      avisarClientePendienteRevision(empresaId, created, faltan, req.user?.id || null)
+        .catch(err => logger.warn("No se pudo avisar del cliente pendiente de revision:", err.message));
+    }
     } catch (e) {
       if (createdId) await db.query("DELETE FROM clientes WHERE id=$1", [createdId]).catch(() => {});
       if (e.code === "23505") {

@@ -5691,7 +5691,8 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
     nombre: datosIniciales?.nombre || "",
     cif: "", email: "", telefono: "",
     calle: "", num_ext: "", codigo_postal: "", ciudad: "", provincia: "", pais: "España",
-    forma_pago: "Transferencia bancaria", tipo_iva: 21, iva_regimen: "general",
+    forma_pago: "Transferencia bancaria", vencimiento: "", iban: "", notas: "",
+    tipo_iva: 21, iva_regimen: "general",
     contacto_nombre: "", contacto_telefono: "",
   });
   const [saving, setSaving] = useState(false);
@@ -5739,21 +5740,28 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre / Razon social *</label><input style={inp} value={form.nombre} onChange={fk("nombre")} autoFocus/></div>
           <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={fk("cif")} placeholder="B12345678"/></div>
           <div><label style={lbl}>Telefono</label><input style={inp} value={form.telefono} onChange={fk("telefono")}/></div>
-          <div><label style={lbl}>Email facturacion</label><input type="email" style={inp} value={form.email} onChange={fk("email")}/></div>
+          <div><label style={lbl}>Email</label><input type="email" style={inp} value={form.email} onChange={fk("email")}/></div>
           <div><label style={lbl}>Forma de pago</label>
             <select style={inp} value={form.forma_pago} onChange={fk("forma_pago")}>
-              {["Contado","Transferencia bancaria","30 dias","45 dias","60 dias","90 dias"].map(o=><option key={o}>{o}</option>)}
+              {["Transferencia bancaria","Contado","Domiciliacion","Pagare","Confirming","Cheque"].map(o=><option key={o}>{o}</option>)}
             </select>
           </div>
+          <div><label style={lbl}>Condicion de pago (dias)</label>
+            <select style={inp} value={form.vencimiento} onChange={fk("vencimiento")}>
+              <option value="">Sin definir</option>
+              {["Contado","15 dias","30 dias","45 dias","60 dias","90 dias"].map(o=><option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div><label style={lbl}>IBAN</label><input style={inp} value={form.iban} onChange={fk("iban")} placeholder="ES00 0000 0000 0000 0000 0000"/></div>
         </div>
 
         {/* Direccion */}
         <div style={{fontSize:11,fontWeight:700,color:"var(--accent)",marginBottom:6,marginTop:16,textTransform:"uppercase",letterSpacing:".06em"}}>Direccion fiscal</div>
-        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:"0 14px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:"0 14px",alignItems:"end"}}>
           <div><label style={lbl}>Calle / Avenida</label><input style={inp} value={form.calle} onChange={fk("calle")} placeholder="Calle Mayor"/></div>
           <div><label style={lbl}>N. / Piso / Pta</label><input style={inp} value={form.num_ext} onChange={fk("num_ext")} placeholder="12, 3oB"/></div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 2fr 2fr",gap:"0 14px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1.4fr 2fr 2fr 1.6fr",gap:"0 14px",alignItems:"end"}}>
           <div><label style={lbl}>Codigo postal</label><input style={inp} value={form.codigo_postal} onChange={fk("codigo_postal")} placeholder="28001"/></div>
           <div><label style={lbl}>Ciudad</label><input style={inp} value={form.ciudad} onChange={fk("ciudad")}/></div>
           <GeoFields
@@ -5769,6 +5777,9 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <div><label style={lbl}>Nombre contacto</label><input style={inp} value={form.contacto_nombre} onChange={fk("contacto_nombre")}/></div>
           <div><label style={lbl}>Tel. contacto</label><input style={inp} value={form.contacto_telefono} onChange={fk("contacto_telefono")}/></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Notas</label>
+            <textarea style={{...inp,minHeight:56,resize:"vertical",fontFamily:"'DM Sans',sans-serif"}} value={form.notas} onChange={fk("notas")} placeholder="Indicaciones, horarios, referencias..."/>
+          </div>
         </div>
 
         {/* Warning if incomplete */}

@@ -1009,6 +1009,8 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS volumen NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metros_lineales NUMERIC(10,2)").catch(captureStartupMigrationError);
     // Detalle de la carga para el grupaje (ocupacion real del remolque).
+    // Grupaje provisional: agrupado y visible, pero aun sin confirmar.
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS grupaje_borrador BOOLEAN DEFAULT false").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS palets_tipo VARCHAR(20)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS palets_cantidad INTEGER").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS palets_apilables BOOLEAN DEFAULT false").catch(captureStartupMigrationError);

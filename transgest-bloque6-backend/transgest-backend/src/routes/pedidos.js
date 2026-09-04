@@ -6301,17 +6301,38 @@ router.post("/grupaje/combinar", GERENTE_O_TRAFICO, async (req, res) => {
     if (rows.length !== ids.length) return res.status(404).json({ error: "Alguno de los pedidos no existe o no pertenece a la empresa." });
     if (rows.some(p => p.factura_id)) return res.status(400).json({ error: "No se pueden agrupar pedidos ya facturados." });
     const grupajeId = rows.map(p => p.grupaje_id).find(Boolean) || crypto.randomUUID();
+    // Grupaje provisional: se guarda y se ve como grupaje, pero queda marcado
+    // como no definitivo hasta que se confirme.
+    const esBorrador = req.body?.borrador === true || req.body?.borrador === "true";
     await db.query(
-      "UPDATE pedidos SET grupaje_id=$1::uuid, tipo_carga='grupaje', updated_at=NOW() WHERE empresa_id=$2 AND id = ANY($3::uuid[])",
-      [grupajeId, empresaId, ids]
+      "UPDATE pedidos SET grupaje_id=$1::uuid, tipo_carga='grupaje', grupaje_borrador=$4, updated_at=NOW() WHERE empresa_id=$2 AND id = ANY($3::uuid[])",
+      [grupajeId, empresaId, ids, esBorrador]
     );
     for (const id of ids) {
-      logPedidoEvento(id, empresaId, "grupaje.combinado", { grupaje_id: grupajeId, pedidos: ids }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+      logPedidoEvento(id, empresaId, esBorrador ? "grupaje.borrador_guardado" : "grupaje.combinado", { grupaje_id: grupajeId, pedidos: ids }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
     }
-    return res.json({ ok: true, grupaje_id: grupajeId, count: ids.length });
+    return res.json({ ok: true, grupaje_id: grupajeId, count: ids.length, borrador: esBorrador });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// POST /pedidos/grupaje/confirmar - pasa un grupaje de borrador a definitivo.
+router.post("/grupaje/confirmar", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const grupajeId = normalizePedidoUuid(req.body?.grupaje_id);
+    if (!grupajeId) return res.status(400).json({ error: "Indica el grupaje a confirmar." });
+    const { rows } = await db.query(
+      "UPDATE pedidos SET grupaje_borrador=false, updated_at=NOW() WHERE empresa_id=$1 AND grupaje_id=$2::uuid RETURNING id",
+      [empresaId, grupajeId]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Grupaje no encontrado." });
+    for (const r of rows) {
+      logPedidoEvento(r.id, empresaId, "grupaje.confirmado", { grupaje_id: grupajeId }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+    }
+    res.json({ ok: true, grupaje_id: grupajeId, count: rows.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // POST /pedidos/grupaje/separar - saca pedidos de su grupaje.
@@ -6321,7 +6342,7 @@ router.post("/grupaje/separar", GERENTE_O_TRAFICO, async (req, res) => {
     const ids = [...new Set((Array.isArray(req.body?.pedido_ids) ? req.body.pedido_ids : []).map(normalizePedidoUuid).filter(Boolean))];
     if (!ids.length) return res.status(400).json({ error: "Sin pedidos." });
     await db.query(
-      "UPDATE pedidos SET grupaje_id=NULL, updated_at=NOW() WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
+      "UPDATE pedidos SET grupaje_id=NULL, grupaje_borrador=false, updated_at=NOW() WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
       [empresaId, ids]
     );
     return res.json({ ok: true, count: ids.length });

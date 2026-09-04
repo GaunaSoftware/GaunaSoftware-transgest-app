@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, separarGrupaje, getColaboradores, crearColaborador } from "../services/api";
+import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, confirmarGrupaje, separarGrupaje, getColaboradores, crearColaborador } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
@@ -5502,19 +5502,38 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
     setSelGids(prev => prev.includes(gid) ? prev.filter(x => x !== gid) : [...prev, gid]);
   }
 
-  async function combinarSeleccionados() {
-    const ids = selGids.flatMap(gid => (byGrupaje[gid] || []).map(p => p.id));
-    if (ids.length < 2) { notify("Marca al menos 2 grupos para combinarlos en un grupaje.", "info"); return; }
+  // Pasa un grupaje de borrador a definitivo.
+  async function confirmarGrupajeBorrador(grupajeId, nPedidos) {
     const ok = await confirmDialog({
-      title: "Combinar en un grupaje",
-      message: `Se juntaran ${ids.length} pedidos en un mismo viaje (grupaje). Podras ordenar las descargas y asignarles la matricula.`,
-      confirmText: "Combinar",
+      title: "Confirmar grupaje",
+      message: `El grupaje de ${nPedidos} pedido(s) dejara de estar en borrador y pasara a ser definitivo.`,
+      confirmText: "Confirmar grupaje",
     });
     if (!ok) return;
     setTrabajandoGrupaje(true);
     try {
-      await combinarGrupaje(ids);
-      notify("Grupaje creado.", "success");
+      await confirmarGrupaje(grupajeId);
+      notify("Grupaje confirmado.", "success");
+      onReload?.();
+    } catch (e) { notify(e.message || "No se pudo confirmar el grupaje.", "error"); }
+    finally { setTrabajandoGrupaje(false); }
+  }
+
+  async function combinarSeleccionados(borrador = false) {
+    const ids = selGids.flatMap(gid => (byGrupaje[gid] || []).map(p => p.id));
+    if (ids.length < 2) { notify("Marca al menos 2 grupos para combinarlos en un grupaje.", "info"); return; }
+    const ok = await confirmDialog({
+      title: borrador ? "Guardar grupaje como borrador" : "Combinar en un grupaje",
+      message: borrador
+        ? `Se guardaran ${ids.length} pedidos como grupaje EN BORRADOR: quedan agrupados y visibles, pero marcados como no definitivos hasta que lo confirmes. Puedes deshacerlo separandolos.`
+        : `Se juntaran ${ids.length} pedidos en un mismo viaje (grupaje). Podras ordenar las descargas y asignarles la matricula.`,
+      confirmText: borrador ? "Guardar borrador" : "Combinar",
+    });
+    if (!ok) return;
+    setTrabajandoGrupaje(true);
+    try {
+      await combinarGrupaje(ids, borrador);
+      notify(borrador ? "Grupaje guardado como borrador." : "Grupaje creado.", "success");
       setSelGids([]);
       onReload?.();
     } catch (e) { notify(e.message || "No se pudieron combinar.", "error"); }
@@ -5608,10 +5627,17 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
           Marca los grupos con la casilla y pulsa "Combinar" para juntarlos en un viaje. Dentro de cada grupaje, arrastra las paradas para ordenarlas.
         </div>
         {selGids.length >= 2 && (
-          <button type="button" onClick={combinarSeleccionados} disabled={trabajandoGrupaje}
-            style={{marginLeft:"auto",padding:"6px 12px",borderRadius:7,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.14)",color:"#10b981",fontWeight:900,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
-            {trabajandoGrupaje ? "Combinando..." : `Combinar ${selGids.length} grupos en un grupaje`}
-          </button>
+          <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button type="button" onClick={()=>combinarSeleccionados(true)} disabled={trabajandoGrupaje}
+              title="Queda agrupado y guardado, pero marcado como no definitivo hasta que lo confirmes"
+              style={{padding:"6px 12px",borderRadius:7,border:"1px dashed rgba(245,158,11,.55)",background:"rgba(245,158,11,.12)",color:"#b45309",fontWeight:900,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
+              Guardar como borrador
+            </button>
+            <button type="button" onClick={()=>combinarSeleccionados(false)} disabled={trabajandoGrupaje}
+              style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.14)",color:"#10b981",fontWeight:900,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
+              {trabajandoGrupaje ? "Combinando..." : `Combinar ${selGids.length} en firme`}
+            </button>
+          </div>
         )}
       </div>
 
@@ -5640,6 +5666,8 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
           // Find vehicle for this grupaje
           const primerPed = peds[0];
           const esGrupoReal = String(gid).startsWith("grupo:");
+          // Grupaje provisional: agrupado y guardado, pero pendiente de confirmar.
+          const esBorradorGrupaje = esGrupoReal && peds.some(p => p.grupaje_borrador);
           const grupoLabel = esGrupoReal ? `Grupaje #${String(gid).replace("grupo:","")}` : `Pendiente de agrupar - ${primerPed?.numero || gid}`;
           const veh = vehiculos.find(v=>v.id===primerPed?.vehiculo_id);
           const chofer = choferes.find(c=>c.id===primerPed?.chofer_id);
@@ -5647,7 +5675,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
           const impTotal = peds.reduce((s,p)=>s+Number(p.importe||0),0);
 
           return (
-            <div key={gid} style={{background:"var(--bg2)",border:selGids.includes(gid)?"1px solid rgba(16,185,129,.5)":"1px solid var(--border2)",borderRadius:12,overflow:"hidden"}}>
+            <div key={gid} style={{background:"var(--bg2)",border:selGids.includes(gid)?"1px solid rgba(16,185,129,.5)":(esBorradorGrupaje?"1px dashed rgba(245,158,11,.6)":"1px solid var(--border2)"),borderRadius:12,overflow:"hidden"}}>
               {/* Header */}
               <div style={{background:"var(--bg3)",padding:"10px 16px",borderBottom:"1px solid var(--border2)",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                 <input type="checkbox" checked={selGids.includes(gid)} onChange={()=>toggleSelGid(gid)}
@@ -5658,6 +5686,16 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                 {veh && <span style={{fontSize:12,color:"var(--accent)",fontWeight:700}}>{veh.matricula}</span>}
                 {chofer && <span style={{fontSize:12,color:"var(--text4)"}}>{chofer.nombre}</span>}
                 {esGrupoReal && <span style={{fontSize:10,fontWeight:900,color:"#34d399",border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.12)",borderRadius:999,padding:"2px 8px"}}>Grupaje</span>}
+                {esBorradorGrupaje && (
+                  <>
+                    <span title="Guardado pero aun sin confirmar" style={{fontSize:10,fontWeight:900,color:"#b45309",border:"1px dashed rgba(245,158,11,.5)",background:"rgba(245,158,11,.12)",borderRadius:999,padding:"2px 8px"}}>Borrador</span>
+                    <button type="button" disabled={trabajandoGrupaje}
+                      onClick={()=>confirmarGrupajeBorrador(String(gid).replace("grupo:",""), peds.length)}
+                      style={{fontSize:10,fontWeight:900,color:"#10b981",border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.12)",borderRadius:999,padding:"2px 9px",cursor:trabajandoGrupaje?"wait":"pointer"}}>
+                      Confirmar
+                    </button>
+                  </>
+                )}
                 <span style={{fontSize:11,color:"var(--text5)",marginLeft:4}}>{peds.length} pedido{peds.length!==1?"s":""} - {Number(kgTotal).toLocaleString("es-ES")} kg - {Number(impTotal).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span>
                 <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
                   <button onClick={()=>{ setAsignaGid(asignaGid===gid?"":gid); setAsignaMat(veh?.matricula||primerPed?.matricula_manual||""); setAsignaChofer(primerPed?.chofer_id||""); }} disabled={trabajandoGrupaje}

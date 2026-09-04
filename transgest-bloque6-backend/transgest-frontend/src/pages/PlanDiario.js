@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { editarPedido, getPlanDiario, guardarPlanDiarioNota, guardarPlanDiarioOrden } from "../services/api";
+import { editarPedido, getPlanDiario, guardarPlanDiarioNota, guardarPlanDiarioOrden, notificarPedidoChoferApp } from "../services/api";
 import { notify } from "../services/notify";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 
@@ -243,6 +243,8 @@ export default function PlanDiario() {
   const [q, setQ] = useState("");
   const [soloAvisos, setSoloAvisos] = useState(false);
   const [savingNote, setSavingNote] = useState("");
+  // Fila cuyo menu de envio al chofer esta desplegado.
+  const [envioAbierto, setEnvioAbierto] = useState("");
   const [notas, setNotas] = useState({});
   const [dragOverRow, setDragOverRow] = useState("");
   const [savingPlan, setSavingPlan] = useState("");
@@ -377,6 +379,38 @@ export default function PlanDiario() {
   async function copiarPlanChofer(row) {
     const ok = await copyTextToClipboard(buildPlanChoferText(row, fecha));
     notify(ok ? "Plan del chofer copiado para WhatsApp." : "No se pudo copiar el plan.", ok ? "success" : "error");
+  }
+
+  // Abre WhatsApp con el plan ya escrito. Si no hay telefono, al menos lo copia.
+  async function abrirWhatsappChofer(row) {
+    const texto = buildPlanChoferText(row, fecha);
+    const tel = String(row?.chofer_telefono || "").replace(/[^0-9+]/g, "");
+    if (!tel) {
+      await copiarPlanChofer(row);
+      notify("El chofer no tiene telefono guardado: el plan se ha copiado para pegarlo a mano.", "warning");
+      return;
+    }
+    const numero = tel.startsWith("+") ? tel.slice(1) : (tel.length === 9 ? `34${tel}` : tel);
+    window.open(`https://wa.me/${numero}?text=${encodeURIComponent(texto)}`, "_blank", "noopener,noreferrer");
+  }
+
+  // Aviso dentro de la app del chofer (uno por viaje del dia).
+  async function avisarAppChofer(row) {
+    const pedidos = (row?.pedidos || []).filter(p => p?.id);
+    if (!pedidos.length) { notify("Este chofer no tiene viajes asignados este dia.", "info"); return; }
+    let ok = 0; const fallos = [];
+    for (const p of pedidos) {
+      try {
+        await notificarPedidoChoferApp(p.id, {
+          mensaje: `Plan del ${fecha}: ${p.origen || "-"} -> ${p.destino || "-"}`,
+        });
+        ok++;
+      } catch (e) { fallos.push(e.message || "error"); }
+    }
+    notify(
+      fallos.length ? `Avisados ${ok} de ${pedidos.length} viajes. ${fallos[0]}` : `Aviso enviado a la app (${ok} viaje/s).`,
+      fallos.length ? "warning" : "success"
+    );
   }
 
   const resumen = data.resumen || {};
@@ -540,11 +574,27 @@ export default function PlanDiario() {
                       />
                       {savingNote === String(row.id) && <div style={{ marginTop:4, fontSize:10, color:"var(--text5)" }}>Guardando...</div>}
                       <button
-                        onClick={() => copiarPlanChofer(row)}
+                        onClick={() => setEnvioAbierto(v => v === String(row.id) ? "" : String(row.id))}
                         style={{ ...S.btn, marginTop:7, width:"100%", padding:"6px 8px", background:"rgba(16,185,129,.10)", color:"#10b981", border:"1px solid rgba(16,185,129,.24)" }}
                       >
-                        Enviar plan por WhatsApp
+                        Enviar al chofer {envioAbierto === String(row.id) ? "^" : "v"}
                       </button>
+                      {envioAbierto === String(row.id) && (
+                        <div style={{ display:"flex", flexDirection:"column", gap:4, marginTop:5 }}>
+                          <button onClick={() => { setEnvioAbierto(""); abrirWhatsappChofer(row); }}
+                            style={{ ...S.btn, width:"100%", padding:"5px 8px", background:"transparent", color:"#25d366", border:"1px solid rgba(37,211,102,.3)" }}>
+                            Abrir WhatsApp con el plan
+                          </button>
+                          <button onClick={() => { setEnvioAbierto(""); avisarAppChofer(row); }}
+                            style={{ ...S.btn, width:"100%", padding:"5px 8px", background:"transparent", color:"#60a5fa", border:"1px solid rgba(59,130,246,.3)" }}>
+                            Aviso en la app del chofer
+                          </button>
+                          <button onClick={() => { setEnvioAbierto(""); copiarPlanChofer(row); }}
+                            style={{ ...S.btn, width:"100%", padding:"5px 8px", background:"transparent", color:"var(--text3)", border:"1px solid var(--border2)" }}>
+                            Copiar el plan (texto)
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

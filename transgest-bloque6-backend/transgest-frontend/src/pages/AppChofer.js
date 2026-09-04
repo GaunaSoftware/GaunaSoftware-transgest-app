@@ -3289,6 +3289,28 @@ export default function AppChofer(){
 
   // Mark the next confirmed trip after any en_curso
   const enCursoIds = new Set(pedidos.filter(p=>["en_curso","descarga"].includes(p.estado)).map(p=>p.vehiculo_id));
+  // Los pedidos de un mismo grupaje van en el MISMO camion: el chofer no debe
+  // verlos como viajes sueltos sino como un viaje con varias cargas y descargas
+  // que ir confirmando. Cada parada sigue confirmandose en su propia tarjeta.
+  function agruparPorGrupaje(lista = []) {
+    const bloques = [];
+    const porGrupaje = new Map();
+    lista.forEach(p => {
+      const gid = p.grupaje_id ? String(p.grupaje_id) : "";
+      if (!gid) { bloques.push({ key: `p:${p.id}`, grupaje: false, pedidos: [p] }); return; }
+      if (!porGrupaje.has(gid)) {
+        const bloque = { key: `g:${gid}`, grupaje: true, pedidos: [], borrador: false };
+        porGrupaje.set(gid, bloque);
+        bloques.push(bloque);
+      }
+      const bloque = porGrupaje.get(gid);
+      bloque.pedidos.push(p);
+      if (p.grupaje_borrador) bloque.borrador = true;
+    });
+    // Un grupaje con un solo viaje se muestra como viaje normal.
+    return bloques.map(b => (b.grupaje && b.pedidos.length < 2 ? { ...b, grupaje: false } : b));
+  }
+
   const filtradosConProxima = filtrados.map((p,i)=>{
     if(p.estado==="confirmado" && enCursoIds.size>0) return {...p, es_proxima_carga:true};
     return p;
@@ -3636,16 +3658,40 @@ export default function AppChofer(){
                   Hay mas de un viaje activo asignado. Finaliza o corrige el viaje anterior antes de iniciar nuevos estados.
                 </div>
               )}
-              {filtradosConProxima.map(p=><TarjetaViaje
-                key={p.id}
-                pedido={p}
-                onActualizar={cargar}
-                jornadaInfo={jornadaInfo}
-                onAbrirJornada={()=>setTab("jornada")}
-                expanded={String(expandedPedidoId || "") === String(p.id)}
-                onExpandedChange={(open)=>setExpandedPedidoId(open ? p.id : null)}
-                onFoto={()=>setCameraModal(p.id)}
-              />)}
+              {agruparPorGrupaje(filtradosConProxima).map(bloque => {
+                const tarjetas = bloque.pedidos.map(p=><TarjetaViaje
+                  key={p.id}
+                  pedido={p}
+                  onActualizar={cargar}
+                  jornadaInfo={jornadaInfo}
+                  onAbrirJornada={()=>setTab("jornada")}
+                  expanded={String(expandedPedidoId || "") === String(p.id)}
+                  onExpandedChange={(open)=>setExpandedPedidoId(open ? p.id : null)}
+                  onFoto={()=>setCameraModal(p.id)}
+                />);
+                if (!bloque.grupaje) return tarjetas;
+                const hechas = bloque.pedidos.filter(p => ["entregado","facturado"].includes(String(p.estado||"").toLowerCase())).length;
+                return (
+                  <div key={bloque.key} style={{marginBottom:14,border:"2px solid rgba(16,185,129,.35)",borderRadius:14,overflow:"hidden",background:"rgba(16,185,129,.05)"}}>
+                    <div style={{padding:"10px 12px",background:"rgba(16,185,129,.12)",borderBottom:"1px solid rgba(16,185,129,.25)"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:12,fontWeight:900,color:"#0f766e"}}>GRUPAJE - un solo viaje</span>
+                        {bloque.borrador && (
+                          <span style={{fontSize:10,fontWeight:900,color:"#b45309",border:"1px dashed rgba(245,158,11,.5)",borderRadius:999,padding:"1px 7px"}}>Sin confirmar</span>
+                        )}
+                        <span style={{marginLeft:"auto",fontSize:11,fontWeight:800,color:"#0f766e"}}>
+                          {hechas}/{bloque.pedidos.length} entregas
+                        </span>
+                      </div>
+                      <div style={{fontSize:11,color:"var(--text4,#64748b)",marginTop:4,lineHeight:1.5}}>
+                        {bloque.pedidos.length} cargas y {bloque.pedidos.length} descargas que confirmar, una por parada:
+                        {" "}{bloque.pedidos.map(p => `${p.origen || "?"} > ${p.destino || "?"}`).join("  |  ")}
+                      </div>
+                    </div>
+                    <div style={{padding:"10px 8px 4px"}}>{tarjetas}</div>
+                  </div>
+                );
+              })}
             </>
           )}
         </div>

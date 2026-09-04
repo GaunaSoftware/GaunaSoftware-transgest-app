@@ -53,6 +53,11 @@ function pedidoRealizado(p) {
 }
 
 function pedidoTieneFactura(p) {
+  // Una factura en BORRADOR no cuenta como facturada: su importe no entra en
+  // "facturado" (ahi solo van emitidas/enviadas/cobradas/vencidas), asi que el
+  // viaje tiene que seguir contando como PENDIENTE de facturar. Si no, el viaje
+  // se caia de los dos lados y el ingreso gestionado salia corto.
+  if (String(p?.factura_estado || "").toLowerCase() === "borrador") return false;
   return Boolean(p?.factura_id || p?.factura_numero || p?.facturado === true);
 }
 

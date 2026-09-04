@@ -439,7 +439,13 @@ export async function getPedidosTodos(params = {}, options = {}) {
   const first = await apiFetch(`/pedidos?${new URLSearchParams({ ...params, page: 1, limit })}`, options);
   if (Array.isArray(first)) return first; // respuesta antigua sin paginacion
   const data = Array.isArray(first?.data) ? first.data : [];
-  const totalPages = Math.min(Number(first?.total_pages) || 1, 40);
+  // La API devuelve pagination.totalPages; se acepta tambien total_pages por
+  // compatibilidad. Leer solo total_pages daba 1 pagina SIEMPRE, asi que los
+  // dashboards se quedaban con los primeros 500 pedidos y los KPIs salian cortos.
+  const totalPages = Math.min(
+    Number(first?.pagination?.totalPages ?? first?.total_pages) || 1,
+    40
+  );
   if (totalPages <= 1) return data;
   const rest = await Promise.all(
     Array.from({ length: totalPages - 1 }, (_, k) =>

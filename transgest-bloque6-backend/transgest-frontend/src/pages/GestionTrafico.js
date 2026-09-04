@@ -5614,6 +5614,26 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
           </button>
         )}
       </div>
+
+      {/* Grupaje en borrador: mientras seleccionas grupos (antes de combinarlos)
+          se simula como quedaria el remolque, para ver si de verdad cabe. No se
+          guarda nada hasta pulsar "Combinar". */}
+      {selGids.length >= 2 && (
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:900,color:"#10b981",marginBottom:6,textTransform:"uppercase",letterSpacing:".05em"}}>
+            Grupaje en borrador - simulacion de {selGids.length} grupos (todavia sin combinar)
+          </div>
+          <RemolqueGrupaje
+            pedidos={selGids.flatMap(g => byGrupaje[g] || [])}
+            vehiculo={(() => {
+              const primero = selGids.flatMap(g => byGrupaje[g] || [])[0];
+              const mat = String(primero?.vehiculo_matricula || primero?.matricula || "").toUpperCase();
+              return vehiculos.find(v => String(v.matricula || "").toUpperCase() === mat) || null;
+            })()}
+          />
+        </div>
+      )}
+
       <div style={{display:"flex",flexDirection:"column",gap:20}}>
         {Object.entries(byGrupaje).map(([gid, peds]) => {
           const paradas = paradasMap[gid] || sortParadasByProximity(peds);

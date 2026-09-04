@@ -753,14 +753,27 @@ const INCIDENCIA_TIPOS_PEDIDO = [
   { v:"paralizacion", l:"Paralizacion / espera" },
   { v:"operativa", l:"Otra operativa" },
 ];
+// "Por kg (EUR/100kg)" y "Por toneladas (EUR/tn)" eran lo MISMO (tarifa por peso,
+// solo cambiaba la unidad: 1 tn = 10 x 100 kg), asi que se ofrecia duplicado. Se
+// deja solo la tonelada, que es lo habitual en transporte. El tipo "kg" se sigue
+// calculando igual para los pedidos y tarifas antiguos que ya lo tuvieran: solo
+// desaparece de la lista de opciones nuevas (ver opcionesTipoPrecio).
 const TIPOS_PRECIO = [
   { v:"viaje",    l:"Precio por viaje (EUR fijo)" },
-  { v:"kg",       l:"Por kg (EUR/100kg)" },
-  { v:"tonelada", l:"Por toneladas (EUR/tn)" },
+  { v:"tonelada", l:"Por peso (EUR/tonelada)" },
   { v:"km",       l:"Por kilometro (EUR/km)" },
   { v:"hora",     l:"Por hora (EUR/h)" },
   { v:"palet",    l:"Por palet (EUR/palet)" },
 ];
+const TIPOS_PRECIO_HISTORICOS = { kg: "Por kg (EUR/100kg) - tarifa antigua" };
+
+// Opciones del desplegable respetando el valor que ya tuviera el registro, para
+// no cambiarle la tarifa a un pedido antiguo solo por abrirlo.
+function opcionesTipoPrecio(actual) {
+  const valor = String(actual || "");
+  if (!valor || TIPOS_PRECIO.some(t => t.v === valor)) return TIPOS_PRECIO;
+  return [...TIPOS_PRECIO, { v: valor, l: TIPOS_PRECIO_HISTORICOS[valor] || valor }];
+}
 const S = {
   page:{flex:1,padding:"34px 36px",minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 45%,#f7fafc 100%)",boxSizing:"border-box",minWidth:0,width:"100%"},
   title:{fontFamily:"'Syne',sans-serif",fontSize:36,fontWeight:900,marginBottom:16,color:"#0f172a"},
@@ -3385,7 +3398,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           <div>
             <label style={S.label}>Tipo precio</label>
             <select style={S.sel} value={form.tipo_precio} onChange={e=>setForm(p=>syncCantidadRapida({...p,tipo_precio:e.target.value}, true))}>
-              {TIPOS_PRECIO.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+              {opcionesTipoPrecio(form.tipo_precio).map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
             </select>
           </div>
           <div>
@@ -8817,7 +8830,7 @@ useEffect(() => {
             <div className="tg-pedido-form-grid-3">
               <div><label style={S.label}>Tipo tarificacion</label>
                 <select value={form.tipo_precio||"viaje"} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,tipo_precio:e.target.value}, true)))} style={S.sel}>
-                  {TIPOS_PRECIO.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+                  {opcionesTipoPrecio(form.tipo_precio).map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
                 </select>
               </div>
               <div><label style={S.label}>{form.tipo_precio==="viaje"?"Precio viaje (EUR)":form.tipo_precio==="kg"?"EUR por 100 kg":form.tipo_precio==="tonelada"?"EUR por tonelada":form.tipo_precio==="km"?"EUR por km":form.tipo_precio==="palet"?"EUR por palet":"EUR por hora"}</label>

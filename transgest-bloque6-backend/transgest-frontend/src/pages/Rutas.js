@@ -28,14 +28,24 @@ const TIPOS_VEHICULO=[
   {v:"adr",l:"ADR (mercancía peligrosa)"},
 ];
 
+// "Por 100 kg" y "Por tonelada" eran la misma tarifa por peso en distinta unidad
+// (1 tn = 10 x 100 kg). Se deja solo la tonelada. Las tarifas antiguas en kg se
+// siguen calculando igual; solo dejan de ofrecerse como opcion nueva.
 const TIPOS_TARIFA = [
   { v:"viaje", l:"Viaje cerrado" },
-  { v:"kg", l:"Por 100 kg" },
-  { v:"tonelada", l:"Por tonelada" },
+  { v:"tonelada", l:"Por peso (tonelada)" },
   { v:"km", l:"Por km" },
   { v:"hora", l:"Por hora" },
   { v:"palet", l:"Por palet" },
 ];
+const TIPOS_TARIFA_HISTORICOS = { kg: "Por 100 kg - tarifa antigua" };
+
+// Mantiene visible el tipo que ya tuviera la ruta, para no cambiarle la tarifa.
+function opcionesTipoTarifa(actual) {
+  const valor = String(actual || "");
+  if (!valor || TIPOS_TARIFA.some(t => t.v === valor)) return TIPOS_TARIFA;
+  return [...TIPOS_TARIFA, { v: valor, l: TIPOS_TARIFA_HISTORICOS[valor] || valor }];
+}
 
 const fmt2=n=>Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2});
 const getClienteMinimoToneladas = (ruta) => {
@@ -87,7 +97,7 @@ const getIngresoBaseRuta = (ruta, precioFinal) => {
   return precioFinal;
 };
 const fmtTarifa = (ruta) => {
-  const tipo = TIPOS_TARIFA.find(t => t.v === (ruta.tarifa_tipo || "viaje"))?.l || (ruta.tarifa_tipo || "Viaje");
+  const tipo = opcionesTipoTarifa(ruta.tarifa_tipo).find(t => t.v === (ruta.tarifa_tipo || "viaje"))?.l || (ruta.tarifa_tipo || "Viaje");
   const precio = fmt2(ruta.precio_base || 0);
   return `${tipo} · ${precio} €`;
 };
@@ -152,7 +162,7 @@ export default function Rutas(){
   const [importando,setImportando]=useState(false);
   const [importFile,setImportFile]=useState(null);
   const fmtTarifaVista = (ruta) => {
-    const tipo = TIPOS_TARIFA.find(t => t.v === (ruta.tarifa_tipo || "viaje"))?.l || (ruta.tarifa_tipo || "Viaje");
+    const tipo = opcionesTipoTarifa(ruta.tarifa_tipo).find(t => t.v === (ruta.tarifa_tipo || "viaje"))?.l || (ruta.tarifa_tipo || "Viaje");
     const precio = fmt2(ruta.precio_base || 0);
     const recargo = Number(ruta.recargo_combustible_pct || 0) || 0;
     const precioFinal = Number(ruta.precio_base || 0) * (1 + recargo / 100);
@@ -328,7 +338,7 @@ export default function Rutas(){
           <select value={filtroTarifa} onChange={e=>setFiltroTarifa(e.target.value)}
             style={{...S.inp}}>
             <option value="todos">Todas tarifas</option>
-            {TIPOS_TARIFA.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+            {opcionesTipoTarifa(form.tarifa_tipo).map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
           </select>
           <button onClick={()=>setSoloMargenNegativo(v=>!v)}
             style={{...S.btn,background:soloMargenNegativo?"rgba(239,68,68,.10)":"var(--accent-soft)",color:soloMargenNegativo?"#ef4444":"var(--accent-xl)",border:soloMargenNegativo?"1px solid rgba(239,68,68,.24)":"1px solid var(--accent-border)",whiteSpace:"nowrap"}}>
@@ -525,7 +535,7 @@ export default function Rutas(){
               <div>
                 <label style={S.label}>Tipo de tarifa</label>
                 <select value={form.tarifa_tipo||"viaje"} onChange={f("tarifa_tipo")} style={S.inp}>
-                  {TIPOS_TARIFA.map(t=> <option key={t.v} value={t.v}>{t.l}</option>)}
+                  {opcionesTipoTarifa(form.tarifa_tipo).map(t=> <option key={t.v} value={t.v}>{t.l}</option>)}
                 </select>
               </div>
               <div>
@@ -669,7 +679,7 @@ function PreciosEditor({ruta,data,clientes=[],canEdit,onClose}){
                 </td>
                 <td style={{padding:"9px 12px",borderBottom:"1px solid #0f1520"}}>
                   <select value={p.tarifa_tipo||"viaje"} onChange={e=>setPrecios(prev=>prev.map((x,j)=>j===i?{...x,tarifa_tipo:e.target.value}:x))} disabled={!canEdit} style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"5px 8px",borderRadius:6,width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:12}}>
-                    {TIPOS_TARIFA.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+                    {opcionesTipoTarifa(p.tarifa_tipo).map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
                   </select>
                 </td>
                 <td style={{padding:"9px 12px",borderBottom:"1px solid #0f1520"}}>

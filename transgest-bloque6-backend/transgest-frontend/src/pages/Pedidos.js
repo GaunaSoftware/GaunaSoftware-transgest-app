@@ -4564,7 +4564,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
 function CargasEditor(props) { return <ParadasEditor {...props} tipo="carga" />; }
 function DescargasEditor(props) { return <ParadasEditor {...props} tipo="descarga" />; }
 
-function OrdenCargaModal({ pedido, onClose }) {
+function OrdenCargaModal({ pedido, grupajePedidos = [], onClose }) {
   const esColaborador = !!pedido.colaborador_id;
   const [rutaOptimizada, setRutaOptimizada] = useState(null);
   const [rutaOptLoading, setRutaOptLoading] = useState(false);
@@ -4885,6 +4885,23 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
     <div class="g2" style="margin-bottom:8px">
       <div class="f hl"><div class="fl">Origen -> Punto de carga</div><div class="fv big">${htmlEscape(origenNombreOrden || origenOrden || "-")}</div>${origenNombreOrden && origenOrden ? `<div class="map-address">${htmlEscape(origenOrden)}</div>` : ""}${cargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(cargaPostalOrden)}</div>` : ""}${pedido.ventana_carga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_carga}</div>`:""}${cargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(cargaPrincipal.google_maps_url)}">${htmlEscape(cargaPrincipal.google_maps_url)}</a></div>`:""}</div>
       <div class="f hl"><div class="fl">Destino -> Punto de entrega</div><div class="fv big">${htmlEscape(destinoNombreOrden || destinoOrden || "-")}</div>${destinoNombreOrden && destinoOrden ? `<div class="map-address">${htmlEscape(destinoOrden)}</div>` : ""}${descargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(descargaPostalOrden)}</div>` : ""}${pedido.ventana_descarga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_descarga}</div>`:""}${descargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(descargaPrincipal.google_maps_url)}">${htmlEscape(descargaPrincipal.google_maps_url)}</a></div>`:""}</div>
+      ${grupajePedidos.length > 1 ? `
+      <div class="f hl" style="grid-column:1/-1">
+        <div class="fl">Grupaje: todas las paradas de este camion (${grupajePedidos.length} viajes)</div>
+        <div class="fv" style="font-size:11px;line-height:1.6">
+          ${grupajePedidos.map((g, i) => `
+            <div style="padding:3px 0;border-bottom:1px dotted #d1d5db">
+              <strong>${i + 1}.</strong> ${htmlEscape(g.numero || "")}
+              &nbsp;CARGA: ${htmlEscape(g.origen || "-")}
+              &nbsp;|&nbsp;DESCARGA: ${htmlEscape(g.destino || "-")}
+              ${g.peso_kg ? `&nbsp;|&nbsp;${htmlEscape(String(g.peso_kg))} kg` : ""}
+              ${g.palets_cantidad ? `&nbsp;|&nbsp;${htmlEscape(String(g.palets_cantidad))} palets` : ""}
+            </div>`).join("")}
+        </div>
+        <div style="font-size:10px;color:#6b7280;margin-top:4px">
+          Hay que confirmar cada carga y cada descarga por separado.
+        </div>
+      </div>` : ""}
     </div>
     ${(() => {
       const cargasAdic = parseStops(pedido.puntos_carga).slice(1).filter(s => stopAddress(s) || s.cliente_nombre);
@@ -10340,6 +10357,8 @@ export default function Pedidos() {
   const [whatsappSending, setWhatsappSending] = useState("");
   // Pedido cuyo submenu de "Avisar" esta desplegado.
   const [avisarAbiertoPedidoId, setAvisarAbiertoPedidoId] = useState("");
+  // Viajes del grupaje al que pertenece la orden de carga abierta.
+  const [ordenCargaGrupaje, setOrdenCargaGrupaje] = useState([]);
   const [incidenciaSelector, setIncidenciaSelector] = useState(null);
   const [facturacionMesSelector, setFacturacionMesSelector] = useState(null);
   const delayResolverRef = React.useRef(null);
@@ -10952,6 +10971,12 @@ export default function Pedidos() {
       notify("Asigna primero un colaborador/proveedor para poder mandar la orden de carga.", "warning");
       return;
     }
+    // Si el viaje forma parte de un grupaje, la orden debe recoger TODAS las
+    // cargas y descargas del camion, no solo las de este pedido.
+    const hermanos = pedidoCompleto?.grupaje_id
+      ? pedidos.filter(x => String(x.grupaje_id || "") === String(pedidoCompleto.grupaje_id))
+      : [];
+    setOrdenCargaGrupaje(hermanos.length > 1 ? hermanos : []);
     setOrdenCarga(normalizePedidoTarifaDraft(pedidoCompleto));
   }
 
@@ -12780,7 +12805,7 @@ export default function Pedidos() {
         />
       )}
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Orden de carga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
-      {ordenCarga && <OrdenCargaModal pedido={ordenCarga} onClose={()=>setOrdenCarga(null)}/>}
+      {ordenCarga && <OrdenCargaModal pedido={ordenCarga} grupajePedidos={ordenCargaGrupaje} onClose={()=>{setOrdenCarga(null);setOrdenCargaGrupaje([]);}}/>}
 
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Autoasignacion IA ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
       {quickAssignPedido && (

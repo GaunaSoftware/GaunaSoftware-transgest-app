@@ -8,30 +8,56 @@ import { useMemo } from "react";
 // Trailer estandar espanol, usado solo si el vehiculo no trae sus medidas.
 export const REMOLQUE_DEFECTO = { metros: 13.6, peso: 24000, palets: 33 };
 
-// Ocupacion de los palets en el remolque. IMPORTANTE: no se multiplica lineal
-// (palets x metros), porque un palet suelto ocupa FILA ENTERA igual que dos.
-// Se cuenta por filas: 13 palets europeos no son 5,20 m sino 7 filas x 0,80 =
-// 5,60 m. Medidas para un remolque estandar de 2,40-2,45 m de ancho interior:
-//   - Europeo 120x80  -> 2 por fila (2 x 1,20 = 2,40 de ancho), fila de 0,80 m
-//   - Americano 120x100 -> 2 por fila (2 x 1,00 = 2,00), fila de 1,20 m
-//   - Medio palet 80x60 -> 3 por fila (3 x 0,80 = 2,40), fila de 0,60 m
-const FILA_PALET = {
-  europeo:   { porFila: 2, fondo: 0.80 },
-  americano: { porFila: 2, fondo: 1.20 },
-  medio:     { porFila: 3, fondo: 0.60 },
+// Ocupacion de los palets en el remolque, con las disposiciones reales de un
+// trailer estandar (13,60 x 2,45 m interior). Verificado contra las cifras del
+// sector: 33 europeos o 26 americanos en un piso.
+//
+// EUROPEO 1200x800 -> 33 palets en 13,20 m. Dos formas de conseguirlo:
+//     11 filas de 3 "de pico" (3 x 0,80 = 2,40 ancho, fila de 1,20 de fondo), o
+//     15 filas de 2 (2 x 1,20 = 2,40 ancho, fila de 0,80) + 1 fila de 3 girada.
+//   Las dos salen a 0,40 m por palet, asi que combinando filas de 2 y de 3
+//   cualquier cantidad >= 2 encaja EXACTA y ocupa 0,40 x n. Solo un palet suelto
+//   desperdicia: ocupa una fila entera (0,80 m).
+//
+// AMERICANO 1200x1000 -> 26 palets en 13,00 m: 13 filas de 2, con el lado de
+//   1,20 a lo ancho (2 x 1,20 = 2,40) y 1,00 de fondo. NO admite 3 por fila
+//   (3 x 1,00 = 3,00 > 2,45), por eso aprovecha peor el remolque.
+//
+// MEDIO PALET 800x600 -> 3 por fila (3 x 0,80 = 2,40), fila de 0,60.
+const PALET_CFG = {
+  europeo:   { anchoFila: [2, 3], fondos: [0.80, 1.20] }, // admite fila girada
+  americano: { anchoFila: [2],    fondos: [1.00] },
+  medio:     { anchoFila: [3],    fondos: [0.60] },
 };
+
+// Metros de fondo que ocupan n palets de un tipo, eligiendo la combinacion de
+// filas que menos ocupe (es lo que hace el mozo al cargar).
+export function mlPalets(n, tipo = "europeo", apilables = false) {
+  const cantidad = Math.max(0, Math.floor(Number(n) || 0));
+  if (!cantidad) return 0;
+  const cfg = PALET_CFG[String(tipo)] || PALET_CFG.europeo;
+  // Apilables: van a dos alturas, asi que en el suelo ocupan la mitad de sitios.
+  const enSuelo = apilables ? Math.ceil(cantidad / 2) : cantidad;
+
+  // Programacion dinamica sobre el numero de palets: para cada cantidad se
+  // prueba cerrar la ultima fila con cada anchura posible y se guarda el minimo.
+  const mejor = new Array(enSuelo + 1).fill(Infinity);
+  mejor[0] = 0;
+  for (let i = 1; i <= enSuelo; i += 1) {
+    cfg.anchoFila.forEach((porFila, idx) => {
+      const restantes = Math.max(0, i - porFila); // una fila a medias tambien ocupa entera
+      const coste = mejor[restantes] + cfg.fondos[idx];
+      if (coste < mejor[i]) mejor[i] = coste;
+    });
+  }
+  return Number(mejor[enSuelo].toFixed(2));
+}
 
 export function mlDeCarga(p) {
   const ml = Number(p?.metros_lineales || 0);
   if (ml > 0) return ml;
-  // Sin ML declarados: se calculan por filas completas segun el tipo de palet.
   const n = Number(p?.palets_cantidad || 0);
-  if (n > 0) {
-    const cfg = FILA_PALET[String(p?.palets_tipo || "europeo")] || FILA_PALET.europeo;
-    // Apilables: caben dos alturas, asi que hacen falta la mitad de filas.
-    const unidadesEnSuelo = p?.palets_apilables ? Math.ceil(n / 2) : n;
-    return Math.ceil(unidadesEnSuelo / cfg.porFila) * cfg.fondo;
-  }
+  if (n > 0) return mlPalets(n, p?.palets_tipo || "europeo", !!p?.palets_apilables);
   // Mercancia sin paletizar: se usa el largo declarado.
   return Number(p?.carga_largo_m || 0);
 }
@@ -97,6 +123,17 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
   const totales = useMemo(() => cargas.reduce((a, c) => ({
     ml: a.ml + c.ml, peso: a.peso + c.peso, palets: a.palets + c.palets,
   }), { ml: 0, peso: 0, palets: 0 }), [cargas]);
+
+  // Carga mixta: europeos y americanos NO comparten fila (el americano ocupa
+  // 1,20 de ancho x 1,00 de fondo y el europeo 1,20 x 0,80), asi que cada tipo
+  // consume sus propias filas y se pierde sitio respecto a cargar solo uno.
+  const tiposPalet = useMemo(() => [...new Set(
+    pedidos
+      .filter(p => Number(p?.palets_cantidad || 0) > 0)
+      .map(p => String(p?.palets_tipo || "europeo"))
+      .filter(t => t !== "granel")
+  )], [pedidos]);
+  const esMixto = tiposPalet.length > 1;
 
   const excedeAlgo = totales.ml > cap.metros || totales.peso > cap.peso || totales.palets > cap.palets;
   // La escala usa el mayor entre capacidad y carga, para que el exceso se VEA
@@ -170,6 +207,14 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
         <Barra etiqueta="Peso" valor={totales.peso} max={cap.peso} unidad="kg" decimales={0} />
         <Barra etiqueta="Palets" valor={totales.palets} max={cap.palets} unidad="" decimales={0} />
       </div>
+
+      {esMixto && (
+        <div style={{ marginTop: 10, fontSize: 11, color: "#b45309", background: "rgba(245,158,11,.10)", border: "1px solid rgba(245,158,11,.28)", borderRadius: 7, padding: "7px 10px", lineHeight: 1.45 }}>
+          <b>Carga mixta ({tiposPalet.join(" + ")}).</b> Los tipos de palet no comparten fila,
+          asi que cada uno ocupa las suyas y se aprovecha peor el remolque que cargando de un
+          solo tipo (33 europeos o 26 americanos en un piso).
+        </div>
+      )}
     </div>
   );
 }

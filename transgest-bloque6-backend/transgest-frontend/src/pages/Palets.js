@@ -426,12 +426,12 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
   }
 
   return(
-    <div className="tg-palets-modal-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="tg-palets-modal-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:300,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"12px 12px max(12px, env(safe-area-inset-bottom))",overflowY:"auto"}} onClick={e=>e.target===e.currentTarget&&onClose()}>
       <style>{`
-        .tg-palets-modal { width:min(720px,100%); max-height:calc(100dvh - 24px); display:flex; flex-direction:column; overflow:hidden; }
+        .tg-palets-modal { width:min(720px,100%); max-height:calc(100dvh - 24px); display:flex; flex-direction:column; overflow:hidden; margin:auto 0; }
         .tg-palets-modal-body { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-gutter:stable; }
-        .tg-palets-lotes-scroll { max-height:230px; overflow-y:auto; display:grid; gap:6px; padding-right:3px; overscroll-behavior:contain; }
-        .tg-palets-selected-scroll { max-height:160px; overflow-y:auto; display:grid; gap:6px; padding-right:3px; }
+        .tg-palets-lotes-scroll { max-height:min(230px, 30dvh); overflow-y:auto; display:grid; gap:6px; padding-right:3px; overscroll-behavior:contain; }
+        .tg-palets-selected-scroll { max-height:min(160px, 22dvh); overflow-y:auto; display:grid; gap:6px; padding-right:3px; }
         .tg-palets-modal-actions { position:sticky; bottom:0; z-index:4; background:var(--bg2); border-top:1px solid var(--border2); padding:12px 0 2px; }
         @media (max-width:600px) {
           .tg-palets-modal-overlay { padding:0 !important; align-items:stretch !important; }
@@ -439,6 +439,8 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
           .tg-palets-modal-header { padding:13px 14px !important; }
           .tg-palets-modal-body { padding:0 14px 14px !important; }
           .tg-palets-modal-form-grid { grid-template-columns:minmax(0,1fr) !important; }
+          .tg-palets-lotes-scroll { max-height:28dvh; }
+          .tg-palets-selected-scroll { max-height:20dvh; }
           .tg-palets-lote-button { grid-template-columns:minmax(0,1fr) !important; }
           .tg-palets-lote-count { justify-self:start; }
           .tg-palets-selected-row { grid-template-columns:minmax(0,1fr) 92px !important; }

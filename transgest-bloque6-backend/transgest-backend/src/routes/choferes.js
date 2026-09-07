@@ -25,6 +25,7 @@ async function ensureChoferesTransparencySchema() {
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base TEXT").catch(failChoferSchema);
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_nombre VARCHAR(180)").catch(failChoferSchema);
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS firma_base_fecha TIMESTAMPTZ").catch(failChoferSchema);
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS remolque_id UUID REFERENCES vehiculos(id) ON DELETE SET NULL").catch(failChoferSchema);
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_nombre TEXT").catch(failChoferSchema);
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_mime VARCHAR(120)").catch(failChoferSchema);
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS carta_renuncia_base64 TEXT").catch(failChoferSchema);

@@ -97,6 +97,14 @@ async function run() {
     { nombre: "ANDORRA", ciudad: "Andorra de Teruel", provincia: "Teruel" }
   );
   assert.equal(ruta.id, "ruta-berge-andorra");
+  const provinceRoutes = [
+    {id:"provincia", origen:"Madrid", destino:"Alicante", precio_base:400, prioridad:0},
+    {id:"municipio", origen:"Madrid", destino:"Benissa", precio_base:450, prioridad:0},
+  ];
+  const provinceClient = { query:async()=>({rows:provinceRoutes}) };
+  assert.equal((await resolvePortalRutaTarifa(provinceClient,"empresa-qa","cliente-qa","Madrid","Benissa",null,null)).id,"municipio");
+  provinceRoutes.pop();
+  assert.equal((await resolvePortalRutaTarifa(provinceClient,"empresa-qa","cliente-qa","Madrid","Benissa",null,null)).id,"provincia");
   const tarifa = mergeTarifaSolicitud({ importe: 0, km_ruta: null }, ruta);
   assert.equal(tarifa.ruta_id, "ruta-berge-andorra");
   assert.equal(tarifa.km_ruta, 392);

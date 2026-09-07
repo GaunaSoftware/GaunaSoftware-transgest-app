@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { getFacturas, getPedidos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos } from "../services/api";
+import { getFacturas, getPedidos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos, getBiResumen } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import { confirmDialog, notify } from "../services/notify";
@@ -70,6 +70,10 @@ function costeOperativoPedido(p) {
 
 function fechaKpiPedido(p) {
   return p?.fecha_descarga || p?.fecha_carga || p?.fecha_pedido || p?.created_at;
+}
+
+function dashboardPeriodToBi(value) {
+  return ({ all:"all", hoy:"hoy", mes:"mes", "7d":"7d", "3m":"90d", "6m":"180d", "1y":"365d" }[value] || "30d");
 }
 
 function navegar(view) {
@@ -349,9 +353,11 @@ export default function Dashboard() {
   const [empresaCfg, setEmpresaCfg] = useState({ cfg_alertas: [] });
   const [tallerEstado, setTallerEstado] = useState({ stock: [], reparaciones: [] });
   const [paletMovimientos, setPaletMovimientos] = useState([]);
+  const [biResumen, setBiResumen] = useState(null);
   const [loading,   setLoading]   = useState(true);
 
   useEffect(() => {
+    let active = true;
     async function load() {
       setLoading(true);
       try {
@@ -366,6 +372,7 @@ export default function Dashboard() {
           getTallerEstado().catch(()=>null),
           getPaletMovimientos().catch(()=>[]),
         ]);
+        if (!active) return;
         setPedidos(Array.isArray(p)?p:Array.isArray(p?.data)?p.data:[]);
         setFacturas(Array.isArray(f)?f:Array.isArray(f?.data)?f.data:[]);
         setVehiculos(Array.isArray(v)?v:[]);
@@ -379,10 +386,21 @@ export default function Dashboard() {
         setTallerEstado(taller && typeof taller === "object" ? taller : { stock: [], reparaciones: [] });
         setPaletMovimientos(Array.isArray(palets) ? palets : Array.isArray(palets?.data) ? palets.data : []);
       } catch(e) { console.error(e); }
-      finally { setLoading(false); }
+      finally { if (active) setLoading(false); }
     }
     load();
+    return () => { active = false; };
   }, [user?.id, user?.rol]);
+
+  useEffect(() => {
+    let active = true;
+    setBiResumen(null);
+    getBiResumen(dashboardPeriodToBi(period)).then(bi => {
+      const data = bi?.data && typeof bi.data === "object" ? bi.data : bi;
+      if (active) setBiResumen(data && typeof data === "object" ? data : null);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [period, user?.id, user?.rol]);
 
   // ── Filter by period ──
   const filterByPeriod = useCallback((items, dateKey="fecha") => {
@@ -659,6 +677,42 @@ export default function Dashboard() {
     };
   }, [pedidos, facturas, vehiculos, choferes, filterByPeriod, empresaCfg, tallerEstado, paletMovimientos]);
 
+  const biKpis = biResumen?.kpis || {};
+  const biNumber = (key, fallback = 0) => {
+    if (biKpis[key] == null) return fallback;
+    const n = Number(biKpis?.[key]);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const kpiIngresoGestionado = biNumber("ingreso_gestionado", ingresoGestionado);
+  const kpiFacturado = biNumber("facturado", totalFacturado);
+  const kpiCobrado = biNumber("cobrado", cobrado);
+  const kpiPendienteCobro = biNumber("pendiente_cobro", pendiente);
+  const kpiPendienteFacturar = biNumber("pendiente_facturar_realizado", pendienteFacturarRealizado);
+  const kpiPendientesFacturarCount = biNumber("pendientes_facturar_count", pedidosRealizados.filter(p => !pedidoTieneFactura(p)).length);
+  const kpiRealizados = biNumber("realizados", pedidosRealizados.length);
+  const kpiMargen = biNumber("margen", margenTotal);
+  const kpiMargenPct = biNumber("margen_pct", Number(margenPct || 0));
+  const kpiEurKm = biNumber("eur_km", eurKmRealizado);
+  const kpiKmRealizados = biNumber("km_realizados", 0);
+  const kpiTicket = biNumber("ticket_medio_realizado", 0);
+  const kpiIncidencias = biNumber("incidencias", 0);
+  const kpiSinPrecio = biNumber("sin_precio", 0);
+  const kpiSinKm = biNumber("sin_km", 0);
+  const kpiPodPendiente = biNumber("pod_pendiente_realizados", 0);
+  const kpiFacturas = biNumber("facturas", nFacturas);
+  const kpiCobroPct = kpiFacturado > 0 ? (kpiCobrado / kpiFacturado) * 100 : 0;
+  const clientesRanking = Array.isArray(biResumen?.clientes) && biResumen.clientes.length
+    ? biResumen.clientes.slice(0, 5).map(c => ({
+        name: c.nombre || c.cliente_nombre || c.razon_social || c.cliente || "Cliente",
+        total: Number(c.ingreso_gestionado || c.venta || c.facturado || 0),
+        facturado: Number(c.facturado || 0),
+        pendiente: Number(c.pendiente_facturar_realizado || 0),
+        viajes_realizados: Number(c.realizados || c.viajes || 0),
+        margen: Number(c.margen || 0),
+        margen_pct: Number(c.margen_pct || 0),
+      }))
+    : topClientes;
+
   const puedeVerControlTower = false;
   const controlAnalysis = null;
   const towerResumen = {};
@@ -720,7 +774,7 @@ export default function Dashboard() {
                 val:`${vDisp}/${vehiculos.filter(v=>{const cl=(v.clase||v.tipo||"").toLowerCase();const mat=(v.matricula||"").toUpperCase();const rids=new Set(vehiculos.map(x=>x.remolque_id).filter(Boolean));return !cl.includes("remolque")&&!cl.includes("semirremolque")&&!cl.includes("dolly")&&!rids.has(v.id)&&!mat.startsWith("R-")&&!mat.endsWith("-R");}).length}`,
                 sub:`${vTaller} en mantenimiento`,                            color:"var(--green)" },
               { label:"CHÓFERES DISP.",    val:`${cDisp}/${choferes.length}`,  sub:`${choferes.filter(c=>c.estado==="vacaciones").length} de vacaciones`, color:"var(--text)" },
-              { label:"INGRESO GESTIONADO", val:`${fmt2(ingresoGestionado)} EUR`,     sub:`${fmtN(nFacturas)} facturas + ${fmtN(pedidosRealizados.length)} viajes realizados`,                  color:"#f59e0b" },
+              { label:"INGRESO GESTIONADO", val:`${fmt2(kpiIngresoGestionado)} EUR`,     sub:`${fmtN(kpiFacturas)} facturas + ${fmtN(kpiRealizados)} viajes realizados`,                  color:"#f59e0b" },
             ].map((k,i)=>(
               <ExecutiveKpi
                 key={i}
@@ -1010,9 +1064,9 @@ export default function Dashboard() {
             {/* Por cliente */}
             <div style={S.card}>
               <PanelTitle icon={<DashboardIcon name="pie" size={17} />} title="POR CLIENTE" />
-              {topClientes.length === 0
+              {clientesRanking.length === 0
                 ? <div style={{ color:"var(--text5)", fontSize:12, padding:"24px 0", textAlign:"center" }}>Sin datos</div>
-                : topClientes.map((c,i)=>(
+                : clientesRanking.map((c,i)=>(
                   <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8, gap:12 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                       <div style={{ width:8, height:8, borderRadius:"50%", background:COLORS[i%COLORS.length] }}/>
@@ -1021,7 +1075,7 @@ export default function Dashboard() {
                     <div style={{ textAlign:"right", flexShrink:0 }}>
                       <div style={{ fontSize:12, fontWeight:700, color:"var(--text)", fontFamily:"'JetBrains Mono',monospace" }}>{fmt2(c.total)} EUR</div>
                       <div style={{ fontSize:10, color:"var(--text5)" }}>
-                        {fmt2(c.facturado)} fact.{Number(c.pendiente||0)>0 ? ` + ${fmt2(c.pendiente)} sin fact.` : ""}
+                        {fmtN(c.viajes_realizados || 0)} viajes · {fmt2(c.facturado)} fact.{Number(c.pendiente||0)>0 ? ` + ${fmt2(c.pendiente)} sin fact.` : ""}
                       </div>
                     </div>
                   </div>
@@ -1036,19 +1090,29 @@ export default function Dashboard() {
             <div style={S.card}>
               <PanelTitle icon={<DashboardIcon name="money" size={17} />} title="RESUMEN FINANCIERO" />
               {[
-                { l:"Ingreso gestionado", v:`${fmt2(ingresoGestionado)} EUR`, c:"var(--accent-xl)" },
-                { l:"Facturado emitido", v:`${fmt2(totalFacturado)} EUR`,  c:"var(--text)" },
-                { l:"Realizado sin facturar", v:`${fmt2(pendienteFacturarRealizado)} EUR`, c:"#f59e0b" },
-                { l:"Cobrado",           v:`${fmt2(cobrado)} EUR`,         c:"var(--green)" },
-                { l:"Pendiente cobro",   v:`${fmt2(pendiente)} EUR`,       c:"#f59e0b" },
-                { l:"% cobrado",         v:`${totalFacturado>0?((cobrado/totalFacturado)*100).toFixed(1):0}%`, c:"var(--accent-xl)" },
-                ...(eurKmRealizado>0 ? [
-                  { l:"EUR/km realizado", v:`${fmt2(eurKmRealizado)} EUR/km`, c:"var(--accent-xl)" },
+                { l:"Ingreso gestionado", v:`${fmt2(kpiIngresoGestionado)} EUR`, c:"var(--accent-xl)" },
+                { l:"Facturado emitido", v:`${fmt2(kpiFacturado)} EUR`,  c:"var(--text)" },
+                { l:"Realizado sin facturar", v:`${fmt2(kpiPendienteFacturar)} EUR`, c:"#f59e0b" },
+                { l:"Viajes realizados sin factura", v:fmtN(kpiPendientesFacturarCount), c:"#f59e0b" },
+                { l:"Cobrado",           v:`${fmt2(kpiCobrado)} EUR`,         c:"var(--green)" },
+                { l:"Pendiente cobro",   v:`${fmt2(kpiPendienteCobro)} EUR`,       c:"#f59e0b" },
+                { l:"% cobrado",         v:`${kpiCobroPct.toFixed(1)}%`, c:"var(--accent-xl)" },
+                { l:"Margen bruto",      v:`${fmt2(kpiMargen)} EUR (${fmt2(kpiMargenPct)}%)`, c:kpiMargen>=0?"var(--green)":"#ef4444" },
+                ...(kpiEurKm>0 ? [
+                  { l:"EUR/km realizado", v:`${fmt2(kpiEurKm)} EUR/km`, c:"var(--accent-xl)" },
+                ] : []),
+                ...(kpiKmRealizados>0 ? [
+                  { l:"KM realizados",   v:fmtN(kpiKmRealizados), c:"var(--text)" },
+                ] : []),
+                ...(kpiTicket>0 ? [
+                  { l:"Ticket medio realizado", v:`${fmt2(kpiTicket)} EUR`, c:"var(--text)" },
                 ] : []),
                 ...(costeTotal>0 ? [
                   { l:"Costes viajes",   v:`${fmt2(costeTotal)} EUR`,      c:"#ef4444" },
-                  { l:"Margen bruto",    v:`${fmt2(margenTotal)} EUR${margenPct?` (${margenPct}%)` :""}`, c:margenTotal>=0?"var(--green)":"#ef4444" },
                 ] : []),
+                { l:"Incidencias",       v:fmtN(kpiIncidencias), c:kpiIncidencias>0?"#ef4444":"var(--green)" },
+                { l:"Sin precio / sin km", v:`${fmtN(kpiSinPrecio)} / ${fmtN(kpiSinKm)}`, c:(kpiSinPrecio+kpiSinKm)>0?"#f59e0b":"var(--green)" },
+                { l:"POD pendiente",     v:fmtN(kpiPodPendiente), c:kpiPodPendiente>0?"#f59e0b":"var(--green)" },
               ].map((k,i)=>(
                 <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:"1px solid var(--border)" }}>
                   <span style={{ fontSize:12, color:"var(--text4)" }}>{k.l}</span>

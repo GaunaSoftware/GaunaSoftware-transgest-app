@@ -540,6 +540,7 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_pais VARCHAR(80) DEFAULT 'España'").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS destino_provincia VARCHAR(120)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metros_lineales NUMERIC(10,2)").catch(() => {});
+      await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS remolque_id UUID REFERENCES vehiculos(id) ON DELETE SET NULL").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cmr_tipo VARCHAR(30) DEFAULT 'nacional'").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS adr BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS adr_items JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
@@ -2929,8 +2930,9 @@ async function solicitarAlbaranesAdministracionSiFaltan(pedidoId, empresaId, use
 }
 
 async function aplicarAutomatismosEntrega(pedidoId, empresaId, userId = null, options = {}) {
-  await crearFacturaBorradorPedido(pedidoId, empresaId, userId)
-    .catch(e => logger.error("No se pudo crear factura borrador automatica:", e.message));
+  const actual = await db.query("SELECT estado FROM pedidos WHERE id=$1 AND empresa_id=$2", [pedidoId, empresaId]);
+  if (actual.rows[0]?.estado !== "entregado") return;
+  await crearFacturaBorradorPedido(pedidoId, empresaId, userId);
   await vincularAlbaranesAFacturaPedido(pedidoId, empresaId);
   await solicitarAlbaranesAdministracionSiFaltan(pedidoId, empresaId, userId)
     .catch(e => logger.warn("No se pudo solicitar albaranes a administracion:", e.message));
@@ -2941,7 +2943,11 @@ async function aplicarAutomatismosEntrega(pedidoId, empresaId, userId = null, op
     appBaseUrl: options.appBaseUrl || "",
     userId,
     motivo: "viaje_finalizado",
-  }).catch(e => logger.warn("No se pudo archivar el DCD del pedido:", e.message));
+  });
+}
+
+async function programarAutomatismosEntrega(pedidoId, empresaId, userId = null, options = {}) {
+  await require("../services/deliveryAutomationQueue").enqueue(pedidoId, empresaId, userId, options);
 }
 
 async function procesarRecordatoriosAlbaranesPendientes({ limit = 200 } = {}) {
@@ -2998,6 +3004,7 @@ async function procesarRecordatoriosAlbaranesPendientes({ limit = 200 } = {}) {
 
 let albaranesReminderSchedulerStarted = false;
 function startAlbaranesReminderScheduler() {
+  require("../services/deliveryAutomationQueue").start(aplicarAutomatismosEntrega);
   if (albaranesReminderSchedulerStarted) return;
   albaranesReminderSchedulerStarted = true;
   const run = async () => {
@@ -5092,14 +5099,20 @@ async function registrarHistorialAsignacionPedido(client, pedido = {}, empresaId
 
 async function sincronizarConjuntoChoferDesdePedido(queryClient, pedido = {}, empresaId) {
   if (!pedido?.chofer_id || !pedido?.vehiculo_id || !empresaId) return;
+  if (queryClient === db) return db.transaction(client => sincronizarConjuntoChoferDesdePedido(client, pedido, empresaId));
   try {
     const choferId = pedido.chofer_id;
     const vehiculoId = pedido.vehiculo_id;
     const remolqueId = pedido.remolque_id || null;
 
     await queryClient.query(
-      "UPDATE vehiculos SET chofer_id=NULL WHERE empresa_id=$1 AND chofer_id=$2 AND id<>$3",
+      "UPDATE vehiculos SET chofer_id=NULL, remolque_id=NULL WHERE empresa_id=$1 AND chofer_id=$2 AND id<>$3",
       [empresaId, choferId, vehiculoId]
+    );
+
+    await queryClient.query(
+      "UPDATE choferes SET vehiculo_id=NULL, remolque_id=NULL WHERE empresa_id=$1 AND vehiculo_id=$2 AND id<>$3",
+      [empresaId, vehiculoId, choferId]
     );
 
     if (remolqueId) {
@@ -5107,11 +5120,15 @@ async function sincronizarConjuntoChoferDesdePedido(queryClient, pedido = {}, em
         "UPDATE vehiculos SET remolque_id=NULL WHERE empresa_id=$1 AND remolque_id=$2 AND id<>$3",
         [empresaId, remolqueId, vehiculoId]
       );
+      await queryClient.query(
+        "UPDATE choferes SET remolque_id=NULL WHERE empresa_id=$1 AND remolque_id=$2 AND id<>$3",
+        [empresaId, remolqueId, choferId]
+      );
     }
 
     await queryClient.query(
-      "UPDATE choferes SET vehiculo_id=$1 WHERE empresa_id=$2 AND id=$3",
-      [vehiculoId, empresaId, choferId]
+      "UPDATE choferes SET vehiculo_id=$1, remolque_id=$2 WHERE empresa_id=$3 AND id=$4",
+      [vehiculoId, remolqueId, empresaId, choferId]
     );
 
     await queryClient.query(
@@ -5120,6 +5137,7 @@ async function sincronizarConjuntoChoferDesdePedido(queryClient, pedido = {}, em
     );
   } catch (err) {
     logger.warn("No se pudo sincronizar el conjunto del chofer desde pedido:", err.message);
+    throw err;
   }
 }
 
@@ -8591,7 +8609,7 @@ router.patch("/:id/estado",
     }
 
     if (estado === "entregado") {
-      await aplicarAutomatismosEntrega(req.params.id, empresaId, actorUsuarioId, { appBaseUrl: publicBaseUrl(req) });
+      await programarAutomatismosEntrega(req.params.id, empresaId, actorUsuarioId, { appBaseUrl: publicBaseUrl(req) });
     }
 
     if (estado === "confirmado" || estado === "entregado") {
@@ -8946,7 +8964,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
       }, "sistema", null);
     }
     if (pedidoActualizado.estado === "entregado") {
-      await aplicarAutomatismosEntrega(pedidoActualizado.id, empresaId, req.user?.id || null, { appBaseUrl: publicBaseUrl(req) });
+      await programarAutomatismosEntrega(pedidoActualizado.id, empresaId, req.user?.id || null, { appBaseUrl: publicBaseUrl(req) });
     }
     if (assignmentFieldsTouched || "tipo_viaje" in body || "fecha_descarga" in body || "fecha_entrega" in body || "destino" in body || "origen" in body) {
       await notificarPlanificacionIdaRetorno(pedidoActualizado, empresaId, req.user?.id || null)
@@ -8991,7 +9009,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
         actorId: req.user?.id || null,
       });
       if (updatedPedido.estado === "entregado") {
-        await aplicarAutomatismosEntrega(updatedPedido.id, empresaId, req.user?.id || null, { appBaseUrl: publicBaseUrl(req) });
+        await programarAutomatismosEntrega(updatedPedido.id, empresaId, req.user?.id || null, { appBaseUrl: publicBaseUrl(req) });
       }
       if (assignmentFieldsTouched || "tipo_viaje" in body || "fecha_descarga" in body || "fecha_entrega" in body || "destino" in body || "origen" in body) {
         await notificarPlanificacionIdaRetorno(updatedPedido, empresaId, req.user?.id || null)

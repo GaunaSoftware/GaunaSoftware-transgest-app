@@ -95,11 +95,11 @@ function isCountryOnlyDraftQuery(value = "") {
   return ["espana", "spain", "es"].includes(normalized);
 }
 
-function mergeResolvedGeo(draft = {}, geo = {}, fallbackCountry = "EspaÃ±a") {
+function mergeResolvedGeo(draft = {}, geo = {}, fallbackCountry = "España") {
   if (!geo) return draft;
   const resolvedPais = canonicalCountry(geo.pais || geo.country || "") || geo.pais || geo.country || "";
   const currentPais = canonicalCountry(draft.pais || "") || draft.pais || "";
-  const currentLooksDefault = !currentPais || ["espana", "espaÃ±a", "spain"].includes(String(currentPais).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase());
+  const currentLooksDefault = !currentPais || ["espana", "españa", "spain"].includes(String(currentPais).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase());
   const pais = currentLooksDefault && resolvedPais ? resolvedPais : (currentPais || resolvedPais || fallbackCountry);
   return {
     ...draft,
@@ -112,7 +112,7 @@ function mergeResolvedGeo(draft = {}, geo = {}, fallbackCountry = "EspaÃ±a") {
   };
 }
 
-async function resolveGeoDraft(draft = {}, fallbackCountry = "EspaÃ±a", ...extra) {
+async function resolveGeoDraft(draft = {}, fallbackCountry = "España", ...extra) {
   const local = inferPlaceGeo(draft, ...extra, draft.ciudad, draft.direccion, draft.nombre, draft.cliente_nombre, draft.pais);
   if (local?.provincia || local?.pais) return mergeResolvedGeo(draft, local, fallbackCountry);
   const q = placeQueryFromDraft(draft, ...extra);
@@ -1370,7 +1370,7 @@ function legacyPuntosInteresLoad() {
 }
 
 function setPuntosInteresCache(next, { broadcast = true } = {}) {
-  puntosInteresCache = Array.isArray(next) ? next.slice(-200) : [];
+  puntosInteresCache = Array.isArray(next) ? dedupePuntosInteres(next).slice(-300) : [];
   if (typeof window !== "undefined") {
     window.__TMS_PUNTOS_INTERES = puntosInteresCache;
     if (broadcast) window.dispatchEvent(new Event("tms:puntos-interes"));
@@ -1381,7 +1381,7 @@ function setPuntosInteresCache(next, { broadcast = true } = {}) {
 function getPuntosInteres() {
   if (puntosInteresCache.length) return puntosInteresCache;
   if (typeof window !== "undefined" && Array.isArray(window.__TMS_PUNTOS_INTERES)) {
-    puntosInteresCache = window.__TMS_PUNTOS_INTERES.slice(-200);
+    puntosInteresCache = dedupePuntosInteres(window.__TMS_PUNTOS_INTERES).slice(-300);
   }
   return puntosInteresCache;
 }
@@ -1436,6 +1436,40 @@ function normalizePlaceText(value) {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function puntoInteresScopeKey(punto = {}) {
+  const clienteId = String(punto?.cliente_id || "").trim();
+  const esGeneral = punto?.punto_general === true || punto?.es_general === true || !clienteId;
+  return esGeneral ? "general" : `cliente:${clienteId}`;
+}
+
+function puntoInteresIdentityKey(punto = {}) {
+  return [
+    puntoInteresScopeKey(punto),
+    normalizePlaceText(punto?.direccion_key || punto?.direccion || direccionCompletaPunto(punto)),
+    normalizePlaceText(punto?.nombre || punto?.cliente_nombre || ""),
+    normalizePlaceText(punto?.ciudad || punto?.poblacion || punto?.localidad || punto?.municipio || ""),
+    normalizePlaceText(punto?.provincia || punto?.region || punto?.state || ""),
+    String(punto?.tipo || "ambos").trim().toLowerCase(),
+  ].join("|");
+}
+
+function dedupePuntosInteres(list = []) {
+  const seenIds = new Set();
+  const seenKeys = new Set();
+  const result = [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const punto = normalizePuntoInteresForForm(list[i] || {});
+    const id = punto?.id ? String(punto.id) : "";
+    const identity = puntoInteresIdentityKey(punto);
+    if (id && seenIds.has(id)) continue;
+    if (identity.replace(/\|/g, "") && seenKeys.has(identity)) continue;
+    if (id) seenIds.add(id);
+    if (identity.replace(/\|/g, "")) seenKeys.add(identity);
+    result.unshift(punto);
+  }
+  return result;
 }
 
 function cleanMapQueryPart(value) {
@@ -1626,19 +1660,17 @@ function savePuntoInteres(punto) {
     cliente_id: punto?.cliente_id || "",
     punto_general: punto?.punto_general ?? punto?.es_general ?? !punto?.cliente_id,
     es_general: punto?.es_general ?? punto?.punto_general ?? !punto?.cliente_id,
+    direccion_key: punto?.direccion_key || normalizePlaceText([direccion, punto?.ciudad, punto?.provincia, punto?.pais || "España"].filter(Boolean).join(", ")),
     google_maps_url: googleMapsUrl,
     lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? mapsCoords?.lat ?? null,
     lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? mapsCoords?.lng ?? null,
   };
   const actuales = getPuntosInteres();
-  const reemplazaPorId = actuales.some(p => String(p.id) === String(id));
+  const identity = puntoInteresIdentityKey(normalizado);
   const next = [
-    ...actuales.filter(p => reemplazaPorId
-      ? String(p.id) !== String(id)
-      : (p.direccion || "").trim().toLowerCase() !== direccion.toLowerCase()
-    ),
+    ...actuales.filter(p => String(p.id) !== String(id) && puntoInteresIdentityKey(p) !== identity),
     normalizado,
-  ].slice(-200);
+  ].slice(-300);
   return setPuntosInteresCache(next);
 }
 
@@ -1914,7 +1946,7 @@ function splitPrimaryAndAdditionalStops(stops, fallbackAddress = "") {
 }
 
 function stopAddress(stop) {
-  return (stop?.direccion || stop?.lugar || stop?.ciudad || "").trim();
+  return String(stop?.direccion ?? stop?.lugar ?? stop?.ciudad ?? "").trim();
 }
 
 function findPuntoInteresForStop(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
@@ -3404,7 +3436,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   async function completarPuntoGeo(draft = form) {
     const requestId = geoRequestRef.current + 1;
     geoRequestRef.current = requestId;
-    const next = await resolveGeoDraft(draft, draft.pais || "EspaÃ±a", draft.ciudad, draft.direccion, draft.nombre);
+    const next = await resolveGeoDraft(draft, draft.pais || "España", draft.ciudad, draft.direccion, draft.nombre);
     let merged = next;
     setForm(current => {
       if (requestId !== geoRequestRef.current) {
@@ -3856,6 +3888,8 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const [puntoQuery, setPuntoQuery] = useState("");
   const [poiDraft, setPoiDraft] = useState(null);
   const [dragIdx, setDragIdx] = useState(null);
+  const stopGeoRequestRef = useRef(0);
+  const latestStopsRef = useRef([]);
   const key = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
   const mainLugar = tipo === "carga" ? form.origen : form.destino;
   const mainFecha = tipo === "carga" ? form.fecha_carga : form.fecha_descarga;
@@ -3877,7 +3911,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     if (local.provincia && (local.lat != null || local.lng != null)) return local;
     const resolved = await resolveGeoDraft(
       local,
-      stopCountryInputValue(local, idx === 0 ? fallbackPais : "EspaÃ±a"),
+      stopCountryInputValue(local, idx === 0 ? fallbackPais : "España"),
       stopAddress(local),
       local.cliente_nombre
     );
@@ -3892,7 +3926,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const effectivePrimary = primaryStop
     ? inferStopGeo({
         ...primaryStop,
-        direccion: stopAddress(primaryStop) || mainLugar || "",
+        direccion: primaryStop.direccion ?? stopAddress(primaryStop) ?? mainLugar ?? "",
         fecha: primaryStop.fecha || mainFecha || "",
         hora: primaryStop.hora || mainHora || "",
         tipo,
@@ -3901,6 +3935,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       }, 0)
     : (mainLugar ? inferStopGeo({ direccion: mainLugar, fecha: mainFecha || "", hora: mainHora || "", pais: fallbackPais, provincia: fallbackProvincia, tipo, es_principal: true, es_adicional: false }, 0) : null);
   const stopsOrdenados = effectivePrimary ? [effectivePrimary, ...paradas] : paradas;
+  latestStopsRef.current = stopsOrdenados;
   useEffect(() => {
     const inferred = inferPlaceGeo(mainLugar);
     if (!mainLugar || !inferred?.provincia) return;
@@ -3932,14 +3967,14 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           if (p.origen_provincia && normalizePlaceText(p.origen_provincia) === normalizePlaceText(inferred.provincia)) return p;
           return {
             ...p,
-            origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "EspaÃ±a") || "EspaÃ±a",
+            origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "España") || "España",
             origen_provincia: inferred.provincia,
           };
         }
         if (p.destino_provincia && normalizePlaceText(p.destino_provincia) === normalizePlaceText(inferred.provincia)) return p;
         return {
           ...p,
-          destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "EspaÃ±a") || "EspaÃ±a",
+          destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "España") || "España",
           destino_provincia: inferred.provincia,
         };
       });
@@ -4001,7 +4036,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       cliente_nombre: punto?.cliente_nombre || punto?.nombre || puntoStop.cliente_nombre || newStop.cliente_nombre || "",
       fecha: newStop.fecha || puntoStop.fecha || mainFecha || "",
       hora: newStop.hora || puntoStop.hora || mainHora || "",
-      pais: stopCountry(puntoStop, newStop.pais || "EspaÃ±a"),
+      pais: stopCountry(puntoStop, newStop.pais || "España"),
       provincia: stopRegion(puntoStop, newStop.provincia || ""),
       tipo,
     };
@@ -4061,16 +4096,18 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     };
   }, []);
 
-  function setStopsOrdenados(nextStops) {
+  function setStopsOrdenados(nextStops, { infer = true } = {}) {
     setForm(p => {
       const stopsToStore = nextStops
-        .filter(stop => stopAddress(stop) || stop?.cliente_nombre || stop?.google_maps_url)
-        .map((stop, idx) => inferStopGeo({
+        .map((stop, idx) => {
+          const next = {
           ...stop,
           tipo,
           es_principal: idx === 0,
           es_adicional: idx !== 0,
-        }, idx));
+          };
+          return infer ? inferStopGeo(next, idx) : next;
+        });
       const first = stopsToStore[0] || {};
       const updated = {...p, [key]: stopsToStore};
       if (tipo === "carga") {
@@ -4106,8 +4143,25 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     setAdding(false);
   }
   function updateStop(idx, patch) {
-    const next = stopsOrdenados.map((stop, i) => i === idx ? inferStopGeo({ ...stop, ...patch }, i) : stop);
-    setStopsOrdenados(next);
+    stopGeoRequestRef.current += 1;
+    const next = stopsOrdenados.map((stop, i) => {
+      if (i !== idx) return stop;
+      const addressChanged = Object.prototype.hasOwnProperty.call(patch, "direccion") && patch.direccion !== stop.direccion;
+      const cleared = addressChanged ? { lat:null, lng:null, latitud:null, longitud:null, ciudad:"", google_maps_url:"", punto_interes_id:null, provincia:stop.provincia_manual ? stop.provincia : "" } : {};
+      return { ...stop, ...cleared, ...patch };
+    });
+    setStopsOrdenados(next, { infer:false });
+  }
+  async function resolveExistingStop(idx) {
+    const stop = stopsOrdenados[idx];
+    if (!stop || !stopAddress(stop)) return;
+    const request = ++stopGeoRequestRef.current;
+    const snapshot = JSON.stringify(stop);
+    try {
+      const resolved = await resolveStopGeo(stop, idx);
+      if (request !== stopGeoRequestRef.current || snapshot !== JSON.stringify(latestStopsRef.current[idx])) return;
+      setStopsOrdenados(latestStopsRef.current.map((item, index) => index === idx ? resolved : item));
+    } catch (_) { /* Keep the entered address when the geocoder is unavailable. */ }
   }
   function removeStop(idx) {
     if (stopsOrdenados.length <= 1) return;
@@ -4193,7 +4247,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             return (
             <div
               className="tg-stop-card"
-              key={`${key}-${i}-${d.id || d.punto_interes_id || "stop"}`}
+              key={`${key}-${i}`}
               draggable={!disabled && stopsOrdenados.length > 1}
               onDragStart={e=>{ setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
               onDragOver={e=>{ if (!disabled && dragIdx !== null) e.preventDefault(); }}
@@ -4263,7 +4317,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 </div>
                 {editingStopIndex === i && (
                   <div className="tg-stop-details-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:6,marginTop:8,padding:10,border:"1px solid var(--border2)",borderRadius:7,background:"var(--bg3)"}}>
-                    <input className="tg-stop-grid-wide" style={inp} disabled={disabled} value={stopAddress(d)} onChange={e=>updateStop(i,{direccion:e.target.value})} placeholder="Poblacion o direccion" />
+                    <input className="tg-stop-grid-wide" style={inp} disabled={disabled} value={stopAddress(d)} onChange={e=>updateStop(i,{direccion:e.target.value})} onBlur={()=>resolveExistingStop(i)} placeholder="Poblacion o direccion" />
                     <input type="date" min="2000-01-01" max="2100-12-31" style={inp} disabled={disabled} value={d.fecha || ""} onChange={e=>updateStop(i,{fecha:e.target.value})} />
                     <input type="time" style={inp} disabled={disabled} value={d.hora || ""} onChange={e=>updateStop(i,{hora:e.target.value})} />
                     <input style={inp} disabled={disabled} value={d.ventana || ""} onChange={e=>updateStop(i,{ventana:e.target.value})} placeholder="Ventana horaria" />
@@ -4281,9 +4335,9 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     {editingStopIndex === i ? "Cerrar" : "Editar"}
                   </button>
                   <span title="Arrastra para reordenar" style={{color:"var(--text5)",fontSize:14,padding:"0 3px"}}>::</span>
-                  <button type="button" onClick={() => moveStop(i, -1)} disabled={i===0} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===0?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Subir</button>
-                  <button type="button" onClick={() => moveStop(i, 1)} disabled={i===stopsOrdenados.length-1} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===stopsOrdenados.length-1?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Bajar</button>
-                  <button type="button" onClick={() => removeStop(i)} disabled={stopsOrdenados.length<=1} style={{background:"none",border:"none",color:stopsOrdenados.length<=1?"var(--text5)":"var(--red)",cursor:stopsOrdenados.length<=1?"not-allowed":"pointer",fontSize:14,padding:"2px 6px"}}>x</button>
+                  <button data-pedido-mutation="true" type="button" onClick={() => moveStop(i, -1)} disabled={i===0} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===0?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Subir</button>
+                  <button data-pedido-mutation="true" type="button" onClick={() => moveStop(i, 1)} disabled={i===stopsOrdenados.length-1} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===stopsOrdenados.length-1?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Bajar</button>
+                  <button data-pedido-mutation="true" type="button" onClick={() => removeStop(i)} disabled={stopsOrdenados.length<=1} style={{background:"none",border:"none",color:stopsOrdenados.length<=1?"var(--text5)":"var(--red)",cursor:stopsOrdenados.length<=1?"not-allowed":"pointer",fontSize:14,padding:"2px 6px"}}>x</button>
                 </div>
               )}
             </div>
@@ -4356,7 +4410,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 const val = e.target.value;
                 const punto = buscarPuntoExacto(val);
                 if (punto) aplicarPuntoGuardado(punto);
-                else setNewStop(p=>inferStopGeo({...p,direccion:val}, stopsOrdenados.length ? 1 : 0));
+                else setNewStop(p=>({...p,direccion:val}));
               }}
               onBlur={e=>{
                 const punto = buscarPuntoExacto(e.target.value);
@@ -4381,7 +4435,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               </button>
             </div>
             <div className="tg-stop-footer-group" style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              <button type="button" onClick={addParada} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Anadir {label}</button>
+              <button data-pedido-mutation="true" type="button" onClick={addParada} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Anadir {label}</button>
               <button type="button" onClick={()=>{ setAdding(false); resetNewStop(); }} style={{padding:"6px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
             </div>
           </div>
@@ -6946,7 +7000,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
       codigo_postal: point.codigo_postal || "",
       ciudad: point.ciudad || "",
       provincia: point.provincia || "",
-      pais: point.pais || "EspaÃ±a",
+      pais: point.pais || "España",
       lat: point.lat ?? point.latitud ?? null,
       lng: point.lng ?? point.longitud ?? null,
       tipo: point.tipo || modo || "ambos",
@@ -7046,7 +7100,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
       nombre:text,
       direccion:text,
       tipo: modo || "ambos",
-      pais:"EspaÃ±a",
+      pais:"España",
       cliente_id: clienteId || "",
       punto_general: !clienteId,
       es_general: !clienteId,
@@ -7330,12 +7384,21 @@ function pedidoTieneContenidoReal(draft = {}) {
   return false;
 }
 
+function hasUnsavedPedidoDraftChanges() {
+  const current = pedidoDraftSignature(form);
+  if (current === initialFormRef.current) return false;
+  if (editando && !userInteractedWithFormRef.current) {
+    initialFormRef.current = current;
+    return false;
+  }
+  return true;
+}
+
 async function requestClose() {
   if (saving) return;
   if (editando?._readonly && !desvinculado) { onClose(); return; }
-  const changed = pedidoDraftSignature(form) !== initialFormRef.current;
   if (!editando && !pedidoTieneContenidoReal(form)) { onClose(); return; }
-  if (editando && !changed) { onClose(); return; }
+  if (editando && !hasUnsavedPedidoDraftChanges()) { onClose(); return; }
   const guardarAntes = await confirmDialog({
     title: "Cambios sin guardar",
     message: "Hay cambios sin guardar o el pedido todavia no se ha creado.\n\nQuieres guardar antes de salir?",
@@ -7865,8 +7928,9 @@ useEffect(() => {
             style={S.mbox}
             onInputCapture={() => { userInteractedWithFormRef.current = true; }}
             onChangeCapture={() => { userInteractedWithFormRef.current = true; }}
+            onDropCapture={() => { userInteractedWithFormRef.current = true; }}
             onClickCapture={event => {
-              if (event.target.closest("button")) userInteractedWithFormRef.current = true;
+              if (event.target.closest("[data-pedido-mutation]")) userInteractedWithFormRef.current = true;
             }}
           >
             <div className="tg-pedido-modal-header">
@@ -7895,7 +7959,7 @@ useEffect(() => {
                   {form.aviso_completar || "Pedido creado rapido. Completar datos antes de cerrar el trabajo."}
                 </div>
                 {!editando?._readonly && (
-                  <button type="button" onClick={()=>setForm(p=>({...p,pendiente_completar:false,aviso_completar:null}))}
+                  <button data-pedido-mutation="true" type="button" onClick={()=>setForm(p=>({...p,pendiente_completar:false,aviso_completar:null}))}
                     style={{...S.btn,background:"rgba(251,191,36,.16)",color:"#fbbf24",border:"1px solid rgba(251,191,36,.35)",padding:"5px 10px",fontSize:11}}>
                     Marcar completado
                   </button>
@@ -8014,7 +8078,7 @@ useEffect(() => {
                   return(
                     <div style={{marginTop:6,padding:"6px 12px",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.2)",borderRadius:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <span style={{fontSize:12,color:"var(--accent)",fontWeight:600}}>{c.nombre}{c.cif?" | "+c.cif:""}</span>
-                      <button type="button" onClick={()=>setForm(p=>({...p,cliente_id:""}))}
+                      <button data-pedido-mutation="true" type="button" onClick={()=>setForm(p=>({...p,cliente_id:""}))}
                         style={{background:"none",border:"none",color:"var(--text5)",cursor:"pointer",fontSize:14,padding:"0 4px"}}>Quitar</button>
                     </div>
                   );
@@ -8143,7 +8207,7 @@ useEffect(() => {
                   <div style={{marginTop:6,fontSize:11,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.22)",borderRadius:7,padding:"7px 9px"}}>
                     La ruta exige {rutaSeleccionada.tipo_vehiculo}; el remolque actual parece {tipoRemolqueActual || "sin clasificar"}. Cambia el remolque a uno compatible antes de guardar.
                     {remolquesCompatiblesRuta.length > 0 && (
-                      <button type="button" onClick={()=>setForm(p=>({...p,remolque_id_manual:remolquesCompatiblesRuta[0].id}))}
+                      <button data-pedido-mutation="true" type="button" onClick={()=>setForm(p=>({...p,remolque_id_manual:remolquesCompatiblesRuta[0].id}))}
                         style={{marginLeft:8,padding:"3px 8px",borderRadius:6,border:"1px solid rgba(245,158,11,.35)",background:"transparent",color:"#f59e0b",fontSize:11,fontWeight:800,cursor:"pointer"}}>
                         Usar {remolquesCompatiblesRuta[0].matricula}
                       </button>
@@ -9148,6 +9212,7 @@ useEffect(() => {
           clienteId={form.cliente_id}
           modo={managePointsMode}
           onSelectPoint={(point)=>{
+            userInteractedWithFormRef.current = true;
             setForm(prev => managePointsMode === "descarga"
               ? applyPuntoDescargaToDraft(prev, point)
               : applyPuntoCargaToDraft(prev, point)

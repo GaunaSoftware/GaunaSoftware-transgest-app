@@ -410,6 +410,7 @@ router.get("/", async (req, res) => {
   const result = await listarNotificaciones(empresaId, usuarioId, {
     limit: req.query.limit,
     includeRead: req.query.include_read,
+    audience: ["cliente", "cliente_portal"].includes(req.user?.rol) ? "cliente" : "",
   });
   res.json(result);
 });

@@ -61,6 +61,9 @@ async function run() {
     });
     console.log(`APLICADA ${id}`);
   }
+  await require("../src/services/pointIdentity").ensurePointIdentitySchema(db);
+  await require("../src/services/deliveryAutomationQueue").ensureSchema();
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS remolque_id UUID REFERENCES vehiculos(id) ON DELETE SET NULL");
 }
 
 run()

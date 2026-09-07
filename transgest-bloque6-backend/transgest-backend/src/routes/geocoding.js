@@ -17,7 +17,8 @@ const router = express.Router();
 const ROUTE_CACHE_DAYS = Math.max(1, Number(process.env.GEO_ROUTE_CACHE_DAYS || 30));
 const EXTERNAL_TIMEOUT_MS = Math.max(2500, Number(process.env.GEO_EXTERNAL_TIMEOUT_MS || 9000));
 const MAX_ROUTE_POINTS = 12;
-const PLACE_CACHE_VERSION = "v6";
+const DEFAULT_COUNTRY = "España";
+const PLACE_CACHE_VERSION = "v7";
 let schemaPromise = null;
 let lastNominatimAt = 0;
 let nominatimQueue = Promise.resolve();
@@ -90,6 +91,38 @@ function formatPlace(raw = {}) {
 
 function buildQuery(q, country, region) {
   return [q, region, country].map(cleanText).filter(Boolean).join(", ");
+}
+
+function sameGeoText(left = "", right = "") {
+  const a = normalizeKey(left);
+  const b = normalizeKey(right);
+  return Boolean(a && b && (a === b || (a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a)))));
+}
+
+function candidateCompatibleWithLocal(candidate = {}, local = null) {
+  if (!candidate || !local) return true;
+  const localCountry = countryCodeFor(local.pais || local.country);
+  const candidateCountry = String(candidate.country_code || candidate.countryCode || "").toLowerCase()
+    || countryCodeFor(candidate.pais || candidate.country);
+  if (localCountry && candidateCountry && localCountry !== candidateCountry) return false;
+  const localRegion = local.provincia || local.region || local.state;
+  const candidateRegion = candidate.provincia || candidate.region || candidate.state;
+  const localCity = local.municipio || local.city || local.locality;
+  const candidateCity = candidate.municipio || candidate.city || candidate.locality;
+  if (localCity && candidateCity) return sameGeoText(localCity, candidateCity);
+  if (localRegion && candidateRegion && sameGeoText(localRegion, candidateRegion)) return true;
+  return !(localCity || localRegion);
+}
+
+function regionHintFromRaw(region = "", raw = {}) {
+  return cleanText(region || raw.region || raw.provincia || raw.state || raw.county);
+}
+
+function countryHintFromRaw(q = "", country = "", region = "", raw = {}) {
+  const explicit = cleanText(country || raw.country || raw.pais);
+  if (explicit) return explicit;
+  const local = fallbackPlaceForAddress(buildQuery(q, "", region));
+  return cleanText(local?.pais) || DEFAULT_COUNTRY;
 }
 
 async function ensureSchema() {
@@ -287,7 +320,10 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} 
   // el punto exacto, para no depender de geocodificar el texto.
   const shortLink = await resolveMapsCoords(raw.google_maps_url || raw.maps_url || raw.googleMapsUrl || "");
   if (shortLink) return { provider: "coordinates", ...formatPlace({ ...raw, lat: shortLink.lat, lng: shortLink.lng, label: raw.label || q }) };
-  const request = parsePlaceRequest(cleanText(q), country, region);
+  const cleanQuery = cleanText(q);
+  const regionHint = regionHintFromRaw(region, raw);
+  const countryHint = countryHintFromRaw(cleanQuery, country, regionHint, raw);
+  const request = parsePlaceRequest(cleanQuery, countryHint, regionHint);
   const query = request.query;
   if (query.length < 2) throw Object.assign(new Error("Indica una poblacion o direccion"), { status: 400 });
   if (isCountryOnlyQuery(query, request.country)) {
@@ -308,6 +344,7 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} 
   let resolved = await geocodeGoogle(empresaId, request).catch(() => null);
   const fallback = fallbackPlaceForAddress(buildQuery(query, request.country, request.region));
   const localResolved = fallback ? selectBestPlaceCandidate(request, [{ provider: "local", ...formatPlace(fallback) }]) : null;
+  if (resolved && localResolved && !candidateCompatibleWithLocal(resolved, localResolved)) resolved = null;
   if (!resolved || resolved.lat == null || resolved.lng == null) {
     if (request.localityOnly) {
       resolved = localResolved;
@@ -315,7 +352,9 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} 
       if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeHere(empresaId, request).catch(() => null);
     } else {
       resolved = await geocodeHere(empresaId, request).catch(() => null);
+      if (resolved && localResolved && !candidateCompatibleWithLocal(resolved, localResolved)) resolved = null;
       if (resolved?.lat == null || resolved?.lng == null) resolved = await geocodeNominatim(request).catch(() => null);
+      if (resolved && localResolved && !candidateCompatibleWithLocal(resolved, localResolved)) resolved = localResolved;
     }
   }
   if (resolved?.lat == null || resolved?.lng == null) {
@@ -528,6 +567,9 @@ async function handleRoute(req, res, next) {
       if (!route) route = estimatedRoute(points, "los motores de ruta no respondieron");
       await saveRouteCache(empresaId, key, points, route);
     }
+    if (points.some(point => point.geocode_provider === "local")) {
+      route = { ...route, warning: [route.warning, "Algun punto esta situado en el centro aproximado de la poblacion. Revisa la direccion exacta antes del viaje."].filter(Boolean).join(" ") };
+    }
     res.json({ ok: true, source, points, puntos: points, ...route });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ ok: false, error: error.message });
@@ -540,5 +582,6 @@ router.get("/route", handleRoute);
 router.post("/route", handleRoute);
 router.get("/distance", handleRoute);
 router.initializeSchema = ensureSchema;
+router._test = { candidateCompatibleWithLocal, countryHintFromRaw };
 
 module.exports = router;

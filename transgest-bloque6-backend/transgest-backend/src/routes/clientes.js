@@ -920,7 +920,7 @@ router.post("/", GERENTE_O_CONTABLE,
       direccion: direccion || null,
       cp: codigo_postal || cp || null,
       ciudad: ciudad || null,
-      pais: pais || "EspaÃ±a",
+      pais: pais || "España",
       email: email || null,
       contacto: contacto || null,
       telefono: telefono || null,
@@ -1124,55 +1124,47 @@ router.post("/:id/rutas", invalidateCache("rutas", "clientes"), async (req,res) 
       return res.status(404).json({ error: "Cliente no encontrado" });
     }
     if (!origen || !destino) return res.status(400).json({error:"Faltan origen y destino"});
-    // Crear o actualizar la ruta general, reutilizando rutas globales o ya vinculadas al cliente.
-    const { rows: existing } = await db.query(
-      `SELECT r.id
-       FROM rutas r
-       LEFT JOIN ruta_precios_cliente rpc
-         ON rpc.ruta_id = r.id
-        AND rpc.cliente_id = $3
-       WHERE LOWER(TRIM(r.origen))=LOWER(TRIM($1))
-         AND LOWER(TRIM(r.destino))=LOWER(TRIM($2))
-         AND (r.cliente_id=$3 OR rpc.cliente_id=$3 OR r.cliente_id IS NULL)
-         AND COALESCE(r.tipo_vehiculo,'cualquiera')=$4
-         AND COALESCE(r.activa,true)=true
-         AND (r.empresa_id=$5 OR r.empresa_id IS NULL)
-       ORDER BY CASE WHEN r.cliente_id=$3 OR rpc.cliente_id=$3 THEN 0 ELSE 1 END
-       LIMIT 1`,
-      [origen, destino, req.params.id, tipo_vehiculo || "cualquiera", empresaId]
-    );
-    let rutaId;
-    if (existing[0]) {
-      rutaId = existing[0].id;
-    } else {
-      const { rows: nueva } = await db.query(
-        "INSERT INTO rutas (origen,destino,km,notas,empresa_id,cliente_id,tipo_vehiculo,tarifa_tipo,precio_base,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
-        [origen.trim(), destino.trim(), numericOrNull(km), notas||null, empresaId, req.params.id, tipo_vehiculo || "cualquiera", minima.tarifaTipo, numericOrNull(precio_base) || 0, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0]
+    const rutaId = await db.transaction(async client => {
+      const routeLock = [empresaId, req.params.id, tipo_vehiculo || "cualquiera", normalizeRouteHealthKey(origen), normalizeRouteHealthKey(destino)].join("|");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [routeLock]);
+      const { rows: existing } = await client.query(
+        `SELECT r.id FROM rutas r
+         LEFT JOIN ruta_precios_cliente rpc ON rpc.ruta_id=r.id AND rpc.cliente_id=$1
+         WHERE (r.cliente_id=$1 OR rpc.cliente_id=$1 OR r.cliente_id IS NULL)
+           AND COALESCE(r.tipo_vehiculo,'cualquiera')=$2
+           AND COALESCE(r.activa,true)=true AND (r.empresa_id=$3 OR r.empresa_id IS NULL)
+           AND tg_point_text(r.origen)=tg_point_text($4) AND tg_point_text(r.destino)=tg_point_text($5)
+         ORDER BY CASE WHEN r.cliente_id=$1 OR rpc.cliente_id=$1 THEN 0 ELSE 1 END, r.id
+         LIMIT 1`, [req.params.id, tipo_vehiculo || "cualquiera", empresaId, origen, destino]
       );
-      rutaId = nueva[0].id;
-    }
-    // Vincular precio al cliente. Se hace resiliente: si el ON CONFLICT falla
-    // (p. ej. falta la constraint unica en un esquema antiguo), se cae a un
-    // UPDATE + INSERT manual para no tirar todo el guardado de la ruta.
-    const precio = numericOrNull(precio_base);
-    const precioValues = [rutaId, req.params.id, precio || 0, minima.tarifaTipo, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0];
-    try {
-      await db.query(
-        "INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (ruta_id,cliente_id) DO UPDATE SET precio=EXCLUDED.precio, tarifa_tipo=EXCLUDED.tarifa_tipo, minimo_facturable=EXCLUDED.minimo_facturable, minimo_unidades=EXCLUDED.minimo_unidades, recargo_combustible_pct=EXCLUDED.recargo_combustible_pct",
-        precioValues
-      );
-    } catch (errPrecio) {
-      const upd = await db.query(
-        "UPDATE ruta_precios_cliente SET precio=$3, tarifa_tipo=$4, minimo_facturable=$5, minimo_unidades=$6, recargo_combustible_pct=$7 WHERE ruta_id=$1 AND cliente_id=$2",
-        precioValues
-      );
-      if (!upd.rowCount) {
-        await db.query(
-          "INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-          precioValues
+      let id = existing[0]?.id;
+      if (!id) {
+        const { rows } = await client.query(
+          "INSERT INTO rutas (origen,destino,km,notas,empresa_id,cliente_id,tipo_vehiculo,tarifa_tipo,precio_base,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
+          [origen.trim(), destino.trim(), numericOrNull(km), notas||null, empresaId, req.params.id, tipo_vehiculo || "cualquiera", minima.tarifaTipo, numericOrNull(precio_base) || 0, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0]
+        );
+        id = rows[0].id;
+      }
+      const values = [id, req.params.id, numericOrNull(precio_base) || 0, minima.tarifaTipo, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0];
+      await client.query("SAVEPOINT precio_cliente");
+      try {
+        await client.query(
+          "INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (ruta_id,cliente_id) DO UPDATE SET precio=EXCLUDED.precio, tarifa_tipo=EXCLUDED.tarifa_tipo, minimo_facturable=EXCLUDED.minimo_facturable, minimo_unidades=EXCLUDED.minimo_unidades, recargo_combustible_pct=EXCLUDED.recargo_combustible_pct",
+          values
+        );
+      } catch (error) {
+        if (error.code !== "42P10") throw error;
+        await client.query("ROLLBACK TO SAVEPOINT precio_cliente");
+        const updated = await client.query(
+          "UPDATE ruta_precios_cliente SET precio=$3, tarifa_tipo=$4, minimo_facturable=$5, minimo_unidades=$6, recargo_combustible_pct=$7 WHERE ruta_id=$1 AND cliente_id=$2", values
+        );
+        if (!updated.rowCount) await client.query(
+          "INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7)", values
         );
       }
-    }
+      await client.query("RELEASE SAVEPOINT precio_cliente");
+      return id;
+    });
     res.status(201).json({ ruta_id: rutaId, ok: true });
   } catch(e) { res.status(500).json({error:e.message}); }
 });

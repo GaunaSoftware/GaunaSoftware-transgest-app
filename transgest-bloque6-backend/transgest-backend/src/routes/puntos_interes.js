@@ -84,36 +84,18 @@ function withComputedFields(row) {
   };
 }
 
-async function findExistingPoint({ empresa, clienteId, direccion, nombre, ciudad, provincia, direccionKey }) {
+async function findExistingPoint({ empresa, clienteId, direccion, ciudad, provincia, pais }) {
   const { rows } = await db.query(
-    `SELECT *
-       FROM puntos_interes
-      WHERE empresa_id=$1
-        AND cliente_id IS NOT DISTINCT FROM $2::uuid
-        AND activo=true
-      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
-      LIMIT 500`,
-    [empresa, clienteId]
+    `SELECT * FROM puntos_interes WHERE empresa_id=$1
+      AND cliente_id IS NOT DISTINCT FROM $2::uuid AND activo=true
+      AND tg_point_text(direccion)=tg_point_text($3)
+      AND tg_point_text(ciudad)=tg_point_text($4)
+      AND tg_point_text(provincia)=tg_point_text($5)
+      AND tg_point_text(COALESCE(NULLIF(trim(pais),''),'Espana'))=tg_point_text($6)
+      LIMIT 1`,
+    [empresa, clienteId, direccion, ciudad, provincia, pais || DEFAULT_COUNTRY]
   );
-  const wantedDireccionKey = direccionKey || foldPointKey(direccion);
-  const wantedNombreKey = foldPointKey(nombre);
-  const wantedCiudadKey = foldPointKey(ciudad);
-  const wantedProvinciaKey = foldPointKey(provincia);
-
-  return rows.find((row) => {
-    const rowDireccionKey = foldPointKey(row.direccion_key || row.direccion);
-    if (wantedDireccionKey && rowDireccionKey === wantedDireccionKey) return true;
-
-    const rowNombreKey = foldPointKey(row.nombre);
-    if (!wantedNombreKey || rowNombreKey !== wantedNombreKey) return false;
-
-    const rowCiudadKey = foldPointKey(row.ciudad);
-    const rowProvinciaKey = foldPointKey(row.provincia);
-    return (
-      (wantedCiudadKey && rowCiudadKey === wantedCiudadKey) ||
-      (wantedProvinciaKey && rowProvinciaKey === wantedProvinciaKey)
-    );
-  }) || null;
+  return rows[0] || null;
 }
 
 function isCountryOnly(value = "") {
@@ -174,7 +156,7 @@ async function normalizeLocationFields({
     if (inferred) {
       nextCiudad = nextCiudad || inferred.municipio;
       nextProvincia = nextProvincia || inferred.provincia;
-      if (!hasCoords) {
+      if (!hasCoords && !STREET_ADDRESS_RE.test(cleanDireccion)) {
         nextLat = inferred.lat;
         nextLng = inferred.lng;
         coordsSource = "local_dictionary";
@@ -197,7 +179,7 @@ async function normalizeLocationFields({
     lng: nextLng,
     googleMapsUrl,
     coords_source: coordsSource || (hasCoords ? "manual" : ""),
-    location_quality: hasFinalCoords ? "precisa" : "estructurada",
+    location_quality: coordsSource === "local_dictionary" ? "municipio" : hasFinalCoords ? "precisa" : "estructurada",
     normalized_query: [cleanDireccion, nextCiudad, nextProvincia, nextPais].filter(Boolean).join(", "),
   };
 }
@@ -206,14 +188,17 @@ router.get("/", async (req, res) => {
   const empresa = empresaId(req);
   if (!empresa) return res.status(401).json({ error: "Sin empresa_id" });
 
-  const { q, tipo, cliente_id } = req.query;
+  const { q, tipo } = req.query;
+  const esCliente = ["cliente", "cliente_portal"].includes(req.user?.rol);
+  const cliente_id = esCliente ? req.user.cliente_id : req.query.cliente_id;
+  if (esCliente && !cliente_id) return res.status(403).json({ error: "Usuario sin cliente asociado" });
   const includeGeneral = boolFromQuery(req.query.include_general ?? req.query.incluir_generales ?? req.query.generales);
   const params = [empresa];
   const where = ["empresa_id=$1", "activo=true"];
 
   if (q) {
     params.push(`%${String(q).trim().toLowerCase()}%`);
-    where.push(`(LOWER(nombre) LIKE $${params.length} OR LOWER(direccion) LIKE $${params.length} OR LOWER(COALESCE(ciudad,'')) LIKE $${params.length})`);
+    where.push(`(LOWER(nombre) LIKE $${params.length} OR LOWER(direccion) LIKE $${params.length} OR LOWER(COALESCE(ciudad,'')) LIKE $${params.length} OR LOWER(COALESCE(provincia,'')) LIKE $${params.length})`);
   }
   if (tipo && tipo !== "todos") {
     params.push(tipo);
@@ -245,6 +230,10 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     email, notas, metadata, google_maps_url, cliente_id,
   } = req.body || {};
   const clienteId = puntoGeneralFromBody(req.body) ? null : emptyToNull(cliente_id);
+  if (clienteId) {
+    const cliente = await db.query("SELECT id FROM clientes WHERE id=$1 AND empresa_id=$2", [clienteId, empresa]);
+    if (!cliente.rows[0]) return res.status(400).json({ error: "El cliente no pertenece a esta empresa" });
+  }
   const cleanNombre = cleanText(nombre);
   const cleanDireccion = cleanText(direccion);
   const direccionKey = foldPointKey(cleanDireccion);
@@ -277,6 +266,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     nombre: cleanNombre,
     ciudad: location.ciudad,
     provincia: location.provincia,
+    pais: location.pais,
     direccionKey,
   });
   if (already) return res.status(200).json(withComputedFields(already));
@@ -320,6 +310,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
     nombre: cleanNombre,
     ciudad: location.ciudad,
     provincia: location.provincia,
+    pais: location.pais,
     direccionKey,
   });
   if (existing) return res.status(200).json(withComputedFields(existing));
@@ -336,6 +327,10 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
     email, notas, metadata, google_maps_url, cliente_id,
   } = req.body || {};
   const clienteId = puntoGeneralFromBody(req.body) ? null : emptyToNull(cliente_id);
+  if (clienteId) {
+    const cliente = await db.query("SELECT id FROM clientes WHERE id=$1 AND empresa_id=$2", [clienteId, empresa]);
+    if (!cliente.rows[0]) return res.status(400).json({ error: "El cliente no pertenece a esta empresa" });
+  }
   const cleanNombre = cleanText(nombre);
   const cleanDireccion = cleanText(direccion);
   const direccionKey = foldPointKey(cleanDireccion);
@@ -368,10 +363,11 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
     nombre: cleanNombre,
     ciudad: location.ciudad,
     provincia: location.provincia,
+    pais: location.pais,
     direccionKey,
   });
   if (already && String(already.id) !== String(req.params.id)) {
-    return res.status(200).json(withComputedFields(already));
+    return res.status(409).json({ error: "Ya existe otro punto en esta ubicacion para el cliente.", punto_id: already.id });
   }
 
   const { rows } = await db.query(

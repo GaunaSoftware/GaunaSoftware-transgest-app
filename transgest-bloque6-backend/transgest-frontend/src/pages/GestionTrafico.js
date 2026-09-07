@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden } from "../services/api";
+import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
@@ -1396,20 +1396,12 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
     }
   }
 
-  async function calcKmOSRM(origen, destino) {
+  async function calcKmRutaCentralizada(origen, destino) {
     if (!origen?.trim() || !destino?.trim()) return null;
     try {
-      const geo = async place => {
-        const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place+", España")}&format=json&limit=1`);
-        const d = await r.json();
-        if (!d[0]) return null;
-        return [parseFloat(d[0].lon), parseFloat(d[0].lat)];
-      };
-      const [o, d] = await Promise.all([geo(origen), geo(destino)]);
-      if (!o || !d) return null;
-      const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${o[0]},${o[1]};${d[0]},${d[1]}?overview=false`);
-      const data = await r.json();
-      return data.code === "Ok" ? Math.round(data.routes[0].distance/1000) : null;
+      const data = await calcularDistanciaGeo(origen, destino);
+      const km = Number(data?.km || data?.distance_km || 0);
+      return Number.isFinite(km) && km > 0 ? Math.round(km) : null;
     } catch(e) { return null; }
   }
 
@@ -1906,7 +1898,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
               <input type="number" style={{...inp,flex:1}} value={form.km_ruta||form.km||""} onChange={e => setForm(p=>({...p, km_ruta:e.target.value, km:e.target.value}))} placeholder="0"/>
               {form.origen && form.destino && (
                 <button type="button" onClick={async()=>{
-                  const km = await calcKmOSRM(form.origen, form.destino);
+                  const km = await calcKmRutaCentralizada(form.origen, form.destino);
                   if(km) setForm(p=>({...p, km_ruta:km, km:km}));
                   else notify("No se pudo calcular. Introduce los km manualmente.", "warning");
                 }} style={{padding:"6px 10px",borderRadius:6,border:"1px solid var(--accent)",background:"transparent",color:"var(--accent)",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",fontWeight:700}}>

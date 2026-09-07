@@ -89,25 +89,28 @@ async function notificarUsuariosCliente({
   })));
 }
 
-async function listarNotificaciones(empresaId, usuarioId, { limit = 50, includeRead = false } = {}) {
+async function listarNotificaciones(empresaId, usuarioId, { limit = 50, includeRead = false, audience = "" } = {}) {
   await ensureNotificacionesSchema();
   const max = Math.min(Math.max(Number(limit) || 50, 1), 100);
   const showRead = includeRead === true || String(includeRead || "").toLowerCase() === "true";
+  const audienceKey = String(audience || "").trim().toLowerCase();
   const [items, count] = await Promise.all([
     db.query(
       `SELECT id, tipo, titulo, mensaje, data, leida, created_at, read_at
          FROM notificaciones_internas
         WHERE empresa_id=$1 AND usuario_id=$2
           AND ($4::boolean = true OR leida=false)
+          AND ($5::text = '' OR data->>'audiencia' = $5)
         ORDER BY created_at DESC
         LIMIT $3`,
-      [empresaId, usuarioId, max, showRead]
+      [empresaId, usuarioId, max, showRead, audienceKey]
     ),
     db.query(
       `SELECT COUNT(*)::int AS no_leidas
          FROM notificaciones_internas
-        WHERE empresa_id=$1 AND usuario_id=$2 AND leida=false`,
-      [empresaId, usuarioId]
+        WHERE empresa_id=$1 AND usuario_id=$2 AND leida=false
+          AND ($3::text = '' OR data->>'audiencia' = $3)`,
+      [empresaId, usuarioId, audienceKey]
     ),
   ]);
   return { data: items.rows, no_leidas: Number(count.rows[0]?.no_leidas || 0) };

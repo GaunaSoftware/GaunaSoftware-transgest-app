@@ -1,6 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const db = require("../services/db");
+const { fallbackPlaceForAddress } = require("../services/geoFallback");
 const {
   crearNotificacion,
   listarNotificaciones,
@@ -304,12 +305,12 @@ function routeMatchKey(value = "") {
 }
 
 function pointRouteCandidates(point = {}, fallback = "") {
+  point = point || {};
   const values = [
     fallback,
     point.nombre,
     point.direccion,
     point.ciudad,
-    point.provincia,
     [point.nombre, point.ciudad].filter(Boolean).join(" "),
     [point.direccion, point.ciudad].filter(Boolean).join(" "),
   ];
@@ -408,8 +409,12 @@ async function resolvePortalRutaTarifa(client, eid, clienteId, origen, destino, 
   );
   let best = null;
   for (const route of rows) {
-    const originScore = routeTextScore(route.origen, origenCandidates);
-    const destinationScore = routeTextScore(route.destino, destinoCandidates);
+    const originProvince = origenPoint?.provincia || fallbackPlaceForAddress(origen)?.provincia;
+    const destinationProvince = destinoPoint?.provincia || fallbackPlaceForAddress(destino)?.provincia;
+    const originScore = Math.max(routeTextScore(route.origen, origenCandidates),
+      originProvince && routeMatchKey(route.origen) === routeMatchKey(originProvince) ? 60 : 0);
+    const destinationScore = Math.max(routeTextScore(route.destino, destinoCandidates),
+      destinationProvince && routeMatchKey(route.destino) === routeMatchKey(destinationProvince) ? 60 : 0);
     if (originScore < 55 || destinationScore < 55) continue;
     const score = originScore + destinationScore - Number(route.prioridad || 0) * 8;
     if (!best || score > best.score) best = { ...route, score };
@@ -842,6 +847,7 @@ router.get("/notificaciones", requireCliente, asyncRoute(async (req, res) => {
   const result = await listarNotificaciones(empresaId(req), req.user.id, {
     limit: req.query.limit || 20,
     includeRead: req.query.include_read,
+    audience: "cliente",
   });
   res.json(result);
 }));
@@ -1568,12 +1574,13 @@ router.get("/puntos", requireCliente, asyncRoute(async (req, res) => {
             contacto_nombre,contacto_telefono,email,notas,cliente_id
        FROM puntos_interes
       WHERE empresa_id=$1 AND activo=true
-        AND cliente_id=$2
-      ORDER BY nombre ASC
+        AND (cliente_id=$2 OR cliente_id IS NULL)
+        AND $2::uuid IS NOT NULL
+      ORDER BY CASE WHEN cliente_id=$2 THEN 0 ELSE 1 END, nombre ASC
       LIMIT 250`,
     [empresaId(req), req.user.cliente_id]
   );
-  res.json(rows.map(row => ({ ...row, es_general: false })));
+  res.json(rows.map(row => ({ ...row, es_general: !row.cliente_id })));
 }));
 
 router.post("/puntos", requireCliente, asyncRoute(async (req, res) => {
@@ -1592,6 +1599,7 @@ router.post("/puntos", requireCliente, asyncRoute(async (req, res) => {
       (empresa_id,cliente_id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
        contacto_nombre,contacto_telefono,email,notas,metadata)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'{}'::jsonb)
+     ON CONFLICT DO NOTHING
      RETURNING id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
                contacto_nombre,contacto_telefono,email,notas,cliente_id`,
     [
@@ -1613,7 +1621,22 @@ router.post("/puntos", requireCliente, asyncRoute(async (req, res) => {
       body.notas || null,
     ]
   );
-  res.status(201).json({ ...rows[0], es_general: false });
+  if (rows[0]) return res.status(201).json({ ...rows[0], es_general: false });
+  const existing = await db.query(
+    `SELECT id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
+            contacto_nombre,contacto_telefono,email,notas,cliente_id
+       FROM puntos_interes
+      WHERE empresa_id=$1 AND cliente_id=$2 AND activo=true
+        AND tg_point_text(direccion)=tg_point_text($3)
+        AND tg_point_text(ciudad)=tg_point_text($4)
+        AND tg_point_text(provincia)=tg_point_text($5)
+        AND tg_point_text(COALESCE(NULLIF(trim(pais),''),'Espana'))=tg_point_text($6)
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+      LIMIT 1`,
+    [empresaId(req), req.user.cliente_id, direccion, body.ciudad || null, body.provincia || null, body.pais || "Espana"]
+  );
+  if (existing.rows[0]) return res.status(200).json({ ...existing.rows[0], es_general: false, duplicate: true });
+  res.status(409).json({ error: "Ya existe un punto similar para este cliente. Refresca los puntos y seleccionalo." });
 }));
 
 router.get("/solicitudes", requireCliente, asyncRoute(async (req, res) => {

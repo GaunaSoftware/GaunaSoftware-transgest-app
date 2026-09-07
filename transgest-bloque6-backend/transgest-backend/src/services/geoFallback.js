@@ -103,8 +103,14 @@ const INDEX = PLACES.flatMap(([municipio, provincia, pais, lat, lng, aliases = [
 function fallbackPlaceForAddress(value) {
   const text = foldGeoText(value);
   if (!text) return null;
+  for (const segment of String(value || '').split(/[,;]/)) {
+    const known = INDEX.find(item => item.alias === foldGeoText(segment));
+    if (known) return { ...known, label: [known.municipio, known.provincia, known.pais].join(', ') };
+    const exact = fallbackMunicipioExacto(segment);
+    if (exact) return exact;
+  }
   const place = INDEX.find(item => text === item.alias)
-    || INDEX.find(item => item.alias.length >= 4 && text.includes(item.alias));
+    || INDEX.find(item => item.alias.length >= 4 && (` ${text} `).includes(` ${item.alias} `));
   return place ? { ...place, label: [place.municipio, place.provincia, place.pais].filter(Boolean).join(", ") } : null;
 }
 

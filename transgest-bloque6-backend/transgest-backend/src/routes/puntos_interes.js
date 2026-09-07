@@ -5,11 +5,12 @@ const { fallbackPlaceForAddress } = require("../services/geoFallback");
 const { coordsFromText, isMapsUrl, resolveMapsCoords } = require("../services/mapsLink");
 const { resolveApiKey } = require("../services/apiKeys");
 const { googleGeocode } = require("../services/googleGeocode");
+const { coordinatesCompatible } = require("../services/geoCoordinateGuard");
 
 const router = express.Router();
 const PUEDE_EDITAR = requireRole("gerente", "trafico", "administrativo");
 const DEFAULT_COUNTRY = "España";
-const STREET_ADDRESS_RE = /\b(calle|c\/|avda|avenida|carretera|ctra|camino|poligono|pol\.|parcela|nave|autovia|autopista|plaza|paseo|ronda|km)\b/i;
+const STREET_ADDRESS_RE = /\b(calle|c\/|avda|avenida|carretera|ctra|crta|camino|poligono|pol\.|parcela|nave|autovia|autopista|plaza|paseo|ronda|km)\b/i;
 
 function empresaId(req) {
   return req.empresaId || req.user?.empresa_id;
@@ -68,8 +69,8 @@ function normalizeMetadata(metadata = {}, googleMapsUrl = null, location = {}) {
   const base = metadata && typeof metadata === "object" ? { ...metadata } : {};
   if (googleMapsUrl) base.google_maps_url = String(googleMapsUrl).trim();
   else delete base.google_maps_url;
-  if (location.lat !== null && location.lat !== undefined) base.lat = location.lat;
-  if (location.lng !== null && location.lng !== undefined) base.lng = location.lng;
+  base.lat = location.lat ?? null;
+  base.lng = location.lng ?? null;
   if (location.location_quality) base.location_quality = location.location_quality;
   if (location.coords_source) base.coords_source = location.coords_source;
   if (location.normalized_query) base.normalized_query = location.normalized_query;
@@ -132,15 +133,17 @@ async function normalizeLocationFields({
   let nextLat = numberOrNull(lat);
   let nextLng = numberOrNull(lng);
   let coordsSource = "";
+  const context = { ciudad: cleanCiudad, provincia: cleanProvincia, pais: nextPais };
+  if (!coordinatesCompatible({ lat: nextLat, lng: nextLng }, context)) nextLat = nextLng = null;
 
   const inlineCoords = coordsFromText(googleMapsUrl || "");
-  if (inlineCoords) {
+  if (inlineCoords && coordinatesCompatible(inlineCoords, context)) {
     nextLat = inlineCoords.lat;
     nextLng = inlineCoords.lng;
     coordsSource = "maps_inline";
   } else if (googleMapsUrl) {
     const resolvedCoords = await resolveMapsCoords(googleMapsUrl).catch(() => null);
-    if (resolvedCoords) {
+    if (resolvedCoords && coordinatesCompatible(resolvedCoords, context)) {
       nextLat = resolvedCoords.lat;
       nextLng = resolvedCoords.lng;
       coordsSource = "maps_shortlink";
@@ -157,7 +160,7 @@ async function normalizeLocationFields({
       if (key) {
         const q = [cleanDireccion, cleanCiudad, cleanProvincia, nextPais].filter(Boolean).join(", ");
         const place = await googleGeocode(key, q, { region: "es", language: "es" }).catch(() => null);
-        if (place && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+        if (place && coordinatesCompatible(place, context)) {
           nextLat = place.lat;
           nextLng = place.lng;
           coordsSource = "google";
@@ -177,7 +180,7 @@ async function normalizeLocationFields({
   }
 
   if ((!nextCiudad || !nextProvincia) && !addressNeedsContext && !isCountryOnly(cleanDireccion)) {
-    const inferred = fallbackPlaceForAddress([cleanDireccion, nextCiudad, nextProvincia, nextPais].filter(Boolean).join(", "));
+    const inferred = fallbackPlaceForAddress(nextCiudad || cleanDireccion);
     if (inferred) {
       nextCiudad = nextCiudad || inferred.municipio;
       nextProvincia = nextProvincia || inferred.provincia;
@@ -442,4 +445,5 @@ router.delete("/:id", PUEDE_EDITAR, async (req, res) => {
   res.json({ ok: true });
 });
 
+router._test = { normalizeLocationFields, normalizeMetadata };
 module.exports = router;

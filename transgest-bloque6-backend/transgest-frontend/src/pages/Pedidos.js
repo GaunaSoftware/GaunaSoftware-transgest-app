@@ -52,11 +52,12 @@ function withPedidoGeoDefaults(draft = {}) {
     ...draft,
     puntos_carga: puntosCarga.length ? puntosCarga : draft.puntos_carga,
     puntos_descarga: puntosDescarga.length ? puntosDescarga : draft.puntos_descarga,
-    // NOTA: no reconciliamos el texto plano origen/destino con la parada. La
-    // parada puede tener una ciudad mal geocodificada (p.ej. "Torrejon de Ardoz"
-    // -> Torrelavega) y no debe pisar lo que el usuario escribio.
-    origen: draft.origen,
-    destino: draft.destino,
+    // Recupera el nombre del punto vinculado solo si el extremo era su calle.
+    // Una poblacion inferida nunca sustituye al texto que escribio el usuario.
+    origen: origenPrimary.punto_interes_id && normalizePlaceText(draft.origen) === normalizePlaceText(origenPrimary.direccion)
+      ? (origenPrimary.cliente_nombre || origenPrimary.nombre || draft.origen) : draft.origen,
+    destino: destinoPrimary.punto_interes_id && normalizePlaceText(draft.destino) === normalizePlaceText(destinoPrimary.direccion)
+      ? (destinoPrimary.cliente_nombre || destinoPrimary.nombre || draft.destino) : draft.destino,
     origen_pais: origenPais,
     destino_pais: destinoPais,
     origen_provincia: stopRegion(origenPrimary, draft.origen_provincia || draft.provincia_origen || ""),
@@ -1228,6 +1229,7 @@ function normalizePesoKgInput(value) {
 
 function compactNumberInput(value) {
   if (value === null || value === undefined || value === "") return "";
+  if (typeof value === "string") return value;
   const n = parseLocaleNumber(value, NaN);
   if (!Number.isFinite(n)) return value;
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3)));
@@ -1531,9 +1533,7 @@ function buildMapQueryFromStop(stop = {}, label = "", fallbackCountry = "España
   const localidad = stop.ciudad || stop.poblacion || stop.localidad || stop.municipio || "";
   const provincia = stop.provincia || stop.region || stop.state || "";
   const pais = stop.pais || stop.country || fallbackCountry || "España";
-  const direccionEsSoloNombre = normalizePlaceText(direccion) && normalizePlaceText(direccion) === normalizePlaceText(label);
-
-  if (!direccionEsSoloNombre) pushUniqueMapPart(parts, direccion);
+  pushUniqueMapPart(parts, direccion);
   pushUniqueMapPart(parts, localidad);
   pushUniqueMapPart(parts, provincia);
   pushUniqueMapPart(parts, pais);
@@ -1608,9 +1608,9 @@ function coordsFromMapsUrl(value) {
     try { return decodeURIComponent(raw); } catch { return raw; }
   })();
   const patterns = [
+    /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/,
     /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
     /[?&](?:q|ll|query)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
-    /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/,
   ];
   for (const pattern of patterns) {
     const match = decoded.match(pattern);
@@ -1812,24 +1812,6 @@ function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos", in
       return true;
     })
     .sort((a, b) => sortPuntosByClienteScope(a, b, clienteId));
-}
-
-function puntoEndpointVariants(punto = {}) {
-  return [
-    punto.nombre,
-    punto.direccion,
-    direccionCompletaPunto(punto),
-    [punto.nombre, punto.ciudad].filter(Boolean).join(" "),
-    [punto.nombre, punto.provincia].filter(Boolean).join(" "),
-    [punto.direccion, punto.ciudad].filter(Boolean).join(" "),
-  ].map(normalizePlaceText).filter(Boolean);
-}
-
-function findPuntoInteresForTypedEndpoint(text, clienteId = "", tipo = "ambos", puntos = null) {
-  const needle = normalizePlaceText(text);
-  if (!needle) return null;
-  const lista = filterPuntosForPedido(Array.isArray(puntos) ? puntos : getPuntosInteres(), { clienteId, tipo });
-  return lista.find(p => puntoEndpointVariants(p).some(v => v === needle)) || null;
 }
 
 function getPuntosCargaCliente(clienteId, puntos = null) {
@@ -3574,17 +3556,26 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   useEffect(() => {
     setForm(p => inferPuntoGeoDraft(p));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const set = k => e => setForm(p => {
-    const next = {...p, [k]: e.target.value};
-    return next;
-  });
+  const set = k => e => {
+    geoRequestRef.current += 1;
+    const value = e.target.value;
+    setForm(p => {
+      const next = {...p, [k]: value};
+      if (["ciudad", "direccion", "provincia", "pais", "google_maps_url"].includes(k) && value !== p[k]) {
+        next.lat = "";
+        next.lng = "";
+        next.metadata = { ...p.metadata, lat: null, lng: null };
+      }
+      return next;
+    });
+  };
   const setGeneral = e => {
     const checked = e.target.checked;
     setForm(p => ({...p, punto_general: checked, cliente_id: checked ? "" : (initialPoint?.cliente_id || p.cliente_id || "")}));
   };
   const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"};
   const lbl = {display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4,marginTop:10};
-  const modalPais = canonicalCountry(form.pais || "España") || "España";
+  const modalPais = form.pais ?? "";
   const modalCountries = Array.from(new Set([...getEnabledEuropeCountries(), modalPais]));
   const modalRegions = getRegionsForCountry(modalPais);
   const modalCountryListId = `poi-countries-${form.id || "nuevo"}`;
@@ -3681,7 +3672,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
               list={modalCountryListId}
               style={inp}
               value={modalPais}
-              onChange={e=>setForm(p=>({...p,pais:e.target.value,provincia:""}))}
+              onChange={set("pais")}
               onKeyDown={e=>completeOnTab(e, modalCountries, modalPais, value=>setForm(p=>({...p,pais:value,provincia:""})))}
               placeholder="España"
             />
@@ -3999,7 +3990,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     const currentProvincia = stopRegion(stop);
     return {
       ...stop,
-      pais: stopCountryInputValue(stop, idx === 0 ? fallbackPais : "España") || canonicalCountry(inferred?.pais || "") || fallbackPais || "España",
+      pais: stopCountryInputValue(stop, idx === 0 ? fallbackPais : "España"),
       provincia: manualProvincia ? (stop.provincia ?? "") : (currentProvincia || inferred?.provincia || (idx === 0 ? fallbackProvincia : "")),
     };
   };
@@ -4215,7 +4206,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       const first = stopsToStore[0] || {};
       const updated = {...p, [key]: stopsToStore};
       if (tipo === "carga") {
-        updated.origen = stopAddress(first) || "";
+        updated.origen = first.cliente_nombre || first.nombre || stopAddress(first) || "";
         // La fecha/hora de la parada de carga se lleva al campo de arriba (junto
         // a Fecha pedido) automaticamente; si la parada no tiene, se conserva lo
         // que ya hubiera puesto el usuario arriba (no se borra).
@@ -4227,7 +4218,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
         // como manual para que la inferencia automatica no la vuelva a pisar.
         updated.origen_provincia_manual = !!first.provincia_manual;
       } else {
-        updated.destino = stopAddress(first) || "";
+        updated.destino = first.cliente_nombre || first.nombre || stopAddress(first) || "";
         updated.fecha_descarga = first.fecha || p.fecha_descarga || "";
         updated.hora_descarga = first.hora || p.hora_descarga || "";
         updated.destino_pais = stopCountryInputValue(first, p.destino_pais || "España");
@@ -6547,10 +6538,12 @@ function PedidoIncidenciaPanel({ pedido }) {
 function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   const isOrigen = side === "origen";
   const rawStop = stop || parseStops(isOrigen ? pedido.puntos_carga : pedido.puntos_descarga)[0] || {};
-  const initialLabel = rawStop.nombre || rawStop.name || rawStop.cliente_nombre || rawStop.direccion || pedido[side] || "";
   const tipo = isOrigen ? "carga" : "descarga";
-  const puntoGuardado = findPuntoInteresForStop(rawStop, initialLabel, pedido.cliente_id || "", tipo)
-    || findPuntoInteresForTypedEndpoint(initialLabel || pedido[side], pedido.cliente_id || "", tipo);
+  const pointId = rawStop.punto_interes_id || rawStop.punto_id || rawStop.point_id || rawStop.id_punto;
+  const puntoGuardado = pointId
+    ? filterPuntosForPedido(getPuntosInteres(), { clienteId: pedido.cliente_id || "", tipo, includeGenerales: true })
+      .find(point => String(point.id) === String(pointId))
+    : null;
   const puntoStop = puntoGuardado ? puntoToStop(puntoGuardado) : {};
   const googleMapsUrl = rawStop.google_maps_url || rawStop.googleMapsUrl || puntoStop.google_maps_url || "";
   const mapsCoords = coordsFromMapsUrl(googleMapsUrl);
@@ -6564,8 +6557,8 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
     provincia: rawStop.provincia || rawStop.region || puntoStop.provincia || "",
     pais: rawStop.pais || rawStop.country || puntoStop.pais || "",
   };
-  const lat = Number(sourceStop.lat ?? sourceStop.latitude ?? pedido[`${side}_lat`] ?? pedido[`${side}_latitude`]);
-  const lng = Number(sourceStop.lng ?? sourceStop.lon ?? sourceStop.longitude ?? pedido[`${side}_lng`] ?? pedido[`${side}_lon`] ?? pedido[`${side}_longitude`]);
+  const lat = mapCoordinate(sourceStop.lat ?? sourceStop.latitude ?? (idx === 0 ? pedido[`${side}_lat`] : null), -90, 90);
+  const lng = mapCoordinate(sourceStop.lng ?? sourceStop.longitude ?? (idx === 0 ? pedido[`${side}_lng`] : null), -180, 180);
   const label = sourceStop.nombre || sourceStop.name || sourceStop.cliente_nombre || sourceStop.direccion || pedido[side] || "";
   const provincia = sourceStop.provincia || pedido[`${side}_provincia`] || "";
   const pais = sourceStop.pais || pedido[`${side}_pais`] || "España";
@@ -6583,12 +6576,16 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
     ciudad: localidad,
     localidad,
   };
-  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng, label, hasGeo:true, ...pointDetails };
-  const geo = inferPlaceGeo(sourceStop, label, pedido[`${side}_provincia`], pedido[`${side}_pais`]);
-  if (geo) return { lat: geo.lat, lng: geo.lng, label: label || geo.municipio || `${side} ${idx + 1}`, hasGeo:true, ...pointDetails };
+  if (lat !== null && lng !== null) return { lat, lng, label, hasGeo:true, ...pointDetails };
   if (!query && !provincia) return null;
-  const fallbackLabel = [label, provincia, pais].filter(Boolean).join(", ");
+  const fallbackLabel = label || localidad;
   return fallbackLabel ? { lat:null, lng:null, label:fallbackLabel, hasGeo:false, ...pointDetails } : null;
+}
+
+function mapCoordinate(value, min, max) {
+  if (value == null || String(value).trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
 }
 
 function getPedidoVehiclePosition(pedido = {}) {
@@ -6599,9 +6596,9 @@ function getPedidoVehiclePosition(pedido = {}) {
     [pedido.vehiculo_latitud, pedido.vehiculo_longitud],
   ];
   for (const [rawLat, rawLng] of candidates) {
-    const lat = Number(rawLat);
-    const lng = Number(rawLng);
-    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    const lat = mapCoordinate(rawLat, -90, 90);
+    const lng = mapCoordinate(rawLng, -180, 180);
+    if (lat !== null && lng !== null) return { lat, lng };
   }
   const text = String(pedido.ultima_posicion || pedido.ubicacion_actual || "");
   const match = text.match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
@@ -7985,6 +7982,9 @@ const aplicarEndpointText = (key, tipo) => (e) => {
       // destino anterior): se re-geocodifica desde cero. Asi al pasar de
       // "Torrelavega" a "Torrejon de Ardoz" no queda marcado en Cantabria.
       const textoCambiado = normalizePlaceText(value) !== normalizePlaceText(primary?.direccion || "");
+      if (textoCambiado) {
+        for (const suffix of ["lat", "lng", "latitude", "longitude", "lon"]) base[`${key}_${suffix}`] = null;
+      }
       const geo = textoCambiado ? {} : (primary || {});
       const province = inferred?.provincia || geo.provincia || (textoCambiado ? "" : (p[regionKey] || ""));
       if (inferred?.provincia) base[regionKey] = inferred.provincia;
@@ -8003,6 +8003,9 @@ const aplicarEndpointText = (key, tipo) => (e) => {
         codigo_postal: geo.codigo_postal || "",
         cliente_nombre: geo.cliente_nombre || "",
         punto_interes_id: geo.punto_interes_id || null,
+        nombre: geo.nombre || "",
+        name: geo.name || "",
+        punto_id: geo.punto_id || null,
         google_maps_url: geo.google_maps_url || "",
         lat: inferred?.lat ?? (geo.lat ?? null),
         lng: inferred?.lng ?? (geo.lng ?? null),
@@ -8024,15 +8027,6 @@ function isSimpleMunicipalityInput(value = "") {
 async function resolverEndpointEnFormulario(key, tipo, rawValue = null) {
   const value = String(rawValue != null ? rawValue : (form[key] || "")).trim();
   if (value.length < 2) return;
-  const suggestions = tipo === "carga" ? puntosCargaSugeridosModal : puntosDescargaSugeridosModal;
-  const punto = findPuntoInteresForTypedEndpoint(value, form.cliente_id || "", tipo, suggestions);
-  if (punto) {
-    setForm(current => {
-      if (normalizePlaceText(current[key]) !== normalizePlaceText(value)) return current;
-      return tipo === "carga" ? applyPuntoCargaToDraft(current, punto) : applyPuntoDescargaToDraft(current, punto);
-    });
-    return;
-  }
   const regionKey = tipo === "carga" ? "origen_provincia" : "destino_provincia";
   const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
   const stopsKey = tipo === "carga" ? "puntos_carga" : "puntos_descarga";
@@ -8042,7 +8036,7 @@ async function resolverEndpointEnFormulario(key, tipo, rawValue = null) {
       if (normalizePlaceText(current[key]) !== normalizePlaceText(value)) return current;
       const { primary, extras } = splitPrimaryAndAdditionalStops(current[stopsKey], current[key] || "");
       const pais = canonicalCountry(localGeo.pais || current[countryKey] || "España") || current[countryKey] || "España";
-      const canonicalEndpoint = String(localGeo.municipio || value).toUpperCase();
+      const canonicalEndpoint = value;
       return {
         ...current,
         [key]: canonicalEndpoint,
@@ -8068,14 +8062,12 @@ async function resolverEndpointEnFormulario(key, tipo, rawValue = null) {
       country: form[countryKey] || "España",
       region: form[regionKey] || "",
     });
-    if (!Number.isFinite(Number(geo?.lat)) || !Number.isFinite(Number(geo?.lng))) return;
+    if (geo?.lat == null || geo?.lng == null || !Number.isFinite(Number(geo.lat)) || !Number.isFinite(Number(geo.lng))) return;
     setForm(current => {
       if (normalizePlaceText(current[key]) !== normalizePlaceText(value)) return current;
       const { primary, extras } = splitPrimaryAndAdditionalStops(current[stopsKey], current[key] || "");
       const pais = canonicalCountry(geo.pais || current[countryKey] || "España") || geo.pais || current[countryKey] || "España";
-      const canonicalEndpoint = isSimpleMunicipalityInput(value) && geo.municipio
-        ? String(geo.municipio).toUpperCase()
-        : value;
+      const canonicalEndpoint = value;
       return {
         ...current,
         [key]: canonicalEndpoint,
@@ -8869,6 +8861,7 @@ useEffect(() => {
               <div><label style={S.label}>Bultos / Palets</label><input type="text" inputMode="decimal" style={S.input} value={form.bultos||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,bultos:e.target.value})))}/></div>
               {/* Detalle de la carga: con esto el grupaje calcula la ocupacion
                   real del remolque (metros lineales, peso y palets). */}
+              {form.tipo_carga === "grupaje" && <>
               <div><label style={S.label}>Tipo de palet</label>
                 <select style={S.sel} value={form.palets_tipo||""} onChange={f("palets_tipo")}>
                   <option value="">Sin especificar</option>
@@ -8888,7 +8881,8 @@ useEffect(() => {
               <div><label style={S.label}>Largo carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_largo_m||""} onChange={f("carga_largo_m")} placeholder="Solo si no va paletizada"/></div>
               <div><label style={S.label}>Ancho carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_ancho_m||""} onChange={f("carga_ancho_m")}/></div>
               <div><label style={S.label}>Alto carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_alto_m||""} onChange={f("carga_alto_m")}/></div>
-              <div><label style={S.label}>Temperatura (C)</label><input type="text" inputMode="decimal" style={S.input} value={form.temperatura_c||""} onChange={f("temperatura_c")} placeholder="Ej: -18 (vacio = sin frio)"/></div>
+              </>}
+              <div><label style={S.label}>Temperatura (C)</label><input type="text" inputMode="decimal" style={S.input} value={form.temperatura_c??""} onChange={f("temperatura_c")} placeholder="Ej: -18 (vacio = sin frio)"/></div>
               <div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>
               <div><label style={S.label}>ML</label><input type="text" inputMode="decimal" style={S.input} value={form.metros_lineales||""} onChange={f("metros_lineales")} placeholder="Metros lineales"/></div>
             </div>

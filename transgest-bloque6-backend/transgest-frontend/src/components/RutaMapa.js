@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { calcularRutaGeo } from "../services/api";
+import { calcularRutaGeo, resolveGeoPlace } from "../services/api";
 import RouteMapCanvas from "./RouteMapCanvas";
 
 function safeCoordinate(value, min, max) {
@@ -88,7 +88,7 @@ function geometryFromRoute(route) {
 }
 
 function resolvedDisplayPoints(route, routePoints) {
-  const resolved = Array.isArray(route?.points) && route.points.length ? route.points : routePoints;
+  const resolved = Array.isArray(route?.points) ? route.points : [];
   return resolved.map((point, index) => ({
     ...(routePoints[index] || {}),
     ...(point || {}),
@@ -110,6 +110,7 @@ function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) 
   const pointKey = JSON.stringify(points.map((point, index) => normalizedPoint(point, index)));
   const routePoints = useMemo(() => JSON.parse(pointKey), [pointKey]);
   const routeReady = routePoints.length >= 2 && routePoints.every(isRoutePointReady);
+  const singleReady = routePoints.length === 1 && isRoutePointReady(routePoints[0]);
   const route = routeState.key === pointKey ? routeState.data : null;
   const loading = loadingKey === pointKey;
   const error = errorState.key === pointKey ? errorState.message : "";
@@ -120,7 +121,7 @@ function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) 
     let active = true;
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    if (!routeReady) {
+    if (!routeReady && !singleReady) {
       setLoadingKey("");
       setErrorState({ key: pointKey, message: "" });
       setRouteState(current => current.key === pointKey ? current : { key: pointKey, data: null });
@@ -131,7 +132,12 @@ function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) 
     forceRef.current = false;
     const timer = window.setTimeout(() => {
       setLoadingKey(pointKey);
-      calcularRutaGeo(routePoints, { force })
+      const point = routePoints[0];
+      const request = singleReady
+        ? resolveGeoPlace({ ...Object.fromEntries(Object.entries(point).filter(([, value]) => value != null && typeof value !== "object")), q: point.query, refresh: force ? "1" : "0" })
+          .then(data => ({ ok: data.ok, points: [{ ...point, ...data, label: point.label }], warning: data.provider === "local" ? "Ubicacion aproximada de la poblacion." : "" }))
+        : calcularRutaGeo(routePoints, { force });
+      request
         .then(data => {
           if (!active || requestIdRef.current !== requestId) return;
           if (!data?.ok) throw new Error(data?.error || "No se pudo calcular la ruta");
@@ -150,7 +156,7 @@ function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) 
       active = false;
       window.clearTimeout(timer);
     };
-  }, [pointKey, retry, routePoints, routeReady]);
+  }, [pointKey, retry, routePoints, routeReady, singleReady]);
 
   return (
     <div style={{ position:"relative", zIndex:0, isolation:"isolate", border:"1px solid var(--border2)", borderRadius:8, overflow:"hidden", background:"var(--bg3)" }}>
@@ -159,13 +165,13 @@ function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) 
         <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap", fontSize:11, color:"var(--text4)" }}>
           {loading && <strong style={{ color:"var(--accent)" }}>Calculando ruta...</strong>}
           {!routeReady && <span>Completa origen y destino para mostrar la ruta.</span>}
-          {!loading && route && <strong style={{ color:"var(--text)" }}>{providerLabel(route)}</strong>}
+          {!loading && route && routeReady && <strong style={{ color:"var(--text)" }}>{providerLabel(route)}</strong>}
           {Number(route?.km) > 0 && <span>{Number(route.km).toLocaleString("es-ES", { maximumFractionDigits:1 })} km</span>}
           {Number(route?.duration_min) > 0 && <span>{Math.floor(route.duration_min / 60)} h {route.duration_min % 60} min</span>}
           {route?.warning && <span style={{ color:"#b45309" }}>{route.warning}</span>}
           {error && <span role="alert" style={{ color:"#64748b" }}>{error}</span>}
         </div>
-        {(routeReady || error) && (
+        {(routeReady || singleReady || error) && (
           <button type="button" onClick={recalcular} disabled={loading} title="Recalcular sin cache" style={{ border:"1px solid var(--border2)", background:"var(--button-bg)", color:"var(--text)", borderRadius:7, padding:"6px 10px", fontWeight:800, cursor:"pointer" }}>
             {loading ? "Recalculando..." : "Recalcular"}
           </button>

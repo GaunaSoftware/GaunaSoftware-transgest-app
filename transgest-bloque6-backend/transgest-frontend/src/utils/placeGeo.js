@@ -113,24 +113,22 @@ const KNOWN_PLACES = {
 };
 
 export function inferPlaceGeo(...values) {
-  const keys = values
+  const texts = values
     .filter(Boolean)
     .flatMap(value => {
       if (typeof value === "object") {
-        return [value.nombre, value.name, value.direccion, value.address, value.municipio, value.city, value.ciudad]
-          .filter(Boolean)
-          .map(normalizePlaceKey);
+        return [value.municipio, value.city, value.ciudad, value.direccion, value.address, value.nombre, value.name].filter(Boolean);
       }
-      const key = normalizePlaceKey(value);
-      const compact = key.replace(/(^|_)s_l(_|$)/g, "_").replace(/(^|_)s_a(_|$)/g, "_");
-      return [key, compact];
-    })
-    .filter(Boolean);
-
-  for (const key of keys) {
-    if (KNOWN_PLACES[key]) return KNOWN_PLACES[key];
-    const match = Object.keys(KNOWN_PLACES).find(k => key.length >= 4 && (key.includes(k) || k.includes(key)));
-    if (match) return KNOWN_PLACES[match];
+      return [value];
+    });
+  for (const text of texts) {
+    // Solo nombres completos: "Aspe" no es "Raspeig", ni "Santa" Santa Marta.
+    for (const part of String(text).split(/[,;]/).map(s => s.trim()).filter(Boolean)) {
+      const known = KNOWN_PLACES[normalizePlaceKey(part)];
+      if (known) return known;
+      const provincia = municipiosProvincia[foldPlaceName(part)];
+      if (provincia) return { municipio: part, provincia, pais: "Espana", lat: null, lng: null };
+    }
   }
   return null;
 }

@@ -5,34 +5,34 @@
       "source": "/",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, max-age=0, must-revalidate" },
-        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-06-rutas-kpis" }
+        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-07-puntos-geocoding" }
       ]
     },
     {
       "source": "/index.html",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, max-age=0, must-revalidate" },
-        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-06-rutas-kpis" }
+        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-07-puntos-geocoding" }
       ]
     },
     {
       "source": "/sw.js",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, max-age=0, must-revalidate" },
-        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-06-rutas-kpis" }
+        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-07-puntos-geocoding" }
       ]
     },
     {
       "source": "/asset-manifest.json",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, max-age=0, must-revalidate" },
-        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-06-rutas-kpis" }
+        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-07-puntos-geocoding" }
       ]
     },
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-06-rutas-kpis" },
+        { "key": "X-TransGest-Frontend-Build", "value": "2026-09-07-puntos-geocoding" },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },

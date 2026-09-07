@@ -28,7 +28,7 @@ La copia local estaba atrasada respecto a `origin/main` (`ddd06e6`). Se integra 
 1. Frontend Vercel: raiz `transgest-bloque6-backend/transgest-frontend`, compilacion CRA y salida `build`.
 2. Backend: desplegar tambien `transgest-bloque6-backend/transgest-backend`; no basta con publicar Vercel. Ejecutar `npm run migrate` con copia de seguridad vigente y reiniciar el servicio.
 3. La migracion de puntos adquiere bloqueo de escritura mientras normaliza duplicados e instala el indice. Programarla teniendo en cuenta el volumen y actividad de la base.
-4. Verificar respuesta publica con cabecera `X-TransGest-Frontend-Build: 2026-09-06-rutas-kpis`, assets nuevos y CSP que permita MapTiler/OpenFreeMap y workers blob. No se eliminan atribuciones del proveedor.
+4. Verificar respuesta publica con cabecera `X-TransGest-Frontend-Build: 2026-09-07-puntos-geocoding`, assets nuevos y CSP que permita MapTiler/OpenFreeMap y workers blob. No se eliminan atribuciones del proveedor.
 5. Verificar salud de API, estado de migraciones, mapa con direcciones reales y acceso con perfiles reales.
 
 ## Pendiente de confirmar, no declarado resuelto
@@ -44,3 +44,16 @@ La copia local estaba atrasada respecto a `origin/main` (`ddd06e6`). Se integra 
 
 - https://maplibre.org/maplibre-gl-js/docs/API/classes/Map/
 - https://openfreemap.org/quick_start/
+
+## Correccion de ubicaciones y formulario
+
+- Consulta de solo lectura del pedido comunicado: tenia coordenadas de Madrid en una carga con ciudad Cojobar y provincia Burgos. No se modifico el pedido en produccion.
+- Inferencia local por nombres completos y localidad estructurada antes del nombre comercial. Aspe no coincide con Raspeig; Santa no coincide con Minera Santa Marta. No se aplica un punto guardado al salir del campo sin seleccionarlo.
+- Los enlaces cortos no extraen coordenadas del cuerpo HTML de Google, que puede contener un mapa por defecto segun la IP. El pin `!3d/!4d` tiene prioridad sobre el encuadre `@`. Sin pin verificable se usa geocodificacion estructurada.
+- Validacion geografica compartida para guardar puntos y resolver rutas: coordenadas vacias no son cero, se rechazan contradicciones graves con Espana/localidad/provincia, conservando Canarias y destinos extranjeros con pais explicito. Es una comprobacion de coherencia, no una certificacion de la entrada exacta de la instalacion.
+- El visor no dibuja puntos guardados sin resolverlos antes. Tambien resuelve una unica parada. Cache geografica v11 y recalculo sin cache.
+- Nombre del punto vinculado en el extremo del formulario; su calle, ciudad y provincia siguen separadas para calcular la ruta. Editar la parada conserva el nombre comercial.
+- Pais editable sin rellenarlo de nuevo en cada pulsacion. Minimo facturable y cantidad conservan la coma durante la edicion. Cambiar una direccion invalida sus coordenadas anteriores.
+- Tipo/cantidad de palets, apilabilidad y dimensiones detalladas solo en grupaje. Peso, bultos, volumen y ML permanecen como antes; temperatura visible tambien en carga completa, incluido cero.
+- Pruebas: `npm run geo:regression` incluye el caso simulado Cojobar/Madrid, Aspe, coordenadas vacias, enlaces cortos sin pin y limpieza de coordenadas contradictorias al guardar. Jest prueba coincidencias completas. La prueba de navegador incluye pais, coma decimal, grupaje y Aspe tras perder foco, ademas de las comprobaciones anteriores.
+- La prueba real con un geocodificador externo quedo bloqueada por revision de permisos: requiere autorizacion para enviar la direccion empresarial. No se declara validada la ubicacion real exacta ni reparado el registro historico.

@@ -5,9 +5,9 @@
 // hacia dominios de Google, nunca IPs ni otros hosts.
 
 const COORD_PATTERNS = [
-  /@(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/,
-  /[?&](?:q|query|ll|sll|daddr|destination|center|viewpoint)=(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/,
   /!3d(-?\d{1,3}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)/,
+  /[?&](?:q|query|daddr|destination)=(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/,
+  /@(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/,
   /\/(-?\d{1,2}\.\d{3,}),(-?\d{1,3}\.\d{3,})/,
   /geo:(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)/i,
   /^\s*(-?\d{1,3}(?:\.\d+)?),\s*(-?\d{1,3}(?:\.\d+)?)\s*$/,
@@ -32,35 +32,16 @@ function matchCoords(raw) {
 function coordsFromText(text) {
   const raw = String(text || "");
   if (!raw) return null;
-  const direct = matchCoords(raw);
-  if (direct) return direct;
   try {
     const decoded = decodeURIComponent(raw.replace(/\+/g, " "));
-    if (decoded !== raw) return matchCoords(decoded);
+    const parsed = matchCoords(decoded);
+    if (parsed) return parsed;
   } catch { /* URI mal formada: ignoramos */ }
-  return null;
+  return matchCoords(raw);
 }
 
 function isMapsUrl(url) {
   return /^https?:\/\/[^\s]*(google\.[a-z.]+\/maps|maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl|g\.co\/)/i.test(String(url || "").trim());
-}
-
-// Area de operacion realista de un transportista europeo: toda Europa (incl.
-// Escandinavia, Este y Turquia), Canarias, Islas y norte de Africa. Guarda de
-// seguridad SOLO para el scraping del cuerpo: Google devuelve un mapa por defecto
-// DISTINTO segun la IP del servidor (desde EE.UU. resolvia a Los Angeles), asi
-// que descartamos coordenadas de otro continente para no calcular km absurdos.
-// Un enlace legitimo de Francia/Alemania/Italia/etc. cae dentro y se acepta.
-// Configurable por si hiciera falta operar fuera (MAPS_AREA_BOX="latMin,latMax,lngMin,lngMax").
-const AREA_BOX = (() => {
-  const parts = String(process.env.MAPS_AREA_BOX || "20,64,-20,45").split(",").map(Number);
-  const [latMin, latMax, lngMin, lngMax] = parts.length === 4 && parts.every(Number.isFinite) ? parts : [20, 64, -20, 45];
-  return { latMin, latMax, lngMin, lngMax };
-})();
-function withinOperatingArea(lat, lng) {
-  return Number.isFinite(lat) && Number.isFinite(lng)
-    && lat >= AREA_BOX.latMin && lat <= AREA_BOX.latMax
-    && lng >= AREA_BOX.lngMin && lng <= AREA_BOX.lngMax;
 }
 
 // Anade contexto España (gl/hl) a una URL de Google Maps para que la resolucion
@@ -76,25 +57,6 @@ function withEsContext(u) {
   } catch {
     return u;
   }
-}
-
-// Extrae coords del CUERPO de una pagina de Google Maps. Prioriza el center= del
-// og:image (staticmap), que es el centro real del sitio, para no coger por error
-// una coordenada de encuadre/limite que tambien aparece en el HTML. Aplica la
-// guarda de area para no devolver un mapa por defecto de otra region.
-function coordsFromMapsBody(body) {
-  const b = String(body || "");
-  if (!b) return null;
-  const centerMatch = b.match(/[?&]center=(-?\d{1,3}(?:\.\d+)?)(?:,|%2C|%2c)(-?\d{1,3}(?:\.\d+)?)/);
-  if (centerMatch) {
-    const lat = Number(centerMatch[1]);
-    const lng = Number(centerMatch[2]);
-    if (withinOperatingArea(lat, lng) && !(lat === 0 && lng === 0)) return { lat, lng };
-  }
-  // Respaldo: URL canonica @lat,lng o el patron !3d!4d de los datos del sitio.
-  const fallback = matchCoords(b);
-  if (fallback && withinOperatingArea(fallback.lat, fallback.lng)) return fallback;
-  return null;
 }
 
 // Enlaces cortos que hay que expandir (no llevan coords inline).
@@ -135,17 +97,18 @@ async function expandForCoords(startUrl) {
       if (res.status >= 300 && res.status < 400 && loc) {
         let next;
         try { next = new URL(loc, current).toString(); } catch { return null; }
+        if (!hostAllowed(next)) return null;
         const inUrl = coordsFromText(next);
         if (inUrl) return inUrl;
-        if (!hostAllowed(next)) return null;
         current = next;
         continue;
       }
-      // Sin mas redirecciones: mira la URL final y, si hace falta, el body.
+      // El HTML puede contener el centro del mapa segun la IP, no el lugar.
+      // Solo aceptamos coordenadas del enlace; sin ellas se geocodifica el texto.
       const inFinal = coordsFromText(current);
       if (inFinal) return inFinal;
-      const body = (await res.text().catch(() => "")).slice(0, 300000);
-      return coordsFromMapsBody(body);
+      await res.body?.cancel();
+      return null;
     }
     return coordsFromText(current);
   } catch {

@@ -5,6 +5,7 @@ const { resolveApiKey, assertApiUsageAllowed, recordApiUsage } = require("../ser
 const { fallbackPlaceForAddress, fallbackMunicipioExacto } = require("../services/geoFallback");
 const { coordsFromText, resolveMapsCoords } = require("../services/mapsLink");
 const { googleGeocode } = require("../services/googleGeocode");
+const { coordinatesCompatible } = require("../services/geoCoordinateGuard");
 const {
   countryCodeFor,
   isCountryOnlyQuery,
@@ -18,7 +19,7 @@ const ROUTE_CACHE_DAYS = Math.max(1, Number(process.env.GEO_ROUTE_CACHE_DAYS || 
 const EXTERNAL_TIMEOUT_MS = Math.max(2500, Number(process.env.GEO_EXTERNAL_TIMEOUT_MS || 9000));
 const MAX_ROUTE_POINTS = 12;
 const DEFAULT_COUNTRY = "España";
-const PLACE_CACHE_VERSION = "v10";
+const PLACE_CACHE_VERSION = "v11";
 let schemaPromise = null;
 let lastNominatimAt = 0;
 let nominatimQueue = Promise.resolve();
@@ -314,29 +315,31 @@ async function cachePlace(empresaId, queryKey, q, country, region, resolved) {
 }
 
 async function resolvePlace({ empresaId, q, country = "", region = "", raw = {}, forceRefresh = false }) {
+  const cleanQuery = cleanText(q);
+  const regionHint = regionHintFromRaw(region, raw);
+  const countryHint = countryHintFromRaw(cleanQuery, country, regionHint, raw);
+  const request = parsePlaceRequest(cleanQuery, countryHint, regionHint);
+  request.locality = cleanText(raw.city || raw.ciudad || raw.municipio) || request.locality;
+  const context = { country: countryHint, region: regionHint, city: request.locality || (request.localityOnly ? cleanQuery : '') };
   // PRIORIDAD MAXIMA: el enlace de Google Maps (pin exacto). Si existe y da
   // coordenadas fiables, manda sobre las coordenadas guardadas y sobre el texto.
   // Asi un enlace correcto no queda anulado por unas coordenadas guardadas viejas.
   const mapsUrl = raw.google_maps_url || raw.maps_url || raw.googleMapsUrl || "";
   if (mapsUrl) {
     const linkCoords = await resolveMapsCoords(mapsUrl).catch(() => null);
-    if (linkCoords) {
+    if (linkCoords && coordinatesCompatible(linkCoords, context)) {
       return { provider: "coordinates", ...formatPlace({ ...raw, lat: linkCoords.lat, lng: linkCoords.lng, label: raw.label || q }) };
     }
   }
   // Coordenadas guardadas (o escritas dentro del texto).
   const direct = directCoordinates(raw);
-  if (direct) return { provider: "coordinates", ...formatPlace({ ...raw, ...direct, label: raw.label || q }) };
-  const cleanQuery = cleanText(q);
-  const regionHint = regionHintFromRaw(region, raw);
-  const countryHint = countryHintFromRaw(cleanQuery, country, regionHint, raw);
-  const request = parsePlaceRequest(cleanQuery, countryHint, regionHint);
+  if (direct && !forceRefresh && coordinatesCompatible(direct, context)) return { provider: "coordinates", ...formatPlace({ ...raw, ...direct, label: raw.label || q }) };
   const query = request.query;
   if (query.length < 2) throw Object.assign(new Error("Indica una poblacion o direccion"), { status: 400 });
   if (isCountryOnlyQuery(query, request.country)) {
     throw Object.assign(new Error("Indica una poblacion o direccion, no solo el pais"), { status: 400 });
   }
-  const queryKey = normalizeKey([PLACE_CACHE_VERSION, query, request.country, request.region].filter(Boolean).join("|"));
+  const queryKey = normalizeKey([PLACE_CACHE_VERSION, query, request.locality, request.country, request.region].filter(Boolean).join("|"));
   // Con forceRefresh (boton "Recalcular") saltamos la cache y re-geocodificamos,
   // reescribiendo el resultado guardado.
   if (!forceRefresh) {
@@ -347,7 +350,7 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {},
     if (cached.rows[0]?.result) {
       const cachedPlace = { ...formatPlace(cached.rows[0].result), provider: cached.rows[0].provider || "cache" };
       const validCached = selectBestPlaceCandidate(request, [cachedPlace]);
-      if (validCached) return validCached;
+      if (validCached && coordinatesCompatible(validCached, context)) return validCached;
     }
   }
 
@@ -375,6 +378,7 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {},
   if (resolved?.lat == null || resolved?.lng == null) {
     resolved = localResolved;
   }
+  if (resolved && !coordinatesCompatible(resolved, context)) resolved = null;
   if (resolved?.lat == null || resolved?.lng == null) {
     throw Object.assign(
       new Error(`No se pudo localizar con seguridad "${query}". Indica la provincia o selecciona un punto guardado.`),
@@ -537,7 +541,8 @@ async function handleResolve(req, res, next) {
     const q = cleanText(req.query.q);
     const country = cleanText(req.query.country || req.query.pais);
     const region = cleanText(req.query.region || req.query.provincia);
-    const result = await resolvePlace({ empresaId, q, country, region, raw: req.query });
+    const forceRefresh = ["1", "true"].includes(String(req.query.refresh || "").toLowerCase());
+    const result = await resolvePlace({ empresaId, q, country, region, raw: req.query, forceRefresh });
     res.json({ ok: true, source: result.provider === "local" ? "fallback" : "provider", ...result });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ ok: false, error: error.message });
@@ -601,6 +606,6 @@ router.get("/route", handleRoute);
 router.post("/route", handleRoute);
 router.get("/distance", handleRoute);
 router.initializeSchema = ensureSchema;
-router._test = { candidateCompatibleWithLocal, countryHintFromRaw };
+router._test = { candidateCompatibleWithLocal, countryHintFromRaw, resolvePlace, normalizeRoutePoint };
 
 module.exports = router;

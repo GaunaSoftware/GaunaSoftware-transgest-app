@@ -35,6 +35,7 @@ async function main() {
       else if (pathname==='/clientes') data=[client];
       else if (pathname==='/palets/movimientos') data=Array.from({length:30},(_,index)=>({id:`lote-${index}`,empresa_id:user.empresa_id,cliente_id:client.id,propietario_cliente_id:client.id,cliente_nombre:client.nombre,tipo:'entrega',cantidad:50,fecha:'2026-09-01',obra_referencia:`Obra QA ${index}`,pedido_ref:`Obra QA ${index}`,estado_salida:'confirmada'}));
       else if (pathname==='/puntos-interes') data=[{id:'55555555-5555-4555-8555-555555555555',empresa_id:user.empresa_id,cliente_id:client.id,nombre:'Punto QA',direccion:'Calle Malaga 1',ciudad:'San Vicente del Raspeig',provincia:'Alicante',pais:'España',tipo:'carga',lat:38.3964,lng:-0.5255}];
+      else if (pathname==='/geocoding/resolve') data={ok:true,provider:'local',municipio:'Aspe',provincia:'Alicante',pais:'Espana',lat:38.3486,lng:-0.7694};
       else if (pathname.includes('/geocoding/')) data={ok:true,provider:'osrm',km:71,duration_min:65,points:pedido.puntos_carga.concat(pedido.puntos_descarga),geometry:[[38.3964,-0.5255],[38.5,-0.2],[38.7149,0.0521]]};
       else if (pathname.includes('notificaciones')) data={data:[],no_leidas:0,items:[],resumen:{}};
       else if (pathname.includes('empresa') || pathname.includes('config')) data={id:user.empresa_id,nombre:'QA',cfg_alertas:[],plan:'enterprise',estado:'activa'};
@@ -96,6 +97,35 @@ async function main() {
     await address.fill('');
     assert.equal(await address.inputValue(),'');
     await address.fill('Calpe');
+    const minimum=modal.locator('label').filter({hasText:/^Minimo facturable/}).locator('..').locator('input').first();
+    await minimum.fill('');
+    await minimum.pressSequentially('12,5');
+    assert.equal(await minimum.inputValue(),'12,5');
+    assert.equal(await modal.getByText('Tipo de palet',{exact:true}).count(),0);
+    await modal.getByText('Temperatura (C)',{exact:true}).scrollIntoViewIfNeeded();
+    assert.equal(await modal.getByText('Temperatura (C)',{exact:true}).isVisible(),true);
+    await modal.locator('input[name="tipo_carga"][value="grupaje"]').check();
+    assert.equal(await modal.getByText('Tipo de palet',{exact:true}).isVisible(),true);
+    assert.equal(await modal.getByText('Largo carga (m)',{exact:true}).isVisible(),true);
+    await modal.locator('input[name="tipo_carga"][value="completa"]').check();
+    assert.equal(await modal.getByText('Largo carga (m)',{exact:true}).count(),0);
+    const origin=modal.locator('label').filter({hasText:/^Origen \(carga\)/i}).locator('..').locator('input').first();
+    await origin.fill('Aspe');
+    const resolvedAspe=page.waitForResponse(response=>response.url().includes('/geocoding/resolve'));
+    await origin.press('Tab');
+    await resolvedAspe;
+    assert.equal(await origin.inputValue(),'ASPE');
+    await modal.getByRole('button',{name:'Guardar punto',exact:true}).first().click();
+    const country=page.locator('input[list^="poi-countries-"]');
+    await country.fill('Espana');
+    await country.press('End');
+    await country.press('Backspace');
+    assert.equal(await country.inputValue(),'Espan');
+    await country.fill('');
+    assert.equal(await country.inputValue(),'');
+    await country.pressSequentially('Portugal');
+    assert.equal(await country.inputValue(),'Portugal');
+    await page.getByText('Guardar punto de interes',{exact:true}).locator('..').locator('..').getByRole('button',{name:'X',exact:true}).click();
     await page.setViewportSize({width:390,height:844});
     await address.scrollIntoViewIfNeeded();
     await page.screenshot({path:path.join(out,'pedido-mobile.png')});
@@ -120,7 +150,7 @@ async function main() {
     assert.ok(lotSize.height<300 && lotSize.scroll>lotSize.height,JSON.stringify(lotSize));
     await page.screenshot({path:path.join(out,'palets-mobile.png')});
     assert.ok(await palets.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
-    console.log('OK: modal desktop/mobile, cierre sin cambios, edicion continua y mapa MapLibre. Capturas: '+out);
+    console.log('OK: modal desktop/mobile, cierre sin cambios, edicion continua, pais, decimales con coma, grupaje y mapa MapLibre. Capturas: '+out);
   } catch(error) {
     if(page) { await page.screenshot({path:path.join(out,'failure.png')}); console.error((await page.locator('body').innerText()).slice(-5000)); }
     throw error;

@@ -75,7 +75,7 @@ function isStreetSegment(segment = "") {
 // no la calle. Convencion espanola: la poblacion/provincia va al final. Asi el
 // nombre de una calle (p.ej. "Calle Malaga") no secuestra el resultado hacia la
 // ciudad de Malaga. Devuelve "" si no hay un segmento de ciudad claro.
-function extractAddressLocality(query = "") {
+function extractAddressLocality(query = "", region = "") {
   const raw = String(query || "").trim();
   if (!raw) return "";
   const segments = raw.split(",").map(part => part.trim()).filter(Boolean);
@@ -97,6 +97,7 @@ function extractAddressLocality(query = "") {
     if (/^\d[\d\s]*$/.test(normalized)) continue; // solo numeros / codigo postal
     if (isStreetSegment(seg)) continue;
     if (countryCodeFor(normalized)) continue; // solo el pais
+    if (normalizeGeoText(region) === normalized && segments.length > 1) continue;
     return seg;
   }
   return "";
@@ -121,7 +122,7 @@ function parsePlaceRequest(q = "", country = "", region = "") {
     region: regionHint,
     localityOnly,
     // Ciudad extraida de la direccion (manda sobre el nombre de la calle al puntuar).
-    locality: extractAddressLocality(query),
+    locality: extractAddressLocality(query, regionHint),
   };
 }
 

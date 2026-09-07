@@ -3,6 +3,8 @@ const db = require("../services/db");
 const { requireRole } = require("../middleware/auth");
 const { fallbackPlaceForAddress } = require("../services/geoFallback");
 const { coordsFromText, isMapsUrl, resolveMapsCoords } = require("../services/mapsLink");
+const { resolveApiKey } = require("../services/apiKeys");
+const { googleGeocode } = require("../services/googleGeocode");
 
 const router = express.Router();
 const PUEDE_EDITAR = requireRole("gerente", "trafico", "administrativo");
@@ -78,6 +80,7 @@ function withComputedFields(row) {
   const metadata = row?.metadata && typeof row.metadata === "object" ? row.metadata : {};
   return {
     ...row,
+    clientes_ids: Array.isArray(row?.clientes_ids) ? row.clientes_ids.map(String) : [],
     google_maps_url: metadata.google_maps_url || "",
     es_general: !row?.cliente_id,
     punto_general: !row?.cliente_id,
@@ -114,6 +117,7 @@ async function normalizeLocationFields({
   lat,
   lng,
   google_maps_url,
+  empresaId = null,
 }) {
   const googleMapsUrl = cleanOptionalText(google_maps_url);
   if (googleMapsUrl && !isMapsUrl(googleMapsUrl) && !/^geo:/i.test(googleMapsUrl) && !coordsFromText(googleMapsUrl)) {
@@ -141,6 +145,27 @@ async function normalizeLocationFields({
       nextLng = resolvedCoords.lng;
       coordsSource = "maps_shortlink";
     }
+  }
+
+  // Sin coordenadas de enlace/manual: geocodificar con el proveedor (Google) para
+  // ubicar el punto de forma fiable, en vez de depender solo del diccionario
+  // local (que puede confundir p.ej. una calle homonima de otra provincia).
+  if (nextLat === null && nextLng === null && empresaId && (cleanDireccion || cleanCiudad)) {
+    try {
+      const resolved = await resolveApiKey(empresaId, "google").catch(() => null);
+      const key = resolved && resolved.key;
+      if (key) {
+        const q = [cleanDireccion, cleanCiudad, cleanProvincia, nextPais].filter(Boolean).join(", ");
+        const place = await googleGeocode(key, q, { region: "es", language: "es" }).catch(() => null);
+        if (place && Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+          nextLat = place.lat;
+          nextLng = place.lng;
+          coordsSource = "google";
+          if (!nextCiudad && place.municipio) nextCiudad = place.municipio;
+          if (!nextProvincia && place.provincia) nextProvincia = place.provincia;
+        }
+      }
+    } catch (_) { /* best-effort: si falla, se sigue con el diccionario local */ }
   }
 
   const hasCoords = nextLat !== null && nextLng !== null;
@@ -206,15 +231,16 @@ router.get("/", async (req, res) => {
   }
   if (cliente_id) {
     params.push(cliente_id);
-    where.push(includeGeneral ? `(cliente_id=$${params.length} OR cliente_id IS NULL)` : `cliente_id=$${params.length}`);
+    const own = `(cliente_id=$${params.length} OR $${params.length}=ANY(clientes_ids))`;
+    where.push(includeGeneral ? `(${own} OR cliente_id IS NULL)` : own);
   }
 
   const { rows } = await db.query(
     `SELECT *
        FROM puntos_interes
       WHERE ${where.join(" AND ")}
-      ORDER BY ${cliente_id && includeGeneral ? `CASE WHEN cliente_id=$${params.length} THEN 0 ELSE 1 END, ` : ""}nombre ASC
-      LIMIT 200`,
+      ORDER BY ${cliente_id && includeGeneral ? `CASE WHEN cliente_id=$${params.length} OR $${params.length}=ANY(clientes_ids) THEN 0 ELSE 1 END, ` : ""}nombre ASC
+      LIMIT 5000`,
     params
   );
   res.json(rows.map(withComputedFields));
@@ -254,6 +280,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
       lat,
       lng,
       google_maps_url,
+      empresaId: empresa,
     });
   } catch (err) {
     return res.status(err.status || 400).json({ error: err.message || "No se pudo validar la ubicacion del punto." });
@@ -351,6 +378,7 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
       lat,
       lng,
       google_maps_url,
+      empresaId: empresa,
     });
   } catch (err) {
     return res.status(err.status || 400).json({ error: err.message || "No se pudo validar la ubicacion del punto." });

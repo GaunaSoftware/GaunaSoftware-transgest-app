@@ -120,7 +120,7 @@ export default function BarcodeScanner({ open, title = "Escanear codigo", onDete
   }
 
   return (
-    <div className="tg-barcode-scanner" style={box} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="tg-barcode-scanner" style={box} onMouseDown={e=>e.target===e.currentTarget && onClose()}>
       <style>{`
         .tg-barcode-scanner, .tg-barcode-scanner * { box-sizing:border-box; }
         @media (max-width: 520px) {

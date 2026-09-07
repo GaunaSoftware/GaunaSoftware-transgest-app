@@ -1,3 +1,5 @@
+import municipiosProvincia from "../data/municipios_provincia.json";
+
 export function normalizePlaceKey(value = "") {
   return String(value)
     .normalize("NFD")
@@ -5,6 +7,36 @@ export function normalizePlaceKey(value = "") {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function foldPlaceName(value = "") {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Provincia de un lugar (municipio o direccion) usando el diccionario curado y,
+// si no, el mapa municipio->provincia completo (INE, ~9300 nombres/variantes).
+// Asi las tarifas por provincia casan aunque el municipio no este en el
+// diccionario pequeno (p.ej. Onda -> Castellon, Sagunto -> Valencia).
+export function provinciaDeLugar(text = "") {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  const known = inferPlaceGeo(raw);
+  if (known?.provincia) return known.provincia;
+  const folded = foldPlaceName(raw);
+  if (municipiosProvincia[folded]) return municipiosProvincia[folded];
+  // Direccion "Calle X, Municipio" o nombre bilingue "Valencia/Valencia": prueba
+  // cada tramo (separados por coma o barra), del final al principio.
+  const partes = raw.split(/[,/]/).map(s => foldPlaceName(s)).filter(Boolean);
+  for (let i = partes.length - 1; i >= 0; i -= 1) {
+    if (municipiosProvincia[partes[i]]) return municipiosProvincia[partes[i]];
+  }
+  return "";
 }
 
 const KNOWN_PLACES = {
@@ -77,6 +109,7 @@ const KNOWN_PLACES = {
   andorra_de_teruel: { municipio:"Andorra", provincia:"Teruel", pais:"Espana", lat:40.9766, lng:-0.4472 },
   lucena: { municipio:"Lucena", provincia:"Cordoba", pais:"Espana", lat:37.4088, lng:-4.4852 },
   torrelavit: { municipio:"Torrelavit", provincia:"Barcelona", pais:"Espana", lat:41.4460, lng:1.7290 },
+  villanueva_de_alcardete: { municipio:"Villanueva de Alcardete", provincia:"Toledo", pais:"Espana", lat:39.6316, lng:-3.0086 },
 };
 
 export function inferPlaceGeo(...values) {

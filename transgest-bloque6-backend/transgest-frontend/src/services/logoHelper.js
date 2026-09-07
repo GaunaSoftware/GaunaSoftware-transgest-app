@@ -1,4 +1,29 @@
 // ── Logo helper — prioriza cache viva de ventana y usa localStorage solo como rescate ──
+import { getLogo } from "./api";
+
+// Carga el logo de la empresa una sola vez y lo deja en window.__TMS_LOGO_CACHE,
+// para que cualquier impresion (orden de carga, factura, nomina...) lo tenga sin
+// necesidad de haber pasado antes por "Mi Empresa". Guardada: solo hace la
+// peticion una vez; si falla la red, permite reintento.
+let logoLoadPromise = null;
+export function ensureLogoCargado() {
+  if (typeof window !== "undefined" && window.__TMS_LOGO_CACHE && window.__TMS_LOGO_CACHE.b64) {
+    return Promise.resolve(window.__TMS_LOGO_CACHE);
+  }
+  if (logoLoadPromise) return logoLoadPromise;
+  logoLoadPromise = getLogo()
+    .then((d) => {
+      const cache = { b64: d?.logo_base64 || null, mime: d?.logo_mime || "image/png" };
+      if (typeof window !== "undefined") window.__TMS_LOGO_CACHE = cache;
+      return cache;
+    })
+    .catch(() => {
+      logoLoadPromise = null; // permite reintentar si fue un fallo de red
+      return { b64: null, mime: "image/png" };
+    });
+  return logoLoadPromise;
+}
+
 export function getLogoBase64() {
   try {
     if (typeof window !== "undefined" && window.__TMS_LOGO_CACHE && typeof window.__TMS_LOGO_CACHE === "object") {

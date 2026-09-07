@@ -342,7 +342,7 @@ export default function ControlHorario() {
             <Mini label="Descanso" value={minToClock(miJornadaLive?.pausa_total_live_min)} tone={descansoExcedido ? "#ef4444" : "var(--text)"} />
           </div>
           {miJornadaLive?.abierto && (
-            <div style={{border:`1px solid ${descansoExcedido ? "rgba(239,68,68,.28)" : "rgba(20,184,166,.22)"}`,background:descansoExcedido ? "rgba(239,68,68,.08)" : "var(--accent-dim)",borderRadius:10,padding:"10px 12px",marginBottom:10,display:"grid",gridTemplateColumns:isMobile ? "1fr" : "1fr 1fr 1fr",gap:8}}>
+            <div style={{border:`1px solid ${descansoExcedido ? "rgba(239,68,68,.28)" : "var(--accent-a22)"}`,background:descansoExcedido ? "rgba(239,68,68,.08)" : "var(--accent-dim)",borderRadius:10,padding:"10px 12px",marginBottom:10,display:"grid",gridTemplateColumns:isMobile ? "1fr" : "1fr 1fr 1fr",gap:8}}>
               <Mini label="Tiempo fichado" value={minToClock(miJornadaLive.bruto_min)} tone="var(--accent-xl)" />
               <Mini label={miJornadaLive.en_pausa ? "Descanso actual" : "Trabajando ahora"} value={miJornadaLive.en_pausa ? minToClock(miJornadaLive.pausa_activa_min) : minToClock(miJornadaLive.trabajado_min)} tone={descansoExcedido ? "#ef4444" : "var(--green)"} />
               <Mini label="Descanso permitido" value={minToClock(jornadaCfg.pausa_min)} tone="var(--text3)" />

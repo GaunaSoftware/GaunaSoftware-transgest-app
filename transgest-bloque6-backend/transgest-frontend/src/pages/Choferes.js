@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { getChoferHistorialVehiculos, getTractoraPeriodos } from "../services/api";
 import { asignarRemolque } from "../services/api";
+import { formatDni, upperFromEvent } from "../utils/formatos";
 import { getChoferes, crearChofer, editarChofer, borrarChofer, getVehiculos, getNominasEmitidas, getTallerEstado, guardarTallerEstado, getChoferJornadas } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -593,7 +594,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
   const tractoras = vehiculos.filter(v => !esRemolque(v) && v.activo !== false && v.estado !== "baja");
   const remolques = vehiculos.filter(v => esRemolque(v) && v.activo !== false && v.estado !== "baja");
 
-  const f = k => e => setForm(p => ({ ...p, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value }));
+  const f = k => e => setForm(p => ({ ...p, [k]: e.target.type==="checkbox" ? e.target.checked : upperFromEvent(k, e) }));
   const onActivoChange = e => {
     const checked = e.target.checked;
     setForm(p => ({
@@ -674,7 +675,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
   ];
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:14,
                     width:"min(780px,98vw)", maxHeight:"97vh", display:"flex", flexDirection:"column" }}>
 
@@ -726,7 +727,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
                 </div>
                 <div>
                   <label style={S.lbl}>DNI / NIE</label>
-                  <input style={S.inp} value={form.dni||""} onChange={f("dni")} placeholder="12345678A"/>
+                  <input style={S.inp} value={form.dni||""} onChange={e=>setForm(p=>({...p,dni:formatDni(e.target.value)}))} placeholder="12345678-A"/>
                 </div>
                 <div>
                   <label style={S.lbl}>Sexo / género para informes retributivos</label>
@@ -842,7 +843,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
               <div style={S.grid2}>
                 <div>
                   <label style={S.lbl}>Número DNI / NIE</label>
-                  <input style={S.inp} value={form.dni||""} onChange={f("dni")} placeholder="12345678A"/>
+                  <input style={S.inp} value={form.dni||""} onChange={e=>setForm(p=>({...p,dni:formatDni(e.target.value)}))} placeholder="12345678-A"/>
                 </div>
                 <div>
                   <label style={S.lbl}>Vencimiento DNI</label>
@@ -941,8 +942,9 @@ function readChoferesFocus() {
 }
 
 export default function Choferes() {
-  const { puedeEditar }  = useAuth();
+  const { puedeEditar, user } = useAuth();
   const canEdit          = puedeEditar("choferes");
+  const esGerente        = user?.rol === "gerente";
   const [focusChofer]    = useState(() => readChoferesFocus());
   const [choferes,  setChoferes]  = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
@@ -1097,7 +1099,7 @@ export default function Choferes() {
                       <span style={{ ...S.badge, background: c.activo!==false ? "var(--green-dim)" : "rgba(239,68,68,.1)", color: c.activo!==false ? "var(--green)" : "var(--red)" }}>
                         {c.activo!==false ? "Activo" : "Baja"}
                       </span>
-                      {canEdit && (
+                      {esGerente && (
                         <button
                           type="button"
                           onClick={(event)=>eliminarChofer(c, event)}

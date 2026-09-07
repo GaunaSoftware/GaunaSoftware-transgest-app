@@ -51,8 +51,10 @@ async function configuredProvider(empresaId) {
 
 async function resolveRoutingApiKey(empresaId, provider) {
   if (!empresaId || !provider || provider === "local") return { key: "", source: "local" };
-  const companyConfig = await getCompanyApiConfig(empresaId, provider);
-  if (!companyConfig) return { key: "", source: "company_required" };
+  // Igual que el geocoding: usa la clave propia de la empresa si la tiene y, si no,
+  // cae a la clave GLOBAL (respetando use_global/activo). Antes exigia que la
+  // empresa tuviera su propia config y por eso ignoraba la clave global (una
+  // empresa sin config, como la demo, se quedaba en routing "local").
   return resolveApiKey(empresaId, provider);
 }
 

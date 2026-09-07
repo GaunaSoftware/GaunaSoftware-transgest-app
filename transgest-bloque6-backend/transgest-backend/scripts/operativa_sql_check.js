@@ -19,13 +19,17 @@ async function main() {
       created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`);
     const insert=(dir,city,owner=cliente)=>pg.query(`INSERT INTO puntos_interes (empresa_id,cliente_id,direccion,ciudad,provincia,pais)
       VALUES ($1,$2,$3,$4,'Alicante','España') RETURNING id`,[empresa,owner,dir,city]);
-    await insert('Calle Málaga 1','San Vicente del Raspeig');
-    await insert('CALLE MALAGA   1','San Vicente del Raspeig');
+    await pg.exec("ALTER TABLE puntos_interes ADD COLUMN clientes_ids UUID[] DEFAULT '{}'");
+    const duplicate1=await insert('Calle Málaga 1','San Vicente del Raspeig');
+    const duplicate2=await insert('CALLE MALAGA   1','San Vicente del Raspeig');
+    await pg.query('UPDATE puntos_interes SET clientes_ids=ARRAY[$1::uuid] WHERE id=$2',[cliente,duplicate1.rows[0].id]);
+    await pg.query('UPDATE puntos_interes SET clientes_ids=ARRAY[$1::uuid] WHERE id=$2',[cliente2,duplicate2.rows[0].id]);
     await insert('Calle Málaga 1','Benissa');
     await insert('Calle Málaga 1','San Vicente del Raspeig',cliente2);
     await insert('Calle Málaga 1','San Vicente del Raspeig',null);
     await ensurePointIdentitySchema(db);
     assert.equal((await pg.query('SELECT count(*)::int AS total FROM puntos_interes WHERE activo')).rows[0].total,4);
+    assert.equal((await pg.query('SELECT cardinality(clientes_ids) AS total FROM puntos_interes WHERE activo AND id=ANY($1::uuid[])',[[duplicate1.rows[0].id,duplicate2.rows[0].id]])).rows[0].total,2);
     await assert.rejects(insert('Calle Malaga 1','San Vicente del Raspeig'),error=>error.code==='23505');
     await insert('Calle Malaga 2','San Vicente del Raspeig');
     await ensurePointIdentitySchema(db);

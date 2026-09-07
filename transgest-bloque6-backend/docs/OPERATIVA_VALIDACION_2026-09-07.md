@@ -16,9 +16,11 @@
 
 ## Pruebas locales
 
+La copia local estaba atrasada respecto a `origin/main` (`ddd06e6`). Se integra ese estado antes de publicar, conservando sus grupajes, catalogo completo de municipios, fechas reales de entrega, peticiones completas para KPIs y el recalculo geográfico sin cache. Las asociaciones explicitas de puntos a varios clientes se conservan al normalizar duplicados.
+
 - Backend: `npm run check` (sintaxis, aislamiento por empresa, portal, geocodificacion, IA y regresiones operativas).
 - PostgreSQL embebido PGlite: indice unico contextual, migracion repetible, transaccion de ruta/precio y reintentos de cola. No conecta a datos de produccion.
-- Frontend: `npm run check` y `npm run build`. Hay advertencias de lint preexistentes en MiCuenta, Pedidos y SuperAdmin.
+- Frontend: `npm run check` y `npm run build`. La version integrada conserva advertencias de hooks en QuickAssignModal, GestionTrafico, MiCuenta y SuperAdmin.
 - `scripts/operativa_browser_check.cjs`: Edge headless, API simulada, pedido desktop y movil de 390px, seleccion de punto, cierre sin cambios, borrado continuo, mapa y paradas pulsables, 30 lotes de palets con desplazamiento acotado. Requiere Playwright instalado o PLAYWRIGHT_MODULE indicando su ruta.
 
 ## Despliegue

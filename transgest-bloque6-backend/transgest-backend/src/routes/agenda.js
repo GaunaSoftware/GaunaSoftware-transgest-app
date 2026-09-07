@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../services/db");
 const { authenticate, requireRole } = require("../middleware/auth");
+const { crearNotificacion } = require("../services/notificaciones");
 
 const router = express.Router();
 
@@ -140,13 +141,12 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
   if (!titulo) return res.status(400).json({ error: "Titulo obligatorio" });
   if (!fechaInicio) return res.status(400).json({ error: "Fecha de inicio obligatoria" });
 
-  const asignadoA = cleanText(body.asignado_a) || req.user.id;
-  const solicitadaAOtro = req.user?.rol !== "gerente" && String(asignadoA) !== String(req.user.id);
+  // Solo el gerente puede asignar tareas a otros usuarios; el resto solo puede
+  // crear tareas para si mismo (no se permite asignar "a la inversa").
+  const asignadoA = (req.user?.rol === "gerente")
+    ? (cleanText(body.asignado_a) || req.user.id)
+    : req.user.id;
   const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
-  if (solicitadaAOtro) {
-    metadata.solicitud_tarea = true;
-    metadata.solicitada_por = req.user.id;
-  }
   const { rows } = await db.query(
     `INSERT INTO agenda_eventos
       (empresa_id, creado_por, asignado_a, titulo, descripcion, fecha_inicio, fecha_fin,
@@ -165,14 +165,28 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
       !!body.todo_dia,
       normalizeType(body.tipo),
       normalizePriority(body.prioridad),
-      solicitadaAOtro ? "pendiente" : normalizeState(body.estado),
-      solicitadaAOtro ? "equipo" : normalizeVisibility(body.visibilidad),
+      normalizeState(body.estado),
+      normalizeVisibility(body.visibilidad),
       cleanText(body.pedido_id),
       cleanText(body.vehiculo_id),
       metadata,
     ]
   );
-  res.status(201).json(rows[0]);
+  const creada = rows[0];
+  // Aviso al usuario asignado (cuando el gerente le asigna una tarea): aparece en
+  // la campana de notificaciones internas, como el resto de avisos.
+  if (creada && String(asignadoA) !== String(req.user.id)) {
+    crearNotificacion({
+      empresa_id: empresaId(req),
+      usuario_id: asignadoA,
+      tipo: "agenda_tarea",
+      titulo: "Nueva tarea asignada",
+      mensaje: titulo,
+      data: { evento_id: creada.id, fecha_inicio: fechaInicio, tipo: normalizeType(body.tipo), dedupe_key: `agenda_asign:${creada.id}` },
+      created_by: req.user.id,
+    }).catch(() => {});
+  }
+  res.status(201).json(creada);
 });
 
 router.patch("/:id", PUEDE_EDITAR, async (req, res) => {
@@ -197,13 +211,13 @@ router.patch("/:id", PUEDE_EDITAR, async (req, res) => {
   if ("prioridad" in body) push("prioridad=?", normalizePriority(body.prioridad));
   if ("estado" in body) push("estado=?", normalizeState(body.estado));
   if ("visibilidad" in body) push("visibilidad=?", normalizeVisibility(body.visibilidad));
+  let notificarAsignadoA = null;
   if ("asignado_a" in body) {
     const nextAsignado = cleanText(body.asignado_a);
-    push("asignado_a=?::uuid", nextAsignado);
-    if (req.user?.rol !== "gerente" && nextAsignado && String(nextAsignado) !== String(req.user.id)) {
-      push("visibilidad=?", "equipo");
-      push("estado=?", "pendiente");
-      push("metadata=COALESCE(metadata,'{}'::jsonb) || ?::jsonb", { solicitud_tarea:true, solicitada_por:req.user.id });
+    // Solo el gerente puede reasignar a otro usuario; el resto solo a si mismo.
+    if (req.user?.rol === "gerente" || !nextAsignado || String(nextAsignado) === String(req.user.id)) {
+      push("asignado_a=?::uuid", nextAsignado);
+      if (nextAsignado && String(nextAsignado) !== String(req.user.id)) notificarAsignadoA = nextAsignado;
     }
   }
   if ("pedido_id" in body) push("pedido_id=?::uuid", cleanText(body.pedido_id));
@@ -219,7 +233,19 @@ router.patch("/:id", PUEDE_EDITAR, async (req, res) => {
       RETURNING *`,
     params
   );
-  res.json(rows[0]);
+  const actualizado = rows[0];
+  if (actualizado && notificarAsignadoA) {
+    crearNotificacion({
+      empresa_id: empresaId(req),
+      usuario_id: notificarAsignadoA,
+      tipo: "agenda_tarea",
+      titulo: "Nueva tarea asignada",
+      mensaje: actualizado.titulo || "Tarea",
+      data: { evento_id: actualizado.id, fecha_inicio: actualizado.fecha_inicio, dedupe_key: `agenda_asign:${actualizado.id}` },
+      created_by: req.user.id,
+    }).catch(() => {});
+  }
+  res.json(actualizado);
 });
 
 router.post("/:id/posponer", PUEDE_EDITAR, async (req, res) => {

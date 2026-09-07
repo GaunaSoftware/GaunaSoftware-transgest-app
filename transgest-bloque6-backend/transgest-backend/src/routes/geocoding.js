@@ -2,7 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 const db = require("../services/db");
 const { resolveApiKey, assertApiUsageAllowed, recordApiUsage } = require("../services/apiKeys");
-const { fallbackPlaceForAddress } = require("../services/geoFallback");
+const { fallbackPlaceForAddress, fallbackMunicipioExacto } = require("../services/geoFallback");
 const { coordsFromText, resolveMapsCoords } = require("../services/mapsLink");
 const { googleGeocode } = require("../services/googleGeocode");
 const {
@@ -18,7 +18,7 @@ const ROUTE_CACHE_DAYS = Math.max(1, Number(process.env.GEO_ROUTE_CACHE_DAYS || 
 const EXTERNAL_TIMEOUT_MS = Math.max(2500, Number(process.env.GEO_EXTERNAL_TIMEOUT_MS || 9000));
 const MAX_ROUTE_POINTS = 12;
 const DEFAULT_COUNTRY = "España";
-const PLACE_CACHE_VERSION = "v7";
+const PLACE_CACHE_VERSION = "v10";
 let schemaPromise = null;
 let lastNominatimAt = 0;
 let nominatimQueue = Promise.resolve();
@@ -313,13 +313,20 @@ async function cachePlace(empresaId, queryKey, q, country, region, resolved) {
   return result;
 }
 
-async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} }) {
+async function resolvePlace({ empresaId, q, country = "", region = "", raw = {}, forceRefresh = false }) {
+  // PRIORIDAD MAXIMA: el enlace de Google Maps (pin exacto). Si existe y da
+  // coordenadas fiables, manda sobre las coordenadas guardadas y sobre el texto.
+  // Asi un enlace correcto no queda anulado por unas coordenadas guardadas viejas.
+  const mapsUrl = raw.google_maps_url || raw.maps_url || raw.googleMapsUrl || "";
+  if (mapsUrl) {
+    const linkCoords = await resolveMapsCoords(mapsUrl).catch(() => null);
+    if (linkCoords) {
+      return { provider: "coordinates", ...formatPlace({ ...raw, lat: linkCoords.lat, lng: linkCoords.lng, label: raw.label || q }) };
+    }
+  }
+  // Coordenadas guardadas (o escritas dentro del texto).
   const direct = directCoordinates(raw);
   if (direct) return { provider: "coordinates", ...formatPlace({ ...raw, ...direct, label: raw.label || q }) };
-  // Enlace corto de Google Maps (maps.app.goo.gl): se expande por red y se usa
-  // el punto exacto, para no depender de geocodificar el texto.
-  const shortLink = await resolveMapsCoords(raw.google_maps_url || raw.maps_url || raw.googleMapsUrl || "");
-  if (shortLink) return { provider: "coordinates", ...formatPlace({ ...raw, lat: shortLink.lat, lng: shortLink.lng, label: raw.label || q }) };
   const cleanQuery = cleanText(q);
   const regionHint = regionHintFromRaw(region, raw);
   const countryHint = countryHintFromRaw(cleanQuery, country, regionHint, raw);
@@ -330,19 +337,27 @@ async function resolvePlace({ empresaId, q, country = "", region = "", raw = {} 
     throw Object.assign(new Error("Indica una poblacion o direccion, no solo el pais"), { status: 400 });
   }
   const queryKey = normalizeKey([PLACE_CACHE_VERSION, query, request.country, request.region].filter(Boolean).join("|"));
-  const cached = await db.query(
-    "SELECT result, provider FROM geo_place_cache WHERE empresa_id=$1 AND query_key=$2 LIMIT 1",
-    [empresaId, queryKey]
-  );
-  if (cached.rows[0]?.result) {
-    const cachedPlace = { ...formatPlace(cached.rows[0].result), provider: cached.rows[0].provider || "cache" };
-    const validCached = selectBestPlaceCandidate(request, [cachedPlace]);
-    if (validCached) return validCached;
+  // Con forceRefresh (boton "Recalcular") saltamos la cache y re-geocodificamos,
+  // reescribiendo el resultado guardado.
+  if (!forceRefresh) {
+    const cached = await db.query(
+      "SELECT result, provider FROM geo_place_cache WHERE empresa_id=$1 AND query_key=$2 LIMIT 1",
+      [empresaId, queryKey]
+    );
+    if (cached.rows[0]?.result) {
+      const cachedPlace = { ...formatPlace(cached.rows[0].result), provider: cached.rows[0].provider || "cache" };
+      const validCached = selectBestPlaceCandidate(request, [cachedPlace]);
+      if (validCached) return validCached;
+    }
   }
 
   // Google primero si hay clave configurada: fiable y sin depender de la IP.
   let resolved = await geocodeGoogle(empresaId, request).catch(() => null);
-  const fallback = fallbackPlaceForAddress(buildQuery(query, request.country, request.region));
+  // Diccionario COMPLETO de municipios por la ciudad extraida (o la consulta si es
+  // solo poblacion): exacto y fiable, sin depender de Nominatim. Tiene prioridad
+  // sobre el fallback curado por substring.
+  const muniExacto = fallbackMunicipioExacto(request.locality || (request.localityOnly ? query : ""), request.region);
+  const fallback = muniExacto || fallbackPlaceForAddress(buildQuery(query, request.country, request.region));
   const localResolved = fallback ? selectBestPlaceCandidate(request, [{ provider: "local", ...formatPlace(fallback) }]) : null;
   if (resolved && localResolved && !candidateCompatibleWithLocal(resolved, localResolved)) resolved = null;
   if (!resolved || resolved.lat == null || resolved.lng == null) {
@@ -535,6 +550,9 @@ async function handleRoute(req, res, next) {
     const empresaId = req.user?.empresa_id || req.empresaId;
     if (!empresaId) return res.status(401).json({ error: "Empresa no identificada" });
     await ensureSchema();
+    const forceRefresh = ["1", "true", "yes", "si"].includes(
+      String(req.query.refresh || req.query.force || req.body?.refresh || req.body?.force || "").toLowerCase()
+    );
     const rawPoints = parseRoutePoints(req);
     const points = [];
     for (const raw of rawPoints) {
@@ -544,6 +562,7 @@ async function handleRoute(req, res, next) {
         country: raw.country,
         region: raw.region,
         raw,
+        forceRefresh,
       });
       points.push({
         ...raw,
@@ -558,7 +577,7 @@ async function handleRoute(req, res, next) {
     }
 
     const key = routeKey(points);
-    let route = await cachedRoute(empresaId, key);
+    let route = forceRefresh ? null : await cachedRoute(empresaId, key);
     let source = "cache";
     if (!route) {
       source = "live";

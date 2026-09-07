@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo } from "../services/api";
+import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, confirmarGrupaje, separarGrupaje, getColaboradores, crearColaborador } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
+import RemolqueGrupaje from "../components/RemolqueGrupaje";
 import { inferPlaceGeo } from "../utils/placeGeo";
 
 // â”€â”€ Calculadora de tiempo de conducciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -193,7 +194,7 @@ function buscarTarifaRutaPedido(pedido, rutas = []) {
 const EC = {
   en_curso:   { label:"En Curso",   color:"#f97316", bg:"rgba(249,115,22,.18)",  border:"rgba(249,115,22,.5)"  },
   espera_carga: { label:"Espera carga", color:"#eab308", bg:"rgba(234,179,8,.16)", border:"rgba(234,179,8,.45)" },
-  cargando: { label:"Cargando", color:"#14b8a6", bg:"rgba(20,184,166,.16)", border:"rgba(20,184,166,.45)" },
+  cargando: { label:"Cargando", color:"var(--accent-l)", bg:"var(--accent-a16)", border:"var(--accent-a45)" },
   espera_descarga: { label:"Espera descarga", color:"#d946ef", bg:"rgba(217,70,239,.16)", border:"rgba(217,70,239,.45)" },
   descarga: { label:"En descarga", color:"#a78bfa", bg:"rgba(167,139,250,.16)", border:"rgba(167,139,250,.45)" },
   confirmado: { label:"Confirmado", color:"#3b82f6", bg:"rgba(59,130,246,.18)",  border:"rgba(59,130,246,.5)"  },
@@ -799,13 +800,13 @@ function printRoutePlan(plan) {
 <style>
 body{font-family:Segoe UI,Arial,sans-serif;background:#f1f5f9;color:#111827;margin:0;padding:24px}
 .sheet{max-width:780px;margin:0 auto;background:#fff;border:1px solid #dbe3ef;border-radius:16px;padding:28px;box-shadow:0 24px 70px rgba(15,23,42,.12)}
-.top{border-left:5px solid #0f766e;padding-left:14px;margin-bottom:22px}
+.top{border-left:5px solid var(--accent);padding-left:14px;margin-bottom:22px}
 h1{font-size:25px;margin:0;color:#0f172a}.muted{color:#64748b;font-size:12px;margin-top:4px}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
 .kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:11px}.lbl{font-size:10px;color:#64748b;text-transform:uppercase;font-weight:800;letter-spacing:.06em}.val{font-size:17px;font-weight:900;margin-top:4px}
 ol{padding-left:22px}li{margin-bottom:12px}li div{font-weight:800;margin-top:2px}small{display:block;color:#64748b;margin-top:2px}
 .box{border:1px solid #dbeafe;background:#eff6ff;border-radius:12px;padding:13px 16px;margin-top:16px}.warn{border-color:#fde68a;background:#fffbeb}
-a{color:#0f766e;word-break:break-all}@media print{@page{margin:1.05cm;size:A4}body{background:#fff;padding:0}.sheet{border:0;box-shadow:none;border-radius:0}}
+a{color:var(--accent);word-break:break-all}@media print{@page{margin:1.05cm;size:A4}body{background:#fff;padding:0}.sheet{border:0;box-shadow:none;border-radius:0}}
 </style></head><body><main class="sheet">
 <div class="top"><h1>Ruta recomendada para camion</h1><div class="muted">Pedido ${htmlSafe(plan.pedido.numero || "")} - ${htmlSafe(plan.modoLabel)}</div></div>
 <div class="grid">
@@ -950,7 +951,7 @@ function TripCard({
         </div>
       )}
       {String(pedido.tipo_viaje || "normal") !== "normal" && (
-        <div title={pedido.viaje_enlazado_id ? "Viaje enlazado ida-retorno" : "Tipo de viaje"} style={{display:"inline-flex",marginBottom:3,marginLeft:pedido.pendiente_completar ? 4 : 0,padding:"1px 5px",borderRadius:3,background:"rgba(20,184,166,.10)",border:"1px solid rgba(20,184,166,.28)",color:"var(--accent-xl)",fontSize:9,fontWeight:900}}>
+        <div title={pedido.viaje_enlazado_id ? "Viaje enlazado ida-retorno" : "Tipo de viaje"} style={{display:"inline-flex",marginBottom:3,marginLeft:pedido.pendiente_completar ? 4 : 0,padding:"1px 5px",borderRadius:3,background:"var(--accent-a10)",border:"1px solid var(--accent-a28)",color:"var(--accent-xl)",fontSize:9,fontWeight:900}}>
           {tipoViajeLabel(pedido.tipo_viaje)}
         </div>
       )}
@@ -1160,6 +1161,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
   const [enlazandoRetorno, setEnlazandoRetorno] = useState(false);
   const [linkRetornoId, setLinkRetornoId] = useState("");
   const [linkKmVacio, setLinkKmVacio] = useState("");
+  const [calculandoKmVacio, setCalculandoKmVacio] = useState(false);
   const origenRef = useRef(null);
   const destinoRef = useRef(null);
   const fechaCargaRef = useRef(null);
@@ -1258,6 +1260,36 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
       })
       .slice(0, 80);
   }, [pedidos, pedido, form.fecha_carga, form.vehiculo_id]);
+
+  // Al elegir el retorno: calcula automaticamente los km EN VACIO de posicionamiento
+  // (destino donde queda el chofer en la ida -> origen donde carga el retorno) y
+  // pregunta si se anaden. Ej.: termina en Madrid y el retorno carga en Villarrubia
+  // -> saca los km de Madrid a Villarrubia y ofrece anadirlos al enlace.
+  async function seleccionarRetornoYSugerirKmVacio(retornoId) {
+    setLinkRetornoId(retornoId);
+    if (!retornoId) return;
+    const retorno = (pedidos || []).find(p => String(p.id) === String(retornoId));
+    const desde = String(form.destino || pedido.destino || "").trim();  // donde queda el chofer al terminar la ida
+    const hasta = String(retorno?.origen || "").trim();                 // donde carga el retorno
+    if (!desde || !hasta) return;
+    if (desde.toUpperCase() === hasta.toUpperCase()) return;             // mismo sitio: sin vacio
+    setCalculandoKmVacio(true);
+    try {
+      const data = await calcularDistanciaGeo(desde, hasta);
+      const km = Number(data?.km);
+      if (data?.ok && Number.isFinite(km) && km > 0) {
+        const kmR = Math.round(km);
+        const ok = await confirmDialog({
+          title: "Km en vacio del enlace",
+          message: `El chofer termina en ${desde} y el retorno carga en ${hasta}. Hay unos ${kmR.toLocaleString("es-ES")} km en vacio de posicionamiento entre un viaje y otro. Anadirlos como km vacio del enlace?`,
+          confirmText: `Anadir ${kmR.toLocaleString("es-ES")} km`,
+          cancelText: "No anadir",
+        });
+        if (ok) setLinkKmVacio(String(kmR));
+      }
+    } catch { /* si el calculo falla, se puede escribir a mano */ }
+    finally { setCalculandoKmVacio(false); }
+  }
 
   async function enlazarRetornoSeleccionado() {
     if (!pedido?.id || !linkRetornoId) {
@@ -1513,7 +1545,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
     <div
       style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.82)", zIndex:300,
                display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      onMouseDown={e => e.target === e.currentTarget && onClose()}
     >
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:13,
                     padding:22, width:"min(560px,96vw)", maxHeight:"92vh", overflowY:"auto" }}>
@@ -1542,7 +1574,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
                   {isControlTowerFocus ? (focusContext.title || focusContext.action || "Aviso de Control Tower") : "Abierto desde Pedidos"}
                 </div>
                 {isControlTowerFocus && focusContext.action && (
-                  <div style={{display:"inline-flex",marginTop:5,padding:"2px 8px",borderRadius:20,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",fontSize:10,fontWeight:900}}>
+                  <div style={{display:"inline-flex",marginTop:5,padding:"2px 8px",borderRadius:20,border:"1px solid var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-xl)",fontSize:10,fontWeight:900}}>
                     Accion elegida: {focusContext.action}
                   </div>
                 )}
@@ -1633,7 +1665,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
         </div>
 
         {!finanzasModal.sinPrecio && (
-          <div style={{background:finanzasModal.margen < 0 ? "rgba(239,68,68,.08)" : "rgba(20,184,166,.08)",border:`1px solid ${finanzasModal.margen < 0 ? "rgba(239,68,68,.28)" : "rgba(20,184,166,.24)"}`,borderRadius:10,padding:"10px 12px",marginBottom:14}}>
+          <div style={{background:finanzasModal.margen < 0 ? "rgba(239,68,68,.08)" : "var(--accent-a08)",border:`1px solid ${finanzasModal.margen < 0 ? "rgba(239,68,68,.28)" : "var(--accent-a24)"}`,borderRadius:10,padding:"10px 12px",marginBottom:14}}>
             <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:finanzasModal.margen < 0 ? "#ef4444" : "var(--accent-xl)",marginBottom:8}}>Rentabilidad</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
               {[
@@ -1776,8 +1808,8 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
           </div>
         )}
         <div style={{
-          background:"rgba(20,184,166,.08)",
-          border:"1px solid rgba(20,184,166,.24)",
+          background:"var(--accent-a08)",
+          border:"1px solid var(--accent-a24)",
           borderRadius:8,
           padding:"10px 12px",
           marginBottom:12
@@ -1789,7 +1821,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
                 Enlaza una salida con su retorno para calcular km en vacio, km cargados y precio total.
               </div>
             </div>
-            <span style={{fontSize:10,fontWeight:900,color:"var(--accent-xl)",border:"1px solid rgba(20,184,166,.30)",borderRadius:20,padding:"3px 8px"}}>
+            <span style={{fontSize:10,fontWeight:900,color:"var(--accent-xl)",border:"1px solid var(--accent-a30)",borderRadius:20,padding:"3px 8px"}}>
               {tipoViajeLabel(form.tipo_viaje || pedido.tipo_viaje)}
             </span>
           </div>
@@ -1828,7 +1860,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
             <div style={{display:"grid",gridTemplateColumns:"1.5fr .7fr auto",gap:8,alignItems:"end"}}>
               <div>
                 <label style={{...lbl, marginTop:0}}>Retorno asociado</label>
-                <select style={inp} value={linkRetornoId} onChange={e => setLinkRetornoId(e.target.value)} disabled={bloquear || enlazandoRetorno}>
+                <select style={inp} value={linkRetornoId} onChange={e => seleccionarRetornoYSugerirKmVacio(e.target.value)} disabled={bloquear || enlazandoRetorno || calculandoKmVacio}>
                   <option value="">Seleccionar retorno...</option>
                   {candidatosRetorno.map(p => (
                     <option key={p.id} value={p.id}>
@@ -1840,9 +1872,10 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
               <div>
                 <label style={{...lbl, marginTop:0}}>Km vacio</label>
                 <input style={inp} type="number" min="0" step="0.1" value={linkKmVacio} onChange={e => setLinkKmVacio(e.target.value)} disabled={bloquear || enlazandoRetorno}/>
+                {calculandoKmVacio && <div style={{fontSize:10,color:"var(--text4)",marginTop:3}}>Calculando km en vacio...</div>}
               </div>
               <button type="button" onClick={enlazarRetornoSeleccionado} disabled={bloquear || enlazandoRetorno || !linkRetornoId}
-                style={{padding:"8px 12px",borderRadius:7,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.14)",color:"var(--accent-xl)",fontWeight:900,fontSize:11,cursor:bloquear||enlazandoRetorno||!linkRetornoId?"not-allowed":"pointer",opacity:(bloquear || enlazandoRetorno || !linkRetornoId) ? .55 : 1}}>
+                style={{padding:"8px 12px",borderRadius:7,border:"1px solid var(--accent-a30)",background:"var(--accent-a14)",color:"var(--accent-xl)",fontWeight:900,fontSize:11,cursor:bloquear||enlazandoRetorno||!linkRetornoId?"not-allowed":"pointer",opacity:(bloquear || enlazandoRetorno || !linkRetornoId) ? .55 : 1}}>
                 {enlazandoRetorno ? "Enlazando..." : "Enlazar"}
               </button>
             </div>
@@ -2028,7 +2061,13 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
     if (!selected?.id) return undefined;
     getRutaOptimizadaPedido(selected.id)
       .then(data => {
-        if (!alive || !data) return;
+        if (!alive) return;
+        if (!data) {
+          // No hay ruta guardada: se calcula sola al seleccionar el pedido para que
+          // el mapa real cargue sin tener que pulsar "Calcular" a mano.
+          if (Array.isArray(plan?.stops) && plan.stops.length >= 2) calcularConApi();
+          return;
+        }
         setApiPlan({
           ...data,
           pedido_id: selected.id,
@@ -2041,7 +2080,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
           truck: data.truck || {},
         });
       })
-      .catch(() => {});
+      .catch(() => { if (alive && Array.isArray(plan?.stops) && plan.stops.length >= 2) calcularConApi(); });
     return () => { alive = false; };
   }, [selected?.id]);
 
@@ -2102,13 +2141,14 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
     }
   }
 
-  async function calcularConApi() {
+  async function calcularConApi(prefOverride) {
     if (!plan) return;
+    const pref = typeof prefOverride === "string" ? prefOverride : preferencia;
     setApiLoading(true);
     try {
       const data = await optimizarRuta({
         pedido_id: selected.id,
-        preference: preferencia,
+        preference: pref,
         stops: plan.stops,
         truck: {
           height_m: Number(vehiculo?.altura_m || 4),
@@ -2167,7 +2207,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
             const stops = pedidoRouteStops(p);
             return (
               <button key={p.id} onClick={()=>setSelectedId(p.id)}
-                style={{...card,textAlign:"left",cursor:"pointer",borderColor:active?"var(--accent)":"var(--border)",background:active?"rgba(20,184,166,.08)":"var(--bg2)"}}>
+                style={{...card,textAlign:"left",cursor:"pointer",borderColor:active?"var(--accent)":"var(--border)",background:active?"var(--accent-a08)":"var(--bg2)"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
                   <div style={{fontWeight:900,color:"var(--text)",fontSize:13}}>{p.numero || "Pedido"}</div>
                   <div style={{fontSize:11,color:"var(--text5)"}}>{Number(p.km_ruta||p.km||0) ? `${Number(p.km_ruta||p.km).toLocaleString("es-ES")} km` : "km pendiente"}</div>
@@ -2217,7 +2257,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
               planUrl={planUrl}
               onPreferencia={next => {
                 setPreferencia(next);
-                setTimeout(() => notify(`Criterio cambiado a ${next}. Pulsa Calcular para guardar la alternativa.`, "success"), 50);
+                calcularConApi(next);
               }}
             />
 
@@ -2241,7 +2281,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {plan.stops.map((s, idx)=>(
                     <div key={`${s.address}-${idx}`} style={{display:"grid",gridTemplateColumns:"34px 1fr",gap:10,alignItems:"start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:10}}>
-                      <div style={{height:28,width:28,borderRadius:6,background:idx===0?"#0f766e":idx===plan.stops.length-1?"#f97316":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>{idx+1}</div>
+                      <div style={{height:28,width:28,borderRadius:6,background:idx===0?"var(--accent)":idx===plan.stops.length-1?"#f97316":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>{idx+1}</div>
                       <div>
                         <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase"}}>{s.type}</div>
                         <div style={{fontSize:13,color:"var(--text)",fontWeight:900,marginTop:2}}>{s.name || s.address}</div>
@@ -2263,7 +2303,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                 </div>
                 {puedeEnviarRuta && (
                   <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>
-                    <button style={{...btn,borderColor:"rgba(20,184,166,.35)",background:"rgba(20,184,166,.10)",color:"#14b8a6"}} onClick={()=>enviarRuta("chofer_app")} disabled={sendLoading==="chofer_app" || !selected?.chofer_id}>
+                    <button style={{...btn,borderColor:"var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-l)"}} onClick={()=>enviarRuta("chofer_app")} disabled={sendLoading==="chofer_app" || !selected?.chofer_id}>
                       {sendLoading==="chofer_app" ? "Enviando..." : selected?.chofer_id ? "Enviar a app del chofer" : "Asigna chofer para enviar a app"}
                     </button>
                     <button style={btn} onClick={()=>enviarRuta("chofer")} disabled={sendLoading==="chofer"}>{sendLoading==="chofer" ? "Enviando..." : "Enviar por email al chofer"}</button>
@@ -2288,7 +2328,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                 <div style={{background:"rgba(245,158,11,.1)",border:"1px solid rgba(245,158,11,.35)",borderRadius:8,padding:12,color:"var(--text3)",fontSize:12,lineHeight:1.55,marginBottom:10}}>
                   Revisar antes de salir: galibo, MMA, restricciones urbanas, ADR si aplica, accesos a muelle, horario de carga/descarga y zonas de espera.
                 </div>
-                <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.25)",borderRadius:8,padding:12}}>
+                <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a25)",borderRadius:8,padding:12}}>
                   <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",marginBottom:6}}>Recomendaciones</div>
                   <ul style={{margin:"0 0 0 18px",padding:0,color:"var(--text3)",fontSize:12,lineHeight:1.65}}>
                     {plan.recomendaciones.map((r,i)=><li key={i}>{r}</li>)}
@@ -2336,7 +2376,7 @@ function buildEmbeddedRouteMap(points, width = 720, height = 310) {
       const wrappedX = ((tx % maxTile) + maxTile) % maxTile;
       const url = maptilerKey
         ? `https://api.maptiler.com/maps/streets-v2/${zoom}/${wrappedX}/${ty}.png?key=${encodeURIComponent(maptilerKey)}`
-        : "";
+        : `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${ty}.png`;
       if (!url) continue;
       tiles.push({
         key: `${zoom}-${tx}-${ty}`,
@@ -2393,11 +2433,12 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
         <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
           <button onClick={()=>onPreferencia("rapida")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa rapida</button>
           <button onClick={()=>onPreferencia("eficiente")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa eficiente</button>
-          <button disabled={!hasCoords} style={{padding:"5px 9px",borderRadius:6,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.1)",color:"#14b8a6",fontSize:11,fontWeight:900,cursor:hasCoords?"default":"not-allowed",opacity:hasCoords?1:.55}}>Mapa real</button>
+          <button disabled={!hasCoords} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-l)",fontSize:11,fontWeight:900,cursor:hasCoords?"default":"not-allowed",opacity:hasCoords?1:.55}}>Mapa real</button>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:hasCoords ? "1fr 1fr" : "1fr",gap:10}}>
-        <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"radial-gradient(circle at 20% 20%, rgba(20,184,166,.14), transparent 26%), linear-gradient(135deg, rgba(15,23,42,.88), rgba(30,41,59,.64))"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
+        {!embeddedMap && (
+        <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"radial-gradient(circle at 20% 20%, var(--accent-a14), transparent 26%), linear-gradient(135deg, rgba(15,23,42,.88), rgba(30,41,59,.64))"}}>
           <svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",height:"100%",display:"block",minHeight:310}}>
             {[0,1,2,3,4].map(i => <line key={`v${i}`} x1={pad+i*(w-pad*2)/4} x2={pad+i*(w-pad*2)/4} y1={pad} y2={h-pad} stroke="rgba(148,163,184,.12)" strokeWidth="1"/>)}
             {[0,1,2,3].map(i => <line key={`h${i}`} y1={pad+i*(h-pad*2)/3} y2={pad+i*(h-pad*2)/3} x1={pad} x2={w-pad} stroke="rgba(148,163,184,.12)" strokeWidth="1"/>)}
@@ -2411,10 +2452,11 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
             ))}
           </svg>
         </div>
+        )}
         {embeddedMap && (
           <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"var(--bg3)"}}>
             {!embeddedMap.tiles.length && (
-              <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 22% 20%, rgba(20,184,166,.12), transparent 28%), linear-gradient(135deg, rgba(226,245,241,.9), rgba(239,246,255,.92))"}} />
+              <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 22% 20%, var(--accent-a12), transparent 28%), linear-gradient(135deg, rgba(226,245,241,.9), rgba(239,246,255,.92))"}} />
             )}
             {embeddedMap.tiles.map(tile => (
               <img key={tile.key} src={tile.url} alt="" draggable="false" style={{position:"absolute",left:tile.left,top:tile.top,width:256,height:256,userSelect:"none",pointerEvents:"none"}} />
@@ -2438,7 +2480,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
         {stops.map((s, idx)=>(
           <div key={`${s.address}-${idx}`} style={{display:"flex",alignItems:"center",gap:6,border:"1px solid var(--border)",borderRadius:7,padding:"5px 8px",fontSize:11,color:"var(--text4)",background:"var(--bg4)",maxWidth:260}}>
-            <span style={{width:18,height:18,borderRadius:5,background:idx===0?"#0f766e":idx===stops.length-1?"#f97316":"#3b82f6",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",flexShrink:0}}>{idx+1}</span>
+            <span style={{width:18,height:18,borderRadius:5,background:idx===0?"var(--accent)":idx===stops.length-1?"#f97316":"#3b82f6",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",flexShrink:0}}>{idx+1}</span>
             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.address}</span>
           </div>
         ))}
@@ -2458,6 +2500,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   const [pedidosGrupajeActivos, setPedidosGrupajeActivos] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
   const [choferes,  setChoferes]  = useState([]);
+  const [colaboradores, setColaboradores] = useState([]);
   const [rutas, setRutas] = useState([]);
   const [incidenciasViaje, setIncidenciasViaje] = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -2510,7 +2553,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       const hasta = semana[6].toISOString().slice(0,10);
       const desdeCarga = addDaysLocal(semana[0], -45).toISOString().slice(0,10);
       const hastaCarga = addDaysLocal(semana[6], 75).toISOString().slice(0,10);
-      const [p, pg, v, c, r, cfgEmpresa, notifs] = await Promise.all([
+      const [p, pg, v, c, r, cfgEmpresa, notifs, col] = await Promise.all([
         getPedidosResumenLista({ desde: desdeCarga, hasta: hastaCarga, limit: 1000 }, { timeoutMs: 45000, silentError: true }),
         getPedidosResumenLista({
           tipo_carga: "grupaje",
@@ -2523,6 +2566,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         getRutas().catch(() => []),
         getEmpresaConfig().catch(() => ({})),
         getNotificaciones(80).catch(() => ({ data: [] })),
+        getColaboradores().catch(() => []),
       ]);
       const pedidosData = Array.isArray(p?.data) ? p.data : Array.isArray(p) ? p : [];
       setPedidos(pedidosData);
@@ -2543,6 +2587,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       try { window.__TMS_CFG_TRAFICO = cfg; } catch {}
       setVehiculos(Array.isArray(v) ? v : []);
       setChoferes(Array.isArray(c) ? c : []);
+      setColaboradores(Array.isArray(col?.data) ? col.data : Array.isArray(col) ? col : []);
       setRutas(Array.isArray(r) ? r : []);
       const avisos = Array.isArray(notifs?.data) ? notifs.data : [];
       setIncidenciasViaje(avisos.filter(n =>
@@ -2609,8 +2654,9 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
           const fetched = await getPedido(focusPedido.pedido_id);
           if (cancelled || !fetched?.id) return;
           setPedidos(prev => prev.some(p => String(p.id) === String(fetched.id)) ? prev : [fetched, ...prev]);
+          // "Ver en trafico": solo resalta el pedido en el tablero; la edicion se
+          // hace en Pedidos (no se abre editor aqui para no duplicarlo ni rebotar).
           setFocusContext(focusPedido);
-          await abrirViaje(fetched);
           clearRuntimeFocus("tms_trafico_focus");
           setFocusPedido(null);
         } catch {}
@@ -2622,7 +2668,6 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     }
     const t = window.setTimeout(() => {
       setFocusContext(focusPedido);
-      abrirViaje(found).catch(() => {});
       clearRuntimeFocus("tms_trafico_focus");
       setFocusPedido(null);
     }, 180);
@@ -3234,19 +3279,17 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   }
 
   async function abrirViaje(pedido) {
-    let pedidoCompleto = pedido;
-    if (pedido?.id) {
-      try {
-        const fetched = await getPedido(pedido.id);
-        if (fetched?.id) pedidoCompleto = fetched;
-      } catch (e) {
-        notify("No se pudo recargar el viaje completo. Se abre la version disponible.", "warning");
-      }
-    }
-    setEditViaje({
-      ...pedidoCompleto,
-      ...(pedidoTieneFacturaFinal(pedidoCompleto) ? { _readonly: true } : {}),
+    if (!pedido?.id) return;
+    // El detalle y la edicion del pedido viven en Pedidos: la mesa de trafico no
+    // duplica el editor. Se abre el MISMO editor de Pedidos con foco en el pedido
+    // (y en la incidencia si la tiene). La mesa queda para asignar/organizar rapido.
+    setRuntimeFocus("tms_pedidos_focus", {
+      source: "gestion_trafico",
+      pedido_id: pedido.id,
+      numero: pedido.numero || "",
+      estado: pedido.estado || "",
     });
+    window.dispatchEvent(new CustomEvent("tms:navegar", { detail: "pedidos" }));
   }
 
   function syncPedidoLocal(pedidoId, patch = {}) {
@@ -4955,7 +4998,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                             const ok = await copyTextToClipboard(buildChoferCopyData(chofer, v));
                             notify(ok ? "Datos del chofer copiados." : "No se pudieron copiar los datos del chofer.", ok ? "success" : "error");
                           }}
-                          style={{marginLeft:"auto",padding:"2px 6px",borderRadius:5,border:"1px solid rgba(20,184,166,.25)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",fontSize:10,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
+                          style={{marginLeft:"auto",padding:"2px 6px",borderRadius:5,border:"1px solid var(--accent-a25)",background:"var(--accent-a10)",color:"var(--accent-xl)",fontSize:10,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
                         >
                           Copiar
                         </button>
@@ -5052,7 +5095,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                               padding:trips.length ? "4px 6px" : "9px 6px",
                               borderRadius:7,
                               border:"1px dashed var(--border2)",
-                              background:trips.length ? "rgba(20,184,166,.06)" : "transparent",
+                              background:trips.length ? "var(--accent-a06)" : "transparent",
                               color:trips.length ? "var(--accent-xl)" : "var(--text5)",
                               fontSize:trips.length ? 10 : 11,
                               fontWeight:800,
@@ -5124,7 +5167,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       {addTripCell && (
         <div
           style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.78)", zIndex:280, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
-          onClick={e => e.target === e.currentTarget && !addTripSaving && setAddTripCell(null)}
+          onMouseDown={e => e.target === e.currentTarget && !addTripSaving && setAddTripCell(null)}
         >
           <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:12, padding:18, width:"min(520px,96vw)", boxShadow:"0 24px 60px rgba(0,0,0,.35)" }}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"flex-start", marginBottom:12 }}>
@@ -5138,7 +5181,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
             </div>
 
             {viajesYaCargadosEnCelda.length > 0 && (
-              <div style={{ border:"1px solid rgba(20,184,166,.24)", background:"rgba(20,184,166,.07)", borderRadius:10, padding:10, marginBottom:12 }}>
+              <div style={{ border:"1px solid var(--accent-a24)", background:"var(--accent-a07)", borderRadius:10, padding:10, marginBottom:12 }}>
                 <div style={{ fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:".07em", color:"var(--accent-xl)", marginBottom:7 }}>
                   Viajes ya cargados en esta matricula
                 </div>
@@ -5148,8 +5191,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                       key={p.id}
                       type="button"
                       onClick={() => {
-                        setEditViaje(p);
-                        setFocusContext({ pedido_id:p.id, fecha_carga:fechaPedido(p), source:"add_trip_cell" });
+                        abrirViaje(p);
                         setAddTripCell(null);
                       }}
                       style={{
@@ -5193,8 +5235,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                       onClick={() => setAddTripExistingId(p.id)}
                       style={{
                         textAlign:"left",
-                        border:`1px solid ${String(addTripExistingId) === String(p.id) ? "rgba(20,184,166,.45)" : "var(--border2)"}`,
-                        background:String(addTripExistingId) === String(p.id) ? "rgba(20,184,166,.10)" : "var(--bg3)",
+                        border:`1px solid ${String(addTripExistingId) === String(p.id) ? "var(--accent-a45)" : "var(--border2)"}`,
+                        background:String(addTripExistingId) === String(p.id) ? "var(--accent-a10)" : "var(--bg3)",
                         borderRadius:8,
                         padding:"8px 10px",
                         cursor:"pointer",
@@ -5220,7 +5262,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
               <button type="button" onClick={() => setAddTripCell(null)} disabled={addTripSaving} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid var(--border2)", background:"var(--bg4)", color:"var(--text3)", fontWeight:800, fontSize:12, cursor:addTripSaving ? "not-allowed" : "pointer", fontFamily:"'DM Sans',sans-serif" }}>
                 Cancelar
               </button>
-              <button type="button" onClick={asignarViajeExistenteACelda} disabled={addTripSaving || !addTripExistingId} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid rgba(20,184,166,.35)", background:addTripExistingId ? "var(--accent)" : "var(--bg4)", color:addTripExistingId ? "#fff" : "var(--text5)", fontWeight:900, fontSize:12, cursor:addTripSaving || !addTripExistingId ? "not-allowed" : "pointer", fontFamily:"'DM Sans',sans-serif", opacity:addTripSaving ? .7 : 1 }}>
+              <button type="button" onClick={asignarViajeExistenteACelda} disabled={addTripSaving || !addTripExistingId} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid var(--accent-a35)", background:addTripExistingId ? "var(--accent)" : "var(--bg4)", color:addTripExistingId ? "#fff" : "var(--text5)", fontWeight:900, fontSize:12, cursor:addTripSaving || !addTripExistingId ? "not-allowed" : "pointer", fontFamily:"'DM Sans',sans-serif", opacity:addTripSaving ? .7 : 1 }}>
                 {addTripSaving ? "Anadiendo..." : "Anadir existente"}
               </button>
             </div>
@@ -5258,7 +5300,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         />
       )}
 
-      {vistaMain==="grupajes" && <CuadranteCascada pedidos={pedidosGrupaje} vehiculos={vehiculos} choferes={choferes} allPedidos={pedidos}/>}
+      {vistaMain==="grupajes" && <CuadranteCascada pedidos={pedidosGrupaje} vehiculos={vehiculos} choferes={choferes} colaboradores={colaboradores} allPedidos={pedidos} onReload={cargar}/>}
       {vistaMain==="optimizacion" && <OptimizacionRutas pedidos={pedidos} vehiculos={vehiculos} choferes={choferes} soloLecturaChofer={esModoChoferOptimizacion}/>}
     </div>
   );
@@ -5303,14 +5345,24 @@ function distKm([lat1,lon1], [lat2,lon2]) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-function sortParadasByProximity(pedidos) {
-  if (pedidos.length <= 1) return pedidos;
-  // Greedy nearest-neighbor: start from first carga, alternate carga/descarga by proximity
+function paradasDePedidos(pedidos = []) {
   const paradas = [];
-  pedidos.forEach(p => {
+  (Array.isArray(pedidos) ? pedidos : []).forEach(p => {
+    if (!p) return;
     paradas.push({ tipo:"carga",    ciudad:p.origen,  pedido:p, key:`c_${p.id}` });
     paradas.push({ tipo:"descarga", ciudad:p.destino, pedido:p, key:`d_${p.id}` });
   });
+  return paradas;
+}
+
+function sortParadasByProximity(pedidos) {
+  // Con 0-1 pedidos no hay nada que reordenar, pero hay que devolver PARADAS
+  // (carga+descarga), no los pedidos: el render espera parada.pedido. Devolver
+  // los pedidos aqui provocaba "Cannot read 'numero' of undefined" y dejaba la
+  // pestana de grupajes en blanco cuando un grupaje tenia un solo pedido.
+  if (!Array.isArray(pedidos) || pedidos.length <= 1) return paradasDePedidos(pedidos);
+  // Greedy nearest-neighbor: start from first carga, alternate carga/descarga by proximity
+  const paradas = paradasDePedidos(pedidos);
 
   // Sort: first all cargas by proximity to each other, then all descargas
   // Simple approach: sort cargas by proximity, keep carga-descarga pairs but order cargas by geography
@@ -5364,7 +5416,7 @@ function sortParadasByProximity(pedidos) {
   return sorted;
 }
 
-function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos }) {
+function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], allPedidos, onReload }) {
   // Group pedidos by grupaje_id
   const byGrupaje = useMemo(() => {
     const grouped = {};
@@ -5421,6 +5473,132 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos }) {
     setParadasMap(prev => ({ ...prev, [gid]: sortParadasByProximity(peds) }));
   }
 
+  // ── Combinar / separar / asignar grupajes desde la propia pestana ──
+  const [selGids, setSelGids] = useState([]);
+  const [trabajandoGrupaje, setTrabajandoGrupaje] = useState(false);
+  const [asignaGid, setAsignaGid] = useState("");   // grupo con el panel de asignacion abierto
+  const [asignaMat, setAsignaMat] = useState("");
+  const [asignaChofer, setAsignaChofer] = useState("");
+  const [asignaColab, setAsignaColab] = useState("");   // colaborador (subcontrata) elegido
+  const [creandoColab, setCreandoColab] = useState(false);
+  const [nuevoColabNombre, setNuevoColabNombre] = useState("");
+  const tractorasGrupaje = useMemo(() => (vehiculos || []).filter(v => {
+    const clase = String(v.clase || v.tipo || "").toLowerCase();
+    const mat = String(v.matricula || "").toUpperCase();
+    const esRemolque = clase.includes("remolque") || clase.includes("semirremolque") || clase.includes("dolly")
+      || vehiculos.some(t => t.remolque_id === v.id) || /^R[-_\s]/i.test(mat) || mat.endsWith("-R");
+    return !esRemolque;
+  }), [vehiculos]);
+
+  function toggleSelGid(gid) {
+    setSelGids(prev => prev.includes(gid) ? prev.filter(x => x !== gid) : [...prev, gid]);
+  }
+
+  // Pasa un grupaje de borrador a definitivo.
+  async function confirmarGrupajeBorrador(grupajeId, nPedidos) {
+    const ok = await confirmDialog({
+      title: "Confirmar grupaje",
+      message: `El grupaje de ${nPedidos} pedido(s) dejara de estar en borrador y pasara a ser definitivo.`,
+      confirmText: "Confirmar grupaje",
+    });
+    if (!ok) return;
+    setTrabajandoGrupaje(true);
+    try {
+      await confirmarGrupaje(grupajeId);
+      notify("Grupaje confirmado.", "success");
+      onReload?.();
+    } catch (e) { notify(e.message || "No se pudo confirmar el grupaje.", "error"); }
+    finally { setTrabajandoGrupaje(false); }
+  }
+
+  async function combinarSeleccionados(borrador = false) {
+    const ids = selGids.flatMap(gid => (byGrupaje[gid] || []).map(p => p.id));
+    if (ids.length < 2) { notify("Marca al menos 2 grupos para combinarlos en un grupaje.", "info"); return; }
+    const ok = await confirmDialog({
+      title: borrador ? "Guardar grupaje como borrador" : "Combinar en un grupaje",
+      message: borrador
+        ? `Se guardaran ${ids.length} pedidos como grupaje EN BORRADOR: quedan agrupados y visibles, pero marcados como no definitivos hasta que lo confirmes. Puedes deshacerlo separandolos.`
+        : `Se juntaran ${ids.length} pedidos en un mismo viaje (grupaje). Podras ordenar las descargas y asignarles la matricula.`,
+      confirmText: borrador ? "Guardar borrador" : "Combinar",
+    });
+    if (!ok) return;
+    setTrabajandoGrupaje(true);
+    try {
+      await combinarGrupaje(ids, borrador);
+      notify(borrador ? "Grupaje guardado como borrador." : "Grupaje creado.", "success");
+      setSelGids([]);
+      onReload?.();
+    } catch (e) { notify(e.message || "No se pudieron combinar.", "error"); }
+    finally { setTrabajandoGrupaje(false); }
+  }
+
+  async function separarGrupajeGid(gid) {
+    const peds = byGrupaje[gid] || [];
+    const ok = await confirmDialog({
+      title: "Deshacer grupaje",
+      message: `Se sacaran ${peds.length} pedido(s) del grupaje y volveran a estar sueltos (pendientes de agrupar).`,
+      confirmText: "Deshacer grupaje",
+      tone: "warning",
+    });
+    if (!ok) return;
+    setTrabajandoGrupaje(true);
+    try {
+      await separarGrupaje(peds.map(p => p.id));
+      notify("Grupaje deshecho.", "success");
+      onReload?.();
+    } catch (e) { notify(e.message || "No se pudo deshacer.", "error"); }
+    finally { setTrabajandoGrupaje(false); }
+  }
+
+  async function crearColaboradorGrupaje() {
+    const nombre = String(nuevoColabNombre || "").trim();
+    if (!nombre) { notify("Escribe el nombre del colaborador.", "info"); return; }
+    setTrabajandoGrupaje(true);
+    try {
+      const nuevo = await crearColaborador({
+        tipo: "empresa",
+        nombre,
+        notas: "Creado desde grupajes. Pendiente de completar datos fiscales, contacto, pago y documentacion.",
+        pendiente_revision: true,
+        origen_creacion: "grupajes",
+      });
+      const id = nuevo?.id || nuevo?.data?.id || "";
+      setCreandoColab(false); setNuevoColabNombre("");
+      if (id) setAsignaColab(id);
+      notify("Colaborador creado y seleccionado.", "success");
+      onReload?.();
+    } catch (e) { notify(e.message || "No se pudo crear el colaborador.", "error"); }
+    finally { setTrabajandoGrupaje(false); }
+  }
+
+  async function asignarMatriculaGrupaje(gid) {
+    const peds = byGrupaje[gid] || [];
+    const m = String(asignaMat || "").trim().toUpperCase();
+    let patch = null;
+    if (asignaColab) {
+      // Colaborador (subcontrata): se limpia flota/chofer propio; la matricula, si
+      // se pone, se guarda como matricula del colaborador.
+      patch = { colaborador_id: asignaColab, vehiculo_id: "", chofer_id: "" };
+      if (m) patch.matricula_colaborador = m;
+    } else {
+      const veh = m ? vehiculos.find(v => String(v.matricula || "").toUpperCase() === m) : null;
+      if (veh) patch = { vehiculo_id: veh.id, colaborador_id: "", matricula_manual: "", chofer_id: asignaChofer || veh.chofer_id || "" };
+      else if (m) patch = { matricula_manual: m, vehiculo_id: "", colaborador_id: "", chofer_id: asignaChofer || "" };
+      else if (asignaChofer) patch = { chofer_id: asignaChofer };
+    }
+    if (!patch) { notify("Escribe una matricula, elige un chofer o un colaborador.", "info"); return; }
+    setTrabajandoGrupaje(true);
+    try {
+      const fallos = [];
+      for (const p of peds) {
+        try { await editarPedido(p.id, patch); } catch (err) { fallos.push(p.numero || p.id); }
+      }
+      notify(fallos.length ? `Asignado a ${peds.length - fallos.length} de ${peds.length}.` : `Asignado al grupaje (${peds.length} pedido/s).`, fallos.length ? "warning" : "success");
+      setAsignaGid(""); setAsignaMat(""); setAsignaChofer(""); setAsignaColab(""); setCreandoColab(false); setNuevoColabNombre("");
+      onReload?.();
+    } finally { setTrabajandoGrupaje(false); }
+  }
+
   if (Object.keys(byGrupaje).length === 0) {
     return (
       <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,color:"var(--text5)"}}>
@@ -5433,15 +5611,55 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos }) {
 
   return (
     <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
-      <div style={{marginBottom:12,fontSize:12,color:"var(--text5)"}}>
-        Paradas ordenadas por proximidad geografica. Arrastra para reordenar.
+      <datalist id="tg-grupaje-tractoras">
+        {tractorasGrupaje.map(v => <option key={v.id} value={v.matricula} />)}
+      </datalist>
+      <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <div style={{fontSize:12,color:"var(--text5)"}}>
+          Marca los grupos con la casilla y pulsa "Combinar" para juntarlos en un viaje. Dentro de cada grupaje, arrastra las paradas para ordenarlas.
+        </div>
+        {selGids.length >= 2 && (
+          <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button type="button" onClick={()=>combinarSeleccionados(true)} disabled={trabajandoGrupaje}
+              title="Queda agrupado y guardado, pero marcado como no definitivo hasta que lo confirmes"
+              style={{padding:"6px 12px",borderRadius:7,border:"1px dashed rgba(245,158,11,.55)",background:"rgba(245,158,11,.12)",color:"#b45309",fontWeight:900,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
+              Guardar como borrador
+            </button>
+            <button type="button" onClick={()=>combinarSeleccionados(false)} disabled={trabajandoGrupaje}
+              style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.14)",color:"#10b981",fontWeight:900,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
+              {trabajandoGrupaje ? "Combinando..." : `Combinar ${selGids.length} en firme`}
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Grupaje en borrador: mientras seleccionas grupos (antes de combinarlos)
+          se simula como quedaria el remolque, para ver si de verdad cabe. No se
+          guarda nada hasta pulsar "Combinar". */}
+      {selGids.length >= 2 && (
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:900,color:"#10b981",marginBottom:6,textTransform:"uppercase",letterSpacing:".05em"}}>
+            Grupaje en borrador - simulacion de {selGids.length} grupos (todavia sin combinar)
+          </div>
+          <RemolqueGrupaje
+            pedidos={selGids.flatMap(g => byGrupaje[g] || [])}
+            vehiculo={(() => {
+              const primero = selGids.flatMap(g => byGrupaje[g] || [])[0];
+              const mat = String(primero?.vehiculo_matricula || primero?.matricula || "").toUpperCase();
+              return vehiculos.find(v => String(v.matricula || "").toUpperCase() === mat) || null;
+            })()}
+          />
+        </div>
+      )}
+
       <div style={{display:"flex",flexDirection:"column",gap:20}}>
         {Object.entries(byGrupaje).map(([gid, peds]) => {
           const paradas = paradasMap[gid] || sortParadasByProximity(peds);
           // Find vehicle for this grupaje
           const primerPed = peds[0];
           const esGrupoReal = String(gid).startsWith("grupo:");
+          // Grupaje provisional: agrupado y guardado, pero pendiente de confirmar.
+          const esBorradorGrupaje = esGrupoReal && peds.some(p => p.grupaje_borrador);
           const grupoLabel = esGrupoReal ? `Grupaje #${String(gid).replace("grupo:","")}` : `Pendiente de agrupar - ${primerPed?.numero || gid}`;
           const veh = vehiculos.find(v=>v.id===primerPed?.vehiculo_id);
           const chofer = choferes.find(c=>c.id===primerPed?.chofer_id);
@@ -5449,21 +5667,99 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, allPedidos }) {
           const impTotal = peds.reduce((s,p)=>s+Number(p.importe||0),0);
 
           return (
-            <div key={gid} style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,overflow:"hidden"}}>
+            <div key={gid} style={{background:"var(--bg2)",border:selGids.includes(gid)?"1px solid rgba(16,185,129,.5)":(esBorradorGrupaje?"1px dashed rgba(245,158,11,.6)":"1px solid var(--border2)"),borderRadius:12,overflow:"hidden"}}>
               {/* Header */}
-              <div style={{background:"var(--bg3)",padding:"10px 16px",borderBottom:"1px solid var(--border2)",display:"flex",alignItems:"center",gap:12}}>
+              <div style={{background:"var(--bg3)",padding:"10px 16px",borderBottom:"1px solid var(--border2)",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                <input type="checkbox" checked={selGids.includes(gid)} onChange={()=>toggleSelGid(gid)}
+                  title="Marca para combinar con otros grupos" style={{width:16,height:16,accentColor:"#10b981",cursor:"pointer"}}/>
                 <span style={{fontWeight:800,fontSize:14,color:"var(--text)"}}>
                   {grupoLabel}
                 </span>
                 {veh && <span style={{fontSize:12,color:"var(--accent)",fontWeight:700}}>{veh.matricula}</span>}
                 {chofer && <span style={{fontSize:12,color:"var(--text4)"}}>{chofer.nombre}</span>}
-                {esGrupoReal && <span style={{fontSize:10,fontWeight:900,color:"#34d399",border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.12)",borderRadius:999,padding:"2px 8px"}}>Carga completa</span>}
+                {esGrupoReal && <span style={{fontSize:10,fontWeight:900,color:"#34d399",border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.12)",borderRadius:999,padding:"2px 8px"}}>Grupaje</span>}
+                {esBorradorGrupaje && (
+                  <>
+                    <span title="Guardado pero aun sin confirmar" style={{fontSize:10,fontWeight:900,color:"#b45309",border:"1px dashed rgba(245,158,11,.5)",background:"rgba(245,158,11,.12)",borderRadius:999,padding:"2px 8px"}}>Borrador</span>
+                    <button type="button" disabled={trabajandoGrupaje}
+                      onClick={()=>confirmarGrupajeBorrador(String(gid).replace("grupo:",""), peds.length)}
+                      style={{fontSize:10,fontWeight:900,color:"#10b981",border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.12)",borderRadius:999,padding:"2px 9px",cursor:trabajandoGrupaje?"wait":"pointer"}}>
+                      Confirmar
+                    </button>
+                  </>
+                )}
                 <span style={{fontSize:11,color:"var(--text5)",marginLeft:4}}>{peds.length} pedido{peds.length!==1?"s":""} - {Number(kgTotal).toLocaleString("es-ES")} kg - {Number(impTotal).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span>
-                <button onClick={()=>resetOrder(gid)}
-                  style={{marginLeft:"auto",padding:"3px 10px",borderRadius:5,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,cursor:"pointer"}}>
-                  Reordenar por proximidad
-                </button>
+                <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
+                  <button onClick={()=>{ setAsignaGid(asignaGid===gid?"":gid); setAsignaMat(veh?.matricula||primerPed?.matricula_manual||""); setAsignaChofer(primerPed?.chofer_id||""); }} disabled={trabajandoGrupaje}
+                    style={{padding:"3px 10px",borderRadius:5,border:"1px solid var(--accent-a35)",background:"var(--accent-a12)",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                    Asignar matricula
+                  </button>
+                  {esGrupoReal && (
+                    <button onClick={()=>separarGrupajeGid(gid)} disabled={trabajandoGrupaje}
+                      style={{padding:"3px 10px",borderRadius:5,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.1)",color:"#ef4444",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                      Deshacer grupaje
+                    </button>
+                  )}
+                  <button onClick={()=>resetOrder(gid)}
+                    style={{padding:"3px 10px",borderRadius:5,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,cursor:"pointer"}}>
+                    Reordenar por proximidad
+                  </button>
+                </div>
               </div>
+              {asignaGid===gid && (
+                <div style={{background:"var(--bg3)",borderBottom:"1px solid var(--border2)",padding:"10px 16px",display:"flex",flexDirection:"column",gap:8}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:"var(--text5)",minWidth:70}}>Flota / a mano:</span>
+                    <input list="tg-grupaje-tractoras" value={asignaMat} onChange={e=>setAsignaMat(e.target.value.toUpperCase())} placeholder={asignaColab ? "Matricula del colaborador (opcional)" : "Ej: 1234-ABC"}
+                      style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,width:200,outline:"none"}}/>
+                    <select value={asignaChofer} onChange={e=>setAsignaChofer(e.target.value)} disabled={!!asignaColab}
+                      style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,outline:"none",opacity:asignaColab?.5:1}}>
+                      <option value="">Chofer (auto del vehiculo)</option>
+                      {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
+                    </select>
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:"var(--text5)",minWidth:70}}>o Colaborador:</span>
+                    <select value={asignaColab} onChange={e=>setAsignaColab(e.target.value)}
+                      style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,outline:"none",minWidth:200}}>
+                      <option value="">Sin colaborador (flota / a mano)</option>
+                      {colaboradores.map(c => <option key={c.id} value={c.id}>{c.nombre || c.cif || c.id}</option>)}
+                    </select>
+                    {!creandoColab ? (
+                      <button type="button" onClick={()=>setCreandoColab(true)}
+                        style={{padding:"6px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        + Nuevo colaborador
+                      </button>
+                    ) : (
+                      <>
+                        <input value={nuevoColabNombre} onChange={e=>setNuevoColabNombre(e.target.value)} placeholder="Nombre del colaborador"
+                          style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,width:200,outline:"none"}}/>
+                        <button type="button" onClick={crearColaboradorGrupaje} disabled={trabajandoGrupaje}
+                          style={{padding:"6px 10px",borderRadius:7,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.14)",color:"#10b981",fontSize:11,fontWeight:800,cursor:"pointer"}}>Crear</button>
+                        <button type="button" onClick={()=>{setCreandoColab(false);setNuevoColabNombre("");}}
+                          style={{padding:"6px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,cursor:"pointer"}}>Cancelar</button>
+                      </>
+                    )}
+                  </div>
+                  <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                    <button onClick={()=>asignarMatriculaGrupaje(gid)} disabled={trabajandoGrupaje}
+                      style={{padding:"6px 12px",borderRadius:7,border:"1px solid var(--accent-a35)",background:"var(--accent-a14)",color:"var(--accent)",fontWeight:800,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
+                      {trabajandoGrupaje ? "Asignando..." : `Asignar a ${peds.length} pedido/s`}
+                    </button>
+                    <span style={{fontSize:10,color:"var(--text5)"}}>{asignaColab ? "Se asigna como colaborador (subcontrata). El precio pactado se completa en el pedido." : "Si la matricula no es de la flota, se guarda como matricula a mano."}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Ocupacion del remolque: solo tiene sentido si hay grupaje real */}
+              {esGrupoReal && (
+                <div style={{padding:"0 16px 12px"}}>
+                  <RemolqueGrupaje
+                    pedidos={peds}
+                    vehiculo={vehiculos.find(v => String(v.matricula || "").toUpperCase() === String(primerPed?.vehiculo_matricula || primerPed?.matricula || "").toUpperCase()) || null}
+                  />
+                </div>
+              )}
 
               {/* Paradas */}
               <div style={{padding:"8px 0"}}>

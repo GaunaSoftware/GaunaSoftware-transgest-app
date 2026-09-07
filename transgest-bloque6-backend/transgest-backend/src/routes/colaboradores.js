@@ -2,6 +2,7 @@ const { cacheMiddleware } = require("../services/cache");
 // src/routes/colaboradores.js
 const express = require("express");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 const db      = require("../services/db");
 const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
 const { crearNotificacion, ensureNotificacionesSchema } = require("../services/notificaciones");
@@ -507,6 +508,51 @@ async function logPedidoEventoPortal(pedidoId, empresaId, tipo, detalle = {}) {
      VALUES ($1,$2,$3,'colaborador_portal',$4)`,
     [pedidoId, empresaId, tipo, JSON.stringify(detalle || {})]
   ).catch(() => {});
+}
+
+// ── Usuario invitado del proveedor habitual ──────────────────────────────
+// Para el proveedor recurrente: en vez de un enlace por viaje, una cuenta con
+// contrasena que ve TODOS sus viajes (y solo los suyos: el filtro por
+// colaborador_id esta en el listado y en el detalle de pedidos).
+function passwordTemporalProveedor() {
+  return `Proveedor${Math.random().toString(36).slice(2, 8)}${Math.floor(10 + Math.random() * 89)}`;
+}
+
+function usernameProveedor(colaborador) {
+  const limpio = String(colaborador.cif || colaborador.nombre || "proveedor")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 24) || "proveedor";
+  return `prov_${limpio}_${String(colaborador.id).slice(0, 8)}`;
+}
+
+// Si el proveedor rechaza el viaje desde su portal hay que enterarse YA, porque
+// el viaje se queda sin transportista.
+async function notificarGerenciaColaboradorRechazo(pedido, token, motivo = "") {
+  if (!pedido?.empresa_id) return;
+  await ensureNotificacionesSchema().catch(() => {});
+  const usuarios = await db.query(
+    `SELECT id FROM usuarios
+      WHERE empresa_id=$1 AND activo IS DISTINCT FROM false
+        AND rol::text IN ('gerente','trafico') LIMIT 30`,
+    [pedido.empresa_id]
+  ).catch(() => ({ rows: [] }));
+  const quien = token?.colaborador_nombre || token?.nombre || "El proveedor";
+  await Promise.all((usuarios.rows || []).map(u => crearNotificacion({
+    empresa_id: pedido.empresa_id,
+    usuario_id: u.id,
+    tipo: "colaborador_rechaza_viaje",
+    titulo: "Un proveedor ha rechazado un viaje",
+    mensaje: `${quien} ha rechazado el viaje ${pedido.numero || pedido.id}${motivo ? `: ${motivo}` : ""}. Hay que reasignarlo.`,
+    data: {
+      pedido_id: pedido.id,
+      view: "pedidos",
+      motivo: motivo || null,
+      dedupe_key: `colaborador_rechaza:${pedido.id}`,
+    },
+  }).catch(() => {})));
 }
 
 async function notificarAlbaranProveedor(empresaId, pedido = {}, colaborador = {}, documento = {}) {
@@ -1041,7 +1087,21 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
           + '<label>Matricula remolque<input data-driver-field="remolque" value="' + escapeHtml(pedido.remolque_matricula_colaborador || '') + '" autocomplete="off"></label>'
           + '</div><button type="button" class="btn btn-primary" data-action="save-driver" data-pedido-id="' + escapeHtml(tripId) + '">Guardar datos del viaje</button>'
           + '</div>';
+        // Aceptar o rechazar el viaje: lo primero, antes de ponerse en marcha.
+        var aceptado = !!pedido.colaborador_precio_confirmado;
+        var rechazado = !!pedido.colaborador_rechazado_at;
+        var decision = rechazado
+          ? '<div class="card" style="margin-bottom:12px"><h3>Viaje rechazado</h3>'
+            + '<p>Has rechazado este viaje. Si fue un error, avisa a la empresa o vuelve a aceptarlo.</p>'
+            + '<button type="button" class="btn btn-primary" data-run-action="aceptar_viaje" data-pedido-id="' + escapeHtml(tripId) + '">Aceptar el viaje</button></div>'
+          : (aceptado
+            ? '<div class="card" style="margin-bottom:12px"><h3>Viaje aceptado</h3><p class="ok">Has aceptado este transporte. Continua con los datos del conductor.</p></div>'
+            : '<div class="card" style="margin-bottom:12px"><h3>1. Aceptas este viaje?</h3>'
+              + '<p>Confirma que lo haces tu, o rechazalo para que la empresa lo reasigne cuanto antes.</p>'
+              + '<button type="button" class="btn btn-primary" data-run-action="aceptar_viaje" data-pedido-id="' + escapeHtml(tripId) + '">Acepto el viaje</button> '
+              + '<button type="button" class="btn" data-run-action="rechazar_viaje" data-pedido-id="' + escapeHtml(tripId) + '">No puedo hacerlo</button></div>');
         box.innerHTML = '<div class="trip-badges" style="margin-bottom:12px"><span class="' + statusClass(workflow.status) + '">' + escapeHtml(String(workflow.status || "pendiente").replace("_"," ")) + '</span><span class="badge badge-neutral">' + escapeHtml(String(pedido.estado || "pendiente").replace("_"," ")) + '</span></div>'
+          + decision
           + driverForm
           + '<div class="progress">'
           + steps.map((step) => {
@@ -1072,6 +1132,8 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
       }
       async function runAction(tripId, action){
         const status = document.getElementById('op-status-' + tripId);
+        // Rechazar deja el viaje sin transportista: se confirma antes.
+        if (action === 'rechazar_viaje' && !window.confirm('Vas a rechazar este viaje. La empresa tendra que reasignarlo. Continuar?')) return;
         if (status) status.innerHTML = '<span class="warn">Guardando cambio...</span>';
         const res = await fetch('/api/v1/colaboradores/public/portal/' + encodeURIComponent(TOKEN) + '/pedidos/' + encodeURIComponent(tripId) + '/operativa', {
           method: 'POST',
@@ -1444,6 +1506,7 @@ async function getPortalProveedorPedido(tokenValue, pedidoId) {
             p.conductor_efectivo_nombre, p.conductor_efectivo_apellidos,
             p.conductor_efectivo_dni, p.conductor_efectivo_telefono,
             p.matricula_colaborador, p.remolque_matricula_colaborador,
+            p.colaborador_precio_confirmado, p.colaborador_rechazado_at,
             c.nombre AS cliente_nombre,
             co.nombre AS colaborador_nombre
        FROM pedidos p
@@ -1630,6 +1693,35 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
       pasos: pasosGuardados,
       workflow: buildPortalProveedorOperativa(rows[0], pasosGuardados),
     };
+  }
+  // Aceptar o rechazar el viaje: es lo primero que hace el proveedor al recibir
+  // el enlace, antes de ponerse en marcha. Si rechaza se avisa a la empresa.
+  if (action === "aceptar_viaje" || action === "rechazar_viaje") {
+    const acepta = action === "aceptar_viaje";
+    const { rows } = await db.query(
+      acepta
+        ? `UPDATE pedidos
+              SET colaborador_precio_confirmado=true,
+                  colaborador_precio_confirmado_at=NOW(),
+                  colaborador_rechazado_at=NULL,
+                  estado=CASE WHEN estado::text='pendiente' THEN 'confirmado'::estado_pedido ELSE estado END
+            WHERE id=$1 AND empresa_id=$2 RETURNING *`
+        : `UPDATE pedidos
+              SET colaborador_rechazado_at=NOW(),
+                  colaborador_precio_confirmado=false
+            WHERE id=$1 AND empresa_id=$2 RETURNING *`,
+      [pedido.id, pedido.empresa_id]
+    );
+    if (!rows[0]) throw Object.assign(new Error("No se pudo registrar la respuesta."), { status: 404 });
+    const motivo = String(body?.motivo || "").trim().slice(0, 300);
+    await logPedidoEventoPortal(pedido.id, pedido.empresa_id,
+      acepta ? "colaborador_portal.viaje_aceptado" : "colaborador_portal.viaje_rechazado",
+      { motivo: motivo || null }).catch(() => {});
+    if (!acepta) {
+      await notificarGerenciaColaboradorRechazo(pedido, ctx?.token, motivo).catch(() => {});
+    }
+    const pasosResp = await getPortalProveedorChoferPasos(pedido.id, pedido.empresa_id);
+    return { pedido: rows[0], pasos: pasosResp, workflow: buildPortalProveedorOperativa(rows[0], pasosResp) };
   }
   switch (String(action || "")) {
     case "posicionar_carga":
@@ -2702,6 +2794,78 @@ router.patch("/:id/revision", GERENTE_O_TRAFICO, async (req,res) => {
     await limpiarNotificacionesColaboradorRevision(empresaId, req.params.id);
     res.json(rows[0]);
   } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /colaboradores/:id/portal-user - ver si el proveedor ya tiene cuenta.
+router.get("/:id/portal-user", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const { rows } = await db.query(
+      `SELECT id, nombre, username, rol, activo, colaborador_id
+         FROM usuarios
+        WHERE empresa_id=$1 AND colaborador_id=$2 AND rol::text='colaborador'
+        ORDER BY created_at ASC LIMIT 1`,
+      [empresaId, req.params.id]
+    );
+    res.json({ existe: !!rows[0], usuario: rows[0] || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /colaboradores/:id/portal-user - invita al proveedor habitual: crea (o
+// resetea) una cuenta con contrasena temporal ligada a ese colaborador. Solo ve
+// sus propios viajes. Con reset_password=true se genera una clave nueva.
+router.post("/:id/portal-user", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const col = await db.query(
+      "SELECT id, nombre, cif, email FROM colaboradores WHERE id=$1 AND empresa_id=$2 AND activo=true",
+      [req.params.id, empresaId]
+    );
+    const colaborador = col.rows[0];
+    if (!colaborador) return res.status(404).json({ error: "Proveedor no encontrado" });
+
+    const existente = await db.query(
+      `SELECT id, nombre, username, rol, activo
+         FROM usuarios
+        WHERE empresa_id=$1 AND colaborador_id=$2 AND rol::text='colaborador'
+        ORDER BY created_at ASC LIMIT 1`,
+      [empresaId, colaborador.id]
+    );
+    if (existente.rows[0] && !req.body?.reset_password) {
+      return res.json({ existe: true, usuario: existente.rows[0] });
+    }
+
+    const password = passwordTemporalProveedor();
+    const hash = await bcrypt.hash(password, 12);
+    if (existente.rows[0]) {
+      const { rows } = await db.query(
+        `UPDATE usuarios
+            SET password_hash=$1, debe_cambiar_password=true, activo=true
+          WHERE id=$2 AND empresa_id=$3
+          RETURNING id, nombre, username, rol, activo`,
+        [hash, existente.rows[0].id, empresaId]
+      );
+      return res.json({ existe: true, reset: true, password_temporal: password, usuario: rows[0] });
+    }
+    // Acceso minimo: sus viajes, sus documentos y su cuenta.
+    const permisos = { modulos: {
+      pedidos: { ver: true, editar: true },
+      documentos: { ver: true, editar: true },
+      mi_cuenta: { ver: true, editar: true },
+    } };
+    const { rows } = await db.query(
+      `INSERT INTO usuarios
+        (nombre,email,username,password_hash,rol,empresa_id,colaborador_id,perfil,permisos,debe_cambiar_password)
+       VALUES ($1,$2,$3,$4,'colaborador',$5,$6,'Portal proveedor',$7,true)
+       RETURNING id, nombre, username, rol, activo`,
+      [`${colaborador.nombre} (Proveedor)`, null, usernameProveedor(colaborador), hash,
+       empresaId, colaborador.id, permisos]
+    );
+    res.status(201).json({ creado: true, password_temporal: password, usuario: rows[0] });
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "Ya existe un usuario con ese identificador." });
     res.status(500).json({ error: e.message });
   }
 });

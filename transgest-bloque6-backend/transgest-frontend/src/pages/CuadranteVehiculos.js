@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { getVehiculos, getDocsVehiculo, editarVehiculo, getChoferes , actualizarKmVehiculo} from "../services/api";
+import { formatMatricula } from "../utils/formatos";
 import { notify } from "../services/notify";
 
 // ── Semáforo de documentos ─────────────────────────────────────────────────
@@ -94,7 +95,7 @@ function FichaVehiculo({ vehiculo, onClose, onSaved }) {
   ];
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
           <div>
@@ -220,7 +221,7 @@ function FichaVehiculo({ vehiculo, onClose, onSaved }) {
               </div>
               <div>
                 <label style={S.lbl}>Matrícula remolque 2</label>
-                <input style={S.inp} value={form.remolque2_matricula||""} onChange={f("remolque2_matricula")} placeholder="5678-XYZ"/>
+                <input style={S.inp} value={form.remolque2_matricula||""} onChange={e=>setForm(p=>({...p,remolque2_matricula:formatMatricula(e.target.value)}))} placeholder="5678-XYZ"/>
               </div>
               <div>
                 <label style={S.lbl}>Tipo remolque 2</label>

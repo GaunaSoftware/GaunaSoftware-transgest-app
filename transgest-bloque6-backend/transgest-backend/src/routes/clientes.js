@@ -2,6 +2,8 @@ const { paginatedResponse } = require("../services/paginate");
 const { cacheMiddleware, invalidateCache } = require("../services/cache");
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const { crearNotificacion, ensureNotificacionesSchema } = require("../services/notificaciones");
+const logger = require("../services/logger");
 const crypto = require("crypto");
 const { body, validationResult } = require("express-validator");
 const db      = require("../services/db");
@@ -331,6 +333,7 @@ async function persistClienteExtendedFields(clienteId, empresaId, data = {}) {
     modo_facturacion: data.modo_facturacion || "por_viaje",
     bloqueado: Boolean(data.bloqueado),
     bloqueo_motivo: data.bloqueo_motivo || null,
+    mercancia_habitual: data.mercancia_habitual === undefined ? undefined : (String(data.mercancia_habitual || "").trim() || null),
     pendiente_revision: data.pendiente_revision === undefined ? undefined : Boolean(data.pendiente_revision),
     updated_at: columns.has("updated_at") ? new Date() : undefined,
   };
@@ -496,6 +499,34 @@ function portalUsername(cliente) {
   return `portal_${clean}_${String(cliente.id).slice(0, 8)}`;
 }
 
+// Cuando se da de alta un cliente con datos clave sin rellenar (tipico del alta
+// rapida desde un pedido), administracion tiene que enterarse para completarlo.
+// Antes solo se marcaba pendiente_revision, pero no llegaba ningun aviso.
+async function avisarClientePendienteRevision(empresaId, cliente, faltan = [], creadoPor = null) {
+  if (!empresaId || !cliente?.id) return;
+  await ensureNotificacionesSchema().catch(() => {});
+  const { rows } = await db.query(
+    `SELECT id FROM usuarios
+      WHERE empresa_id=$1 AND activo IS DISTINCT FROM false
+        AND rol::text IN ('gerente','administrativo','contable') LIMIT 30`,
+    [empresaId]
+  ).catch(() => ({ rows: [] }));
+  const detalle = faltan.length ? ` Faltan: ${faltan.join(", ")}.` : "";
+  await Promise.all((rows || []).map(u => crearNotificacion({
+    empresa_id: empresaId,
+    usuario_id: u.id,
+    tipo: "cliente_pendiente_revision",
+    titulo: "Cliente nuevo sin completar",
+    mensaje: `${cliente.nombre || "Un cliente"} se ha creado con datos incompletos.${detalle}`,
+    data: {
+      cliente_id: cliente.id,
+      view: "clientes",
+      dedupe_key: `cliente_pendiente_revision:${cliente.id}`,
+    },
+    created_by: creadoPor,
+  }).catch(() => null)));
+}
+
 function tempPassword() {
   return `Portal${Math.random().toString(36).slice(2, 8)}${Math.floor(10 + Math.random() * 89)}`;
 }
@@ -516,7 +547,7 @@ async function getRutasClienteRows(clienteId, empresaId) {
             rc.iva_pct,
             rc.notas AS precio_notas,
             cli.minimo_facturable_toneladas AS cliente_minimo_facturable_toneladas,
-            r.id, r.origen, r.destino, r.km, r.peajes, r.tiempo_h, r.tipo_vehiculo,
+            r.id, r.origen, r.destino, r.km, r.peajes, r.tiempo_h, r.tipo_vehiculo, r.grupo_id,
             COALESCE(rc.tarifa_tipo, r.tarifa_tipo, 'viaje') AS tarifa_tipo,
             COALESCE(rc.precio, r.precio_base, 0) AS precio_base,
             COALESCE(rc.minimo_facturable, r.minimo_facturable) AS minimo_facturable,
@@ -962,21 +993,7 @@ router.post("/", GERENTE_O_CONTABLE,
       bloqueado: Boolean(bloqueado),
       bloqueo_motivo: bloqueo_motivo || null,
       pendiente_revision: Boolean(incompleto),
-    }); /*
-      INSERT INTO clientes (nombre,cif,direccion,cp,ciudad,pais,email,contacto,telefono,
-        forma_pago,vencimiento,tipo_iva,iva_regimen,tipo_irpf,precio_tn_km,notas,empresa_id,
-        pendiente_revision,email_facturacion,emails_albaranes,iban,horario_carga,horario_descarga,minimo_facturable_toneladas,
-        limite_riesgo,modo_facturacion,bloqueado,bloqueo_motivo)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28) RETURNING *`,
-      [nombre,cif||null,direccion||null,
-       codigo_postal||cp||null,ciudad||null,pais||"España",
-       email||null,contacto||null,telefono||null,
-       forma_pago||"Transferencia bancaria",vencimiento||"30 días",
-       iva.tipo_iva,iva.iva_regimen,tipo_irpf||0,precio_tn_km||0,notas||null,empresaId,incompleto,
-       email_facturacion || null, emails_albaranes || null, iban || null, horarioCargaNorm, horarioDescargaNorm,
-       numericOrNull(minimo_facturable_toneladas), numericOrNull(limite_riesgo) || 0,
-       modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null]
-    ); */
+    });
     createdId = created?.id || null;
     if (!createdId) {
       const err = new Error("No se ha confirmado la creacion del cliente. Revisa la API antes de repetir el alta.");
@@ -984,6 +1001,18 @@ router.post("/", GERENTE_O_CONTABLE,
       throw err;
     }
     res.status(201).json(created);
+    // Aviso a administracion (despues de responder: no debe retrasar el alta).
+    if (incompleto) {
+      const faltan = [
+        !String(req.body?.cif || "").trim() && "CIF/NIF",
+        !email?.trim() && "Email",
+        !telefono?.trim() && "Telefono",
+        (!cp?.trim() && !codigo_postal?.trim()) && "Codigo postal",
+        !ciudad?.trim() && "Ciudad",
+      ].filter(Boolean);
+      avisarClientePendienteRevision(empresaId, created, faltan, req.user?.id || null)
+        .catch(err => logger.warn("No se pudo avisar del cliente pendiente de revision:", err.message));
+    }
     } catch (e) {
       if (createdId) await db.query("DELETE FROM clientes WHERE id=$1", [createdId]).catch(() => {});
       if (e.code === "23505") {
@@ -1043,19 +1072,7 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
     modo_facturacion: modo_facturacion || "por_viaje",
     bloqueado: Boolean(bloqueado),
     bloqueo_motivo: bloqueo_motivo || null,
-  }); /*
-    UPDATE clientes SET nombre=$1,cif=$2,direccion=$3,cp=$4,ciudad=$5,pais=$6,email=$7,
-      contacto=$8,telefono=$9,forma_pago=$10,vencimiento=$11,tipo_iva=$12,iva_regimen=$13,tipo_irpf=$14,
-      precio_tn_km=$15,activo=$16,notas=$17,email_facturacion=$18,emails_albaranes=$19,iban=$20,horario_carga=$21,horario_descarga=$22,
-      minimo_facturable_toneladas=$23,limite_riesgo=$24,modo_facturacion=$25,bloqueado=$26,bloqueo_motivo=$27
-    WHERE id=$28 AND empresa_id=$29 RETURNING *`,
-    [nombre,cif,direccion,cp,ciudad,pais,email,contacto,telefono,forma_pago,vencimiento,
-     iva.tipo_iva,iva.iva_regimen,tipo_irpf,precio_tn_km,activo!==undefined?activo:true,notas,
-     email_facturacion || null, emails_albaranes || null, iban || null, horarioCargaNorm, horarioDescargaNorm,
-     numericOrNull(minimo_facturable_toneladas), numericOrNull(limite_riesgo) || 0,
-     modo_facturacion || "por_viaje", Boolean(bloqueado), bloqueo_motivo || null,
-     req.params.id,empresaId]
-  ); */
+  });
   if (!updated) return res.status(404).json({ error: "Cliente no encontrado" });
   const saved = await persistClienteExtendedFields(updated.id, empresaId, clienteData);
   res.json(saved || updated);
@@ -1084,6 +1101,20 @@ router.patch("/:id/revision", async (req,res) => {
     );
     res.json({ok:true});
   } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// PATCH /clientes/:id/mercancia-habitual — fijar/quitar la mercancia habitual del cliente
+router.patch("/:id/mercancia-habitual", GERENTE_O_CONTABLE, async (req,res) => {
+  try {
+    const empresaId = req.empresaId||req.user.empresa_id;
+    const val = String(req.body?.mercancia_habitual || "").trim().slice(0,200) || null;
+    const { rows } = await db.query(
+      "UPDATE clientes SET mercancia_habitual=$1 WHERE id=$2 AND empresa_id=$3 RETURNING id, mercancia_habitual",
+      [val, req.params.id, empresaId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Cliente no encontrado" });
+    res.json(rows[0]);
+  } catch(e) { res.status(500).json({ error: "No se pudo guardar la mercancia habitual", request_id: req.id }); }
 });
 
 // GET /clientes/:id/rutas — listar rutas del cliente
@@ -1225,6 +1256,73 @@ router.delete("/:id/rutas/:rid", invalidateCache("rutas", "clientes"), async (re
     if (!rowCount) return res.status(404).json({ error: "Ruta del cliente no encontrada" });
     res.json({ ok: true });
   } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// POST /clientes/:id/rutas/agrupar - asociar varias tarifas en un grupo. Los
+// miembros comparten precio: el primer id de la lista (la tarifa sobre la que se
+// suelta) marca el precio y se copia al resto. Cada tarifa mantiene su propio
+// origen/destino, de modo que al emparejar pedidos cualquiera del grupo encaja y
+// da el mismo precio.
+router.post("/:id/rutas/agrupar", invalidateCache("rutas", "clientes"), async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    if (!(await assertClienteEmpresa(req.params.id, empresaId))) {
+      return res.status(404).json({ error: "Cliente no encontrado" });
+    }
+    const rutaIds = Array.isArray(req.body?.ruta_ids) ? req.body.ruta_ids.map(String).filter(Boolean) : [];
+    if (rutaIds.length < 2) return res.status(400).json({ error: "Se necesitan al menos dos tarifas para agrupar" });
+    const rows = await getRutasClienteRows(req.params.id, empresaId);
+    const byId = new Map(rows.map(r => [String(r.id), r]));
+    const validos = rutaIds.filter(id => byId.has(id));
+    if (validos.length < 2) return res.status(400).json({ error: "Tarifas no encontradas para este cliente" });
+    // Reutiliza un grupo existente entre las seleccionadas si lo hay; si no, nuevo.
+    const grupoExistente = validos.map(id => byId.get(id)?.grupo_id).find(Boolean);
+    const grupoId = grupoExistente || (await db.query("SELECT gen_random_uuid() AS g")).rows[0].g;
+    await db.query(
+      "UPDATE rutas SET grupo_id=$1 WHERE id = ANY($2::uuid[]) AND (empresa_id=$3 OR empresa_id IS NULL)",
+      [grupoId, validos, empresaId]
+    );
+    // Precio compartido del grupo, tomado de la primera tarifa (la de destino).
+    const target = byId.get(validos[0]);
+    if (target) {
+      const precio = numericOrNull(target.precio_base) || 0;
+      const tipo = target.tarifa_tipo || "viaje";
+      const minF = numericOrNull(target.minimo_facturable);
+      const minU = numericOrNull(target.minimo_unidades);
+      const recargo = numericOrNull(target.recargo_combustible_pct) || 0;
+      for (const id of validos.filter(x => x !== validos[0])) {
+        await db.query(
+          "UPDATE rutas SET tarifa_tipo=$2, precio_base=$3, minimo_facturable=$4, minimo_unidades=$5, recargo_combustible_pct=$6 WHERE id=$1 AND (empresa_id=$7 OR empresa_id IS NULL)",
+          [id, tipo, precio, minF, minU, recargo, empresaId]
+        );
+        await db.query(
+          "UPDATE ruta_precios_cliente SET precio=$1, tarifa_tipo=$2, minimo_facturable=$3, minimo_unidades=$4, recargo_combustible_pct=$5 WHERE ruta_id=$6 AND cliente_id=$7",
+          [precio, tipo, minF, minU, recargo, id, req.params.id]
+        );
+      }
+    }
+    res.json({ ok: true, grupo_id: grupoId, ruta_ids: validos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /clientes/:id/rutas/desagrupar - sacar tarifas de su grupo
+router.post("/:id/rutas/desagrupar", invalidateCache("rutas", "clientes"), async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    if (!(await assertClienteEmpresa(req.params.id, empresaId))) {
+      return res.status(404).json({ error: "Cliente no encontrado" });
+    }
+    const rutaIds = Array.isArray(req.body?.ruta_ids) ? req.body.ruta_ids.map(String).filter(Boolean) : [];
+    if (!rutaIds.length) return res.status(400).json({ error: "Sin tarifas" });
+    const rows = await getRutasClienteRows(req.params.id, empresaId);
+    const validos = rutaIds.filter(id => rows.some(r => String(r.id) === id));
+    if (!validos.length) return res.status(400).json({ error: "Tarifas no encontradas para este cliente" });
+    await db.query(
+      "UPDATE rutas SET grupo_id=NULL WHERE id = ANY($1::uuid[]) AND (empresa_id=$2 OR empresa_id IS NULL)",
+      [validos, empresaId]
+    );
+    res.json({ ok: true, ruta_ids: validos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 module.exports = router;

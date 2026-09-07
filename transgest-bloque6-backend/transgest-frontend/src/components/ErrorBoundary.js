@@ -81,7 +81,7 @@ export default class ErrorBoundary extends React.Component {
             <button
               type="button"
               onClick={() => window.location.reload()}
-              style={{border:0,borderRadius:8,background:"#0f766e",color:"#fff",padding:"10px 14px",fontWeight:800,cursor:"pointer"}}
+              style={{border:0,borderRadius:8,background:"var(--accent)",color:"#fff",padding:"10px 14px",fontWeight:800,cursor:"pointer"}}
             >
               Recargar
             </button>

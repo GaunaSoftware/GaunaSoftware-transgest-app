@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  getVehiculos, getAlertasDocVehiculos, actualizarKmVehiculo, getPedidos,
+  getVehiculos, getAlertasDocVehiculos, actualizarKmVehiculo, getPedidosTodos,
   getTallerEstado, guardarTallerEstado,
   getTallerSolicitudes, actualizarTallerSolicitud,
   getTallerPiezas, getTallerPiezaPorCodigo, crearTallerPieza, editarTallerPieza,
@@ -10,6 +10,7 @@ import {
   getTallerNeumaticos, crearTallerNeumatico, montarTallerNeumatico, bajaTallerNeumatico,
 } from "../services/api";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
+import { formatMatricula } from "../utils/formatos";
 import BarcodeScanner from "../components/BarcodeScanner";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
 import { GeoFields } from "../components/GeoFields";
@@ -298,7 +299,7 @@ function resumenGastoTaller(reparaciones = []) {
   }, { total:0, mes:0, manoObra:0, piezas:0 });
 }
 
-function TallerIcon({ name = "tool", color = "#0f766e", size = 24 }) {
+function TallerIcon({ name = "tool", color = "var(--accent)", size = 24 }) {
   const common = { fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round" };
   const shapes = {
     tool: <path {...common} d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l2.6-2.6a6 6 0 0 1-7.9 7.9l-6.8 6.8a2 2 0 0 1-2.8-2.8l6.8-6.8a6 6 0 0 1 7.9-7.9l-2.8 2.8Z" />,
@@ -422,7 +423,7 @@ function ModalPieza({editando, stockActual = [], onClose, onSaved}) {
     tallerSave(d); onSaved();
   }
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(520px,96vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editando?"Editar pieza":"Nueva pieza al stock"}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -497,7 +498,7 @@ function StockUnidadesPanel({ vehiculos = [], onAssigned }) {
       <div style={{display:"grid",gridTemplateColumns:"minmax(160px,.7fr) minmax(220px,1fr) auto auto",gap:8,alignItems:"end"}}>
         <label>
           <span style={S.lbl}>Matricula</span>
-          <input list="taller-matriculas" style={S.inp} value={matricula} onChange={e=>setMatricula(e.target.value.toUpperCase())} placeholder="1234-ABC" />
+          <input list="taller-matriculas" style={S.inp} value={matricula} onChange={e=>setMatricula(formatMatricula(e.target.value))} placeholder="1234-ABC" />
           <datalist id="taller-matriculas">
             {vehiculos.map(v=><option key={v.id} value={v.matricula}>{v.marca} {v.modelo}</option>)}
           </datalist>
@@ -575,7 +576,7 @@ function UnidadesPiezaModal({ pieza, onClose }) {
 
   const stockUnits = unidades.filter(u => u.estado === "stock");
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(820px,96vw)"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:14}}>
           <div>
@@ -1006,7 +1007,7 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>
           {editando?"Editar intervencion":"Nueva intervencion"}
@@ -1845,16 +1846,16 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
         </select>
         {["diagrama","stock","estadisticas"].map(t=>(
           <button key={t} onClick={()=>setTabN(t)}
-            style={{...btn,background:tabN===t?"linear-gradient(135deg,#0f766e,#0d9488)":"#f1f5f9",color:tabN===t?"#fff":"#64748b",border:"1px solid #dbe5ec"}}>
+            style={{...btn,background:tabN===t?"linear-gradient(135deg,var(--accent),#0d9488)":"#f1f5f9",color:tabN===t?"#fff":"#64748b",border:"1px solid #dbe5ec"}}>
             {t==="diagrama"?"Diagrama":t==="stock"?"Stock":"Estadisticas"}
           </button>
         ))}
-        <button onClick={()=>setModalStock(true)} style={{...btn,background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",border:"1px solid #0f766e",marginLeft:"auto"}}>
+        <button onClick={()=>setModalStock(true)} style={{...btn,background:"linear-gradient(135deg,var(--accent),#0d9488)",color:"#fff",border:"1px solid var(--accent)",marginLeft:"auto"}}>
           + Añadir al stock
         </button>
         {/* Stock badge */}
         <div style={{fontSize:14,color:"#64748b"}}>
-          Stock: <strong style={{color:stock.length>0?"#0f766e":"#ef4444"}}>{stock.reduce((s,x)=>s+x.cantidad,0)} ud.</strong>
+          Stock: <strong style={{color:stock.length>0?"var(--accent)":"#ef4444"}}>{stock.reduce((s,x)=>s+x.cantidad,0)} ud.</strong>
         </div>
       </div>
 
@@ -2066,7 +2067,7 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
 
       {/* MODAL AÑADIR STOCK */}
       {modalStock && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setModalStock(false)}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setModalStock(false)}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(460px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:16}}>Añadir neumáticos al stock</div>
             {[
@@ -2533,7 +2534,7 @@ export default function Taller() {
 
   useEffect(() => {
     getVehiculos().then(v=>{ setVehiculos(Array.isArray(v)?v:[]); }).catch(()=>{});
-    getPedidos().then(p=>{ setPedidos(Array.isArray(p)?p:[]); }).catch(()=>{});
+    getPedidosTodos({}, { silentError: true }).then(p=>{ setPedidos(Array.isArray(p)?p:[]); }).catch(()=>{});
     getAlertasDocVehiculos().then(a=>setAlertasDoc(Array.isArray(a)?a:[])).catch(()=>{});
     cargarSolicitudesTaller();
     cargarEstadoCompartidoTaller();
@@ -2665,10 +2666,10 @@ export default function Taller() {
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:18,marginBottom:28}}>
         {[
           {l:"Total intervenciones",  v:taller.reparaciones.length, c:"#0f2a6b", icon:"tool", bg:"#dcfce7"},
-          {l:"Coste este mes",        v:`${fmt2(costoMes)} EUR`,       c:"#0f766e", icon:"money", bg:"#d1fae5", title:`Mano de obra: ${fmt2(gastoTaller.manoObra)} EUR - Piezas: ${fmt2(gastoTaller.piezas)} EUR`},
+          {l:"Coste este mes",        v:`${fmt2(costoMes)} EUR`,       c:"var(--accent)", icon:"money", bg:"#d1fae5", title:`Mano de obra: ${fmt2(gastoTaller.manoObra)} EUR - Piezas: ${fmt2(gastoTaller.piezas)} EUR`},
           ...(vehiculosEnTaller.length>0?[{l:`Lucro cesante (${vehiculosEnTaller.length} veh.)`,v:`${fmt2(lucroTotal)} EUR`,c:"#ef4444",title:"Ingresos perdidos por vehículos en taller"}]:[]),
           {l:"Piezas en stock",       v:stockTotalUnidades,          c:"#7c3aed", icon:"cube", bg:"#ede9fe"},
-          {l:"Stock bajo minimo",     v:stockBajo.length,             c:stockBajo.length>0?"#2563eb":"#0f766e", icon:"layers", bg:"#dbeafe"},
+          {l:"Stock bajo minimo",     v:stockBajo.length,             c:stockBajo.length>0?"#2563eb":"var(--accent)", icon:"layers", bg:"#dbeafe"},
           ...(()=>{
             const cnt = {};
             taller.reparaciones.forEach(r=>{ if(r.vehiculo_matricula) cnt[r.vehiculo_matricula]=(cnt[r.vehiculo_matricula]||0)+1; });
@@ -2697,7 +2698,7 @@ export default function Taller() {
       {/* Tabs */}
       <div style={{display:"flex",gap:20,borderBottom:"1px solid #dbe5ec",marginBottom:16,overflowX:"auto"}}>
         {[["reparaciones","Intervenciones"],[`stock`,`Stock${stockBajo.length>0?` (${stockBajo.length} bajo minimo)`:""}`],["trazabilidad","Trazabilidad piezas"],["neumaticos","Neumaticos"],["proveedores","Talleres / Proveedores"],["avisos_mant","Avisos mantenimiento"],["solicitudes","Solicitudes choferes"],["tareas","Tareas mecanicos"]].map(([id,l])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{...S.tab,borderBottomColor:tab===id?"#0f766e":"transparent",color:tab===id?"#0f766e":"#64748b",padding:"12px 0",fontSize:14,fontWeight:900,whiteSpace:"nowrap"}}>{l}</button>
+          <button key={id} onClick={()=>setTab(id)} style={{...S.tab,borderBottomColor:tab===id?"var(--accent)":"transparent",color:tab===id?"var(--accent)":"#64748b",padding:"12px 0",fontSize:14,fontWeight:900,whiteSpace:"nowrap"}}>{l}</button>
         ))}
       </div>
 
@@ -2943,7 +2944,7 @@ export default function Taller() {
 
       {/* Modal Proveedor */}
       {modalProv && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&recargarProv()}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&recargarProv()}>
           <div style={{...S.mbox,width:"min(600px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editProv?"Editar proveedor/taller":"Nuevo proveedor / taller"}</div>
             <ModalProveedorForm editando={editProv} proveedores={proveedores} onSaved={guardarProveedores} onClose={recargarProv}/>
@@ -2953,7 +2954,7 @@ export default function Taller() {
 
       {/* Modal Aviso mantenimiento */}
       {modalAviso && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&recargarAvisos()}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&recargarAvisos()}>
           <div style={{...S.mbox,width:"min(520px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editAviso?"Editar aviso":"Nuevo aviso de mantenimiento"}</div>
             <ModalAvisoForm editando={editAviso} tipos={TIPOS_INT} avisosMant={avisosMant} onSaved={guardarAvisosMantenimiento} onClose={recargarAvisos}/>
@@ -3234,7 +3235,7 @@ function TareasMecanicos({ vehiculos, tareas = [], onChange }) {
 
       {/* Modal nueva tarea */}
       {modal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setModal(false)}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setModal(false)}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(480px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:14}}>Nueva tarea de mecanico</div>
 

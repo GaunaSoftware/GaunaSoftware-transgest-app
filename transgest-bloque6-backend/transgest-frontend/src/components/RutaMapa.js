@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { calcularRutaGeo } from "../services/api";
 import RouteMapCanvas from "./RouteMapCanvas";
 
@@ -98,12 +98,14 @@ function resolvedDisplayPoints(route, routePoints) {
   })).filter(point => point.lat !== null && point.lng !== null);
 }
 
-export default function RutaMapa({ points = [], vehiclePosition = null }) {
+function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) {
   const [routeState, setRouteState] = useState({ key: "", data: null });
   const [loadingKey, setLoadingKey] = useState("");
   const [errorState, setErrorState] = useState({ key: "", message: "" });
   const [retry, setRetry] = useState(0);
   const requestIdRef = useRef(0);
+  const forceRef = useRef(false);
+  function recalcular() { forceRef.current = true; setRetry(value => value + 1); }
 
   const pointKey = JSON.stringify(points.map((point, index) => normalizedPoint(point, index)));
   const routePoints = useMemo(() => JSON.parse(pointKey), [pointKey]);
@@ -125,9 +127,11 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
       return () => { active = false; };
     }
     setErrorState({ key: pointKey, message: "" });
+    const force = forceRef.current;
+    forceRef.current = false;
     const timer = window.setTimeout(() => {
       setLoadingKey(pointKey);
-      calcularRutaGeo(routePoints)
+      calcularRutaGeo(routePoints, { force })
         .then(data => {
           if (!active || requestIdRef.current !== requestId) return;
           if (!data?.ok) throw new Error(data?.error || "No se pudo calcular la ruta");
@@ -150,7 +154,7 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
 
   return (
     <div style={{ position:"relative", zIndex:0, isolation:"isolate", border:"1px solid var(--border2)", borderRadius:8, overflow:"hidden", background:"var(--bg3)" }}>
-      <RouteMapCanvas points={displayPoints} geometry={geometry} vehicle={vehicleCoords} />
+      <RouteMapCanvas points={displayPoints} geometry={geometry} vehicle={vehicleCoords} stableFrame={stableFrame} />
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"9px 11px", flexWrap:"wrap" }}>
         <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap", fontSize:11, color:"var(--text4)" }}>
           {loading && <strong style={{ color:"var(--accent)" }}>Calculando ruta...</strong>}
@@ -161,12 +165,16 @@ export default function RutaMapa({ points = [], vehiclePosition = null }) {
           {route?.warning && <span style={{ color:"#b45309" }}>{route.warning}</span>}
           {error && <span role="alert" style={{ color:"#64748b" }}>{error}</span>}
         </div>
-        {error && (
-          <button type="button" onClick={() => setRetry(value => value + 1)} style={{ border:"1px solid var(--border2)", background:"var(--button-bg)", color:"var(--text)", borderRadius:7, padding:"6px 10px", fontWeight:800, cursor:"pointer" }}>
-            Reintentar
+        {(routeReady || error) && (
+          <button type="button" onClick={recalcular} disabled={loading} title="Recalcular sin cache" style={{ border:"1px solid var(--border2)", background:"var(--button-bg)", color:"var(--text)", borderRadius:7, padding:"6px 10px", fontWeight:800, cursor:"pointer" }}>
+            {loading ? "Recalculando..." : "Recalcular"}
           </button>
         )}
       </div>
     </div>
   );
 }
+
+export default memo(RutaMapa, (prev, next) => prev.stableFrame === next.stableFrame
+  && JSON.stringify(prev.points) === JSON.stringify(next.points)
+  && JSON.stringify(prev.vehiclePosition) === JSON.stringify(next.vehiclePosition));

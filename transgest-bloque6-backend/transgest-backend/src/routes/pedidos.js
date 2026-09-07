@@ -6,6 +6,7 @@ const crypto  = require("crypto");
 const zlib = require("zlib");
 const pdfParse = require("pdf-parse");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
+const { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } = require("../utils/number");
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
 const { crearNotificacion, notificarUsuariosCliente } = require("../services/notificaciones");
@@ -56,6 +57,12 @@ const INCIDENCIA_PEDIDO_TIPOS = {
   trafico: "Trafico",
   paralizacion: "Paralizacion",
   gps: "GPS / localizacion",
+  // Motivos generales/administrativos
+  cancelado_cliente: "Cancelado por el cliente",
+  duplicado: "Pedido duplicado",
+  error_datos: "Error en los datos del pedido",
+  no_realizado: "Viaje no realizado",
+  sin_completar: "Sin marcar entregado (plazo superado)",
   otro: "Otro",
   operativa: "Operativa",
 };
@@ -72,6 +79,11 @@ function normalizePedidoIncidenciaTipo(value) {
   if (["trafico", "planificacion"].includes(raw)) return "trafico";
   if (["paralizacion", "espera"].includes(raw)) return "paralizacion";
   if (["gps", "localizacion", "ubicacion"].includes(raw)) return "gps";
+  if (["cancelado_cliente", "cancelado_por_cliente", "anulado_cliente"].includes(raw)) return "cancelado_cliente";
+  if (["duplicado", "repetido"].includes(raw)) return "duplicado";
+  if (["error_datos", "error_pedido", "datos_erroneos"].includes(raw)) return "error_datos";
+  if (["no_realizado", "no_show", "no_presentado"].includes(raw)) return "no_realizado";
+  if (["sin_completar", "plazo_superado", "entrega_vencida", "vencido_entrega"].includes(raw)) return "sin_completar";
   if (["otro", "otros"].includes(raw)) return "otro";
   return "operativa";
 }
@@ -530,6 +542,9 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_colaborador VARCHAR(60)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS matricula_manual VARCHAR(60)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_manual VARCHAR(60)").catch(() => {});
+      // Fecha real en que se marco como entregado/descargado (para el plan diario:
+      // si se descarga antes de la fecha programada, no arrastrar el viaje a ese dia).
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS entregado_at DATE").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_lateral BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_trasera BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_techo BOOLEAN DEFAULT false").catch(() => {});
@@ -2947,6 +2962,11 @@ async function aplicarAutomatismosEntrega(pedidoId, empresaId, userId = null, op
 }
 
 async function programarAutomatismosEntrega(pedidoId, empresaId, userId = null, options = {}) {
+  // Record delivery on confirmation, not on the day a delayed job is retried.
+  await db.query(
+    `UPDATE pedidos SET entregado_at=COALESCE(entregado_at,CURRENT_DATE)
+      WHERE id=$1 AND empresa_id=$2 AND estado::text='entregado'`, [pedidoId, empresaId]
+  );
   await require("../services/deliveryAutomationQueue").enqueue(pedidoId, empresaId, userId, options);
 }
 
@@ -3023,6 +3043,54 @@ function startAlbaranesReminderScheduler() {
     }, 24 * 60 * 60 * 1000);
     logger.info("[Albaranes] Scheduler iniciado - recordatorios cada 24h");
   }
+}
+
+// Auto-incidencia: si un pedido activo supera su fecha de entrega prevista sin
+// marcarse como entregado (por defecto 1 dia), pasa a estado 'incidencia' con
+// tipo 'sin_completar'. Configurable por empresa en cfg_trafico:
+//   auto_incidencia: "false" para desactivar; auto_incidencia_dias: "1"/"2"/...
+async function procesarPedidosEntregaVencida() {
+  const { rows } = await db.query(`
+    UPDATE pedidos p
+       SET estado='incidencia',
+           incidencia_tipo='sin_completar',
+           incidencia_descripcion=COALESCE(NULLIF(p.incidencia_descripcion,''), 'Sin marcar como entregado: ha superado su fecha de entrega prevista.'),
+           incidencia_origen='automatica',
+           incidencia_creada_at=NOW(),
+           incidencia_automatica=true,
+           notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(p.notas,''), 'INCIDENCIA AUTOMATICA: entrega vencida sin completar'))
+      FROM empresas e
+     WHERE e.id = p.empresa_id
+       AND COALESCE(e.estado,'activo') = 'activo'
+       AND COALESCE(e.cfg_trafico->>'auto_incidencia','true') <> 'false'
+       AND LOWER(p.estado::text) IN ('pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga')
+       AND COALESCE(p.pendiente_completar,false) = false
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga) IS NOT NULL
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= CURRENT_DATE - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[1-9][0-9]*$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 1 END)
+       -- Solo vencidos recientes: evita marcar datos historicos antiguos de golpe.
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date >= CURRENT_DATE - 60
+     RETURNING p.id
+  `).catch(e => { logger.warn("Auto-incidencia por entrega vencida fallo:", e.message); return { rows: [] }; });
+  return { marcados: rows.length };
+}
+
+let pedidosVencidosSchedulerStarted = false;
+function startPedidosVencidosScheduler() {
+  if (pedidosVencidosSchedulerStarted) return;
+  pedidosVencidosSchedulerStarted = true;
+  const run = async () => {
+    const r = await procesarPedidosEntregaVencida();
+    if (r.marcados) logger.info(`[Incidencias] Auto-incidencia entrega vencida: ${r.marcados} pedido(s) marcados`);
+  };
+  try {
+    const cron = require("node-cron");
+    cron.schedule("15 7 * * *", () => { run().catch(e => logger.warn("[Incidencias] Scheduler fallo:", e.message)); }, { timezone: "Europe/Madrid" });
+    logger.info("[Incidencias] Scheduler iniciado - revision diaria de entregas vencidas a las 07:15");
+  } catch (e) {
+    setInterval(() => { run().catch(err => logger.warn("[Incidencias] Scheduler fallo:", err.message)); }, 12 * 60 * 60 * 1000);
+    logger.info("[Incidencias] Scheduler iniciado - revision cada 12h");
+  }
+  setTimeout(() => run().catch(e => logger.warn("[Incidencias] Ejecucion inicial fallo:", e.message)), 30000);
 }
 
 async function createColaboradorToken(pedido, accion, horas = 360) {
@@ -3702,6 +3770,9 @@ function getMissingColumn(error) {
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
   "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
+  // Detalle de carga del grupaje (solo los realmente numericos: palets_tipo es
+  // texto y palets_apilables booleano, no deben pasar por conversion numerica).
+  "palets_cantidad", "carga_largo_m", "carga_ancho_m", "carga_alto_m", "temperatura_c",
   "cantidad", "precio_unitario", "extracostes_importe",
   "tipo_iva",
   "km_vacio_enlace",
@@ -3722,20 +3793,6 @@ function normalizePedidoUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw)
     ? raw
     : null;
-}
-
-function parseLocaleNumber(value) {
-  if (value === "" || value === null || value === undefined) return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  let raw = String(value).trim().replace(/\s+/g, "");
-  if (!raw) return null;
-  const hasComma = raw.includes(",");
-  const hasDot = raw.includes(".");
-  if (hasComma && hasDot) raw = raw.replace(/\./g, "").replace(",", ".");
-  else if (hasComma) raw = raw.replace(",", ".");
-  else if (hasDot && /^\d{1,3}(\.\d{3}){2,}$/.test(raw)) raw = raw.replace(/\./g, "");
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
 }
 
 function normalizePaisPedido(value, fallback = "España") {
@@ -3864,8 +3921,8 @@ function normalizePedidoTarifaFields(fieldMap = {}) {
   const cantidad = parseLocaleNumber(next.cantidad);
   const pesoKg = parseLocaleNumber(next.peso_kg);
   if (Number.isFinite(pesoKg) && pesoKg > 0) {
-    const toneladas = pesoKg < 1000 ? pesoKg : Number((pesoKg / 1000).toFixed(3));
-    if (!Number.isFinite(cantidad) || cantidad <= 0 || (cantidad < 1 && pesoKg >= 1000)) {
+    const toneladas = toneladasDesdePeso(pesoKg);
+    if (!Number.isFinite(cantidad) || cantidad <= 0 || (cantidad < 1 && pesoKg > MAX_TONELADAS_CAMION)) {
       next.cantidad = toneladas;
     }
   }
@@ -4410,24 +4467,185 @@ function extractSupplierOrderHints(text = "") {
   };
 }
 
+// Provincias de Espana (sin acentos, mayusculas) para separar ciudad/provincia
+// en direcciones tipo "33186 EL BERRON, ASTURIAS".
+const PROVINCIAS_ES = new Set([
+  "ALAVA", "ARABA", "ALBACETE", "ALICANTE", "ALACANT", "ALMERIA", "ASTURIAS", "AVILA", "BADAJOZ",
+  "BARCELONA", "BIZKAIA", "VIZCAYA", "BURGOS", "CACERES", "CADIZ", "CANTABRIA", "CASTELLON", "CASTELLO",
+  "CIUDAD REAL", "CORDOBA", "CORUNA", "CUENCA", "GIRONA", "GERONA", "GRANADA", "GUADALAJARA", "GIPUZKOA",
+  "GUIPUZCOA", "HUELVA", "HUESCA", "JAEN", "LEON", "LLEIDA", "LERIDA", "LUGO", "MADRID", "MALAGA",
+  "MURCIA", "NAVARRA", "NAFARROA", "OURENSE", "ORENSE", "PALENCIA", "PALMAS", "PONTEVEDRA", "RIOJA",
+  "SALAMANCA", "TENERIFE", "SEGOVIA", "SEVILLA", "SORIA", "TARRAGONA", "TERUEL", "TOLEDO", "VALENCIA",
+  "VALLADOLID", "ZAMORA", "ZARAGOZA", "BALEARES", "CEUTA", "MELILLA",
+]);
+
+// Parser de importe con convencion espanola: "1.285" = 1285, "1.285,50" = 1285.5.
+// (parseLocaleNumber deja "24.791" como 24.791 al ser un unico grupo de miles.)
+function parseImporteEs(raw) {
+  let s = String(raw || "").replace(/[^\d.,]/g, "");
+  if (!s) return null;
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+// De una direccion saca CIUDAD y PROVINCIA. Busca el codigo postal (5 digitos)
+// y la ciudad que le sigue; la provincia se detecta contra el listado conocido.
+function localidadResumenEs(address = "") {
+  const a = String(address || "").replace(/\s+/g, " ").trim();
+  if (!a) return { ciudad: "", provincia: "", resumen: "" };
+  const up = a.toUpperCase();
+  let provincia = "";
+  for (const seg of up.split(/[,\n]/).map(s => s.trim())) {
+    if (PROVINCIAS_ES.has(seg)) { provincia = seg; break; }
+  }
+  if (!provincia) {
+    for (const p of PROVINCIAS_ES) {
+      if (new RegExp(`(?:^|[,\\s])${p}(?:$|[,\\s])`).test(up)) { provincia = p; break; }
+    }
+  }
+  let ciudad = "";
+  const cp = up.match(/\b\d{5}\b\s+([^,]+)/);
+  if (cp) {
+    ciudad = cp[1].trim();
+    if (provincia) ciudad = ciudad.replace(new RegExp(`\\s+${provincia}\\s*$`), "").trim();
+  }
+  const resumen = [ciudad, provincia].filter(Boolean).join(", ");
+  return { ciudad, provincia, resumen };
+}
+
+// Extractor dedicado para "Ordenes de carga" con secciones verticales (etiqueta
+// en una linea, valor en la siguiente): LUGAR DE CARGA / DIRECCIONES DE DESCARGA
+// / Kg totales / Precio acordado / Ref. pedido(s). El parser generico no vale
+// para este formato: sus regex de respaldo enganchaban con los ENCABEZADOS
+// (origen -> "KG TOTALES", destino -> "PARADA 1 DE 2") y no detectaba el precio.
+function extractOrdenCargaHints(clean = "") {
+  const text = String(clean || "");
+  if (!/lugar de carga/i.test(text)) return null;
+  if (!/direcciones?\s+de\s+descarga/i.test(text) && !/parada\s+\d+\s+de\s+\d+/i.test(text)) return null;
+
+  const PICTO = /[\u{1F000}-\u{1FAFF}\u2190-\u27BF\u2B00-\u2BFF\uFE0F\u200D]/gu;
+  const bultosTotal = [...text.matchAll(/\u{1F4E6}\s*(\d{1,4})/gu)]
+    .map(m => Number(m[1])).filter(Number.isFinite).reduce((a, b) => a + b, 0) || null;
+
+  const lines = text.split("\n")
+    .map(l => l.replace(PICTO, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const HEADERS = [
+    /^transportista\b/i, /^datos de la carga\b/i, /^lugar de carga\b/i,
+    /^direcciones?\s+de\s+descarga\b/i, /^parada\s+\d+\s+de\s+\d+/i,
+    /^obligaciones\b/i, /^kg totales\b/i, /^paradas\b/i, /^ref\.?\s*pedido/i,
+    /^precio acordado\b/i, /^fecha de carga\b/i,
+  ];
+  const isHeader = l => HEADERS.some(rx => rx.test(l));
+  const idxOf = rx => lines.findIndex(l => rx.test(l));
+  const nextHeaderAfter = i => {
+    for (let j = i + 1; j < lines.length; j += 1) if (isHeader(lines[j])) return j;
+    return lines.length;
+  };
+  // Valor de una etiqueta vertical: resto de su linea, o la siguiente linea util.
+  const valorDe = rx => {
+    const i = idxOf(rx);
+    if (i < 0) return "";
+    const same = lines[i].replace(rx, "").replace(/^[\s:\-\u00B7]+/, "").trim();
+    // Restos sin contenido real (p.ej. "(s)" de "Ref. pedido(s)") -> linea siguiente.
+    if (same && /[A-Za-z0-9]{2,}/.test(same)) return same;
+    return (lines[i + 1] || "").trim();
+  };
+  const companyPattern = /\b(?:S\.?\s*L\.?\s*U?\.?|S\.?\s*A\.?\s*U?\.?|SOCIEDAD\s+LIMITADA|SOCIEDAD\s+ANONIMA)\b/i;
+
+  // Cliente = emisor de la orden (cabecera, ANTES de TRANSPORTISTA para no coger
+  // al transportista como cliente).
+  const iTrans = idxOf(/^transportista\b/i);
+  const headerBlock = lines.slice(0, iTrans > 0 ? iTrans : 3);
+  const clienteNombre = (headerBlock.find(l => companyPattern.test(l)) || headerBlock[0] || "")
+    .split(/\u00B7|\|/)[0].replace(/\b(?:CIF|NIF).*$/i, "").trim();
+
+  // Lugar de carga (incluye lo que venga en la misma linea del encabezado).
+  const iCarga = idxOf(/^lugar de carga\b/i);
+  let cargaAddress = "";
+  if (iCarga >= 0) {
+    const same = lines[iCarga].replace(/^lugar de carga\b/i, "").replace(/^[\s:\-\u00B7]+/, "").trim();
+    cargaAddress = [same, ...lines.slice(iCarga + 1, nextHeaderAfter(iCarga))]
+      .filter(Boolean).join(", ").replace(/\s*\u2014\s*/g, " - ").replace(/\s+/g, " ").trim();
+  }
+  const cargaLoc = localidadResumenEs(cargaAddress);
+
+  // Paradas de descarga.
+  const stopIdx = lines.map((l, i) => (/^parada\s+\d+\s+de\s+\d+/i.test(l) ? i : -1)).filter(i => i >= 0);
+  const stops = [];
+  for (const sIdx of stopIdx) {
+    const block = lines.slice(sIdx + 1, nextHeaderAfter(sIdx));
+    const referencia = (block.find(l => /^[A-Z]{2}\d{2}[\/-]\d{3,6}/i.test(l)) || "").trim();
+    const util = block.filter(l => l
+      && !/^[A-Z]{2}\d{2}[\/-]\d{3,6}/i.test(l)   // ref. pedido PVxx/xxxxx
+      && !/^\d{1,4}$/.test(l)                       // contador de bultos suelto
+      && !/escanear|maps|pulsar/i.test(l));
+    const empresa = util[0] || "";
+    let addrLines = util.slice(1);
+    if (!addrLines.length) addrLines = util;
+    const address = addrLines.join(", ").replace(/\s+/g, " ").trim() || empresa;
+    const loc = localidadResumenEs(address);
+    stops.push({
+      empresa,
+      referencia,
+      direccion: (loc.resumen ? `${address}` : address).toUpperCase(),
+      ciudad: loc.ciudad,
+      provincia: loc.provincia,
+      resumen: loc.resumen,
+    });
+  }
+
+  const precio = parseImporteEs(valorDe(/^precio acordado\b/i));
+  const kg = parseImporteEs(valorDe(/^kg totales\b/i));
+  const referencia = valorDe(/^ref\.?\s*pedido/i) || (text.match(/\b[A-Z]{2}\d{2}[\/-]\d{3,6}\b/i)?.[0] || "");
+
+  const origen = (cargaLoc.resumen || cargaAddress || "").toUpperCase();
+  const destino = (stops[0]?.resumen || stops[0]?.direccion || "").toUpperCase();
+
+  return {
+    detected: true,
+    cliente_nombre: clienteNombre,
+    origen,
+    destino,
+    referencia,
+    importe: Number.isFinite(precio) && precio > 0 ? precio : null,
+    precio_unitario: Number.isFinite(precio) && precio > 0 ? precio : null,
+    peso_kg: Number.isFinite(kg) && kg > 0 ? Math.round(kg) : null,
+    bultos: bultosTotal,
+    puntos_carga: cargaAddress ? [{
+      direccion: cargaAddress.toUpperCase(), ciudad: cargaLoc.ciudad, provincia: cargaLoc.provincia,
+      fecha: "", hora: "", tipo: "carga",
+    }] : [],
+    puntos_descarga: stops.map(s => ({
+      direccion: s.direccion, ciudad: s.ciudad, provincia: s.provincia,
+      cliente_nombre: s.empresa, referencia_cliente: s.referencia,
+      fecha: "", hora: "", tipo: "descarga",
+    })),
+    paradas: stops.length,
+  };
+}
+
 function extractAiPedidoDraft(text = "") {
   const raw = String(text || "");
   const clean = normalizeAiText(raw);
   const lower = clean.toLowerCase();
   const supplierOrder = extractSupplierOrderHints(clean);
+  const orden = extractOrdenCargaHints(clean);
   const lineValue = label => {
     const rx = new RegExp(`(?:^|\\n)\\s*(?:${label})\\s*[:\\-]\\s*([^\\n]+)`, "i");
     const m = clean.match(rx);
     return m?.[1]?.trim() || "";
   };
-  const clienteNombre = lineValue("cliente|cargador|empresa|customer|shipper|from|de") || supplierOrder.cliente_nombre || pickAiMatch(clean, [
+  const clienteNombre = orden?.cliente_nombre || lineValue("cliente|cargador|empresa|customer|shipper|from|de") || supplierOrder.cliente_nombre || pickAiMatch(clean, [
     /\bcliente\s+(?:es\s+)?([A-ZÁÉÍÓÚÜÑ0-9][^\n,;]{2,80})/i,
   ]);
-  const origen = lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || pickAiMatch(clean, [
+  const origen = orden?.origen || lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || pickAiMatch(clean, [
     /\b(?:carga|recogida|origen)\s+(?:en|desde)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bdesde\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const destino = lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || pickAiMatch(clean, [
+  const destino = orden?.destino || lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || pickAiMatch(clean, [
     /\b(?:descarga|entrega|destino)\s+(?:en|a)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bhasta\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
@@ -4439,7 +4657,7 @@ function extractAiPedidoDraft(text = "") {
   const mercancia = lineValue("mercancia|mercancia / notas|producto|goods|commodity|description|carga") || supplierOrder.mercancia || pickAiMatch(clean, [
     /\bmercancia\s+(?:de\s+)?([^\n;.]{3,120})/i,
   ]);
-  const referencia = extractAiReference(clean, lineValue);
+  const referencia = orden?.referencia || extractAiReference(clean, lineValue);
   const pesoTon = lower.match(/\b(\d+(?:[,.]\d+)?)\s*(?:tn|ton|toneladas|t)\b/);
   const pesoKg = lower.match(/\b(\d{2,6}(?:[,.]\d+)?)\s*(?:kg|kilos)\b/);
   const palets = lower.match(/\b(\d{1,4})\s*(?:palets|pales|pallets|pallet|plt)\b/);
@@ -4452,9 +4670,9 @@ function extractAiPedidoDraft(text = "") {
   ]).toUpperCase().replace(/\s+/g, "-");
   const pesoKgValue = pesoTon
     ? Math.round((parseLocaleNumber(pesoTon[1]) || 0) * 1000)
-    : (pesoKg ? parseLocaleNumber(pesoKg[1]) : null);
+    : (pesoKg ? parseLocaleNumber(pesoKg[1]) : (orden?.peso_kg ?? null));
   const importeNumberRaw = String(importeRaw || "").match(/(\d+(?:[,.]\d{1,2})?)/)?.[1] || "";
-  const importe = supplierOrder.importe ?? parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
+  const importe = orden?.importe ?? supplierOrder.importe ?? parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
   const toneladas = Number.isFinite(pesoKgValue) && pesoKgValue > 0
     ? Number((pesoKgValue / 1000).toFixed(3))
     : null;
@@ -4514,7 +4732,7 @@ function extractAiPedidoDraft(text = "") {
     hora_descarga: horaDescarga || "",
     mercancia,
     peso_kg: pesoKgValue || null,
-    bultos: palets ? Number(palets[1]) : null,
+    bultos: palets ? Number(palets[1]) : (orden?.bultos ?? null),
     importe: importeCalculado || importe || null,
     precio_unitario: precioUnitario || null,
     tipo_precio: tipoPrecio,
@@ -4527,8 +4745,12 @@ function extractAiPedidoDraft(text = "") {
     _tarifa_unitaria_detectada: tarifaUnitariaDetectada,
     pendiente_completar: true,
     aviso_completar: "Borrador generado desde Bandeja IA: revisar campos, tarifa, asignacion y documentos antes de confirmar.",
-    puntos_carga: origen ? [{ direccion: origen.toUpperCase(), fecha: normalizeAiDate(fechaCargaRaw || anyDate), hora: horaCarga || "", tipo: "carga" }] : [],
-    puntos_descarga: destino ? [{ direccion: destino.toUpperCase(), fecha: normalizeAiDate(fechaDescargaRaw), hora: horaDescarga || "", tipo: "descarga" }] : [],
+    puntos_carga: orden?.puntos_carga?.length
+      ? orden.puntos_carga.map(p => ({ ...p, fecha: normalizeAiDate(fechaCargaRaw || anyDate) || p.fecha || "", hora: horaCarga || p.hora || "" }))
+      : (origen ? [{ direccion: origen.toUpperCase(), fecha: normalizeAiDate(fechaCargaRaw || anyDate), hora: horaCarga || "", tipo: "carga" }] : []),
+    puntos_descarga: orden?.puntos_descarga?.length
+      ? orden.puntos_descarga.map(p => ({ ...p, fecha: normalizeAiDate(fechaDescargaRaw) || p.fecha || "", hora: horaDescarga || p.hora || "" }))
+      : (destino ? [{ direccion: destino.toUpperCase(), fecha: normalizeAiDate(fechaDescargaRaw), hora: horaDescarga || "", tipo: "descarga" }] : []),
   };
   return draft;
 }
@@ -4545,7 +4767,8 @@ function normalizeRouteMinimumUnits(route = {}, tarifaTipo = route?.tarifa_tipo)
   const raw = route.minimo_unidades ?? route.minimo_facturable;
   const value = parseLocaleNumber(raw);
   if (!Number.isFinite(value) || value <= 0) return 0;
-  if (String(tarifaTipo || "").toLowerCase() === "tonelada" && value >= 1000) {
+  if (String(tarifaTipo || "").toLowerCase() === "tonelada" && value > MAX_TONELADAS_CAMION) {
+    // Un minimo por encima de 45 solo puede venir expresado en kilos.
     return Number((value / 1000).toFixed(3));
   }
   return value;
@@ -4604,7 +4827,6 @@ function isValidMapsUrl(value) {
 
 function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCountry = "España", fallbackRegion = "", fallbackSchedule = {}) {
   const parsed = normalizePedidoJsonList(value);
-  const seen = new Set();
   return parsed.map((stop, idx) => {
     const source = stop && typeof stop === "object" ? stop : {};
     const rawMaps = String(source.google_maps_url || source.googleMapsUrl || source.maps_url || "").trim();
@@ -4627,22 +4849,11 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCou
       lng: source.lng ?? source.longitud ?? source.metadata?.lng ?? null,
     };
   }).filter(stop => {
-    // No descartar una parada que tenga nombre de cliente/punto aunque le falte
-    // la direccion exacta (p. ej. una 2a descarga elegida por nombre).
+    // Solo se descartan paradas vacias/degeneradas (sin direccion, sin enlace, sin
+    // cliente y sin coordenadas). NO se deduplican paradas: el usuario puede tener
+    // 2 o 3 descargas al MISMO cliente/direccion y todas deben conservarse y contar
+    // (antes se colapsaban por clave direccion+cliente y se perdia la 3a descarga).
     if (!stop.direccion && !stop.google_maps_url && !stop.cliente_nombre && (stop.lat == null || stop.lng == null)) return false;
-    // Deduplicado: incluir cliente_nombre y referencia para NO colapsar dos
-    // descargas distintas que geocodifiquen al mismo punto (misma poblacion) o
-    // compartan direccion pero sean clientes distintos.
-    const key = [
-      String(stop.direccion || "").trim().toLowerCase(),
-      String(stop.cliente_nombre || "").trim().toLowerCase(),
-      String(stop.referencia || stop.referencia_cliente || "").trim().toLowerCase(),
-      String(stop.google_maps_url || "").trim().toLowerCase(),
-      stop.lat ?? "",
-      stop.lng ?? "",
-    ].join("|");
-    if (seen.has(key)) return false;
-    seen.add(key);
     return true;
   });
 }
@@ -4775,15 +4986,18 @@ function normalizeTraficoConfig(config = {}) {
     : [];
   const tiposRaw = Array.isArray(raw.tipos_viaje) ? raw.tipos_viaje : [];
   const tipos = [...new Set(tiposRaw.map(normalizeTipoViaje).filter(Boolean))];
+  const etiquetasRaw = Array.isArray(raw.etiquetas) ? raw.etiquetas : [];
+  const etiquetas = [...new Set(etiquetasRaw.map(e => String(e || "").trim()).filter(Boolean))];
   return {
     vehiculo_ids: vehiculoIds,
     tipos_viaje: tipos.length ? tipos : ["normal", "salida", "retorno"],
+    etiquetas,
   };
 }
 
 function traficoConfigIsOpen(config = {}) {
   const cfg = normalizeTraficoConfig(config);
-  return cfg.vehiculo_ids.length === 0 && cfg.tipos_viaje.length >= 3;
+  return cfg.vehiculo_ids.length === 0 && cfg.tipos_viaje.length >= 3 && cfg.etiquetas.length === 0;
 }
 
 function traficoConfigMatchesPedido(config = {}, pedido = {}, targetTipo = null) {
@@ -5142,15 +5356,25 @@ async function sincronizarConjuntoChoferDesdePedido(queryClient, pedido = {}, em
 }
 
 function pedidoTieneMinimosOperativos(pedido = {}) {
-  const tieneAsignacion = Boolean(pedido.vehiculo_id || pedido.colaborador_id);
-  const importe = Number(pedido.importe || pedido.precio_cliente_col || 0);
+  // Cuenta tambien la matricula a mano / de colaborador (asignacion desde fuera del
+  // pedido), no solo vehiculo de flota o colaborador. Si no, al asignar una
+  // matricula manual el pedido se quedaba en amarillo (pendiente_completar).
+  const tieneAsignacion = Boolean(
+    pedido.vehiculo_id ||
+    pedido.colaborador_id ||
+    String(pedido.matricula_manual || "").trim() ||
+    String(pedido.matricula_colaborador || "").trim()
+  );
+  // El minimo OPERATIVO para dejar de estar en amarillo es: cliente, origen,
+  // destino, fecha de carga y una asignacion (vehiculo/colaborador/matricula a
+  // mano). El precio es tema de facturacion y no bloquea: al asignar desde fuera
+  // el pedido deja de estar en amarillo aunque el precio se ponga despues.
   return Boolean(
     pedido.cliente_id &&
     String(pedido.origen || "").trim() &&
     String(pedido.destino || "").trim() &&
     pedido.fecha_carga &&
-    tieneAsignacion &&
-    importe > 0
+    tieneAsignacion
   );
 }
 
@@ -5729,6 +5953,15 @@ router.get("/", async (req, res) => {
     where.push(`(p.chofer_id = $${i} OR p.chofer2_id = $${i++})`);
     params.push(chofer_id);
   }
+  // Proveedor invitado: solo ve los viajes asignados a SU colaborador. Si el
+  // usuario no esta ligado a ninguno, no ve nada (nunca toda la empresa).
+  if (req.user?.rol === "colaborador") {
+    if (!req.user?.colaborador_id) {
+      return res.json({ data: [], page: Number(page) || 1, limit: Number(limit) || 50, total: 0, total_pages: 0 });
+    }
+    where.push(`p.colaborador_id = $${i++}`);
+    params.push(req.user.colaborador_id);
+  }
   if (req.user?.rol === "trafico" && !traficoConfigIsOpen(req.user.trafico_config)) {
     const scope = normalizeTraficoConfig(req.user.trafico_config);
     if (scope.vehiculo_ids.length) {
@@ -5738,6 +5971,11 @@ router.get("/", async (req, res) => {
     if (scope.tipos_viaje.length && scope.tipos_viaje.length < 3) {
       where.push(`COALESCE(p.tipo_viaje,'normal') = ANY($${i++}::text[])`);
       params.push(scope.tipos_viaje);
+    }
+    // Perfil por etiquetas: solo ve pedidos con alguna de sus etiquetas.
+    if (scope.etiquetas.length) {
+      where.push(`COALESCE(p.etiquetas,'{}') && $${i++}::text[]`);
+      params.push(scope.etiquetas);
     }
   }
   if (desde)      { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) >= $${i++}`);  params.push(desde); }
@@ -5872,6 +6110,262 @@ router.get("/", async (req, res) => {
   });
 });
 
+// GET /pedidos/chofer-ultimo-viaje - viaje del chofer que PRECEDE al que se le
+// esta asignando, para sugerir los km EN VACIO de posicionamiento (destino donde
+// queda -> origen del nuevo). Si se pasa antes_de (fecha de carga del nuevo
+// viaje), se elige el viaje del chofer que TERMINA justo antes de esa fecha (el
+// predecesor cronologico real), asi no importa en que orden se graben los viajes.
+// Sin antes_de, se comporta como antes (el ultimo viaje por fecha).
+router.get("/chofer-ultimo-viaje", async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const choferId = normalizePedidoUuid(req.query?.chofer_id);
+    const vehiculoId = normalizePedidoUuid(req.query?.vehiculo_id);
+    const excluir = normalizePedidoUuid(req.query?.excluir);
+    const antesDe = normalizePedidoDate(req.query?.antes_de);
+    if (!empresaId || !choferId) return res.json({ hay: false });
+
+    // Cascada para el punto de partida del posicionamiento en vacio, robusta al
+    // orden en que se graban los viajes: 1) GPS del camion si es reciente y el
+    // viaje sale pronto, 2) destino del viaje anterior por fecha, 3) base empresa.
+
+    // -- Fecha de carga cercana a hoy? (para decidir si el GPS actual es relevante)
+    let cargaCercana = true;
+    if (antesDe) {
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      const d = new Date(`${antesDe}T00:00:00`);
+      const diffDias = Math.round((d.getTime() - hoy.getTime()) / 86400000);
+      cargaCercana = diffDias >= -1 && diffDias <= 2;
+    }
+
+    // 1) GPS del vehiculo asignado (ubicacion reciente <= 2 dias)
+    if (vehiculoId && cargaCercana) {
+      const gps = await db.query(
+        "SELECT ubicacion_actual, ubicacion_ts FROM vehiculos WHERE id=$1 AND empresa_id=$2",
+        [vehiculoId, empresaId]
+      );
+      const v = gps.rows[0];
+      const ubic = String(v?.ubicacion_actual || "").trim();
+      const tsMs = v?.ubicacion_ts ? new Date(v.ubicacion_ts).getTime() : 0;
+      if (ubic && tsMs && (Date.now() - tsMs) <= 2 * 86400000) {
+        return res.json({ hay: true, fuente: "gps", desde: ubic, desde_label: `GPS del camion: ${ubic}` });
+      }
+    }
+
+    // 2) Viaje anterior por fecha (predecesor cronologico real)
+    const { rows } = await db.query(
+      `SELECT id, numero, destino, destino_provincia, destino_pais, estado::text AS estado
+         FROM pedidos
+        WHERE empresa_id=$1
+          AND (chofer_id=$2 OR chofer2_id=$2)
+          AND ($3::uuid IS NULL OR id<>$3)
+          AND estado::text IN ('en_curso','descarga','entregado','facturado')
+          AND NULLIF(TRIM(COALESCE(destino,'')),'') IS NOT NULL
+          AND ($4::date IS NULL OR COALESCE(fecha_entrega, fecha_descarga, fecha_carga) <= $4::date)
+        ORDER BY COALESCE(fecha_entrega, fecha_descarga, fecha_carga) DESC NULLS LAST, updated_at DESC NULLS LAST
+        LIMIT 1`,
+      [empresaId, choferId, excluir || null, antesDe || null]
+    );
+    const p = rows[0];
+    if (p) {
+      const desde = [p.destino, p.destino_provincia].filter(Boolean).join(", ");
+      return res.json({
+        hay: true, fuente: "viaje", desde,
+        desde_label: `Viaje ${p.numero || ""} (${p.destino})`.replace(/\s+\(/, " ("),
+        pedido_id: p.id, numero: p.numero, destino: p.destino,
+        destino_provincia: p.destino_provincia || "", destino_pais: p.destino_pais || "", estado: p.estado,
+      });
+    }
+
+    // 3) Base de la empresa (domicilio/municipio del perfil)
+    const emp = await db.query("SELECT cfg_precios FROM empresas WHERE id=$1", [empresaId]);
+    const perfil = emp.rows[0]?.cfg_precios?.empresa_perfil || emp.rows[0]?.cfg_precios || {};
+    const baseDesde = [perfil.municipio, perfil.provincia].filter(x => String(x || "").trim()).join(", ")
+      || String(perfil.domicilio || "").trim();
+    if (baseDesde) {
+      return res.json({ hay: true, fuente: "base", desde: baseDesde, desde_label: `Base de la empresa: ${baseDesde}` });
+    }
+
+    return res.json({ hay: false });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /pedidos/disponibilidad - para una fecha, dice que vehiculos y choferes
+// estan libres y, si no lo estan, por que. Se usa al asignar (boton Asignar y
+// formulario del pedido) para mostrar atenuados los ocupados con su motivo, sin
+// impedir asignarlos si hace falta.
+router.get("/disponibilidad", async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    if (!empresaId) return res.json({ fecha: null, vehiculos: [], choferes: [] });
+    const fecha = normalizePedidoDate(req.query?.fecha) || new Date().toISOString().slice(0, 10);
+    const excluir = normalizePedidoUuid(req.query?.excluir);
+
+    // Un recurso esta ocupado si tiene otro viaje vivo cuyo rango de fechas
+    // (carga -> descarga) incluye la fecha consultada.
+    const ocupacionSql = (campo) => `
+      SELECT p.numero, p.origen, p.destino,
+             COALESCE(p.fecha_carga, p.fecha_pedido) AS desde,
+             COALESCE(p.fecha_descarga, p.fecha_entrega, p.fecha_carga, p.fecha_pedido) AS hasta
+        FROM pedidos p
+       WHERE p.empresa_id = $1
+         AND p.${campo} = r.id
+         AND ($2::uuid IS NULL OR p.id <> $2::uuid)
+         AND LOWER(p.estado::text) NOT IN ('cancelado','entregado','facturado')
+         AND COALESCE(p.fecha_carga, p.fecha_pedido) <= $3::date
+         AND COALESCE(p.fecha_descarga, p.fecha_entrega, p.fecha_carga, p.fecha_pedido) >= $3::date
+       ORDER BY COALESCE(p.fecha_carga, p.fecha_pedido) ASC
+       LIMIT 1`;
+
+    const [vehRes, chofRes] = await Promise.all([
+      db.query(`
+        SELECT r.id, r.matricula, r.clase, r.tipo, r.activo, r.estado::text AS estado,
+               r.fecha_itv, r.fecha_seguro, o.numero AS ocupado_numero,
+               o.origen AS ocupado_origen, o.destino AS ocupado_destino
+          FROM vehiculos r
+          LEFT JOIN LATERAL (${ocupacionSql("vehiculo_id")}) o ON TRUE
+         WHERE r.empresa_id = $1
+         ORDER BY r.matricula ASC`, [empresaId, excluir || null, fecha]),
+      db.query(`
+        SELECT r.id, r.nombre, r.apellidos, r.activo,
+               o.numero AS ocupado_numero, o.origen AS ocupado_origen, o.destino AS ocupado_destino
+          FROM choferes r
+          LEFT JOIN LATERAL (${ocupacionSql("chofer_id")}) o ON TRUE
+         WHERE r.empresa_id = $1
+         ORDER BY r.nombre ASC`, [empresaId, excluir || null, fecha]),
+    ]);
+
+    // Vacaciones aparte: si la tabla no existe todavia, no debe dejar la lista de
+    // choferes vacia (solo se pierde ese motivo).
+    const vacRes = await db.query(`
+      SELECT chofer_id FROM chofer_vacaciones_solicitudes
+       WHERE empresa_id = $1
+         AND LOWER(estado) IN ('aprobada','aprobado','aceptada')
+         AND fecha_inicio <= $2::date AND fecha_fin >= $2::date`,
+      [empresaId, fecha]
+    ).catch(() => ({ rows: [] }));
+    const deVacaciones = new Set(vacRes.rows.map(v => String(v.chofer_id)));
+
+    const venceAntes = (valor) => {
+      const iso = valor ? String(valor instanceof Date ? valor.toISOString() : valor).slice(0, 10) : "";
+      return iso && iso < fecha;
+    };
+
+    const vehiculos = vehRes.rows.map(v => {
+      const motivos = [];
+      if (v.activo === false) motivos.push({ nivel: "duro", texto: "Vehiculo de baja" });
+      if (String(v.estado || "").toLowerCase() === "taller") motivos.push({ nivel: "duro", texto: "En taller" });
+      if (v.ocupado_numero) {
+        motivos.push({
+          nivel: "duro",
+          texto: `En el viaje ${v.ocupado_numero}${v.ocupado_destino ? ` (${v.ocupado_origen || ""} - ${v.ocupado_destino})` : ""}`,
+        });
+      }
+      if (venceAntes(v.fecha_itv)) motivos.push({ nivel: "aviso", texto: "ITV caducada" });
+      if (venceAntes(v.fecha_seguro)) motivos.push({ nivel: "aviso", texto: "Seguro caducado" });
+      return {
+        id: v.id,
+        matricula: v.matricula,
+        clase: v.clase || v.tipo || "",
+        disponible: !motivos.some(m => m.nivel === "duro"),
+        motivos,
+        motivo: motivos.map(m => m.texto).join(" | "),
+      };
+    });
+
+    const choferes = chofRes.rows.map(c => {
+      const motivos = [];
+      if (c.activo === false) motivos.push({ nivel: "duro", texto: "Chofer inactivo" });
+      if (deVacaciones.has(String(c.id))) motivos.push({ nivel: "duro", texto: "De vacaciones" });
+      if (c.ocupado_numero) {
+        motivos.push({
+          nivel: "duro",
+          texto: `En el viaje ${c.ocupado_numero}${c.ocupado_destino ? ` (${c.ocupado_origen || ""} - ${c.ocupado_destino})` : ""}`,
+        });
+      }
+      return {
+        id: c.id,
+        nombre: `${c.nombre || ""} ${c.apellidos || ""}`.trim(),
+        disponible: !motivos.some(m => m.nivel === "duro"),
+        motivos,
+        motivo: motivos.map(m => m.texto).join(" | "),
+      };
+    });
+
+    res.json({ fecha, vehiculos, choferes });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /pedidos/grupaje/combinar - junta varios pedidos en un mismo viaje
+// (grupaje): les pone un grupaje_id comun y tipo_carga='grupaje'. Si alguno ya
+// esta en un grupaje, se reutiliza ese id. Luego aparecen como un solo grupo en
+// la pestana Grupajes, con sus cargas/descargas ordenables y asignables.
+router.post("/grupaje/combinar", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const ids = [...new Set((Array.isArray(req.body?.pedido_ids) ? req.body.pedido_ids : []).map(normalizePedidoUuid).filter(Boolean))];
+    if (ids.length < 2) return res.status(400).json({ error: "Selecciona al menos 2 pedidos para agruparlos en un grupaje." });
+    const { rows } = await db.query(
+      "SELECT id, grupaje_id, factura_id FROM pedidos WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
+      [empresaId, ids]
+    );
+    if (rows.length !== ids.length) return res.status(404).json({ error: "Alguno de los pedidos no existe o no pertenece a la empresa." });
+    if (rows.some(p => p.factura_id)) return res.status(400).json({ error: "No se pueden agrupar pedidos ya facturados." });
+    const grupajeId = rows.map(p => p.grupaje_id).find(Boolean) || crypto.randomUUID();
+    // Grupaje provisional: se guarda y se ve como grupaje, pero queda marcado
+    // como no definitivo hasta que se confirme.
+    const esBorrador = req.body?.borrador === true || req.body?.borrador === "true";
+    await db.query(
+      "UPDATE pedidos SET grupaje_id=$1::uuid, tipo_carga='grupaje', grupaje_borrador=$4, updated_at=NOW() WHERE empresa_id=$2 AND id = ANY($3::uuid[])",
+      [grupajeId, empresaId, ids, esBorrador]
+    );
+    for (const id of ids) {
+      logPedidoEvento(id, empresaId, esBorrador ? "grupaje.borrador_guardado" : "grupaje.combinado", { grupaje_id: grupajeId, pedidos: ids }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+    }
+    return res.json({ ok: true, grupaje_id: grupajeId, count: ids.length, borrador: esBorrador });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /pedidos/grupaje/confirmar - pasa un grupaje de borrador a definitivo.
+router.post("/grupaje/confirmar", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const grupajeId = normalizePedidoUuid(req.body?.grupaje_id);
+    if (!grupajeId) return res.status(400).json({ error: "Indica el grupaje a confirmar." });
+    const { rows } = await db.query(
+      "UPDATE pedidos SET grupaje_borrador=false, updated_at=NOW() WHERE empresa_id=$1 AND grupaje_id=$2::uuid RETURNING id",
+      [empresaId, grupajeId]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Grupaje no encontrado." });
+    for (const r of rows) {
+      logPedidoEvento(r.id, empresaId, "grupaje.confirmado", { grupaje_id: grupajeId }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
+    }
+    res.json({ ok: true, grupaje_id: grupajeId, count: rows.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /pedidos/grupaje/separar - saca pedidos de su grupaje.
+router.post("/grupaje/separar", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const ids = [...new Set((Array.isArray(req.body?.pedido_ids) ? req.body.pedido_ids : []).map(normalizePedidoUuid).filter(Boolean))];
+    if (!ids.length) return res.status(400).json({ error: "Sin pedidos." });
+    await db.query(
+      "UPDATE pedidos SET grupaje_id=NULL, grupaje_borrador=false, updated_at=NOW() WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
+      [empresaId, ids]
+    );
+    return res.json({ ok: true, count: ids.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /pedidos/resumen-lista - listado operativo ligero para pantallas de trafico
 router.get("/resumen-lista", async (req, res) => {
   try {
@@ -5896,6 +6390,14 @@ router.get("/resumen-lista", async (req, res) => {
       }
     }
     if (cliente_id) { where.push(`p.cliente_id = $${i++}`); params.push(cliente_id); }
+    // Proveedor invitado: solo SUS viajes (nunca los del resto de la empresa).
+    if (req.user?.rol === "colaborador") {
+      if (!req.user?.colaborador_id) {
+        return res.json({ data: [], pagination: { total: 0, page: pageN, limit: limitN, totalPages: 0, hasNext: false, hasPrev: pageN > 1 } });
+      }
+      where.push(`p.colaborador_id = $${i++}`);
+      params.push(req.user.colaborador_id);
+    }
     if (req.user?.rol === "chofer") {
       const access = await getChoferAccessForUser(req.user, empresaId);
       if (!access.choferIds.length && !access.vehiculoIds.length) {
@@ -7246,6 +7748,11 @@ router.get("/:id", async (req, res) => {
   if (req.user?.rol === "chofer" && !(await usuarioPuedeGestionarPedido(req, rows[0]))) {
     return res.status(403).json({ error: "No puedes acceder a este pedido" });
   }
+  // Proveedor invitado: solo puede abrir los viajes de SU colaborador.
+  if (req.user?.rol === "colaborador"
+      && String(rows[0].colaborador_id || "") !== String(req.user?.colaborador_id || " ")) {
+    return res.status(403).json({ error: "No puedes acceder a este pedido" });
+  }
 
   const extras = await db.query(
     `SELECT pe.*
@@ -8095,6 +8602,39 @@ router.post("/chofer", async (req, res) => {
   }
 });
 
+// Asocia (sin quitar a nadie) los puntos de interes usados en un pedido al
+// cliente del pedido: el punto pasa a aparecer TAMBIEN como "del cliente",
+// pudiendo estar en varios clientes a la vez y seguir siendo general/visible.
+// Solo anade el cliente a clientes_ids; nunca cambia el dueno ni borra a otros.
+async function asociarPuntosInteresUsados(empresaId, clienteId, ...stopArrays) {
+  try {
+    const cid = normalizePedidoUuid(clienteId);
+    if (!empresaId || !cid) return;
+    const ids = [];
+    for (const arr of stopArrays) {
+      for (const stop of normalizePedidoJsonList(arr)) {
+        const pid = normalizePedidoUuid(stop?.punto_interes_id || stop?.punto_id || stop?.point_id);
+        if (pid) ids.push(pid);
+      }
+    }
+    const unique = [...new Set(ids)];
+    if (!unique.length) return;
+    await db.query(
+      `UPDATE puntos_interes
+          SET clientes_ids = array_append(COALESCE(clientes_ids, '{}'), $1::uuid),
+              updated_at = NOW()
+        WHERE empresa_id = $2
+          AND id = ANY($3::uuid[])
+          AND activo = true
+          AND cliente_id IS DISTINCT FROM $1::uuid
+          AND NOT ($1::uuid = ANY(COALESCE(clientes_ids, '{}')))`,
+      [cid, empresaId, unique]
+    );
+  } catch (e) {
+    logger.warn(`No se pudieron asociar puntos de interes al cliente: ${e.message}`);
+  }
+}
+
 router.post("/", GERENTE_O_TRAFICO,
   body("cliente_id").isUUID(),
   body("importe").optional({ checkFalsy: true }).custom(value => parseLocaleNumber(value) !== null),
@@ -8291,6 +8831,7 @@ router.post("/", GERENTE_O_TRAFICO,
         precio_colaborador_unitario: req.body.precio_colaborador_unitario !== undefined ? (req.body.precio_colaborador_unitario ?? null) : undefined,
         minimo_colaborador_unidades: req.body.minimo_colaborador_unidades !== undefined ? (req.body.minimo_colaborador_unidades ?? null) : undefined,
         reparto_chofer1: req.body.reparto_chofer1 ?? 50,
+        etiquetas: Array.isArray(req.body.etiquetas) ? [...new Set(req.body.etiquetas.map(e => String(e || "").trim()).filter(Boolean))] : undefined,
         referencia_cliente: req.body.referencia_cliente ?? null,
         matricula_colaborador: req.body.matricula_colaborador !== undefined ? (req.body.matricula_colaborador ? String(req.body.matricula_colaborador).trim().toUpperCase() : null) : undefined,
         remolque_matricula_colaborador: req.body.remolque_matricula_colaborador !== undefined ? (req.body.remolque_matricula_colaborador ? String(req.body.remolque_matricula_colaborador).trim().toUpperCase() : null) : undefined,
@@ -8318,6 +8859,7 @@ router.post("/", GERENTE_O_TRAFICO,
         coste_otros: req.body.coste_otros !== undefined ? (req.body.coste_otros ?? 0) : undefined,
         coste_notas: req.body.coste_notas !== undefined ? (req.body.coste_notas ?? null) : undefined,
         condiciones_adicionales: req.body.condiciones_adicionales !== undefined ? (req.body.condiciones_adicionales ?? null) : undefined,
+        nota_visible: req.body.nota_visible !== undefined ? !!req.body.nota_visible : undefined,
         importe_minimo: req.body.importe_minimo !== undefined ? (parseLocaleNumber(req.body.importe_minimo) || 0) : undefined,
         minimo_unidades: req.body.minimo_unidades !== undefined ? (parseLocaleNumber(req.body.minimo_unidades) || 0) : undefined,
         importe_paralizacion: req.body.importe_paralizacion !== undefined ? (parseLocaleNumber(req.body.importe_paralizacion) || 0) : undefined,
@@ -8426,8 +8968,27 @@ router.post("/", GERENTE_O_TRAFICO,
       pedidoCreado = pedido;
       remolqueMatCreado = remolque_mat;
     });
-    res.status(201).json({...pedidoCreado, remolque_matricula: remolqueMatCreado});
+    // Sugerir fijar la mercancia como habitual del cliente si se repite lo suficiente
+    // y el cliente todavia no la tiene fijada. No debe romper la creacion.
+    let sugerenciaMercancia = null;
+    try {
+      const merc = String(pedidoCreado?.mercancia || "").trim();
+      if (merc && cliente_id) {
+        const cli = await db.query("SELECT mercancia_habitual FROM clientes WHERE id=$1 AND empresa_id=$2", [cliente_id, empresaId]);
+        const yaFijada = String(cli.rows[0]?.mercancia_habitual || "").trim().toLowerCase();
+        if (yaFijada !== merc.toLowerCase()) {
+          const cnt = await db.query(
+            "SELECT COUNT(*)::int AS n FROM pedidos WHERE empresa_id=$1 AND cliente_id=$2 AND lower(trim(mercancia))=lower(trim($3))",
+            [empresaId, cliente_id, merc]
+          );
+          const veces = cnt.rows[0]?.n || 0;
+          if (veces >= 3) sugerenciaMercancia = { mercancia: merc, veces };
+        }
+      }
+    } catch (e) { /* la sugerencia es opcional */ }
+    res.status(201).json({...pedidoCreado, remolque_matricula: remolqueMatCreado, sugerencia_mercancia_habitual: sugerenciaMercancia});
     webhooks.dispatch(empresaId, "pedido.creado", { pedido_id: pedidoCreado && pedidoCreado.id, numero: pedidoCreado && pedidoCreado.numero, cliente_id, origen: pedidoCreado && pedidoCreado.origen, destino: pedidoCreado && pedidoCreado.destino }).catch(() => {});
+    asociarPuntosInteresUsados(empresaId, cliente_id, pedidoCreado?.puntos_carga, pedidoCreado?.puntos_descarga);
     if (pedidoCreado && festivoAviso) {
       notificarGerenciaPedido(
         empresaId,
@@ -8493,6 +9054,17 @@ router.patch("/:id/estado",
     }
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
       return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
+    }
+    // Proteccion: cuando el chofer ya esta haciendo los pasos del viaje (en curso),
+    // nadie desde trafico/pedidos puede cambiarle el estado. Solo el propio chofer
+    // (desde su app) o gerencia. Asi no se pisa el estado real del viaje.
+    const ESTADOS_EN_CURSO_CHOFER = ["cargando", "en_curso", "espera_carga", "espera_descarga", "descarga"];
+    if (
+      ESTADOS_EN_CURSO_CHOFER.includes(String(rows[0].estado || "").toLowerCase()) &&
+      req.user?.rol !== "chofer" &&
+      req.user?.rol !== "gerente"
+    ) {
+      return res.status(403).json({ error: "El chofer esta realizando el viaje. Solo el chofer o gerencia pueden cambiar el estado mientras esta en curso." });
     }
     await assertUnicoViajeActivoChofer({ pedido: rows[0], empresaId, estadoDestino: estado });
 
@@ -8566,6 +9138,17 @@ router.patch("/:id/estado",
         "UPDATE pedidos SET estado=$1, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL WHERE id=$2 AND empresa_id=$3",
         [estado, req.params.id, empresaId]
       );
+    }
+
+    // Mes de facturacion elegido al entregar fuera de su mes (facturar este mes
+    // o dejarlo para la prevision del mes siguiente). Se guarda como el dia 1 del
+    // mes elegido; el dashboard y facturacion lo usan para situar el viaje.
+    if (estado === "entregado" && typeof req.body.facturacion_mes === "string") {
+      const fm = req.body.facturacion_mes.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(fm)) {
+        await db.query("UPDATE pedidos SET facturacion_mes=$1 WHERE id=$2 AND empresa_id=$3", [fm, req.params.id, empresaId])
+          .catch(e => logger.warn("facturacion_mes no guardado:", e.message));
+      }
     }
 
     if (estado === "descarga" && rows[0].vehiculo_id && rows[0].destino) {
@@ -8752,6 +9335,14 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     bultos: body.bultos ?? null,
     volumen: body.volumen ?? null,
     metros_lineales: body.metros_lineales ?? null,
+    // Detalle de la carga (ocupacion real del remolque en los grupajes)
+    palets_tipo: body.palets_tipo ?? null,
+    palets_cantidad: body.palets_cantidad ?? null,
+    palets_apilables: body.palets_apilables === undefined ? undefined : Boolean(body.palets_apilables),
+    carga_largo_m: body.carga_largo_m ?? null,
+    carga_ancho_m: body.carga_ancho_m ?? null,
+    carga_alto_m: body.carga_alto_m ?? null,
+    temperatura_c: body.temperatura_c ?? null,
     importe: body.importe,
     notas: body.notas ?? null,
     km_ruta: body.km_ruta ?? null,
@@ -8771,6 +9362,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     precio_colaborador_unitario: body.precio_colaborador_unitario !== undefined ? (body.precio_colaborador_unitario ?? null) : undefined,
     minimo_colaborador_unidades: body.minimo_colaborador_unidades !== undefined ? (body.minimo_colaborador_unidades ?? null) : undefined,
     reparto_chofer1: body.reparto_chofer1 ?? 50,
+    etiquetas: Array.isArray(body.etiquetas) ? [...new Set(body.etiquetas.map(e => String(e || "").trim()).filter(Boolean))] : undefined,
     referencia_cliente: body.referencia_cliente ?? null,
     matricula_colaborador: body.matricula_colaborador !== undefined ? (body.matricula_colaborador ? String(body.matricula_colaborador).trim().toUpperCase() : null) : undefined,
     remolque_matricula_colaborador: body.remolque_matricula_colaborador !== undefined ? (body.remolque_matricula_colaborador ? String(body.remolque_matricula_colaborador).trim().toUpperCase() : null) : undefined,
@@ -8818,6 +9410,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     foto_entrega:           body.foto_entrega           !== undefined ? (body.foto_entrega           ?? null) : undefined,
     // Condiciones del encargo
     condiciones_adicionales: body.condiciones_adicionales !== undefined ? (body.condiciones_adicionales ?? null) : undefined,
+    nota_visible: body.nota_visible !== undefined ? !!body.nota_visible : undefined,
     // Minimo facturable + paralizacion
     importe_minimo:         body.importe_minimo         !== undefined ? (parseLocaleNumber(body.importe_minimo) || 0) : undefined,
     minimo_unidades:        body.minimo_unidades        !== undefined ? (parseLocaleNumber(body.minimo_unidades) || 0) : undefined,
@@ -8980,6 +9573,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
         req.user?.id || null
       );
     }
+    asociarPuntosInteresUsados(empresaId, pedidoActualizado.cliente_id, pedidoActualizado.puntos_carga, pedidoActualizado.puntos_descarga);
     res.json(pedidoActualizado);
   } catch(e) {
     if (e.code === '42703') {
@@ -9505,6 +10099,7 @@ table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid
 });
 
 router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
+router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
 
 module.exports = router;

@@ -1385,7 +1385,7 @@ export default function PortalClientes() {
                     {!s.pedido_id && !["convertida", "cancelada", "rechazada", "descartada"].includes(String(s.estado || "").toLowerCase()) && (
                       <>
                         <button
-                          style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(20,184,166,.10)", color: "var(--accent)", borderColor: "rgba(20,184,166,.25)" }}
+                          style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "var(--accent-a10)", color: "var(--accent)", borderColor: "var(--accent-a25)" }}
                           onClick={() => setSolicitudEditando(s)}
                         >
                           Editar solicitud
@@ -1400,7 +1400,7 @@ export default function PortalClientes() {
                     )}
                     {s.pedido_id && !["cancelado", "facturado", "cerrado"].includes(normalizarEstadoPedidoPortal(s.pedido_estado)) && (
                       <button
-                        style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "rgba(20,184,166,.10)", color: "var(--accent)", borderColor: "rgba(20,184,166,.25)" }}
+                        style={{ ...S.btn, padding: "6px 10px", fontSize: 12, background: "var(--accent-a10)", color: "var(--accent)", borderColor: "var(--accent-a25)" }}
                         onClick={() => setSolicitudEditando(s)}
                       >
                         Editar datos
@@ -1432,7 +1432,7 @@ export default function PortalClientes() {
                           const mio = ev.tipo === "mensaje.cliente";
                           return (
                             <div key={ev.id} style={{ display: "flex", justifyContent: mio ? "flex-end" : "flex-start", padding: "5px 0" }}>
-                              <div style={{ maxWidth: "80%", padding: "8px 11px", borderRadius: 10, background: mio ? "rgba(20,184,166,.12)" : "var(--bg2)", border: `1px solid ${mio ? "rgba(20,184,166,.3)" : "var(--border2)"}` }}>
+                              <div style={{ maxWidth: "80%", padding: "8px 11px", borderRadius: 10, background: mio ? "var(--accent-a12)" : "var(--bg2)", border: `1px solid ${mio ? "var(--accent-a30)" : "var(--border2)"}` }}>
                                 <div style={{ fontSize: 10, fontWeight: 900, color: mio ? "var(--accent)" : "var(--text4)", marginBottom: 2 }}>
                                   {mio ? "Tu" : "Trafico"}
                                 </div>

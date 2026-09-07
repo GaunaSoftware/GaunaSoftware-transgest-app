@@ -1,4 +1,5 @@
 import { getLogoDataUrl } from "../services/logoHelper";
+import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
 import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -54,8 +55,8 @@ function FinanceIcon({ icon = "wallet" }) {
 }
 
 function FinanceKpi({ label, value, color, icon }) {
-  const softBg = String(color).startsWith("#") ? `${color}12` : "rgba(20,184,166,.10)";
-  const softBorder = String(color).startsWith("#") ? `${color}22` : "rgba(20,184,166,.22)";
+  const softBg = String(color).startsWith("#") ? `${color}12` : "var(--accent-a10)";
+  const softBorder = String(color).startsWith("#") ? `${color}22` : "var(--accent-a22)";
   return (
     <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"26px 28px",display:"flex",alignItems:"center",gap:20,minHeight:106,boxShadow:"0 12px 34px rgba(15,23,42,.05)"}}>
       <div style={{width:58,height:58,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",color,background:softBg,border:`1px solid ${softBorder}`,flexShrink:0}}>
@@ -660,7 +661,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:`1px solid ${esRect?"rgba(249,115,22,.4)":"var(--border2)"}`,borderRadius:14,width:"min(820px,97vw)",maxHeight:"96vh",overflowY:"auto",display:"flex",flexDirection:"column"}}>
         {/* Toolbar */}
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 18px",borderBottom:"1px solid #141a28",flexShrink:0}}>
@@ -1236,7 +1237,7 @@ function ModalCorregirPedidoFactura({ pedido, onClose, onSaved }) {
 
   const input = {...S.inp,padding:"8px 10px",fontSize:12};
   return (
-    <div style={{position:"fixed",inset:0,zIndex:360,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,zIndex:360,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{width:"min(760px,96vw)",maxHeight:"92vh",overflowY:"auto",background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:20}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
           <div>
@@ -1324,7 +1325,7 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
   }
 
   return (
-    <div style={{...S.modal,zIndex:300}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{...S.modal,zIndex:300}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid rgba(249,115,22,.3)",borderRadius:14,padding:26,width:"min(540px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"#f97316",marginBottom:6}}>Factura rectificativa</div>
         <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Rectifica: <strong style={{color:"var(--text2)"}}>{facturaOriginal.numero}</strong> - {facturaOriginal.cliente_nombre} - {fmt2(facturaOriginal.total)} EUR</div>
@@ -1629,7 +1630,7 @@ function ModalFacturarMultiple({ onClose }) {
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:22,width:"min(760px,96vw)",maxHeight:"93vh",overflowY:"auto"}}>
 
         {/* Header */}
@@ -1973,7 +1974,7 @@ function ModalFacturarMultiple({ onClose }) {
         )}
 
         {refEdit && (
-          <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(15,23,42,.42)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setRefEdit(null)}>
+          <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(15,23,42,.42)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setRefEdit(null)}>
             <div style={{width:"min(420px,96vw)",background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,boxShadow:"0 24px 64px rgba(15,23,42,.28)",padding:18}}>
               <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:800,color:"var(--text)",marginBottom:6}}>Referencia cliente</div>
               <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.4,marginBottom:12}}>
@@ -2037,8 +2038,10 @@ function monthBounds(value = new Date()) {
 }
 
 export default function Facturacion() {
-  const { puedeEditar } = useAuth();
+  const { puedeEditar, user } = useAuth();
   const canEdit           = puedeEditar("facturas");
+  // Los ajustes contables (programa y cuentas) los cambia solo gerencia.
+  const esGerenteFacturacion = String(user?.rol || "").toLowerCase() === "gerente";
   const aiDisponible      = planHasFeature(getEmpresaPlanLocal(), "ai");
   const [activeFacturacionTab, setActiveFacturacionTab] = useState("facturas");
   const [focusFactura]    = useState(() => readFacturacionFocus());
@@ -2074,6 +2077,24 @@ export default function Facturacion() {
   const [pagoProveedorEdit, setPagoProveedorEdit] = useState(null);
   const [pagoProveedorForm, setPagoProveedorForm] = useState({});
   const [capitalActual, setCapitalActual] = useState(0);
+  // Viajes entregados sin facturar (todos los clientes), para verlos de un
+  // vistazo sin entrar a Pedidos. Seccion desplegable en el area de facturas.
+  const [sinFacturar, setSinFacturar] = useState([]);
+  const [sinFacturarLoad, setSinFacturarLoad] = useState(false);
+  const [sinFacturarOpen, setSinFacturarOpen] = useState(false);
+  const cargarSinFacturar = useCallback(() => {
+    setSinFacturarLoad(true);
+    getPedidos({ facturado: "false", estado: "entregado", limit: 1000 })
+      .then(d => setSinFacturar(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : []))
+      .catch(() => setSinFacturar([]))
+      .finally(() => setSinFacturarLoad(false));
+  }, []);
+  useEffect(() => { cargarSinFacturar(); }, [cargarSinFacturar]);
+  const sinFacturarOrdenados = useMemo(() => [...sinFacturar].sort((a, b) =>
+    String(a.cliente_nombre || "").localeCompare(String(b.cliente_nombre || "")) ||
+    String(a.fecha_descarga || a.fecha_carga || "").localeCompare(String(b.fecha_descarga || b.fecha_carga || ""))
+  ), [sinFacturar]);
+  const sinFacturarTotal = useMemo(() => sinFacturar.reduce((s, p) => s + Number(p.importe || p.precio || 0), 0), [sinFacturar]);
   const [cobrosCfg,    setCobrosCfg]    = useState({
     dias_revision_post_vencimiento: 1,
     dias_entre_reclamaciones: 7,
@@ -2718,7 +2739,7 @@ export default function Facturacion() {
     <div className="tg-responsive-page" style={S.page}>
       <div style={{display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",marginBottom:24}}>
         <div style={{display:"flex",gap:18,alignItems:"flex-start"}}>
-          <div style={{width:46,height:46,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"rgba(20,184,166,.10)",border:"1px solid rgba(20,184,166,.20)",color:"var(--accent-xl)",flexShrink:0}}>
+          <div style={{width:46,height:46,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"var(--accent-a10)",border:"1px solid var(--accent-a20)",color:"var(--accent-xl)",flexShrink:0}}>
             <FinanceIcon icon="wallet" />
           </div>
           <div>
@@ -2729,14 +2750,14 @@ export default function Facturacion() {
       </div>
 
       {focusFactura?.source === "control_tower" && !focusFactura?.factura_id && (
-        <div style={{...S.card,marginBottom:14,borderColor:"rgba(20,184,166,.35)",background:"rgba(20,184,166,.07)"}}>
+        <div style={{...S.card,marginBottom:14,borderColor:"var(--accent-a35)",background:"var(--accent-a07)"}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
             <div style={{flex:"1 1 320px"}}>
               <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--accent-xl)",marginBottom:5}}>Control Tower</div>
               <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>{focusFactura.title || focusFactura.action || "Accion financiera pendiente"}</div>
               <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.4}}>{focusFactura.description || "Revisa esta senal desde facturacion."}</div>
             </div>
-            <span style={{fontSize:11,fontWeight:900,border:"1px solid rgba(20,184,166,.35)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",borderRadius:20,padding:"4px 9px"}}>
+            <span style={{fontSize:11,fontWeight:900,border:"1px solid var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-xl)",borderRadius:20,padding:"4px 9px"}}>
               {focusFactura.action || focusFactura.action_key || "Revisar"}
             </span>
           </div>
@@ -2753,10 +2774,10 @@ export default function Facturacion() {
         ].map((k,i)=><FinanceKpi key={i} label={k.l} value={k.v} color={k.c} icon={k.icon} />)}
       </div>
 
-      <div style={{...S.card,marginBottom:22,borderColor:"rgba(20,184,166,.24)",background:"linear-gradient(135deg, rgba(20,184,166,.07), var(--card-bg))"}}>
+      <div style={{...S.card,marginBottom:22,borderColor:"var(--accent-a24)",background:"linear-gradient(135deg, var(--accent-a07), var(--card-bg))"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
           <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"var(--text)"}}>Resumen general financiero</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"var(--text)"}}>Resumen general financiero</div>
             <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Cobros, pagos, fiscalidad, soporte documental y caja prevista en una sola lectura.</div>
           </div>
           <span style={{fontSize:11,color:pendiente>0?"#f59e0b":"var(--green)",fontWeight:900}}>
@@ -2765,10 +2786,10 @@ export default function Facturacion() {
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
           {resumenGestionFinanciera.map(item=>(
-            <div key={item.label} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 12px"}}>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:17,fontWeight:900,color:item.color}}>{item.value}</div>
-              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",marginTop:4}}>{item.label}</div>
-              <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{item.detail}</div>
+            <div key={item.label} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 12px",minWidth:0}}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:600,color:item.color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.value}</div>
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.label}</div>
+              <div style={{fontSize:11,color:"var(--text4)",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}} title={item.detail}>{item.detail}</div>
             </div>
           ))}
         </div>
@@ -3279,6 +3300,10 @@ export default function Facturacion() {
             Facturar pedidos de cliente
           </button>
         )}
+        <button onClick={()=>setSinFacturarOpen(v=>!v)}
+          style={{...S.btn,background:sinFacturarOpen?"rgba(245,158,11,.16)":"var(--bg3)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.28)"}}>
+          {sinFacturarOpen ? "v" : ">"} Viajes sin facturar ({sinFacturar.length})
+        </button>
         <button
           onClick={()=>setAgruparCliente(v=>!v)}
           style={{...S.btn,background:agruparCliente?"rgba(34,211,160,.12)":"var(--bg3)",color:agruparCliente?"var(--green)":"var(--text4)",border:"1px solid rgba(34,211,160,.22)"}}
@@ -3287,6 +3312,52 @@ export default function Facturacion() {
         </button>
         <span style={{marginLeft:"auto",fontSize:11,color:"var(--text5)"}}>Doble clic o boton Ver para abrir la factura</span>
       </div>
+      {canEdit && <ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} />}
+      {sinFacturarOpen && (
+        <div style={{border:"1px solid rgba(245,158,11,.28)",borderRadius:10,background:"var(--bg2)",marginBottom:16,overflow:"hidden"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"10px 14px",borderBottom:"1px solid var(--border)",background:"rgba(245,158,11,.06)"}}>
+            <div>
+              <div style={{fontWeight:800,color:"var(--text)"}}>Viajes entregados sin facturar</div>
+              <div style={{fontSize:11,color:"var(--text5)"}}>Todos los clientes y de cualquier fecha (backlog completo, no solo el periodo). Usa "Facturar pedidos de cliente" para emitir.</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"#f59e0b",fontSize:15}}>{fmt2(sinFacturarTotal)} EUR</div>
+                <div style={{fontSize:11,color:"var(--text5)"}}>{sinFacturar.length} viaje(s)</div>
+              </div>
+              <button onClick={cargarSinFacturar} title="Actualizar" style={{...S.btn,background:"var(--bg3)",color:"var(--text3)",border:"1px solid var(--border)",padding:"5px 10px",fontSize:12}}>Actualizar</button>
+            </div>
+          </div>
+          {sinFacturarLoad ? (
+            <div style={{padding:16,textAlign:"center",color:"var(--text5)",fontSize:12}}>Cargando...</div>
+          ) : sinFacturar.length===0 ? (
+            <div style={{padding:16,textAlign:"center",color:"var(--text5)",fontSize:12}}>No hay viajes entregados pendientes de facturar.</div>
+          ) : (
+            <div style={{maxHeight:340,overflowY:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead><tr>{["Fecha","Nº","Cliente","Ruta","Importe"].map(h=><th key={h} style={{...S.th,position:"sticky",top:0,background:"var(--bg2)",zIndex:1}}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {sinFacturarOrdenados.map(p=>(
+                    <tr key={p.id} style={{borderBottom:"1px solid var(--border2)"}}>
+                      <td style={{...S.td,whiteSpace:"nowrap",color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{(p.fecha_descarga||p.fecha_carga) ? new Date(p.fecha_descarga||p.fecha_carga).toLocaleDateString("es-ES") : "-"}</td>
+                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"var(--accent-xl)"}}>{p.numero||"-"}</td>
+                      <td style={{...S.td,fontWeight:700,color:"var(--text)"}}>{p.cliente_nombre||"-"}</td>
+                      <td style={{...S.td,color:"var(--text3)"}}>{(p.origen||"?")+" -> "+(p.destino||"?")}</td>
+                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)",textAlign:"right",whiteSpace:"nowrap"}}>{fmt2(Number(p.importe||p.precio||0))} EUR</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{position:"sticky",bottom:0,background:"var(--bg3)",borderTop:"2px solid rgba(245,158,11,.4)"}}>
+                    <td colSpan={4} style={{...S.td,fontWeight:900,color:"var(--text)",textAlign:"right"}}>TOTAL a facturar ({sinFacturar.length} viaje{sinFacturar.length!==1?"s":""})</td>
+                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:"#f59e0b",textAlign:"right",whiteSpace:"nowrap",fontSize:14}}>{fmt2(sinFacturarTotal)} EUR</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
         {fiscalQuickFilters.map((item) => {
           const active = fiscalEstadoFiltro === item.key || (item.key === "todos" && fiscalEstadoFiltro === "todos");
@@ -3492,7 +3563,7 @@ export default function Facturacion() {
       )}
 
       {pagoProveedorEdit && (
-        <div style={{...S.modal,zIndex:260}} onClick={e=>e.target===e.currentTarget&&setPagoProveedorEdit(null)}>
+        <div style={{...S.modal,zIndex:260}} onMouseDown={e=>e.target===e.currentTarget&&setPagoProveedorEdit(null)}>
           <div style={{background:"var(--bg2)",border:"1px solid #1e2d45",borderRadius:10,width:"min(760px,96vw)",maxHeight:"90vh",overflow:"auto",padding:18}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
               <div>
@@ -3579,7 +3650,7 @@ export default function Facturacion() {
         </div>
       )}
 
-      {modalMulti && <ModalFacturarMultiple onClose={()=>{setModalMulti(false);cargar();}}/>}
+      {modalMulti && <ModalFacturarMultiple onClose={()=>{setModalMulti(false);cargar();cargarSinFacturar();}}/>}
       {pedidoCorreccion && (
         <ModalCorregirPedidoFactura
           pedido={pedidoCorreccion}

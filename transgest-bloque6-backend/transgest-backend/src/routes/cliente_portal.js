@@ -287,6 +287,16 @@ function ensureValidDateOnly(value, label = "fecha") {
   return normalized;
 }
 
+// La descarga no puede ser ANTERIOR a la carga (no puedes descargar antes de
+// cargar). Fechas en formato AAAA-MM-DD -> comparacion de strings = cronologica.
+function assertDescargaNoAntesDeCarga(fechaCarga, fechaDescarga) {
+  if (fechaCarga && fechaDescarga && String(fechaDescarga) < String(fechaCarga)) {
+    const err = new Error("La fecha de descarga no puede ser anterior a la de carga.");
+    err.status = 400;
+    throw err;
+  }
+}
+
 function portalPointLabel(point = {}, fallback = "") {
   const parts = [point.nombre, point.direccion, point.ciudad, point.provincia]
     .map(value => String(value || "").trim())
@@ -1574,9 +1584,9 @@ router.get("/puntos", requireCliente, asyncRoute(async (req, res) => {
             contacto_nombre,contacto_telefono,email,notas,cliente_id
        FROM puntos_interes
       WHERE empresa_id=$1 AND activo=true
-        AND (cliente_id=$2 OR cliente_id IS NULL)
+        AND (cliente_id=$2 OR $2=ANY(clientes_ids) OR cliente_id IS NULL)
         AND $2::uuid IS NOT NULL
-      ORDER BY CASE WHEN cliente_id=$2 THEN 0 ELSE 1 END, nombre ASC
+      ORDER BY CASE WHEN cliente_id=$2 OR $2=ANY(clientes_ids) THEN 0 ELSE 1 END, nombre ASC
       LIMIT 250`,
     [empresaId(req), req.user.cliente_id]
   );
@@ -2002,6 +2012,7 @@ router.patch("/solicitudes/:id", requireCliente, asyncRoute(async (req, res) => 
     try {
       fechaCargaNorm = ensureValidDateOnly(body.fecha_carga || body.fecha || null, "Fecha de carga");
       fechaDescargaNorm = ensureValidDateOnly(body.fecha_descarga || null, "Fecha de descarga");
+      assertDescargaNoAntesDeCarga(fechaCargaNorm, fechaDescargaNorm);
     } catch (dateErr) {
       return res.status(dateErr.status || 400).json({ error: dateErr.message });
     }
@@ -2783,6 +2794,7 @@ router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, re
     fechaPropuestaNorm = ensureValidDateOnly(fecha_propuesta || null, "Fecha propuesta");
     if (has("fecha_carga")) fechaCargaNorm = ensureValidDateOnly(body.fecha_carga || null, "Fecha de carga");
     if (has("fecha_descarga")) fechaDescargaNorm = ensureValidDateOnly(body.fecha_descarga || null, "Fecha de descarga");
+    if (has("fecha_carga") && has("fecha_descarga")) assertDescargaNoAntesDeCarga(fechaCargaNorm, fechaDescargaNorm);
   } catch (dateErr) {
     return res.status(dateErr.status || 400).json({ error: dateErr.message });
   }

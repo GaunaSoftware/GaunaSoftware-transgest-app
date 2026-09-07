@@ -7,10 +7,12 @@ import { getColaboradores, crearColaborador, editarColaborador,
          getColaboradorDocumentos, crearColaboradorDocumento, borrarColaboradorDocumento,
          getColaboradorAccionesPendientes, descargarColaboradorInformeAcciones,
          marcarColaboradorRevisado, crearColaboradorLiquidacionToken, getColaboradorLiquidacionTokens,
+         crearColaboradorPortalUser,
          revocarColaboradorLiquidacionToken, enviarColaboradorLiquidacionEmail,
          revisarAlertasLiquidacionesColaboradores } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
+import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { readRuntimeFocus, clearRuntimeFocus } from "../services/runtimeFocus";
 import { GeoFields } from "../components/GeoFields";
 
@@ -202,7 +204,7 @@ function ModalFacturaColab({ colaborador, viaje, factura, onClose, onSaved }) {
     notas: factura?.notas || "",
   });
   const [saving, setSaving] = useState(false);
-  const f = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const f = k => e => setForm(p=>({...p,[k]:upperFromEvent(k, e)}));
   const recalcular = (base, iva) => {
     const b = Number(base || 0);
     const pct = Number(iva || 0);
@@ -242,7 +244,7 @@ function ModalFacturaColab({ colaborador, viaje, factura, onClose, onSaved }) {
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(640px,96vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)",marginBottom:4}}>
           {factura?.id ? "Completar factura recibida" : "Registrar factura recibida"}
@@ -280,7 +282,7 @@ function ModalVehiculoColab({ colaboradorId, editando, onClose, onSaved }) {
     doc_tarjeta_transp:"", doc_tarjeta_exp:"", doc_seguro_venc:"", doc_itv_venc:"", doc_tacografo_venc:"",
   });
   const [saving, setSaving] = useState(false);
-  const f = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const f = k => e => setForm(p=>({...p,[k]:upperFromEvent(k, e)}));
 
   async function guardar() {
     if (!form.matricula.trim()) { notify("La matricula es obligatoria", "warning"); return; }
@@ -296,7 +298,7 @@ function ModalVehiculoColab({ colaboradorId, editando, onClose, onSaved }) {
   const Sec = ({titulo}) => <div style={{gridColumn:"1/-1",borderTop:"1px solid var(--border2)",paddingTop:4,marginTop:8,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent)"}}>{titulo}</div>;
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)",marginBottom:4}}>
           {editando?"Editar vehiculo":"Añadir vehiculo al colaborador"}
@@ -305,7 +307,7 @@ function ModalVehiculoColab({ colaboradorId, editando, onClose, onSaved }) {
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <Sec titulo="Identificación"/>
-          <div><label style={S.lbl}>Matricula *</label><input style={S.inp} value={form.matricula} onChange={f("matricula")} placeholder="1234-ABC"/></div>
+          <div><label style={S.lbl}>Matricula *</label><input style={S.inp} value={form.matricula} onChange={e=>setForm(p=>({...p,matricula:formatMatricula(e.target.value)}))} placeholder="1234-ABC"/></div>
           <div><label style={S.lbl}>Tipo</label>
             <select style={S.inp} value={form.tipo} onChange={f("tipo")}>
               {["Camión","Tractora","Remolque","Semirremolque","Furgón","Furgoneta"].map(t=><option key={t}>{t}</option>)}
@@ -855,6 +857,52 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
     return crearAccesoColaborador("operativa");
   }
 
+  // Proveedor habitual: cuenta con contrasena que ve TODOS sus viajes (y solo
+  // los suyos). Alternativa al enlace por viaje, para los que trabajan a diario.
+  async function invitarUsuarioProveedor() {
+    if (!canEdit) return;
+    try {
+      const previo = await crearColaboradorPortalUser(colaborador.id, {});
+      if (previo?.existe && !previo?.password_temporal) {
+        const reset = await confirmDialog({
+          title: "Este proveedor ya tiene cuenta",
+          message: `Usuario: ${previo.usuario?.username || "-"}
+
+Quieres generar una contrasena nueva? La anterior dejara de funcionar.`,
+          confirmText: "Generar contrasena nueva",
+          cancelText: "Cerrar",
+          tone: "warning",
+        });
+        if (!reset) return;
+        const nuevo = await crearColaboradorPortalUser(colaborador.id, { reset_password: true });
+        return mostrarCredencialesProveedor(nuevo);
+      }
+      return mostrarCredencialesProveedor(previo);
+    } catch (e) {
+      notify(e.message || "No se pudo crear el acceso del proveedor.", "error");
+    }
+  }
+
+  async function mostrarCredencialesProveedor(data) {
+    const usuario = data?.usuario?.username || "";
+    const pass = data?.password_temporal || "";
+    if (!usuario || !pass) { notify("No se recibieron las credenciales.", "warning"); return; }
+    const texto = `Usuario: ${usuario}
+Contrasena: ${pass}`;
+    if (navigator.clipboard) await navigator.clipboard.writeText(texto).catch(() => {});
+    await confirmDialog({
+      title: "Acceso de proveedor creado",
+      message: `Pasale estos datos al proveedor (se han copiado al portapapeles).
+
+${texto}
+
+Tendra que cambiar la contrasena al entrar. Solo vera los viajes que le asignes.`,
+      confirmText: "Entendido",
+      cancelText: "Cerrar",
+      tone: "success",
+    });
+  }
+
   async function enviarLiquidacionEmail() {
     if (!canEdit) return;
     if (!String(colaborador.email || "").trim()) {
@@ -1035,8 +1083,14 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
           </button>
         )}
         {canEdit && (
-          <button onClick={crearAccesoOperativo} style={{...S.btn,background:"rgba(15,118,110,.12)",color:"#0f766e",border:"1px solid rgba(15,118,110,.25)"}}>
+          <button onClick={crearAccesoOperativo} style={{...S.btn,background:"rgba(15,118,110,.12)",color:"var(--accent)",border:"1px solid rgba(15,118,110,.25)"}}>
             Acceso operativo
+          </button>
+        )}
+        {canEdit && (
+          <button onClick={invitarUsuarioProveedor} title="Crea una cuenta con contrasena para el proveedor habitual: vera todos SUS viajes"
+            style={{...S.btn,background:"rgba(168,85,247,.12)",color:"#a855f7",border:"1px solid rgba(168,85,247,.25)"}}>
+            Invitar como usuario
           </button>
         )}
         {canEdit && (
@@ -1217,7 +1271,7 @@ function ModalColaborador({ editando, onClose, onSaved }) {
     forma_pago:"Transferencia bancaria", tipo_iva:21, iva_regimen:"general",
   });
   const [saving, setSaving] = useState(false);
-  const f = k => e => setForm(p=>({...p,[k]:e.target.value}));
+  const f = k => e => setForm(p=>({...p,[k]:upperFromEvent(k, e)}));
   const fb = k => e => setForm(p=>({...p,[k]:e.target.checked}));
   const fIva = e => {
     const opt = IVA_OPCIONES.find(o => o.value === e.target.value) || IVA_OPCIONES[0];
@@ -1236,7 +1290,7 @@ function ModalColaborador({ editando, onClose, onSaved }) {
   }
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S.mbox}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)",marginBottom:16}}>
           {editando?"Editar colaborador":"Nuevo colaborador"}

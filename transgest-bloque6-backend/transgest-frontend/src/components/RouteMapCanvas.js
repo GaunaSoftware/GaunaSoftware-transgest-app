@@ -8,10 +8,11 @@ const style = key
   : "https://tiles.openfreemap.org/styles/liberty";
 const empty = { type: "FeatureCollection", features: [] };
 
-export default function RouteMapCanvas({ points, geometry, vehicle }) {
+export default function RouteMapCanvas({ points, geometry, vehicle, stableFrame = false }) {
   const container = useRef(null);
   const mapRef = useRef(null);
   const fitRef = useRef(() => {});
+  const fittedRef = useRef("");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -20,6 +21,7 @@ export default function RouteMapCanvas({ points, geometry, vehicle }) {
     let map;
     let observer;
     setLoaded(false);
+    fittedRef.current = "";
     setError("");
     try {
       map = new maplibregl.Map({ container: container.current, style, center: [-3.7, 40.2], zoom: 5, attributionControl: { compact: true }, cooperativeGestures: true });
@@ -75,9 +77,14 @@ export default function RouteMapCanvas({ points, geometry, vehicle }) {
       const bounds = positions.reduce((result, point) => result.extend(point), new maplibregl.LngLatBounds(positions[0], positions[0]));
       map.fitBounds(bounds, { padding: Math.min(55, map.getContainer().clientWidth / 6), maxZoom: 14, duration: 0 });
     };
-    fitRef.current();
+    const frameKey = JSON.stringify(positions);
+    if (positions.length && (!stableFrame || !fittedRef.current)) {
+      if (fittedRef.current !== frameKey) fitRef.current();
+      // Wait for the complete route before freezing its frame.
+      if (line.length >= 2 || !stableFrame) fittedRef.current = frameKey;
+    }
     return () => stopMarkers.forEach(marker => marker.remove());
-  }, [loaded, points, geometry, vehicle]);
+  }, [loaded, points, geometry, vehicle, stableFrame]);
 
   return (
     <div data-map-engine="maplibre">

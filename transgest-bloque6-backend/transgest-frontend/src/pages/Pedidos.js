@@ -2,26 +2,29 @@ import { useDebounce } from "../hooks/useDebounce";
 import AdrPanel from "../components/AdrPanel";
 import QuickAssignModal from "../components/QuickAssignModal";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
+import { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } from "../utils/number";
 import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
-import { getLogoDataUrl } from "../services/logoHelper";
+import { getLogoDataUrl, ensureLogoCargado } from "../services/logoHelper";
 import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPedidoDocAChofer, enviarTodosPedidoDocsAChofer, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
-         crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente,
+         crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente, editarRutaCliente,
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
-         crearCliente, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
+         crearCliente, setClienteMercanciaHabitual, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          crearColaboradorLiquidacionToken,
          getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta, resolveGeoPlace,
-         getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos } from "../services/api";
+         getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos, calcularDistanciaGeo, getChoferUltimoViaje, combinarGrupaje } from "../services/api";
 import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { useAuth } from "../context/AuthContext";
-import { confirmDialog, notify } from "../services/notify";
+import { confirmDialog, promptDialog, notify } from "../services/notify";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
+import { formatMatricula, formatDni, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
-import { inferPlaceGeo } from "../utils/placeGeo";
+import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
+import EndpointAutocomplete from "../components/EndpointAutocomplete";
 
 let puntosInteresCache = [];
 const AI_INBOX_MAX_FILE_BYTES = 6 * 1024 * 1024;
@@ -49,6 +52,11 @@ function withPedidoGeoDefaults(draft = {}) {
     ...draft,
     puntos_carga: puntosCarga.length ? puntosCarga : draft.puntos_carga,
     puntos_descarga: puntosDescarga.length ? puntosDescarga : draft.puntos_descarga,
+    // NOTA: no reconciliamos el texto plano origen/destino con la parada. La
+    // parada puede tener una ciudad mal geocodificada (p.ej. "Torrejon de Ardoz"
+    // -> Torrelavega) y no debe pisar lo que el usuario escribio.
+    origen: draft.origen,
+    destino: draft.destino,
     origen_pais: origenPais,
     destino_pais: destinoPais,
     origen_provincia: stopRegion(origenPrimary, draft.origen_provincia || draft.provincia_origen || ""),
@@ -164,13 +172,16 @@ function currentWeekRangeLocal(now = new Date()) {
   };
 }
 
-function currentMonthRangeLocal(now = new Date()) {
+// Vista por defecto de Trafico: desde el inicio del mes actual (para conservar el
+// contexto del mes en curso) y SIN cortar en fin de mes, para que los viajes
+// proximos SIEMPRE se muestren aunque caigan en meses siguientes. Ventana rodante
+// de ~12 meses hacia delante (suficiente para cualquier planificacion real).
+function defaultTraficoRangeLocal(now = new Date()) {
   const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const hasta = new Date(now.getFullYear() + 1, now.getMonth() + 1, 0);
   return {
-    month: formatDateInputLocal(first),
     desde: formatDateInputLocal(first),
-    hasta: formatDateInputLocal(last),
+    hasta: formatDateInputLocal(hasta),
     label: first.toLocaleDateString("es-ES", { month: "long", year: "numeric" }),
   };
 }
@@ -412,15 +423,6 @@ function sumarDiasISO(fecha, dias) {
   if (Number.isNaN(base.getTime())) return String(fecha).slice(0, 10);
   base.setDate(base.getDate() + Number(dias || 0));
   return base.toISOString().slice(0, 10);
-}
-
-function normalizarFechasCopia(fechaBase, copias, actuales = []) {
-  const total = Math.max(1, Math.min(20, Number(copias || 1)));
-  const base = String(fechaBase || new Date().toISOString().slice(0, 10)).slice(0, 10);
-  return Array.from({ length: total }, (_, idx) => {
-    const current = String(actuales[idx] || "").slice(0, 10);
-    return current || (idx === 0 ? base : "");
-  });
 }
 
 function descargaAntesQueCarga(fechaCarga, fechaDescarga) {
@@ -731,10 +733,15 @@ const LABEL_ESTADO = {
   descarga:"En descarga", entregado:"Entregado", cancelado:"Cancelado", incidencia:"Incidencia"
 };
 const COLOR_ESTADO = {
-  pendiente:"#fb8c3a", confirmado:"#3b6ef5", espera_carga:"#eab308", cargando:"#14b8a6", en_curso:"#22d3ee", espera_descarga:"#d946ef",
+  pendiente:"#fb8c3a", confirmado:"#3b6ef5", espera_carga:"#eab308", cargando:"var(--accent-l)", en_curso:"#22d3ee", espera_descarga:"#d946ef",
   descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#ef4444", incidencia:"#fbbf24"
 };
 const INCIDENCIA_TIPOS_PEDIDO = [
+  { v:"cancelado_cliente", l:"Cancelado por el cliente" },
+  { v:"duplicado", l:"Pedido duplicado" },
+  { v:"error_datos", l:"Error en los datos del pedido" },
+  { v:"no_realizado", l:"Viaje no realizado" },
+  { v:"sin_completar", l:"Sin marcar entregado (plazo superado)" },
   { v:"taller", l:"Camion en taller" },
   { v:"carga", l:"Problema en carga" },
   { v:"descarga", l:"Problema en descarga" },
@@ -746,14 +753,27 @@ const INCIDENCIA_TIPOS_PEDIDO = [
   { v:"paralizacion", l:"Paralizacion / espera" },
   { v:"operativa", l:"Otra operativa" },
 ];
+// "Por kg (EUR/100kg)" y "Por toneladas (EUR/tn)" eran lo MISMO (tarifa por peso,
+// solo cambiaba la unidad: 1 tn = 10 x 100 kg), asi que se ofrecia duplicado. Se
+// deja solo la tonelada, que es lo habitual en transporte. El tipo "kg" se sigue
+// calculando igual para los pedidos y tarifas antiguos que ya lo tuvieran: solo
+// desaparece de la lista de opciones nuevas (ver opcionesTipoPrecio).
 const TIPOS_PRECIO = [
   { v:"viaje",    l:"Precio por viaje (EUR fijo)" },
-  { v:"kg",       l:"Por kg (EUR/100kg)" },
-  { v:"tonelada", l:"Por toneladas (EUR/tn)" },
+  { v:"tonelada", l:"Por peso (EUR/tonelada)" },
   { v:"km",       l:"Por kilometro (EUR/km)" },
   { v:"hora",     l:"Por hora (EUR/h)" },
   { v:"palet",    l:"Por palet (EUR/palet)" },
 ];
+const TIPOS_PRECIO_HISTORICOS = { kg: "Por kg (EUR/100kg) - tarifa antigua" };
+
+// Opciones del desplegable respetando el valor que ya tuviera el registro, para
+// no cambiarle la tarifa a un pedido antiguo solo por abrirlo.
+function opcionesTipoPrecio(actual) {
+  const valor = String(actual || "");
+  if (!valor || TIPOS_PRECIO.some(t => t.v === valor)) return TIPOS_PRECIO;
+  return [...TIPOS_PRECIO, { v: valor, l: TIPOS_PRECIO_HISTORICOS[valor] || valor }];
+}
 const S = {
   page:{flex:1,padding:"34px 36px",minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 45%,#f7fafc 100%)",boxSizing:"border-box",minWidth:0,width:"100%"},
   title:{fontFamily:"'Syne',sans-serif",fontSize:36,fontWeight:900,marginBottom:16,color:"#0f172a"},
@@ -1045,9 +1065,8 @@ function cantidadSugeridaPorTipo(form, tipo = form?.tipo_precio) {
   if (!tipo || tipo === "viaje") return "";
   if (tipo === "kg") return parseLocaleNumber(form?.peso_kg || form?.kg, 0) || "";
   if (tipo === "tonelada") {
-    const peso = parseLocaleNumber(form?.peso_kg || form?.kg, 0);
-    const toneladas = peso > 0 && peso < 1000 ? peso : peso / 1000;
-    return toneladas ? Number(toneladas.toFixed(3)) : "";
+    const toneladas = toneladasDesdePeso(form?.peso_kg || form?.kg);
+    return toneladas || "";
   }
   if (tipo === "km") return parseLocaleNumber(form?.km_ruta || form?.km, 0) || "";
   if (tipo === "palet") return parseLocaleNumber(form?.bultos, 0) || "";
@@ -1058,7 +1077,8 @@ function normalizeMinimoUnidadesRuta(ruta = {}, tarifaTipo = ruta?.tarifa_tipo) 
   const raw = ruta.minimo_unidades ?? ruta.minimo_facturable ?? "";
   const value = parseLocaleNumber(raw, NaN);
   if (!Number.isFinite(value) || value <= 0) return "";
-  if (tarifaTipo === "tonelada" && value >= 1000) {
+  if (tarifaTipo === "tonelada" && value > MAX_TONELADAS_CAMION) {
+    // Un minimo por encima de 45 solo puede venir expresado en kilos.
     return Number((value / 1000).toFixed(3));
   }
   return value;
@@ -1089,18 +1109,40 @@ function routeTarifaMatchesDraft(ruta = {}, draft = {}) {
   return true;
 }
 
-function formatRutaTarifaLabel(ruta = {}) {
+function formatRutaTarifaLabel(ruta = {}, incluirOrigen = true) {
   const tipos = { viaje:"EUR/viaje", kg:"EUR/100kg", tonelada:"EUR/tn", km:"EUR/km", hora:"EUR/h", palet:"EUR/palet" };
   const precio = parseLocaleNumber(ruta.precio_base ?? ruta.precio, 0);
   const minimo = normalizeMinimoUnidadesRuta(ruta, ruta.tarifa_tipo);
   const recargo = parseLocaleNumber(ruta.recargo_combustible_pct, 0);
   return [
-    `${ruta.origen || "Origen"} -> ${ruta.destino || "Destino"}`,
+    incluirOrigen
+      ? `${ruta.origen || "Origen"} -> ${ruta.destino || "Destino"}`
+      : `${ruta.destino || "Destino"}`,
     precio > 0 ? `${precio.toLocaleString("es-ES", { maximumFractionDigits: 4 })} ${tipos[ruta.tarifa_tipo] || ruta.tarifa_tipo || "EUR/viaje"}` : "sin precio",
     ruta.km ? `${ruta.km} km` : "",
     minimo ? `min. ${minimo}` : "",
     recargo ? `+${recargo.toLocaleString("es-ES")} % gasoil` : "",
   ].filter(Boolean).join(" | ");
+}
+
+// Agrupa las tarifas por ORIGEN para que el selector no sea una lista plana de
+// cientos de rutas: cada origen es un <optgroup> con sus destinos dentro. Asi
+// un cliente con muchas tarifas del mismo origen queda ordenado y navegable.
+function groupRutasByOrigen(rutas = []) {
+  const grupos = new Map();
+  for (const r of Array.isArray(rutas) ? rutas : []) {
+    const clave = String(r.origen || "").trim().toUpperCase() || "SIN ORIGEN";
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(r);
+  }
+  return Array.from(grupos.entries())
+    .sort((a, b) => a[0].localeCompare(b[0], "es"))
+    .map(([origen, items]) => ({
+      origen,
+      rutas: items.slice().sort((x, y) =>
+        String(x.destino || "").localeCompare(String(y.destino || ""), "es")
+      ),
+    }));
 }
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
@@ -1116,6 +1158,30 @@ const NUMERIC_PEDIDO_FIELDS = new Set([
 const DATE_PEDIDO_FIELDS = new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga", "firma_fecha"]);
 const TIME_PEDIDO_FIELDS = new Set(["hora_carga", "hora_descarga"]);
 const UUID_PEDIDO_FIELDS = new Set(["cliente_id", "ruta_id", "vehiculo_id", "chofer_id", "chofer2_id", "colaborador_id", "remolque_id"]);
+
+// Auto-etiquetas por vehiculo: si una etiqueta del catalogo tiene "auto_match" y
+// el tipo/clase del vehiculo lo contiene, se aplica sola al asignar el vehiculo.
+function foldEtiquetaTexto(s){return String(s||"").normalize("NFD").split("").filter(function(ch){var c=ch.charCodeAt(0);return c<768||c>879;}).join("").toLowerCase();}
+function autoEtiquetasVehiculo(catalogo, veh){
+  if(!veh) return [];
+  const hay = foldEtiquetaTexto([veh.clase,veh.tipo,veh.carroceria,veh.modelo,veh.descripcion,veh.matricula].filter(Boolean).join(" "));
+  return (Array.isArray(catalogo)?catalogo:[])
+    .filter(et=>{const m=foldEtiquetaTexto(et&&et.auto_match).trim(); return m && hay.includes(m);})
+    .map(et=>String((et&&et.nombre)||"").trim()).filter(Boolean);
+}
+function mergeEtiquetas(prev, add){
+  const set = new Set((Array.isArray(prev)?prev:[]).map(String).filter(Boolean));
+  (Array.isArray(add)?add:[]).forEach(e=>{const n=String(e||"").trim(); if(n) set.add(n);});
+  return [...set];
+}
+function etiquetaColorFromCatalog(nombre){
+  try {
+    const cat = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && window.__TMS_EMPRESA_CONFIG.cfg_trafico && window.__TMS_EMPRESA_CONFIG.cfg_trafico.etiquetas_catalogo) || [];
+    const key = String(nombre || "").trim().toLowerCase();
+    const hit = Array.isArray(cat) ? cat.find(e => String((e && e.nombre) || "").trim().toLowerCase() === key) : null;
+    return (hit && hit.color) || "#14b8a6";
+  } catch { return "var(--accent-l)"; }
+}
 
 function normalizeStrictDateInput(value) {
   if (value === "" || value === null || value === undefined) return null;
@@ -1160,24 +1226,6 @@ function normalizePesoKgInput(value) {
   return Number.isFinite(kg) ? kg : null;
 }
 
-function parseLocaleNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  let raw = String(value).trim().replace(/\s+/g, "");
-  if (!raw) return fallback;
-  const hasComma = raw.includes(",");
-  const hasDot = raw.includes(".");
-  if (hasComma && hasDot) {
-    raw = raw.replace(/\./g, "").replace(",", ".");
-  } else if (hasComma) {
-    raw = raw.replace(",", ".");
-  } else if (hasDot && /^\d{1,3}(\.\d{3}){2,}$/.test(raw)) {
-    raw = raw.replace(/\./g, "");
-  }
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
-}
-
 function compactNumberInput(value) {
   if (value === null || value === undefined || value === "") return "";
   const n = parseLocaleNumber(value, NaN);
@@ -1213,8 +1261,8 @@ function normalizePedidoTarifaDraft(draft = {}) {
     }
     const cantidad = parseLocaleNumber(next.cantidad, NaN);
     const peso = parseLocaleNumber(next.peso_kg || next.kg, NaN);
-    if (Number.isFinite(peso) && peso > 0 && (!Number.isFinite(cantidad) || cantidad <= 0 || (cantidad < 1 && peso >= 1000))) {
-      next.cantidad = peso < 1000 ? peso : Number((peso / 1000).toFixed(3));
+    if (Number.isFinite(peso) && peso > 0 && (!Number.isFinite(cantidad) || cantidad <= 0 || (cantidad < 1 && peso > MAX_TONELADAS_CAMION))) {
+      next.cantidad = toneladasDesdePeso(peso);
     }
   }
   return next;
@@ -1262,7 +1310,7 @@ function normalizePesoKgDraft(draft = {}) {
   if (!Number.isFinite(normalized)) return draft;
   const next = { ...draft, peso_kg: normalized };
   if (String(next.tipo_precio || "") === "tonelada") {
-    const toneladas = normalized < 1000 ? normalized : Number((normalized / 1000).toFixed(3));
+    const toneladas = toneladasDesdePeso(normalized);
     next.cantidad = toneladas || next.cantidad || "";
   }
   return syncPrecioClienteCol(syncPrecioColaboradorCalc(next));
@@ -1350,18 +1398,9 @@ function normalizeStopsForCopy(stops, fallbackAddress = "", tipo = "carga") {
     })
     .filter(stop => stop.direccion || stop.google_maps_url || (stop.lat != null && stop.lng != null));
   if (!parsed.length && fallbackAddress) parsed.push({ direccion: fallbackAddress, cliente_nombre: "", google_maps_url: "", tipo });
-  const seen = new Set();
-  return parsed.filter(stop => {
-    const key = [
-      normalizePlaceText(stop.direccion || stop.address || ""),
-      String(stop.google_maps_url || "").trim().toLowerCase(),
-      stop.lat ?? "",
-      stop.lng ?? "",
-    ].join("|");
-    if (!key.replace(/\|/g, "") || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  // No deduplicar: al copiar se conservan TODAS las paradas (2-3 descargas al
+  // mismo cliente/direccion son validas y deben mantenerse).
+  return parsed;
 }
 
 function legacyPuntosInteresLoad() {
@@ -1370,7 +1409,7 @@ function legacyPuntosInteresLoad() {
 }
 
 function setPuntosInteresCache(next, { broadcast = true } = {}) {
-  puntosInteresCache = Array.isArray(next) ? dedupePuntosInteres(next).slice(-300) : [];
+  puntosInteresCache = Array.isArray(next) ? dedupePuntosInteres(next).slice(-5000) : [];
   if (typeof window !== "undefined") {
     window.__TMS_PUNTOS_INTERES = puntosInteresCache;
     if (broadcast) window.dispatchEvent(new Event("tms:puntos-interes"));
@@ -1381,7 +1420,7 @@ function setPuntosInteresCache(next, { broadcast = true } = {}) {
 function getPuntosInteres() {
   if (puntosInteresCache.length) return puntosInteresCache;
   if (typeof window !== "undefined" && Array.isArray(window.__TMS_PUNTOS_INTERES)) {
-    puntosInteresCache = dedupePuntosInteres(window.__TMS_PUNTOS_INTERES).slice(-300);
+    puntosInteresCache = dedupePuntosInteres(window.__TMS_PUNTOS_INTERES).slice(-5000);
   }
   return puntosInteresCache;
 }
@@ -1670,7 +1709,7 @@ function savePuntoInteres(punto) {
   const next = [
     ...actuales.filter(p => String(p.id) !== String(id) && puntoInteresIdentityKey(p) !== identity),
     normalizado,
-  ].slice(-300);
+  ].slice(-5000);
   return setPuntosInteresCache(next);
 }
 
@@ -1711,19 +1750,40 @@ function isPuntoGeneral(punto = {}) {
 }
 
 function isPuntoVisibleParaCliente(punto = {}, clienteId = "", { includeGenerales = false } = {}) {
+  // Para los selectores en linea ("escribe o elige") se muestran los puntos DEL
+  // cliente (dueno o adoptado) y, si se pide, los generales; NO los de otros
+  // clientes. El listado completo (boton "Puntos") usa el flag `todos` para
+  // mostrarlos TODOS y poder reutilizarlos sin duplicar.
+  if (isPuntoDeCliente(punto, clienteId)) return true;
   if (isPuntoGeneral(punto)) return !!includeGenerales;
-  return !!clienteId && String(punto.cliente_id) === String(clienteId);
+  return false;
+}
+
+// Un punto es "del cliente" si es su dueno o si el cliente lo ha adoptado
+// (clientes_ids). Asi un punto general adoptado por 3 clientes sale como "suyo"
+// en esos 3 y sigue saliendo como "General" para el resto.
+function isPuntoDeCliente(punto = {}, clienteId = "") {
+  if (!clienteId) return false;
+  const cid = String(clienteId);
+  if (punto?.cliente_id && String(punto.cliente_id) === cid) return true;
+  const ids = Array.isArray(punto?.clientes_ids) ? punto.clientes_ids : [];
+  return ids.some(x => String(x) === cid);
+}
+
+function puntoScopeRank(punto = {}, clienteId = "") {
+  if (isPuntoDeCliente(punto, clienteId)) return 0; // del cliente (dueno o adoptado)
+  if (isPuntoGeneral(punto)) return 1;              // general
+  return 2;                                         // de otro cliente
 }
 
 function sortPuntosByClienteScope(a = {}, b = {}, clienteId = "") {
-  const scope = (p) => (!isPuntoGeneral(p) && clienteId && String(p.cliente_id) === String(clienteId) ? 0 : 1);
-  const byScope = scope(a) - scope(b);
+  const byScope = puntoScopeRank(a, clienteId) - puntoScopeRank(b, clienteId);
   if (byScope) return byScope;
   return String(a.nombre || a.direccion || "").localeCompare(String(b.nombre || b.direccion || ""), "es");
 }
 
 function puntoScopeLabel(punto = {}, clienteId = "") {
-  if (!isPuntoGeneral(punto) && clienteId && String(punto.cliente_id) === String(clienteId)) return "Cliente";
+  if (isPuntoDeCliente(punto, clienteId)) return "Cliente";
   if (isPuntoGeneral(punto)) return "General";
   return "Otro cliente";
 }
@@ -1743,9 +1803,9 @@ function puntoPickerLabel(punto = {}, clienteId = "") {
   return [name, location, scope].filter(Boolean).join(" - ");
 }
 
-function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos", includeGenerales = false } = {}) {
+function filterPuntosForPedido(puntos = [], { clienteId = "", tipo = "ambos", includeGenerales = false, todos = false } = {}) {
   return (Array.isArray(puntos) ? puntos : [])
-    .filter(p => isPuntoVisibleParaCliente(p, clienteId, { includeGenerales }))
+    .filter(p => todos || isPuntoVisibleParaCliente(p, clienteId, { includeGenerales }))
     .filter(p => {
       if (tipo === "carga") return isCargaPoint(p);
       if (tipo === "descarga") return isDescargaPoint(p);
@@ -2022,11 +2082,21 @@ function likelyTownFromListText(value = "") {
 function stopTownLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
   const punto = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
   const source = { ...(punto || {}), ...(stop || {}) };
+  const direccion = cleanListPlace(stopAddress(stop) || source.direccion || fallback || "");
+  // Sin punto guardado que case, si la direccion escrita parece un municipio de
+  // verdad (poblacion simple, sin guion y pocas palabras), ESA manda: es lo que el
+  // usuario escribio y ve en el formulario, no una ciudad heredada/vieja de otra
+  // parada. Asi "fuera" (lista) y "dentro" (formulario) coinciden.
+  const pareceMunicipio = direccion
+    && !/\d|[,;]/.test(direccion)
+    && !/\b(?:autovia|autopista|avenida|av|calle|camino|carretera|ctra|km|paseo|plaza|poligono|ronda|ruta|via)\b/i.test(direccion)
+    && !direccion.includes("-")
+    && direccion.split(/\s+/).filter(Boolean).length <= 4;
+  if (!punto && pareceMunicipio) return direccion.toUpperCase();
   const town = cleanListPlace(source.ciudad || source.poblacion || source.localidad || source.municipio || "");
   if (town) return town.toUpperCase();
-  const address = cleanListPlace(stopAddress(stop) || source.direccion || fallback || "");
-  if (!address) return "";
-  return likelyTownFromListText(address);
+  if (!direccion) return "";
+  return likelyTownFromListText(direccion);
 }
 
 function stopPointNameLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
@@ -2140,12 +2210,29 @@ function sumStopWeights(stops) {
 // tanto para cargas como para descargas. La primera parada es el origen/destino
 // principal, cuyo importe ya va en el precio base del viaje.
 function sumAdditionalStopPrices(stops) {
+  // Suma el precio EXTRA de cualquier parada que lo tenga. No se excluye la
+  // primera por indice: si al reordenar una descarga con precio pasa a ser la
+  // principal, su precio debe seguir contando (antes se perdia con slice(1)).
   return parseStops(stops)
-    .slice(1)
     .reduce((total, stop) => {
       const n = parseLocaleNumber(stop?.precio ?? stop?.importe ?? stop?.precio_cliente, 0);
       return total + (Number.isFinite(n) && n > 0 ? n : 0);
     }, 0);
+}
+
+// Detalle por parada adicional (desde la 2a) con precio > 0, para desglosar el
+// importe de forma clara (cada carga/descarga extra en su linea).
+function additionalStopPriceItems(stops) {
+  return parseStops(stops)
+    .map((stop, i) => {
+      const n = parseLocaleNumber(stop?.precio ?? stop?.importe ?? stop?.precio_cliente, 0);
+      return {
+        num: i + 1, // la parada nº1 es la principal
+        label: String(stop?.cliente_nombre || stop?.nombre || stop?.direccion || "").replace(/\s+/g, " ").trim(),
+        precio: Number.isFinite(n) && n > 0 ? n : 0,
+      };
+    })
+    .filter(item => item.precio > 0);
 }
 
 const IVA_PEDIDO_OPTIONS = [
@@ -2777,7 +2864,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
   const [puntosCargaLoading, setPuntosCargaLoading] = useState(false);
   const [poiDraftRapido, setPoiDraftRapido] = useState(null);
   const riesgoConfirmadoRapidoRef = useRef(new Map());
-  const f = k => e => setForm(p => ({ ...p, [k]: (k === "origen" || k === "destino") ? e.target.value.toUpperCase() : e.target.value }));
+  const f = k => e => setForm(p => ({ ...p, [k]: upperFromEvent(k, e) }));
   const inp = { ...S.input, boxSizing:"border-box" };
   const quickGrid = {display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10};
   const cleanCliente = form.cliente_nombre.trim();
@@ -3187,7 +3274,13 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                   else setForm(p => ({ ...p, ruta_id: "" }));
                 }} disabled={rutasLoading}>
                   <option value="">{rutasLoading ? "Cargando tarifas..." : rutasCliente.length ? "Selecciona tarifa del cliente" : "Sin tarifas guardadas"}</option>
-                  {rutasCliente.map(r => <option key={r.id || r.ruta_id} value={r.id || r.ruta_id}>{formatRutaTarifaLabel(r)}</option>)}
+                  {groupRutasByOrigen(rutasCliente).map(g => (
+                    <optgroup key={g.origen} label={g.origen}>
+                      {g.rutas.map(r => (
+                        <option key={r.id || r.ruta_id} value={r.id || r.ruta_id}>{formatRutaTarifaLabel(r, false)}</option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
                 <div style={{fontSize:11,color:rutasCliente.length ? "#f59e0b" : "var(--text5)",marginTop:4}}>
                   {rutasCliente.length ? "Opcional: si no eliges tarifa, se creara marcado para revisar ruta/precio." : "No hay tarifas guardadas; puedes completar el precio manualmente."}
@@ -3290,7 +3383,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           <div>
             <label style={S.label}>Matricula colaborador</label>
             <input style={inp} value={form.matricula_colaborador} onChange={e=>{
-              const value = e.target.value.toUpperCase();
+              const value = formatMatricula(e.target.value);
               setForm(p=>({
                 ...p,
                 matricula_colaborador:value,
@@ -3321,7 +3414,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           </div>
           <div>
             <label style={S.label}>Remolque colaborador</label>
-            <input style={inp} value={form.remolque_matricula_colaborador} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:e.target.value.toUpperCase()}))} placeholder="Opcional"/>
+            <input style={inp} value={form.remolque_matricula_colaborador} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Opcional"/>
           </div>
           <div>
             <label style={S.label}>Tipo descarga</label>
@@ -3337,7 +3430,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           <div>
             <label style={S.label}>Tipo precio</label>
             <select style={S.sel} value={form.tipo_precio} onChange={e=>setForm(p=>syncCantidadRapida({...p,tipo_precio:e.target.value}, true))}>
-              {TIPOS_PRECIO.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+              {opcionesTipoPrecio(form.tipo_precio).map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
             </select>
           </div>
           <div>
@@ -3365,7 +3458,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
             <label style={S.label}>ML</label>
             <input type="text" inputMode="decimal" style={inp} value={form.metros_lineales || ""} onChange={f("metros_lineales")} placeholder="Metros lineales"/>
           </div>
-          <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.22)",borderRadius:8,padding:"8px 10px"}}>
+          <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a22)",borderRadius:8,padding:"8px 10px"}}>
             <label style={S.label}>EUR/km venta</label>
             {(() => {
               const eurKm = precioKmPedidoInfo(form);
@@ -3526,7 +3619,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   }
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.76)",zIndex:2600,display:"flex",alignItems:"center",justifyContent:"center",padding:12,overflow:"auto"}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.76)",zIndex:2600,display:"flex",alignItems:"center",justifyContent:"center",padding:12,overflow:"auto"}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,width:"min(660px,calc(100vw - 24px))",maxHeight:"calc(100dvh - 24px)",overflowY:"auto",boxShadow:"0 24px 80px rgba(0,0,0,.35)"}}>
         <div style={{position:"sticky",top:0,zIndex:2,background:"var(--bg2)",borderBottom:"1px solid var(--border)",padding:"16px 18px 12px",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
           <div>
@@ -3896,6 +3989,10 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const mainHora = tipo === "carga" ? form.hora_carga : form.hora_descarga;
   const fallbackPais = tipo === "carga" ? (form.origen_pais || "España") : (form.destino_pais || "España");
   const fallbackProvincia = tipo === "carga" ? (form.origen_provincia || "") : (form.destino_provincia || "");
+  // El usuario (o el programa al calcular) ya ha fijado la provincia: la
+  // inferencia automatica desde el texto de origen/destino NO debe pisarla,
+  // ni siquiera cuando el campo se vacia para reescribirlo.
+  const provinciaManual = tipo === "carga" ? !!form.origen_provincia_manual : !!form.destino_provincia_manual;
   const inferStopGeo = (stop = {}, idx = 0) => {
     const inferred = inferPlaceGeo(stop, stopAddress(stop), stop.cliente_nombre, stop.direccion, stop.pais);
     const manualProvincia = !!stop.provincia_manual;
@@ -3915,7 +4012,11 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       stopAddress(local),
       local.cliente_nombre
     );
-    return inferStopGeo(resolved, idx);
+    // La geolocalizacion puede inferir una poblacion (ciudad) por coincidencia de
+    // una sola palabra (p. ej. "Teruel" -> "Andorra de Teruel"). No dejamos que
+    // invente la poblacion del texto: solo conservamos provincia/pais/coordenadas
+    // para el mapa; la ubicacion escrita por el usuario (en 'direccion') manda.
+    return { ...inferStopGeo(resolved, idx), ciudad: stop.ciudad || "" };
   };
   const completarNewStopGeo = async () => {
     const next = await resolveStopGeo(newStop, stopsOrdenados.length ? 1 : 0);
@@ -3937,26 +4038,29 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   const stopsOrdenados = effectivePrimary ? [effectivePrimary, ...paradas] : paradas;
   latestStopsRef.current = stopsOrdenados;
   useEffect(() => {
+    if (provinciaManual) return;
     const inferred = inferPlaceGeo(mainLugar);
     if (!mainLugar || !inferred?.provincia) return;
     setForm(p => {
       if (tipo === "carga") {
-        if (p.origen_provincia && normalizePlaceText(p.origen_provincia) === normalizePlaceText(inferred.provincia)) return p;
+        // Solo rellena si esta vacia: nunca sobreescribe una provincia ya puesta.
+        if (p.origen_provincia_manual || p.origen_provincia) return p;
         return {
           ...p,
           origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "España") || "España",
           origen_provincia: inferred.provincia,
         };
       }
-      if (p.destino_provincia && normalizePlaceText(p.destino_provincia) === normalizePlaceText(inferred.provincia)) return p;
+      if (p.destino_provincia_manual || p.destino_provincia) return p;
       return {
         ...p,
         destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "España") || "España",
         destino_provincia: inferred.provincia,
       };
     });
-  }, [mainLugar, setForm, tipo]);
+  }, [mainLugar, setForm, tipo, provinciaManual]);
   useEffect(() => {
+    if (provinciaManual) return;
     let alive = true;
     async function run() {
       if (!mainLugar || fallbackProvincia) return;
@@ -3964,14 +4068,14 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       if (!alive || !inferred?.provincia) return;
       setForm(p => {
         if (tipo === "carga") {
-          if (p.origen_provincia && normalizePlaceText(p.origen_provincia) === normalizePlaceText(inferred.provincia)) return p;
+          if (p.origen_provincia_manual || p.origen_provincia) return p;
           return {
             ...p,
             origen_pais: p.origen_pais || canonicalCountry(inferred.pais || "España") || "España",
             origen_provincia: inferred.provincia,
           };
         }
-        if (p.destino_provincia && normalizePlaceText(p.destino_provincia) === normalizePlaceText(inferred.provincia)) return p;
+        if (p.destino_provincia_manual || p.destino_provincia) return p;
         return {
           ...p,
           destino_pais: p.destino_pais || canonicalCountry(inferred.pais || "España") || "España",
@@ -3981,7 +4085,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     }
     run();
     return () => { alive = false; };
-  }, [fallbackPais, fallbackProvincia, mainLugar, setForm, tipo]);
+  }, [fallbackPais, fallbackProvincia, mainLugar, setForm, tipo, provinciaManual]);
   const puntosFiltrados = filterPuntosForPedido(puntosInteres, { clienteId: form.cliente_id || "", tipo });
   const puntosListId = `puntos-${tipo}-${pedidoId || "nuevo"}`;
   const countryListId = `paises-${tipo}-${pedidoId || "nuevo"}`;
@@ -4112,16 +4216,23 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       const updated = {...p, [key]: stopsToStore};
       if (tipo === "carga") {
         updated.origen = stopAddress(first) || "";
-        updated.fecha_carga = first.fecha || "";
-        updated.hora_carga = first.hora || "";
+        // La fecha/hora de la parada de carga se lleva al campo de arriba (junto
+        // a Fecha pedido) automaticamente; si la parada no tiene, se conserva lo
+        // que ya hubiera puesto el usuario arriba (no se borra).
+        updated.fecha_carga = first.fecha || p.fecha_carga || "";
+        updated.hora_carga = first.hora || p.hora_carga || "";
         updated.origen_pais = stopCountryInputValue(first, p.origen_pais || "España");
         updated.origen_provincia = stopRegion(first, p.origen_provincia || "");
+        // Si el usuario ha tocado la provincia de la parada principal, se marca
+        // como manual para que la inferencia automatica no la vuelva a pisar.
+        updated.origen_provincia_manual = !!first.provincia_manual;
       } else {
         updated.destino = stopAddress(first) || "";
-        updated.fecha_descarga = first.fecha || "";
-        updated.hora_descarga = first.hora || "";
+        updated.fecha_descarga = first.fecha || p.fecha_descarga || "";
+        updated.hora_descarga = first.hora || p.hora_descarga || "";
         updated.destino_pais = stopCountryInputValue(first, p.destino_pais || "España");
         updated.destino_provincia = stopRegion(first, p.destino_provincia || "");
+        updated.destino_provincia_manual = !!first.provincia_manual;
       }
       updated.cmr_tipo = cmrTypeForPedidoStops(updated);
       const totalCarga = tipo === "carga" ? sumStopWeights(stopsToStore) : sumStopWeights(updated.puntos_carga);
@@ -4136,7 +4247,9 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
   }
   async function addParada() {
     if (!newStop.direccion.trim()) { notify("La direccion es obligatoria", "warning"); return; }
-    const resolvedStop = await resolveStopGeo({...newStop, direccion:newStop.direccion.trim(), es_adicional:true, es_principal:false}, 1);
+    // Una nueva parada hereda por defecto la fecha/hora de la parada principal
+    // (misma fecha de descarga/carga) si no se ha indicado otra.
+    const resolvedStop = await resolveStopGeo({...newStop, fecha: newStop.fecha || mainFecha || "", hora: newStop.hora || mainHora || "", direccion:newStop.direccion.trim(), es_adicional:true, es_principal:false}, 1);
     setStopsOrdenados([...stopsOrdenados, resolvedStop]);
     setNewStop(emptyStop);
     setNewStopDetailsOpen(false);
@@ -4147,7 +4260,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
     const next = stopsOrdenados.map((stop, i) => {
       if (i !== idx) return stop;
       const addressChanged = Object.prototype.hasOwnProperty.call(patch, "direccion") && patch.direccion !== stop.direccion;
-      const cleared = addressChanged ? { lat:null, lng:null, latitud:null, longitud:null, ciudad:"", google_maps_url:"", punto_interes_id:null, provincia:stop.provincia_manual ? stop.provincia : "" } : {};
+      const cleared = addressChanged ? { lat:null, lng:null, latitud:null, longitud:null, ciudad:"", lugar:"", nombre:"", cliente_nombre:"", punto_id:null, point_id:null, id_punto:null, google_maps_url:"", punto_interes_id:null, provincia:stop.provincia_manual ? stop.provincia : "" } : {};
       return { ...stop, ...cleared, ...patch };
     });
     setStopsOrdenados(next, { infer:false });
@@ -4239,7 +4352,6 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
       {stopsOrdenados.length > 0 && (
         <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
           {stopsOrdenados.map((d, i) => {
-            const isPrimary = i === 0;
             const isDragging = dragIdx === i;
             const stopPais = stopCountryInputValue(d, "España");
             const stopRegions = getRegionsForCountry(stopPais);
@@ -4259,7 +4371,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               }}
               style={{
                 background:"var(--bg4)",
-                border:`1px solid ${dragIdx !== null && dragIdx !== i ? "rgba(20,184,166,.38)" : "var(--border2)"}`,
+                border:`1px solid ${dragIdx !== null && dragIdx !== i ? "var(--accent-a38)" : "var(--border2)"}`,
                 borderRadius:8,
                 padding:"8px 12px",
                 display:"flex",
@@ -4274,10 +4386,12 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               </span>
               <div className="tg-stop-card-body" style={{flex:1}}>
                 <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                  <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{stopAddress(d)}</span>
+                  {/* En negrita el nombre de la empresa; si no hay empresa (es una
+                      poblacion), la poblacion/direccion queda en negrita. */}
+                  <span style={{fontWeight:700,fontSize:12,color:"var(--text)"}}>{d.cliente_nombre || stopAddress(d)}</span>
                 </div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
-                  {d.cliente_nombre && <span style={{marginRight:8}}>{d.cliente_nombre}</span>}
+                  {d.cliente_nombre && stopAddress(d) && <span style={{marginRight:8}}>{stopAddress(d)}</span>}
                   {d.fecha && <span style={{marginRight:8}}>{new Date(d.fecha).toLocaleDateString("es-ES")}</span>}
                   {d.hora && <span style={{marginRight:8}}>{d.hora}</span>}
                   {d.ventana && <span style={{marginRight:8}}>{d.ventana}</span>}
@@ -4323,7 +4437,13 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     <input style={inp} disabled={disabled} value={d.ventana || ""} onChange={e=>updateStop(i,{ventana:e.target.value})} placeholder="Ventana horaria" />
                     <input type="number" min="0" style={inp} disabled={disabled} value={d.bultos || ""} onChange={e=>updateStop(i,{bultos:e.target.value})} placeholder="Bultos / palets" />
                     <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.peso_kg || ""} onChange={e=>updateStop(i,{peso_kg:e.target.value})} placeholder="Peso kg" />
-                    <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.precio || ""} onChange={e=>updateStop(i,{precio:e.target.value})} placeholder={`Precio ${label} EUR`} />
+                    {(i > 0 || Number(d.precio||0) > 0) ? (
+                      <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.precio || ""} onChange={e=>updateStop(i,{precio:e.target.value})} placeholder={`Precio extra ${label} EUR`} />
+                    ) : (
+                      <div style={{...inp, display:"flex", alignItems:"center", color:"var(--text5)", fontSize:11, background:"transparent", border:"1px dashed var(--border2)"}} title="El precio de la parada principal es el precio base del viaje (arriba). Aqui solo se cobran las paradas adicionales.">
+                        Precio en el viaje base
+                      </div>
+                    )}
                     <input className="tg-stop-grid-wide" style={inp} disabled={disabled} value={d.google_maps_url || ""} onChange={e=>updateStop(i,{google_maps_url:e.target.value})} placeholder="Enlace Google Maps (opcional)" />
                     <input className="tg-stop-grid-wide" style={inp} disabled={disabled} value={d.notas || ""} onChange={e=>updateStop(i,{notas:e.target.value})} placeholder="Notas" />
                   </div>
@@ -4367,7 +4487,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{p.nombre || "Punto sin nombre"}</div>
                     <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>{p.direccion || "-"}{p.ciudad ? ` · ${p.ciudad}` : ""}</div>
                     <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
-                      <button type="button" onClick={()=>usarPuntoBuscado(p, "principal")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--accent)",background:"rgba(20,184,166,.08)",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Usar principal</button>
+                      <button type="button" onClick={()=>usarPuntoBuscado(p, "principal")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--accent)",background:"var(--accent-a08)",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Usar principal</button>
                       <button type="button" onClick={()=>usarPuntoBuscado(p, "adicional")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Anadir parada</button>
                     </div>
                   </div>
@@ -4402,7 +4522,6 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
             </datalist>
             <input
               className="tg-stop-address"
-              list={puntosListId}
               style={inp}
               placeholder={tipo === "carga" ? "Poblacion o punto de carga *" : "Poblacion o punto de descarga *"}
               value={newStop.direccion}
@@ -4470,7 +4589,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
           )}
         </div>
       ) : (
-        <button type="button" onClick={()=>setAdding(true)} style={{padding:"8px 14px",borderRadius:7,border:"1px dashed var(--accent)",background:"rgba(20,184,166,.08)",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer",marginTop:4}}>
+        <button type="button" onClick={()=>{ setNewStop(s=>({...s, fecha: s.fecha || mainFecha || "", hora: s.hora || mainHora || ""})); setAdding(true); }} style={{padding:"8px 14px",borderRadius:7,border:"1px dashed var(--accent)",background:"var(--accent-a08)",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer",marginTop:4}}>
           + Añadir {label}
         </button>
       ))}
@@ -4492,7 +4611,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
 function CargasEditor(props) { return <ParadasEditor {...props} tipo="carga" />; }
 function DescargasEditor(props) { return <ParadasEditor {...props} tipo="descarga" />; }
 
-function OrdenCargaModal({ pedido, onClose }) {
+function OrdenCargaModal({ pedido, grupajePedidos = [], onClose }) {
   const esColaborador = !!pedido.colaborador_id;
   const [rutaOptimizada, setRutaOptimizada] = useState(null);
   const [rutaOptLoading, setRutaOptLoading] = useState(false);
@@ -4503,6 +4622,15 @@ function OrdenCargaModal({ pedido, onClose }) {
   const { user } = useAuth();
   const esGerente = user?.rol === "gerente";
   const empresa = useEmpresaPerfil();
+  // El logo puede no estar aun en cache si no se ha abierto "Mi Empresa": se
+  // carga bajo demanda y se fuerza el re-render para que salga en la orden.
+  const [logoUrl, setLogoUrl] = useState(() => getLogoDataUrl());
+  useEffect(() => {
+    if (logoUrl) return;
+    let alive = true;
+    ensureLogoCargado().then(() => { if (alive) setLogoUrl(getLogoDataUrl()); });
+    return () => { alive = false; };
+  }, [logoUrl]);
   const numOC = getOrdenCargaNumero(pedido, docControl);
   const pagoColaboradorTonelada = getPagoColaboradorPorTonelada(pedido);
   const pagoColaboradorTotalCerrado = getPagoColaboradorTotalCerrado(pedido);
@@ -4579,7 +4707,7 @@ function OrdenCargaModal({ pedido, onClose }) {
     const cargaPostalOrden = stopPostalLine(cargaPrincipal, pedido.origen_provincia || "", pedido.origen_pais || "España", pedido.cliente_id || "", "carga");
     const descargaPostalOrden = stopPostalLine(descargaPrincipal, pedido.destino_provincia || "", pedido.destino_pais || "España", pedido.cliente_id || "", "descarga");
     const albaranesDireccionPostal = empresaDireccion || "Direccion postal pendiente de configurar en Mi Empresa";
-    const logoHtml = getLogoDataUrl() ? `<img src="${getLogoDataUrl()}" style="max-height:52px;max-width:160px;object-fit:contain;margin-bottom:6px;display:block" alt="">` : "";
+    const logoHtml = logoUrl ? `<img src="${logoUrl}" style="max-height:52px;max-width:160px;object-fit:contain;margin-bottom:6px;display:block" alt="">` : "";
     const emailAlbaranesColaborador = joinEmailList(
       [empresa.emails_albaranes, empresa.email],
       "Email de albaranes pendiente de configurar en Mi Empresa"
@@ -4600,15 +4728,29 @@ function OrdenCargaModal({ pedido, onClose }) {
           address: s.address || s.name || String(s || ""),
           google_maps_url: s.google_maps_url || s.maps_url || "",
         }))
-      : fallbackRoutePlaces.map((place, idx) => ({
-          type: idx === 0 ? "Carga" : idx === fallbackRoutePlaces.length - 1 ? "Descarga" : "Parada intermedia",
-          name: place?.name || "",
-          address: place?.address || place?.direccion || place?.google_maps_url || String(place || ""),
-          google_maps_url: place?.google_maps_url || place?.googleMapsUrl || "",
-        }));
+      : fallbackRoutePlaces.map((place) => {
+          // Conserva Carga/Descarga de cada parada (getRoutePlaces ya distingue
+          // cargas y descargas intermedias) para que en un grupaje se numeren como
+          // Carga 1, Carga 2, Descarga 1, Descarga 2 y no se pierdan como "Parada".
+          const t = String(place?.type || "").toLowerCase();
+          const base = t.includes("descarga") ? "Descarga" : t.includes("carga") ? "Carga" : "Parada intermedia";
+          return {
+            type: base,
+            name: place?.name || "",
+            address: place?.address || place?.direccion || place?.google_maps_url || String(place || ""),
+            google_maps_url: place?.google_maps_url || place?.googleMapsUrl || "",
+          };
+        });
     const routeUrl = rutaOptimizada?.maps_url || buildMapsRouteUrl(fallbackRoutePlaces);
     const routeProvider = rutaOptimizada?.provider_label || "Enlace orientativo";
     const routeKm = rutaOptimizada?.distance_km || pedido.km_ruta || pedido.km || "";
+    // Huella de CO2 estimada del viaje: km x consumo medio / 100 x factor diesel.
+    // Config en cfg_precios.sostenibilidad (mismos valores que el informe de emisiones).
+    const sostenibilidadOrden = (empresa?.cfg_precios?.sostenibilidad && typeof empresa.cfg_precios.sostenibilidad === "object") ? empresa.cfg_precios.sostenibilidad : {};
+    const consumoL100Orden = Number(sostenibilidadOrden.consumo_l_100km) > 0 ? Number(sostenibilidadOrden.consumo_l_100km) : 32;
+    const factorCo2Orden = Number(sostenibilidadOrden.factor_kg_co2_litro) > 0 ? Number(sostenibilidadOrden.factor_kg_co2_litro) : 2.68;
+    const kmCo2Orden = Number(parseLocaleNumber(routeKm, 0)) || 0;
+    const co2KgOrden = kmCo2Orden > 0 ? Math.round((kmCo2Orden * consumoL100Orden / 100) * factorCo2Orden) : 0;
     const routeDuration = rutaOptimizada?.duration_min
       ? `${Math.floor(Number(rutaOptimizada.duration_min) / 60)}h${Number(rutaOptimizada.duration_min) % 60 ? ` ${Number(rutaOptimizada.duration_min) % 60}min` : ""}`
       : "";
@@ -4666,18 +4808,23 @@ function OrdenCargaModal({ pedido, onClose }) {
   <div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#1d4ed8;margin-bottom:6px">Condiciones de pago del servicio</div>
   <div><strong>Forma de pago:</strong> ${htmlEscape(condicionesPagoCliente)}</div>
 </div>`;
-    const mapsRowsHtml = allMapsRows.map((item) => `
+    const renderMapStop = (item) => `
       <div class="map-stop">
         <div class="fl">${htmlEscape(item.label)}</div>
         <div class="fv">${htmlEscape(item.nombre || item.direccion || "-")}</div>
         ${item.nombre && item.direccion ? `<div class="map-address">${htmlEscape(item.direccion)}</div>` : ""}
         ${item.url ? `<a class="map-button" href="${htmlEscape(item.url)}">Abrir ${htmlEscape(item.label)} en Google Maps</a><div class="route-link" style="font-size:9.5px;margin-top:4px">${htmlEscape(item.url)}</div>` : ""}
-      </div>
-    `).join("");
-    const mapsBlock = mapsRowsHtml ? `
+      </div>`;
+    // Cargas a la izquierda, descargas a la derecha (una columna por tipo).
+    const cargasMapsCol = allMapsRows.filter(r => /^carga/i.test(String(r.label || "")));
+    const descargasMapsCol = allMapsRows.filter(r => !/^carga/i.test(String(r.label || "")));
+    const mapsBlock = allMapsRows.length ? `
 <div class="sec">
   <div class="sec-t">Ubicaciones Google Maps</div>
-  <div class="map-grid">${mapsRowsHtml}</div>
+  <div class="map-grid">
+    <div class="map-col"><div class="map-col-t">Cargas</div>${cargasMapsCol.map(renderMapStop).join("") || `<div class="map-col-empty">Sin cargas</div>`}</div>
+    <div class="map-col"><div class="map-col-t">Descargas</div>${descargasMapsCol.map(renderMapStop).join("") || `<div class="map-col-empty">Sin descargas</div>`}</div>
+  </div>
 </div>` : "";
     const dcdBlock = docControl?.documento ? `
 <div class="sec">
@@ -4748,7 +4895,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
 .firma-lbl{font-size:8.5px;font-weight:900;text-transform:uppercase;color:#64748b;letter-spacing:.06em}
 .firma-name{font-size:11px;color:#111827;font-weight:700;margin-top:4px}
 .route-sheet{page-break-before:always;margin-top:24px;padding-top:10px}
-.route-head{border-left:5px solid #0f766e;padding-left:14px;margin-bottom:18px}
+.route-head{border-left:5px solid var(--accent);padding-left:14px;margin-bottom:18px}
 .route-head h2{font-size:24px;color:#0f172a;margin:0 0 4px}
 .route-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;margin:16px 0}
 .route-kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:11px}
@@ -4757,8 +4904,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
 .route-list div{font-size:13px;color:#111827;font-weight:800;margin-top:2px}
 .route-box{border:1px solid #dbeafe;background:#eff6ff;border-radius:12px;padding:12px 14px;margin-top:12px;font-size:11.5px;color:#1f2937}
 .route-warn{border-color:#fde68a;background:#fffbeb;color:#92400e}
-.route-link{color:#0f766e;word-break:break-all;font-weight:700}
-.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.route-link{color:var(--accent);word-break:break-all;font-weight:700}
+.map-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.map-col{display:flex;flex-direction:column;gap:10px}
+.map-col-t{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:#64748b;padding-bottom:2px}
+.map-col-empty{font-size:10px;color:#94a3b8}
 .map-stop{background:#eff6ff;border:1px solid #bfdbfe;border-radius:11px;padding:10px 12px;break-inside:avoid}
 .map-address{font-size:11px;color:#475569;margin-top:3px}
 .map-button{display:inline-block;margin-top:8px;background:#2563eb;color:#fff;text-decoration:none;border-radius:7px;padding:7px 10px;font-size:10.5px;font-weight:900}
@@ -4782,6 +4932,23 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
     <div class="g2" style="margin-bottom:8px">
       <div class="f hl"><div class="fl">Origen -> Punto de carga</div><div class="fv big">${htmlEscape(origenNombreOrden || origenOrden || "-")}</div>${origenNombreOrden && origenOrden ? `<div class="map-address">${htmlEscape(origenOrden)}</div>` : ""}${cargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(cargaPostalOrden)}</div>` : ""}${pedido.ventana_carga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_carga}</div>`:""}${cargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(cargaPrincipal.google_maps_url)}">${htmlEscape(cargaPrincipal.google_maps_url)}</a></div>`:""}</div>
       <div class="f hl"><div class="fl">Destino -> Punto de entrega</div><div class="fv big">${htmlEscape(destinoNombreOrden || destinoOrden || "-")}</div>${destinoNombreOrden && destinoOrden ? `<div class="map-address">${htmlEscape(destinoOrden)}</div>` : ""}${descargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(descargaPostalOrden)}</div>` : ""}${pedido.ventana_descarga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_descarga}</div>`:""}${descargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(descargaPrincipal.google_maps_url)}">${htmlEscape(descargaPrincipal.google_maps_url)}</a></div>`:""}</div>
+      ${grupajePedidos.length > 1 ? `
+      <div class="f hl" style="grid-column:1/-1">
+        <div class="fl">Grupaje: todas las paradas de este camion (${grupajePedidos.length} viajes)</div>
+        <div class="fv" style="font-size:11px;line-height:1.6">
+          ${grupajePedidos.map((g, i) => `
+            <div style="padding:3px 0;border-bottom:1px dotted #d1d5db">
+              <strong>${i + 1}.</strong> ${htmlEscape(g.numero || "")}
+              &nbsp;CARGA: ${htmlEscape(g.origen || "-")}
+              &nbsp;|&nbsp;DESCARGA: ${htmlEscape(g.destino || "-")}
+              ${g.peso_kg ? `&nbsp;|&nbsp;${htmlEscape(String(g.peso_kg))} kg` : ""}
+              ${g.palets_cantidad ? `&nbsp;|&nbsp;${htmlEscape(String(g.palets_cantidad))} palets` : ""}
+            </div>`).join("")}
+        </div>
+        <div style="font-size:10px;color:#6b7280;margin-top:4px">
+          Hay que confirmar cada carga y cada descarga por separado.
+        </div>
+      </div>` : ""}
     </div>
     ${(() => {
       const cargasAdic = parseStops(pedido.puntos_carga).slice(1).filter(s => stopAddress(s) || s.cliente_nombre);
@@ -4795,7 +4962,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
         return `<div class="f"><div class="fl" style="color:${color}">${htmlEscape(label)}</div><div class="fv">${htmlEscape(s.cliente_nombre || stopAddress(s) || "-")}${s.cliente_nombre && stopAddress(s) ? `<div class="map-address">${htmlEscape(stopAddress(s))}</div>` : ""}${meta ? `<div style="font-size:10px;color:#6b7280;margin-top:2px">${htmlEscape(meta)}</div>` : ""}${extra ? `<div style="font-size:10px;color:#6b7280;margin-top:1px">${htmlEscape(extra)}</div>` : ""}${s.notas ? `<div style="font-size:10px;color:#6b7280;margin-top:1px">${htmlEscape(s.notas)}</div>` : ""}</div></div>`;
       };
       return `<div class="g2" style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1">
-        ${cargasAdic.map((s,i)=>row(`Carga adicional ${i+2}`, s, "#0f766e")).join("")}
+        ${cargasAdic.map((s,i)=>row(`Carga adicional ${i+2}`, s, "var(--accent)")).join("")}
         ${descargasAdic.map((s,i)=>row(`Descarga adicional ${i+2}`, s, "#b45309")).join("")}
       </div>`;
     })()}
@@ -4915,7 +5082,9 @@ ${esCol ? `
     <div class="route-kpi"><div class="fl">Kilometros previstos</div><div class="fv">${routeKm||"Pendiente"}${routeKm?" km":""}</div></div>
     <div class="route-kpi"><div class="fl">Tiempo estimado</div><div class="fv">${routeDuration||"Pendiente"}</div></div>
     <div class="route-kpi"><div class="fl">Peso</div><div class="fv">${pedido.peso_kg||pedido.kg||"Sin dato"}${pedido.peso_kg||pedido.kg?" kg":""}</div></div>
+    <div class="route-kpi"><div class="fl">Huella CO2 estimada</div><div class="fv">${co2KgOrden>0 ? `${co2KgOrden.toLocaleString("es-ES")} kg` : "Pendiente"}</div></div>
   </div>
+  ${co2KgOrden>0 ? `<div class="muted" style="font-size:10px;margin-top:3px">Huella CO2 estimada = ${kmCo2Orden.toLocaleString("es-ES")} km x ${consumoL100Orden} L/100km x ${factorCo2Orden} kg CO2/L (diesel). Estimacion orientativa, no medicion certificada.</div>` : ""}
   <div class="sec-t">Paradas de la ruta</div>
   <ol class="route-list">${routeStopsHtml || "<li>Sin direcciones suficientes</li>"}</ol>
   <div class="route-box">
@@ -5178,7 +5347,7 @@ ${esCol ? `
   }
 
   return (
-    <div style={S2.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S2.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={S2.box}>
         <div style={{height:7,background:esColaborador?"linear-gradient(90deg,#7c3aed,#10b981,#f59e0b)":"linear-gradient(90deg,var(--accent),#10b981,#f59e0b)"}}/>
         <div style={S2.body}>
@@ -5270,7 +5439,7 @@ ${esCol ? `
               {docControl?.documento && (
                 <button
                   onClick={descargarExportDocControl}
-                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.10)",color:"#2dd4bf",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid var(--accent-a28)",background:"var(--accent-a10)",color:"#2dd4bf",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                   Export JSON eFTI/eCMR
                 </button>
               )}
@@ -5340,7 +5509,7 @@ ${esCol ? `
                     )}
                     {docControl.repositorio.export_url && (
                       <button type="button" onClick={()=>window.open(docControl.repositorio.export_url, "_blank", "noopener,noreferrer")}
-                        style={{padding:"6px 10px",borderRadius:7,border:"1px solid rgba(20,184,166,.28)",background:"rgba(20,184,166,.10)",color:"#2dd4bf",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+                        style={{padding:"6px 10px",borderRadius:7,border:"1px solid var(--accent-a28)",background:"var(--accent-a10)",color:"#2dd4bf",fontSize:12,fontWeight:800,cursor:"pointer"}}>
                         Export archivado
                       </button>
                     )}
@@ -5354,7 +5523,7 @@ ${esCol ? `
                 </summary>
                 <div style={{marginTop:10}}>
               {docControlExpediente && (
-                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"rgba(20,184,166,.07)",border:"1px solid rgba(20,184,166,.20)",fontSize:12,color:"var(--text3)"}}>
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:8,background:"var(--accent-a07)",border:"1px solid var(--accent-a20)",fontSize:12,color:"var(--text3)"}}>
                   <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap",marginBottom:8}}>
                     <div>
                       <div style={{fontWeight:900,color:"var(--text)",marginBottom:3}}>Expediente DCD/eCMR</div>
@@ -5413,7 +5582,7 @@ ${esCol ? `
                     <button onClick={descargarPaqueteRegulatorio} style={{border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.10)",color:"var(--accent)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Paquete regulatorio
                     </button>
-                    <button onClick={descargarDossierRegulatorioPdf} style={{border:"1px solid rgba(15,118,110,.30)",background:"rgba(15,118,110,.10)",color:"#0f766e",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    <button onClick={descargarDossierRegulatorioPdf} style={{border:"1px solid rgba(15,118,110,.30)",background:"rgba(15,118,110,.10)",color:"var(--accent)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Dossier PDF
                     </button>
                     {["efti","ecmr","diwass"].map(type => (
@@ -5421,7 +5590,7 @@ ${esCol ? `
                         JSON {type.toUpperCase()}
                       </button>
                     ))}
-                    <button onClick={()=>crearBorradorTransmisionRegulatoria("efti")} style={{border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"#0f766e",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    <button onClick={()=>crearBorradorTransmisionRegulatoria("efti")} style={{border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",color:"var(--accent)",borderRadius:7,padding:"5px 9px",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Borrador envío eFTI
                     </button>
                   </div>
@@ -5512,17 +5681,24 @@ ${esCol ? `
           {allMapsRows.length > 0 && (
             <div style={{...S2.kv,gridColumn:"1/-1"}}>
               <div style={S2.lbl}>Google Maps para colaborador</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
-                {allMapsRows.map((item, idx)=>(
-                  <div key={`${item.label}-${idx}`} style={{border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg4)"}}>
-                    <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>{item.label}</div>
-                    <div style={{...S2.val,fontSize:12,marginTop:3}}>{item.nombre || item.direccion || "-"}</div>
-                    {item.nombre && item.direccion && <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{item.direccion}</div>}
-                    {item.url && (
-                      <a href={item.url} target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:7,padding:"6px 10px",borderRadius:7,background:"rgba(59,130,246,.12)",border:"1px solid rgba(59,130,246,.24)",color:"var(--accent)",fontSize:11,fontWeight:800,textDecoration:"none"}}>
-                        Abrir en Google Maps
-                      </a>
-                    )}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,alignItems:"start"}}>
+                {/* Cargas a la izquierda, descargas a la derecha. */}
+                {[["Cargas", allMapsRows.filter(r=>/^carga/i.test(String(r.label||"")))],
+                  ["Descargas", allMapsRows.filter(r=>!/^carga/i.test(String(r.label||"")))]].map(([titulo, items])=>(
+                  <div key={titulo} style={{display:"flex",flexDirection:"column",gap:8}}>
+                    <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>{titulo}</div>
+                    {items.length ? items.map((item, idx)=>(
+                      <div key={`${item.label}-${idx}`} style={{border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg4)"}}>
+                        <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>{item.label}</div>
+                        <div style={{...S2.val,fontSize:12,marginTop:3}}>{item.nombre || item.direccion || "-"}</div>
+                        {item.nombre && item.direccion && <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{item.direccion}</div>}
+                        {item.url && (
+                          <a href={item.url} target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:7,padding:"6px 10px",borderRadius:7,background:"rgba(59,130,246,.12)",border:"1px solid rgba(59,130,246,.24)",color:"var(--accent)",fontSize:11,fontWeight:800,textDecoration:"none"}}>
+                            Abrir en Google Maps
+                          </a>
+                        )}
+                      </div>
+                    )) : <div style={{fontSize:11,color:"var(--text5)"}}>Sin {String(titulo).toLowerCase()}</div>}
                   </div>
                 ))}
               </div>
@@ -5592,7 +5768,8 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
     nombre: datosIniciales?.nombre || "",
     cif: "", email: "", telefono: "",
     calle: "", num_ext: "", codigo_postal: "", ciudad: "", provincia: "", pais: "España",
-    forma_pago: "Transferencia bancaria", tipo_iva: 21, iva_regimen: "general",
+    forma_pago: "Transferencia bancaria", vencimiento: "", iban: "", notas: "",
+    tipo_iva: 21, iva_regimen: "general",
     contacto_nombre: "", contacto_telefono: "",
   });
   const [saving, setSaving] = useState(false);
@@ -5640,21 +5817,28 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre / Razon social *</label><input style={inp} value={form.nombre} onChange={fk("nombre")} autoFocus/></div>
           <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={fk("cif")} placeholder="B12345678"/></div>
           <div><label style={lbl}>Telefono</label><input style={inp} value={form.telefono} onChange={fk("telefono")}/></div>
-          <div><label style={lbl}>Email facturacion</label><input type="email" style={inp} value={form.email} onChange={fk("email")}/></div>
+          <div><label style={lbl}>Email</label><input type="email" style={inp} value={form.email} onChange={fk("email")}/></div>
           <div><label style={lbl}>Forma de pago</label>
             <select style={inp} value={form.forma_pago} onChange={fk("forma_pago")}>
-              {["Contado","Transferencia bancaria","30 dias","45 dias","60 dias","90 dias"].map(o=><option key={o}>{o}</option>)}
+              {["Transferencia bancaria","Contado","Domiciliacion","Pagare","Confirming","Cheque"].map(o=><option key={o}>{o}</option>)}
             </select>
           </div>
+          <div><label style={lbl}>Condicion de pago (dias)</label>
+            <select style={inp} value={form.vencimiento} onChange={fk("vencimiento")}>
+              <option value="">Sin definir</option>
+              {["Contado","15 dias","30 dias","45 dias","60 dias","90 dias"].map(o=><option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div><label style={lbl}>IBAN</label><input style={inp} value={form.iban} onChange={fk("iban")} placeholder="ES00 0000 0000 0000 0000 0000"/></div>
         </div>
 
         {/* Direccion */}
         <div style={{fontSize:11,fontWeight:700,color:"var(--accent)",marginBottom:6,marginTop:16,textTransform:"uppercase",letterSpacing:".06em"}}>Direccion fiscal</div>
-        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:"0 14px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:"0 14px",alignItems:"end"}}>
           <div><label style={lbl}>Calle / Avenida</label><input style={inp} value={form.calle} onChange={fk("calle")} placeholder="Calle Mayor"/></div>
           <div><label style={lbl}>N. / Piso / Pta</label><input style={inp} value={form.num_ext} onChange={fk("num_ext")} placeholder="12, 3oB"/></div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr 2fr 2fr",gap:"0 14px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1.4fr 2fr 2fr 1.6fr",gap:"0 14px",alignItems:"end"}}>
           <div><label style={lbl}>Codigo postal</label><input style={inp} value={form.codigo_postal} onChange={fk("codigo_postal")} placeholder="28001"/></div>
           <div><label style={lbl}>Ciudad</label><input style={inp} value={form.ciudad} onChange={fk("ciudad")}/></div>
           <GeoFields
@@ -5670,6 +5854,9 @@ function ModalNuevoClienteRapido({ datosIniciales, onClose, onCreado }) {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <div><label style={lbl}>Nombre contacto</label><input style={inp} value={form.contacto_nombre} onChange={fk("contacto_nombre")}/></div>
           <div><label style={lbl}>Tel. contacto</label><input style={inp} value={form.contacto_telefono} onChange={fk("contacto_telefono")}/></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Notas</label>
+            <textarea style={{...inp,minHeight:56,resize:"vertical",fontFamily:"'DM Sans',sans-serif"}} value={form.notas} onChange={fk("notas")} placeholder="Indicaciones, horarios, referencias..."/>
+          </div>
         </div>
 
         {/* Warning if incomplete */}
@@ -6370,8 +6557,9 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   const sourceStop = {
     ...puntoStop,
     ...rawStop,
-    lat: rawStop.lat ?? rawStop.latitud ?? rawStop.latitude ?? puntoStop.lat ?? puntoStop.latitud ?? mapsCoords?.lat ?? null,
-    lng: rawStop.lng ?? rawStop.longitud ?? rawStop.lon ?? rawStop.longitude ?? puntoStop.lng ?? puntoStop.longitud ?? mapsCoords?.lng ?? null,
+    // El enlace de Google Maps manda sobre las coordenadas guardadas (pin exacto).
+    lat: mapsCoords?.lat ?? rawStop.lat ?? rawStop.latitud ?? rawStop.latitude ?? puntoStop.lat ?? puntoStop.latitud ?? null,
+    lng: mapsCoords?.lng ?? rawStop.lng ?? rawStop.longitud ?? rawStop.lon ?? rawStop.longitude ?? puntoStop.lng ?? puntoStop.longitud ?? null,
     google_maps_url: googleMapsUrl,
     provincia: rawStop.provincia || rawStop.region || puntoStop.provincia || "",
     pais: rawStop.pais || rawStop.country || puntoStop.pais || "",
@@ -6441,7 +6629,7 @@ function pedidoPointTone({ tipo, pedido = {}, pasos = {} }) {
       return { key:"ok", label:"Carga OK", color:"#10b981", bg:"rgba(16,185,129,.17)", border:"rgba(16,185,129,.55)" };
     }
     if (estado === "cargando" || pasos.carga_proceso || pasos.carga_iniciada) {
-      return { key:"activo", label:"En carga", color:"#14b8a6", bg:"rgba(20,184,166,.16)", border:"rgba(20,184,166,.55)" };
+      return { key:"activo", label:"En carga", color:"var(--accent-l)", bg:"var(--accent-a16)", border:"var(--accent-a55)" };
     }
     if (estado === "espera_carga") {
       return { key:"espera", label:"Espera carga", color:"#eab308", bg:"rgba(234,179,8,.16)", border:"rgba(234,179,8,.5)" };
@@ -6505,11 +6693,11 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Ruta operativa</div>
           <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Ruta, paradas y posicion conocida del vehiculo.</div>
         </div>
-        <span style={{fontSize:10,fontWeight:900,border:"1px solid rgba(20,184,166,.30)",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
+        <span style={{fontSize:10,fontWeight:900,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
           {currentLabel}
         </span>
       </div>
-      <RutaMapa points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} />
+      <RutaMapa key={pedido?.id || "nuevo"} points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame />
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginTop:9}}>
         {mapPoints.map(point => (
           <div key={`card-${point.tipo}-${point.index}-${point.label}`} style={{border:`1px solid ${point.tone.border}`,borderRadius:8,padding:"8px 10px",background:point.tone.bg}}>
@@ -6539,6 +6727,19 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [choferPasosMapa, setChoferPasosMapa] = useState(null);
   const [clientes, setClientes] = useState(clientesProp || []);
   const [rutas,    setRutas]    = useState(rutas_prop || []);
+  const [etiquetasCatalogo, setEtiquetasCatalogo] = useState(() => {
+    const cat = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG?.cfg_trafico?.etiquetas_catalogo);
+    return Array.isArray(cat) ? cat.filter(e => e && String(e.nombre || "").trim()) : [];
+  });
+  useEffect(() => {
+    let alive = true;
+    getEmpresaConfig().then(d => {
+      if (!alive) return;
+      const cat = d?.cfg_trafico?.etiquetas_catalogo;
+      setEtiquetasCatalogo(Array.isArray(cat) ? cat.filter(e => e && String(e.nombre || "").trim()) : []);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -6615,7 +6816,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [form,       setForm]       = useState(
     editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""}))
-      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", metros_lineales:"13.65", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
   );
   const [mapPedidoDraft, setMapPedidoDraft] = useState(() => form);
   const [saving,     setSaving]     = useState(false);
@@ -6654,7 +6855,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     if (hydratedPedidoKeyRef.current === editandoKey) return;
     const nextForm = editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({ ...editando, remolque_id_manual: editando.remolque_id || "" }))
-      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, carga_techo:false, intercambio_palets:false, requiere_cinchas:true });
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", metros_lineales:"13.65", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, carga_techo:false, intercambio_palets:false, requiere_cinchas:true });
     hydratedPedidoKeyRef.current = editandoKey;
     setForm(nextForm);
     setColaboradorBusqueda("");
@@ -6779,12 +6980,18 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     // provincial para Benissa, Denia, Alcoy, etc. No se equiparan entre si dos
     // municipios distintos: la provincia debe coincidir con el extremo guardado.
     if (provincia && (e === provincia || e === `provincia ${provincia}` || e === `${provincia} provincia`)) return 3;
-    // Misma provincia exacta: si la provincia del destino guardado en la tarifa
-    // coincide con la provincia del extremo actual (la ultima descarga), se
-    // aplica como tarifa provincial aunque el municipio sea distinto.
+    // Misma provincia: si la provincia del destino guardado en la tarifa coincide
+    // con la provincia del extremo actual (la ultima descarga), se aplica como
+    // tarifa provincial aunque el municipio sea distinto. La provincia de la
+    // tarifa se resuelve con el mapa completo de municipios (p.ej. Onda ->
+    // Castellon), no solo con el diccionario pequeno.
     if (provincia) {
-      const provinciaEsperada = normalizePlaceText(inferPlaceGeo(esperado)?.provincia || "");
-      if (provinciaEsperada && provinciaEsperada === provincia) return 3;
+      const provinciaEsperada = normalizePlaceText(provinciaDeLugar(esperado) || "");
+      const compat = provinciaEsperada && (
+        provinciaEsperada === provincia ||
+        (provinciaEsperada.length >= 5 && provincia.length >= 5 && (provinciaEsperada.includes(provincia) || provincia.includes(provinciaEsperada)))
+      );
+      if (compat) return 3;
     }
     if (!a) return 0;
     const stop = new Set(["de","del","la","el","los","las","s","sl","sa","sau","slu","calle","av","avenida","ctra","carretera"]);
@@ -6800,13 +7007,30 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     // Para la tarifa por provincia, la descarga que manda es la ULTIMA de la
     // lista (destino final del viaje); la carga sigue siendo la primera (origen).
     const ref = isCarga ? (stops[0] || {}) : (stops[stops.length - 1] || stops[0] || {});
-    const mainLabel = isCarga ? draft.origen : (stopAddress(ref) || draft.destino);
-    const labels = [mainLabel, stopAddress(ref), ref.ciudad, ref.municipio, ref.cliente_nombre].filter(Boolean);
+    // La tarifa se empareja PREFERENTEMENTE por POBLACION + PROVINCIA: una misma
+    // empresa (p.ej. CEMENTOS CAPA) puede cargar/descargar en pueblos distintos y
+    // lo que define la tarifa es el pueblo y su provincia. Se prioriza la
+    // poblacion (ciudad/municipio) como etiqueta, pero se MANTIENE tambien el
+    // nombre de la empresa y el texto libre como etiquetas de reserva para no
+    // romper las tarifas antiguas guardadas con el nombre de la empresa.
+    const poblacion = ref.ciudad || ref.municipio || ref.poblacion || ref.localidad || "";
+    const textoLibre = isCarga ? draft.origen : (stopAddress(ref) || draft.destino);
+    const labels = Array.from(new Set([
+      poblacion,
+      textoLibre,
+      stopAddress(ref),
+      ref.ciudad,
+      ref.municipio,
+      ref.cliente_nombre,
+    ].filter(Boolean)));
     const inferred = inferPlaceGeo(ref, ...labels);
-    return {
-      labels: Array.from(new Set(labels)),
-      provincia: stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia) || inferred?.provincia || "",
-    };
+    const provincia =
+      stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia)
+      || provinciaDeLugar(poblacion)
+      || inferred?.provincia
+      || provinciaDeLugar(textoLibre)
+      || "";
+    return { labels, provincia };
   };
   const routeEndpointScore = (draft, ruta, tipo) => {
     const ctx = endpointContextFromDraft(draft, tipo);
@@ -6818,13 +7042,46 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     const destinoScore = routeEndpointScore(draft, ruta, "descarga");
     return origenScore && destinoScore ? (origenScore * 10) + destinoScore : 0;
   };
+  // Una tarifa ENCAJA con el viaje cuando el origen Y el destino coinciden al
+  // menos por PROVINCIA (score 3) o exactamente (4). Score 1 = ese extremo no
+  // esta definido en la tarifa (comodin) y se admite mientras el otro extremo si
+  // coincida por provincia. Score 2 (solo tokens sueltos) NO basta: evita falsos
+  // positivos. El score numerico se sigue usando solo para RANKING (exacto por
+  // encima de provincia). Mismo criterio en vivo y al guardar.
+  const routeEndpointsMatch = (draft, ruta) => {
+    const o = routeEndpointScore(draft, ruta, "carga");
+    const d = routeEndpointScore(draft, ruta, "descarga");
+    const ok = (s) => s >= 3 || s === 1;
+    return ok(o) && ok(d) && (o >= 3 || d >= 3);
+  };
   const bestRouteForDraft = (draft, candidates = rutasCompatibles, requireTarifaMatch = false) => {
     return candidates
       .filter(r => !requireTarifaMatch || routeTarifaMatchesDraft(r, draft))
+      .filter(r => routeEndpointsMatch(draft, r))
       .map(r => ({ ruta:r, score:routeDraftScore(draft, r) }))
-      .filter(item => item.score > 0)
       .sort((a,b) => b.score - a.score || String(a.ruta.id || "").localeCompare(String(b.ruta.id || "")))[0]?.ruta || null;
   };
+  // Si hay una tarifa/ruta guardada vinculada pero el ORIGEN cuadra y el DESTINO
+  // ya NO (p.ej. se cargo la tarifa Alicante->San Vicente y luego se cambio el
+  // destino a Canovelles), se desvincula para no arrastrar un precio que no
+  // corresponde a este viaje, y se avisa para revisar el precio. Al limpiar
+  // ruta_id el efecto no vuelve a dispararse.
+  useEffect(() => {
+    if (!form.ruta_id || !form.origen || !form.destino) return;
+    const ruta = rutas.find(r => String(r.id) === String(form.ruta_id));
+    if (!ruta || !ruta.origen || !ruta.destino) return;
+    // No desvincular mientras se esta tecleando el destino: hasta que el destino
+    // no tiene provincia cogida, un score 0 es transitorio y provocaria un falso
+    // aviso "la tarifa no cuadra".
+    if (!endpointContextFromDraft(form, "descarga").provincia) return;
+    const origenScore = routeEndpointScore(form, ruta, "carga");
+    const destinoScore = routeEndpointScore(form, ruta, "descarga");
+    if (origenScore > 0 && destinoScore === 0) {
+      setForm(p => ({ ...p, ruta_id: "" }));
+      notify(`La tarifa guardada (${ruta.origen} -> ${ruta.destino}) no cuadra con el destino "${form.destino}". Se desvincula la tarifa: revisa el precio de este viaje.`, "warning");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.ruta_id, form.origen, form.destino, rutas]);
   const tipoVehiculoDeTexto = (value) => {
     const txt = normalizarTipoRuta(value);
     if (!txt) return "cualquiera";
@@ -6838,6 +7095,11 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   };
   const vehiculoActual = vehiculosLocal.find(v => v.id === form.vehiculo_id);
   const remolqueActual = vehiculosLocal.find(v => v.id === (form.remolque_id_manual || vehiculoActual?.remolque_id));
+  // Aviso si la carga (metros lineales) supera los metros de carga del remolque
+  // asignado (p. ej. viaje de 13,65 m en una plataforma de 11 m).
+  const cargaMetrosLineales = parseFloat(String(form.metros_lineales ?? "").replace(",", ".")) || 0;
+  const remolqueMetrosCarga = parseFloat(String(remolqueActual?.metros_carga ?? "").replace(",", ".")) || 0;
+  const avisoCargaExcedeRemolque = !!remolqueActual && remolqueMetrosCarga > 0 && cargaMetrosLineales > 0 && cargaMetrosLineales > remolqueMetrosCarga + 0.01;
   const tipoRemolqueActual = tipoVehiculoDeTexto([remolqueActual?.clase, remolqueActual?.tipo, remolqueActual?.marca, remolqueActual?.modelo, remolqueActual?.notas_operacion].filter(Boolean).join(" "));
   const rutaCompatibleConConjunto = (ruta) => {
     const requerido = tipoVehiculoDeTexto(ruta?.tipo_vehiculo);
@@ -6865,8 +7127,6 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     : [];
   const puntosCargaSugeridosModal = filterPuntosForPedido(puntosInteresModal, { clienteId: form.cliente_id || "", tipo: "carga" });
   const puntosDescargaSugeridosModal = filterPuntosForPedido(puntosInteresModal, { clienteId: form.cliente_id || "", tipo: "descarga" });
-  const cargaEndpointListId = `pedido-origen-puntos-${editando?.id || "nuevo"}`;
-  const descargaEndpointListId = `pedido-destino-puntos-${editando?.id || "nuevo"}`;
 
   useEffect(() => {
     if (editando?.id || !bloqueoClienteModal || !form.cliente_id) return;
@@ -7064,7 +7324,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
     const next = setPuntosInteresCache([
       ...current.filter(p => String(p.id) !== String(normalized.id)),
       normalized,
-    ].slice(-250));
+    ].slice(-5000));
     setPuntos(next);
     onApply?.(next);
     return { point: normalized, changed: true, cloned: clone };
@@ -7083,7 +7343,9 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   }
 
   const qPoint = normalizePlaceText(pointSearch);
-  const puntosVisibles = filterPuntosForPedido(puntos, { clienteId, tipo: modo, includeGenerales: true });
+  // El listado completo (boton "Puntos") muestra TODOS los puntos de la empresa
+  // para reutilizarlos; al elegir uno que no es del cliente, se le asocia.
+  const puntosVisibles = filterPuntosForPedido(puntos, { clienteId, tipo: modo, includeGenerales: true, todos: true });
   const puntosFiltrados = qPoint
     ? puntosVisibles.filter(point => [
         point.nombre,
@@ -7108,7 +7370,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   };
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",zIndex:2500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.78)",zIndex:2500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,width:"min(880px,96vw)",maxHeight:"92vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
         <div style={{padding:"18px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
           <div>
@@ -7134,7 +7396,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
               type="button"
               onClick={crearDesdeBusqueda}
               disabled={!pointSearch.trim()}
-              style={{...S.btn,background:pointSearch.trim()?"rgba(20,184,166,.12)":"var(--bg4)",color:pointSearch.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",cursor:pointSearch.trim()?"pointer":"not-allowed"}}
+              style={{...S.btn,background:pointSearch.trim()?"var(--accent-a12)":"var(--bg4)",color:pointSearch.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",cursor:pointSearch.trim()?"pointer":"not-allowed"}}
             >
               Crear desde busqueda
             </button>
@@ -7155,7 +7417,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                 <React.Fragment key={point.id}>
                   {showScopeHeader && (
                     <div style={{marginTop:idx ? 6 : 0,fontSize:11,fontWeight:900,letterSpacing:".08em",textTransform:"uppercase",color:"var(--text4)",display:"flex",alignItems:"center",gap:8}}>
-                      <span>{scope === "Cliente" ? "Puntos de este cliente" : "Puntos generales"}</span>
+                      <span>{scope === "Cliente" ? "Puntos de este cliente" : scope === "General" ? "Puntos generales" : "Puntos de otros clientes"}</span>
                       <span style={{height:1,background:"var(--border)",flex:1}} />
                     </div>
                   )}
@@ -7163,21 +7425,21 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                   <div>
                     <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                       <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{point.nombre || point.direccion}</div>
-                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:scope === "Cliente" ? "rgba(20,184,166,.12)" : "rgba(59,130,246,.12)",color:scope === "Cliente" ? "var(--accent)" : "#60a5fa",border:`1px solid ${scope === "Cliente" ? "rgba(20,184,166,.24)" : "rgba(59,130,246,.24)"}`}}>
+                      <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:scope === "Cliente" ? "var(--accent-a12)" : "rgba(59,130,246,.12)",color:scope === "Cliente" ? "var(--accent)" : "#60a5fa",border:`1px solid ${scope === "Cliente" ? "var(--accent-a24)" : "rgba(59,130,246,.24)"}`}}>
                         {scope}
                       </span>
                     </div>
                     <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion || puntoLocationLabel(point) || "-"}</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
                       {point.tipo && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(59,130,246,.12)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.22)"}}>{point.tipo}</span>}
-                      {puntoLocationLabel(point) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.22)"}}>{puntoLocationLabel(point)}</span>}
+                      {puntoLocationLabel(point) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a22)"}}>{puntoLocationLabel(point)}</span>}
                       {point.ventana && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)"}}>{point.ventana}</span>}
                       {point.google_maps_url && <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--accent)"}}>Google Maps</a>}
                     </div>
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                     {onSelectPoint && (
-                      <button type="button" onClick={()=>selectPoint(point)} style={{...S.btn,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.28)",padding:"6px 10px"}}>Seleccionar</button>
+                      <button type="button" onClick={()=>selectPoint(point)} style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a28)",padding:"6px 10px"}}>Seleccionar</button>
                     )}
                     <button type="button" onClick={()=>setEditing(point)} style={{...S.btn,background:"transparent",color:"var(--accent)",border:"1px solid var(--border2)",padding:"6px 10px"}}>Editar</button>
                     <button type="button" onClick={()=>removePoint(point)} style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",padding:"6px 10px"}}>Eliminar</button>
@@ -7255,13 +7517,43 @@ async function maybeCrearRutaClienteDesdePedido() {
   }
   const rutaExistente = rutasClienteActualizadas
     .filter(r =>
-      routeDraftScore(form, r) >= 43 &&
+      routeEndpointsMatch(form, r) &&
       (!r.cliente_id || r.cliente_id === form.cliente_id) &&
       (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
     )
     .sort((a,b) => routeDraftScore(form, b) - routeDraftScore(form, a))[0];
   if (rutaExistente) {
     if (!routeTarifaMatchesDraft(rutaExistente, form)) {
+      // Si lo unico que no cuadra es el TIPO de tarifa (p.ej. la guardada esta en
+      // "viaje" y el pedido es por "tonelada"), se ACTUALIZA la tarifa al tipo del
+      // pedido en vez de dejarla desincronizada (para que no vuelva a cargar mal).
+      const tipoRuta = String(rutaExistente.tarifa_tipo || "viaje");
+      const tipoDraft = String(form.tipo_precio || "viaje");
+      const draftTieneTarifa = parseLocaleNumber(form.precio_unitario, 0) > 0
+        || parseLocaleNumber(form.minimo_unidades, 0) > 0
+        || parseLocaleNumber(form.importe_minimo, 0) > 0;
+      if (draftTieneTarifa && tipoRuta !== tipoDraft) {
+        try {
+          await editarRutaCliente(form.cliente_id, rutaExistente.id, {
+            origen: rutaExistente.origen,
+            destino: rutaExistente.destino,
+            km: toNullableNumber(rutaExistente.km ?? form.km_ruta),
+            tipo_vehiculo: rutaExistente.tipo_vehiculo || tipoRutaActual || "cualquiera",
+            tarifa_tipo: tipoDraft,
+            precio_base: toFiniteNumber(form.precio_unitario, calcImporte(form)),
+            recargo_combustible_pct: toNullableNumber(form.recargo_combustible_pct),
+            minimo_facturable: tipoDraft === "viaje" ? toNullableNumber(form.importe_minimo) : null,
+            minimo_unidades: tipoDraft !== "viaje" ? toNullableNumber(form.minimo_unidades) : null,
+            notas: rutaExistente.notas || "",
+          });
+          if (!form.ruta_id) setForm(p => ({ ...p, ruta_id: rutaExistente.id }));
+          rutasCreadasRef.current.add(routeKey);
+          notify(`Tarifa de la ruta actualizada a ${tipoDraft === "tonelada" ? "por tonelada" : tipoDraft === "km" ? "por km" : tipoDraft === "hora" ? "por hora" : tipoDraft}.`, "success");
+          return rutaExistente.id || null;
+        } catch (e) {
+          console.warn("No se pudo actualizar el tipo de la tarifa:", e?.message || e);
+        }
+      }
       rutasCreadasRef.current.add(routeKey);
       notify("Existe una ruta con ese origen/destino, pero tiene otra tarifa. No se ha vinculado automaticamente.", "info");
       return null;
@@ -7283,7 +7575,7 @@ async function maybeCrearRutaClienteDesdePedido() {
       setRutas(normalized);
       return normalized
         .filter(r =>
-          routeDraftScore(form, r) >= 43 &&
+          routeEndpointsMatch(form, r) &&
           routeTarifaMatchesDraft(r, form) &&
           (!r.tipo_vehiculo || r.tipo_vehiculo === "cualquiera" || tipoVehiculoDeTexto(r.tipo_vehiculo) === (tipoRutaActual || "cualquiera"))
         )
@@ -7292,9 +7584,26 @@ async function maybeCrearRutaClienteDesdePedido() {
       return null;
     }
   };
+  // Para la tarifa se guarda la POBLACION (o la provincia), nunca el nombre de
+  // la empresa: una misma empresa puede cargar/descargar en pueblos distintos.
+  const tarifaEndpointLabel = (tipo) => {
+    const isCarga = tipo === "carga";
+    const stops = parseStops(isCarga ? form.puntos_carga : form.puntos_descarga);
+    const ref = isCarga ? (stops[0] || {}) : (stops[stops.length - 1] || stops[0] || {});
+    const textoLibre = String(isCarga ? form.origen : form.destino).trim();
+    if (ref.cliente_nombre) {
+      const poblacion = String(ref.ciudad || ref.municipio || ref.poblacion || ref.localidad || "").trim();
+      if (poblacion) return poblacion;
+      const prov = String(isCarga ? form.origen_provincia : form.destino_provincia).trim();
+      if (prov) return prov;
+    }
+    return textoLibre;
+  };
+  const origenRutaBase = tarifaEndpointLabel("carga").toUpperCase();
+  const destinoRutaBase = tarifaEndpointLabel("descarga").toUpperCase();
   const addRoute = await confirmDialog({
     title: "Guardar ruta del cliente",
-    message: `La ruta "${form.origen} -> ${form.destino}" no existe todavia.\n\nQuieres guardarla como ruta de este cliente para reutilizarla en futuros viajes?`,
+    message: `La ruta "${origenRutaBase} -> ${destinoRutaBase}" no existe todavia.\n\nQuieres guardarla como ruta de este cliente para reutilizarla en futuros viajes?`,
     confirmText: "Guardar ruta",
     cancelText: "No guardar",
   });
@@ -7302,17 +7611,17 @@ async function maybeCrearRutaClienteDesdePedido() {
     rutasCreadasRef.current.add(routeKey);
     return null;
   }
-  const origenRuta = form.origen.trim().toUpperCase();
-  let destinoRuta = form.destino.trim().toUpperCase();
+  const origenRuta = origenRutaBase;
+  let destinoRuta = destinoRutaBase;
   const destinoProvincia = String(form.destino_provincia || "").trim();
-  if (destinoProvincia && normalizePlaceText(destinoProvincia) !== normalizePlaceText(form.destino)) {
+  if (destinoProvincia && normalizePlaceText(destinoProvincia) !== normalizePlaceText(destinoRuta)) {
     const usarProvincia = await confirmDialog({
       title: "Ambito de la tarifa",
-      message: `Puedes guardar esta tarifa para toda la provincia de ${destinoProvincia} (aplicara a todos sus pueblos) o solo para ${form.destino.trim()}.
+      message: `Puedes guardar esta tarifa para toda la provincia de ${destinoProvincia} (aplicara a todos sus pueblos) o solo para ${destinoRuta}.
 
 Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueblo (excepcion).`,
       confirmText: `Provincia ${destinoProvincia}`,
-      cancelText: `Solo ${form.destino.trim()}`,
+      cancelText: `Solo ${destinoRuta}`,
     });
     if (usarProvincia) destinoRuta = destinoProvincia.toUpperCase();
   }
@@ -7351,7 +7660,7 @@ Si este pueblo tiene otro precio por estar mas lejos, guardalo solo para el pueb
     return null;
   }
   setRutas(prev => prev.some(r => r.id === nuevaRutaId || (
-    routeDraftScore({...form, origen:origenRuta, destino:destinoRuta}, r) >= 43 &&
+    routeEndpointsMatch({...form, origen:origenRuta, destino:destinoRuta}, r) &&
     (!r.cliente_id || r.cliente_id === form.cliente_id)
   )) ? prev : [...prev, {
     id: nuevaRutaId,
@@ -7614,6 +7923,26 @@ async function guardar() {
         enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
       }
       notify("Pedido creado correctamente.", "success");
+      // Si esta mercancia ya se repite bastante en este cliente, ofrecer fijarla como habitual
+      const sugMerc = pedidoGuardado?.sugerencia_mercancia_habitual;
+      if (sugMerc && sugMerc.mercancia && form.cliente_id) {
+        const okFijar = await confirmDialog({
+          title: "Mercancia habitual del cliente",
+          message: `Este cliente ya lleva ${sugMerc.veces} pedidos con "${sugMerc.mercancia}". Quieres fijarla como mercancia habitual? Se rellenara sola al crear nuevos pedidos de este cliente (siempre podras cambiarla).`,
+          confirmText: "Fijar como habitual",
+          cancelText: "Ahora no",
+          tone: "success",
+        });
+        if (okFijar) {
+          try {
+            await setClienteMercanciaHabitual(form.cliente_id, sugMerc.mercancia);
+            setClientes(prev => prev.map(c => c.id === form.cliente_id ? { ...c, mercancia_habitual: sugMerc.mercancia } : c));
+            notify(`"${sugMerc.mercancia}" fijada como mercancia habitual del cliente.`, "success");
+          } catch (e) {
+            notify("No se pudo fijar la mercancia habitual: " + (e.message || ""), "warning");
+          }
+        }
+      }
       initialFormRef.current = pedidoDraftSignature(form);
       onSaved();
       return;
@@ -7651,21 +7980,35 @@ const aplicarEndpointText = (key, tipo) => (e) => {
       const countryKey = tipo === "carga" ? "origen_pais" : "destino_pais";
       const { primary, extras } = splitPrimaryAndAdditionalStops(p[stopsKey], p[key] || "");
       const inferred = isSimpleMunicipalityInput(value) ? inferPlaceGeo(value) : null;
-      const province = inferred?.provincia || primary?.provincia || p[regionKey] || "";
-      if (province && (inferred?.provincia || !p[regionKey])) base[regionKey] = province;
+      // Si el texto del extremo cambia a un lugar DISTINTO, no se hereda la
+      // geolocalizacion vieja (ciudad/poblacion/provincia/coords/punto/enlace del
+      // destino anterior): se re-geocodifica desde cero. Asi al pasar de
+      // "Torrelavega" a "Torrejon de Ardoz" no queda marcado en Cantabria.
+      const textoCambiado = normalizePlaceText(value) !== normalizePlaceText(primary?.direccion || "");
+      const geo = textoCambiado ? {} : (primary || {});
+      const province = inferred?.provincia || geo.provincia || (textoCambiado ? "" : (p[regionKey] || ""));
+      if (inferred?.provincia) base[regionKey] = inferred.provincia;
+      else if (textoCambiado) base[regionKey] = "";
       base[stopsKey] = value.trim() ? [{
         ...(primary || {}),
         direccion: value,
         es_principal: true,
         pais: p[countryKey] || "España",
         provincia: province,
-        ciudad: inferred?.municipio || primary?.ciudad || "",
-        codigo_postal: primary?.codigo_postal || "",
-        cliente_nombre: primary?.cliente_nombre || "",
-        punto_interes_id: primary?.punto_interes_id || null,
-        google_maps_url: primary?.google_maps_url || "",
-        lat: inferred?.lat ?? primary?.lat ?? null,
-        lng: inferred?.lng ?? primary?.lng ?? null,
+        ciudad: inferred?.municipio || geo.ciudad || "",
+        poblacion: geo.poblacion || "",
+        localidad: geo.localidad || "",
+        municipio: inferred?.municipio || geo.municipio || "",
+        lugar: geo.lugar || "",
+        codigo_postal: geo.codigo_postal || "",
+        cliente_nombre: geo.cliente_nombre || "",
+        punto_interes_id: geo.punto_interes_id || null,
+        google_maps_url: geo.google_maps_url || "",
+        lat: inferred?.lat ?? (geo.lat ?? null),
+        lng: inferred?.lng ?? (geo.lng ?? null),
+        latitud: geo.latitud ?? null,
+        longitud: geo.longitud ?? null,
+        metadata: geo.metadata,
       }, ...extras] : extras;
       return base;
     }
@@ -7755,7 +8098,7 @@ async function resolverEndpointEnFormulario(key, tipo, rawValue = null) {
   }
 }
 
-const f = k => e => setForm(p => ({...p,[k]: (k==="origen"||k==="destino") ? e.target.value.toUpperCase() : e.target.value}));
+const f = k => e => setForm(p => ({...p,[k]: upperFromEvent(k, e)}));
 
 async function seleccionarDocsPendientes(e) {
   const files = Array.from(e.target.files || []);
@@ -7788,6 +8131,8 @@ function aplicarColaborador(col) {
     ...p,
     colaborador_id: col?.id || "",
     colaborador_nombre: col?.nombre || "",
+    // Excluyente con transporte propio: al poner colaborador se quita el camion/chofer asignado
+    ...(col?.id ? { vehiculo_id:"", chofer_id:"", chofer2_id:"", remolque_id_manual:"", matricula_manual:"", remolque_matricula_manual:"" } : {}),
     precio_cliente_col: col?.id ? (impActual || p.precio_cliente_col || "") : "",
     coste_gasoil: col?.id ? 0 : p.coste_gasoil,
   }));
@@ -7852,7 +8197,14 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
   return next;
 };
 
-const rutaTarifaSugerida = form.cliente_id && form.origen && form.destino
+// La tarifa NO se intenta relacionar mientras se escribe origen/destino (con
+// dos letras no puede acertar y ademas descuadra la carga). Solo se asocia
+// cuando el programa ya tiene cogidas AMBAS provincias (origen y destino), que
+// es cuando el emparejado por provincia es fiable.
+const provinciasCogidas =
+  !!endpointContextFromDraft(form, "carga").provincia &&
+  !!endpointContextFromDraft(form, "descarga").provincia;
+const rutaTarifaSugerida = form.cliente_id && form.origen && form.destino && provinciasCogidas
   ? bestRouteForDraft(form, rutasCompatibles, true)
   : null;
 
@@ -8056,6 +8408,8 @@ useEffect(() => {
                                 iva_regimen: c.iva_regimen || ivaOptionValue({ tipo_iva: c.tipo_iva ?? p.tipo_iva }),
                                 ventana_carga: p.ventana_carga || c.horario_carga || "",
                                 ventana_descarga: p.ventana_descarga || c.horario_descarga || "",
+                                // Mercancia habitual del cliente (si no hay una escrita ya)
+                                mercancia: p.mercancia || c.mercancia_habitual || "",
                               }));
                               setNombreBusqueda("");
                               setShowSuggestions(false);
@@ -8185,15 +8539,19 @@ useEffect(() => {
   });
 }} style={S.sel}>
                   <option value="">Sin ruta / Manual</option>
-                  {rutas.map(r=>{
-                    const compatible = rutaCompatibleConConjunto(r);
-                    const tipoReq = r.tipo_vehiculo && r.tipo_vehiculo !== "cualquiera" ? ` (${r.tipo_vehiculo})` : "";
-                    return (
-                      <option key={r.id} value={r.id} disabled={!compatible}>
-                        {r.origen} -> {r.destino}{tipoReq}{!compatible ? " - requiere cambio de remolque" : ""}
-                      </option>
-                    );
-                  })}
+                  {groupRutasByOrigen(rutas).map(g => (
+                    <optgroup key={g.origen} label={g.origen}>
+                      {g.rutas.map(r=>{
+                        const compatible = rutaCompatibleConConjunto(r);
+                        const tipoReq = r.tipo_vehiculo && r.tipo_vehiculo !== "cualquiera" ? ` (${r.tipo_vehiculo})` : "";
+                        return (
+                          <option key={r.id} value={r.id} disabled={!compatible}>
+                            {r.destino}{tipoReq}{!compatible ? " - requiere cambio de remolque" : ""}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  ))}
                 </select>
                 <div style={{marginTop:6,fontSize:11,color:"var(--text5)"}}>
                   Al seleccionar una ruta se cargan automaticamente origen, destino, km, precio, minimo facturable y recargo.
@@ -8218,21 +8576,17 @@ useEffect(() => {
               <div><label style={S.label}>Referencia cliente</label><input style={S.input} value={form.referencia_cliente||""} onChange={f("referencia_cliente")} placeholder="Ref. pedido del cliente"/></div>
               <div>
                 <label style={S.label}>Origen (carga) *</label>
-                <input
-                  style={S.input}
+                <EndpointAutocomplete
+                  inputStyle={S.input}
                   value={form.origen||""}
                   onChange={aplicarEndpointText("origen", "carga")}
                   onBlur={e=>resolverEndpointEnFormulario("origen", "carga", e.currentTarget.value)}
-                  list={cargaEndpointListId}
                   placeholder="Escribe o elige un punto de carga"
+                  suggestions={puntosCargaSugeridosModal}
+                  getValue={p => p.nombre || p.direccion}
+                  getLabel={p => direccionCompletaPunto(p) || p.direccion || p.nombre}
+                  onPick={p => setForm(x => applyPuntoCargaToDraft(x, p))}
                 />
-                <datalist id={cargaEndpointListId}>
-                  {puntosCargaSugeridosModal.map(p => (
-                    <option key={`${p.id}-carga`} value={p.nombre || p.direccion}>
-                      {direccionCompletaPunto(p) || p.direccion || p.nombre}
-                    </option>
-                  ))}
-                </datalist>
                 {form.cliente_id && (
                   <div style={{marginTop:6}}>
                     {puntosCargaClienteModal.length > 0 ? (
@@ -8271,21 +8625,17 @@ useEffect(() => {
               </div>
               <div>
                 <label style={S.label}>Destino (entrega) *</label>
-                <input
-                  style={S.input}
+                <EndpointAutocomplete
+                  inputStyle={S.input}
                   value={form.destino||""}
                   onChange={aplicarEndpointText("destino", "descarga")}
                   onBlur={e=>resolverEndpointEnFormulario("destino", "descarga", e.currentTarget.value)}
-                  list={descargaEndpointListId}
                   placeholder="Escribe o elige un punto de descarga"
+                  suggestions={puntosDescargaSugeridosModal}
+                  getValue={p => p.nombre || p.direccion}
+                  getLabel={p => direccionCompletaPunto(p) || p.direccion || p.nombre}
+                  onPick={p => setForm(x => applyPuntoDescargaToDraft(x, p))}
                 />
-                <datalist id={descargaEndpointListId}>
-                  {puntosDescargaSugeridosModal.map(p => (
-                    <option key={`${p.id}-descarga`} value={p.nombre || p.direccion}>
-                      {direccionCompletaPunto(p) || p.direccion || p.nombre}
-                    </option>
-                  ))}
-                </datalist>
                 <div className="tg-pedido-actions-row">
                   <PuntoInteresPicker
                     placeholder="Usar punto como destino"
@@ -8363,6 +8713,48 @@ useEffect(() => {
                 />
               </div>
             </div>
+
+            {etiquetasCatalogo.length > 0 && (
+              <div style={{margin:"2px 0 12px"}}>
+                <label style={S.label}>Etiquetas del viaje</label>
+                {(()=>{
+                  const etiquetaTipo = (e) => e?.tipo === "perfil" ? "perfil" : e?.tipo === "categoria" ? "categoria" : (String(e?.auto_match||"").trim() ? "categoria" : "perfil");
+                  const grupoLabel = {fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",margin:"4px 0 4px"};
+                  const chip = (et)=>{
+                    const nombre = String(et.nombre||"").trim();
+                    if(!nombre) return null;
+                    const activa = Array.isArray(form.etiquetas) && form.etiquetas.map(String).includes(nombre);
+                    return (
+                      <button type="button" key={nombre}
+                        onClick={()=>setForm(p=>{
+                          const list = Array.isArray(p.etiquetas)?p.etiquetas.map(String).filter(Boolean):[];
+                          const set = new Set(list);
+                          set.has(nombre)?set.delete(nombre):set.add(nombre);
+                          return {...p, etiquetas:[...set]};
+                        })}
+                        style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:20,border:`1px solid ${activa?(et.color||"var(--accent)"):"var(--border2)"}`,background:activa?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:activa?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                        <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"var(--accent-l)",display:"inline-block"}}/>
+                        {nombre}
+                      </button>
+                    );
+                  };
+                  const cats = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="categoria" && String(e.nombre||"").trim());
+                  const perfs = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="perfil" && String(e.nombre||"").trim());
+                  return (
+                    <>
+                      {cats.length>0 && (<>
+                        <div style={grupoLabel}>Categorias de vehiculo</div>
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{cats.map(chip)}</div>
+                      </>)}
+                      {perfs.length>0 && (<>
+                        <div style={{...grupoLabel,marginTop:8}}>Perfiles de viaje</div>
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{perfs.map(chip)}</div>
+                      </>)}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
 
             <div style={S.sec}>Distancias</div>
             <div className="tg-pedido-form-grid-2" style={{marginBottom:10}}>
@@ -8475,6 +8867,28 @@ useEffect(() => {
                 />
               </div>
               <div><label style={S.label}>Bultos / Palets</label><input type="text" inputMode="decimal" style={S.input} value={form.bultos||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,bultos:e.target.value})))}/></div>
+              {/* Detalle de la carga: con esto el grupaje calcula la ocupacion
+                  real del remolque (metros lineales, peso y palets). */}
+              <div><label style={S.label}>Tipo de palet</label>
+                <select style={S.sel} value={form.palets_tipo||""} onChange={f("palets_tipo")}>
+                  <option value="">Sin especificar</option>
+                  <option value="europeo">Europeo (120x80)</option>
+                  <option value="americano">Americano (120x100)</option>
+                  <option value="medio">Medio palet (80x60)</option>
+                  <option value="granel">Sin paletizar / granel</option>
+                </select>
+              </div>
+              <div><label style={S.label}>N. de palets</label><input type="text" inputMode="numeric" style={S.input} value={form.palets_cantidad||""} onChange={f("palets_cantidad")} placeholder="Ej: 12"/></div>
+              <div style={{display:"flex",alignItems:"flex-end",paddingBottom:6}}>
+                <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"var(--text3)",cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!form.palets_apilables} onChange={e=>setForm(p=>({...p,palets_apilables:e.target.checked}))}/>
+                  Se pueden apilar
+                </label>
+              </div>
+              <div><label style={S.label}>Largo carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_largo_m||""} onChange={f("carga_largo_m")} placeholder="Solo si no va paletizada"/></div>
+              <div><label style={S.label}>Ancho carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_ancho_m||""} onChange={f("carga_ancho_m")}/></div>
+              <div><label style={S.label}>Alto carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_alto_m||""} onChange={f("carga_alto_m")}/></div>
+              <div><label style={S.label}>Temperatura (C)</label><input type="text" inputMode="decimal" style={S.input} value={form.temperatura_c||""} onChange={f("temperatura_c")} placeholder="Ej: -18 (vacio = sin frio)"/></div>
               <div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>
               <div><label style={S.label}>ML</label><input type="text" inputMode="decimal" style={S.input} value={form.metros_lineales||""} onChange={f("metros_lineales")} placeholder="Metros lineales"/></div>
             </div>
@@ -8490,7 +8904,7 @@ useEffect(() => {
             <div className="tg-pedido-form-grid-3">
               <div><label style={S.label}>Tipo tarificacion</label>
                 <select value={form.tipo_precio||"viaje"} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,tipo_precio:e.target.value}, true)))} style={S.sel}>
-                  {TIPOS_PRECIO.map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+                  {opcionesTipoPrecio(form.tipo_precio).map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
                 </select>
               </div>
               <div><label style={S.label}>{form.tipo_precio==="viaje"?"Precio viaje (EUR)":form.tipo_precio==="kg"?"EUR por 100 kg":form.tipo_precio==="tonelada"?"EUR por tonelada":form.tipo_precio==="km"?"EUR por km":form.tipo_precio==="palet"?"EUR por palet":"EUR por hora"}</label>
@@ -8593,18 +9007,43 @@ useEffect(() => {
             )}
             {(calcImporte(form)>0 || form.precio_unitario)&&(
               <div style={{background:"rgba(34,211,160,.07)",border:"1px solid rgba(34,211,160,.2)",borderRadius:8,padding:"10px 16px",marginTop:4}}>
-                {sumAdditionalStopPrices(form.puntos_carga)>0&&(
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                    <span style={{fontSize:11,color:"var(--text3)"}}>Cargas adicionales incluidas</span>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--green)"}}>+{sumAdditionalStopPrices(form.puntos_carga).toFixed(2)} EUR</span>
-                  </div>
-                )}
-                {sumAdditionalStopPrices(form.puntos_descarga)>0&&(
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                    <span style={{fontSize:11,color:"var(--text3)"}}>Descargas adicionales incluidas</span>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--green)"}}>+{sumAdditionalStopPrices(form.puntos_descarga).toFixed(2)} EUR</span>
-                  </div>
-                )}
+                {(() => {
+                  const cargaItems = additionalStopPriceItems(form.puntos_carga);
+                  const descItems = additionalStopPriceItems(form.puntos_descarga);
+                  if (!cargaItems.length && !descItems.length) return null;
+                  const extracostes = parseLocaleNumber(form.extracostes ?? form.extracostes_importe, 0);
+                  const sumExtras = [...cargaItems, ...descItems].reduce((s, it) => s + it.precio, 0) + (extracostes > 0 ? extracostes : 0);
+                  const fleteBase = calcImporte(form) - sumExtras;
+                  const row = { display:"flex", justifyContent:"space-between", marginBottom:4 };
+                  const lbl = { fontSize:11, color:"var(--text3)" };
+                  const val = { fontFamily:"'JetBrains Mono',monospace", fontWeight:700, fontSize:13, color:"var(--green)" };
+                  return (
+                    <>
+                      <div style={row}>
+                        <span style={lbl}>Flete base (viaje)</span>
+                        <span style={{ ...val, color:"var(--text2)" }}>{fleteBase.toFixed(2)} EUR</span>
+                      </div>
+                      {cargaItems.map(it => (
+                        <div key={`c-${it.num}`} style={row}>
+                          <span style={lbl}>+ Carga {it.num}{it.label ? ` · ${it.label}` : ""}</span>
+                          <span style={val}>+{it.precio.toFixed(2)} EUR</span>
+                        </div>
+                      ))}
+                      {descItems.map(it => (
+                        <div key={`d-${it.num}`} style={row}>
+                          <span style={lbl}>+ Descarga {it.num}{it.label ? ` · ${it.label}` : ""}</span>
+                          <span style={val}>+{it.precio.toFixed(2)} EUR</span>
+                        </div>
+                      ))}
+                      {extracostes > 0 && (
+                        <div style={row}>
+                          <span style={lbl}>+ Extracostes</span>
+                          <span style={val}>+{extracostes.toFixed(2)} EUR</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontSize:12,color:"var(--text2)"}}>
                     Importe viaje sin IVA
@@ -8762,6 +9201,8 @@ useEffect(() => {
                   const vid = e.target.value;
                   const veh = vehiculosLocal.find(v=>v.id===vid);
                   const prevVeh = vehiculosLocal.find(v=>v.id===form.vehiculo_id);
+                  const remolqueAuto = vehiculosLocal.find(v=>v.id===(veh&&veh.remolque_id));
+                  const autoEt = vid ? [...autoEtiquetasVehiculo(etiquetasCatalogo, veh), ...autoEtiquetasVehiculo(etiquetasCatalogo, remolqueAuto)] : [];
                   setForm(p=>{
                     const choferEraDelAnterior = !p.chofer_id || p.chofer_id === prevVeh?.chofer_id;
                     const remolqueEraDelAnterior = !p.remolque_id_manual || p.remolque_id_manual === prevVeh?.remolque_id;
@@ -8770,10 +9211,13 @@ useEffect(() => {
                     return {
                       ...p,
                       vehiculo_id: vid,
+                      // Camion propio y colaborador son excluyentes: al asignar vehiculo se quita el colaborador
+                      ...(vid ? { colaborador_id:"", colaborador_nombre:"", precio_cliente_col:"", precio_colaborador:"", precio_colaborador_unitario:"", minimo_colaborador_unidades:"" } : {}),
                       chofer_id: choferEraDelAnterior ? choferDelVehiculo : p.chofer_id,
                       remolque_id_manual: remolqueEraDelAnterior ? (veh?.remolque_id || "") : p.remolque_id_manual,
                       matricula_manual: vid ? "" : p.matricula_manual,
                       remolque_matricula_manual: vid ? "" : p.remolque_matricula_manual,
+                      etiquetas: vid ? mergeEtiquetas(p.etiquetas, autoEt) : p.etiquetas,
                     };
                   });
                   // Mostrar aviso operacional si el vehiculo tiene notas
@@ -8815,7 +9259,7 @@ useEffect(() => {
                     </span>
                   )}
                 </label>
-                <select value={form.chofer_id||""} onChange={f("chofer_id")} style={S.sel}>
+                <select value={form.chofer_id||""} onChange={e=>{ const cid=e.target.value; setForm(p=>({ ...p, chofer_id:cid, ...(cid && p.colaborador_id ? { colaborador_id:"", colaborador_nombre:"", precio_cliente_col:"", precio_colaborador:"" } : {}) })); }} style={S.sel}>
                   <option value="">Sin asignar</option>
                   {choferesLocal.map(c=><option key={c.id} value={c.id}>{c.nombre} {c.apellidos||""}</option>)}
                 </select>
@@ -8854,6 +9298,11 @@ useEffect(() => {
                     Aviso: Distinto al conjunto habitual - al guardar se actualizara el conjunto de la tractora
                   </div>
                 )}
+                {avisoCargaExcedeRemolque && (
+                  <div style={{marginTop:4,fontSize:11,color:"#f87171",fontWeight:700,padding:"5px 9px",background:"rgba(239,68,68,.09)",border:"1px solid rgba(239,68,68,.28)",borderRadius:6}}>
+                    Aviso: la carga ({cargaMetrosLineales.toString().replace(".", ",")} m) supera los metros de carga del remolque {remolqueActual?.matricula ? `(${remolqueActual.matricula}, ${remolqueMetrosCarga.toString().replace(".", ",")} m)` : `(${remolqueMetrosCarga.toString().replace(".", ",")} m)`}. Revisa la asignacion.
+                  </div>
+                )}
               </div>
 
               <div><label style={S.label}>2o Chofer (opcional)</label>
@@ -8873,9 +9322,11 @@ useEffect(() => {
                   <div style={{flex:1,fontSize:12,color:"var(--text3)"}}>Viaje compartido entre dos choferes. El importe se repartira a partes iguales en las hojas de ruta.</div>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
                     <label style={{fontSize:11,color:"var(--text4)"}}>% chofer 1:</label>
-                    <input type="number" min="0" max="100" style={{...S.input,width:60,padding:"4px 8px",fontSize:12}} value={form.reparto_chofer1||50} onChange={f("reparto_chofer1")}/>
+                    <input type="number" min="0" max="100" style={{...S.input,width:60,padding:"4px 8px",fontSize:12}} value={form.reparto_chofer1??50}
+                      onChange={e=>{ const v=Math.max(0,Math.min(100,Number(e.target.value)||0)); setForm(p=>({...p, reparto_chofer1:v})); }}/>
                     <label style={{fontSize:11,color:"var(--text4)"}}>% chofer 2:</label>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--accent)"}}>{100-Number(form.reparto_chofer1||50)}%</span>
+                    <input type="number" min="0" max="100" style={{...S.input,width:60,padding:"4px 8px",fontSize:12}} value={100-Number(form.reparto_chofer1??50)}
+                      onChange={e=>{ const v2=Math.max(0,Math.min(100,Number(e.target.value)||0)); setForm(p=>({...p, reparto_chofer1:100-v2})); }}/>
                   </div>
                 </div>
               )}
@@ -8935,6 +9386,8 @@ useEffect(() => {
                         ...p,
                         colaborador_id: e.target.value,
                         colaborador_nombre: col?.nombre||"",
+                        // Excluyente con transporte propio: al poner colaborador se quita el camion/chofer asignado
+                        ...(e.target.value ? { vehiculo_id:"", chofer_id:"", chofer2_id:"", remolque_id_manual:"", matricula_manual:"", remolque_matricula_manual:"" } : {}),
                         // Siempre sincronizar precio del viaje -> lo que cobramos al colaborador
                         precio_cliente_col: e.target.value ? (impActual || p.precio_cliente_col || "") : "",
                         precio_colaborador: e.target.value ? (importeColaboradorCalculado({ ...p, colaborador_id: e.target.value }) || p.precio_colaborador || "") : "",
@@ -8958,10 +9411,31 @@ useEffect(() => {
                         value={form.precio_cliente_col||""}
                         onChange={e=>{
                           const v = e.target.value;
-                          setForm(p=>({
-                            ...p,
-                            precio_cliente_col: v,
-                          }));
+                          setForm(p=>{
+                            // "Lo que cobramos al cliente" ES el total del viaje: al
+                            // editarlo, el importe del pedido pasa a valer eso. Se
+                            // despeja el precio unitario segun el tipo de tarifa (sin
+                            // cambiar el tipo, para no ocultar los campos por tonelada
+                            // del colaborador) y se descuentan extracostes/paradas para
+                            // que el total (base+extras) coincida con lo tecleado.
+                            const nv = parseLocaleNumber(v, NaN);
+                            if (!Number.isFinite(nv)) return { ...p, precio_cliente_col: v };
+                            const extras = parseLocaleNumber(p.extracostes ?? p.extracostes_importe, 0)
+                              + sumAdditionalStopPrices(p.puntos_descarga)
+                              + sumAdditionalStopPrices(p.puntos_carga);
+                            const base = Math.max(0, nv - extras);
+                            const cant = parseLocaleNumber(p.cantidad, 0);
+                            const minU = parseLocaleNumber(p.minimo_unidades, 0);
+                            const units = minU > 0 ? Math.max(cant, minU) : cant;
+                            const tipo = p.tipo_precio || "viaje";
+                            if (tipo !== "viaje" && units > 0) {
+                              const precioUnit = tipo === "kg" ? (base * 100 / units) : (base / units);
+                              return { ...p, precio_cliente_col: v, precio_unitario: String(Number(precioUnit.toFixed(4))) };
+                            }
+                            // Tarifa por viaje (o por unidad sin cantidad aun): precio de
+                            // viaje cerrado = base.
+                            return { ...p, precio_cliente_col: v, tipo_precio: "viaje", precio_unitario: String(Number(base.toFixed(2))), importe_minimo: "" };
+                          });
                         }}
                         placeholder="Ej: 850"/>
                     </div>
@@ -8995,15 +9469,15 @@ useEffect(() => {
                       </div>
                     )}
                     <div><label style={S.label}>Matricula tractora colaborador</label>
-                      <input style={S.input} value={form.matricula_colaborador||""} onChange={e=>setForm(p=>({...p,matricula_colaborador:e.target.value.toUpperCase()}))} placeholder="Ej: 1234-ABC"/>
+                      <input style={S.input} value={form.matricula_colaborador||""} onChange={e=>setForm(p=>({...p,matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Ej: 1234-ABC"/>
                     </div>
                     <div><label style={S.label}>Matricula remolque colaborador</label>
-                      <input style={S.input} value={form.remolque_matricula_colaborador||""} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:e.target.value.toUpperCase()}))} placeholder="Opcional"/>
+                      <input style={S.input} value={form.remolque_matricula_colaborador||""} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Opcional"/>
                     </div>
-                    {(form.precio_cliente_col&&form.precio_colaborador)&&(
+                    {(calcImporte(form)>0&&parseLocaleNumber(form.precio_colaborador)>0)&&(
                       <div style={{gridColumn:"1/-1",display:"flex",gap:16,background:"var(--bg3)",borderRadius:7,padding:"8px 14px",alignItems:"center"}}>
-                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Beneficio viaje: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:parseLocaleNumber(form.precio_cliente_col)-parseLocaleNumber(form.precio_colaborador)>=0?"var(--green)":"var(--red)"}}>{(parseLocaleNumber(form.precio_cliente_col)-parseLocaleNumber(form.precio_colaborador)).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span></div>
-                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Margen: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#f59e0b"}}>{parseLocaleNumber(form.precio_cliente_col)>0?((1-parseLocaleNumber(form.precio_colaborador)/parseLocaleNumber(form.precio_cliente_col))*100).toFixed(1):0}%</span></div>
+                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Beneficio viaje: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:calcImporte(form)-parseLocaleNumber(form.precio_colaborador)>=0?"var(--green)":"var(--red)"}}>{(calcImporte(form)-parseLocaleNumber(form.precio_colaborador)).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span></div>
+                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Margen: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#f59e0b"}}>{calcImporte(form)>0?((1-parseLocaleNumber(form.precio_colaborador)/calcImporte(form))*100).toFixed(1):0}%</span></div>
                         {form.tipo_precio==="tonelada" && form.precio_colaborador_unitario && (
                           <div><span style={{fontSize:11,color:"var(--text5)"}}>Pago acordado: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--text2)"}}>{parseLocaleNumber(form.precio_colaborador_unitario,0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR/tn x {unidadesFacturablesPedido(form, form.minimo_colaborador_unidades).toLocaleString("es-ES")} tn</span></div>
                         )}
@@ -9079,7 +9553,7 @@ useEffect(() => {
                   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
                     <div><label style={S.label}>Nombre</label><input style={S.input} value={form.conductor_efectivo_nombre||""} onChange={f("conductor_efectivo_nombre")} placeholder="Nombre" /></div>
                     <div><label style={S.label}>Apellidos</label><input style={S.input} value={form.conductor_efectivo_apellidos||""} onChange={f("conductor_efectivo_apellidos")} placeholder="Apellidos" /></div>
-                    <div><label style={S.label}>DNI / NIE</label><input style={S.input} value={form.conductor_efectivo_dni||""} onChange={e=>setForm(p=>({...p,conductor_efectivo_dni:e.target.value.toUpperCase()}))} placeholder="Documento de identidad" /></div>
+                    <div><label style={S.label}>DNI / NIE</label><input style={S.input} value={form.conductor_efectivo_dni||""} onChange={e=>setForm(p=>({...p,conductor_efectivo_dni:formatDni(e.target.value)}))} placeholder="Documento de identidad" /></div>
                     <div><label style={S.label}>Telefono</label><input type="tel" style={S.input} value={form.conductor_efectivo_telefono||""} onChange={f("conductor_efectivo_telefono")} placeholder="Telefono" /></div>
                   </div>
                 </div>
@@ -9087,6 +9561,13 @@ useEffect(() => {
 
               <div style={{gridColumn:"1/-1"}}><label style={S.label}>Notas / Instrucciones</label>
                 <textarea style={{...S.input,height:64,resize:"vertical"}} value={form.notas||""} onChange={f("notas")}/>
+                <label style={{display:"flex",alignItems:"center",gap:8,marginTop:7,cursor:form.notas?"pointer":"default",fontSize:12,color:form.notas?"var(--text3)":"var(--text5)"}}>
+                  <input type="checkbox" checked={!!form.nota_visible} disabled={!form.notas}
+                    onChange={e=>setForm(p=>({...p,nota_visible:e.target.checked}))}
+                    style={{width:15,height:15,cursor:form.notas?"pointer":"default",accentColor:"var(--accent)"}}/>
+                  Dejar nota visible en el pedido
+                  <span style={{fontSize:10,color:"var(--text5)"}}>- aparece al pasar el raton por encima del pedido en la lista</span>
+                </label>
               </div>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={S.label}>
@@ -9366,8 +9847,8 @@ ${anexosConArchivo.map((a, idx) => `
   .status{display:inline-block;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700}
   .badge-ok{background:#d1fae5;color:#065f46}
   .badge-warn{background:#fef3c7;color:#92400e}
-  .cmr-note{border-color:#0f766e;background:#f0fdfa;margin-bottom:12px}
-  .cmr-note h2{color:#0f766e;border-bottom-color:#0f766e}
+  .cmr-note{border-color:var(--accent);background:#f0fdfa;margin-bottom:12px}
+  .cmr-note h2{color:var(--accent);border-bottom-color:var(--accent)}
   .page-break{break-before:page;page-break-before:always}
   .anexo-box{margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
   .anexo-img{display:block;max-width:100%;max-height:920px;margin:10px auto 0;border:1px solid #ddd;object-fit:contain}
@@ -9551,7 +10032,7 @@ ${anexosHtml}
   const fmtD = v => v ? new Date(v).toLocaleDateString("es-ES") : "-";
 
   return (
-    <div style={O.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={O.overlay} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={O.modal}>
         <div style={O.header}>
           <div>
@@ -9565,8 +10046,8 @@ ${anexosHtml}
 
         <div style={O.body}>
           {isCmrInternacional && (
-            <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.24)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
-              <div style={{fontSize:12,fontWeight:800,color:"#0f766e"}}>CMR internacional</div>
+            <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a24)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:800,color:"var(--accent)"}}>CMR internacional</div>
               <div style={{fontSize:11,color:"var(--text3)",marginTop:4}}>
                 Se genera como transporte internacional porque el pais de carga o descarga no es España. Revisa documentos aduaneros e instrucciones antes de imprimir o firmar.
               </div>
@@ -9771,9 +10252,9 @@ function GuidedPedidoTutorialPanel({ active, progress, onStart, onClose }) {
   const current = GUIDED_PEDIDO_STEPS.find(step => !progress?.[step.key]) || GUIDED_PEDIDO_STEPS[GUIDED_PEDIDO_STEPS.length - 1];
   const complete = doneCount === GUIDED_PEDIDO_STEPS.length;
   return (
-    <div style={{position:"fixed",right:18,bottom:18,zIndex:520,width:"min(380px,calc(100vw - 36px))",background:"var(--bg2)",border:"1px solid rgba(20,184,166,.35)",borderRadius:10,boxShadow:"0 20px 55px rgba(0,0,0,.28)",padding:14,fontFamily:"'DM Sans',sans-serif"}}>
+    <div style={{position:"fixed",right:18,bottom:18,zIndex:520,width:"min(380px,calc(100vw - 36px))",background:"var(--bg2)",border:"1px solid var(--accent-a35)",borderRadius:10,boxShadow:"0 20px 55px rgba(0,0,0,.28)",padding:14,fontFamily:"'DM Sans',sans-serif"}}>
       <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
-        <div style={{width:34,height:34,borderRadius:9,background:complete?"rgba(16,185,129,.16)":"rgba(20,184,166,.14)",color:complete?"#10b981":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>
+        <div style={{width:34,height:34,borderRadius:9,background:complete?"rgba(16,185,129,.16)":"var(--accent-a14)",color:complete?"#10b981":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900}}>
           {complete ? "OK" : doneCount + 1}
         </div>
         <div style={{flex:1,minWidth:0}}>
@@ -9795,7 +10276,7 @@ function GuidedPedidoTutorialPanel({ active, progress, onStart, onClose }) {
           const done = !!progress?.[step.key];
           const isCurrent = step.key === current.key && !complete;
           return (
-            <div key={step.key} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 8px",borderRadius:7,border:`1px solid ${isCurrent ? "rgba(20,184,166,.32)" : "var(--border)"}`,background:isCurrent ? "rgba(20,184,166,.08)" : "transparent"}}>
+            <div key={step.key} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 8px",borderRadius:7,border:`1px solid ${isCurrent ? "var(--accent-a32)" : "var(--border)"}`,background:isCurrent ? "var(--accent-a08)" : "transparent"}}>
               <span style={{width:18,height:18,borderRadius:999,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,background:done?"rgba(16,185,129,.16)":"var(--bg4)",color:done?"#10b981":"var(--text5)"}}>{done ? "✓" : ""}</span>
               <span style={{fontSize:11,fontWeight:850,color:done?"#10b981":"var(--text3)"}}>{step.title}</span>
             </div>
@@ -9827,16 +10308,30 @@ function openPedidoInTrafico(pedido) {
   window.dispatchEvent(new CustomEvent("tms:navegar", { detail: "gestion_trafico" }));
 }
 
+// Estados que marca el chofer haciendo los pasos del viaje. Mientras el pedido
+// esta en uno de estos, el estado no se puede cambiar desde trafico/pedidos:
+// solo el propio chofer (desde su app) o gerencia. Asi no se pisa su progreso.
+const ESTADOS_EN_CURSO_CHOFER = ["cargando", "en_curso", "espera_carga", "espera_descarga", "descarga"];
+function pedidoEnCursoPorChofer(pedido) {
+  return ESTADOS_EN_CURSO_CHOFER.includes(String(pedido?.estado || "").toLowerCase());
+}
+
 export default function Pedidos() {
   useEmpresaPerfil();
   const { puedeEditar, user } = useAuth();
   const canEdit = puedeEditar("pedidos");
+  const esGerente = String(user?.rol || "").toLowerCase() === "gerente";
   const canFacturarPedidos = ["gerente","contable","contabilidad","administrativo","administracion","admin","superadmin"]
     .includes(String(user?.rol || "").toLowerCase());
   const empresaPlan = getEmpresaPlanLocal();
   const aiVisualPlanActivo = planHasFeature(empresaPlan, "ai");
   const aiDisponible = planHasFeature(empresaPlan, "ai");
   const [focusPedido] = useState(() => readPedidosFocus());
+  // El foco es de UN SOLO USO: ya se ha volcado en el estado inicial (filtro de
+  // estado, busqueda...). Si no se limpia aqui, vive en memoria toda la sesion y
+  // cada vez que se vuelve a entrar en Pedidos re-aplica el filtro (p.ej. el de
+  // incidencias del Dashboard) aunque lo hayas quitado con Reset.
+  useEffect(() => { clearRuntimeFocus("tms_pedidos_focus"); }, []);
   const focusNuevoAplicadoRef = useRef(false);
   const [guidedPedido, setGuidedPedido] = useState(() => {
     const focus = readGuidedPedidoTutorial();
@@ -9902,26 +10397,42 @@ export default function Pedidos() {
   function abrirMenuAcciones(pedidoId, btn) {
     try {
       const r = btn.getBoundingClientRect();
-      const menuMaxH = 320;
-      const openUp = (r.bottom + menuMaxH > window.innerHeight - 12) && (r.top > window.innerHeight - r.bottom);
+      const spaceBelow = window.innerHeight - r.bottom - 12;
+      // Se abre SIEMPRE hacia abajo (misma posicion para todos los pedidos, sin
+      // "rebote"). Solo si abajo casi no hay hueco se abre hacia arriba. La altura
+      // se limita al hueco disponible y el menu hace scroll interno.
+      const openUp = spaceBelow < 180 && r.top > spaceBelow;
+      const maxHeight = Math.min(320, Math.max(160, openUp ? Math.round(r.top - 12) : Math.round(spaceBelow)));
       setActionMenuPos({
-        right: Math.max(8, window.innerWidth - r.right),
+        right: Math.max(8, Math.round(window.innerWidth - r.right)),
         top: openUp ? undefined : Math.round(r.bottom + 6),
         bottom: openUp ? Math.round(window.innerHeight - r.top + 6) : undefined,
+        maxHeight,
       });
     } catch { setActionMenuPos(null); }
     setOpenActionMenuPedidoId(pedidoId);
   }
   const [whatsappSending, setWhatsappSending] = useState("");
+  // Pedido cuyo submenu de "Avisar" esta desplegado.
+  const [avisarAbiertoPedidoId, setAvisarAbiertoPedidoId] = useState("");
+  // Viajes del grupaje al que pertenece la orden de carga abierta.
+  const [ordenCargaGrupaje, setOrdenCargaGrupaje] = useState([]);
   const [incidenciaSelector, setIncidenciaSelector] = useState(null);
+  const [facturacionMesSelector, setFacturacionMesSelector] = useState(null);
   const delayResolverRef = React.useRef(null);
   const [delayRequest, setDelayRequest] = useState(null);
   const [autoAsignando, setAutoAsignando] = useState(null);  // pedido para autoasignacion IA
   const [colaboradores,setColaboradores]=useState([]);
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
-  const _rangoMesActual = currentMonthRangeLocal();
+  const _rangoMesActual = defaultTraficoRangeLocal();
   const filtroPeriodoActivo = filtroFechasCustom || Boolean(filtroMes);
-  const vistaMesActualPorDefecto = !filtroPeriodoActivo;
+  // Al acotar por busqueda/cliente/estado concreto se muestra todo el historico,
+  // asi que la etiqueta "mes actual y siguientes" ya no aplica en ese caso.
+  const filtroAcotaHistorico =
+    Boolean(debouncedQ) ||
+    Boolean(filtroCliente) ||
+    (filtroEst !== "todos" && filtroEst !== "activos");
+  const vistaMesActualPorDefecto = !filtroPeriodoActivo && !filtroAcotaHistorico;
 
   useEffect(() => {
     savePedidosCollapsedGroups(collapsedClientes);
@@ -10117,14 +10628,23 @@ export default function Pedidos() {
     } catch {}
   }, [readCriticalAlerts]);
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (typeof window === "undefined") return undefined;
+    if (!openActionMenuPedidoId) return undefined;
     const handleClose = () => setOpenActionMenuPedidoId("");
-    window.addEventListener("click", handleClose);
-    // El menu "Mas" va en posicion fija: si se hace scroll se queda descolgado,
-    // asi que lo cerramos al hacer scroll (en cualquier contenedor).
-    window.addEventListener("scroll", handleClose, true);
-    return () => { window.removeEventListener("click", handleClose); window.removeEventListener("scroll", handleClose, true); };
-  }, []);
+    // Se adjunta en el siguiente tick y SOLO con el menu abierto, para que el
+    // mismo click que abre el menu no lo cierre (el stopPropagation de React no
+    // siempre frena el evento nativo que llega a window). El menu "Mas" va en
+    // posicion fija, asi que tambien se cierra al hacer scroll.
+    const timer = window.setTimeout(() => {
+      window.addEventListener("click", handleClose);
+      window.addEventListener("scroll", handleClose, true);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("click", handleClose);
+      window.removeEventListener("scroll", handleClose, true);
+    };
+  }, [openActionMenuPedidoId]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("tms:pedido-action-menu", { detail: { open: Boolean(openActionMenuPedidoId) } }));
@@ -10147,12 +10667,23 @@ export default function Pedidos() {
       if (debouncedQ) params.q = debouncedQ;
       if (filtroCliente) params.cliente_id = filtroCliente;
       const aplicarRangoFechas = filtroFechasCustom || Boolean(filtroMes);
-      const rangoMesActualCarga = currentMonthRangeLocal();
+      const rangoDefectoCarga = defaultTraficoRangeLocal();
+      // Cuando se acota por busqueda de texto, por cliente o por un estado
+      // concreto (p.ej. al pinchar "En ruta" en el Dashboard, o al buscar un
+      // cliente), el usuario quiere ver TODO ese subconjunto -todo el historico-
+      // y no solo el mes en curso. El rango por defecto (mes actual + los
+      // siguientes) es unicamente para la vista general sin acotar.
+      const filtroAcotaHistorico =
+        Boolean(debouncedQ) ||
+        Boolean(filtroCliente) ||
+        (filtroEst !== "todos" && filtroEst !== "activos");
       if (aplicarRangoFechas && filtroDesde) params.desde = filtroDesde;
       if (aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
-      if (!aplicarRangoFechas) {
-        params.desde = rangoMesActualCarga.desde;
-        params.hasta = rangoMesActualCarga.hasta;
+      if (!aplicarRangoFechas && !filtroAcotaHistorico) {
+        // Mes actual como contexto + todos los viajes siguientes (no se corta en
+        // fin de mes, para que "los proximos" salgan siempre).
+        params.desde = rangoDefectoCarga.desde;
+        params.hasta = rangoDefectoCarga.hasta;
       }
       const cargarPeriodoCompleto = !debouncedQ || groupByCliente || !filtroFechasCustom || Boolean(filtroMes);
       const effectivePage = cargarPeriodoCompleto ? 1 : page;
@@ -10257,25 +10788,29 @@ export default function Pedidos() {
 
   useEffect(() => {
     if (!focusPedido?.pedido_id || loading) return;
+    // El pedido puede NO estar en la lista cargada (otro rango de fechas u otra
+    // pagina): venir de Control Tower a una incidencia antigua es el caso tipico.
+    // Antes se salia sin hacer nada y quedaba Pedidos abierto SIN abrir el viaje;
+    // ahora se pide por id igualmente y la lista solo sirve de respaldo.
     const found = pedidos.find(p => String(p.id) === String(focusPedido.pedido_id));
-    if (!found) return;
     let alive = true;
     const t = window.setTimeout(() => {
       document.getElementById(`pedido-row-${focusPedido.pedido_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
       const focusText = `${focusPedido.type || ""} ${focusPedido.title || ""} ${focusPedido.action || ""} ${focusPedido.action_key || ""}`.toLowerCase();
-      const focusIncidencia = focusText.includes("incidencia") || String(found.estado || "").toLowerCase() === "incidencia";
-      getPedido(found.id)
+      const focusIncidencia = focusText.includes("incidencia") || String(found?.estado || focusPedido.estado || "").toLowerCase() === "incidencia";
+      getPedido(focusPedido.pedido_id)
         .then(full => {
           if (!alive) return;
-          setEditando({ ...(full || found), _focus_incidencia: focusIncidencia });
+          setEditando({ ...(full || found || { id: focusPedido.pedido_id, numero: focusPedido.numero || "" }), _focus_incidencia: focusIncidencia });
           setModal(true);
           clearRuntimeFocus("tms_pedidos_focus");
         })
         .catch(() => {
           if (!alive) return;
+          clearRuntimeFocus("tms_pedidos_focus");
+          if (!found) { notify("No se pudo abrir el pedido indicado.", "error"); return; }
           setEditando({ ...found, _focus_incidencia: focusIncidencia });
           setModal(true);
-          clearRuntimeFocus("tms_pedidos_focus");
         });
     }, 180);
     return () => {
@@ -10399,6 +10934,17 @@ export default function Pedidos() {
       setIncidenciaSelector({ pedidoId:id, tipo:"", detalle:"" });
       return;
     }
+    // Entrega fuera de su mes (p. ej. cerrado tarde por incidencia): preguntar si
+    // se factura en el mes actual o en la prevision del mes siguiente.
+    if (estado === "entregado" && !extra.__facturacionResuelta) {
+      const mesRef = String(p?.fecha_descarga || p?.fecha_entrega || p?.fecha_pedido || p?.fecha_carga || "").slice(0, 7);
+      const ahora = new Date();
+      const mesActual = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`;
+      if (mesRef && mesRef < mesActual) {
+        setFacturacionMesSelector({ pedidoId: id, mesRef, mesActual });
+        return;
+      }
+    }
     // Optimistic update - UI responds instantly
     setPedidos(prev => prev.map(x => x.id===id ? {
       ...x,
@@ -10413,6 +10959,7 @@ export default function Pedidos() {
     try {
       const payloadExtra = { ...extra };
       delete payloadExtra.__fromCancelFlow;
+      delete payloadExtra.__facturacionResuelta;
       await cambiarEstadoPedido(id, estado, payloadExtra);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: id, estado, source: "pedidos-estado" } }));
       // No need to full reload - optimistic update is correct
@@ -10482,6 +11029,12 @@ export default function Pedidos() {
       notify("Asigna primero un colaborador/proveedor para poder mandar la orden de carga.", "warning");
       return;
     }
+    // Si el viaje forma parte de un grupaje, la orden debe recoger TODAS las
+    // cargas y descargas del camion, no solo las de este pedido.
+    const hermanos = pedidoCompleto?.grupaje_id
+      ? pedidos.filter(x => String(x.grupaje_id || "") === String(pedidoCompleto.grupaje_id))
+      : [];
+    setOrdenCargaGrupaje(hermanos.length > 1 ? hermanos : []);
     setOrdenCarga(normalizePedidoTarifaDraft(pedidoCompleto));
   }
 
@@ -10667,7 +11220,7 @@ export default function Pedidos() {
         aviso_completar: "Asignacion limpiada desde pedidos: volver a planificar recurso y horario operativo.",
       }));
       notify(`Asignacion limpiada en ${pedido.numero || "el pedido"}.`, "success");
-      cargar();
+      cargar({ silent: true });
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: pedido.id, source: "pedidos-clear-assignment" } }));
       }
@@ -10767,49 +11320,6 @@ export default function Pedidos() {
     const days = await pedirDiasRetraso("los pedidos criticos visibles", 1);
     if (days == null) return;
     await reprogramarCriticosDias(days);
-  }
-
-  async function copiarSeleccionadosSemanaSiguiente() {
-    const lista = selectedPedidosOperables;
-    if (!lista.length) {
-      notify("Selecciona pedidos editables para copiarlos.", "info");
-      return;
-    }
-    const ok = await confirmDialog({
-      title: "Copiar pedidos seleccionados",
-      message: `Se copiaran ${lista.length} pedido(s) seleccionados a la semana siguiente manteniendo, si existe, la asignacion actual.\n\nLas copias quedaran como pendientes para revisarlas antes de cerrar.`,
-      confirmText: "Copiar seleccionados",
-    });
-    if (!ok) return;
-    setBulkCopying(true);
-    try {
-      for (const pedido of lista) {
-        let pedidoBase = pedido;
-        if (pedido?.id) {
-          const fetched = await getPedido(pedido.id);
-          if (fetched?.id) pedidoBase = fetched;
-        }
-        await crearPedido(buildPedidoCopyPayload(pedidoBase, {
-          fecha_carga: sumarDiasISO(pedidoBase?.fecha_carga, 7),
-          fecha_descarga: pedidoBase?.fecha_descarga
-            ? sumarDiasISO(pedidoBase.fecha_descarga, 7)
-            : sumarDiasISO(pedidoBase?.fecha_carga, 7),
-          pendiente_completar: true,
-          aviso_completar: "Viaje copiado desde seleccion multiple: revisar fechas, asignacion y precio antes de cerrar.",
-          estado: "pendiente",
-        }));
-      }
-      notify(`Se han copiado ${lista.length} pedido(s) seleccionados.`, "success");
-      setSelectedPedidoIds([]);
-      cargar();
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-copy-selected" } }));
-      }
-    } catch (e) {
-      notify(e.message || "No se pudieron copiar los pedidos seleccionados.", "error");
-    } finally {
-      setBulkCopying(false);
-    }
   }
 
   async function reprogramarSeleccionadosDias(offsetDays = 1) {
@@ -10930,6 +11440,34 @@ export default function Pedidos() {
     }
   }
 
+  // Junta los pedidos seleccionados en un mismo grupaje (un solo viaje): les
+  // asigna un grupaje_id comun y tipo_carga=grupaje. Luego aparecen como un unico
+  // grupo en Mesa de trafico -> Grupajes, con sus cargas/descargas ordenables, y
+  // se les puede asignar la matricula (flota propia o colaborador) desde ahi o
+  // con la asignacion en lote.
+  async function combinarSeleccionadosEnGrupaje() {
+    const lista = selectedPedidosOperables.filter(p => !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p));
+    if (lista.length < 2) { notify("Selecciona al menos 2 pedidos para agruparlos en un grupaje.", "info"); return; }
+    const ok = await confirmDialog({
+      title: "Combinar en grupaje",
+      message: `Se agruparan ${lista.length} pedidos en un mismo viaje (grupaje). Apareceran juntos en Mesa de trafico > Grupajes, respetando el orden de las descargas, y podras asignarles la matricula (propia o de colaborador).`,
+      confirmText: "Combinar en grupaje",
+    });
+    if (!ok) return;
+    setBulkAssigning(true);
+    try {
+      const res = await combinarGrupaje(lista.map(p => p.id));
+      notify(`Grupaje creado con ${res?.count || lista.length} pedidos. Revisalo en Mesa de trafico > Grupajes.`, "success");
+      setSelectedPedidoIds([]);
+      cargar();
+      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-grupaje-combinar" } }));
+    } catch (e) {
+      notify(e.message || "No se pudieron combinar los pedidos en un grupaje.", "error");
+    } finally {
+      setBulkAssigning(false);
+    }
+  }
+
   async function asignarSeleccionados() {
     const matriculaManual = String(bulkMatricula || "").trim().toUpperCase();
     if (!bulkVehiculo && !bulkChofer && !matriculaManual) { notify("Elige un vehiculo, un chofer o escribe una matricula para asignar.", "info"); return; }
@@ -10972,7 +11510,7 @@ export default function Pedidos() {
         fallos.length ? "warning" : "success"
       );
       setSelectedPedidoIds([]); setBulkVehiculo(""); setBulkChofer(""); setBulkMatricula("");
-      cargar();
+      cargar({ silent: true });
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-assign" } }));
     } catch (e) {
       notify(e.message || "No se pudieron asignar los pedidos seleccionados.", "error");
@@ -10981,15 +11519,91 @@ export default function Pedidos() {
     }
   }
 
+  // Pedidos a los que aplica el popup "Asignar": si el pedido abierto esta dentro
+  // de una seleccion multiple, se asigna a todos los seleccionados operables; si
+  // no, solo a ese pedido.
+  function quickAssignTargets(p) {
+    if (!p) return [];
+    const operables = selectedPedidosOperables.filter(x => !pedidoTieneFacturaBorrador(x));
+    if (operables.length > 1 && operables.some(x => String(x.id) === String(p.id))) return operables;
+    return [p];
+  }
+
+  // Al asignar un chofer a un pedido desde Pedidos: calcula los km EN VACIO de
+  // posicionamiento hasta el origen de este viaje. El punto de partida se decide
+  // por cascada en el backend (robusta al orden de grabacion): GPS del camion si
+  // es reciente y el viaje sale pronto -> destino del viaje anterior por fecha ->
+  // base de la empresa. Los km se muestran editables antes de anadirlos.
+  async function ofrecerKmVacioPorChoferAsignado(pedido, patch, choferId) {
+    try {
+      if (!choferId || !pedido?.id) return;
+      if (Number(pedido.km_vacio) > 0) return;                 // ya tiene km en vacio: no molestar
+      const origen = String(pedido.origen || "").trim();
+      if (!origen) return;
+      const cargaFecha = String(pedido.fecha_carga || parseStops(pedido.puntos_carga)[0]?.fecha || "").slice(0, 10);
+      const info = await getChoferUltimoViaje(choferId, pedido.id, cargaFecha, patch?.vehiculo_id || "");
+      const desde = String(info?.desde || "").trim();
+      if (!info?.hay || !desde) return;
+      if (desde.toUpperCase() === origen.toUpperCase()) return; // mismo sitio
+      const data = await calcularDistanciaGeo(desde, origen);
+      const km = Number(data?.km);
+      if (!data?.ok || !Number.isFinite(km) || km <= 0) return;
+      const kmR = Math.round(km);
+      const fuenteTxt = info.desde_label || desde;
+      const kmStr = await promptDialog({
+        title: "Km en vacio de posicionamiento",
+        message: `Posicion antes del viaje: ${fuenteTxt}.\nHasta el origen (${origen}) hay unos ${kmR.toLocaleString("es-ES")} km en vacio.\nAjusta los km si hace falta (0 = no anadir).`,
+        inputType: "number",
+        defaultValue: String(kmR),
+        confirmText: "Anadir km",
+        cancelText: "No anadir",
+      });
+      if (kmStr === null || kmStr === undefined) return;       // cancelado
+      const kmFinal = Math.max(0, Math.round(Number(String(kmStr).replace(",", ".")) || 0));
+      if (kmFinal <= 0) return;
+      await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, { ...patch, km_vacio: kmFinal }));
+      notify(`Anadidos ${kmFinal.toLocaleString("es-ES")} km en vacio.`, "success");
+      cargar({ silent: true });
+    } catch { /* no bloquea la asignacion */ }
+  }
+
   async function aplicarQuickAssign(patch) {
     const p = quickAssignPedido;
     if (!p) return;
+    // Si el pedido abierto forma parte de una multiseleccion, la misma asignacion
+    // se aplica a TODOS los seleccionados (no solo al primero). Asi el popup de
+    // "Asignar" respeta la seleccion multiple.
+    const seleccion = quickAssignTargets(p);
+    const enLote = seleccion.length > 1;
     try {
-      await editarPedido(p.id, buildPedidoUpdatePayload(p, patch));
-      notify("Asignacion guardada.", "success");
+      if (enLote) {
+        let okCount = 0; const fallos = [];
+        for (const ped of seleccion) {
+          try {
+            await editarPedido(ped.id, buildPedidoUpdatePayload(ped, patch));
+            okCount++;
+          } catch (err) {
+            fallos.push(`${ped.numero || ped.id}: ${err.message || "error"}`);
+          }
+        }
+        notify(
+          fallos.length
+            ? `Asignados ${okCount} de ${seleccion.length}. Fallaron ${fallos.length}: ${fallos.slice(0, 2).join(" | ")}${fallos.length > 2 ? "..." : ""}`
+            : `Asignacion guardada en ${okCount} pedido(s).`,
+          fallos.length ? "warning" : "success"
+        );
+        setSelectedPedidoIds([]);
+      } else {
+        await editarPedido(p.id, buildPedidoUpdatePayload(p, patch));
+        notify("Asignacion guardada.", "success");
+      }
+      const choferAsignado = !enLote ? (patch.chofer_id || "") : "";
       setQuickAssignPedido(null);
-      cargar();
+      cargar({ silent: true });
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: p.id, source: "pedidos-quick-assign" } }));
+      // Si se asigno un chofer que viene de un viaje en curso/finalizado, ofrecer
+      // anadir los km en vacio de posicionamiento (destino anterior -> este origen).
+      if (choferAsignado) ofrecerKmVacioPorChoferAsignado(p, patch, choferAsignado);
     } catch (e) {
       notify(e.message || "No se pudo asignar.", "error");
     }
@@ -11039,7 +11653,7 @@ export default function Pedidos() {
         fallos.length ? "warning" : "success"
       );
       setSelectedPedidoIds(prev => prev.filter(id => invalidos.some(item => item.pedido.id === id)));
-      cargar();
+      cargar({ silent: true });
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-state", estado: bulkEstado } }));
       }
@@ -11269,7 +11883,7 @@ export default function Pedidos() {
                       </button>
                       {needsAssignment && (
                       <button onClick={e=>{e.stopPropagation();setQuickAssignPedido(p);}}
-                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(20,184,166,.4)",background:"rgba(20,184,166,.12)",color:"var(--accent)",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--accent-a40)",background:"var(--accent-a12)",color:"var(--accent)",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
                           Asignar
                         </button>
                       )}
@@ -11356,13 +11970,13 @@ export default function Pedidos() {
           <span style={{
             fontSize:11,
             fontWeight:900,
-            color:"#0f766e",
+            color:"var(--accent)",
             background:"rgba(16,185,129,.10)",
             border:"1px solid rgba(16,185,129,.24)",
             borderRadius:999,
             padding:"5px 10px",
           }}>
-            Mes actual: {_rangoMesActual.label}
+            {_rangoMesActual.label} y siguientes
           </span>
         )}
         <span style={{
@@ -11490,9 +12104,16 @@ export default function Pedidos() {
             <option value="">Chofer (auto del vehiculo)...</option>
             {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
           </select>
-          <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer)} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(20,184,166,.12)",color:"var(--accent)",border:"1px solid rgba(20,184,166,.3)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?"not-allowed":"pointer"}}>
+          <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer)} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a30)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?"not-allowed":"pointer"}}>
             {bulkAssigning ? "Asignando..." : "Asignar"}
           </button>
+          {selectedPedidoIds.length >= 2 && (
+            <button onClick={combinarSeleccionadosEnGrupaje} disabled={bulkAssigning}
+              title="Junta los pedidos seleccionados en un mismo viaje (grupaje), respetando el orden de descargas. Luego se asignan matriculas en Mesa de trafico > Grupajes."
+              style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.3)",opacity:bulkAssigning?0.6:1,cursor:bulkAssigning?"not-allowed":"pointer"}}>
+              Combinar en grupaje
+            </button>
+          )}
           <button
             onClick={() => setSelectedPedidoIds([])}
             style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)"}}
@@ -11504,7 +12125,7 @@ export default function Pedidos() {
 
       <div style={{...S.card, overflow:"hidden",width:"100%",maxWidth:"100%",boxSizing:"border-box"}}>
         <div className="tg-responsive-scroll" style={{overflowX:"auto",width:"100%",maxWidth:"100%"}}>
-        <table style={{width:"100%",minWidth:1060,borderCollapse:"collapse"}}>
+        <table className="tg-pedidos-table" style={{width:"100%",minWidth:1060,borderCollapse:"collapse"}}>
           <thead><tr>
             <th style={{...S.th,width:42}}>
               <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
@@ -11608,7 +12229,7 @@ export default function Pedidos() {
                             : undefined;
               const actionMenuOpen = openActionMenuPedidoId === String(p.id);
               return (
-              <tr key={p.id} id={`pedido-row-${p.id}`} style={{
+              <tr key={p.id} id={`pedido-row-${p.id}`} className="tg-pedidos-row" style={{
                 cursor:"pointer",
                 opacity:pedidoTieneFacturaFinal(p)?0.85:1,
                 background: rowBackground,
@@ -11617,15 +12238,22 @@ export default function Pedidos() {
   if (pedidoTieneFacturaFinal(p)) abrirEditar(p);
   else abrirEditar(p);
 }}>
-                <td style={S.td} onClick={e=>e.stopPropagation()}>
+                <td className="tg-td-check" style={S.td} onClick={e=>e.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={selectedPedidoIds.includes(String(p.id))}
                     onChange={() => togglePedidoSelected(p.id)}
                   />
                 </td>
-                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)",whiteSpace:"nowrap",minWidth:104}}>
+                <td className="tg-td-num" style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)",whiteSpace:"nowrap",minWidth:104}}>
                   <div>{p.numero}</div>
+                  {p.nota_visible && p.notas ? (
+                    <div title={p.notas} onClick={e=>e.stopPropagation()}
+                      style={{display:"inline-flex",alignItems:"center",gap:4,marginTop:4,maxWidth:120,padding:"2px 7px",borderRadius:5,background:"rgba(251,191,36,.12)",border:"1px solid rgba(251,191,36,.3)",color:"#d97706",fontSize:9,fontFamily:"'DM Sans',sans-serif",fontWeight:800,cursor:"help"}}>
+                      <span>NOTA</span>
+                      <span style={{fontWeight:600,opacity:.85,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.notas}</span>
+                    </div>
+                  ) : null}
                   {(() => {
                     // Sin repetir: si ya se muestra "Completar" (pendiente_completar),
                     // no repetimos "Datos pendientes". Y solo "Vencido" va en color de
@@ -11661,8 +12289,23 @@ export default function Pedidos() {
                     </div>
                   )}
                 </td>
-                <td style={{...S.td,fontWeight:600,fontSize:12}}>{p.cliente_nombre||"-"}</td>
-                <td style={{...S.td,fontSize:12,color:"var(--text2)",minWidth:190}}>
+                <td data-label="Cliente" style={{...S.td,fontWeight:600,fontSize:12}}>
+                  <div>{p.cliente_nombre||"-"}</div>
+                  {Array.isArray(p.etiquetas) && p.etiquetas.length > 0 && (
+                    <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:4}}>
+                      {p.etiquetas.map(et => {
+                        const color = etiquetaColorFromCatalog(et);
+                        return (
+                          <span key={et} title={et} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:20,background:`${color}1f`,border:`1px solid ${color}66`,color:"var(--text2)",fontSize:9,fontWeight:800,fontFamily:"'DM Sans',sans-serif"}}>
+                            <span style={{width:6,height:6,borderRadius:"50%",background:color,display:"inline-block"}}/>
+                            {et}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </td>
+                <td data-label="Ruta" style={{...S.td,fontSize:12,color:"var(--text2)",minWidth:190}}>
                   <div style={{fontWeight:800,color:"var(--text)"}}>{routeDisplay.main}</div>
                   {routeDisplay.detail && (
                     <div style={{fontSize:10,lineHeight:1.35,color:"var(--text4)",marginTop:3}}>{routeDisplay.detail}</div>
@@ -11684,17 +12327,17 @@ export default function Pedidos() {
                     </div>
                   )}
                 </td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
+                <td data-label="Carga" style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
                   <div>{formatPedidoListDate(cargaPrincipal.fecha)||"-"}</div>
                   {formatPedidoListTime(cargaPrincipal.hora) && <div style={{fontSize:10}}>{formatPedidoListTime(cargaPrincipal.hora)}</div>}
                   {cargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:2,fontFamily:"'DM Sans',sans-serif"}}>{cargaPrincipal.ventana}</div>}
                 </td>
-                <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
+                <td data-label="Descarga" style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
                   <div>{formatPedidoListDate(descargaPrincipal.fecha)||"-"}</div>
                   {formatPedidoListTime(descargaPrincipal.hora) && <div style={{fontSize:10}}>{formatPedidoListTime(descargaPrincipal.hora)}</div>}
                   {descargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:2,fontFamily:"'DM Sans',sans-serif"}}>{descargaPrincipal.ventana}</div>}
                 </td>
-                <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>
+                <td data-label="Vehiculo" style={{...S.td,fontSize:12,color:"var(--text2)"}}>
                   {p.colaborador_id ? (
                     <div>
                       <div style={{fontSize:10,fontWeight:700,color:"#a78bfa",marginBottom:2}}>COLABORADOR</div>
@@ -11712,7 +12355,7 @@ export default function Pedidos() {
                     </>
                   )}
                 </td>
-                <td style={S.td}>
+                <td data-label="Estado" style={S.td}>
                   <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-start"}}>
                     <Badge estado={p.estado}/>
                     {priorityMeta.validationIssues.length > 0 && (
@@ -11722,8 +12365,8 @@ export default function Pedidos() {
                     )}
                   </div>
                 </td>
-                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{Number(p.importe||0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</td>
-                <td style={{...S.td, position:"sticky", right:0, zIndex: actionMenuOpen ? 40 : 2, background: rowBackground ? `linear-gradient(${rowBackground}, ${rowBackground}), var(--card-bg, #ffffff)` : "var(--card-bg, #ffffff)", boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"}} onClick={e=>e.stopPropagation()}>
+                <td data-label="Importe" style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{Number(p.importe||0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</td>
+                <td className="tg-td-actions" style={{...S.td, position:"sticky", right:0, zIndex: actionMenuOpen ? 40 : 2, background: rowBackground ? `linear-gradient(${rowBackground}, ${rowBackground}), var(--card-bg, #ffffff)` : "var(--card-bg, #ffffff)", boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"}} onClick={e=>e.stopPropagation()}>
                   {pedidoTieneFacturaFinal(p)
                     ? <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>FACTURADO</span>
@@ -11808,9 +12451,15 @@ export default function Pedidos() {
                             Asignar
                           </button>
                         )}
-                        {canEdit&&<select value={p.estado} onChange={e=>cambiarEstado(p.id,e.target.value)} style={{...S.sel,width:130,padding:"4px 8px",fontSize:11}}>
-                          {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
-                        </select>}
+                        {canEdit&&(pedidoEnCursoPorChofer(p) && !esGerente ? (
+                          <span title="El chofer esta realizando el viaje. El estado en curso solo lo cambia el chofer (desde su app) o gerencia." style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 9px",borderRadius:7,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text4)",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>
+                            En curso (chofer)
+                          </span>
+                        ) : (
+                          <select value={p.estado} onChange={e=>cambiarEstado(p.id,e.target.value)} style={{...S.sel,width:130,padding:"4px 8px",fontSize:11}}>
+                            {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
+                          </select>
+                        ))}
                         {canFacturarPedidos&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&p.estado==="entregado"&&(
                           <button style={{...S.btn,background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.2)",padding:"4px 10px",fontSize:11}} onClick={()=>setFacturando(p)}>Facturar</button>
                         )}
@@ -11821,7 +12470,7 @@ export default function Pedidos() {
                           {actionMenuOpen ? "Cerrar" : "Mas"}
                         </button>
                         {actionMenuOpen && (
-                          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:actionMenuPos?.top,bottom:actionMenuPos?.bottom,right:actionMenuPos?.right ?? 12,zIndex:3000,minWidth:200,maxHeight:320,overflowY:"auto",padding:8,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.28)",display:"flex",flexDirection:"column",gap:6}}>
+                          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:actionMenuPos?.top,bottom:actionMenuPos?.bottom,right:actionMenuPos?.right ?? 12,zIndex:3000,width:184,maxHeight:actionMenuPos?.maxHeight ?? 320,overflowY:"auto",padding:5,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.28)",display:"flex",flexDirection:"column",gap:3}}>
                             {canEdit && (
                               <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirCopiarPedido(p);}}
                                 style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"6px 10px",fontSize:11}}>
@@ -11853,37 +12502,48 @@ export default function Pedidos() {
                                 {reprogrammingPedidoId === String(p.id) ? "Limpiando..." : "Limpiar asignacion"}
                               </button>
                             )}
-                            {p.cliente_telefono&&(
-                              <button
-                                style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
-                                disabled={whatsappSending === `${p.id}:cliente`}
-                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "cliente");}}>
-                                {whatsappSending === `${p.id}:cliente` ? "Registrando..." : "WhatsApp cliente (estado)"}
-                              </button>
-                            )}
-                            {p.chofer_id&&(
-                              <button
-                                style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
-                                disabled={whatsappSending === `${p.id}:chofer`}
-                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "chofer");}}>
-                                {whatsappSending === `${p.id}:chofer` ? "Registrando..." : "WhatsApp chofer"}
-                              </button>
-                            )}
-                            {p.chofer_id&&(
-                              <button
-                                style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.1)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)",padding:"6px 10px",fontSize:11}}
-                                disabled={whatsappSending === `${p.id}:app_chofer`}
-                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");notificarChoferAppAccion(p);}}>
-                                {whatsappSending === `${p.id}:app_chofer` ? "Enviando..." : "App chofer"}
-                              </button>
-                            )}
-                            {p.colaborador_telefono&&(
-                              <button
-                                style={{...S.btn,textAlign:"left",background:"rgba(34,197,94,.1)",color:"#22c55e",border:"1px solid rgba(34,197,94,.25)",padding:"6px 10px",fontSize:11}}
-                                disabled={whatsappSending === `${p.id}:colaborador`}
-                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "colaborador");}}>
-                                {whatsappSending === `${p.id}:colaborador` ? "Registrando..." : "WhatsApp colaborador"}
-                              </button>
+                            {/* Un solo boton "Avisar": al pulsarlo despliega los
+                                destinatarios disponibles, en vez de ocupar 4 lineas. */}
+                            {(p.cliente_telefono || p.chofer_id || p.colaborador_telefono)&&(
+                              <>
+                                <button
+                                  style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
+                                  disabled={String(whatsappSending || "").startsWith(`${p.id}:`)}
+                                  onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId(v => v === String(p.id) ? "" : String(p.id));}}>
+                                  {String(whatsappSending || "").startsWith(`${p.id}:`)
+                                    ? "Enviando..."
+                                    : `Avisar ${avisarAbiertoPedidoId === String(p.id) ? "^" : "v"}`}
+                                </button>
+                                {avisarAbiertoPedidoId === String(p.id) && (
+                                  <div style={{display:"flex",flexDirection:"column",gap:4,paddingLeft:10,borderLeft:"2px solid rgba(37,211,102,.3)",marginLeft:4}}>
+                                    {p.cliente_telefono&&(
+                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"5px 9px",fontSize:11}}
+                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "cliente");}}>
+                                        WhatsApp al cliente (estado)
+                                      </button>
+                                    )}
+                                    {p.chofer_id&&(
+                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"5px 9px",fontSize:11}}
+                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "chofer");}}>
+                                        WhatsApp al chofer
+                                      </button>
+                                    )}
+                                    {p.chofer_id&&(
+                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)",padding:"5px 9px",fontSize:11}}
+                                        title="Aviso dentro de la aplicacion movil del chofer (no es WhatsApp)"
+                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");notificarChoferAppAccion(p);}}>
+                                        Aviso en la app del chofer
+                                      </button>
+                                    )}
+                                    {p.colaborador_telefono&&(
+                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#22c55e",border:"1px solid rgba(34,197,94,.25)",padding:"5px 9px",fontSize:11}}
+                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "colaborador");}}>
+                                        WhatsApp al proveedor
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </>
                             )}
                             {canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&(
                               <button style={{...S.btn,textAlign:"left",background:"rgba(99,102,241,.1)",color:"#818cf8",border:"1px solid rgba(99,102,241,.2)",padding:"6px 10px",fontSize:11}}
@@ -11991,7 +12651,7 @@ export default function Pedidos() {
       )}
 
       {copyPlan && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget && !copySaving && setCopyPlan(null)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget && !copySaving && setCopyPlan(null)}>
           <div style={{...S.mbox, width:"min(520px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:16,color:"var(--text)"}}>
               Copiar viaje
@@ -12062,7 +12722,7 @@ export default function Pedidos() {
       )}
 
       {delayRequest && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget && cerrarSelectorRetraso(null)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget && cerrarSelectorRetraso(null)}>
           <div style={{...S.mbox, width:"min(440px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:10,color:"var(--text)"}}>
               Retrasar carga
@@ -12103,8 +12763,43 @@ export default function Pedidos() {
         </div>
       )}
 
+      {facturacionMesSelector && (() => {
+        const nombreMes = (ym) => { const [y,m]=String(ym||"").slice(0,7).split("-").map(Number); return (y&&m)? new Date(y,m-1,1).toLocaleDateString("es-ES",{month:"long",year:"numeric"}) : String(ym||""); };
+        const [ay,am] = facturacionMesSelector.mesActual.split("-").map(Number);
+        const currFirst = `${facturacionMesSelector.mesActual}-01`;
+        const nd = new Date(ay, am, 1);
+        const nextFirst = `${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,"0")}-01`;
+        const aplicar = (fm) => { const pid = facturacionMesSelector.pedidoId; setFacturacionMesSelector(null); cambiarEstado(pid, "entregado", { __facturacionResuelta:true, facturacion_mes: fm }); };
+        return (
+          <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setFacturacionMesSelector(null)}>
+            <div style={{...S.mbox,width:"min(560px,96vw)"}}>
+              <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:800,color:"var(--text)"}}>Entrega fuera de su mes</div>
+              <div style={{fontSize:13,color:"var(--text4)",marginTop:6,lineHeight:1.6}}>
+                Este viaje corresponde a <b style={{color:"var(--text)"}}>{nombreMes(facturacionMesSelector.mesRef)}</b> pero lo marcas como entregado en <b style={{color:"var(--text)"}}>{nombreMes(facturacionMesSelector.mesActual)}</b>. ¿En qué mes se factura?
+              </div>
+              <div style={{display:"grid",gap:10,marginTop:18}}>
+                <button type="button" onClick={()=>aplicar(currFirst)}
+                  style={{textAlign:"left",padding:"12px 14px",borderRadius:9,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",cursor:"pointer"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"var(--accent-xl)"}}>Facturar en el mes actual ({nombreMes(currFirst)})</div>
+                  <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>Se registra como viaje realizado del mes en curso y se factura este mes.</div>
+                </button>
+                <button type="button" onClick={()=>aplicar(nextFirst)}
+                  style={{textAlign:"left",padding:"12px 14px",borderRadius:9,border:"1px solid var(--border2)",background:"var(--bg3)",cursor:"pointer"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>Previsión del mes siguiente ({nombreMes(nextFirst)})</div>
+                  <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>El mes anterior ya está cerrado: se deja para facturar en la previsión del mes que viene.</div>
+                </button>
+              </div>
+              <div style={{display:"flex",justifyContent:"flex-end",marginTop:16}}>
+                <button type="button" onClick={()=>setFacturacionMesSelector(null)}
+                  style={{padding:"8px 14px",borderRadius:8,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:13,cursor:"pointer"}}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {incidenciaSelector && (
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&setIncidenciaSelector(null)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setIncidenciaSelector(null)}>
           <div style={{...S.mbox,width:"min(620px,96vw)",maxHeight:"min(760px,92vh)",overflowY:"auto"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,marginBottom:8}}>
               <div>
@@ -12168,7 +12863,7 @@ export default function Pedidos() {
         />
       )}
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Orden de carga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
-      {ordenCarga && <OrdenCargaModal pedido={ordenCarga} onClose={()=>setOrdenCarga(null)}/>}
+      {ordenCarga && <OrdenCargaModal pedido={ordenCarga} grupajePedidos={ordenCargaGrupaje} onClose={()=>{setOrdenCarga(null);setOrdenCargaGrupaje([]);}}/>}
 
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Autoasignacion IA ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
       {quickAssignPedido && (
@@ -12176,6 +12871,9 @@ export default function Pedidos() {
           pedido={quickAssignPedido}
           vehiculos={vehiculos}
           choferes={choferes}
+          colaboradores={colaboradores}
+          bulkCount={quickAssignTargets(quickAssignPedido).length}
+          fechasLote={quickAssignTargets(quickAssignPedido).map(p => String(p.fecha_carga || p.fecha_pedido || "").slice(0, 10)).filter(Boolean)}
           onClose={()=>setQuickAssignPedido(null)}
           onAssign={aplicarQuickAssign}
         />
@@ -12192,8 +12890,12 @@ export default function Pedidos() {
                 vehiculo_id: asig.vehiculo_id || autoAsignando.vehiculo_id,
                 chofer_id: asig.chofer_id || autoAsignando.chofer_id,
                 remolque_id_manual: asig.remolque_id_manual,
+                // Asignar transporte propio quita el colaborador (excluyentes)
+                colaborador_id: "",
+                colaborador_nombre: "",
+                precio_colaborador: null,
               }));
-              cargar();
+              cargar({ silent: true });
             } catch(e) { notify("Error al asignar: " + e.message, "error"); }
           }}
         />
@@ -12219,7 +12921,7 @@ export default function Pedidos() {
 
       {/* Modal facturar */}
       {facturando&&(
-        <div style={S.modal} onClick={e=>e.target===e.currentTarget&&setFacturando(null)}>
+        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setFacturando(null)}>
           <div style={{...S.mbox,width:"min(520px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:16,color:"var(--text)"}}>Emitir factura</div>
             <div style={{background:"rgba(59,110,245,.07)",border:"1px solid rgba(59,110,245,.15)",borderRadius:8,padding:"12px 16px",marginBottom:16}}>

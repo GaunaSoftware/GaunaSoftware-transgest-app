@@ -49,7 +49,7 @@ function UnBuscador({ value, onPick }) {
           {res.map(r => (
             <div key={r.un} onMouseDown={() => { onPick({ un: r.un, nombre: r.nombre, clase: r.clase, grupo_embalaje: r.grupo, codigo_tunel: r.tunel, categoria_transporte: r.cat, peligro_ambiente: r.ambiente }); setQ(r.un); setOpen(false); }}
               style={{ padding: "8px 10px", cursor: "pointer", borderBottom: "1px solid var(--border2,#eef2f7)", fontSize: 12 }}>
-              <strong style={{ color: "var(--accent,#0f766e)" }}>UN {r.un}</strong> · {r.nombre}
+              <strong style={{ color: "var(--accent,var(--accent))" }}>UN {r.un}</strong> · {r.nombre}
               <div style={{ color: "var(--text5,#94a3b8)", fontSize: 11 }}>Clase {r.clase}{r.grupo ? ` · GE ${r.grupo}` : ""}{r.tunel && r.tunel !== "-" ? ` · túnel ${r.tunel}` : ""} · cat {r.cat}</div>
             </div>
           ))}

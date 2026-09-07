@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getUsuarios, crearUsuario, editarUsuario, resetPassword, getChoferes, getVehiculos, getClientes } from "../services/api";
+import { getUsuarios, crearUsuario, editarUsuario, resetPassword, getChoferes, getVehiculos, getClientes, getEmpresaConfig } from "../services/api";
 import { notify, promptDialog } from "../services/notify";
 import { FormField, ModalShell, StatusBadge } from "../components/ui";
 
@@ -38,7 +38,7 @@ const RC = {
   colaborador:"var(--text2)",
   visualizador:"var(--text2)",
   chofer:"#a78bfa",
-  cliente:"#14b8a6",
+  cliente:"var(--accent-l)",
 };
 
 const MODULOS_PERM = [
@@ -157,9 +157,11 @@ function normalizarTraficoConfigUI(config) {
   const raw = config && typeof config === "object" && !Array.isArray(config) ? config : {};
   const vehiculo_ids = Array.isArray(raw.vehiculo_ids) ? raw.vehiculo_ids.map(String).filter(Boolean) : [];
   const tipos = Array.isArray(raw.tipos_viaje) ? raw.tipos_viaje.map(v => String(v).toLowerCase()).filter(Boolean) : [];
+  const etiquetas = Array.isArray(raw.etiquetas) ? raw.etiquetas.map(e => String(e || "").trim()).filter(Boolean) : [];
   return {
     vehiculo_ids: [...new Set(vehiculo_ids)],
     tipos_viaje: tipos.length ? [...new Set(tipos)] : ["normal", "salida", "retorno"],
+    etiquetas: [...new Set(etiquetas)],
   };
 }
 
@@ -200,8 +202,16 @@ export default function Usuarios() {
   const [errors,setErrors]=useState({});
   const [saving,setSaving]=useState(false);
   const [credencialCreada,setCredencialCreada]=useState(null);
+  const [etiquetasCatalogo,setEtiquetasCatalogo]=useState([]);
 
   const cargar=async()=>{setLoading(true);try{const [d,c,v,cl]=await Promise.all([getUsuarios(), getChoferes().catch(()=>[]), getVehiculos().catch(()=>[]), getClientes("", "true", 1, 500, { silentError:true }).catch(()=>[])]);setUsuarios(Array.isArray(d)?d:[]);setChoferes(Array.isArray(c)?c:[]);setVehiculos(Array.isArray(v)?v:[]);setClientes(Array.isArray(cl?.data)?cl.data:Array.isArray(cl)?cl:[]);}catch(e){}finally{setLoading(false);}};
+  useEffect(()=>{getEmpresaConfig().then(d=>{const cat=d?.cfg_trafico?.etiquetas_catalogo;setEtiquetasCatalogo(Array.isArray(cat)?cat.filter(e=>e&&String(e.nombre||"").trim()):[]);}).catch(()=>{});},[]);
+  const toggleEtiquetaScope = (nombre) => setForm(p=>{
+    const cfg = normalizarTraficoConfigUI(p.trafico_config);
+    const set = new Set(cfg.etiquetas);
+    set.has(nombre) ? set.delete(nombre) : set.add(nombre);
+    return { ...p, trafico_config: { ...cfg, etiquetas: [...set] } };
+  });
   useEffect(()=>{cargar();},[]);
   const f=k=>e=>{
     const value = e.target.value;
@@ -495,7 +505,7 @@ export default function Usuarios() {
               </FormField>
             )}
             {form.rol === "trafico" && (
-              <div style={{border:"1px solid var(--border2)",borderRadius:8,padding:12,marginTop:12,background:"rgba(20,184,166,.06)"}}>
+              <div style={{border:"1px solid var(--border2)",borderRadius:8,padding:12,marginTop:12,background:"var(--accent-a06)"}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
                   <div>
                     <div style={{fontSize:12,fontWeight:900,color:"var(--accent-xl)"}}>Alcance operativo de trafico</div>
@@ -503,7 +513,7 @@ export default function Usuarios() {
                   </div>
                   <button
                     type="button"
-                    style={{...S.btn,background:"rgba(20,184,166,.12)",color:"var(--accent-xl)",border:"1px solid rgba(20,184,166,.35)",padding:"5px 9px",fontSize:11}}
+                    style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent-xl)",border:"1px solid var(--accent-a35)",padding:"5px 9px",fontSize:11}}
                     onClick={()=>setForm(p=>({...p,trafico_config:{ vehiculo_ids: [], tipos_viaje: ["normal","salida","retorno"] }}))}
                   >
                     Ver todo
@@ -523,7 +533,7 @@ export default function Usuarios() {
                         type="button"
                         key={key}
                         onClick={()=>toggleTipoViaje(key)}
-                        style={{padding:"6px 10px",borderRadius:7,border:`1px solid ${active ? "rgba(20,184,166,.35)" : "var(--border2)"}`,background:active ? "rgba(20,184,166,.14)" : "var(--bg4)",color:active ? "var(--accent-xl)" : "var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}
+                        style={{padding:"6px 10px",borderRadius:7,border:`1px solid ${active ? "var(--accent-a35)" : "var(--border2)"}`,background:active ? "var(--accent-a14)" : "var(--bg4)",color:active ? "var(--accent-xl)" : "var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}
                       >
                         {label}
                       </button>
@@ -548,7 +558,7 @@ export default function Usuarios() {
                     const cfg = normalizarTraficoConfigUI(form.trafico_config);
                     const active = cfg.vehiculo_ids.includes(String(v.id));
                     return (
-                      <label key={v.id} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 8px",borderRadius:7,border:`1px solid ${active ? "rgba(20,184,166,.35)" : "var(--border2)"}`,background:active ? "rgba(20,184,166,.10)" : "var(--bg4)",fontSize:11,color:"var(--text2)",cursor:"pointer"}}>
+                      <label key={v.id} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 8px",borderRadius:7,border:`1px solid ${active ? "var(--accent-a35)" : "var(--border2)"}`,background:active ? "var(--accent-a10)" : "var(--bg4)",fontSize:11,color:"var(--text2)",cursor:"pointer"}}>
                         <input type="checkbox" checked={active} onChange={()=>toggleVehiculoScope(v.id)} />
                         <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800}}>{v.matricula || "Sin matricula"}</span>
                       </label>
@@ -558,6 +568,49 @@ export default function Usuarios() {
                 </div>
                 <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45,marginTop:8}}>
                   Si no seleccionas matriculas, el usuario ve todas. Si seleccionas algunas, solo vera esas y recibira avisos de ida/retorno para esas matriculas.
+                </div>
+                <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed var(--border2)"}}>
+                  <label style={{...S.label,marginTop:0}}>Etiquetas visibles (categorías + perfiles)</label>
+                  {etiquetasCatalogo.length === 0 ? (
+                    <div style={{fontSize:11,color:"var(--text5)"}}>No hay etiquetas configuradas. Créalas en <b>Empresa → Tráfico</b>.</div>
+                  ) : (()=>{
+                    const etiquetaTipo = (e) => e?.tipo === "perfil" ? "perfil" : e?.tipo === "categoria" ? "categoria" : (String(e?.auto_match||"").trim() ? "categoria" : "perfil");
+                    const cfg = normalizarTraficoConfigUI(form.trafico_config);
+                    const grupoLabel = {fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",marginBottom:5};
+                    const chip = (et)=>{
+                      const nombre = String(et.nombre||"").trim();
+                      if(!nombre) return null;
+                      const active = cfg.etiquetas.includes(nombre);
+                      return (
+                        <button type="button" key={nombre} onClick={()=>toggleEtiquetaScope(nombre)}
+                          style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:20,border:`1px solid ${active?(et.color||"var(--accent)"):"var(--border2)"}`,background:active?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:active?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                          <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"var(--accent-l)",display:"inline-block"}}/>
+                          {nombre}
+                        </button>
+                      );
+                    };
+                    const cats = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="categoria" && String(e.nombre||"").trim());
+                    const perfs = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="perfil" && String(e.nombre||"").trim());
+                    return (
+                      <>
+                        {cats.length>0 && (
+                          <>
+                            <div style={grupoLabel}>Categorías de vehículo</div>
+                            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{cats.map(chip)}</div>
+                          </>
+                        )}
+                        {perfs.length>0 && (
+                          <>
+                            <div style={{...grupoLabel,marginTop:10}}>Perfiles de viaje</div>
+                            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{perfs.map(chip)}</div>
+                          </>
+                        )}
+                        <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.45,marginTop:8}}>
+                          Puedes combinar de los dos grupos. Si no marcas ninguna, verá pedidos de cualquier etiqueta. Si marcas algunas, solo verá los que tengan al menos una (sea categoría o perfil).
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -631,7 +684,7 @@ export default function Usuarios() {
           ))}
           <button
             type="button"
-            style={{...S.btn,width:"100%",justifyContent:"center",marginTop:6,background:"rgba(20,184,166,.12)",color:"var(--accent-xl)",border:"1px solid rgba(20,184,166,.3)"}}
+            style={{...S.btn,width:"100%",justifyContent:"center",marginTop:6,background:"var(--accent-a12)",color:"var(--accent-xl)",border:"1px solid var(--accent-a30)"}}
             onClick={()=>copiarCredencial(`Usuario: ${credencialCreada.username}\nContrasena temporal: ${credencialCreada.password}`,"Credenciales")}
           >
             Copiar usuario y contrasena

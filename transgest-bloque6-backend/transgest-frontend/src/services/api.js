@@ -420,6 +420,7 @@ export const getCliente   = (id)      => apiFetch(`/clientes/${id}`);
 export const getClienteRiesgoOperativo = (id, options = {}) => apiFetch(`/clientes/${id}/riesgo-operativo`, options);
 export const crearCliente = (data)    => apiFetch("/clientes", { method:"POST", body:data, timeoutMs:30000, silentSuccess:true });
 export const editarCliente= (id,data) => apiFetch(`/clientes/${id}`, { method:"PUT", body:data, timeoutMs:30000, silentSuccess:true });
+export const setClienteMercanciaHabitual = (id, mercancia_habitual) => apiFetch(`/clientes/${id}/mercancia-habitual`, { method:"PATCH", body:{ mercancia_habitual }, silentSuccess:true });
 export const borrarCliente= (id)      => apiFetch(`/clientes/${id}`, { method:"DELETE" });
 export const crearPortalUsuarioCliente = (id, data={}) => apiFetch(`/clientes/${id}/portal-user`, { method:"POST", body:data });
 export const getClienteIntegracionTokens = (id) => apiFetch(`/clientes/${id}/integracion-tokens`);
@@ -428,6 +429,33 @@ export const revocarClienteIntegracionToken = (id, tokenId) => apiFetch(`/client
 
 // ── Pedidos ───────────────────────────────────────────
 export const getPedidos     = (params={}, options = {}) => apiFetch(`/pedidos?${new URLSearchParams(params)}`, options);
+// Trae TODOS los pedidos paginando. El endpoint /pedidos pagina a 50 por
+// defecto; los dashboards e informes que agregan por periodo necesitan el
+// conjunto completo (si no, los KPIs solo cuentan los primeros 50 pedidos).
+// Pide la pagina 1, lee total_pages y trae el resto en paralelo. Devuelve un
+// array plano. Tope de seguridad de 40 paginas (20.000 pedidos).
+export async function getPedidosTodos(params = {}, options = {}) {
+  const limit = 500;
+  const first = await apiFetch(`/pedidos?${new URLSearchParams({ ...params, page: 1, limit })}`, options);
+  if (Array.isArray(first)) return first; // respuesta antigua sin paginacion
+  const data = Array.isArray(first?.data) ? first.data : [];
+  // La API devuelve pagination.totalPages; se acepta tambien total_pages por
+  // compatibilidad. Leer solo total_pages daba 1 pagina SIEMPRE, asi que los
+  // dashboards se quedaban con los primeros 500 pedidos y los KPIs salian cortos.
+  const totalPages = Math.min(
+    Number(first?.pagination?.totalPages ?? first?.total_pages) || 1,
+    40
+  );
+  if (totalPages <= 1) return data;
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, k) =>
+      apiFetch(`/pedidos?${new URLSearchParams({ ...params, page: k + 2, limit })}`, options)
+        .then(r => (Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : []))
+        .catch(() => [])
+    )
+  );
+  return rest.reduce((acc, arr) => acc.concat(arr), data);
+}
 export async function getPedidosResumenLista(params = {}, options = {}) {
   try {
     return await apiFetch(`/pedidos/resumen-lista?${new URLSearchParams(params)}`, options);
@@ -440,6 +468,22 @@ export async function getPedidosResumenLista(params = {}, options = {}) {
 }
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
 export const getPedidoIdaRetorno = (id)   => apiFetch(`/pedidos/${id}/ida-retorno`);
+// Enlace temporal del portal del proveedor para un viaje (valido 7 dias tras la
+// descarga). Devuelve { url, dias_validez }.
+export const crearPortalProveedor = (pedidoId) =>
+  apiFetch(`/pedidos/${pedidoId}/portal-proveedor`, { method: "POST" });
+
+// Disponibilidad de vehiculos y choferes para una fecha (quien esta libre y, si
+// no lo esta, por que): se usa al asignar para atenuar los ocupados.
+export const getDisponibilidadRecursos = (fecha = "", excluirPedidoId = "") =>
+  apiFetch(`/pedidos/disponibilidad?fecha=${encodeURIComponent(fecha)}${excluirPedidoId ? `&excluir=${encodeURIComponent(excluirPedidoId)}` : ""}`, { silentError: true });
+
+export const getChoferUltimoViaje = (choferId, excluirPedidoId = "", antesDe = "", vehiculoId = "") =>
+  apiFetch(`/pedidos/chofer-ultimo-viaje?chofer_id=${encodeURIComponent(choferId)}${excluirPedidoId ? `&excluir=${encodeURIComponent(excluirPedidoId)}` : ""}${antesDe ? `&antes_de=${encodeURIComponent(antesDe)}` : ""}${vehiculoId ? `&vehiculo_id=${encodeURIComponent(vehiculoId)}` : ""}`, { silentError: true });
+// borrador=true guarda el grupaje como provisional (agrupado pero sin confirmar).
+export const combinarGrupaje = (pedidoIds = [], borrador = false) => apiFetch("/pedidos/grupaje/combinar", { method: "POST", body: { pedido_ids: pedidoIds, borrador } });
+export const confirmarGrupaje = (grupajeId) => apiFetch("/pedidos/grupaje/confirmar", { method: "POST", body: { grupaje_id: grupajeId } });
+export const separarGrupaje  = (pedidoIds = []) => apiFetch("/pedidos/grupaje/separar", { method: "POST", body: { pedido_ids: pedidoIds } });
 export const enlazarPedidoRetorno = (id, data) => apiFetch(`/pedidos/${id}/ida-retorno`, { method:"POST", body:data });
 export const desvincularPedidoRetorno = (id) => apiFetch(`/pedidos/${id}/ida-retorno`, { method:"DELETE" });
 export const getPedidoRentabilidadPredictiva = (id) => apiFetch(`/pedidos/${id}/rentabilidad-predictiva`);
@@ -530,12 +574,64 @@ export const guardarPlanDiarioOrden = (data) =>
 
 // ── Facturas ──────────────────────────────────────────
 export const getFacturas    = (params={}) => apiFetch(`/facturas?${new URLSearchParams(params)}`);
+// Trae TODAS las facturas paginando (mismo motivo que getPedidosTodos: el
+// endpoint pagina a 50 y los KPIs de ingresos necesitan el conjunto completo).
+export async function getFacturasTodas(params = {}, options = {}) {
+  const limit = 500;
+  const first = await apiFetch(`/facturas?${new URLSearchParams({ ...params, page: 1, limit })}`, options);
+  if (Array.isArray(first)) return first;
+  const data = Array.isArray(first?.data) ? first.data : [];
+  const totalPages = Math.min(Number(first?.pagination?.totalPages) || 1, 40);
+  if (totalPages <= 1) return data;
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, k) =>
+      apiFetch(`/facturas?${new URLSearchParams({ ...params, page: k + 2, limit })}`, options)
+        .then(r => (Array.isArray(r?.data) ? r.data : Array.isArray(r) ? r : []))
+        .catch(() => [])
+    )
+  );
+  return rest.reduce((acc, arr) => acc.concat(arr), data);
+}
 export const getFactura     = (id)        => apiFetch(`/facturas/${id}`);
 export const getFacturaFiscal = (id)      => apiFetch(`/facturas/${id}/fiscal`);
 export const reencolarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/requeue`, { method:"POST", body:{} });
 export const sincronizarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/sincronizar`, { method:"POST", body:{} });
 export const facturaFiscalXmlUrl = (id) => `${BASE}/api/v1/facturas/${encodeURIComponent(id)}/fiscal/xml`;
 export const facturasFiscalLoteXmlUrl = (params={}) => `${BASE}/api/v1/facturas/fiscal/export-lote.xml?${new URLSearchParams(params)}`;
+// ── Traspaso de facturas a la contabilidad externa (Contasol/Factusol, a3) ──
+export const getContabilidadExportConfig  = ()      => apiFetch("/facturas/export/contabilidad/config");
+export const setContabilidadExportConfig  = (data)  => apiFetch("/facturas/export/contabilidad/config", { method:"PUT", body:data });
+export const getContabilidadExportResumen = (params={}) => apiFetch(`/facturas/export/contabilidad/resumen?${new URLSearchParams(params)}`);
+export const getContabilidadExportLotes   = ()      => apiFetch("/facturas/export/contabilidad/lotes");
+export const confirmarContabilidadLote    = (data)  => apiFetch("/facturas/export/contabilidad/lotes", { method:"POST", body:data });
+export const borrarContabilidadLote       = (id)    => apiFetch(`/facturas/export/contabilidad/lotes/${id}`, { method:"DELETE" });
+
+// Descarga el fichero de contabilidad con la sesion actual y lo guarda en disco
+// (no se puede usar un enlace normal: la API exige cabecera Authorization).
+export async function descargarContabilidadExport(params = {}) {
+  const token = getToken();
+  const res = await fetch(apiUrl(`/facturas/export/contabilidad?${new URLSearchParams(params)}`), {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    const data = await parseApiResponse(res);
+    const message = data.error || data.message || `Error ${res.status}`;
+    notifyError(message, res.status);
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  const filename = filenameFromDisposition(res.headers.get("content-disposition")) || "contabilidad";
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  return { filename, size: blob.size };
+}
+
 export const getControlCobros = ()        => apiFetch("/facturas/control-cobros");
 export const getBloqueosDocumentalesCobro = () => apiFetch("/facturas/bloqueos-documentales");
 export const getControlCobrosConfig = ()  => apiFetch("/facturas/control-cobros/config");
@@ -577,7 +673,7 @@ export async function descargarJornadaDiariaInforme() {
 }
 export const getFacturacionFiscalResumen = () => apiFetch("/facturas/fiscal/resumen");
 export const procesarColaFiscalFacturas = (data={}) => apiFetch("/facturas/fiscal/procesar-cola", { method:"POST", body:data });
-export const crearFactura   = (data)      => apiFetch("/facturas", { method:"POST", body:data });
+export const crearFactura   = (data)      => apiFetch("/facturas", { method:"POST", body:data, timeoutMs:60000 });
 export const procesarReclamacionesFacturas = (data={}) => apiFetch("/facturas/reclamaciones/procesar", { method:"POST", body:data });
 export const cambiarEstadoFactura = (id, estado, motivo) =>
   apiFetch(`/facturas/${id}/estado`, { method:"PATCH", body:{ estado, motivo } });
@@ -641,6 +737,9 @@ export const crearColaborador = (data)    => apiFetch("/colaboradores", { method
 export const editarColaborador= (id,data) => apiFetch(`/colaboradores/${id}`, { method:"PUT", body:data });
 export const borrarColaborador= (id)      => apiFetch(`/colaboradores/${id}`, { method:"DELETE" });
 export const crearColaboradorLiquidacionToken = (id, data={}) => apiFetch(`/colaboradores/${id}/liquidacion-token`, { method:"POST", body:data });
+// Proveedor habitual invitado: cuenta con contrasena que solo ve SUS viajes.
+export const getColaboradorPortalUser  = (id)       => apiFetch(`/colaboradores/${id}/portal-user`);
+export const crearColaboradorPortalUser = (id, data={}) => apiFetch(`/colaboradores/${id}/portal-user`, { method:"POST", body:data });
 export const enviarColaboradorLiquidacionEmail = (id, data={}) => apiFetch(`/colaboradores/${id}/liquidacion-email`, { method:"POST", body:data });
 export const getColaboradorLiquidacionTokens = (id) => apiFetch(`/colaboradores/${id}/liquidacion-tokens`);
 export const revocarColaboradorLiquidacionToken = (id, tokenId) => apiFetch(`/colaboradores/${id}/liquidacion-tokens/${tokenId}`, { method:"DELETE" });
@@ -794,6 +893,10 @@ export const getRutasClienteSalud = (cid)     => apiFetch(`/clientes/${cid}/ruta
 export const crearRutaCliente  = (cid, data, options = {}) => apiFetch(`/clientes/${cid}/rutas`, { method:"POST", body:data, ...options });
 export const editarRutaCliente = (cid,rid,data)=>apiFetch(`/clientes/${cid}/rutas/${rid}`, { method:"PUT", body:data });
 export const borrarRutaCliente = (cid, rid)   => apiFetch(`/clientes/${cid}/rutas/${rid}`, { method:"DELETE" });
+// Agrupar/desagrupar tarifas del cliente. En agrupar, el primer id de la lista
+// (la tarifa sobre la que se suelta) marca el precio compartido del grupo.
+export const agruparRutasCliente   = (cid, rutaIds = []) => apiFetch(`/clientes/${cid}/rutas/agrupar`, { method:"POST", body:{ ruta_ids: rutaIds } });
+export const desagruparRutasCliente = (cid, rutaIds = []) => apiFetch(`/clientes/${cid}/rutas/desagrupar`, { method:"POST", body:{ ruta_ids: rutaIds } });
 
 // ── Pedidos por cliente ───────────────────────────────
 export const getPedidosCliente = (cid, params={}) => apiFetch(`/pedidos?cliente_id=${cid}&${new URLSearchParams(params)}`);
@@ -1041,7 +1144,7 @@ export const actualizarGpsPedido = (id, data) =>
 export const registrarGpsChoferApp = (data) =>
   apiFetch("/choferes/app/gps", { method: "POST", body: data, timeoutMs: 15000, silentSuccess: true, silentError: true });
 
-export const calcularRutaGeo = (points = []) => {
+export const calcularRutaGeo = (points = [], { force = false } = {}) => {
   const compactPoints = points.map(point => {
     const hasExplicitQuery = Object.prototype.hasOwnProperty.call(point, "query");
     return {
@@ -1059,7 +1162,8 @@ export const calcularRutaGeo = (points = []) => {
       lng: point.lng ?? point.lon ?? point.longitude ?? point.longitud ?? null,
     };
   });
-  return apiFetch(`/geocoding/route?points=${encodeURIComponent(JSON.stringify(compactPoints))}`, {
+  const refreshParam = force ? "&refresh=1" : "";
+  return apiFetch(`/geocoding/route?points=${encodeURIComponent(JSON.stringify(compactPoints))}${refreshParam}`, {
     timeoutMs: 35000,
     silentSuccess: true,
   });

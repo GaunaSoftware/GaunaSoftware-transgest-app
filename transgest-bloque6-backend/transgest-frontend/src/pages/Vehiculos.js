@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, actualizarKmVehiculo, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
 import PlatformDocumentsEditor, { normalizePlatformDocuments } from "../components/PlatformDocumentsEditor";
@@ -164,6 +165,11 @@ function esClaseRemolque(clase = "") {
   return c.includes("remolque") || c.includes("semirremolque") || c.includes("dolly");
 }
 
+// Preferencia (por navegador) para ocultar todo lo de GPS en Vehiculos.
+function gpsOculto() {
+  try { return localStorage.getItem("tms_ocultar_gps") === "1"; } catch { return false; }
+}
+
 function marcasPorClase(clase = "") {
   return esClaseRemolque(clase) ? MARCAS_REMOLQUES : MARCAS_TRACTORAS;
 }
@@ -190,6 +196,21 @@ function normalizeVehiculoForClase(data = {}) {
     next.volumen_m3 = "";
     next.lateral_bajo = false;
     next.piso_movil = false;
+  }
+  return next;
+}
+
+// Longitud de carga (metros lineales) estandar de un semirremolque para
+// carrocerias tipo tautliner/lona, plataforma lisa o lateral bajo.
+const METROS_CARGA_ESTANDAR = "13.65";
+function carroceriaUsaMedidaEstandar(form = {}) {
+  const c = String(form.tipo_carroceria || "").toLowerCase();
+  return c.includes("tautliner") || c.includes("lona") || c.includes("plataforma") || !!form.lateral_bajo;
+}
+function aplicarMedidasEstandarCarga(next = {}) {
+  // Rellena la medida estandar solo si esta vacia (no pisa lo que ponga el usuario).
+  if (carroceriaUsaMedidaEstandar(next) && !String(next.metros_carga || "").trim()) {
+    next.metros_carga = METROS_CARGA_ESTANDAR;
   }
   return next;
 }
@@ -252,7 +273,7 @@ function mergeVehiculoState(rows = [], updated) {
   return current.map(v => String(v.id) === String(updated.id) ? { ...v, ...updated } : v);
 }
 
-function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncProvider, onSync, onReload }) {
+function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncProvider, onSync, onReload, hidden = false }) {
   const [focusGps, setFocusGps] = useState(() => readGpsFocus());
   const [open, setOpen] = useState(() => Boolean(readGpsFocus()));
   const [importOpen, setImportOpen] = useState(false);
@@ -434,11 +455,12 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
     </div>
   );
 
+  if (hidden) return null;
   return (
     <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"24px 26px",marginBottom:18,boxShadow:"var(--shadow-sm)"}}>
       <div style={{display:"flex",gap:18,alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",marginBottom:18}}>
         <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
-          <div style={{width:50,height:50,borderRadius:12,display:"grid",placeItems:"center",background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",boxShadow:"0 14px 28px rgba(15,118,110,.22)"}}>
+          <div style={{width:50,height:50,borderRadius:12,display:"grid",placeItems:"center",background:"linear-gradient(135deg,var(--accent),#0d9488)",color:"#fff",boxShadow:"0 14px 28px rgba(15,118,110,.22)"}}>
             <UiIcon name="pin" color="#fff" size={26} />
           </div>
           <div>
@@ -472,7 +494,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
               Pegar listado
             </button>
           )}
-          <button onClick={()=>setOpen(o=>!o)} style={{...S.btn,background:"linear-gradient(135deg,#0f766e,#0d9488)",color:"#fff",border:"1px solid #0f766e"}}>
+          <button onClick={()=>setOpen(o=>!o)} style={{...S.btn,background:"linear-gradient(135deg,var(--accent),#0d9488)",color:"#fff",border:"1px solid var(--accent)"}}>
             {open ? "Cerrar enlaces" : "Gestionar enlaces"}
           </button>
         </div>
@@ -500,11 +522,11 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(185px,1fr))",gap:12,marginTop:12}}>
         {chip("Vehiculos", status?.counts?.activos ?? vehiculos.length, "#475569", "truck")}
         {chip("Enlazados", status?.counts?.enlazados ?? mapped, "#10b981", "link")}
-        {chip("Pendientes", status?.counts?.pendientes ?? pendientes, (status?.counts?.pendientes ?? pendientes) ? "#0f766e" : "#10b981", "clock")}
-        {chip("Senal reciente", status?.counts?.senal_reciente ?? 0, (status?.counts?.senal_reciente ?? 0) ? "#0f766e" : "#64748b", "signal")}
+        {chip("Pendientes", status?.counts?.pendientes ?? pendientes, (status?.counts?.pendientes ?? pendientes) ? "var(--accent)" : "#10b981", "clock")}
+        {chip("Senal reciente", status?.counts?.senal_reciente ?? 0, (status?.counts?.senal_reciente ?? 0) ? "var(--accent)" : "#64748b", "signal")}
         {chip("Sin senal", status?.counts?.sin_senal_reciente ?? 0, (status?.counts?.sin_senal_reciente ?? 0) ? "#ef4444" : "#10b981", "signalOff")}
         {chip("Nunca recibida", status?.counts?.nunca_senal ?? 0, (status?.counts?.nunca_senal ?? 0) ? "#f97316" : "#10b981", "signalOff")}
-        {chip("Proveedor activo", GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin proveedor", "#0f766e", "database")}
+        {chip("Proveedor activo", GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin proveedor", "var(--accent)", "database")}
       </div>
 
       {(status?.last_position || status?.webhook) && (
@@ -521,7 +543,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
             </div>
           )}
           {status?.webhook && (
-            <div style={{background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.24)",borderRadius:8,padding:"9px 11px"}}>
+            <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a24)",borderRadius:8,padding:"9px 11px"}}>
               <div style={{fontSize:10,color:"#34d399",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Webhook GPS</div>
               <div style={{fontSize:12,color:"var(--text)",fontWeight:800,marginTop:4}}>
                 {status.webhook.activo ? "Activo" : "Inactivo"} - {status.webhook.token_mask || "sin token"}
@@ -619,7 +641,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
             const dirty = dirtyLinks.some(x => x.v.id === v.id);
             const focused = String(focusGps?.vehiculo_id || "") === String(v.id);
             return (
-              <div id={`gps-link-${v.id}`} key={v.id} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,alignItems:"center",background:focused?"rgba(20,184,166,.10)":"var(--bg3)",border:`1px solid ${focused ? "rgba(20,184,166,.60)" : dirty ? "rgba(16,185,129,.35)" : "var(--border)"}`,boxShadow:focused?"0 0 0 2px rgba(20,184,166,.14)":undefined,borderRadius:8,padding:10}}>
+              <div id={`gps-link-${v.id}`} key={v.id} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,alignItems:"center",background:focused?"var(--accent-a10)":"var(--bg3)",border:`1px solid ${focused ? "var(--accent-a60)" : dirty ? "rgba(16,185,129,.35)" : "var(--border)"}`,boxShadow:focused?"0 0 0 2px var(--accent-a14)":undefined,borderRadius:8,padding:10}}>
                 <div>
                   <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:"var(--accent-xl)",fontSize:13}}>{v.matricula}</div>
                   <div style={{fontSize:11,color:"var(--text4)"}}>
@@ -729,7 +751,7 @@ function TabGpsHistorial({ vehiculo }) {
         <div style={{fontSize:12,fontWeight:800,color:"var(--text3)",textTransform:"uppercase",letterSpacing:".06em"}}>Historial de posiciones</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
           {isMovildata && (
-            <button type="button" onClick={sincronizarMovildataVehiculo} disabled={syncingMovildata || loading} style={{...S.btn,background:"rgba(20,184,166,.12)",color:"#0f766e",border:"1px solid rgba(20,184,166,.28)"}}>
+            <button type="button" onClick={sincronizarMovildataVehiculo} disabled={syncingMovildata || loading} style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a28)"}}>
               {syncingMovildata ? "Sincronizando..." : "Movildata 7 dias"}
             </button>
           )}
@@ -887,7 +909,7 @@ function ModalChoferPicker({ vehiculoId, matricula, estado, choferes, onConfirm,
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(400px,95vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"var(--text)",marginBottom:4}}>
           Cambiar a En Ruta
@@ -998,7 +1020,17 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("vehiculos");
   const [tab,    setTab]    = useState("identificacion");
-  const [form,   setForm]   = useState(editando ? { ...editando } : {
+  const [form,   setForm]   = useState(editando ? {
+    ...editando,
+    // Las fechas llegan del backend como ISO (2027-05-10T00:00:00Z) y un input
+    // type=date solo acepta YYYY-MM-DD: se recortan para que se vean al reabrir
+    // y no se guarden vacias. Aplica igual a tractoras y remolques (mismo modal).
+    fecha_matriculacion: String(editando.fecha_matriculacion || "").slice(0, 10),
+    fecha_itv:           String(editando.fecha_itv || "").slice(0, 10),
+    fecha_seguro:        String(editando.fecha_seguro || "").slice(0, 10),
+    fecha_compra:        String(editando.fecha_compra || "").slice(0, 10),
+    fecha_venta:         String(editando.fecha_venta || "").slice(0, 10),
+  } : {
     // Identificacion
     matricula:"", clase:initialClase || "Tractora", marca:"", modelo:"", anio:"",
     color:"", numero_bastidor:"", numero_motor:"",
@@ -1011,7 +1043,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
     velocidad_max_kmh:"", homologacion_co2:"",
     tipo_carroceria:"", apertura_lateral:"", techo_elevable:false,
     temperatura_min_c:"", temperatura_max_c:"", capacidad_palets:"", volumen_m3:"",
-    lateral_bajo:false, piso_movil:false,
+    lateral_bajo:false, piso_movil:false, metros_carga:"",
     // Compra / Venta
     fecha_compra:"", valor_compra:"", financiacion:"",
     concesionario:"", numero_pedido_compra:"",
@@ -1086,7 +1118,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
   }
 
   const f = k => e => {
-    const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    const value = e.target.type === "checkbox" ? e.target.checked : upperFromEvent(k, e);
     setForm(p => {
       const next = { ...p, [k]: value };
       return k === "clase" ? normalizeVehiculoForClase(next) : next;
@@ -1160,13 +1192,13 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
     { id:"economico",      l:"Compra / Venta" },
     { id:"docs",           l:"Documentacion" },
     { id:"plataformas",    l:"Plataformas" },
-    { id:"gps",            l:"GPS" },
+    ...(gpsOculto() ? [] : [{ id:"gps", l:"GPS" }]),
     { id:"conjunto",       l:"Conjunto / Chofer" },
     ...(editando ? [{ id:"historial", l:"Historial" }] : []),
   ];
 
   return (
-    <div style={S.modal} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:14,
                     width:"min(920px,calc(100vw - 24px))", maxWidth:"calc(100vw - 24px)", maxHeight:"97vh", display:"flex", flexDirection:"column", overflow:"hidden" }}>
 
@@ -1226,7 +1258,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                 <div>
                   <label style={S.lbl}>Matricula *</label>
                   <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace", fontWeight:700, textTransform:"uppercase" }}
-                    value={form.matricula||""} onChange={f("matricula")} placeholder="1234 ABC"/>
+                    value={form.matricula||""} onChange={e=>setForm(p=>({...p,matricula:formatMatricula(e.target.value)}))} placeholder="1234-ABC"/>
                 </div>
                 <div>
                   <label style={S.lbl}>Clase de vehiculo *</label>
@@ -1437,7 +1469,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                   <div style={S.grid3}>
                     <div>
                       <label style={S.lbl}>Tipo de carroceria</label>
-                      <select value={form.tipo_carroceria||""} onChange={f("tipo_carroceria")} style={S.sel}>
+                      <select value={form.tipo_carroceria||""} onChange={e=>setForm(p=>aplicarMedidasEstandarCarga({...p,tipo_carroceria:e.target.value}))} style={S.sel}>
                         <option value="">Sin especificar</option>
                         {CARROCERIAS_REMOLQUE.map(c=><option key={c} value={c}>{c}</option>)}
                       </select>
@@ -1458,12 +1490,17 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                       <label style={S.lbl}>Volumen (m3)</label>
                       <input type="number" min="0" step="0.01" style={S.inp} value={form.volumen_m3||""} onChange={f("volumen_m3")} placeholder="90"/>
                     </div>
+                    <div>
+                      <label style={S.lbl}>Metros de carga (LDM)</label>
+                      <input type="text" inputMode="decimal" style={S.inp} value={form.metros_carga||""} onChange={f("metros_carga")} placeholder="13,65"/>
+                      <div style={{fontSize:10,color:"var(--text5)",marginTop:3}}>Longitud util de carga en metros. Estandar 13,65 en tautliner, lateral bajo y plataforma.</div>
+                    </div>
                     <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>
                       <input type="checkbox" checked={!!form.techo_elevable} onChange={f("techo_elevable")}/>
                       Techo elevable
                     </label>
                     <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>
-                      <input type="checkbox" checked={!!form.lateral_bajo} onChange={f("lateral_bajo")}/>
+                      <input type="checkbox" checked={!!form.lateral_bajo} onChange={e=>setForm(p=>aplicarMedidasEstandarCarga({...p,lateral_bajo:e.target.checked}))}/>
                       Lateral bajo / lowboy
                     </label>
                     <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>
@@ -1758,6 +1795,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
   const [editando,  setEditando]  = useState(null);
   const [initialClaseModal, setInitialClaseModal] = useState("Tractora");
   const [filtroTipo,   setFiltroTipo]   = useState(initialTipo || "todos");
+  const [ocultarGps,   setOcultarGps]   = useState(gpsOculto);
   const [filtroEstado, setFiltroEstado] = useState("todos");
   const [gpsSyncing, setGpsSyncing] = useState(false);
   const [gpsProviders, setGpsProviders] = useState([]);
@@ -1947,9 +1985,19 @@ export default function Vehiculos({ initialTipo = "todos" }) {
             ["baja",      "Bajas"],
           ].map(([id, label]) => (
             <button key={id}
-              onClick={() => { setFiltroTipo(id); setFiltroEstado("todos"); }}
+              onClick={() => {
+                setFiltroEstado("todos");
+                // Tractoras/Remolques tienen entrada propia en el menu lateral: se
+                // navega para que el lateral tambien cambie de resaltado. Todos/Bajas
+                // no tienen equivalente, se filtran en local.
+                if (id === "tractoras" || id === "remolques") {
+                  window.dispatchEvent(new CustomEvent("tms:navegar", { detail: `vehiculos_${id}` }));
+                } else {
+                  setFiltroTipo(id);
+                }
+              }}
               style={{ ...S.btn,
-                background: filtroTipo===id ? "linear-gradient(135deg,#0f766e,#0d9488)" : "transparent",
+                background: filtroTipo===id ? "linear-gradient(135deg,var(--accent),#0d9488)" : "transparent",
                 color:      filtroTipo===id ? "#fff" : "var(--text3)",
                 border:     "none",
                 padding: "7px 13px", fontSize:12, borderRadius:7, boxShadow:"none",
@@ -1958,6 +2006,13 @@ export default function Vehiculos({ initialTipo = "todos" }) {
             </button>
           ))}
         </div>
+
+        <button
+          onClick={() => { const v = !ocultarGps; setOcultarGps(v); try { localStorage.setItem("tms_ocultar_gps", v ? "1" : "0"); } catch {} }}
+          title="Mostrar u ocultar todo lo relativo a GPS (panel y pestana del vehiculo)"
+          style={{ ...S.btn, marginLeft:"auto", background: ocultarGps ? "var(--bg3)" : "var(--accent-a10)", color: ocultarGps ? "var(--text4)" : "var(--accent-xl)", border:`1px solid ${ocultarGps ? "var(--border2)" : "var(--accent-a30)"}`, fontSize:12, padding:"7px 12px" }}>
+          {ocultarGps ? "Mostrar GPS" : "Ocultar GPS"}
+        </button>
 
         {/* Subfiltro estado - separador visual, solo si no es "baja" */}
         {filtroTipo !== "baja" && (
@@ -1993,7 +2048,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
         {canEdit && (
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginLeft:"auto"}}>
             {filtroTipo !== "remolques" && (
-              <button style={{ ...S.btn, background:"linear-gradient(135deg,#0f766e,#0d9488)", color:"#fff", border:"1px solid #0f766e" }}
+              <button style={{ ...S.btn, background:"linear-gradient(135deg,var(--accent),#0d9488)", color:"#fff", border:"1px solid var(--accent)" }}
                 onClick={() => abrirNuevoVehiculo("Tractora")}>
                 + Nueva tractora
               </button>
@@ -2019,6 +2074,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
       </div>
 
         <GpsMappingPanel
+          hidden={ocultarGps}
           vehiculos={vehiculosActivos}
           providers={gpsProviders}
           status={gpsStatus}
@@ -2052,13 +2108,13 @@ export default function Vehiculos({ initialTipo = "todos" }) {
               const esRemolque = esRemolqueVehiculo(v, vehiculos);
               return (
                 <div key={v.id} id={`vehiculo-card-${v.id}`} style={{
-                                          background:String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.10)" : "rgba(255,255,255,.96)",
-                                          border:`1px solid ${String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.65)" : "#dbe5ec"}`,
+                                          background:String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "var(--accent-a10)" : "rgba(255,255,255,.96)",
+                                          border:`1px solid ${String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "var(--accent-a65)" : "#dbe5ec"}`,
                                           borderRadius:12, padding:16,
                                           cursor:"pointer", transition:"border-color .15s, box-shadow .15s", boxShadow:"0 12px 26px rgba(15,23,42,.05)" }}
                   onClick={() => { setEditando(v); setModal(true); }}
                   onMouseEnter={e => e.currentTarget.style.borderColor="var(--accent-l)"}
-                  onMouseLeave={e => e.currentTarget.style.borderColor=String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "rgba(20,184,166,.65)" : "#dbe5ec"}>
+                  onMouseLeave={e => e.currentTarget.style.borderColor=String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "var(--accent-a65)" : "#dbe5ec"}>
 
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
                     <div>
@@ -2078,7 +2134,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
                     <span style={{ background:"#f1f5f9", padding:"3px 9px", borderRadius:10, border:"1px solid #e2e8f0" }}>
                       {claseCorta(v.clase)}
                     </span>
-                    <span style={{ background:esRemolque?"rgba(139,92,246,.10)":"rgba(20,184,166,.10)", color:esRemolque?"#8b5cf6":"#0f766e", padding:"3px 9px", borderRadius:10, border:`1px solid ${esRemolque?"rgba(139,92,246,.25)":"rgba(20,184,166,.25)"}`, fontWeight:800 }}>
+                    <span style={{ background:esRemolque?"rgba(139,92,246,.10)":"var(--accent-a10)", color:esRemolque?"#8b5cf6":"var(--accent)", padding:"3px 9px", borderRadius:10, border:`1px solid ${esRemolque?"rgba(139,92,246,.25)":"var(--accent-a25)"}`, fontWeight:800 }}>
                       {esRemolque ? "Remolque" : "Tractora"}
                     </span>
                     {!esRemolque && v.combustible && <span style={{ color:"var(--text5)" }}>{v.combustible}</span>}
@@ -2100,7 +2156,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
                         </div>
                       </>
                     ) : (
-                      <div style={{gridColumn:"1/-1",background:v.tractora_id ? "rgba(20,184,166,.08)" : "rgba(245,158,11,.08)",border:`1px solid ${v.tractora_id ? "rgba(20,184,166,.22)" : "rgba(245,158,11,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
+                      <div style={{gridColumn:"1/-1",background:v.tractora_id ? "var(--accent-a08)" : "rgba(245,158,11,.08)",border:`1px solid ${v.tractora_id ? "var(--accent-a22)" : "rgba(245,158,11,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
                         <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Asignacion del remolque</div>
                         <div style={{fontSize:12,fontWeight:800,color:v.tractora_id ? "var(--text)" : "#f59e0b"}}>
                           {v.tractora_matricula ? `${v.tractora_matricula}${v.tractora_chofer_nombre ? ` · ${v.tractora_chofer_nombre}` : ""}` : "Libre / a espera de tractora"}

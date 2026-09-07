@@ -243,7 +243,47 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
     iban_facturacion: empresa.iban_facturacion || "",
   });
   const [loading,setLoading]=useState(false); const [err,setErr]=useState("");
+  const [purgeName,setPurgeName]=useState(""); const [purging,setPurging]=useState(false);
+  const cancelada = String(form.estado||"").toLowerCase()==="cancelado";
   const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+  async function cancelarEmpresa(){
+    const ok = await confirmDialog({
+      title:"Cancelar empresa",
+      message:`${empresa.nombre} dejara de estar disponible: sus usuarios no podran usar el programa. Los datos se conservan hasta que la elimines definitivamente. ¿Continuar?`,
+      confirmText:"Cancelar empresa",
+      tone:"danger",
+    });
+    if(!ok) return;
+    setPurging(true); setErr("");
+    try{
+      await saFetch("/empresas/"+empresa.id,{method:"PATCH",body:{estado:"cancelado"}});
+      setForm(p=>({...p,estado:"cancelado"}));
+      notify("Empresa cancelada. Ya no esta disponible.","success");
+      onGuardado?.();
+    }catch(e){ setErr(e.message||"No se pudo cancelar"); }
+    finally{ setPurging(false); }
+  }
+  async function purgarEmpresa(){
+    if(purgeName.trim()!==String(empresa.nombre||"").trim()){
+      setErr("Escribe el nombre EXACTO de la empresa para confirmar el borrado.");
+      return;
+    }
+    const ok = await confirmDialog({
+      title:"Eliminar definitivamente",
+      message:`Se borrara ${empresa.nombre} y TODOS sus datos (pedidos, clientes, vehiculos, facturas, usuarios...). Esta accion NO se puede deshacer. ¿Eliminar definitivamente?`,
+      confirmText:"Eliminar y borrar datos",
+      tone:"danger",
+    });
+    if(!ok) return;
+    setPurging(true); setErr("");
+    try{
+      await saFetch("/empresas/"+empresa.id+"/purgar",{method:"DELETE",body:{confirmar_nombre:purgeName.trim()}});
+      notify(`Empresa "${empresa.nombre}" eliminada con todos sus datos.`,"success");
+      onGuardado?.();
+      onClose?.();
+    }catch(e){ setErr(e.message||"No se pudo eliminar"); }
+    finally{ setPurging(false); }
+  }
   async function guardar(){
     setLoading(true); setErr("");
     const body = { ...form, fecha_vencimiento: form.fecha_vencimiento || null };
@@ -397,6 +437,33 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
           </div>
         </div>
 
+        <div style={{marginTop:18,borderTop:"1px solid rgba(239,68,68,.3)",paddingTop:14}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"#f87171",marginBottom:10}}>
+            Zona de peligro
+          </div>
+          {!cancelada ? (
+            <>
+              <div style={{fontSize:12,color:"#94a3b8",marginBottom:10,lineHeight:1.6}}>
+                Cancela la empresa para que deje de estar disponible (sus usuarios no podran usar el programa). Los datos se conservan; podras eliminarla definitivamente despues.
+              </div>
+              <button onClick={cancelarEmpresa} disabled={purging} style={{...btnExport,background:"rgba(245,158,11,.12)",color:"#fbbf24",border:"1px solid rgba(245,158,11,.35)",fontWeight:700,opacity:purging?0.6:1}}>
+                Cancelar empresa (dejar de estar disponible)
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{fontSize:12,color:"#fca5a5",marginBottom:10,lineHeight:1.6}}>
+                Empresa cancelada. Para <strong>eliminarla y borrar TODOS sus datos</strong> (pedidos, clientes, vehiculos, facturas, usuarios...) de forma <strong>irreversible</strong>, escribe su nombre exacto y confirma.
+              </div>
+              <input value={purgeName} onChange={e=>setPurgeName(e.target.value)} placeholder={empresa.nombre} style={{...inp,marginBottom:8,borderColor:"rgba(239,68,68,.4)"}}/>
+              <button onClick={purgarEmpresa} disabled={purging||purgeName.trim()!==String(empresa.nombre||"").trim()}
+                style={{...btnExport,background:"rgba(239,68,68,.15)",color:"#fca5a5",border:"1px solid rgba(239,68,68,.45)",fontWeight:800,opacity:(purging||purgeName.trim()!==String(empresa.nombre||"").trim())?0.5:1,cursor:(purging||purgeName.trim()!==String(empresa.nombre||"").trim())?"not-allowed":"pointer"}}>
+                {purging?"Eliminando...":"Eliminar definitivamente y borrar datos"}
+              </button>
+            </>
+          )}
+        </div>
+
         <div style={{display:"flex",gap:10,marginTop:16,justifyContent:"flex-end"}}>
           <button onClick={onClose} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #1c2740",background:"transparent",color:"#64748b",fontFamily:"'DM Sans',sans-serif",fontSize:13,cursor:"pointer"}}>Cancelar</button>
           <button onClick={guardar} disabled={loading} style={{padding:"8px 20px",borderRadius:8,border:"none",background:"#3b6ef5",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>
@@ -494,7 +561,7 @@ function UsuariosAdmin({ saFetchFn }) {
 
 function CorreoGaunaAdmin({ saFetchFn }) {
   const [status, setStatus] = useState(null);
-  const [form, setForm] = useState({ smtp_host:"", smtp_port:"587", smtp_secure:false, smtp_user:"", smtp_pass:"", smtp_from:"", smtp_from_nombre:"Gauna - TransGest", reply_to:"", activo:true });
+  const [form, setForm] = useState({ smtp_host:"", smtp_port:"587", smtp_secure:false, smtp_user:"", smtp_pass:"", smtp_from:"", smtp_from_nombre:"Gauna - TransGest", reply_to:"", reset_notify_email:"", activo:true });
   const [destinatario, setDestinatario] = useState("");
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
@@ -514,6 +581,7 @@ function CorreoGaunaAdmin({ saFetchFn }) {
           smtp_from: cfg.smtp_from || "",
           smtp_from_nombre: cfg.smtp_from_nombre || "Gauna - TransGest",
           reply_to: cfg.reply_to || "",
+          reset_notify_email: cfg.reset_notify_email || "",
           activo: cfg.activo !== false,
         }));
       })
@@ -589,6 +657,7 @@ function CorreoGaunaAdmin({ saFetchFn }) {
         <div><label style={label}>Remitente</label><input style={input} value={form.smtp_from} onChange={f("smtp_from")} placeholder="correo@gauna..."/></div>
         <div><label style={label}>Nombre remitente</label><input style={input} value={form.smtp_from_nombre} onChange={f("smtp_from_nombre")} placeholder="Gauna - TransGest"/></div>
         <div><label style={label}>Reply-to</label><input style={input} value={form.reply_to} onChange={f("reply_to")} placeholder="opcional"/></div>
+        <div><label style={label}>Aviso solicitudes de reset</label><input style={input} value={form.reset_notify_email} onChange={f("reset_notify_email")} placeholder="correo@empresa.com (avisos de reset de contrasena)"/></div>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12,flexWrap:"wrap"}}>
         <button onClick={guardar} disabled={loading} style={{padding:"8px 14px",borderRadius:7,border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.14)",color:"#85B7EB",fontWeight:800,cursor:"pointer"}}>
@@ -2908,6 +2977,29 @@ export default function SuperAdmin(){
     }
   }
 
+  async function toggleBloqueoEmpresa(empresa) {
+    const bloquear = !empresa.bloqueo_manual;
+    const ok = await confirmDialog({
+      title: bloquear ? "Bloquear por impago" : "Desbloquear empresa",
+      message: bloquear
+        ? `Se bloqueara ${empresa.nombre}. Sus usuarios no podran usar el programa: al entrar veran una pantalla que obliga al pago. ¿Continuar?`
+        : `Se reactivara ${empresa.nombre} y sus usuarios podran volver a usar el programa con normalidad.`,
+      confirmText: bloquear ? "Bloquear" : "Desbloquear",
+      tone: bloquear ? "danger" : "default",
+    });
+    if (!ok) return;
+    try {
+      await saFetch(`/empresas/${empresa.id}`, {
+        method: "PATCH",
+        body: bloquear ? { bloqueo_manual: true, bloqueo_motivo: "impago" } : { bloqueo_manual: false, bloqueo_motivo: "" },
+      });
+      notify(bloquear ? "Empresa bloqueada. Sus usuarios veran la pantalla de pago." : "Empresa desbloqueada.", "success");
+      await cargar();
+    } catch (e) {
+      notify(e.message || "No se pudo actualizar el bloqueo", "error");
+    }
+  }
+
   async function crearEmpresaDemo() {
     const ok = await confirmDialog({
       title: "Crear empresa demo",
@@ -3212,7 +3304,7 @@ export default function SuperAdmin(){
                   <thead><tr>
                     <th style={S.th}>Empresa</th><th style={S.th}>Plan</th><th style={S.th}>Estado</th>
                     <th style={S.th}>Pago</th><th style={S.th}>Uso</th><th style={S.th}>Implantacion</th><th style={S.th}>Pedidos</th>
-                    <th style={S.th}>Registro</th><th style={S.th}>Vencimiento</th><th style={S.th}></th>
+                    <th style={S.th}>Registro</th><th style={S.th}>Vencimiento</th><th style={{...S.th,position:"sticky",right:0,background:"var(--sa-panel)",zIndex:3}}>Acciones</th>
                   </tr></thead>
                   <tbody>
                     {empresasFiltradas.map(e=>{
@@ -3228,7 +3320,10 @@ export default function SuperAdmin(){
                             {e.cif&&<div style={{fontSize:10,color:"#475569"}}>{e.cif}</div>}
                           </td>
                           <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${PLAN_COLOR[e.plan]}20`,color:PLAN_COLOR[e.plan],border:`1px solid ${PLAN_COLOR[e.plan]}40`}}>{e.plan}</span></td>
-                          <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${ESTADO_COLOR[e.estado]}18`,color:ESTADO_COLOR[e.estado]}}>{e.estado}</span></td>
+                          <td style={S.td}>
+                            <span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${ESTADO_COLOR[e.estado]}18`,color:ESTADO_COLOR[e.estado]}}>{e.estado}</span>
+                            {e.bloqueo_manual && <div style={{marginTop:4,padding:"2px 7px",borderRadius:20,fontSize:9,fontWeight:800,background:"rgba(239,68,68,.15)",color:"#f87171",display:"inline-block",letterSpacing:".04em"}}>BLOQUEADA{e.bloqueo_motivo?` · ${e.bloqueo_motivo}`:""}</div>}
+                          </td>
                           <td style={S.td}>
                             <div style={{fontSize:11,color:e.metodo_pago==="pendiente"?"#fbbf24":"#94a3b8",fontWeight:700}}>{e.metodo_pago || "pendiente"}</div>
                             {e.email_facturacion&&<div style={{fontSize:10,color:"#64748b",marginTop:2}}>{e.email_facturacion}</div>}
@@ -3254,12 +3349,15 @@ export default function SuperAdmin(){
                               {vencida?"Vencida ":proxima?"Proxima ":""}{e.fecha_vencimiento?fmtDate(e.fecha_vencimiento):"Sin limite"}
                             </span>
                           </td>
-                          <td style={{...S.td,textAlign:"right"}}>
-                            <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap"}}>
+                          <td style={{...S.td,textAlign:"right",position:"sticky",right:0,background:"var(--sa-panel)",zIndex:2,boxShadow:"-8px 0 12px -8px rgba(15,23,42,.18)"}}>
+                            <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap",maxWidth:230,marginLeft:"auto"}}>
                               <button onClick={()=>entrarEmpresa(e)} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"#34d399",border:"1px solid rgba(16,185,129,.25)"}}>Entrar</button>
                               <button onClick={()=>resetPasswordEmpresa(e)} style={{...S.btn,background:"rgba(20,184,166,.10)",color:"#5eead4",border:"1px solid rgba(20,184,166,.22)"}}>Clave</button>
                               <button onClick={()=>reinvitarEmpresa(e)} style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#85B7EB",border:"1px solid rgba(59,130,246,.22)"}}>Invitar</button>
                               <button onClick={()=>enviarAvisoPagoEmpresa(e, "auto")} style={{...S.btn,background:"rgba(245,158,11,.10)",color:"#fbbf24",border:"1px solid rgba(245,158,11,.22)"}}>Aviso pago</button>
+                              <button onClick={()=>toggleBloqueoEmpresa(e)} style={{...S.btn, ...(e.bloqueo_manual
+                                ? {background:"rgba(16,185,129,.14)",color:"#34d399",border:"1px solid rgba(16,185,129,.3)"}
+                                : {background:"rgba(239,68,68,.12)",color:"#f87171",border:"1px solid rgba(239,68,68,.3)"})}}>{e.bloqueo_manual ? "Desbloquear" : "Bloquear"}</button>
                               <button onClick={()=>setEditando(e)} style={{...S.btn,background:"#1e2d45",color:"#94a3b8",border:"1px solid #1c2740"}}>Gestionar</button>
                             </div>
                           </td>

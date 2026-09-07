@@ -7,6 +7,8 @@ export const COMPANY_PALETTES = [
   { id:"custom", label:"Personalizada", accent:"#0f766e", accentLight:"#14b8a6", sidebar:"#10231f" },
 ];
 
+const ACCENT_ALPHAS = [5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 18, 20, 22, 24, 25, 28, 30, 32, 34, 35, 36, 38, 40, 45, 48, 55, 60, 65];
+
 export function canUseCompanyPalette(plan) {
   const normalized = String(plan || "").toLowerCase();
   return normalized === "profesional" || normalized === "enterprise" || normalized === "premium";
@@ -76,6 +78,12 @@ export function applyCompanyPalette(value) {
   root.style.setProperty("--sidebar-bg", palette.sidebar);
   root.style.setProperty("--sidebar-active", hexToRgba(palette.accentLight, 0.18));
   root.style.setProperty("--topbar-active", hexToRgba(palette.accentLight, 0.12));
+  // Variables de acento a cada opacidad usada en la app, para que TODO el color
+  // de marca (no solo la barra lateral) siga la paleta elegida. El valor por
+  // defecto (teal) coincide exactamente con los literales antiguos.
+  ACCENT_ALPHAS.forEach(a => {
+    root.style.setProperty(`--accent-a${String(a).padStart(2, "0")}`, hexToRgba(palette.accentLight, a / 100));
+  });
   root.style.colorScheme = theme;
   if (document.body) {
     document.body.style.background = "var(--bg)";

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { getFacturas, getPedidos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos, getBiResumen } from "../services/api";
+import { getFacturasTodas, getPedidosTodos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos, getBiResumen } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import { confirmDialog, notify } from "../services/notify";
@@ -28,7 +28,7 @@ const ESTADO_PEDIDO = {
   pendiente: { label:"Pendiente", color:"var(--text4)" },
   confirmado: { label:"Confirmado", color:"var(--accent-l)" },
   espera_carga: { label:"Espera carga", color:"#eab308" },
-  cargando: { label:"Cargando", color:"#14b8a6" },
+  cargando: { label:"Cargando", color:"var(--accent-l)" },
   en_curso: { label:"En ruta", color:"#f59e0b" },
   espera_descarga: { label:"Espera descarga", color:"#d946ef" },
   descarga: { label:"En descarga", color:"#a78bfa" },
@@ -53,6 +53,11 @@ function pedidoRealizado(p) {
 }
 
 function pedidoTieneFactura(p) {
+  // Una factura en BORRADOR no cuenta como facturada: su importe no entra en
+  // "facturado" (ahi solo van emitidas/enviadas/cobradas/vencidas), asi que el
+  // viaje tiene que seguir contando como PENDIENTE de facturar. Si no, el viaje
+  // se caia de los dos lados y el ingreso gestionado salia corto.
+  if (String(p?.factura_estado || "").toLowerCase() === "borrador") return false;
   return Boolean(p?.factura_id || p?.factura_numero || p?.facturado === true);
 }
 
@@ -69,6 +74,15 @@ function costeOperativoPedido(p) {
 }
 
 function fechaKpiPedido(p) {
+  // Los viajes realizados (entregado/facturado) se atribuyen por su fecha REAL de
+  // entrega (cuando se marcaron entregados / firma), no por la descarga
+  // planificada: esta puede caer en otro mes (p. ej. programada a futuro) y dejar
+  // el viaje fuera del periodo, aunque se haya entregado hoy.
+  const estado = String(p?.estado || "").toLowerCase();
+  if (estado === "entregado" || estado === "facturado") {
+    // facturacion_mes: mes elegido al entregar fuera de su mes (manda sobre todo).
+    return p?.facturacion_mes || p?.entregado_at || p?.firma_fecha || p?.fecha_descarga || p?.fecha_carga || p?.fecha_pedido || p?.created_at;
+  }
   return p?.fecha_descarga || p?.fecha_carga || p?.fecha_pedido || p?.created_at;
 }
 
@@ -318,7 +332,7 @@ function ExecutiveKpi({ icon, iconBg, iconColor, value, label, sub, valueColor }
         {icon}
       </div>
       <div style={{minWidth:0}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:26,fontWeight:900,color:valueColor || "var(--text)",lineHeight:1.05}}>{value}</div>
+        <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:26,fontWeight:600,color:valueColor || "var(--text)",lineHeight:1.1,fontVariantNumeric:"tabular-nums",letterSpacing:"-.01em"}}>{value}</div>
         <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginTop:5}}>{label}</div>
         <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{sub}</div>
       </div>
@@ -331,7 +345,7 @@ function PanelTitle({ icon, title, action }) {
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:14}}>
       <div style={{display:"flex",alignItems:"center",gap:12,minWidth:0}}>
         {icon && (
-          <span style={{width:30,height:30,borderRadius:9,border:"1px solid rgba(15,118,110,.18)",background:"rgba(20,184,166,.07)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,flexShrink:0}}>
+          <span style={{width:30,height:30,borderRadius:9,border:"1px solid rgba(15,118,110,.18)",background:"var(--accent-a07)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,flexShrink:0}}>
             {icon}
           </span>
         )}
@@ -363,8 +377,8 @@ export default function Dashboard() {
       try {
       const _tout = (p, ms=8000) => Promise.race([p, new Promise(r=>setTimeout(()=>r([]),ms))]);
         const [p, f, v, c, ex, cfg, taller, palets] = await Promise.all([
-          _tout(getPedidos({}, { timeoutMs: 45000, silentError: true }).catch(()=>[]), 45000),
-          getFacturas().catch(()=>[]),
+          _tout(getPedidosTodos({}, { timeoutMs: 45000, silentError: true }).catch(()=>[]), 45000),
+          getFacturasTodas({}, { silentError: true }).catch(()=>[]),
           getVehiculos().catch(()=>[]),
           getChoferes().catch(()=>[]),
           getExcepcionesOperativas().catch(()=>null),
@@ -785,8 +799,8 @@ export default function Dashboard() {
                   <DashboardIcon name="euro" size={25} />,
                 ][i]}
                 iconBg={[
-                  "linear-gradient(135deg,#0f766e,#14b8a6)",
-                  "rgba(20,184,166,.22)",
+                  "linear-gradient(135deg,var(--accent),var(--accent-l))",
+                  "var(--accent-a22)",
                   "rgba(245,158,11,.24)",
                   "rgba(249,115,22,.28)",
                 ][i]}
@@ -804,7 +818,7 @@ export default function Dashboard() {
               <button key={item.key} onClick={()=>abrirPedidosConEstado(item.estado, { title:item.label, count:item.value, operativo:item.key })}
                 style={{...S.card,padding:"14px 16px",textAlign:"left",cursor:"pointer",borderColor:`${item.color}44`,background:`linear-gradient(135deg, ${item.color}12, var(--card-bg) 60%)`,fontFamily:"'DM Sans',sans-serif"}}>
                 <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:item.color}}>{item.label}</div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontSize:25,fontWeight:900,color:"var(--text)",marginTop:5}}>{fmtN(item.value)}</div>
+                <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:25,fontWeight:600,color:"var(--text)",marginTop:5,fontVariantNumeric:"tabular-nums",letterSpacing:"-.01em"}}>{fmtN(item.value)}</div>
                 <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{item.sub}</div>
               </button>
             ))}
@@ -860,7 +874,7 @@ export default function Dashboard() {
                         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:8}}>
                           {p.quick_actions.slice(0,3).map(action=>(
                             <button key={action.key || action.label} onClick={()=>abrirControlAnalysisAction(p, action)}
-                              style={{fontSize:10,fontWeight:800,border:`1px solid ${action.primary ? "rgba(20,184,166,.35)" : "var(--border)"}`,background:action.primary ? "rgba(20,184,166,.10)" : "var(--bg3)",color:action.primary ? "var(--accent-xl)" : "var(--text4)",borderRadius:20,padding:"2px 7px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                              style={{fontSize:10,fontWeight:800,border:`1px solid ${action.primary ? "var(--accent-a35)" : "var(--border)"}`,background:action.primary ? "var(--accent-a10)" : "var(--bg3)",color:action.primary ? "var(--accent-xl)" : "var(--text4)",borderRadius:20,padding:"2px 7px",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                               {action.label}
                             </button>
                           ))}
@@ -1156,4 +1170,3 @@ export default function Dashboard() {
     </div>
   );
 }
-

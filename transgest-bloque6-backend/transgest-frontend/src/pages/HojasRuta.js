@@ -1,6 +1,6 @@
 import { getLogoDataUrl } from "../services/logoHelper";
 import { useState, useEffect, useCallback } from "react";
-import { borrarNoche, borrarRepostaje, crearNoche, crearRepostaje, getNominasEmitidas, getChoferes, getChoferConfig, getGasoilConfig, getNochesVehiculo, getPedidos, getRepostajes, getVehiculos, getTallerEstado, setChoferConfig, setGasoilConfig } from "../services/api";
+import { borrarNoche, borrarRepostaje, crearNoche, crearRepostaje, getNominasEmitidas, getChoferes, getChoferConfig, getGasoilConfig, getNochesVehiculo, getPedidosTodos, getRepostajes, getVehiculos, getTallerEstado, setChoferConfig, setGasoilConfig } from "../services/api";
 import { getChoferConfigSync, useChoferConfig } from "../hooks/useChoferConfig";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { notify } from "../services/notify";
@@ -76,7 +76,7 @@ function ModalGasoil({vehiculo,onClose}){
   function addP(){if(!np.desde||!np.hasta||!np.precio){notify("Completa todos los campos", "warning");return;}setCfg(p=>({...p,periodos:[...(p.periodos||[]),{...np,id:"gp_"+Date.now()}]}));setNp({desde:"",hasta:"",precio:""});}
   function delP(id){setCfg(p=>({...p,periodos:(p.periodos||[]).filter(x=>x.id!==id)}));}
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(520px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>&#9981; Gasoil — {vehiculo.matricula}</div>
@@ -155,7 +155,7 @@ function ModalLitros({vehiculo,fechaDesde,fechaHasta,onClose}){
   function del(id){borrarRepostaje(id).then(()=>setLista(p=>p.filter(x=>x.id!==id))).catch(e=>notify("Error: "+e.message, "error"));}
   const total=lista.reduce((s,x)=>s+Number(x.litros||0),0);
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose(total)}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose(total)}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(480px,96vw)",maxHeight:"88vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Litros repostados — {vehiculo.matricula}</div>
@@ -218,7 +218,7 @@ function ModalNoches({vehiculo,choferConfig={},fechaDesde,fechaHasta,onClose}){
   function del(id){borrarNoche(id).then(()=>setLista(p=>p.filter(x=>x.id!==id))).catch(e=>notify("Error: "+e.message, "error"));}
   const total=lista.reduce((s,x)=>s+Number(x.importe||0),0);
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose(total)}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose(total)}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(480px,96vw)",maxHeight:"88vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Noches — {vehiculo.matricula}</div>
@@ -298,7 +298,7 @@ function ModalChoferExt({chofer,onClose}){
     }
   }
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(680px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
           <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Config. {chofer.nombre} {chofer.apellidos||""}</div>
@@ -378,7 +378,7 @@ export default function HojasRuta(){
     async function load(){
       setLoading(true);
       try{
-        const[v,p,c,t]=await Promise.all([getVehiculos().catch(()=>[]),getPedidos().catch(()=>[]),getChoferes().catch(()=>[]),getTallerEstado().catch(()=>null)]);
+        const[v,p,c,t]=await Promise.all([getVehiculos().catch(()=>[]),getPedidosTodos({}, { silentError: true }).catch(()=>[]),getChoferes().catch(()=>[]),getTallerEstado().catch(()=>null)]);
         const vArr=Array.isArray(v)?v:[];
         const pArr=Array.isArray(p)?p:(Array.isArray(p?.data)?p.data:[]);
         setVehiculos(vArr);setPedidos(pArr);setChoferes(Array.isArray(c)?c:[]);
@@ -549,7 +549,7 @@ export default function HojasRuta(){
                   <div style={{fontSize:15,fontWeight:900,color:"var(--accent-xl)"}}>{chofer.nombre} {chofer.apellidos||""}</div>
                   <div style={{fontSize:13,color:"var(--text5)",marginTop:3}}>{choferExt.salario_base?"Salario: "+fmt2(choferExt.salario_base)+" EUR":"Sin salario base"}{choferExt.incentivo_pct?" - Incentivo: "+choferExt.incentivo_pct+"%":""}</div>
                 </div>
-                <button onClick={()=>setModalChofer(true)} style={{...S.btn,background:"rgba(20,184,166,.08)",border:"1px solid rgba(20,184,166,.20)",color:"var(--accent-xl)",fontSize:12}}>Config.</button>
+                <button onClick={()=>setModalChofer(true)} style={{...S.btn,background:"var(--accent-a08)",border:"1px solid var(--accent-a20)",color:"var(--accent-xl)",fontSize:12}}>Config.</button>
               </div>
             )}
           </div>
@@ -574,13 +574,13 @@ export default function HojasRuta(){
                     <tr key={l}><td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{l}</td><td style={{...S.td,color:"var(--text5)",fontSize:11}}>{d}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{v} EUR</td></tr>
                   ))}
                   <tr style={{background:"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"#ef4444"}} colSpan={2}>TOTAL COSTES</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:15,color:"#ef4444"}}>{fmt2(hoja.totalCostes)} EUR</td></tr>
-                  <tr style={{background:hoja.margen>=0?"linear-gradient(90deg, rgba(20,184,166,.12), rgba(20,184,166,.05))":"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"var(--accent-xl)"}} colSpan={2}>MARGEN BRUTO</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:16,color:hoja.margen>=0?"var(--accent-xl)":"#ef4444"}}>{fmt2(hoja.margen)} EUR</td></tr>
+                  <tr style={{background:hoja.margen>=0?"linear-gradient(90deg, var(--accent-a12), var(--accent-a05))":"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"var(--accent-xl)"}} colSpan={2}>MARGEN BRUTO</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:16,color:hoja.margen>=0?"var(--accent-xl)":"#ef4444"}}>{fmt2(hoja.margen)} EUR</td></tr>
                 </tbody></table>
               </div>
               <div style={{...S.card,padding:"20px 24px"}}>
                 <div style={{fontWeight:900,fontSize:13,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".04em",marginBottom:14}}>Viajes del periodo ({hoja.viajes})</div>
                 {hoja.pedVeh.length===0?(<div style={{padding:"32px 20px",textAlign:"center",color:"var(--text5)",display:"flex",alignItems:"center",justifyContent:"center",gap:20}}>
-                  <div style={{width:58,height:58,borderRadius:"50%",background:"rgba(20,184,166,.10)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center"}}><RouteSheetIcon icon="doc" /></div>
+                  <div style={{width:58,height:58,borderRadius:"50%",background:"var(--accent-a10)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center"}}><RouteSheetIcon icon="doc" /></div>
                   <div style={{textAlign:"left"}}><div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>Sin viajes en este periodo</div><div style={{fontSize:11,marginTop:4}}>Aun no se han registrado viajes en el rango de fechas seleccionado.</div></div>
                 </div>):(
                   <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>N</th><th style={S.th}>Fecha</th><th style={S.th}>Origen / Destino</th><th style={S.th}>Cliente</th><th style={S.th}>Km</th><th style={S.th}>Km vacio</th><th style={S.th}>Importe</th></tr></thead><tbody>

@@ -11,6 +11,7 @@ import {
   getVehiculos,
 } from "../services/api";
 import { notify } from "../services/notify";
+import { formatMatricula } from "../utils/formatos";
 import { useAuth } from "../context/AuthContext";
 
 const S = {
@@ -203,7 +204,7 @@ export default function AppMecanico() {
 
         {tab === "trabajos" && (
           <Section title="Comenzar reparacion">
-            <Field label="Vehiculo / matricula" value={otForm.vehiculo_matricula} onChange={v=>setOtForm(p=>({...p,vehiculo_matricula:v}))} placeholder="1234-ABC" />
+            <Field label="Vehiculo / matricula" value={otForm.vehiculo_matricula} onChange={v=>setOtForm(p=>({...p,vehiculo_matricula:formatMatricula(v)}))} placeholder="1234-ABC" />
             <Field label="Tipo" value={otForm.tipo} onChange={v=>setOtForm(p=>({...p,tipo:v}))} />
             <Field label="Descripcion" value={otForm.descripcion} onChange={v=>setOtForm(p=>({...p,descripcion:v}))} placeholder="Averia, revision, mantenimiento..." />
             <button style={{...S.btn,...S.primary}} onClick={()=>comenzarOt()}>Comenzar trabajo</button>

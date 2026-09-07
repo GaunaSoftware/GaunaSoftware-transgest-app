@@ -659,7 +659,7 @@ export default function Solicitudes() {
             Bandeja de peticiones de clientes y proveedores asociadas a viajes.
           </div>
         </div>
-        <button onClick={cargar} style={{...S.btn,color:"#0f766e"}}>Actualizar</button>
+        <button onClick={cargar} style={{...S.btn,color:"var(--accent)"}}>Actualizar</button>
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:16, marginBottom:28 }}>
@@ -693,7 +693,7 @@ export default function Solicitudes() {
             ["rechazadas", `Rechazadas (${resumen.rechazadas})`],
           ].map(([key, label]) => (
             <button key={key} onClick={() => { setVista(key); setEstado(""); setSoloVencidas(false); }}
-              style={{ ...S.btn, border:"none", background:vista===key ? "linear-gradient(135deg,#0f766e,#0d9488)" : "transparent", color:vista===key ? "#fff" : "#64748b", padding:"10px 16px", boxShadow:"none" }}>
+              style={{ ...S.btn, border:"none", background:vista===key ? "linear-gradient(135deg,var(--accent),#0d9488)" : "transparent", color:vista===key ? "#fff" : "#64748b", padding:"10px 16px", boxShadow:"none" }}>
               {label}
             </button>
           ))}
@@ -716,8 +716,8 @@ export default function Solicitudes() {
           <option value="carga">Orden: fecha carga</option>
           <option value="cliente">Orden: cliente</option>
         </select>
-        <button onClick={exportarCsv} style={{...S.btn,color:"#0f766e"}}>Exportar CSV</button>
-        <button onClick={exportarInformeHtml} style={{...S.btn,color:"#0f766e"}}>Informe HTML</button>
+        <button onClick={exportarCsv} style={{...S.btn,color:"var(--accent)"}}>Exportar CSV</button>
+        <button onClick={exportarInformeHtml} style={{...S.btn,color:"var(--accent)"}}>Informe HTML</button>
         {(q || estado || soloVencidas || enRechazadas) && (
           <button onClick={()=>{setQ("");setEstado("");setSoloVencidas(false);setVista("activas");}} style={S.btn}>Limpiar</button>
         )}
@@ -725,7 +725,7 @@ export default function Solicitudes() {
       {!loading && sols.length > 0 && (
         <div style={{ margin:"0 0 16px", fontSize:14, color:"#64748b" }}>
           {enRechazadas ? "Rechazadas: " : "Activas: "}
-          Mostrando <strong style={{color:"#0f766e"}}>{visibles.length}</strong> de {totalVistaActual} solicitudes
+          Mostrando <strong style={{color:"var(--accent)"}}>{visibles.length}</strong> de {totalVistaActual} solicitudes
           {soloVencidas ? " · solo sin atender mas de 24 h" : ""}
         </div>
       )}
@@ -734,7 +734,7 @@ export default function Solicitudes() {
       {!loading && (sols.length === 0 || visibles.length === 0) && (
         <div style={{ ...S.card, textAlign: "center", color: "#64748b", padding: "58px 24px", minHeight: 250, display:"grid", placeItems:"center" }}>
           <div>
-            <div style={{width:128,height:128,borderRadius:"50%",background:"rgba(15,118,110,.10)",margin:"0 auto 18px",display:"grid",placeItems:"center",color:"#0f766e",fontSize:64}}>▱</div>
+            <div style={{width:128,height:128,borderRadius:"50%",background:"rgba(15,118,110,.10)",margin:"0 auto 18px",display:"grid",placeItems:"center",color:"var(--accent)",fontSize:64}}>▱</div>
             <div style={{fontSize:22,fontWeight:900,color:"#0f172a",marginBottom:8}}>
               {enRechazadas && sols.length > 0 ? "No hay solicitudes rechazadas." : "No hay solicitudes con esos filtros."}
             </div>
@@ -846,7 +846,7 @@ export default function Solicitudes() {
                 </button>
               )}
               {!rejected && (
-                <button onClick={() => abrirEditor(sol)} disabled={trabajando === sol.id} style={{ ...S.btn, color:"#0f766e", borderColor:"rgba(15,118,110,.25)" }}>
+                <button onClick={() => abrirEditor(sol)} disabled={trabajando === sol.id} style={{ ...S.btn, color:"var(--accent)", borderColor:"rgba(15,118,110,.25)" }}>
                   Editar
                 </button>
               )}
@@ -1002,7 +1002,7 @@ export default function Solicitudes() {
                         <div style={{ fontWeight:900, color:"var(--text)", fontSize:13 }}>{doc.nombre || "orden-carga"}</div>
                         <div style={{ color:"var(--text5)", fontSize:11 }}>{doc.file_mime || "archivo"} · {doc.file_size_kb || "-"} KB</div>
                       </div>
-                      <button type="button" onClick={()=>descargarDocumentoSolicitud(doc)} style={{ ...S.btn, color:"#0f766e" }}>Descargar</button>
+                      <button type="button" onClick={()=>descargarDocumentoSolicitud(doc)} style={{ ...S.btn, color:"var(--accent)" }}>Descargar</button>
                     </div>
                   ))}
                 </div>
@@ -1010,7 +1010,7 @@ export default function Solicitudes() {
             </div>
             <div style={{ display:"flex", justifyContent:"flex-end", gap:10, flexWrap:"wrap", marginTop:16 }}>
               <button type="button" onClick={()=>setEditando(null)} style={S.btn}>Cancelar</button>
-              <button type="button" onClick={guardarEditor} disabled={trabajando === editando.id} style={{ ...S.btn, background:"#0f766e", color:"#fff", borderColor:"#0f766e", opacity: trabajando === editando.id ? .65 : 1 }}>
+              <button type="button" onClick={guardarEditor} disabled={trabajando === editando.id} style={{ ...S.btn, background:"var(--accent)", color:"#fff", borderColor:"var(--accent)", opacity: trabajando === editando.id ? .65 : 1 }}>
                 {trabajando === editando.id ? "Guardando..." : "Guardar cambios"}
               </button>
             </div>

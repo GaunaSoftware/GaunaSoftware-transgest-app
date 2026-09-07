@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getFacturas, getPedidos, getVehiculos, getChoferes, getTallerEstado, getInformeGestion, getBiResumen, getRentabilidadOperativa, getCargasRetorno, prepararSolicitudRetornoCarrier, enviarSolicitudRetornoCarrier, actualizarSolicitudRetornoCarrier, getScoringOperativo, getEmisionesOperativas, getDatosMaestrosReadiness, getCumplimientoEuropeo, getObjetivos, setObjetivo, getEmpresaConfig, setConfigPrecios } from "../services/api";
+import { getFacturasTodas, getPedidosTodos, getVehiculos, getChoferes, getTallerEstado, getInformeGestion, getBiResumen, getRentabilidadOperativa, getCargasRetorno, prepararSolicitudRetornoCarrier, enviarSolicitudRetornoCarrier, actualizarSolicitudRetornoCarrier, getScoringOperativo, getEmisionesOperativas, getDatosMaestrosReadiness, getCumplimientoEuropeo, getObjetivos, setObjetivo, getEmpresaConfig, setConfigPrecios } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
@@ -212,7 +212,7 @@ export default function Informes() {
       try {
         const _tout = (pr, ms=8000) => Promise.race([pr, new Promise(r=>setTimeout(()=>r([]),ms))]);
           const [p,f,v,c,t,obj,cfgEmpresa,dm] = await Promise.all([
-            _tout(getPedidos().catch(()=>[])), getFacturas().catch(()=>[]),
+            _tout(getPedidosTodos({}, { silentError: true }).catch(()=>[])), getFacturasTodas({}, { silentError: true }).catch(()=>[]),
             getVehiculos().catch(()=>[]), getChoferes().catch(()=>[]),
             getTallerEstado().catch(()=>null),
             getObjetivos().catch(()=>({})),
@@ -673,7 +673,7 @@ export default function Informes() {
                 ))}
               </div>
 
-              <div style={{...S.card,borderColor:"rgba(20,184,166,.25)",background:"linear-gradient(135deg, rgba(20,184,166,.08), var(--card-bg))"}}>
+              <div style={{...S.card,borderColor:"var(--accent-a25)",background:"linear-gradient(135deg, var(--accent-a08), var(--card-bg))"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
                   <div>
                     <div style={S.sec}>VISION GERENCIA</div>

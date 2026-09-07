@@ -93,6 +93,17 @@ export default function Empresa() {
   const [logoMime, setLogoMime]     = useState("image/png");
   const [logoUploading, setLogoUploading] = useState(false);
   const esGerente = user?.rol === "gerente";
+  // Sesion de superadmin (soporte) impersonando la empresa: solo entonces se
+  // muestran los ajustes tecnicos/sensibles (Tesoreria, Email, WhatsApp, VERIFACTU
+  // /SII). Para el gerente normal quedan ocultos: los gestiona el superadmin.
+  const esSuperadmin = (() => {
+    try {
+      const t = getToken();
+      if (!t || t.split(".").length < 2) return false;
+      const payload = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      return !!payload.superadmin_impersonation;
+    } catch { return false; }
+  })();
   const empresaPlan = normalizePlan(user?.plan || getEmpresaPlanLocal());
   const puedePersonalizarColores = canUseCompanyPalette(empresaPlan);
 
@@ -354,9 +365,47 @@ export default function Empresa() {
     cargarCalendarioLaboral(false);
   }, [tab, cargarCalendarioLaboral]);
 
+  // Tipo de etiqueta: "categoria" (de vehiculo, se auto-pone por el tipo de camion)
+  // o "perfil" (de viaje, manual). Retrocompatible: las etiquetas antiguas sin
+  // tipo se clasifican por si tienen "auto por vehiculo" (categoria) o no (perfil).
+  const etiquetaTipo = (e) => e?.tipo === "perfil" ? "perfil"
+    : e?.tipo === "categoria" ? "categoria"
+    : (String(e?.auto_match || "").trim() ? "categoria" : "perfil");
+  function addEtiquetaTrafico(tipo = "categoria") {
+    const palette = ["#14b8a6","#f59e0b","#3b82f6","#ef4444","#8b5cf6","#10b981","#ec4899","#0ea5e9"];
+    setCfgTrafico(p=>{
+      const list = Array.isArray(p.etiquetas_catalogo)?p.etiquetas_catalogo:[];
+      return {...p, etiquetas_catalogo:[...list,{nombre:"",color:palette[list.length%palette.length],auto_match:"",tipo}]};
+    });
+  }
+  function updateEtiquetaTrafico(idx, patch) {
+    setCfgTrafico(p=>{
+      const list = Array.isArray(p.etiquetas_catalogo)?[...p.etiquetas_catalogo]:[];
+      if(!list[idx]) return p;
+      list[idx] = {...list[idx], ...patch};
+      return {...p, etiquetas_catalogo:list};
+    });
+  }
+  function removeEtiquetaTrafico(idx) {
+    setCfgTrafico(p=>{
+      const list = Array.isArray(p.etiquetas_catalogo)?p.etiquetas_catalogo:[];
+      return {...p, etiquetas_catalogo:list.filter((_,i)=>i!==idx)};
+    });
+  }
+
   async function guardarTrafico() {
     try {
-      const next = {...cfgTrafico,paises_trabajo:getEnabledEuropeCountries({cfg_trafico:cfgTrafico})};
+      const seen = new Set();
+      const etiquetasLimpias = (Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[])
+        .map(e=>{ const tipo = etiquetaTipo(e); return {nombre:String(e?.nombre||"").trim(), color:e?.color||"#14b8a6", tipo, auto_match: tipo==="perfil" ? "" : String(e?.auto_match||"").trim().toLowerCase()}; })
+        .filter(e=>{ const k=e.nombre.toLowerCase(); if(!e.nombre||seen.has(k)) return false; seen.add(k); return true; });
+      const numOr = (v, def) => { const n = Number(v); return (v === "" || v == null || !Number.isFinite(n) || n <= 0) ? def : n; };
+      const next = {...cfgTrafico,
+        velocidad_media: numOr(cfgTrafico.velocidad_media, 80),
+        tiempo_descarga: numOr(cfgTrafico.tiempo_descarga, 60),
+        horas_pausa: numOr(cfgTrafico.horas_pausa, 4.5),
+        min_pausa: numOr(cfgTrafico.min_pausa, 45),
+        etiquetas_catalogo:etiquetasLimpias,paises_trabajo:getEnabledEuropeCountries({cfg_trafico:cfgTrafico})};
       await setConfigTrafico(next);
       setCfgTrafico(next);
       if (typeof window !== "undefined") window.__TMS_EMPRESA_CONFIG = {...(window.__TMS_EMPRESA_CONFIG || {}), cfg_trafico:next};
@@ -700,14 +749,16 @@ export default function Empresa() {
 
   const TABS = [
     { id:"empresa", l:"Datos fiscales" },
-    { id:"tesoreria", l:"Tesoreria" },
+    ...(esSuperadmin ? [{ id:"tesoreria", l:"Tesoreria" }] : []),
     { id:"sostenibilidad", l:"Sostenibilidad / CO2" },
     { id:"factura", l:"Configuración facturas" },
-    { id:"email",   l:"Email / Notificaciones" },
-    { id:"whatsapp", l:"WhatsApp" },
-    { id:"avisos_cfg", l:"Avisos personalizados" },
+    ...(esSuperadmin ? [{ id:"email", l:"Email / Notificaciones" }, { id:"whatsapp", l:"WhatsApp" }] : []),
     { id:"trafico_cfg", l:"Config. Tráfico" },
   ];
+  useEffect(() => {
+    if (!TABS.some(t => t.id === tab)) setTab("empresa");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, esSuperadmin]);
 
   const activePalette = normalizePaletteConfig(empresa.paleta_colores);
 
@@ -901,7 +952,7 @@ export default function Empresa() {
                     disabled={!puedePersonalizarColores}
                     value={activePalette[key]}
                     onChange={e => setEmpresaPaletteColor(key, e.target.value)}
-                    placeholder="#0f766e"
+                    placeholder="var(--accent)"
                     maxLength={7}
                     style={{...S.inp,height:34,fontSize:12,textTransform:"uppercase",opacity:puedePersonalizarColores ? 1 : .55}}
                   />
@@ -1644,7 +1695,7 @@ export default function Empresa() {
             </div>
           </div>
 
-          <div style={S.section}>
+          <div style={{...S.section, ...(esSuperadmin ? {} : {display:"none"})}}>
             <div style={S.secTitle}>AEAT - VERIFACTU / SII</div>
             <div style={S.info}>
               Configura el modo fiscal de esta empresa. Al emitir facturas, TransGest ya deja creado el registro fiscal y la cola de envio correspondiente.
@@ -2186,7 +2237,7 @@ export default function Empresa() {
             )}
           </div>
 
-          <div style={S.section}>
+          <div style={{...S.section, ...(esSuperadmin ? {} : {display:"none"})}}>
             <div style={S.secTitle}>Documento de Control Digital (DeCA)</div>
             <div style={S.info}>
               Preparacion del documento de control electronico para transporte por carretera. Puedes trabajar con codigo numerico o con QR enlazado a una URL HTTPS en un dominio comunicado.
@@ -2396,7 +2447,7 @@ export default function Empresa() {
             </div>
           </div>
 
-          <div style={S.section}>
+          <div style={{...S.section, ...(esSuperadmin ? {} : {display:"none"})}}>
             <div style={S.secTitle}>Normativa rectificativas (AEAT)</div>
             <div style={{ fontSize:12, color:"var(--text3)", lineHeight:1.7 }}>
               <p style={{ marginBottom:8 }}>Según el <strong style={{ color:"var(--text2)" }}>Art. 15 RD 1619/2012</strong>, es <strong style={{ color:"#f97316" }}>obligatorio</strong> emitir factura rectificativa cuando:</p>
@@ -2763,7 +2814,7 @@ export default function Empresa() {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
             <div><label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10}}>Velocidad media camión (km/h)</label>
               <input type="number" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
-                value={cfgTrafico.velocidad_media||80} onChange={e=>setCfgTrafico(p=>({...p,velocidad_media:Number(e.target.value)}))}/>
+                value={cfgTrafico.velocidad_media ?? ""} placeholder="80" onChange={e=>setCfgTrafico(p=>({...p,velocidad_media: e.target.value === "" ? "" : Number(e.target.value)}))}/>
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 80 km/h</div>
               <div style={{marginTop:8,padding:"9px 11px",background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.15)",borderRadius:8,fontSize:11,color:"var(--text3)",lineHeight:1.45}}>
                 Ejemplo: Madrid->Barcelona (620 km) = 620÷80 = 7,75h + 1 pausa de 45min = <strong>8h 30min</strong> de tránsito
@@ -2771,17 +2822,17 @@ export default function Empresa() {
             </div>
             <div><label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10}}>Tiempo descarga (minutos)</label>
               <input type="number" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
-                value={cfgTrafico.tiempo_descarga||60} onChange={e=>setCfgTrafico(p=>({...p,tiempo_descarga:Number(e.target.value)}))}/>
+                value={cfgTrafico.tiempo_descarga ?? ""} placeholder="60" onChange={e=>setCfgTrafico(p=>({...p,tiempo_descarga: e.target.value === "" ? "" : Number(e.target.value)}))}/>
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 60 min (1 hora)</div>
             </div>
             <div><label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10}}>Pausa obligatoria cada (horas)</label>
               <input type="number" step="0.5" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
-                value={cfgTrafico.horas_pausa||4.5} onChange={e=>setCfgTrafico(p=>({...p,horas_pausa:Number(e.target.value)}))}/>
+                value={cfgTrafico.horas_pausa ?? ""} placeholder="4.5" onChange={e=>setCfgTrafico(p=>({...p,horas_pausa: e.target.value === "" ? "" : Number(e.target.value)}))}/>
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 4,5 h (normativa)</div>
             </div>
             <div><label style={{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10}}>Duración pausa (minutos)</label>
               <input type="number" style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"7px 10px",borderRadius:7,width:"100%",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif",fontSize:13}}
-                value={cfgTrafico.min_pausa||45} onChange={e=>setCfgTrafico(p=>({...p,min_pausa:Number(e.target.value)}))}/>
+                value={cfgTrafico.min_pausa ?? ""} placeholder="45" onChange={e=>setCfgTrafico(p=>({...p,min_pausa: e.target.value === "" ? "" : Number(e.target.value)}))}/>
               <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Por defecto: 45 min</div>
             </div>
           </div>
@@ -2792,7 +2843,7 @@ export default function Empresa() {
                 <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>Solo los paises activados apareceran en los puntos de carga y descarga de Pedidos.</div>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:["EspaÃ±a"]}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Solo Espana</button>
+                <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:["España"]}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Solo España</button>
                 <button type="button" onClick={()=>setCfgTrafico(p=>({...p,paises_trabajo:EUROPE_COUNTRIES}))} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Activar Europa</button>
               </div>
             </div>
@@ -2800,7 +2851,7 @@ export default function Empresa() {
               {EUROPE_COUNTRIES.map(country => {
                 const selected = getEnabledEuropeCountries({cfg_trafico:cfgTrafico}).includes(country);
                 return (
-                  <label key={country} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",borderRadius:8,border:`1px solid ${selected ? "rgba(20,184,166,.36)" : "var(--border2)"}`,background:selected ? "rgba(20,184,166,.08)" : "var(--bg3)",fontSize:12,color:"var(--text)",cursor:"pointer"}}>
+                  <label key={country} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",borderRadius:8,border:`1px solid ${selected ? "var(--accent-a36)" : "var(--border2)"}`,background:selected ? "var(--accent-a08)" : "var(--bg3)",fontSize:12,color:"var(--text)",cursor:"pointer"}}>
                     <input
                       type="checkbox"
                       checked={selected}
@@ -2810,7 +2861,7 @@ export default function Empresa() {
                         const next = e.target.checked
                           ? Array.from(new Set([...current, canonical]))
                           : current.filter(x => x !== canonical);
-                        return {...prev,paises_trabajo:next.length ? next : ["EspaÃ±a"]};
+                        return {...prev,paises_trabajo:next.length ? next : ["España"]};
                       })}
                       style={{accentColor:"var(--accent)"}}
                     />
@@ -2832,6 +2883,75 @@ export default function Empresa() {
               <span style={{display:"block",fontSize:11,color:"var(--text4)",marginTop:2}}>Si esta activo, el menu contextual de pedidos pedira un motivo y lo guardara en el viaje y en el historial.</span>
             </span>
           </label>
+
+          <div style={{marginTop:16,padding:"12px 14px",borderRadius:9,border:"1px solid var(--border2)",background:"var(--bg4)"}}>
+            <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+              <input
+                type="checkbox"
+                checked={cfgTrafico.auto_incidencia !== "false" && cfgTrafico.auto_incidencia !== false}
+                onChange={e=>setCfgTrafico(p=>({...p,auto_incidencia:e.target.checked?"true":"false"}))}
+                style={{marginTop:2,accentColor:"var(--accent)"}}
+              />
+              <span>
+                <span style={{display:"block",fontSize:13,fontWeight:900,color:"var(--text)"}}>Marcar incidencia automatica si vence la entrega</span>
+                <span style={{display:"block",fontSize:11,color:"var(--text4)",marginTop:2}}>Los viajes activos que superen su fecha de entrega prevista sin marcarse como entregados pasan solos a incidencia.</span>
+              </span>
+            </label>
+            {(cfgTrafico.auto_incidencia !== "false" && cfgTrafico.auto_incidencia !== false) && (
+              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,paddingLeft:28}}>
+                <span style={{fontSize:12,color:"var(--text3)"}}>Avisar tras</span>
+                <input type="number" min="1" max="60" value={cfgTrafico.auto_incidencia_dias || 1}
+                  onChange={e=>setCfgTrafico(p=>({...p,auto_incidencia_dias:String(Math.max(1,Math.min(60,Number(e.target.value)||1)))}))}
+                  style={{width:64,padding:"6px 8px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:13,textAlign:"center"}}/>
+                <span style={{fontSize:12,color:"var(--text3)"}}>dia(s) de la fecha de entrega.</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{marginTop:20,paddingTop:18,borderTop:"1px solid var(--border2)"}}>
+            <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Etiquetas de tráfico</div>
+            <div style={{fontSize:11,color:"var(--text4)",marginTop:3,lineHeight:1.5,maxWidth:660}}>
+              Dos grupos que puedes <b>combinar</b> al dar acceso a cada usuario de tráfico en Usuarios (verá los pedidos con cualquiera de las etiquetas que le marques). Las <b>categorías de vehículo</b> (bañera, lona, cisterna) se ponen solas al asignar un camión cuyo tipo/clase contenga el texto de «Auto por vehículo». Los <b>perfiles de viaje</b> (salida, retorno…) se marcan a mano en cada pedido.
+            </div>
+
+            {/* Categorías de vehículo */}
+            <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",margin:"14px 0 4px"}}>Categorías de vehículo</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).map((et,idx)=> etiquetaTipo(et)!=="categoria" ? null : (
+                <div key={idx} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:9,padding:"8px 10px"}}>
+                  <input type="color" value={et.color||"#14b8a6"} onChange={e=>updateEtiquetaTrafico(idx,{color:e.target.value})} title="Color" style={{width:34,height:30,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
+                  <input value={et.nombre||""} onChange={e=>updateEtiquetaTrafico(idx,{nombre:e.target.value})} placeholder="Nombre (Bañera, Lona, Cisterna...)" style={{flex:"1 1 150px",minWidth:120,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
+                  <input value={et.auto_match||""} onChange={e=>updateEtiquetaTrafico(idx,{auto_match:e.target.value})} placeholder="Auto por vehículo: bañera, lona..." style={{flex:"2 1 220px",minWidth:160,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
+                  <button type="button" onClick={()=>removeEtiquetaTrafico(idx)} title="Eliminar" style={{width:30,height:30,borderRadius:7,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.1)",color:"#ef4444",fontSize:13,fontWeight:900,cursor:"pointer"}}>✕</button>
+                </div>
+              ))}
+              {!(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).some(e=>etiquetaTipo(e)==="categoria") && (
+                <div style={{fontSize:11,color:"var(--text5)"}}>Sin categorías. Añade una (ej. Bañera, con «bañera» en auto por vehículo).</div>
+              )}
+            </div>
+            <button type="button" onClick={()=>addEtiquetaTrafico("categoria")} style={{marginTop:8,padding:"6px 12px",borderRadius:7,border:"1px dashed var(--border2)",background:"transparent",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+              + Añadir categoría
+            </button>
+
+            {/* Perfiles de viaje */}
+            <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",margin:"18px 0 4px"}}>Perfiles de viaje</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).map((et,idx)=> etiquetaTipo(et)!=="perfil" ? null : (
+                <div key={idx} style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:9,padding:"8px 10px"}}>
+                  <input type="color" value={et.color||"#14b8a6"} onChange={e=>updateEtiquetaTrafico(idx,{color:e.target.value})} title="Color" style={{width:34,height:30,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
+                  <input value={et.nombre||""} onChange={e=>updateEtiquetaTrafico(idx,{nombre:e.target.value})} placeholder="Nombre (Salida, Retorno...)" style={{flex:"1 1 200px",minWidth:120,padding:"7px 9px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:12}}/>
+                  <button type="button" onClick={()=>removeEtiquetaTrafico(idx)} title="Eliminar" style={{width:30,height:30,borderRadius:7,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.1)",color:"#ef4444",fontSize:13,fontWeight:900,cursor:"pointer"}}>✕</button>
+                </div>
+              ))}
+              {!(Array.isArray(cfgTrafico.etiquetas_catalogo)?cfgTrafico.etiquetas_catalogo:[]).some(e=>etiquetaTipo(e)==="perfil") && (
+                <div style={{fontSize:11,color:"var(--text5)"}}>Sin perfiles. Añade uno (ej. Salida, Retorno).</div>
+              )}
+            </div>
+            <button type="button" onClick={()=>addEtiquetaTrafico("perfil")} style={{marginTop:8,padding:"6px 12px",borderRadius:7,border:"1px dashed var(--border2)",background:"transparent",color:"var(--accent)",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+              + Añadir perfil
+            </button>
+          </div>
+
           <button onClick={guardarTrafico} style={{marginTop:14,padding:"7px 18px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>
             Guardar configuración
           </button>
@@ -2840,7 +2960,7 @@ export default function Empresa() {
       )}
 
       {modalAviso && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&setModalAviso(false)}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setModalAviso(false)}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(480px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"var(--text)",marginBottom:14}}>{editAviso ? "Editar aviso" : "Nuevo aviso personalizado"}</div>
             <AvisoCfgForm

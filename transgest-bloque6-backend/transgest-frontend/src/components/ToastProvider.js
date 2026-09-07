@@ -147,7 +147,7 @@ export default function ToastProvider({ children }) {
     ? "#dc2626"
     : confirmState?.tone === "warning"
       ? "#d97706"
-      : "#0f766e";
+      : "var(--accent)";
 
   return (
     <ToastContext.Provider value={value}>
@@ -368,8 +368,8 @@ export default function ToastProvider({ children }) {
               <button
                 type="submit"
                 style={{
-                  border:"1px solid #0f766e",
-                  background:"#0f766e",
+                  border:"1px solid var(--accent)",
+                  background:"var(--accent)",
                   color:"#fff",
                   borderRadius:8,
                   padding:"8px 13px",

@@ -64,6 +64,44 @@ function countryCodeFor(value = "") {
   return COUNTRY_CODES[key] || "";
 }
 
+function isStreetSegment(segment = "") {
+  const normalized = normalizeGeoText(segment);
+  if (!normalized) return true;
+  if (/\d/.test(segment)) return true; // numero de portal / codigo postal
+  return /\b(?:autovia|autopista|avenida|av|calle|camino|carretera|ctra|km|kilometro|paseo|plaza|poligono|ronda|ruta|via)\b/.test(normalized);
+}
+
+// De una direccion "Calle Malaga 1, San Vicente" saca la CIUDAD ("San Vicente"),
+// no la calle. Convencion espanola: la poblacion/provincia va al final. Asi el
+// nombre de una calle (p.ej. "Calle Malaga") no secuestra el resultado hacia la
+// ciudad de Malaga. Devuelve "" si no hay un segmento de ciudad claro.
+function extractAddressLocality(query = "") {
+  const raw = String(query || "").trim();
+  if (!raw) return "";
+  const segments = raw.split(",").map(part => part.trim()).filter(Boolean);
+  // SIN comas: en espanol la poblacion suele ir DESPUES del numero de portal.
+  // "Calle Malaga 1 San Vicente" -> "San Vicente". Asi "Malaga" (la calle) no
+  // secuestra el resultado aunque no haya comas.
+  if (segments.length < 2) {
+    const after = raw.replace(/^.*\d+[a-zA-Z]?\s+/, "").trim();
+    if (after && after.toLowerCase() !== raw.toLowerCase()) {
+      const words = normalizeGeoText(after).split(" ").filter(Boolean);
+      if (words.length >= 1 && words.length <= 4 && !countryCodeFor(normalizeGeoText(after))) return after;
+    }
+    return "";
+  }
+  for (let i = segments.length - 1; i >= 0; i -= 1) {
+    const seg = segments[i];
+    const normalized = normalizeGeoText(seg);
+    if (!normalized) continue;
+    if (/^\d[\d\s]*$/.test(normalized)) continue; // solo numeros / codigo postal
+    if (isStreetSegment(seg)) continue;
+    if (countryCodeFor(normalized)) continue; // solo el pais
+    return seg;
+  }
+  return "";
+}
+
 function parsePlaceRequest(q = "", country = "", region = "") {
   let query = String(q || "").replace(/\s+/g, " ").trim();
   let regionHint = String(region || "").replace(/\s+/g, " ").trim();
@@ -82,6 +120,8 @@ function parsePlaceRequest(q = "", country = "", region = "") {
     country: String(country || "").replace(/\s+/g, " ").trim(),
     region: regionHint,
     localityOnly,
+    // Ciudad extraida de la direccion (manda sobre el nombre de la calle al puntuar).
+    locality: extractAddressLocality(query),
   };
 }
 
@@ -141,7 +181,10 @@ function scorePlaceCandidate(request, candidate = {}) {
   if (requestedCountry && candidateCountry && requestedCountry !== candidateCountry) return -1;
   if (!regionMatches(request.region, candidate.provincia || candidate.region, candidate.label)) return -1;
 
-  const requestedLocality = localityKey(request.query);
+  // Prioriza la CIUDAD extraida de la direccion sobre el texto completo, para que
+  // una calle llamada como otra ciudad (p.ej. "Calle Malaga" en San Vicente) no
+  // resuelva a esa otra ciudad.
+  const requestedLocality = localityKey(request.locality || request.query);
   const candidateLocality = localityKey(candidate.municipio || candidate.city || candidate.locality);
   const candidateAliases = (Array.isArray(candidate.aliases) ? candidate.aliases : [])
     .map(localityKey)

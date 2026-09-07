@@ -63,6 +63,10 @@ const integrationRoutes   = require("./routes/integration");
 const webhooksRoutes      = require("./routes/webhooks");
 
 const app  = express();
+// Hace que los errores de handlers async lleguen al gestor de errores global
+// (Express 4 no lo hace por si solo: sin esto, un handler async que lanza deja
+// la peticion colgada). Debe aplicarse antes de atender peticiones.
+require("./middleware/asyncErrors")(logger);
 const PORT = process.env.PORT || 3001;
 let httpServer = null;
 let shuttingDown = false;
@@ -354,8 +358,10 @@ app.use((err, req, res, next) => {
 
 // ── DB migrations on startup ──────────────────────────
 function captureStartupMigrationError(error) {
-  logger.error("[startup] DDL fallido: " + error.message);
-  throw error;
+  // NO abortar el arranque por una migracion fallida: un solo ALTER que falle no
+  // debe tumbar toda la API (crash-loop). Se registra y se continua; los handlers
+  // ya devuelven errores controlados si faltara una columna.
+  logger.error("[startup] DDL fallido (se continua): " + error.message);
 }
 
 async function applyMigrations() {
@@ -377,6 +383,9 @@ async function applyMigrations() {
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_facturable NUMERIC").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS minimo_unidades NUMERIC").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    // Grupos de tarifas: varias rutas (distintos puntos de carga/descarga) que se
+    // asocian y comparten precio. Comparten un mismo grupo_id.
+    await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS grupo_id UUID").catch(captureStartupMigrationError);
     await db.query("UPDATE rutas SET activa=true WHERE activa IS NULL").catch(captureStartupMigrationError);
     await db.query(`
       CREATE TABLE IF NOT EXISTS ruta_precios_cliente (
@@ -402,6 +411,9 @@ async function applyMigrations() {
     await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_ruta_precios_cliente_cliente ON ruta_precios_cliente(cliente_id)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
+    // Clientes que han adoptado un punto (ademas del dueno/general): un punto puede
+    // aparecer como "del cliente" en varios clientes a la vez sin dejar de ser general.
+    await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS clientes_ids UUID[] DEFAULT '{}'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS direccion_key TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS remolque_id UUID REFERENCES vehiculos(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo = true").catch(captureStartupMigrationError);
@@ -530,8 +542,59 @@ async function applyMigrations() {
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS aviso_cobro_dias INTEGER NOT NULL DEFAULT 7").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS referencia_cliente VARCHAR(255)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS vencimiento VARCHAR(80)").catch(captureStartupMigrationError);
+    // IRPF y regimen de IVA en la factura. Faltaban y el INSERT de POST /facturas
+    // los referencia: sin ellos, crear cualquier factura/borrador fallaba.
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS tipo_irpf NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS cuota_irpf NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS iva_regimen VARCHAR(30) NOT NULL DEFAULT 'general'").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS observaciones TEXT").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS notas_internas TEXT").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS created_by UUID").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS updated_by UUID").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS forma_pago VARCHAR(80)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS base_imponible NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS tipo_iva NUMERIC DEFAULT 21").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS cuota_iva NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS total NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
+    // Tablas de detalle de la factura: columnas que usa el INSERT del alta.
+    await db.query("ALTER TABLE factura_lineas ADD COLUMN IF NOT EXISTS orden INTEGER DEFAULT 0").catch(captureStartupMigrationError);
+    // La columna legacy "importe" es NOT NULL; con DEFAULT 0 no rompe si alguna
+    // ruta inserta lineas sin calcular el importe.
+    await db.query("ALTER TABLE factura_lineas ALTER COLUMN importe SET DEFAULT 0").catch(captureStartupMigrationError);
+    // La tabla factura_extracostes no existia; se crea (la usa el INSERT del alta
+    // de factura). El ALTER posterior queda como red de seguridad.
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS factura_extracostes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        factura_id UUID NOT NULL REFERENCES facturas(id) ON DELETE CASCADE,
+        tipo VARCHAR(40),
+        concepto TEXT,
+        importe NUMERIC DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `).catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE factura_extracostes ADD COLUMN IF NOT EXISTS tipo VARCHAR(40)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ALTER COLUMN vencimiento TYPE VARCHAR(80) USING vencimiento::text").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE").catch(captureStartupMigrationError);
+    // Traspaso a contabilidad externa (Contasol/Factusol, a3...): marca que la
+    // factura ya se volco, para no duplicar asientos en el siguiente envio.
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS contabilidad_exportada_at TIMESTAMPTZ").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS contabilidad_lote_id UUID").catch(captureStartupMigrationError);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS contabilidad_export_lotes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        formato VARCHAR(30) NOT NULL DEFAULT 'contasol',
+        desde DATE,
+        hasta DATE,
+        total_facturas INTEGER NOT NULL DEFAULT 0,
+        importe_total NUMERIC(14,2) NOT NULL DEFAULT 0,
+        creado_por UUID,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `).catch(captureStartupMigrationError);
+    await db.query("CREATE INDEX IF NOT EXISTS idx_contabilidad_lotes_empresa ON contabilidad_export_lotes(empresa_id, created_at DESC)").catch(captureStartupMigrationError);
+    await db.query("CREATE INDEX IF NOT EXISTS idx_facturas_contab_pendientes ON facturas(empresa_id, contabilidad_exportada_at)").catch(captureStartupMigrationError);
     await db.query("UPDATE facturas SET vencimiento=fecha_vencimiento::text WHERE vencimiento IS NULL AND fecha_vencimiento IS NOT NULL").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_facturas_revision_cobro ON facturas(empresa_id, revision_cobro_at) WHERE estado <> 'cobrada'").catch(captureStartupMigrationError);
     await db.query(`
@@ -593,6 +656,9 @@ async function applyMigrations() {
     await db.query("CREATE INDEX IF NOT EXISTS idx_factura_eventos_fiscales_registro ON factura_eventos_fiscales(registro_id, created_at DESC)").catch(captureStartupMigrationError);
     // Schema additions
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS email_admin VARCHAR(200)").catch(captureStartupMigrationError);
+    // Nombre fiscal (razon social). Lo usan login-brand y la facturacion; faltaba
+    // la columna y generaba 'column e.razon_social does not exist' en cada login.
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS razon_social VARCHAR(255)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS dominio VARCHAR(100)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'basico'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'activo'").catch(captureStartupMigrationError);
@@ -635,6 +701,7 @@ async function applyMigrations() {
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS web TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS contacto_telefono VARCHAR(60)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pendiente_revision BOOLEAN DEFAULT false").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS mercancia_habitual TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS calle VARCHAR(200)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS num_ext VARCHAR(30)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS codigo_postal VARCHAR(20)").catch(captureStartupMigrationError);
@@ -677,6 +744,11 @@ async function applyMigrations() {
       END $$;
     `).catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS origen_pais VARCHAR(80) DEFAULT 'España'").catch(captureStartupMigrationError);
+    // Etiquetas de trafico del pedido (tipo de vehiculo + operativas). Sirven
+    // para separar vistas por perfil de tráfico.
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS etiquetas TEXT[] NOT NULL DEFAULT '{}'").catch(captureStartupMigrationError);
+    // Etiquetas de trafico configurables por empresa (lista + mapa clase->etiqueta).
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_etiquetas_trafico JSONB NOT NULL DEFAULT '{}'::jsonb").catch(captureStartupMigrationError);
     await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'incidencia'").catch(captureStartupMigrationError);
     await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'espera_carga'").catch(captureStartupMigrationError);
     await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'cargando'").catch(captureStartupMigrationError);
@@ -907,6 +979,17 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS km_vacio NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS volumen NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metros_lineales NUMERIC(10,2)").catch(captureStartupMigrationError);
+    // Detalle de la carga para el grupaje (ocupacion real del remolque).
+    // Grupaje provisional: agrupado y visible, pero aun sin confirmar.
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS grupaje_borrador BOOLEAN DEFAULT false").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS palets_tipo VARCHAR(20)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS palets_cantidad INTEGER").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS palets_apilables BOOLEAN DEFAULT false").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_largo_m NUMERIC(8,2)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_ancho_m NUMERIC(8,2)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS carga_alto_m NUMERIC(8,2)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS temperatura_c NUMERIC(5,1)").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS facturacion_mes DATE").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_precio VARCHAR(50) DEFAULT 'viaje'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_unitario NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_iva NUMERIC(5,2) NOT NULL DEFAULT 21").catch(captureStartupMigrationError);
@@ -933,9 +1016,13 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS firma_hash VARCHAR(64)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS foto_entrega TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS condiciones_adicionales TEXT").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nota_visible BOOLEAN NOT NULL DEFAULT false").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS ultima_posicion VARCHAR(100)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS posicion_ts TIMESTAMPTZ").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
+    // Proveedor habitual invitado: usuario ligado a un colaborador, que solo ve
+    // los viajes que tiene asignados ese colaborador.
+    await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS colaborador_id UUID REFERENCES colaboradores(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
     await db.query(`
       CREATE TABLE IF NOT EXISTS route_optimizations (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1080,6 +1167,8 @@ async function applyMigrations() {
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS paralizacion_horas NUMERIC(6,2) DEFAULT 0").catch(captureStartupMigrationError);
           await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_colaborador NUMERIC(10,2)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS matricula_colaborador VARCHAR(60)").catch(captureStartupMigrationError);
+    // El proveedor puede rechazar el viaje desde su portal (enlace temporal).
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_rechazado_at TIMESTAMPTZ").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS remolque_matricula_colaborador VARCHAR(60)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_nombre VARCHAR(120)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS conductor_efectivo_apellidos VARCHAR(180)").catch(captureStartupMigrationError);
@@ -1236,6 +1325,35 @@ async function applyMigrations() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `).catch(captureStartupMigrationError);
+
+    // ── Recuperacion de acceso de SUPERADMIN por variable de entorno ──
+    // Si se definen SUPERADMIN_BOOTSTRAP_EMAIL y SUPERADMIN_BOOTSTRAP_PASSWORD,
+    // al arrancar se crea ese superadmin (o se le resetea la contrasena). Sirve
+    // para recuperar el acceso si se olvida la contrasena, sin tocar la BD. La
+    // contrasena la fija el operador en el entorno (Render); el codigo solo la
+    // hashea. Recomendado: quitar las variables despues de recuperar el acceso.
+    try {
+      const saEmail = String(process.env.SUPERADMIN_BOOTSTRAP_EMAIL || "").trim().toLowerCase();
+      const saPass = String(process.env.SUPERADMIN_BOOTSTRAP_PASSWORD || "");
+      if (saEmail && saPass) {
+        const bcryptSa = require("bcryptjs");
+        const hash = await bcryptSa.hash(saPass, 12);
+        const { rows: saExist } = await db.query("SELECT id FROM superadmins WHERE LOWER(email)=$1", [saEmail]);
+        if (saExist[0]) {
+          await db.query("UPDATE superadmins SET password_hash=$1, activo=true WHERE id=$2", [hash, saExist[0].id]);
+          logger.info(`[startup] Superadmin ${saEmail}: contrasena restablecida por variable de entorno.`);
+        } else {
+          await db.query(
+            "INSERT INTO superadmins (nombre,email,password_hash,rol,activo) VALUES ($1,$2,$3,'superadmin',true)",
+            ["Superadmin", saEmail, hash]
+          );
+          logger.info(`[startup] Superadmin ${saEmail}: creado por variable de entorno.`);
+        }
+      }
+    } catch (e) {
+      logger.error("[startup] bootstrap superadmin fallo (se continua): " + e.message);
+    }
+
     logger.info("✅ DB indexes + schema ready");
   } catch (e) {
     logger.error("[startup] migration failure: " + e.message);
@@ -1307,6 +1425,7 @@ async function startServer() {
     try { backupService.startScheduler(); } catch (e) { logger.warn("Backup: " + e.message); }
     try { fiscalScheduler.startScheduler(); } catch (e) { logger.warn("Fiscal: " + e.message); }
     try { pedidosRoutes.startAlbaranesReminderScheduler?.(); } catch (e) { logger.warn("Albaranes: " + e.message); }
+    try { pedidosRoutes.startPedidosVencidosScheduler?.(); } catch (e) { logger.warn("Auto-incidencias: " + e.message); }
     try { billingReminders.startScheduler(); } catch (e) { logger.warn("Billing: " + e.message); }
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
   });

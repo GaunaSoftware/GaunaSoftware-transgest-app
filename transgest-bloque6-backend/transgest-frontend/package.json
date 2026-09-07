@@ -6,7 +6,6 @@
   "dependencies": {
     "@capacitor/android": "^8.4.1",
     "@capacitor/camera": "^8.2.0",
-    "@capacitor/cli": "^8.4.1",
     "@capacitor/core": "^8.4.1",
     "@capacitor/geolocation": "^8.2.0",
     "@capacitor/ios": "^8.4.1",
@@ -18,7 +17,6 @@
     "maplibre-gl": "5.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-scripts": "5.0.1",
     "recharts": "^2.12.7"
   },
   "scripts": {
@@ -32,6 +30,7 @@
     "mobile:icons": "npx @capacitor/assets generate --iconBackgroundColor '#0d1017' --splashBackgroundColor '#0d1017'",
     "desktop:build": "cross-env PUBLIC_URL=./ react-scripts build",
     "desktop:run": "electron .",
+    "desktop:portable": "npm run desktop:build && node scripts/pack-desktop.js",
     "desktop:dist": "npm run desktop:build && electron-builder --win --publish never",
     "test": "react-scripts test",
     "audit:alerts": "node scripts/audit_alerts.js",
@@ -61,10 +60,13 @@
     "lodash": "4.18.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
     "ajv": "^8.12.0",
     "cross-env": "^7.0.3",
     "electron": "^33.4.11",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "rcedit": "^5.0.2",
+    "react-scripts": "5.0.1"
   },
   "build": {
     "extends": null,
@@ -84,7 +86,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -97,13 +100,15 @@
       "target": [
         "dmg"
       ],
-      "category": "public.app-category.business"
+      "category": "public.app-category.business",
+      "icon": "assets/icon.png"
     },
     "linux": {
       "target": [
         "AppImage"
       ],
-      "category": "Office"
+      "category": "Office",
+      "icon": "assets/icon.png"
     }
   }
 }

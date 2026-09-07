@@ -1280,10 +1280,10 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
       if (data?.ok && Number.isFinite(km) && km > 0) {
         const kmR = Math.round(km);
         const ok = await confirmDialog({
-          title: "Km en vacio del enlace",
-          message: `El chofer termina en ${desde} y el retorno carga en ${hasta}. Hay unos ${kmR.toLocaleString("es-ES")} km en vacio de posicionamiento entre un viaje y otro. Anadirlos como km vacio del enlace?`,
-          confirmText: `Anadir ${kmR.toLocaleString("es-ES")} km`,
-          cancelText: "No anadir",
+          title: "Km en vacío del enlace",
+          message: `El chófer termina en ${desde} y el retorno carga en ${hasta}. Hay unos ${kmR.toLocaleString("es-ES")} km en vacío de posicionamiento entre un viaje y otro. ¿Añadirlos como km en vacío del enlace?`,
+          confirmText: `Añadir ${kmR.toLocaleString("es-ES")} km`,
+          cancelText: "No añadir",
         });
         if (ok) setLinkKmVacio(String(kmR));
       }

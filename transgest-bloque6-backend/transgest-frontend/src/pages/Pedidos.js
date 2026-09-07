@@ -11545,18 +11545,18 @@ export default function Pedidos() {
       const kmR = Math.round(km);
       const fuenteTxt = info.desde_label || desde;
       const kmStr = await promptDialog({
-        title: "Km en vacio de posicionamiento",
-        message: `Posicion antes del viaje: ${fuenteTxt}.\nHasta el origen (${origen}) hay unos ${kmR.toLocaleString("es-ES")} km en vacio.\nAjusta los km si hace falta (0 = no anadir).`,
+        title: "Km en vacío de posicionamiento",
+        message: `Posición antes del viaje: ${fuenteTxt}.\nHasta el origen (${origen}) hay unos ${kmR.toLocaleString("es-ES")} km en vacío.\nAjusta los km si hace falta (0 = no añadir).`,
         inputType: "number",
         defaultValue: String(kmR),
-        confirmText: "Anadir km",
-        cancelText: "No anadir",
+        confirmText: "Añadir km",
+        cancelText: "No añadir",
       });
       if (kmStr === null || kmStr === undefined) return;       // cancelado
       const kmFinal = Math.max(0, Math.round(Number(String(kmStr).replace(",", ".")) || 0));
       if (kmFinal <= 0) return;
       await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, { ...patch, km_vacio: kmFinal }));
-      notify(`Anadidos ${kmFinal.toLocaleString("es-ES")} km en vacio.`, "success");
+      notify(`Añadidos ${kmFinal.toLocaleString("es-ES")} km en vacío.`, "success");
       cargar({ silent: true });
     } catch { /* no bloquea la asignacion */ }
   }

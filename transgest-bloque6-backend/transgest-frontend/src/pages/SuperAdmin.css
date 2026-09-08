@@ -56,7 +56,7 @@
   border-right: 1px solid var(--sa-border);
 }
 .sa-brand-row { min-height: 42px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 16px; border-bottom: 1px solid var(--sa-border); }
-.sa-brand { font-family: "Syne", sans-serif; font-weight: 900; font-size: 18px; color: var(--sa-text); }
+.sa-brand { font-family: "Syne", sans-serif; font-weight: 900; font-size: 15px; color: var(--sa-text); overflow-wrap: anywhere; }
 .sa-sidebar-close { display: none; }
 .sa-nav { display: grid; gap: 5px; margin-top: 16px; }
 .sa-nav button {
@@ -119,7 +119,7 @@
 .sa-theme-light .sa-content textarea { background: var(--sa-input) !important; color: var(--sa-text) !important; border-color: var(--sa-border-strong) !important; color-scheme: light; }
 .sa-theme-dark .sa-content input,
 .sa-theme-dark .sa-content select,
-.sa-theme-dark .sa-content textarea { color-scheme: dark; }
+.sa-theme-dark .sa-content textarea { background: var(--sa-input) !important; color: var(--sa-text) !important; border-color: var(--sa-border-strong) !important; color-scheme: dark; }
 .sa-theme-light .sa-content [style*="color: rgb(226, 232, 240)"],
 .sa-theme-light .sa-content [style*="color: rgb(241, 245, 249)"],
 .sa-theme-light .sa-content [style*="color: #e2e8f0"],

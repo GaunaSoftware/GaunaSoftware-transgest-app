@@ -106,11 +106,12 @@ async function ensureTables() {
 }
 
 async function getGlobalApiKey(provider) {
+  provider = normalizeProvider(provider);
   await ensureTables();
   const keyName = `${provider}_api_key`;
   const { rows } = await db.query("SELECT value FROM system_config WHERE key=$1 LIMIT 1", [keyName]);
   const dbValue = rows[0]?.value || "";
-  if (dbValue) return { key: decryptSecret(dbValue), source: "global" };
+  if (rows.length) return { key: decryptSecret(dbValue), source: dbValue ? "global" : "none" };
   const envName = PROVIDER_ENV[provider];
   const envValue = envName ? process.env[envName] : "";
   return { key: envValue || "", source: envValue ? "env" : "none" };
@@ -132,6 +133,8 @@ async function setGlobalSetting(key, value) {
 }
 
 async function setGlobalApiKey(provider, apiKey) {
+  provider = normalizeProvider(provider);
+  apiKey = validateApiKey(apiKey);
   await ensureTables();
   const keyName = `${provider}_api_key`;
   const encrypted = encryptSecret(apiKey);
@@ -140,18 +143,17 @@ async function setGlobalApiKey(provider, apiKey) {
     VALUES ($1,$2,NOW())
     ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=NOW()
   `, [keyName, encrypted]);
-  const envName = PROVIDER_ENV[provider];
-  if (envName) process.env[envName] = apiKey;
 }
 
 async function deleteGlobalApiKey(provider) {
+  provider = normalizeProvider(provider);
   await ensureTables();
-  await db.query("DELETE FROM system_config WHERE key=$1", [`${provider}_api_key`]);
-  const envName = PROVIDER_ENV[provider];
-  if (envName) delete process.env[envName];
+  // Una baja persistida no debe reactivar la variable de entorno al reiniciar.
+  await setGlobalSetting(`${provider}_api_key`, "");
 }
 
 async function getCompanyApiConfig(empresaId, provider) {
+  provider = normalizeProvider(provider);
   await ensureTables();
   const { rows } = await db.query(
     "SELECT * FROM empresa_api_configs WHERE empresa_id=$1 AND provider=$2 LIMIT 1",
@@ -161,43 +163,58 @@ async function getCompanyApiConfig(empresaId, provider) {
 }
 
 async function setCompanyApiConfig(empresaId, provider, data, actorId = null) {
+  provider = normalizeProvider(provider);
   await ensureTables();
-  const apiKey = data.api_key ? String(data.api_key).trim() : "";
-  const encrypted = apiKey ? encryptSecret(apiKey) : null;
-  const keyMask = apiKey ? maskSecret(apiKey) : null;
-  const clearKey = data.clear_key === true;
-  const useGlobal = clearKey ? true : (data.use_global !== undefined ? Boolean(data.use_global) : !apiKey);
-  if (!useGlobal && !apiKey && !clearKey) {
-    const current = await getCompanyApiConfig(empresaId, provider);
-    if (!current?.encrypted_key) {
-      const err = new Error("Para usar una clave propia de empresa debes pegar una clave API.");
-      err.status = 400;
-      throw err;
+  return db.transaction(async client => {
+    const owner = await client.query('SELECT id FROM empresas WHERE id=$1 FOR UPDATE', [empresaId]);
+    if (!owner.rows.length) throw configError('Empresa no encontrada.');
+    const { rows } = await client.query('SELECT * FROM empresa_api_configs WHERE empresa_id=$1 AND provider=$2', [empresaId, provider]);
+    const current = rows[0];
+    const apiKey = data.api_key ? validateApiKey(data.api_key) : "";
+    const encrypted = apiKey ? encryptSecret(apiKey) : null;
+    const keyMask = apiKey ? maskSecret(apiKey) : null;
+    const clearKey = data.clear_key === true;
+    for (const field of ['use_global', 'activo', 'clear_key']) {
+      if (data[field] !== undefined && typeof data[field] !== 'boolean') throw configError(`${field} debe ser verdadero o falso.`);
     }
-  }
-  const activo = data.activo !== undefined ? Boolean(data.activo) : true;
-  const limite = Number(data.limite_mensual || 0);
-  await db.query(`
-    INSERT INTO empresa_api_configs
-      (empresa_id,provider,encrypted_key,key_mask,use_global,activo,limite_mensual,updated_by,updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
-    ON CONFLICT (empresa_id, provider) DO UPDATE SET
-      encrypted_key=CASE
-        WHEN $9 THEN NULL
-        WHEN EXCLUDED.encrypted_key IS NOT NULL THEN EXCLUDED.encrypted_key
-        ELSE empresa_api_configs.encrypted_key
-      END,
-      key_mask=CASE
-        WHEN $9 THEN NULL
-        WHEN EXCLUDED.key_mask IS NOT NULL THEN EXCLUDED.key_mask
-        ELSE empresa_api_configs.key_mask
-      END,
-      use_global=EXCLUDED.use_global,
-      activo=EXCLUDED.activo,
-      limite_mensual=EXCLUDED.limite_mensual,
-      updated_by=EXCLUDED.updated_by,
-      updated_at=NOW()
-  `, [empresaId, provider, encrypted, keyMask, useGlobal, activo, Number.isFinite(limite) ? limite : 0, actorId, clearKey]);
+    const useGlobal = clearKey ? true : (data.use_global ?? (apiKey ? false : current?.use_global ?? true));
+    if (!useGlobal && !apiKey && !clearKey) {
+      if (!current?.encrypted_key) {
+        const err = new Error("Para usar una clave propia de empresa debes pegar una clave API.");
+        err.status = 400;
+        throw err;
+      }
+    }
+    const activo = data.activo ?? current?.activo ?? true;
+    const limite = Number(data.limite_mensual ?? current?.limite_mensual ?? 0);
+    if (!Number.isInteger(limite) || limite < 0 || limite > 2147483647) throw configError('El limite mensual debe ser un entero no negativo.');
+    await client.query(`
+      INSERT INTO empresa_api_configs
+        (empresa_id,provider,encrypted_key,key_mask,use_global,activo,limite_mensual,updated_by,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+      ON CONFLICT (empresa_id, provider) DO UPDATE SET
+        encrypted_key=CASE
+          WHEN $9 THEN NULL
+          WHEN EXCLUDED.encrypted_key IS NOT NULL THEN EXCLUDED.encrypted_key
+          ELSE empresa_api_configs.encrypted_key
+        END,
+        key_mask=CASE
+          WHEN $9 THEN NULL
+          WHEN EXCLUDED.key_mask IS NOT NULL THEN EXCLUDED.key_mask
+          ELSE empresa_api_configs.key_mask
+        END,
+        use_global=EXCLUDED.use_global,
+        activo=EXCLUDED.activo,
+        limite_mensual=EXCLUDED.limite_mensual,
+        updated_by=EXCLUDED.updated_by,
+        updated_at=NOW()
+    `, [empresaId, provider, encrypted, keyMask, useGlobal, activo, Number.isFinite(limite) ? limite : 0, actorId, clearKey]);
+    const gpsProviders = ['locatel', 'tacogest', 'movildata', 'gps_generic'];
+    if (activo && gpsProviders.includes(provider)) {
+      await client.query(`UPDATE empresa_api_configs SET activo=false, updated_at=NOW()
+        WHERE empresa_id=$1 AND provider <> $2 AND provider=ANY($3::varchar[])`, [empresaId,provider,gpsProviders]);
+    }
+  });
 }
 
 async function ensureMonthlyUsageRow(empresaId, provider) {
@@ -256,9 +273,8 @@ async function recordApiUsage(empresaId, provider, amount = 1) {
 async function resolveApiKey(empresaId, provider) {
   const company = empresaId ? await getCompanyApiConfig(empresaId, provider) : null;
   if (company && company.activo === false) return { key: "", source: "disabled", config: company };
-  // La clave propia de la empresa manda siempre, exista o no clave global y sea
-  // cual sea el flag use_global. La global queda solo como respaldo.
-  if (company && company.encrypted_key) {
+  // El modo seleccionado manda; conservar una clave privada no la activa.
+  if (company && !company.use_global && company.encrypted_key) {
     return { key: decryptSecret(company.encrypted_key), source: "company", config: company };
   }
   // Sin clave propia y con use_global desactivado: la empresa ha optado
@@ -291,9 +307,12 @@ async function publicStatusForProvider(provider, empresaId = null) {
     provider,
     global_configured: !!global.key,
     global_source: global.source,
+    global_masked: maskSecret(global.key),
     company_configured: !!company?.encrypted_key,
     company_masked: company?.key_mask || "",
     use_global: company ? company.use_global : true,
+    effective_source: company?.activo === false ? 'disabled'
+      : company && !company.use_global ? (company.encrypted_key ? 'company' : 'company_missing') : global.source,
     activo: company ? company.activo : true,
     limite_mensual: company?.limite_mensual || 0,
     usos_mes: company?.usos_mes || 0,
@@ -319,3 +338,21 @@ module.exports = {
   resolveBestApiKey,
   publicStatusForProvider,
 };
+
+function configError(message) {
+  return Object.assign(new Error(message), { status: 400 });
+}
+
+function normalizeProvider(value) {
+  const provider = String(value || '').trim().toLowerCase();
+  if (!Object.hasOwn(PROVIDER_ENV, provider)) throw configError('Proveedor no valido.');
+  return provider;
+}
+
+function validateApiKey(value) {
+  const key = String(value || '').trim();
+  if (!key || key.length > 8192 || /[\r\n\u0000]/.test(key) || key.includes('...') || key.includes('\u2026')) {
+    throw configError('Pega la clave API completa, sin mascara ni saltos de linea.');
+  }
+  return key;
+}

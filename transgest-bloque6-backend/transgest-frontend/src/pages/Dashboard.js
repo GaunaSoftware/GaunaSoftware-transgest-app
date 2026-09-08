@@ -57,7 +57,7 @@ function pedidoTieneFactura(p) {
   // "facturado" (ahi solo van emitidas/enviadas/cobradas/vencidas), asi que el
   // viaje tiene que seguir contando como PENDIENTE de facturar. Si no, el viaje
   // se caia de los dos lados y el ingreso gestionado salia corto.
-  if (String(p?.factura_estado || "").toLowerCase() === "borrador") return false;
+  if (["borrador", "cancelada", "anulada"].includes(String(p?.factura_estado || "").toLowerCase())) return false;
   return Boolean(p?.factura_id || p?.factura_numero || p?.facturado === true);
 }
 
@@ -455,18 +455,19 @@ export default function Dashboard() {
   
     // ── KPIs ──
     // Solo facturas emitidas/enviadas/cobradas - no borradores
-    const facEmitidas    = facFilt.filter(f=>["emitida","enviada","cobrada","vencida"].includes(f.estado));
-    const totalFacturado = facEmitidas.reduce((s,f)=>s+Number(f.total||0),0);
+    const facEmitidas    = facFilt.filter(f=>!["borrador","cancelada","anulada"].includes(f.estado));
+    const totalFacturado = facEmitidas.reduce((s,f)=>s+Number(f.base_imponible||0),0);
     const cobrado        = facEmitidas.filter(f=>f.estado==="cobrada").reduce((s,f)=>s+Number(f.total||0),0);
     const pendiente      = facEmitidas.filter(f=>["emitida","enviada"].includes(f.estado)).reduce((s,f)=>s+Number(f.total||0),0);
     const nFacturas      = facEmitidas.length;
     const pendienteFacturarRealizado = pedidosRealizadosSinFactura.reduce((s,p)=>s+importePedido(p),0);
     const ingresoGestionado = totalFacturado + pendienteFacturarRealizado;
     const costeTotal = pedidosRealizados.reduce((s,p)=>s+costeOperativoPedido(p),0);
-    const margenTotal = ingresoGestionado - costeTotal;
-    const margenPct   = ingresoGestionado>0 ? (margenTotal/ingresoGestionado*100).toFixed(1) : null;
+    const ventaRealizada = pedidosRealizados.reduce((sum,p)=>sum+importePedido(p),0);
+    const margenTotal = ventaRealizada - costeTotal;
+    const margenPct   = ventaRealizada>0 ? (margenTotal/ventaRealizada*100).toFixed(1) : null;
     const kmRealizados = pedidosRealizados.reduce((s,p)=>s+Number(p.km_ruta||0)+Number(p.km_vacio||0),0);
-    const eurKmRealizado = kmRealizados>0 ? ingresoGestionado/kmRealizados : 0;
+    const eurKmRealizado = kmRealizados>0 ? ventaRealizada/kmRealizados : 0;
     // Fleet stats: tractoras for operational KPIs, all vehicles for taller
     const _remIds2 = new Set(vehiculos.map(v=>v.remolque_id).filter(Boolean));
     const esTractora = v => {
@@ -519,7 +520,7 @@ export default function Dashboard() {
         if (!f.fecha) return;
         const k = f.fecha.slice(0,7); // YYYY-MM
         if (!meses[k]) meses[k] = { facturado:0, pendiente:0 };
-        meses[k].facturado += Number(f.total||0);
+        meses[k].facturado += Number(f.base_imponible||0);
       });
       pedidosRealizadosSinFactura.forEach(p => {
         const fecha = fechaKpiPedido(p);
@@ -542,11 +543,11 @@ export default function Dashboard() {
       };
       facEmitidas.forEach(f => {
         const row = ensure(f.cliente_nombre);
-        const total = Number(f.total||0);
+        const total = Number(f.base_imponible||0);
         row.total += total;
         row.facturado += total;
         row.nfact += 1;
-        if (f.estado === "cobrada") row.cobrado += total;
+        if (f.estado === "cobrada") row.cobrado += Number(f.total||0);
       });
       pedidosRealizadosSinFactura.forEach(p => {
         const row = ensure(p.cliente_nombre || p.cliente);
@@ -714,7 +715,8 @@ export default function Dashboard() {
   const kpiSinKm = biNumber("sin_km", 0);
   const kpiPodPendiente = biNumber("pod_pendiente_realizados", 0);
   const kpiFacturas = biNumber("facturas", nFacturas);
-  const kpiCobroPct = kpiFacturado > 0 ? (kpiCobrado / kpiFacturado) * 100 : 0;
+  const facturadoConImpuestos = biNumber("facturado_total", filterByPeriod(facturas,"fecha").filter(f=>!["borrador","cancelada","anulada"].includes(f.estado)).reduce((sum,f)=>sum+Number(f.total||0),0));
+  const kpiCobroPct = facturadoConImpuestos > 0 ? (kpiCobrado / facturadoConImpuestos) * 100 : 0;
   const clientesRanking = Array.isArray(biResumen?.clientes) && biResumen.clientes.length
     ? biResumen.clientes.slice(0, 5).map(c => ({
         name: c.nombre || c.cliente_nombre || c.razon_social || c.cliente || "Cliente",

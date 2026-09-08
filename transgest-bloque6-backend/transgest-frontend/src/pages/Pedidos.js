@@ -1,6 +1,7 @@
 import { useDebounce } from "../hooks/useDebounce";
 import AdrPanel from "../components/AdrPanel";
 import QuickAssignModal from "../components/QuickAssignModal";
+import { buildPedidoUpdatePatch } from "../utils/pedidoUpdatePatch";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
 import { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } from "../utils/number";
 import { getCartaPorte, guardarFirmaEntrega, getFirmaEntregaEvidencia, verArchivoProtegido } from "../services/api";
@@ -617,6 +618,7 @@ function mergePrimaryStopSchedule(stops, { fecha, hora, ventana } = {}) {
 }
 
 function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
+  if (Object.keys(overrides).length) return sanitizePedidoPayload(buildPedidoUpdatePatch(overrides));
   const merged = normalizePedidoTarifaDraft({ ...basePedido, ...overrides });
   const geoMerged = withPedidoGeoDefaults(merged);
   const {
@@ -4697,8 +4699,6 @@ function OrdenCargaModal({ pedido, grupajePedidos = [], onClose }) {
     const empCol  = esCol ? "#6d28d9" : "#1d4ed8";
     const empBg   = esCol ? "#ede9fe" : "#dbeafe";
     const empresaDireccion = empresaPostalAddress(empresa);
-    const cargaPostalOrden = stopPostalLine(cargaPrincipal, pedido.origen_provincia || "", pedido.origen_pais || "España", pedido.cliente_id || "", "carga");
-    const descargaPostalOrden = stopPostalLine(descargaPrincipal, pedido.destino_provincia || "", pedido.destino_pais || "España", pedido.cliente_id || "", "descarga");
     const albaranesDireccionPostal = empresaDireccion || "Direccion postal pendiente de configurar en Mi Empresa";
     const logoHtml = logoUrl ? `<img src="${logoUrl}" style="max-height:52px;max-width:160px;object-fit:contain;margin-bottom:6px;display:block" alt="">` : "";
     const emailAlbaranesColaborador = joinEmailList(
@@ -4713,29 +4713,7 @@ function OrdenCargaModal({ pedido, grupajePedidos = [], onClose }) {
 </div>`;
     const fallbackRoutePlaces = getRoutePlaces({ ...pedido, origen: origenOrden, destino: destinoOrden })
       .filter((place, idx, arr) => arr.findIndex(x => routePlaceKey(x) === routePlaceKey(place)) === idx);
-    const optimizedStops = Array.isArray(rutaOptimizada?.stops) ? rutaOptimizada.stops.filter(s => s?.address || s?.name || s) : [];
-    const routeStops = optimizedStops.length
-      ? optimizedStops.map((s, idx) => ({
-          type: s.type || (idx === 0 ? "Carga" : idx === optimizedStops.length - 1 ? "Descarga" : "Parada intermedia"),
-          name: s.name || "",
-          address: s.address || s.name || String(s || ""),
-          google_maps_url: s.google_maps_url || s.maps_url || "",
-        }))
-      : fallbackRoutePlaces.map((place) => {
-          // Conserva Carga/Descarga de cada parada (getRoutePlaces ya distingue
-          // cargas y descargas intermedias) para que en un grupaje se numeren como
-          // Carga 1, Carga 2, Descarga 1, Descarga 2 y no se pierdan como "Parada".
-          const t = String(place?.type || "").toLowerCase();
-          const base = t.includes("descarga") ? "Descarga" : t.includes("carga") ? "Carga" : "Parada intermedia";
-          return {
-            type: base,
-            name: place?.name || "",
-            address: place?.address || place?.direccion || place?.google_maps_url || String(place || ""),
-            google_maps_url: place?.google_maps_url || place?.googleMapsUrl || "",
-          };
-        });
     const routeUrl = rutaOptimizada?.maps_url || buildMapsRouteUrl(fallbackRoutePlaces);
-    const routeProvider = rutaOptimizada?.provider_label || "Enlace orientativo";
     const routeKm = rutaOptimizada?.distance_km || pedido.km_ruta || pedido.km || "";
     // Huella de CO2 estimada del viaje: km x consumo medio / 100 x factor diesel.
     // Config en cfg_precios.sostenibilidad (mismos valores que el informe de emisiones).
@@ -4761,7 +4739,7 @@ function OrdenCargaModal({ pedido, grupajePedidos = [], onClose }) {
     const bloqueEconomicoColaborador = esCol && (pagoColaboradorTonelada || pagoColaboradorTotalCerrado) ? `
 <div class="price-box">
   <div class="price-head"><div class="price-title">Condiciones economicas</div><div class="price-pill">Colaborador</div></div>
-  <div class="g3" style="margin-top:10px">
+  <div class="g2" style="margin-top:10px">
     ${pagoColaboradorTonelada ? `
     <div class="price-cell"><div class="fl">Precio acordado por tonelada</div><div class="fv">${fmtEur(pagoColaboradorTonelada.precioTonelada)} / tn</div></div>
     <div class="price-cell"><div class="fl">Minimo facturable acordado</div><div class="fv">${fmtNum(pagoColaboradorTonelada.minimoToneladas)} tn</div></div>
@@ -4769,16 +4747,12 @@ function OrdenCargaModal({ pedido, grupajePedidos = [], onClose }) {
     <div class="price-cell"><div class="fl">Precio acordado</div><div class="fv">${fmtEur(pagoColaboradorTotalCerrado.total)}</div></div>
     <div class="price-cell"><div class="fl">Tipo de acuerdo</div><div class="fv">Precio cerrado</div></div>
     `}
-    <div class="price-cell"><div class="fl">Referencia de pedido</div><div class="fv">${htmlEscape(referenciaPedido || "-")}</div></div>
   </div>
   <div class="notice" style="margin-top:10px"><strong>Forma de pago:</strong> ${htmlEscape(condicionesPagoColaborador)}</div>
-  <div class="notice"><strong>PENDIENTE DE PAGO</strong> - Adjuntar factura del colaborador. Enviar copia digital a: ${htmlEscape(emailAlbaranesColaborador)}. Los albaranes originales deben remitirse por correo postal a: ${htmlEscape(albaranesDireccionPostal)}</div>
 </div>` : "";
-    const dcdReady = !!docControl?.status?.ready;
     const dcdSupportUrl = docControl?.documento?.soporte_url || "";
     const dcdCode = docControl?.documento?.codigo_control || "";
     const dcdSystem = docControl?.documento?.sistema === "qr_url" ? "QR / URL" : "Codigo numerico";
-    const dcdScore = Number(docControlReadiness.score || 0);
     const bloqueOperativa = `
 <div class="cond">
   <div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#166534;margin-bottom:6px">Instrucciones operativas</div>
@@ -4801,53 +4775,46 @@ function OrdenCargaModal({ pedido, grupajePedidos = [], onClose }) {
   <div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#1d4ed8;margin-bottom:6px">Condiciones de pago del servicio</div>
   <div><strong>Forma de pago:</strong> ${htmlEscape(condicionesPagoCliente)}</div>
 </div>`;
-    const renderMapStop = (item) => `
-      <div class="map-stop">
-        <div class="fl">${htmlEscape(item.label)}</div>
-        <div class="fv">${htmlEscape(item.nombre || item.direccion || "-")}</div>
-        ${item.nombre && item.direccion ? `<div class="map-address">${htmlEscape(item.direccion)}</div>` : ""}
-        ${item.url ? `<a class="map-button" href="${htmlEscape(item.url)}">Abrir ${htmlEscape(item.label)} en Google Maps</a><div class="route-link" style="font-size:9.5px;margin-top:4px">${htmlEscape(item.url)}</div>` : ""}
-      </div>`;
-    // Cargas a la izquierda, descargas a la derecha (una columna por tipo).
-    const cargasMapsCol = allMapsRows.filter(r => /^carga/i.test(String(r.label || "")));
-    const descargasMapsCol = allMapsRows.filter(r => !/^carga/i.test(String(r.label || "")));
-    const mapsBlock = allMapsRows.length ? `
-<div class="sec">
-  <div class="sec-t">Ubicaciones Google Maps</div>
-  <div class="map-grid">
-    <div class="map-col"><div class="map-col-t">Cargas</div>${cargasMapsCol.map(renderMapStop).join("") || `<div class="map-col-empty">Sin cargas</div>`}</div>
-    <div class="map-col"><div class="map-col-t">Descargas</div>${descargasMapsCol.map(renderMapStop).join("") || `<div class="map-col-empty">Sin descargas</div>`}</div>
-  </div>
-</div>` : "";
+    const renderStop = (stop, index, tipo) => {
+      if (!stop) return '<td class="stop-empty"></td>';
+      const main = index === 0;
+      const carga = tipo === "carga";
+      const fallback = main ? (carga ? pedido.origen : pedido.destino) : "";
+      const display = stopDisplayParts(stop, fallback || "", pedido.cliente_id || "", tipo);
+      const postal = stopPostalLine(stop, main ? (carga ? pedido.origen_provincia : pedido.destino_provincia) : "", stop.pais || (main ? (carga ? pedido.origen_pais : pedido.destino_pais) : "") || "", pedido.cliente_id || "", tipo);
+      const fecha = stop.fecha || (main ? (carga ? pedido.fecha_carga : pedido.fecha_descarga || pedido.fecha_entrega) : "");
+      const hora = stop.hora || (main ? (carga ? pedido.hora_carga : pedido.hora_descarga) : "");
+      const ventana = stop.ventana || [stop.ventana_inicio, stop.ventana_fin].filter(Boolean).join("-") || (main ? (carga ? pedido.ventana_carga : pedido.ventana_descarga) : "");
+      const ref = stop.referencia || stop.referencia_cliente;
+      const url = stop.google_maps_url || (main ? (carga ? pedido.google_maps_carga : pedido.google_maps_descarga) : "") || buildMapsSearchUrl([display.direccion, postal].filter(Boolean).join(", "));
+      const detail = [fecha ? fmtDate(fecha) : "", hora, ventana ? "Ventana: " + ventana : ""].filter(Boolean).join(" | ");
+      const quantities = [stop.bultos ? stop.bultos + " bultos" : "", stop.peso_kg ? stop.peso_kg + " kg" : ""].filter(Boolean).join(" | ");
+      return `<td class="order-stop"><div class="fl">${carga ? "Carga" : "Descarga"} ${index+1}</div>
+        <div class="fv big">${htmlEscape(display.nombre || display.direccion || fallback || "-")}</div>
+        ${display.nombre && display.direccion && display.nombre !== display.direccion ? `<div class="map-address">${htmlEscape(display.direccion)}</div>` : ""}
+        ${postal ? `<div class="map-address">${htmlEscape(postal)}</div>` : ""}
+        ${detail ? `<div class="stop-detail">${htmlEscape(detail)}</div>` : ""}
+        ${ref ? `<div class="stop-detail"><strong>Referencia:</strong> ${htmlEscape(ref)}</div>` : ""}
+        ${quantities ? `<div class="stop-detail">${htmlEscape(quantities)}</div>` : ""}
+        ${stop.notas ? `<div class="stop-detail">${htmlEscape(stop.notas)}</div>` : ""}
+        ${url ? `<a class="map-button" href="${htmlEscape(url)}">Abrir ubicación</a>` : ""}</td>`;
+    };
+    const cargasOrden = parseStops(pedido.puntos_carga);
+    const descargasOrden = parseStops(pedido.puntos_descarga);
+    if (!cargasOrden.length) cargasOrden.push({});
+    if (!descargasOrden.length) descargasOrden.push({});
+    const stopsBlock = `<table class="order-stops"><tbody>${Array.from({length:Math.max(cargasOrden.length,descargasOrden.length)},(_,i)=>
+      `<tr>${renderStop(cargasOrden[i],i,"carga")}${renderStop(descargasOrden[i],i,"descarga")}</tr>`).join("")}</tbody></table>
+      ${grupajePedidos.length > 1 ? `<div class="notice"><strong>Otros pedidos del grupaje:</strong> ${grupajePedidos.filter(g=>g.id!==pedido.id).map(g=>htmlEscape(g.numero || "") + ": " + htmlEscape(g.origen || "-") + " &rarr; " + htmlEscape(g.destino || "-")).join("; ")}</div>` : ""}`;
     const dcdBlock = docControl?.documento ? `
 <div class="sec">
   <div class="sec-t">Documento de control digital</div>
   <div class="${esCol ? "g2" : "g3"}">
     <div class="f"><div class="fl">Sistema</div><div class="fv">${dcdSystem}</div></div>
     <div class="f"><div class="fl">Codigo control</div><div class="fv">${htmlEscape(dcdCode || "Pendiente")}</div></div>
-    ${!esCol ? `<div class="f"><div class="fl">Estado</div><div class="fv">${dcdReady ? "Listo" : "Pendiente de completar"}</div></div>
-    <div class="f"><div class="fl">Preparacion digital</div><div class="fv">${dcdScore || "-"}${dcdScore ? "%" : ""}</div></div>` : ""}
   </div>
   ${dcdSupportUrl ? `<div class="route-box" style="margin-top:8px"><strong>Soporte digital:</strong><br><a class="route-link" href="${htmlEscape(dcdSupportUrl)}">${htmlEscape(dcdSupportUrl)}</a></div>` : ""}
-  ${!esCol && docControlFaltantes.length ? `<div class="notice"><strong>Revision pendiente:</strong> ${htmlEscape(docControlFaltantes.join(" | "))}</div>` : ""}
-  ${!esCol && docControlAvisos.length ? `<div class="cond"><strong>Avisos eCMR/eFTI:</strong> ${htmlEscape(docControlAvisos.join(" | "))}</div>` : ""}
 </div>` : "";
-    const routeTypeCounts = {};
-    const routeStopsWithLabels = routeStops.map((stop) => {
-      const baseType = String(stop.type || "Parada").replace(/\s+\d+$/g, "");
-      routeTypeCounts[baseType] = (routeTypeCounts[baseType] || 0) + 1;
-      const address = String(stop.address || "").trim();
-      const name = distinctPlaceName(stop.name || "", address);
-      return { ...stop, name, address, displayType: routeTypeCounts[baseType] > 1 ? `${baseType} ${routeTypeCounts[baseType]}` : baseType };
-    });
-    const routeStopsHtml = routeStopsWithLabels.map((stop) => `
-      <li>
-        <strong>${htmlEscape(stop.displayType)}</strong>
-        ${stop.name ? `<div>${htmlEscape(stop.name)}</div>` : ""}
-        <div>${htmlEscape(stop.address)}</div>
-        ${stop.google_maps_url ? `<a class="map-button" href="${htmlEscape(stop.google_maps_url)}">Abrir este punto en Google Maps</a>` : ""}
-      </li>
-    `).join("");
     w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>OC ${pedido.numero}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -4904,7 +4871,18 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
 .map-col-empty{font-size:10px;color:#94a3b8}
 .map-stop{background:#eff6ff;border:1px solid #bfdbfe;border-radius:11px;padding:10px 12px;break-inside:avoid}
 .map-address{font-size:11px;color:#475569;margin-top:3px}
-.map-button{display:inline-block;margin-top:8px;background:#2563eb;color:#fff;text-decoration:none;border-radius:7px;padding:7px 10px;font-size:10.5px;font-weight:900}
+.map-button{display:inline-block;margin-top:5px;color:#1d4ed8;text-decoration:underline;font-size:10.5px;font-weight:700}
+.order-stops{width:100%;table-layout:fixed;border-spacing:8px;margin:-8px 0 0}
+.order-stops tr{break-inside:avoid}
+.order-stop{width:50%;vertical-align:top;border:1px solid #cbd5e1;border-radius:6px;padding:10px}
+.stop-detail{font-size:10.5px;line-height:1.5;margin-top:4px;overflow-wrap:anywhere}
+.stops-section{break-inside:auto}
+.conditions-sheet{break-before:page;margin-top:24px}
+.conditions-sheet .cond{font-size:10px;line-height:1.4;padding:9px 12px;margin:8px 0}
+.conditions-sheet .cond ol{line-height:1.4}
+.conditions-sheet .firma-row{margin-top:14px}
+.conditions-sheet .firma-box{min-height:65px;padding-top:28px}
+@media screen and (max-width:560px){body{padding:8px}.sheet{padding:14px}.hdr{grid-template-columns:1fr;gap:10px}.doc-panel{text-align:left}.g3{grid-template-columns:1fr 1fr}.order-stops{border-spacing:3px}.order-stop{padding:7px}.fv.big{font-size:13px}}
 @media print{@page{margin:1.05cm;size:A4}body{background:#fff;padding:0}.sheet{max-width:none;border:none;border-radius:0;padding:0;box-shadow:none}.sheet:before,.sheet:after{display:none}}
 </style></head><body>
 <main class="sheet">
@@ -4915,68 +4893,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;padding:22px;col
   <div class="doc-panel">
     <div class="doc-oc">ORDEN DE CARGA</div>
     <div class="doc-ref">N. OC: <strong>${numOCDisplay}</strong></div>
-    <div class="doc-ref">Ref: ${pedido.numero}</div>
     <div class="doc-ref">${new Date().toLocaleDateString("es-ES")}</div>
     <div class="badge">${esCol?"COLABORADOR EXTERNO":"TRANSPORTE PROPIO"}</div>
   </div>
 </div>
-  <div class="sec">
-    <div class="sec-t">Ruta y fechas</div>
-    <div class="g2" style="margin-bottom:8px">
-      <div class="f hl"><div class="fl">Origen -> Punto de carga</div><div class="fv big">${htmlEscape(origenNombreOrden || origenOrden || "-")}</div>${origenNombreOrden && origenOrden ? `<div class="map-address">${htmlEscape(origenOrden)}</div>` : ""}${cargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(cargaPostalOrden)}</div>` : ""}${pedido.ventana_carga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_carga}</div>`:""}${cargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(cargaPrincipal.google_maps_url)}">${htmlEscape(cargaPrincipal.google_maps_url)}</a></div>`:""}</div>
-      <div class="f hl"><div class="fl">Destino -> Punto de entrega</div><div class="fv big">${htmlEscape(destinoNombreOrden || destinoOrden || "-")}</div>${destinoNombreOrden && destinoOrden ? `<div class="map-address">${htmlEscape(destinoOrden)}</div>` : ""}${descargaPostalOrden ? `<div class="map-address"><strong>CP / poblacion / provincia:</strong> ${htmlEscape(descargaPostalOrden)}</div>` : ""}${pedido.ventana_descarga?`<div style="font-size:10px;color:#6b7280;margin-top:2px">${pedido.ventana_descarga}</div>`:""}${descargaPrincipal?.google_maps_url?`<div style="font-size:10px;margin-top:4px"><a class="route-link" href="${htmlEscape(descargaPrincipal.google_maps_url)}">${htmlEscape(descargaPrincipal.google_maps_url)}</a></div>`:""}</div>
-      ${grupajePedidos.length > 1 ? `
-      <div class="f hl" style="grid-column:1/-1">
-        <div class="fl">Grupaje: todas las paradas de este camion (${grupajePedidos.length} viajes)</div>
-        <div class="fv" style="font-size:11px;line-height:1.6">
-          ${grupajePedidos.map((g, i) => `
-            <div style="padding:3px 0;border-bottom:1px dotted #d1d5db">
-              <strong>${i + 1}.</strong> ${htmlEscape(g.numero || "")}
-              &nbsp;CARGA: ${htmlEscape(g.origen || "-")}
-              &nbsp;|&nbsp;DESCARGA: ${htmlEscape(g.destino || "-")}
-              ${g.peso_kg ? `&nbsp;|&nbsp;${htmlEscape(String(g.peso_kg))} kg` : ""}
-              ${g.palets_cantidad ? `&nbsp;|&nbsp;${htmlEscape(String(g.palets_cantidad))} palets` : ""}
-            </div>`).join("")}
-        </div>
-        <div style="font-size:10px;color:#6b7280;margin-top:4px">
-          Hay que confirmar cada carga y cada descarga por separado.
-        </div>
-      </div>` : ""}
-    </div>
-    ${(() => {
-      const cargasAdic = parseStops(pedido.puntos_carga).slice(1).filter(s => stopAddress(s) || s.cliente_nombre);
-      const descargasAdic = parseStops(pedido.puntos_descarga).slice(1).filter(s => stopAddress(s) || s.cliente_nombre);
-      if (!cargasAdic.length && !descargasAdic.length) return "";
-      const row = (label, s, color) => {
-        const win = s.ventana || [s.ventana_inicio, s.ventana_fin].filter(Boolean).join("-") || "";
-        const meta = [fmtDate(s.fecha) || "", s.hora || "", win ? `Ventana ${win}` : ""].filter(Boolean).join(" · ");
-        const ref = s.referencia || s.referencia_cliente || "";
-        const extra = [ref ? `Ref: ${ref}` : "", s.bultos ? `${s.bultos} bultos` : "", s.peso_kg ? `${s.peso_kg} kg` : ""].filter(Boolean).join(" · ");
-        return `<div class="f"><div class="fl" style="color:${color}">${htmlEscape(label)}</div><div class="fv">${htmlEscape(s.cliente_nombre || stopAddress(s) || "-")}${s.cliente_nombre && stopAddress(s) ? `<div class="map-address">${htmlEscape(stopAddress(s))}</div>` : ""}${meta ? `<div style="font-size:10px;color:#6b7280;margin-top:2px">${htmlEscape(meta)}</div>` : ""}${extra ? `<div style="font-size:10px;color:#6b7280;margin-top:1px">${htmlEscape(extra)}</div>` : ""}${s.notas ? `<div style="font-size:10px;color:#6b7280;margin-top:1px">${htmlEscape(s.notas)}</div>` : ""}</div></div>`;
-      };
-      return `<div class="g2" style="margin-top:8px;padding-top:8px;border-top:1px dashed #cbd5e1">
-        ${cargasAdic.map((s,i)=>row(`Carga adicional ${i+2}`, s, "var(--accent)")).join("")}
-        ${descargasAdic.map((s,i)=>row(`Descarga adicional ${i+2}`, s, "#b45309")).join("")}
-      </div>`;
-    })()}
-    <div class="g3">
-      <div class="f"><div class="fl">Fecha carga</div><div class="fv">${fmtDate(pedido.fecha_carga)}</div></div>
-      <div class="f"><div class="fl">Hora carga</div><div class="fv">${pedido.hora_carga||"-"}</div></div>
-      <div class="f"><div class="fl">Ventana carga</div><div class="fv">${pedido.ventana_carga||"-"}</div></div>
-    </div>
-    <div class="g3" style="margin-top:8px">
-      <div class="f"><div class="fl">Fecha descarga</div><div class="fv">${fmtDate(pedido.fecha_descarga||pedido.fecha_entrega)}</div></div>
-      <div class="f"><div class="fl">Hora descarga</div><div class="fv">${pedido.hora_descarga||"-"}</div></div>
-      <div class="f"><div class="fl">Ventana descarga</div><div class="fv">${pedido.ventana_descarga||"-"}</div></div>
-    </div>
-    <div class="g3" style="margin-top:8px">
-      <div class="f"><div class="fl">KM ruta</div><div class="fv">${pedido.km_ruta||pedido.km||"-"} km</div></div>
-      <div class="f"><div class="fl">Referencia cliente</div><div class="fv">${pedido.referencia_cliente||"-"}</div></div>
-      <div class="f"><div class="fl">Estado</div><div class="fv">${pedido.estado||"-"}</div></div>
-    </div>
-</div>
-${mapsBlock}
-${!esCol ? bloqueEmailsAlbaranes : ""}
+  <section class="sec stops-section"><div class="sec-t">Cargas y descargas</div>${stopsBlock}</section>
 <div class="sec">
   <div class="sec-t">Mercancia y referencias</div>
   <div class="g2" style="margin-bottom:8px">
@@ -5021,7 +4942,33 @@ ${esCol ? `
   </div>
 </div>
 ${bloqueEconomicoColaborador}
-<div class="cond">
+` : `
+<div class="sec">
+  <div class="sec-t">Asignacion de transporte propio</div>
+  <div class="g3">
+    <div class="f hl"><div class="fl">Vehiculo / Tractora</div><div class="fv big">${pedido.vehiculo_matricula||pedido.matricula||pedido.matricula_manual||"Sin asignar"}</div></div>
+    <div class="f hl"><div class="fl">Remolque</div><div class="fv">${pedido.remolque_matricula||pedido.remolque_mat||pedido.remolque_matricula_manual||"Sin remolque"}</div></div>
+    <div class="f hl"><div class="fl">Chofer principal</div><div class="fv big">${pedido.chofer_nombre||"Sin asignar"}</div></div>
+  </div>
+  ${pedido.chofer2_nombre?`<div class="f" style="margin-top:8px"><div class="fl">2o Chofer</div><div class="fv">${pedido.chofer2_nombre}</div></div>`:""}
+</div>`}
+${bloqueEconomicoCliente}
+${pedido.notas?`
+<div class="sec">
+  <div class="sec-t">Instrucciones</div>
+  <div class="f" style="margin-bottom:6px"><div class="fl">Instrucciones especiales</div><div style="white-space:pre-wrap;line-height:1.6">${htmlEscape(pedido.notas)}</div></div>
+</div>`:""}
+${bloqueOperativa}
+${dcdBlock}
+<section class="sec">
+  <div class="sec-t">Navegación</div>
+  <div class="stop-detail">${routeKm ? htmlEscape(String(routeKm)) + " km" : "Distancia pendiente"}${routeDuration ? " | " + htmlEscape(routeDuration) : ""}${co2KgOrden ? " | CO2 estimado: " + co2KgOrden.toLocaleString("es-ES") + " kg" : ""}</div>
+  ${routeUrl ? `<a class="map-button" href="${htmlEscape(routeUrl)}">Abrir ruta completa</a>` : ""}
+  <div class="stop-detail">Ruta orientativa. Revisar accesos, gálibo, MMA, restricciones, ADR y horarios con navegación apta para camión.</div>
+</section>
+<section class="conditions-sheet">
+  <div class="sec-t">Condiciones de la orden</div>
+${esCol ? `<div class="cond">
   <div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#b45309;margin-bottom:6px">Condiciones para el colaborador</div>
   <ol>
     <li><strong>Aceptacion:</strong> La presente orden constituye un contrato de transporte de mercancias por carretera. Se considerara aceptada y vinculante salvo que el porteador comunique su rechazo expreso en el plazo de una hora desde la recepcion de esta orden.</li>
@@ -5033,62 +4980,19 @@ ${bloqueEconomicoColaborador}
     <li><strong>Puntualidad:</strong> La puntualidad en carga y descarga es esencial. Los retrasos no justificados pueden generar penalizaciones.</li>
     <li><strong>Contacto con clientes:</strong> Queda expresamente prohibido el contacto directo con los clientes de la empresa contratante.</li>
     <li><strong>Documentacion:</strong> No se pagara la factura hasta recibir todos los documentos de transporte originales firmados por el destinatario (CMR o carta de porte y albaran) en maximo 48h.</li>
-    <li><strong>Albaranes originales:</strong> Deben enviarse por correo postal a ${htmlEscape(albaranesDireccionPostal)}.</li>
     <li><strong>Mercancia:</strong> El colaborador es responsable de la mercancia desde la carga hasta la entrega.</li>
     <li><strong>Facturacion:</strong> Las facturas deben emitirse a: <strong>${empresa.razon_social||empresa.nombre||"-"} | CIF: ${empresa.cif||"-"}</strong>.</li>
   </ol>
-</div>` : `
-<div class="sec">
-  <div class="sec-t">Asignacion de transporte propio</div>
-  <div class="g3">
-    <div class="f hl"><div class="fl">Vehiculo / Tractora</div><div class="fv big">${pedido.vehiculo_matricula||pedido.matricula||pedido.matricula_manual||"Sin asignar"}</div></div>
-    <div class="f hl"><div class="fl">Remolque</div><div class="fv">${pedido.remolque_matricula||pedido.remolque_mat||pedido.remolque_matricula_manual||"Sin remolque"}</div></div>
-    <div class="f hl"><div class="fl">Chofer principal</div><div class="fv big">${pedido.chofer_nombre||"Sin asignar"}</div></div>
-  </div>
-  ${pedido.chofer2_nombre?`<div class="f" style="margin-top:8px"><div class="fl">2o Chofer</div><div class="fv">${pedido.chofer2_nombre}</div></div>`:""}
-</div>`}
-${bloqueEconomicoCliente}
-${pedido.notas||pedido.condiciones_adicionales?`
-<div class="sec">
-  <div class="sec-t">Instrucciones</div>
-  ${pedido.notas?`<div class="f" style="margin-bottom:6px"><div class="fl">Instrucciones especiales</div><div style="white-space:pre-wrap;line-height:1.6">${pedido.notas}</div></div>`:""}
-  ${pedido.condiciones_adicionales?`<div class="f"><div class="fl">Condiciones adicionales</div><div style="white-space:pre-wrap;line-height:1.6">${pedido.condiciones_adicionales}</div></div>`:""}
-</div>`:""}
-${dcdBlock}
-${!esCol ? bloquePagoCliente : ""}
-${bloqueOperativa}
+</div>` : bloquePagoCliente}
+${bloqueEmailsAlbaranes}
+${pedido.condiciones_adicionales ? `<div class="cond"><strong>Condiciones adicionales</strong><div style="white-space:pre-wrap">${htmlEscape(pedido.condiciones_adicionales)}</div></div>` : ""}
 ${bloqueCombustible}
 <div class="firma-row">
   ${esCol?`<div class="firma-box"><div class="firma-lbl">Colaborador</div><div class="firma-name">${pedido.colaborador_nombre||""}</div></div>`:`<div class="firma-box"><div class="firma-lbl">Chofer</div><div class="firma-name">${pedido.chofer_nombre||""}</div></div>`}
   <div class="firma-box"><div class="firma-lbl">Expedidor (empresa)</div><div class="firma-name">${empresa.razon_social||empresa.nombre||""}</div></div>
   <div class="firma-box"><div class="firma-lbl">Destinatario</div><div class="firma-name">${destinatarioOrden}</div></div>
 </div>
-${esCol ? `
-<section class="route-sheet">
-  <div class="route-head">
-    <h2>Ruta recomendada para camion</h2>
-    <div class="muted">Hoja adjunta a la orden de carga ${numOCDisplay}</div>
-  </div>
-  <div class="route-kpis">
-    <div class="route-kpi"><div class="fl">Pedido</div><div class="fv">${pedido.numero||"---"}</div></div>
-    <div class="route-kpi"><div class="fl">Proveedor</div><div class="fv">${htmlEscape(routeProvider)}</div></div>
-    <div class="route-kpi"><div class="fl">Kilometros previstos</div><div class="fv">${routeKm||"Pendiente"}${routeKm?" km":""}</div></div>
-    <div class="route-kpi"><div class="fl">Tiempo estimado</div><div class="fv">${routeDuration||"Pendiente"}</div></div>
-    <div class="route-kpi"><div class="fl">Peso</div><div class="fv">${pedido.peso_kg||pedido.kg||"Sin dato"}${pedido.peso_kg||pedido.kg?" kg":""}</div></div>
-    <div class="route-kpi"><div class="fl">Huella CO2 estimada</div><div class="fv">${co2KgOrden>0 ? `${co2KgOrden.toLocaleString("es-ES")} kg` : "Pendiente"}</div></div>
-  </div>
-  ${co2KgOrden>0 ? `<div class="muted" style="font-size:10px;margin-top:3px">Huella CO2 estimada = ${kmCo2Orden.toLocaleString("es-ES")} km x ${consumoL100Orden} L/100km x ${factorCo2Orden} kg CO2/L (diesel). Estimacion orientativa, no medicion certificada.</div>` : ""}
-  <div class="sec-t">Paradas de la ruta</div>
-  <ol class="route-list">${routeStopsHtml || "<li>Sin direcciones suficientes</li>"}</ol>
-  <div class="route-box">
-    <strong>Enlace de navegacion:</strong><br>
-    ${routeUrl ? `<a class="route-link" href="${htmlEscape(routeUrl)}">${htmlEscape(routeUrl)}</a>` : "No disponible"}
-  </div>
-  <div class="route-box route-warn">
-    <strong>Control obligatorio para camion:</strong><br>
-    Revisar galibo, MMA, restricciones locales, ADR si aplica, peajes, accesos a muelle, horarios de carga/descarga y zonas de espera. Esta ruta es orientativa y debe validarse con navegacion apta para camion cuando este disponible.
-  </div>
-</section>` : ""}
+</section>
 </main>
 </body></html>`);
     w.document.close(); w.focus(); setTimeout(()=>w.print(),350);
@@ -10344,6 +10248,7 @@ export default function Pedidos() {
   const [filtroEst,  setFiltroEst]  = useState(() => (focusPedido?.source && focusPedido?.estado && !focusPedido?.pedido_id) ? String(focusPedido.estado) : "todos");
   const [filtroMes,  setFiltroMes]  = useState("");
   const [filtroFechasCustom, setFiltroFechasCustom] = useState(false);
+  const [mostrarHistorico, setMostrarHistorico] = useState(Boolean(focusPedido?.pedido_id));
   const [filtroDesde, setFiltroDesde] = useState("");
   const [filtroHasta, setFiltroHasta] = useState("");
   const [filtroCliente,setFiltroCliente]=useState("");
@@ -10422,13 +10327,7 @@ export default function Pedidos() {
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
   const _rangoMesActual = defaultTraficoRangeLocal();
   const filtroPeriodoActivo = filtroFechasCustom || Boolean(filtroMes);
-  // Al acotar por busqueda/cliente/estado concreto se muestra todo el historico,
-  // asi que la etiqueta "mes actual y siguientes" ya no aplica en ese caso.
-  const filtroAcotaHistorico =
-    Boolean(debouncedQ) ||
-    Boolean(filtroCliente) ||
-    (filtroEst !== "todos" && filtroEst !== "activos");
-  const vistaMesActualPorDefecto = !filtroPeriodoActivo && !filtroAcotaHistorico;
+  const vistaMesActualPorDefecto = !filtroPeriodoActivo && !mostrarHistorico;
 
   useEffect(() => {
     savePedidosCollapsedGroups(collapsedClientes);
@@ -10656,7 +10555,7 @@ export default function Pedidos() {
     let listadoCargado = false;
     try {
       const params = {};
-      params.incluir_incidencias = "true";
+      params.incluir_incidencias = "false";
       if (filtroEst === "activos") {
         params.estado = ESTADOS_ACTIVOS.join(",");
       }
@@ -10665,18 +10564,9 @@ export default function Pedidos() {
       if (filtroCliente) params.cliente_id = filtroCliente;
       const aplicarRangoFechas = filtroFechasCustom || Boolean(filtroMes);
       const rangoDefectoCarga = defaultTraficoRangeLocal();
-      // Cuando se acota por busqueda de texto, por cliente o por un estado
-      // concreto (p.ej. al pinchar "En ruta" en el Dashboard, o al buscar un
-      // cliente), el usuario quiere ver TODO ese subconjunto -todo el historico-
-      // y no solo el mes en curso. El rango por defecto (mes actual + los
-      // siguientes) es unicamente para la vista general sin acotar.
-      const filtroAcotaHistorico =
-        Boolean(debouncedQ) ||
-        Boolean(filtroCliente) ||
-        (filtroEst !== "todos" && filtroEst !== "activos");
       if (aplicarRangoFechas && filtroDesde) params.desde = filtroDesde;
       if (aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
-      if (!aplicarRangoFechas && !filtroAcotaHistorico) {
+      if (!aplicarRangoFechas && !mostrarHistorico) {
         // Mes actual como contexto + todos los viajes siguientes (no se corta en
         // fin de mes, para que "los proximos" salgan siempre).
         params.desde = rangoDefectoCarga.desde;
@@ -10749,7 +10639,7 @@ export default function Pedidos() {
         if (!silent) setLoadError(e.message || "No se pudieron cargar los viajes.");
       }
     finally { if (!listadoCargado && !silent) setLoading(false); }
-  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente]);
+  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente, mostrarHistorico]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {
@@ -11022,10 +10912,6 @@ export default function Pedidos() {
       } catch (e) {
         notify("No se pudo refrescar el pedido completo. Se abre la version disponible.", "warning");
       }
-    }
-    if (!pedidoCompleto?.colaborador_id) {
-      notify("Asigna primero un colaborador/proveedor para poder mandar la orden de carga.", "warning");
-      return;
     }
     // Si el viaje forma parte de un grupaje, la orden debe recoger TODAS las
     // cargas y descargas del camion, no solo las de este pedido.
@@ -11947,6 +11833,10 @@ export default function Pedidos() {
           {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar..." style={{...S.input,width:160}}/>
+        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--text)"}}>
+          <input type="checkbox" checked={mostrarHistorico} onChange={e=>{setMostrarHistorico(e.target.checked);setFiltroFechasCustom(false);setFiltroMes("");setFiltroDesde("");setFiltroHasta("");setPage(1);setSelectedPedidoIds([]);}} />
+          Incluir meses anteriores
+        </label>
         <button onClick={()=>setShowAdvancedFilters(v=>!v)}
           style={{...S.btn,background:showAdvancedFilters?"#2563eb":"#fff",color:showAdvancedFilters?"#fff":"#475569",border:showAdvancedFilters?"1px solid #2563eb":"1px solid #dbe5ec"}}>
           Filtros avanzados
@@ -11960,8 +11850,8 @@ export default function Pedidos() {
           style={{...S.btn,background:soloCriticos?"#dc2626":"#fff",color:soloCriticos?"#fff":"#475569",border:soloCriticos?"1px solid #dc2626":"1px solid #dbe5ec"}}>
           {soloCriticos ? "Solo criticos" : "Ver criticos"}
         </button>
-        {(filtroEst!=="todos"||filtroDesde||filtroHasta||filtroMes||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
-          <button onClick={()=>{setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);}}
+        {(mostrarHistorico||filtroEst!=="todos"||filtroDesde||filtroHasta||filtroMes||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
+          <button onClick={()=>{setMostrarHistorico(false);setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);}}
             style={{...S.btn,background:"rgba(239,68,68,.12)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",fontSize:11,padding:"4px 10px"}}>Reset</button>
         )}
         {vistaMesActualPorDefecto && (
@@ -12371,7 +12261,11 @@ export default function Pedidos() {
                         <span style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{p.factura_numero||""}</span>
                       </div>
                     : pedidoTieneFacturaBorrador(p)
-                    ? <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)"}}>BORRADOR</span><span style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{p.factura_numero||""}</span></div>
+                    ? <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)"}}>BORRADOR</span>
+                        <span style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{p.factura_numero||""}</span>
+                        {canEdit && <button style={{...S.btn,padding:"5px 8px",fontSize:11}} onClick={()=>abrirOrdenCarga(p)}>Orden de carga</button>}
+                      </div>
                     : <div style={{display:"flex",gap:5,flexWrap:"wrap",position:"relative"}}>
                         {canEdit && priorityMeta.validationIssues.length > 0 && (
                           <button onClick={e=>{e.stopPropagation();abrirEditar(p, {_focus_asignacion: priorityMeta.flags.missingVehiculo || priorityMeta.flags.missingChofer});}}
@@ -12442,9 +12336,9 @@ export default function Pedidos() {
                             {reprogrammingPedidoId === String(p.id) ? "Limpiando..." : "Limpiar asignacion"}
                           </button>
                         )}
-                        {canEdit && (priorityMeta.flags.missingVehiculo || priorityMeta.flags.missingChofer) && (
-                          <button onClick={e=>{e.stopPropagation();setAutoAsignando(p);}}
-                            title="Autoasignacion IA"
+                        {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (priorityMeta.flags.missingVehiculo || priorityMeta.flags.missingChofer) && (
+                          <button onClick={e=>{e.stopPropagation();setQuickAssignPedido(p);}}
+                            title="Asignar vehiculo y chofer"
                             style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#a78bfa",border:"1px solid rgba(139,92,246,.25)",padding:"3px 7px",fontSize:11}}>
                             Asignar
                           </button>
@@ -12543,7 +12437,7 @@ export default function Pedidos() {
                                 )}
                               </>
                             )}
-                            {canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&(
+                            {canEdit&&!pedidoTieneFacturaFinal(p)&&(
                               <button style={{...S.btn,textAlign:"left",background:"rgba(99,102,241,.1)",color:"#818cf8",border:"1px solid rgba(99,102,241,.2)",padding:"6px 10px",fontSize:11}}
                                 onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirOrdenCarga(p);}}>
                                 Orden de carga

@@ -1,6 +1,7 @@
 const { cacheMiddleware } = require("../services/cache");
 const express = require("express");
 const db      = require("../services/db");
+const { financialPedidosCte } = require("../services/financialKpis");
 const { authenticate, GERENTE_O_CONTABLE, GERENTE_O_TRAFICO, SOLO_GERENTE } = require("../middleware/auth");
 const { crearNotificacion } = require("../services/notificaciones");
 const { enviarEmail } = require("../services/email");
@@ -49,68 +50,72 @@ router.get("/bi/resumen", async (req, res) => {
   const params = [empresaId, desde, hasta];
   const [pedidos, facturas, clientes, rutas, incidencias, documentos, estados, clientesCobro] = await Promise.all([
     db.query(`
+      WITH ${financialPedidosCte}
       SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE estado='cancelado')::int AS cancelados,
-        COUNT(*) FILTER (WHERE estado IN ('entregado','facturado'))::int AS completados,
-        COUNT(*) FILTER (WHERE estado IN ('pendiente'))::int AS pendientes,
-        COUNT(*) FILTER (WHERE estado IN ('confirmado','cargando','en_curso','en_ruta','descarga','descargando','espera_carga','espera_descarga'))::int AS activos,
-        COUNT(*) FILTER (WHERE estado='incidencia')::int AS incidencias,
+        COUNT(*) FILTER (WHERE estado::text='cancelado')::int AS cancelados,
+        COUNT(*) FILTER (WHERE estado::text IN ('entregado','facturado'))::int AS completados,
+        COUNT(*) FILTER (WHERE estado::text IN ('pendiente'))::int AS pendientes,
+        COUNT(*) FILTER (WHERE estado::text IN ('confirmado','cargando','en_curso','en_ruta','descarga','descargando','espera_carga','espera_descarga'))::int AS activos,
+        COUNT(*) FILTER (WHERE estado::text='incidencia')::int AS incidencias,
         COUNT(*) FILTER (WHERE pendiente_completar IS TRUE OR NULLIF(TRIM(COALESCE(aviso_completar,'')),'') IS NOT NULL)::int AS pendientes_completar,
-        COUNT(*) FILTER (WHERE estado <> 'cancelado' AND COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0) <= 0)::int AS sin_precio,
-        COUNT(*) FILTER (WHERE estado <> 'cancelado' AND COALESCE(km_ruta,0) <= 0)::int AS sin_km,
-        COUNT(*) FILTER (WHERE estado IN ('entregado','facturado') AND factura_id IS NULL)::int AS pendientes_facturar_count,
-        COUNT(*) FILTER (WHERE estado IN ('pendiente','confirmado') AND vehiculo_id IS NULL AND chofer_id IS NULL AND colaborador_id IS NULL)::int AS sin_recurso,
+        COUNT(*) FILTER (WHERE estado::text <> 'cancelado' AND COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0) <= 0)::int AS sin_precio,
+        COUNT(*) FILTER (WHERE estado::text <> 'cancelado' AND COALESCE(km_ruta,0) <= 0)::int AS sin_km,
+        COUNT(*) FILTER (WHERE estado::text IN ('entregado','facturado') AND pendiente_factura)::int AS pendientes_facturar_count,
+        COUNT(*) FILTER (WHERE estado::text IN ('pendiente','confirmado') AND vehiculo_id IS NULL AND chofer_id IS NULL AND colaborador_id IS NULL)::int AS sin_recurso,
         COALESCE(SUM(importe),0)::numeric AS venta,
-        COALESCE(SUM(importe) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS venta_realizada,
-        COALESCE(SUM(importe) FILTER (WHERE estado IN ('entregado','facturado') AND factura_id IS NULL),0)::numeric AS pendiente_facturar_realizado,
-        COALESCE(AVG(NULLIF(COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0),0)) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS ticket_medio_realizado,
+        COALESCE(SUM(importe) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS venta_realizada,
+        COALESCE(SUM(importe) FILTER (WHERE estado::text IN ('entregado','facturado') AND pendiente_factura),0)::numeric AS pendiente_facturar_realizado,
+        COALESCE(AVG(NULLIF(COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0),0)) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS ticket_medio_realizado,
         COALESCE(SUM(COALESCE(importe_paralizacion, paralizacion_importe, 0)),0)::numeric AS paralizacion,
         COUNT(*) FILTER (WHERE COALESCE(importe_paralizacion, paralizacion_importe, 0) > 0)::int AS pedidos_con_paralizacion,
         COALESCE(SUM(precio_colaborador),0)::numeric AS coste_colaborador,
-        COALESCE(SUM(precio_colaborador) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS coste_colaborador_realizado,
+        COALESCE(SUM(precio_colaborador) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS coste_colaborador_realizado,
+        COALESCE(SUM(coste_operativo) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS coste_operativo_realizado,
         COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)),0)::numeric AS km,
-        COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS km_realizados,
+        COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS km_realizados,
         COALESCE(SUM(COALESCE(km_vacio,0)),0)::numeric AS km_vacio,
-        COALESCE(SUM(COALESCE(km_vacio,0)) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS km_vacio_realizado,
+        COALESCE(SUM(COALESCE(km_vacio,0)) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS km_vacio_realizado,
         COALESCE(AVG(NULLIF(COALESCE(km_ruta,0) + COALESCE(km_vacio,0),0)),0)::numeric AS km_medio,
         COALESCE(AVG(EXTRACT(EPOCH FROM (fecha_descarga::timestamp - fecha_carga::timestamp))/86400) FILTER (WHERE fecha_descarga IS NOT NULL AND fecha_carga IS NOT NULL),0)::numeric AS dias_medio
-      FROM pedidos
-      WHERE empresa_id=$1 AND COALESCE(fecha_descarga, fecha_carga, fecha_pedido, created_at::date) BETWEEN $2 AND $3
+      FROM pedidos_bi
+      WHERE empresa_id=$1 AND fecha_bi BETWEEN $2 AND $3
     `, params),
     db.query(`
       SELECT
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE estado='cobrada')::int AS cobradas,
-        COUNT(*) FILTER (WHERE estado IN ('emitida','enviada','vencida','reclamada','sin_cobrar'))::int AS pendientes,
-        COUNT(*) FILTER (WHERE estado IN ('vencida','reclamada','sin_cobrar'))::int AS vencidas,
-        COALESCE(SUM(total),0)::numeric AS facturado,
-        COALESCE(SUM(total) FILTER (WHERE estado='cobrada'),0)::numeric AS cobrado,
-        COALESCE(SUM(total) FILTER (WHERE estado IN ('emitida','enviada','vencida','reclamada','sin_cobrar')),0)::numeric AS pendiente_cobro,
-        COALESCE(SUM(total) FILTER (WHERE estado IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
+        COUNT(*) FILTER (WHERE estado::text='cobrada')::int AS cobradas,
+        COUNT(*) FILTER (WHERE estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar'))::int AS pendientes,
+        COUNT(*) FILTER (WHERE estado::text IN ('vencida','reclamada','sin_cobrar'))::int AS vencidas,
+        COALESCE(SUM(base_imponible),0)::numeric AS facturado,
+        COALESCE(SUM(total),0)::numeric AS facturado_total,
+        COALESCE(SUM(total) FILTER (WHERE estado::text='cobrada'),0)::numeric AS cobrado,
+        COALESCE(SUM(total) FILTER (WHERE estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar')),0)::numeric AS pendiente_cobro,
+        COALESCE(SUM(total) FILTER (WHERE estado::text IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
       FROM facturas
-      WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND estado <> 'borrador'
+      WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('borrador','cancelada','anulada')
     `, params),
     db.query(`
-      WITH pedidos_cliente AS (
+      WITH ${financialPedidosCte}, pedidos_cliente AS (
         SELECT cliente_id,
                COUNT(*)::int AS pedidos,
-               COUNT(*) FILTER (WHERE estado IN ('entregado','facturado'))::int AS realizados,
+               COUNT(*) FILTER (WHERE estado::text IN ('entregado','facturado'))::int AS realizados,
                COALESCE(SUM(importe),0)::numeric AS venta,
-               COALESCE(SUM(importe) FILTER (WHERE estado IN ('entregado','facturado') AND factura_id IS NULL),0)::numeric AS pendiente_facturar_realizado,
-               COALESCE(SUM(precio_colaborador) FILTER (WHERE estado IN ('entregado','facturado')),0)::numeric AS coste_realizado
-          FROM pedidos
+               COALESCE(SUM(importe) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS venta_realizada,
+               COALESCE(SUM(importe) FILTER (WHERE estado::text IN ('entregado','facturado') AND pendiente_factura),0)::numeric AS pendiente_facturar_realizado,
+               COALESCE(SUM(coste_operativo) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS coste_realizado
+          FROM pedidos_bi
          WHERE empresa_id=$1
-           AND COALESCE(fecha_descarga,fecha_carga,fecha_pedido,created_at::date) BETWEEN $2 AND $3
+           AND fecha_bi BETWEEN $2 AND $3
          GROUP BY cliente_id
       ),
       facturas_cliente AS (
         SELECT cliente_id,
-               COUNT(*) FILTER (WHERE estado <> 'borrador')::int AS facturas,
-               COALESCE(SUM(total) FILTER (WHERE estado <> 'borrador'),0)::numeric AS facturado,
-               COALESCE(SUM(total) FILTER (WHERE estado IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS deuda_vencida
+               COUNT(*) FILTER (WHERE estado::text <> 'borrador')::int AS facturas,
+               COALESCE(SUM(base_imponible) FILTER (WHERE estado::text <> 'borrador'),0)::numeric AS facturado,
+               COALESCE(SUM(total) FILTER (WHERE estado::text IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS deuda_vencida
           FROM facturas
-         WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3
+         WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('cancelada','anulada')
          GROUP BY cliente_id
       )
       SELECT c.id, c.nombre,
@@ -118,11 +123,12 @@ router.get("/bi/resumen", async (req, res) => {
              COALESCE(pc.realizados,0)::int AS realizados,
              COALESCE(fc.facturas,0)::int AS facturas,
              COALESCE(pc.venta,0)::numeric AS venta,
+             COALESCE(pc.venta_realizada,0)::numeric AS venta_realizada,
              COALESCE(fc.facturado,0)::numeric AS facturado,
              COALESCE(pc.pendiente_facturar_realizado,0)::numeric AS pendiente_facturar_realizado,
              (COALESCE(fc.facturado,0) + COALESCE(pc.pendiente_facturar_realizado,0))::numeric AS ingreso_gestionado,
              COALESCE(pc.coste_realizado,0)::numeric AS coste,
-             (COALESCE(fc.facturado,0) + COALESCE(pc.pendiente_facturar_realizado,0) - COALESCE(pc.coste_realizado,0))::numeric AS margen,
+             (COALESCE(pc.venta_realizada,0) - COALESCE(pc.coste_realizado,0))::numeric AS margen,
              COALESCE(fc.deuda_vencida,0)::numeric AS deuda_vencida
         FROM clientes c
         LEFT JOIN pedidos_cliente pc ON pc.cliente_id=c.id
@@ -133,31 +139,33 @@ router.get("/bi/resumen", async (req, res) => {
        LIMIT 12
     `, params),
     db.query(`
+      WITH ${financialPedidosCte}
       SELECT COALESCE(NULLIF(origen,''),'Sin origen') AS origen,
              COALESCE(NULLIF(destino,''),'Sin destino') AS destino,
              COUNT(*)::int AS viajes,
              COALESCE(AVG(NULLIF(COALESCE(km_ruta,0) + COALESCE(km_vacio,0),0)),0)::numeric AS km_medio,
              COALESCE(SUM(importe),0)::numeric AS venta,
-             COALESCE(SUM(importe - COALESCE(precio_colaborador,0)),0)::numeric AS margen
-        FROM pedidos
-       WHERE empresa_id=$1 AND COALESCE(fecha_carga,fecha_pedido,created_at::date) BETWEEN $2 AND $3
-         AND estado <> 'cancelado'
+             COALESCE(SUM(importe - coste_operativo),0)::numeric AS margen
+        FROM pedidos_bi
+       WHERE empresa_id=$1 AND fecha_bi BETWEEN $2 AND $3
+         AND estado::text IN ('entregado','facturado')
        GROUP BY 1,2
        ORDER BY viajes DESC, margen DESC
        LIMIT 10
     `, params),
     db.query(`
       SELECT
-        COUNT(*) FILTER (WHERE estado='pendiente')::int AS solicitudes_pendientes,
+        COUNT(*) FILTER (WHERE estado::text='pendiente')::int AS solicitudes_pendientes,
         (SELECT COUNT(*) FROM factura_registros_fiscales WHERE empresa_id=$1 AND estado_envio='error')::int AS errores_fiscales,
         (SELECT COUNT(*) FROM pedido_docs pd JOIN pedidos p ON p.id=pd.pedido_id WHERE pd.empresa_id=$1 AND pd.created_at::date BETWEEN $2 AND $3)::int AS documentos_periodo
       FROM portal_solicitudes_cliente
       WHERE empresa_id=$1 AND created_at::date BETWEEN $2 AND $3
     `, params).catch(() => ({ rows:[{}] })),
     db.query(`
+      WITH ${financialPedidosCte}
       SELECT
         COUNT(*) FILTER (
-          WHERE p.estado IN ('entregado','facturado')
+          WHERE p.estado::text IN ('entregado','facturado')
             AND NOT EXISTS (
               SELECT 1 FROM pedido_docs pd
                WHERE pd.empresa_id=p.empresa_id
@@ -173,7 +181,7 @@ router.get("/bi/resumen", async (req, res) => {
             )
         )::int AS pod_pendiente_realizados,
         COUNT(*) FILTER (
-          WHERE p.estado IN ('entregado','facturado')
+          WHERE p.estado::text IN ('entregado','facturado')
             AND NOT EXISTS (
               SELECT 1 FROM pedido_docs pd
                WHERE pd.empresa_id=p.empresa_id
@@ -181,8 +189,8 @@ router.get("/bi/resumen", async (req, res) => {
             )
         )::int AS sin_documentos_realizados,
         COUNT(*) FILTER (
-          WHERE p.estado IN ('entregado','facturado')
-            AND p.factura_id IS NULL
+          WHERE p.estado::text IN ('entregado','facturado')
+            AND p.pendiente_factura
             AND NOT EXISTS (
               SELECT 1 FROM pedido_docs pd
                WHERE pd.empresa_id=p.empresa_id
@@ -197,30 +205,32 @@ router.get("/bi/resumen", async (req, res) => {
                  )
             )
         )::int AS facturable_bloqueado_docs
-      FROM pedidos p
+      FROM pedidos_bi p
       WHERE p.empresa_id=$1
-        AND COALESCE(p.fecha_descarga, p.fecha_carga, p.fecha_pedido, p.created_at::date) BETWEEN $2 AND $3
+        AND p.fecha_bi BETWEEN $2 AND $3
     `, params).catch(() => ({ rows:[{}] })),
     db.query(`
+      WITH ${financialPedidosCte}
       SELECT COALESCE(NULLIF(estado::text,''),'pendiente') AS estado,
              COUNT(*)::int AS pedidos,
              COALESCE(SUM(COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0)),0)::numeric AS importe
-      FROM pedidos
+      FROM pedidos_bi
       WHERE empresa_id=$1
-        AND COALESCE(fecha_descarga, fecha_carga, fecha_pedido, created_at::date) BETWEEN $2 AND $3
+        AND fecha_bi BETWEEN $2 AND $3
       GROUP BY 1
       ORDER BY pedidos DESC, estado ASC
     `, params).catch(() => ({ rows:[] })),
     db.query(`
       SELECT c.id, c.nombre,
              COUNT(f.id)::int AS facturas,
-             COALESCE(SUM(f.total) FILTER (WHERE f.estado <> 'borrador'),0)::numeric AS facturado,
-             COALESCE(SUM(f.total) FILTER (WHERE f.estado='cobrada'),0)::numeric AS cobrado,
-             COALESCE(SUM(f.total) FILTER (WHERE f.estado IN ('emitida','enviada','vencida','reclamada','sin_cobrar')),0)::numeric AS pendiente,
-             COALESCE(SUM(f.total) FILTER (WHERE f.estado IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
+             COALESCE(SUM(f.base_imponible) FILTER (WHERE f.estado::text <> 'borrador'),0)::numeric AS facturado,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado::text <> 'borrador'),0)::numeric AS facturado_total,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado::text='cobrada'),0)::numeric AS cobrado,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar')),0)::numeric AS pendiente,
+             COALESCE(SUM(f.total) FILTER (WHERE f.estado::text IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
       FROM facturas f
       JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id
-      WHERE f.empresa_id=$1 AND f.fecha BETWEEN $2 AND $3 AND f.estado <> 'rectificada'
+      WHERE f.empresa_id=$1 AND f.fecha BETWEEN $2 AND $3 AND f.estado::text NOT IN ('borrador','cancelada','anulada')
       GROUP BY c.id, c.nombre
       ORDER BY facturado DESC NULLS LAST, cobrado DESC NULLS LAST
       LIMIT 12
@@ -233,8 +243,8 @@ router.get("/bi/resumen", async (req, res) => {
   const facturado = Number(facturas.rows[0]?.facturado || 0);
   const cobrado = Number(facturas.rows[0]?.cobrado || 0);
   const ingresoGestionado = facturado + pendienteFacturarRealizado;
-  const coste = Number(p.coste_colaborador_realizado || 0);
-  const margen = ingresoGestionado - coste;
+  const coste = Number(p.coste_operativo_realizado || 0);
+  const margen = ventaRealizada - coste;
   const docs = documentos.rows[0] || {};
   const kmTotales = Number(p.km || 0);
   const kmRealizados = Number(p.km_realizados || 0);
@@ -258,10 +268,11 @@ router.get("/bi/resumen", async (req, res) => {
       pendiente_facturar_realizado: round2(pendienteFacturarRealizado),
       pendientes_facturar_count: Number(p.pendientes_facturar_count || 0),
       ingreso_gestionado: round2(ingresoGestionado),
-      coste_colaborador: round2(coste),
+      coste_colaborador: round2(p.coste_colaborador_realizado),
+      coste_operativo: round2(coste),
       margen: round2(margen),
-      margen_pct: ingresoGestionado > 0 ? round2((margen / ingresoGestionado) * 100) : 0,
-      eur_km: kmRealizados > 0 ? round2(ingresoGestionado / kmRealizados) : 0,
+      margen_pct: ventaRealizada > 0 ? round2((margen / ventaRealizada) * 100) : 0,
+      eur_km: kmRealizados > 0 ? round2(ventaRealizada / kmRealizados) : 0,
       km_totales: round2(kmTotales),
       km_realizados: round2(kmRealizados),
       km_vacio: round2(kmVacio),
@@ -280,8 +291,9 @@ router.get("/bi/resumen", async (req, res) => {
       sin_documentos_realizados: Number(docs.sin_documentos_realizados || 0),
       facturable_bloqueado_docs: Number(docs.facturable_bloqueado_docs || 0),
       facturado: round2(facturado),
+      facturado_total: round2(facturas.rows[0]?.facturado_total),
       cobrado: round2(cobrado),
-      cobro_pct: facturado > 0 ? round2((cobrado / facturado) * 100) : 0,
+      cobro_pct: Number(facturas.rows[0]?.facturado_total) > 0 ? round2((cobrado / Number(facturas.rows[0].facturado_total)) * 100) : 0,
       facturas: Number(facturas.rows[0]?.total || 0),
       facturas_cobradas: Number(facturas.rows[0]?.cobradas || 0),
       facturas_pendientes: Number(facturas.rows[0]?.pendientes || 0),
@@ -297,7 +309,7 @@ router.get("/bi/resumen", async (req, res) => {
       ingreso_gestionado: round2(r.ingreso_gestionado),
       coste: round2(r.coste),
       margen: round2(r.margen),
-      margen_pct: Number(r.ingreso_gestionado || 0) > 0 ? round2((Number(r.margen || 0) / Number(r.ingreso_gestionado || 0)) * 100) : 0,
+      margen_pct: Number(r.venta_realizada || 0) > 0 ? round2((Number(r.margen || 0) / Number(r.venta_realizada || 0)) * 100) : 0,
       deuda_vencida: round2(r.deuda_vencida),
     })),
     rutas: rutas.rows.map(r => ({ ...r, venta: round2(r.venta), margen: round2(r.margen), km_medio: round2(r.km_medio) })),
@@ -644,13 +656,13 @@ async function avisarBajadaRendimiento(empresaId, userId, desde, hasta) {
               COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)),0) AS km,
               COUNT(*) AS viajes
          FROM pedidos
-        WHERE empresa_id=$1 AND fecha_carga BETWEEN $2 AND $3 AND estado NOT IN ('cancelado')
+        WHERE empresa_id=$1 AND fecha_carga BETWEEN $2 AND $3 AND estado::text NOT IN ('cancelado')
      ), anterior AS (
        SELECT COALESCE(SUM(importe),0) AS facturacion,
               COALESCE(SUM(COALESCE(km_ruta,0) + COALESCE(km_vacio,0)),0) AS km,
               COUNT(*) AS viajes
          FROM pedidos
-        WHERE empresa_id=$1 AND fecha_carga BETWEEN $4 AND $5 AND estado NOT IN ('cancelado')
+        WHERE empresa_id=$1 AND fecha_carga BETWEEN $4 AND $5 AND estado::text NOT IN ('cancelado')
      )
      SELECT actual.facturacion AS facturacion_actual,
             anterior.facturacion AS facturacion_anterior,

@@ -26,6 +26,9 @@ async function main() {
     const errors=[];
     const stateRequests=[];
     const listRequests=[];
+    const updateRequests=[];
+    const fleet=Array.from({length:100},(_,i)=>({id:`55555555-5555-4555-8555-${String(i).padStart(12,'0')}`,matricula:`${1000+i}-BCD`,activo:true,clase:'tractora'}));
+    const drivers=Array.from({length:100},(_,i)=>({id:`66666666-6666-4666-8666-${String(i).padStart(12,'0')}`,nombre:`Conductor ${String(i).padStart(3,'0')}`,activo:true}));
     page.on('pageerror',error=>errors.push(error.message));
     await page.route('**/api/v1/**', async route=> {
       const url=new URL(route.request().url());
@@ -34,7 +37,13 @@ async function main() {
       if (pathname==='/auth/me') data=user;
       else if (pathname==='/pedidos' || pathname==='/pedidos/resumen-lista') { data=[pedido]; listRequests.push(url); }
       else if (pathname===`/pedidos/${pedido.id}/estado`) { stateRequests.push(route.request().postDataJSON()); data={ok:true}; }
-      else if (pathname===`/pedidos/${pedido.id}`) data=pedido;
+      else if (pathname===`/pedidos/${pedido.id}`) {
+        if(route.request().method()==='PUT') {const body=route.request().postDataJSON();updateRequests.push(body);Object.assign(pedido,body);}
+        data=pedido;
+      }
+      else if (pathname==='/vehiculos') data=fleet;
+      else if (pathname==='/choferes') data=drivers;
+      else if (pathname==='/pedidos/disponibilidad') data={vehiculos:fleet.map((v,i)=>({...v,disponible:i%2===0,motivo:i%2?'Viaje QA ocupado':''})),choferes:drivers.map((c,i)=>({...c,disponible:i%2===0,motivo:i%2?'Servicio QA':''}))};
       else if (pathname==='/clientes') data=[client];
       else if (pathname==='/palets/movimientos') data=Array.from({length:30},(_,index)=>({id:`lote-${index}`,empresa_id:user.empresa_id,cliente_id:client.id,propietario_cliente_id:client.id,cliente_nombre:client.nombre,tipo:'entrega',cantidad:50,fecha:'2026-09-01',obra_referencia:`Obra QA ${index}`,pedido_ref:`Obra QA ${index}`,estado_salida:'confirmada'}));
       else if (pathname==='/puntos-interes') data=[{id:'55555555-5555-4555-8555-555555555555',empresa_id:user.empresa_id,cliente_id:client.id,nombre:'Punto QA',direccion:'Calle Malaga 1',ciudad:'San Vicente del Raspeig',provincia:'Alicante',pais:'España',tipo:'carga',lat:38.3964,lng:-0.5255}];
@@ -51,6 +60,7 @@ async function main() {
       localStorage.setItem(`tms_onboarding_done:${user.empresa_id}:${user.rol}:${user.id}`,'1');
     },{user});
     await page.goto(`http://127.0.0.1:${server.address().port}`,{waitUntil:'networkidle'});
+    if (!process.env.QA_FOCUSED) {
     await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'})));
     await page.getByText('PED-QA-0001',{exact:true}).click({timeout:30000});
     const modal=page.locator('.tg-pedido-modal');
@@ -153,15 +163,16 @@ async function main() {
     assert.ok(lotSize.height<300 && lotSize.scroll>lotSize.height,JSON.stringify(lotSize));
     await page.screenshot({path:path.join(out,'palets-mobile.png')});
     assert.ok(await palets.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+    }
     const now=new Date();
     const month=date=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
     const originalMonth=month(new Date(now.getFullYear(),now.getMonth()-1,1));
     Object.assign(pedido,{estado:'incidencia',fecha_pedido:'2020-01-01',fecha_carga:`${originalMonth}-14`,fecha_descarga:`${originalMonth}-15`,vehiculo_id:'55555555-5555-4555-8555-555555555555',chofer_id:'66666666-6666-4666-8666-666666666666'});
-    for (const [option,expected] of [
+    for (const [option,expected] of (process.env.QA_FOCUSED ? [] : [
       [/mes original del viaje/,originalMonth],
       [/mes actual/,month(now)],
       [/mes siguiente/,month(new Date(now.getFullYear(),now.getMonth()+1,1))],
-    ]) {
+    ])) {
       await page.reload({waitUntil:'networkidle'});
       await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});
       await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'})));
@@ -170,7 +181,7 @@ async function main() {
       const originalOption=page.getByRole('button',{name:/mes original del viaje/});
       await originalOption.waitFor();
       assert.ok((await originalOption.innerText()).includes(new Date(`${originalMonth}-01T12:00:00`).toLocaleDateString('es-ES',{month:'long',year:'numeric'})));
-      assert.equal(listRequests.at(-1).searchParams.get('incluir_incidencias'),'true');
+      assert.equal(listRequests.at(-1).searchParams.get('incluir_incidencias'),'false');
       assert.ok(await originalOption.evaluate(el=>el.getBoundingClientRect().right<=window.innerWidth));
       await page.screenshot({path:path.join(out,'mes-facturacion-mobile.png')});
       const saved=page.waitForRequest(req=>req.url().includes(`/pedidos/${pedido.id}/estado`) && req.method()==='PATCH');
@@ -179,7 +190,77 @@ async function main() {
       assert.equal(stateRequests.at(-1).facturacion_mes,`${expected}-01`);
       assert.equal(stateRequests.at(-1).estado,'entregado');
     }
-    console.log('OK: modal desktop/mobile, cierre sin cambios, edicion continua, pais, decimales con coma, grupaje, mapa MapLibre y facturacion en mes original/actual/siguiente. Capturas: '+out);
+    Object.assign(pedido,{importe:480,estado:'confirmado',fecha_carga:`${month(now)}-14`,fecha_descarga:`${month(now)}-15`,vehiculo_id:null,chofer_id:null});
+    await page.setViewportSize({width:1440,height:1000});
+    await page.reload({waitUntil:'networkidle'});
+    await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});
+    await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'})));
+    const row=page.locator('tr').filter({hasText:'PED-QA-0001'});
+    await row.getByRole('button',{name:/^M[aá]s$/}).click();
+    await page.getByRole('button',{name:'Asignar vehiculo/chofer',exact:true}).click();
+    const assign=page.getByRole('dialog',{name:'Asignar recursos'});
+    await assign.getByRole('combobox',{name:'Tractora',exact:true}).click();
+    await assign.getByText('100 resultados',{exact:true}).waitFor();
+    assert.equal(await assign.getByRole('listbox').getByRole('option').count(),100);
+    await assign.getByRole('combobox',{name:'Disponibilidad Tractora',exact:true}).selectOption('free');
+    assert.equal(await assign.getByRole('listbox').getByRole('option').count(),50);
+    await assign.getByRole('combobox',{name:'Disponibilidad Tractora',exact:true}).selectOption('all');
+    await assign.getByRole('combobox',{name:'Tractora',exact:true}).fill('1099');
+    await assign.getByRole('option').filter({hasText:'1099-BCD'}).click();
+    await assign.getByRole('combobox',{name:'Chofer',exact:true}).click();
+    assert.equal(await assign.getByRole('listbox').count(),1);
+    await page.screenshot({path:path.join(out,'asignacion-100-desktop.png')});
+    await page.setViewportSize({width:390,height:844});
+    assert.ok(await assign.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+    await page.screenshot({path:path.join(out,'asignacion-100-mobile.png')});
+    await assign.getByRole('combobox',{name:'Chofer',exact:true}).fill('099');
+    await assign.getByRole('option').filter({hasText:'Conductor 099'}).click();
+    await assign.getByRole('button',{name:'Asignar',exact:true}).click();
+    await assign.waitFor({state:'hidden'});
+    const assignment=updateRequests.at(-1);
+    assert.equal(assignment.vehiculo_id,fleet[99].id);
+    assert.equal(assignment.chofer_id,drivers[99].id);
+    for(const field of ['importe','precio_unitario','tipo_precio','cantidad','puntos_carga','puntos_descarga','mercancia']) assert.ok(!(field in assignment),'Asignacion no debe enviar '+field);
+    assert.equal(pedido.importe,480);
+    await row.getByText('480,00 EUR',{exact:true}).waitFor();
+    const defaultDesde=listRequests.at(-1).searchParams.get('desde');
+    assert.ok(defaultDesde?.startsWith(month(now)),String(defaultDesde));
+    const historyResponse=page.waitForResponse(r=>/\/pedidos(?:\/resumen-lista)?$/.test(new URL(r.url()).pathname));
+    await page.getByRole('checkbox',{name:'Incluir meses anteriores'}).check();
+    await historyResponse;
+    assert.equal(listRequests.at(-1).searchParams.get('desde'),null);
+    const currentResponse=page.waitForResponse(r=>/\/pedidos(?:\/resumen-lista)?$/.test(new URL(r.url()).pathname));
+    await page.getByRole('checkbox',{name:'Incluir meses anteriores'}).uncheck();
+    await currentResponse;
+    assert.equal(listRequests.at(-1).searchParams.get('desde'),defaultDesde);
+    const clientResponse=page.waitForResponse(r=>/\/pedidos(?:\/resumen-lista)?$/.test(new URL(r.url()).pathname));
+    await page.locator('select').filter({has:page.locator(`option[value="${client.id}"]`)}).first().selectOption(client.id);
+    await clientResponse;
+    assert.equal(listRequests.at(-1).searchParams.get('desde'),defaultDesde,'El filtro cliente no debe abrir el historico');
+    Object.assign(pedido,{orden_carga_numero:'OC-QA-0001',factura_id:'draft-qa',factura_estado:'borrador',colaborador_id:'col-qa',colaborador_nombre:'Transportista QA',precio_colaborador:430,matricula_colaborador:'2052-LKJ',remolque_matricula_colaborador:'R-8683-BDV',referencia_cliente:'REF-ORDEN-UNICA',mercancia:'Paletizado',peso_kg:24000,metros_lineales:13.65});
+    pedido.puntos_carga[0]={...pedido.puntos_carga[0],cliente_nombre:'Fabrica QA',referencia:'REF-CARGA-UNICA'};
+    pedido.puntos_descarga.push({direccion:'Calpe',cliente_nombre:'Terminal QA',referencia:'REF-DESCARGA-2',fecha:`${month(now)}-16`});
+    await page.setViewportSize({width:1440,height:1000});
+    await page.reload({waitUntil:'networkidle'});
+    await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});
+    await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'})));
+    await row.getByRole('button',{name:'Orden de carga',exact:true}).click();
+    const popupPromise=page.waitForEvent('popup');
+    await page.getByRole('button',{name:'Imprimir orden',exact:true}).click();
+    const print=await popupPromise;
+    await print.waitForLoadState();
+    const printText=await print.locator('body').innerText();
+    for(const value of ['REF-ORDEN-UNICA','REF-CARGA-UNICA','REF-DESCARGA-2']) assert.equal(printText.split(value).length-1,1,value);
+    assert.doesNotMatch(printText,/Ubicaciones Google Maps|Paradas de la ruta|ESTADO/);
+    assert.equal(await print.locator('.order-stops tr').count(),2);
+    assert.equal(await print.locator('.order-stops tr').nth(1).locator('td').first().getAttribute('class'),'stop-empty');
+    assert.match(await print.locator('.order-stops tr').nth(1).locator('td').last().innerText(),/Descarga 2/i);
+    assert.equal(await print.locator('main > :last-child').getAttribute('class'),'conditions-sheet');
+    await print.pdf({path:path.join(out,'orden-carga-1-carga-2-descargas.pdf'),format:'A4',printBackground:true,preferCSSPageSize:true});
+    await print.screenshot({path:path.join(out,'orden-carga.png'),fullPage:true});
+    await print.close();
+    assert.deepEqual(errors,[]);
+    console.log('OK: operativa, filtros de mes, asignacion 100 recursos y orden imprimible con borrador, referencias unicas y columnas de paradas. Capturas: '+out);
   } catch(error) {
     if(page) { await page.screenshot({path:path.join(out,'failure.png')}); console.error((await page.locator('body').innerText()).slice(-5000)); }
     throw error;

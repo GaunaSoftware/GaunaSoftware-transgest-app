@@ -2156,14 +2156,6 @@ router.put("/integraciones/empresas/:empresaId/:provider", superAuth, async (req
     const exists = await db.query("SELECT id FROM empresas WHERE id=$1", [req.params.empresaId]);
     if (!exists.rows[0]) return res.status(404).json({ error: "Empresa no encontrada" });
     await setCompanyApiConfig(req.params.empresaId, provider, req.body || {}, req.superadmin?.id || null);
-    if (GPS_PROVIDERS.includes(provider) && req.body?.activo !== false) {
-      await db.query(
-        `UPDATE empresa_api_configs
-         SET activo=false, updated_at=NOW()
-         WHERE empresa_id=$1 AND provider <> $2 AND provider = ANY($3::varchar[])`,
-        [req.params.empresaId, provider, GPS_PROVIDERS]
-      );
-    }
     await audit(req, "integracion.empresa.actualizada", {
       provider,
       use_global: req.body?.use_global,

@@ -3969,6 +3969,20 @@ function calcPedidoImporteCanonical(payload = {}) {
   return roundMoney(base + extra + stopsExtra);
 }
 
+function pedidoConImporteVisible(pedido) {
+  // Recupera tarifas antiguas sin escribir durante la lectura ni cambiar facturas.
+  if (Number(pedido.importe) || pedido.factura_id) return pedido;
+  const calculado = calcPedidoImporteCanonical(pedido);
+  const importe = calculado ?? parseLocaleNumber(pedido.precio_cliente_col);
+  return Number.isFinite(importe) && importe > 0 ? { ...pedido, importe } : pedido;
+}
+
+function calcPedidoImporteUpdate(current, body, normalizedFields) {
+  if (!hasPedidoTarifaCalcInput(body)) return null;
+  const sent = Object.fromEntries(Object.entries(normalizedFields).filter(([key,value])=>key in body && value !== undefined));
+  return calcPedidoImporteCanonical(normalizePedidoTarifaFields({ ...current, ...sent }));
+}
+
 function normalizeAiText(value = "") {
   return String(value || "")
     .normalize("NFD")
@@ -6100,7 +6114,7 @@ router.get("/", async (req, res) => {
   const limitN = parseInt(req.query.limit || 50);
 
   res.json({
-    data: rows,
+    data: rows.map(pedidoConImporteVisible),
     pagination: {
       total,
       page: pageN,
@@ -6465,6 +6479,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.hora_carga, p.hora_descarga, p.ventana_carga, p.ventana_descarga,
              p.puntos_carga, p.puntos_descarga, p.origen, p.destino, p.referencia_cliente,
              p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
+             p.tipo_precio, p.precio_unitario, p.cantidad, p.importe_minimo, p.minimo_unidades, p.extracostes_importe, p.precio_cliente_col,
              p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,
              p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
              p.incidencia_creada_at, p.incidencia_automatica, p.paralizacion_minutos,
@@ -6496,6 +6511,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.hora_carga, p.hora_descarga, p.ventana_carga, p.ventana_descarga,
              p.puntos_carga, p.puntos_descarga, p.origen, p.destino, p.referencia_cliente,
              p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
+             p.tipo_precio, p.precio_unitario, p.cantidad, p.importe_minimo, p.minimo_unidades, p.extracostes_importe, p.precio_cliente_col,
              p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,
              p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
              p.incidencia_creada_at, p.incidencia_automatica, p.paralizacion_minutos,
@@ -6523,7 +6539,7 @@ router.get("/resumen-lista", async (req, res) => {
 
     const totalAproximado = offset + rows.length + (rows.length === limitN ? 1 : 0);
     res.json({
-      data: rows,
+      data: rows.map(pedidoConImporteVisible),
       pagination: {
         total: totalAproximado,
         page: pageN,
@@ -9463,8 +9479,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     : pedidoActualRows[0].colaborador_id;
   let precioClienteColSincronizado = false;
   if (hasPedidoTarifaCalcInput(body)) {
-    const calcBase = normalizePedidoTarifaFields(inferPayload);
-    const importeCanonico = calcPedidoImporteCanonical({ ...calcBase, ...normalizedFieldMap });
+    const importeCanonico = calcPedidoImporteUpdate(pedidoActualRows[0], body, normalizedFieldMap);
     if (importeCanonico !== null) {
       normalizedFieldMap.importe = importeCanonico;
       if (colaboradorIdEfectivo) {
@@ -10106,5 +10121,6 @@ table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid
 router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
 router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
+router._test = { pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate };
 
 module.exports = router;

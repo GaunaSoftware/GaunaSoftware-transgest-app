@@ -24,13 +24,16 @@ async function main() {
     browser = await chromium.launch({ headless:true, channel:'msedge', args:['--enable-unsafe-swiftshader'] });
     page = await browser.newPage({viewport:{width:1440,height:1000}});
     const errors=[];
+    const stateRequests=[];
+    const listRequests=[];
     page.on('pageerror',error=>errors.push(error.message));
     await page.route('**/api/v1/**', async route=> {
       const url=new URL(route.request().url());
       const pathname=url.pathname.replace('/api/v1','');
       let data=[];
       if (pathname==='/auth/me') data=user;
-      else if (pathname==='/pedidos' || pathname==='/pedidos/resumen-lista') data=[pedido];
+      else if (pathname==='/pedidos' || pathname==='/pedidos/resumen-lista') { data=[pedido]; listRequests.push(url); }
+      else if (pathname===`/pedidos/${pedido.id}/estado`) { stateRequests.push(route.request().postDataJSON()); data={ok:true}; }
       else if (pathname===`/pedidos/${pedido.id}`) data=pedido;
       else if (pathname==='/clientes') data=[client];
       else if (pathname==='/palets/movimientos') data=Array.from({length:30},(_,index)=>({id:`lote-${index}`,empresa_id:user.empresa_id,cliente_id:client.id,propietario_cliente_id:client.id,cliente_nombre:client.nombre,tipo:'entrega',cantidad:50,fecha:'2026-09-01',obra_referencia:`Obra QA ${index}`,pedido_ref:`Obra QA ${index}`,estado_salida:'confirmada'}));
@@ -150,7 +153,33 @@ async function main() {
     assert.ok(lotSize.height<300 && lotSize.scroll>lotSize.height,JSON.stringify(lotSize));
     await page.screenshot({path:path.join(out,'palets-mobile.png')});
     assert.ok(await palets.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
-    console.log('OK: modal desktop/mobile, cierre sin cambios, edicion continua, pais, decimales con coma, grupaje y mapa MapLibre. Capturas: '+out);
+    const now=new Date();
+    const month=date=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
+    const originalMonth=month(new Date(now.getFullYear(),now.getMonth()-1,1));
+    Object.assign(pedido,{estado:'incidencia',fecha_pedido:'2020-01-01',fecha_carga:`${originalMonth}-14`,fecha_descarga:`${originalMonth}-15`,vehiculo_id:'55555555-5555-4555-8555-555555555555',chofer_id:'66666666-6666-4666-8666-666666666666'});
+    for (const [option,expected] of [
+      [/mes original del viaje/,originalMonth],
+      [/mes actual/,month(now)],
+      [/mes siguiente/,month(new Date(now.getFullYear(),now.getMonth()+1,1))],
+    ]) {
+      await page.reload({waitUntil:'networkidle'});
+      await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});
+      await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'})));
+      const row=page.locator('tr').filter({hasText:'PED-QA-0001'});
+      await row.locator('select').selectOption('entregado');
+      const originalOption=page.getByRole('button',{name:/mes original del viaje/});
+      await originalOption.waitFor();
+      assert.ok((await originalOption.innerText()).includes(new Date(`${originalMonth}-01T12:00:00`).toLocaleDateString('es-ES',{month:'long',year:'numeric'})));
+      assert.equal(listRequests.at(-1).searchParams.get('incluir_incidencias'),'true');
+      assert.ok(await originalOption.evaluate(el=>el.getBoundingClientRect().right<=window.innerWidth));
+      await page.screenshot({path:path.join(out,'mes-facturacion-mobile.png')});
+      const saved=page.waitForRequest(req=>req.url().includes(`/pedidos/${pedido.id}/estado`) && req.method()==='PATCH');
+      await page.getByRole('button',{name:option}).click();
+      await saved;
+      assert.equal(stateRequests.at(-1).facturacion_mes,`${expected}-01`);
+      assert.equal(stateRequests.at(-1).estado,'entregado');
+    }
+    console.log('OK: modal desktop/mobile, cierre sin cambios, edicion continua, pais, decimales con coma, grupaje, mapa MapLibre y facturacion en mes original/actual/siguiente. Capturas: '+out);
   } catch(error) {
     if(page) { await page.screenshot({path:path.join(out,'failure.png')}); console.error((await page.locator('body').innerText()).slice(-5000)); }
     throw error;

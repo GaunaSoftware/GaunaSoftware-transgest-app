@@ -6,6 +6,7 @@ const crypto  = require("crypto");
 const zlib = require("zlib");
 const pdfParse = require("pdf-parse");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
+const { pedidoDateFilter } = require("../services/pedidoDateFilter");
 const { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } = require("../utils/number");
 const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail } = require("../services/email");
@@ -5978,8 +5979,9 @@ router.get("/", async (req, res) => {
       params.push(scope.etiquetas);
     }
   }
-  if (desde)      { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) >= $${i++}`);  params.push(desde); }
-  if (hasta)      { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) <= $${i++}`);  params.push(hasta); }
+  const dateFilter = pedidoDateFilter(req.query, params);
+  if (dateFilter) where.push(dateFilter);
+  i = params.length + 1;
   if (pendiente_completar === "true")  { where.push("p.pendiente_completar IS TRUE"); }
   if (pendiente_completar === "false") { where.push("COALESCE(p.pendiente_completar,false) IS FALSE"); }
   if (tipo_carga) { where.push(`COALESCE(p.tipo_carga,'') = $${i++}`); params.push(tipo_carga); }
@@ -6429,8 +6431,9 @@ router.get("/resumen-lista", async (req, res) => {
         params.push(scope.tipos_viaje);
       }
     }
-    if (desde) { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) >= $${i++}`); params.push(desde); }
-    if (hasta) { where.push(`COALESCE(p.fecha_carga, p.fecha_descarga, p.fecha_entrega) <= $${i++}`); params.push(hasta); }
+    const dateFilter = pedidoDateFilter(req.query, params);
+    if (dateFilter) where.push(dateFilter);
+    i = params.length + 1;
     if (pendiente_completar === "true") where.push("p.pendiente_completar IS TRUE");
     if (pendiente_completar === "false") where.push("COALESCE(p.pendiente_completar,false) IS FALSE");
     if (tipo_carga) { where.push(`COALESCE(p.tipo_carga,'') = $${i++}`); params.push(tipo_carga); }
@@ -9043,6 +9046,13 @@ router.patch("/:id/estado",
 
     try {
     const { estado } = req.body;
+    let facturacionMes = null;
+    if (estado === "entregado" && req.body.facturacion_mes != null) {
+      facturacionMes = normalizePedidoDate(req.body.facturacion_mes);
+      if (!facturacionMes || !facturacionMes.endsWith("-01")) {
+        return res.status(400).json({ error: "Indica un mes de facturacion valido (AAAA-MM-01)." });
+      }
+    }
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows } = await db.query("SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);
     if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
@@ -9133,22 +9143,17 @@ router.patch("/:id/estado",
          WHERE id=$5 AND empresa_id=$6`,
         [estado, motivoCancelacion || null, actorUsuarioId, `CANCELACION: ${motivoCancelacion}`, req.params.id, empresaId]
       );
+    } else if (estado === "entregado" && facturacionMes) {
+      // La entrega y el mes elegido se guardan juntos, sin exito parcial.
+      await db.query(
+        "UPDATE pedidos SET estado=$1, facturacion_mes=$4, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL WHERE id=$2 AND empresa_id=$3",
+        [estado, req.params.id, empresaId, facturacionMes]
+      );
     } else {
       await db.query(
         "UPDATE pedidos SET estado=$1, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL WHERE id=$2 AND empresa_id=$3",
         [estado, req.params.id, empresaId]
       );
-    }
-
-    // Mes de facturacion elegido al entregar fuera de su mes (facturar este mes
-    // o dejarlo para la prevision del mes siguiente). Se guarda como el dia 1 del
-    // mes elegido; el dashboard y facturacion lo usan para situar el viaje.
-    if (estado === "entregado" && typeof req.body.facturacion_mes === "string") {
-      const fm = req.body.facturacion_mes.trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(fm)) {
-        await db.query("UPDATE pedidos SET facturacion_mes=$1 WHERE id=$2 AND empresa_id=$3", [fm, req.params.id, empresaId])
-          .catch(e => logger.warn("facturacion_mes no guardado:", e.message));
-      }
     }
 
     if (estado === "descarga" && rows[0].vehiculo_id && rows[0].destino) {

@@ -25,6 +25,7 @@ import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
 import EndpointAutocomplete from "../components/EndpointAutocomplete";
+import { pedidoOriginalMonth } from "../utils/pedidoBillingMonth";
 
 let puntosInteresCache = [];
 const AI_INBOX_MAX_FILE_BYTES = 6 * 1024 * 1024;
@@ -729,6 +730,7 @@ function buildPedidoCriticalAlertKey(item) {
 }
 
 const ESTADOS_RAW = ["pendiente","confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"];
+const ESTADOS_ACTIVOS = ESTADOS_RAW.filter(estado => !["entregado", "cancelado"].includes(estado));
 const LABEL_ESTADO = {
   pendiente:"Pendiente", confirmado:"Confirmado", espera_carga:"Espera carga", cargando:"Cargando", en_curso:"En curso", espera_descarga:"Espera descarga",
   descarga:"En descarga", entregado:"Entregado", cancelado:"Cancelado", incidencia:"Incidencia"
@@ -10654,8 +10656,9 @@ export default function Pedidos() {
     let listadoCargado = false;
     try {
       const params = {};
+      params.incluir_incidencias = "true";
       if (filtroEst === "activos") {
-        params.estado = "pendiente,confirmado,en_curso,descarga,incidencia";
+        params.estado = ESTADOS_ACTIVOS.join(",");
       }
       else if (filtroEst !== "todos") { params.estado = filtroEst; }
       if (debouncedQ) params.q = debouncedQ;
@@ -10689,7 +10692,7 @@ export default function Pedidos() {
       let pedidosData = Array.isArray(p) ? p : (Array.isArray(p?.data) ? p.data : []);
       // Safety net for "activos" if an older backend ignores multi-state filtering.
       if (filtroEst === "activos") {
-        pedidosData = pedidosData.filter(x => ["pendiente","confirmado","en_curso","descarga","incidencia"].includes(x.estado));
+        pedidosData = pedidosData.filter(x => ESTADOS_ACTIVOS.includes(x.estado));
       }
       setPedidos(pedidosData);
       if (p?.pagination) {
@@ -10929,9 +10932,9 @@ export default function Pedidos() {
       return;
     }
     // Entrega fuera de su mes (p. ej. cerrado tarde por incidencia): preguntar si
-    // se factura en el mes actual o en la prevision del mes siguiente.
+    // se conserva su mes original, se factura este mes o se lleva al siguiente.
     if (estado === "entregado" && !extra.__facturacionResuelta) {
-      const mesRef = String(p?.fecha_descarga || p?.fecha_entrega || p?.fecha_pedido || p?.fecha_carga || "").slice(0, 7);
+      const mesRef = pedidoOriginalMonth(p);
       const ahora = new Date();
       const mesActual = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`;
       if (mesRef && mesRef < mesActual) {
@@ -10943,6 +10946,7 @@ export default function Pedidos() {
     setPedidos(prev => prev.map(x => x.id===id ? {
       ...x,
       estado,
+      ...(estado === "entregado" && extra.facturacion_mes ? { facturacion_mes: extra.facturacion_mes } : {}),
       ...(estado === "cancelado" ? { motivo_cancelacion: extra.motivo_cancelacion || x.motivo_cancelacion || "" } : {}),
       ...(estado === "incidencia" ? {
         incidencia_descripcion: extra.incidencia || x.incidencia_descripcion || "",
@@ -10959,7 +10963,7 @@ export default function Pedidos() {
       // No need to full reload - optimistic update is correct
     } catch(e) {
       // Revert on error
-      setPedidos(prev => prev.map(x => x.id===id ? {...x, estado: p?.estado} : x));
+      setPedidos(prev => prev.map(x => x.id===id ? {...x, estado: p?.estado, facturacion_mes: p?.facturacion_mes} : x));
       notify(e.message, "error");
     }
   }
@@ -12766,12 +12770,16 @@ export default function Pedidos() {
         const aplicar = (fm) => { const pid = facturacionMesSelector.pedidoId; setFacturacionMesSelector(null); cambiarEstado(pid, "entregado", { __facturacionResuelta:true, facturacion_mes: fm }); };
         return (
           <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setFacturacionMesSelector(null)}>
-            <div style={{...S.mbox,width:"min(560px,96vw)"}}>
+            <div style={{...S.mbox,width:"min(560px,96vw)",maxHeight:"calc(100dvh - 24px)",overflowY:"auto"}}>
               <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:800,color:"var(--text)"}}>Entrega fuera de su mes</div>
               <div style={{fontSize:13,color:"var(--text4)",marginTop:6,lineHeight:1.6}}>
                 Este viaje corresponde a <b style={{color:"var(--text)"}}>{nombreMes(facturacionMesSelector.mesRef)}</b> pero lo marcas como entregado en <b style={{color:"var(--text)"}}>{nombreMes(facturacionMesSelector.mesActual)}</b>. ¿En qué mes se factura?
               </div>
               <div style={{display:"grid",gap:10,marginTop:18}}>
+                <button type="button" onClick={()=>aplicar(`${facturacionMesSelector.mesRef}-01`)}
+                  style={{textAlign:"left",padding:"12px 14px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",cursor:"pointer"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>Facturar en el mes original del viaje ({nombreMes(facturacionMesSelector.mesRef)})</div>
+                </button>
                 <button type="button" onClick={()=>aplicar(currFirst)}
                   style={{textAlign:"left",padding:"12px 14px",borderRadius:9,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",cursor:"pointer"}}>
                   <div style={{fontSize:13,fontWeight:800,color:"var(--accent-xl)"}}>Facturar en el mes actual ({nombreMes(currFirst)})</div>

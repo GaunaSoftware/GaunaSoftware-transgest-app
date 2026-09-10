@@ -9,7 +9,8 @@
   no se superpone con el estado sin trabajo.
 - Rutas: calculo estimado por tonelada con minimo de ruta, minimo del cliente o
   24 t por defecto. Se muestran toneladas usadas y EUR/km; no es margen real
-  contable. El coste por km sigue siendo una estimacion configurable en la ruta.
+  contable. Sin coste especifico se usa la referencia estimada de 0,42 EUR/km;
+  no representa el coste completo real de una empresa.
 - Clientes: minimo facturable en toneladas editable con coma decimal.
 - Documentos del chofer: lectura y subida por conductor vinculado; acceso por
   vehiculo solo si el pedido no tiene otro conductor asignado. No se concede

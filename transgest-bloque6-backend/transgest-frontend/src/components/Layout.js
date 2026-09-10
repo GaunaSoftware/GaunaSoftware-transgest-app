@@ -81,31 +81,31 @@ const CSS = `
     .tg-content {
       overflow-x:hidden;
     }
-    .tg-content > div {
+    .tg-content--legacy > div {
       padding-left:18px !important;
       padding-right:18px !important;
       max-width:100% !important;
       min-width:0 !important;
     }
-    .tg-content * {
+    .tg-content--legacy * {
       box-sizing:border-box;
       min-width:0;
     }
-    .tg-content [style*="display: flex"],
-    .tg-content [style*="display:flex"] {
+    .tg-content--legacy [style*="display: flex"],
+    .tg-content--legacy [style*="display:flex"] {
       flex-wrap:wrap;
     }
-    .tg-content [style*="margin-left: auto"],
-    .tg-content [style*="marginLeft:auto"] {
+    .tg-content--legacy [style*="margin-left: auto"],
+    .tg-content--legacy [style*="marginLeft:auto"] {
       margin-left:0 !important;
     }
-    .tg-content input,
-    .tg-content select,
-    .tg-content textarea {
+    .tg-content--legacy input,
+    .tg-content--legacy select,
+    .tg-content--legacy textarea {
       min-width:0 !important;
       max-width:100% !important;
     }
-    .tg-content table {
+    .tg-content--legacy table {
       display:block;
       width:100% !important;
       max-width:100% !important;
@@ -149,47 +149,47 @@ const CSS = `
       box-sizing:border-box;
       padding-bottom:84px;
     }
-    .tg-content * {
+    .tg-content--legacy * {
       box-sizing:border-box;
       min-width:0;
     }
-    .tg-content > * {
+    .tg-content--legacy > * {
       width:100% !important;
       max-width:100vw !important;
     }
-    .tg-content [style*="display: flex"],
-    .tg-content [style*="display:flex"] {
+    .tg-content--legacy [style*="display: flex"],
+    .tg-content--legacy [style*="display:flex"] {
       max-width:100%;
     }
-    .tg-content [style*="width: min("],
-    .tg-content [style*="width:min("] {
+    .tg-content--legacy [style*="width: min("],
+    .tg-content--legacy [style*="width:min("] {
       width:100% !important;
       max-width:calc(100vw - 24px) !important;
     }
-    .tg-content [style*="min-width"],
-    .tg-content [style*="minWidth"] {
+    .tg-content--legacy [style*="min-width"],
+    .tg-content--legacy [style*="minWidth"] {
       min-width:0 !important;
     }
-    .tg-content input,
-    .tg-content select,
-    .tg-content textarea {
+    .tg-content--legacy input,
+    .tg-content--legacy select,
+    .tg-content--legacy textarea {
       width:100% !important;
       max-width:100% !important;
       min-width:0 !important;
     }
-    .tg-content button {
+    .tg-content--legacy button {
       max-width:100%;
       white-space:normal;
     }
-    .tg-content table {
+    .tg-content--legacy table {
       display:block;
       width:100% !important;
       max-width:100% !important;
       overflow-x:auto;
       white-space:nowrap;
     }
-    .tg-content th,
-    .tg-content td {
+    .tg-content--legacy th,
+    .tg-content--legacy td {
       white-space:nowrap;
     }
   }
@@ -911,7 +911,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
           </div>
 
           {/* Content */}
-          <div className="tg-content">
+          <div className={`tg-content${vistaActiva === "facturacion" ? "" : " tg-content--legacy"}`}>
             {children}
           </div>
         </div>

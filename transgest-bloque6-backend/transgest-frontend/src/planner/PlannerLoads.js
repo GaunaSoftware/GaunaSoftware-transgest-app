@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { getPedidos, getPedido, getClientes, getColaboradores, crearPedido, editarPedido, enviarWorkflowColaborador } from '../services/api';
 import { supplierPriceType } from '../utils/supplierPricing';
 import { orderTown } from '../utils/orderTown';
+import { loadPlannerClients } from './catalogs';
 
 const rowsOf = data => Array.isArray(data) ? data : data?.data || [];
 const localDate = () => new Date().toLocaleDateString('en-CA');
@@ -36,7 +37,7 @@ export default function PlannerLoads() {
     let active = true;
     async function fetchCatalogs() {
       try {
-        const c = puedeVer('clientes') ? await getClientes('', 'true', 1, 1000) : [];
+        const c = puedeVer('clientes') ? await loadPlannerClients((page,limit)=>getClientes('', 'true', page, limit),()=>active) : [];
         const a = puedeVer('colaboradores') ? await getColaboradores() : [];
         if (active) { setClients(rowsOf(c)); setAgencies(rowsOf(a)); }
       } catch (err) { if (active) setError(err.message); }

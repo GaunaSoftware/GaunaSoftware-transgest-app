@@ -37,7 +37,7 @@
 
 ## Verificacion
 
-Frontend: compilaciones TMS/Planner, 14 pruebas unitarias, pruebas de navegador
+Frontend: compilaciones TMS/Planner, 16 pruebas unitarias, pruebas de navegador
 para plan diario/tarifas, Planner, operativa y chatbot; ejecucion del .exe con API
 simulada. Dos avisos de hooks preexistentes en GestionTrafico y MiCuenta.
 
@@ -48,10 +48,12 @@ Los mocks no prueban entrega real de notificaciones, correo, GPS ni respuesta IA
 ## Pendiente que no debe darse por completado
 
 - Arranque integral LAN, reinicio, restauracion y corte de Internet en un equipo
-  con motor Docker disponible. En este equipo no hay motor Docker arrancado.
+  con motor Docker disponible. Docker Desktop se intento iniciar, pero se cierra
+  por un error interno de dockerInference. No se ha restablecido su configuracion.
 - Pruebas reales de OpenAI/GPS/correo con autorizacion y configuracion de empresa.
 - Publicacion independiente de Planner y validacion con usuarios de una fabrica.
 - Funciones comerciales adicionales de Planner descritas en su documento;
   no se han simulado licitaciones, cupos ni conexion entre instalaciones.
-- Confirmacion del despliegue remoto del commit, aparte del push a GitHub.
+- El bloque principal ya se verifico publicado en web y API con release 9581b1b;
+  cualquier correccion posterior debe verificarse de nuevo tras su push.
 - Siguiente bloque acordado con el usuario: trabajar en la app del chofer.

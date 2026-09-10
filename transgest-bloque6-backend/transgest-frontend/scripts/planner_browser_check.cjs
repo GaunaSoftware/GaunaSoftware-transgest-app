@@ -22,16 +22,17 @@ async function main() {
     browser=await chromium.launch({channel:'msedge',headless:true});
     page=await browser.newPage({viewport:{width:1440,height:1000}});
     const errors=[], requests=[], writes=[];
-    let order=null;
+    let order=null, blocked=false;
     page.on('pageerror',e=>errors.push(e.message));
     await page.route('**/api/v1/**', async route=>{
       const req=route.request(),url=new URL(req.url()),p=url.pathname.replace('/api/v1',''); requests.push(p);
       let data=[];
       if(p==='/auth/me')data=user;
       else if(p==='/producto')data={producto:'planner'};
-      else if(p==='/clientes')data={data:[client]};
+      else if(p==='/clientes')data=url.searchParams.get('page')==='1' ? {data:[{id:'first',nombre:'Primera pagina'}],pagination:{hasNext:true}} : {data:[client],pagination:{hasNext:false}};
       else if(p==='/colaboradores')data=[agency];
       else if(p==='/pedidos') {
+        if(blocked){await route.fulfill({status:402,contentType:'application/json',body:JSON.stringify({motivo:'suspendido',mensaje:'Cuenta suspendida QA'})});return;}
         if(req.method()==='POST') {const body=req.postDataJSON();writes.push(body);order={...body,id:'p-qa',numero:'PED-QA',colaborador_nombre:agency.nombre};data=order;}
         else {assert.match(url.searchParams.get('desde'),/^\d{4}-\d{2}-01$/);data={data:order?[order]:[],pagination:{hasNext:false}};}
       } else if(p==='/pedidos/p-qa') {
@@ -65,6 +66,10 @@ async function main() {
     await dialog.getByRole('button',{name:'Guardar carga',exact:true}).click();
     await dialog.waitFor({state:'hidden'});assert.equal(writes.length,1,'Sin cambios no debe escribir');
     assert.ok(!requests.some(p=>/^\/(vehiculos|choferes|taller)\b/.test(p)));
+    blocked=true;
+    await page.locator('input[type="month"]').fill('2027-01');
+    await page.getByText('Cuenta suspendida',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Nueva carga',exact:true}).count(),0);
     assert.deepEqual(errors,[]);
     console.log('PASS Planner: create, assign agency, independent tonne rate, unchanged edit, desktop/mobile layout, no fleet calls. Mock API only.');
   } catch(error) {

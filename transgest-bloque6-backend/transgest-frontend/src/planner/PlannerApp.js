@@ -16,11 +16,18 @@ const modules = [
   ['clientes','Destinatarios'], ['documentos','Documentos'], ['empresa','Empresa'],
 ];
 export default function PlannerApp({ PasswordChangeComponent }) {
-  const { user, loading, logout, puedeVer, bloqueado, refreshUser } = useAuth();
+  const { user, loading, logout, puedeVer, refreshUser } = useAuth();
+  const [bloqueado, setBloqueado] = useState(null);
   const { theme, toggle } = useTheme();
   const [view, setView] = useState('pedidos');
   const [product, setProduct] = useState('');
   const [error, setError] = useState('');
+  useEffect(() => {
+    const onBlocked = event => setBloqueado(event.detail);
+    window.addEventListener('tms:bloqueado', onBlocked);
+    return () => window.removeEventListener('tms:bloqueado', onBlocked);
+  }, []);
+  useEffect(() => { setBloqueado(null); }, [user?.id]);
   useEffect(() => {
     document.title = 'TransGest Planner';
     let alive = true;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { routeMargin } from '../utils/routeMargin';
 import { getRutas, crearRuta, editarRuta, borrarRuta, getRutaPrecios, editarRutaPrecios, getClientes, importarRutas } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -83,19 +84,6 @@ const getMinimoDescriptor = (ruta) => {
   const unit = tipo === "hora" ? "h" : tipo === "palet" ? "palets" : "u.";
   return minimo > 0 ? { value: minimo, unit, fromClient: false } : null;
 };
-const getIngresoBaseRuta = (ruta, precioFinal) => {
-  const tipo = String(ruta?.tarifa_tipo || "viaje");
-  const minimo = getMinimoDescriptor(ruta);
-  if (tipo === "km") return precioFinal * Number(ruta?.km || 0);
-  if (tipo === "viaje") {
-    const minimoFacturable = Number(ruta?.minimo_facturable || 0);
-    return Math.max(precioFinal, minimoFacturable || 0);
-  }
-  if (["tonelada", "kg", "hora", "palet"].includes(tipo)) {
-    return precioFinal * Number(minimo?.value || 1);
-  }
-  return precioFinal;
-};
 const fmtTarifa = (ruta) => {
   const tipo = opcionesTipoTarifa(ruta.tarifa_tipo).find(t => t.v === (ruta.tarifa_tipo || "viaje"))?.l || (ruta.tarifa_tipo || "Viaje");
   const precio = fmt2(ruta.precio_base || 0);
@@ -122,20 +110,7 @@ const margenRuta = (ruta) => {
   return { margen, pct, margenKm, ingresoKm, costeKm };
 };
 
-const calcularMargenRuta = (ruta) => {
-  const precio = Number(ruta?.precio_base || 0);
-  const recargo = Number(ruta?.recargo_combustible_pct || 0) || 0;
-  const km = Number(ruta?.km || 0);
-  const peajes = Number(ruta?.peajes || 0);
-  const costeKm = 0.42 + (km > 0 ? peajes / km : 0);
-  const precioFinal = precio * (1 + recargo / 100);
-  const ingresoTotal = getIngresoBaseRuta(ruta, precioFinal);
-  const ingresoKm = km > 0 ? ingresoTotal / km : 0;
-  const margenKm = km > 0 ? ingresoKm - costeKm : 0;
-  const margen = km > 0 ? margenKm * km : ingresoTotal - peajes;
-  const pct = ingresoKm > 0 ? (margenKm / ingresoKm) * 100 : 0;
-  return { margen, pct, margenKm, ingresoKm, ingresoTotal, costeKm };
-};
+const calcularMargenRuta = (ruta) => routeMargin(ruta);
 
 export default function Rutas(){
   void fmtTarifa;
@@ -467,14 +442,15 @@ export default function Rutas(){
                                         return (
                                           <div style={{display:"grid",gap:2}}>
                                             <span style={{fontSize:11,color:"var(--text4)"}}>Ing. {fmt2(m.ingresoKm)}</span>
-                                            <span style={{fontSize:11,color:"var(--text4)"}}>Coste {fmt2(m.costeKm)}</span>
-                                            <span style={{fontWeight:900,color:m.margenKm>=0?"#008b82":"#ef4444"}}>Margen {fmt2(m.margenKm)}</span>
+                                            <span style={{fontSize:11,color:"var(--text4)"}}>Coste est. {fmt2(m.costeKm)}</span>
+                                            <span style={{fontWeight:900,color:m.margenKm>=0?"#008b82":"#ef4444"}}>Margen est. {fmt2(m.margenKm)}</span>
+                                            {(r.tarifa_tipo || r.tipo_precio)==='tonelada' && <span style={{fontSize:11}}>Base: {fmt2(m.units)} t</span>}
                                           </div>
                                         );
                                       })() : "-"}
                                     </td>
                                     <td style={S.td}>
-                                      <span style={{padding:"2px 8px",borderRadius:20,fontSize:11,
+                                      <span style={{display:"inline-block",maxWidth:"100%",whiteSpace:"normal",lineHeight:1.4,padding:"2px 8px",borderRadius:6,fontSize:11,
                                         background:"var(--accent-soft)",color:"var(--accent-xl)",border:"1px solid var(--accent-border)"}}>
                                         {TIPOS_VEHICULO.find(t=>t.v===r.tipo_vehiculo)?.l||r.tipo_vehiculo||"Cualquiera"}
                                       </span>

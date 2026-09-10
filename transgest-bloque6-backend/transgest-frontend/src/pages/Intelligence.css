@@ -1,0 +1,23 @@
+.intelligence { max-width:1080px; margin:0 auto; padding:24px; color:var(--text); min-width:0; }
+.intelligence-header { display:flex; justify-content:space-between; gap:16px; align-items:center; border-bottom:1px solid var(--border); padding-bottom:16px; }
+.intelligence h1 { font-size:22px; margin:0 0 6px; overflow-wrap:anywhere; letter-spacing:0; }
+.intelligence h2 { font-size:18px; margin:20px 0 12px; }
+.intelligence-header span,.intelligence small { color:var(--text4); font-size:12px; }
+.intelligence button { border:1px solid var(--border); border-radius:6px; background:var(--bg2); color:var(--text); padding:10px 14px; cursor:pointer; font:inherit; }
+.intelligence button:disabled { opacity:.5; cursor:default; }
+.intelligence-status { padding:12px 0; font-size:12px; color:var(--text4); overflow-wrap:anywhere; }
+.intelligence-suggestions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.intelligence-suggestions button { text-align:left; font-size:13px; }
+.intelligence-messages { max-height:55vh; overflow:auto; overscroll-behavior:contain; padding:8px 0; }
+.intelligence-message { padding:18px 0; border-bottom:1px solid var(--border); font-size:14px; }
+.intelligence-message.user { padding-left:16px; border-left:3px solid var(--accent); }
+.intelligence-answer { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.65; margin-top:8px; }
+.intelligence details { margin-top:12px; font-size:12px; color:var(--text4); }
+.intelligence details li { margin:6px 0; overflow-wrap:anywhere; }
+.intelligence-error { padding:12px; color:#a12a24; background:#fff0ef; border:1px solid #efb3ae; margin:12px 0; }
+.intelligence-compose { padding-top:16px; }
+.intelligence-compose label { display:block; font-size:12px; margin-bottom:6px; }
+.intelligence textarea { width:100%; box-sizing:border-box; resize:vertical; min-height:80px; max-height:240px; border:1px solid var(--border); border-radius:6px; background:var(--bg2); color:var(--text); padding:12px; font:inherit; }
+.intelligence-compose>div { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:8px; }
+.intelligence-compose button { background:var(--accent); color:#fff; }
+@media(max-width:640px) { .intelligence{padding:12px} .intelligence-header{align-items:flex-start;flex-wrap:wrap} .intelligence-suggestions{grid-template-columns:1fr} .intelligence h1{font-size:20px} .intelligence-compose>div{align-items:flex-start;flex-wrap:wrap} }

@@ -38,6 +38,9 @@ async function main() {
       else if (pathname==='/pedidos' || pathname==='/pedidos/resumen-lista') { data=[pedido]; listRequests.push(url); }
       else if (pathname===`/pedidos/${pedido.id}/estado`) { stateRequests.push(route.request().postDataJSON()); data={ok:true}; }
       else if (pathname===`/pedidos/${pedido.id}`) {
+        if(route.request().method()==='PUT' && route.request().postDataJSON()?.vehiculo_id===fleet[99].id && !route.request().postDataJSON()?.salida_taller_confirmada) {
+          await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({code:'VEHICULO_EN_TALLER',requiere_confirmacion:true,vehiculos:[{id:fleet[99].id,matricula:fleet[99].matricula}],error:'Vehiculo en taller'})}); return;
+        }
         if(route.request().method()==='PUT') {const body=route.request().postDataJSON();updateRequests.push(body);Object.assign(pedido,body);}
         data=pedido;
       }
@@ -216,9 +219,15 @@ async function main() {
     await assign.getByRole('combobox',{name:'Chofer',exact:true}).fill('099');
     await assign.getByRole('option').filter({hasText:'Conductor 099'}).click();
     await assign.getByRole('button',{name:'Asignar',exact:true}).click();
+    await page.getByRole('button',{name:'Mantener en taller',exact:true}).click();
+    assert.ok(!updateRequests.some(p=>p.vehiculo_id===fleet[99].id),'Rechazar taller no debe asignar');
+    await assign.getByRole('button',{name:'Asignar',exact:true}).click();
+    await page.getByRole('button',{name:'Sacar del taller y asignar',exact:true}).click();
     await assign.waitFor({state:'hidden'});
     const assignment=updateRequests.at(-1);
     assert.equal(assignment.vehiculo_id,fleet[99].id);
+    assert.deepEqual(assignment.salida_taller_confirmada,[fleet[99].id]);
+    assert.equal(await row.getByRole('button',{name:'Orden de carga',exact:true}).count(),0,'Flota propia no tiene orden a colaborador');
     assert.equal(assignment.chofer_id,drivers[99].id);
     for(const field of ['importe','precio_unitario','tipo_precio','cantidad','puntos_carga','puntos_descarga','mercancia']) assert.ok(!(field in assignment),'Asignacion no debe enviar '+field);
     assert.equal(pedido.importe,480);
@@ -237,7 +246,8 @@ async function main() {
     await page.locator('select').filter({has:page.locator(`option[value="${client.id}"]`)}).first().selectOption(client.id);
     await clientResponse;
     assert.equal(listRequests.at(-1).searchParams.get('desde'),defaultDesde,'El filtro cliente no debe abrir el historico');
-    Object.assign(pedido,{orden_carga_numero:'OC-QA-0001',factura_id:'draft-qa',factura_estado:'borrador',colaborador_id:'col-qa',colaborador_nombre:'Transportista QA',precio_colaborador:430,matricula_colaborador:'2052-LKJ',remolque_matricula_colaborador:'R-8683-BDV',referencia_cliente:'REF-ORDEN-UNICA',mercancia:'Paletizado',peso_kg:24000,metros_lineales:13.65});
+    Object.assign(pedido,{vehiculo_id:null,orden_carga_numero:'OC-QA-0001',factura_id:'draft-qa',factura_estado:'borrador',colaborador_id:'col-qa',colaborador_nombre:'Transportista QA',precio_colaborador:430,matricula_colaborador:'2052-LKJ',remolque_matricula_colaborador:'R-8683-BDV',referencia_cliente:'REF-ORDEN-UNICA',mercancia:'Paletizado',peso_kg:24000,metros_lineales:13.65});
+    Object.assign(pedido,{tipo_precio:'viaje',tipo_precio_colaborador:'tonelada',precio_colaborador_unitario:32.5,minimo_colaborador_unidades:25});
     pedido.puntos_carga[0]={...pedido.puntos_carga[0],cliente_nombre:'Fabrica QA',referencia:'REF-CARGA-UNICA'};
     pedido.puntos_descarga.push({direccion:'Calpe',cliente_nombre:'Terminal QA',referencia:'REF-DESCARGA-2',fecha:`${month(now)}-16`});
     await page.setViewportSize({width:1440,height:1000});
@@ -250,6 +260,8 @@ async function main() {
     const print=await popupPromise;
     await print.waitForLoadState();
     const printText=await print.locator('body').innerText();
+    assert.match(printText,/32,50/);
+    assert.doesNotMatch(printText,/430,00|Precio cerrado/);
     for(const value of ['REF-ORDEN-UNICA','REF-CARGA-UNICA','REF-DESCARGA-2']) assert.equal(printText.split(value).length-1,1,value);
     assert.doesNotMatch(printText,/Ubicaciones Google Maps|Paradas de la ruta|ESTADO/);
     assert.equal(await print.locator('.order-stops tr').count(),2);

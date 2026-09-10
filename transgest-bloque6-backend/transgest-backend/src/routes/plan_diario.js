@@ -1,5 +1,8 @@
 const express = require("express");
 const db = require("../services/db");
+const { dailyDeliveries, dailyPlanMessage } = require('../services/dailyPlan');
+const { crearNotificacion } = require('../services/notificaciones');
+const { createHash } = require('node:crypto');
 
 const router = express.Router();
 
@@ -67,6 +70,7 @@ async function ensurePlanDiarioSchema() {
     )
   `);
   await db.query("ALTER TABLE plan_diario_notas ADD COLUMN IF NOT EXISTS pedido_orden JSONB NOT NULL DEFAULT '[]'::jsonb").catch(() => {});
+  await db.query("ALTER TABLE plan_diario_notas ADD COLUMN IF NOT EXISTS descarga_orden JSONB NOT NULL DEFAULT '[]'::jsonb");
   await db.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_diario_notas_empresa_fecha_vehiculo
       ON plan_diario_notas(empresa_id, fecha, vehiculo_id)
@@ -123,6 +127,7 @@ function buildPedidoResumen(p, fecha) {
     origen: p.origen,
     destino: p.destino,
     ruta: buildRutaPedido(p),
+    puntos_descarga: p.puntos_descarga,
     estado: normalizeEstadoPedido(p.estado),
     fecha_carga: carga,
     hora_carga: p.hora_carga || null,
@@ -422,6 +427,7 @@ router.get("/", async (req, res, next) => {
         nota_plan: nota?.nota || "",
         nota_color: nota?.color || "info",
         pedido_orden: Array.isArray(nota?.pedido_orden) ? nota.pedido_orden : [],
+        descarga_orden: Array.isArray(nota?.descarga_orden) ? nota.descarga_orden : [],
       };
     });
 
@@ -498,7 +504,7 @@ router.put("/orden", async (req, res, next) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return res.status(400).json({ error: "Fecha no valida" });
     if (!vehiculoId) return res.status(400).json({ error: "Vehiculo obligatorio" });
     const pedidoOrden = Array.isArray(req.body?.pedido_orden)
-      ? req.body.pedido_orden.map(cleanText).filter(Boolean).slice(0, 80)
+      ? [...new Set(req.body.pedido_orden.map(cleanText).filter(Boolean))].slice(0, 500)
       : [];
     const veh = await db.query(
       `SELECT v.*,
@@ -515,15 +521,20 @@ router.put("/orden", async (req, res, next) => {
     if (!veh.rows[0]) return res.status(404).json({ error: "Vehiculo no encontrado" });
     const remolqueIds = veh.rows[0].usado_como_remolque ? new Set([String(veh.rows[0].id)]) : new Set();
     if (!isTractora(veh.rows[0], remolqueIds)) return res.status(400).json({ error: "El plan diario solo admite ordenar pedidos sobre tractoras." });
+    const own = await db.query('SELECT id, numero, destino, puntos_descarga FROM pedidos WHERE empresa_id=$1 AND vehiculo_id=$2 AND id::text=ANY($3::text[])', [empresa,vehiculoId,pedidoOrden]);
+    if (own.rows.length !== pedidoOrden.length) return res.status(400).json({error:'El plan contiene pedidos ajenos o asignados a otra tractora.'});
+    const allowed = new Set(dailyDeliveries(own.rows).map(stop=>stop.key));
+    const deliveryOrder = Array.isArray(req.body.descarga_orden) ? req.body.descarga_orden : null;
+    if (deliveryOrder && (deliveryOrder.length>1000 || new Set(deliveryOrder).size!==deliveryOrder.length || deliveryOrder.some(key=>!allowed.has(key)))) return res.status(400).json({error:'Orden de descargas no valido. Recarga el plan.'});
     const { rows } = await db.query(
       `INSERT INTO plan_diario_notas
-        (empresa_id, fecha, vehiculo_id, matricula_snapshot, pedido_orden, updated_by, updated_at)
-       VALUES ($1,$2::date,$3::uuid,$4,$5::jsonb,$6,NOW())
+        (empresa_id, fecha, vehiculo_id, matricula_snapshot, pedido_orden, updated_by, updated_at, descarga_orden)
+       VALUES ($1,$2::date,$3::uuid,$4,$5::jsonb,$6,NOW(),COALESCE($7::jsonb,'[]'::jsonb))
        ON CONFLICT (empresa_id, fecha, vehiculo_id)
        WHERE vehiculo_id IS NOT NULL
-       DO UPDATE SET pedido_orden=$5::jsonb, matricula_snapshot=$4, updated_by=$6, updated_at=NOW()
+       DO UPDATE SET pedido_orden=$5::jsonb, matricula_snapshot=$4, updated_by=$6, updated_at=NOW(), descarga_orden=COALESCE($7::jsonb,plan_diario_notas.descarga_orden)
        RETURNING *`,
-      [empresa, fecha, vehiculoId, veh.rows[0].matricula, JSON.stringify(pedidoOrden), req.user?.id || null]
+      [empresa, fecha, vehiculoId, veh.rows[0].matricula, JSON.stringify(pedidoOrden), req.user?.id || null, deliveryOrder ? JSON.stringify(deliveryOrder) : null]
     );
     res.json(rows[0]);
   } catch (error) {
@@ -531,4 +542,24 @@ router.put("/orden", async (req, res, next) => {
   }
 });
 
+router.post('/enviar', async (req,res,next)=>{
+  try {
+    await ensurePlanDiarioSchema();
+    const empresa=empresaId(req), fecha=dateOnly(req.body?.fecha), vehiculoId=cleanText(req.body?.vehiculo_id);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !/^[0-9a-f-]{36}$/i.test(vehiculoId)) return res.status(400).json({error:'Fecha o vehiculo no valido'});
+    const vehicle=await db.query('SELECT v.id,v.matricula,v.chofer_id,u.id AS usuario_id FROM vehiculos v LEFT JOIN usuarios u ON u.chofer_id=v.chofer_id AND u.empresa_id=v.empresa_id AND u.activo=true WHERE v.id=$1 AND v.empresa_id=$2',[vehiculoId,empresa]);
+    const v=vehicle.rows[0];
+    if(!v?.usuario_id)return res.status(400).json({error:'El conjunto necesita un chofer con usuario de app activo.'});
+    const note=await db.query('SELECT * FROM plan_diario_notas WHERE empresa_id=$1 AND vehiculo_id=$2 AND fecha=$3::date',[empresa,vehiculoId,fecha]);
+    const result=await db.query("SELECT * FROM pedidos WHERE empresa_id=$1 AND vehiculo_id=$2 AND COALESCE(estado::text,'pendiente') NOT IN ('cancelado','facturado') AND (COALESCE(fecha_carga,fecha_pedido)::date=$3::date OR (CASE WHEN estado::text='entregado' AND entregado_at IS NOT NULL THEN entregado_at ELSE COALESCE(fecha_descarga,fecha_entrega) END)::date=$3::date) ORDER BY COALESCE(hora_carga,hora_descarga,'23:59'), numero",[empresa,vehiculoId,fecha]);
+    if(!result.rows.length)return res.status(400).json({error:'No hay viajes para enviar en esta fecha.'});
+    if(result.rows.some(p=>String(p.chofer_id || '')!==String(v.chofer_id)))return res.status(409).json({error:'Hay pedidos asignados a otro chofer. Revisa el conjunto antes de enviar el plan.'});
+    const pedidos=sortPedidosPlan(result.rows,note.rows[0]);
+    const descargas=dailyDeliveries(pedidos,note.rows[0]?.descarga_orden || []);
+    const mensaje=dailyPlanMessage({fecha,vehiculo:v.matricula,pedidos,descargas,nota:note.rows[0]?.nota});
+    const hash=createHash('sha256').update(mensaje).digest('hex');
+    await crearNotificacion({empresa_id:empresa,usuario_id:v.usuario_id,tipo:'plan_diario',titulo:`Plan completo ${fecha}`,mensaje,data:{fecha,pedido_ids:pedidos.map(p=>p.id),descargas,dedupe_key:`plan:${vehiculoId}:${fecha}:${hash}`},created_by:req.user.id});
+    res.json({ok:true,pedidos:pedidos.length,descargas:descargas.length});
+  }catch(error){next(error);}
+});
 module.exports = router;

@@ -99,6 +99,7 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(compression());
 app.use(cors({
   origin(origin, cb) {
+    if (origin === 'transgest://app') return cb(null,true);
     if (!origin) return cb(null, true);
     if (!corsOrigins.length) return cb(null, true);
     return cb(null, corsOrigins.includes(origin));
@@ -248,6 +249,9 @@ function pedidosAuthUnlessPublic(req, res, next) {
   if (req.path.startsWith("/public/")) return next();
   return authenticate(req, res, (err) => {
     if (err) return next(err);
+    if (req.user.rol !== 'chofer' && /^\/[^/]+\/chofer-docs(?:\/|$)/.test(req.path)) {
+      return requireModulePermission('documentos')(req,res,next);
+    }
     return requireModulePermission("pedidos")(req, res, next);
   });
 }
@@ -305,6 +309,8 @@ safeUse(`${api}/fiscal`,        fiscalWebhookRoutes);
 safeUse(`${api}/whatsapp`,      whatsappRoutes);
 safeUse(`${api}/usuarios`,      authenticate, requireModulePermission("usuarios"), usuariosRoutes);
 safeUse(`${api}/clientes`,      authenticate, requireModulePermission("clientes"), clientesRoutes);
+app.get(`${api}/producto`, (req, res) => res.json({ producto: process.env.TRANSGEST_PRODUCT === 'planner' ? 'planner' : 'tms' }));
+app.use(require('./services/plannerPolicy').plannerPolicy);
 safeUse(`${api}/pedidos`,       pedidosAuthUnlessPublic, pedidosRoutes);
 safeUse(`${api}/facturas`,      authenticate, requireModulePermission("facturacion"), facturasRoutes);
 safeUse(`${api}/rutas`,         authenticate, requireModulePermission("rutas"), requirePlanFeature("gestion_rutas"), rutasRoutes);

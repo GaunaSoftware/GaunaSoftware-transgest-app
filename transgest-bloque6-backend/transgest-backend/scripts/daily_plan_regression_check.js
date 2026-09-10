@@ -1,0 +1,12 @@
+const assert = require('node:assert/strict');
+const {dailyDeliveries,dailyPlanMessage}=require('../src/services/dailyPlan');
+const orders=[{id:'a',numero:'PED-A',origen:'Alicante',destino:'Madrid',puntos_descarga:[{id:'1',nombre:'Obra uno'},{id:'2',nombre:'Obra dos'}]},{id:'b',numero:'PED-B',origen:'Burgos',destino:'Valencia'}];
+const original=JSON.stringify(orders);
+const deliveries=dailyDeliveries(orders,['b:0','a:2','a:1']);
+assert.deepEqual(deliveries.map(s=>[s.orden,s.lugar]),[[1,'Valencia'],[2,'Obra dos'],[3,'Obra uno']]);
+assert.equal(JSON.stringify(orders),original);
+const message=dailyPlanMessage({fecha:'2026-09-09',vehiculo:'1234-ABC',pedidos:orders,descargas:deliveries});
+assert.match(message,/PED-A/);assert.match(message,/PED-B/);
+assert.ok(message.indexOf('1. Valencia')<message.indexOf('2. Obra dos'));
+assert.equal(dailyDeliveries([{id:'x',puntos_descarga:'invalid',destino:'Burgos'}])[0].lugar,'Burgos');
+console.log('PASS daily plan: multiple orders, numbered deliveries, persisted sequence and complete message.');

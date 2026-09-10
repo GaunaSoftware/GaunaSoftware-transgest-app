@@ -15,6 +15,7 @@ logs/
 dist/
 dist-desktop/
 build/
+build-planner/
 .next/
 .vercel/
 

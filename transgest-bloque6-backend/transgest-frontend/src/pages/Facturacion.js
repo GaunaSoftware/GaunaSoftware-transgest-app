@@ -1601,7 +1601,7 @@ function ModalFacturarMultiple({ onClose }) {
   }
 
   async function analizarSeleccionIA() {
-    if (!aiDisponible) { notify("La IA solo esta disponible en Enterprise.", "warning"); return; }
+    if (!aiDisponible) { notify("La IA solo esta disponible en TransGest Pro Intelligence.", "warning"); return; }
     if (!selArr.length) { notify("Selecciona pedidos para analizar.", "warning"); return; }
     setAnalizandoIA(true);
     try {
@@ -2200,7 +2200,7 @@ export default function Facturacion() {
 
   async function analizarSoportesPedidoFactura(pedido) {
     if (!pedido?.id) return;
-    if (!aiDisponible) { notify("La IA solo esta disponible en Enterprise.", "warning"); return; }
+    if (!aiDisponible) { notify("La IA solo esta disponible en TransGest Pro Intelligence.", "warning"); return; }
     setAnalizandoPedidoId(pedido.id);
     try {
       const result = await analizarPedidoFacturacionIA(pedido.id, { factura_id: vistaFact?.id || null });

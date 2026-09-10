@@ -86,9 +86,10 @@ CREATE TABLE IF NOT EXISTS planes (
   features      JSONB NOT NULL DEFAULT '[]'
 );
 INSERT INTO planes VALUES
-  ('basico',      'Básico',       49.00,  3,  2, '["pedidos","facturacion","vehiculos"]'),
-  ('profesional', 'Profesional', 149.00, 10,  5, '["pedidos","facturacion","vehiculos","choferes","informes","hojas_ruta","tarifas"]'),
-  ('enterprise',  'Enterprise',  249.00, 50, 20, '["todo"]')
+  ('lite', 'TransGest Go', 49.00, 3, 2, '["pedidos","clientes","rutas","app_chofer"]'),
+  ('basico', 'TransGest Control', 99.00, 0, 0, '["pedidos","facturacion","vehiculos"]'),
+  ('profesional', 'TransGest Pro', 199.00, 0, 0, '["pedidos","facturacion","vehiculos","choferes","informes","hojas_ruta","tarifas"]'),
+  ('enterprise', 'TransGest Pro Intelligence', 399.00, 0, 0, '["todo"]')
 ON CONFLICT DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────
@@ -233,10 +234,14 @@ CREATE TABLE IF NOT EXISTS choferes (
 CREATE INDEX IF NOT EXISTS idx_choferes_empresa ON choferes(empresa_id);
 
 -- FKs circulares en vehiculos
-ALTER TABLE vehiculos ADD CONSTRAINT IF NOT EXISTS fk_vehiculos_chofer
-  FOREIGN KEY (chofer_id) REFERENCES choferes(id) ON DELETE SET NULL;
-ALTER TABLE vehiculos ADD CONSTRAINT IF NOT EXISTS fk_vehiculos_remolque
-  FOREIGN KEY (remolque_id) REFERENCES vehiculos(id) ON DELETE SET NULL;
+DO $$ BEGIN
+  ALTER TABLE vehiculos ADD CONSTRAINT fk_vehiculos_chofer
+    FOREIGN KEY (chofer_id) REFERENCES choferes(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE vehiculos ADD CONSTRAINT fk_vehiculos_remolque
+    FOREIGN KEY (remolque_id) REFERENCES vehiculos(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- TABLA: rutas
@@ -484,9 +489,7 @@ CREATE INDEX IF NOT EXISTS idx_fsus_empresa ON facturas_suscripcion(empresa_id);
 -- EMPRESA DEMO (para desarrollo/pruebas)
 -- Comentar en producción real si no se quiere empresa demo
 -- ─────────────────────────────────────────────────────────────────────────
-INSERT INTO empresas (id, nombre, cif, email_admin, plan, estado, max_vehiculos, max_usuarios)
-VALUES ('00000000-0000-0000-0000-000000000001', 'Empresa Demo S.L.', 'B00000001', 'gerente@empresa.com', 'enterprise', 'activo', 999, 999)
-ON CONFLICT DO NOTHING;
+-- Las instalaciones reales comienzan vacias. El seed demo se ejecuta aparte.
 
 COMMIT;
 

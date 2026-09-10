@@ -72,7 +72,9 @@ export default function Login() {
   const mostrarConfigServidor = desktopApp || servidorPersonalizado;
 
   function guardarServidor() {
-    const guardada = setConfiguredServer(srvUrl);
+    let guardada;
+    try { guardada = setConfiguredServer(srvUrl); }
+    catch (e) { setServerMessage(e.message); return; }
     // Recargar para que todos los modulos tomen la nueva URL de backend.
     if (guardada || srvUrl.trim() === "") window.location.reload();
   }
@@ -383,4 +385,3 @@ export default function Login() {
     </>
   );
 }
-

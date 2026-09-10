@@ -1,4 +1,7 @@
 import { useDebounce } from "../hooks/useDebounce";
+import { orderTown } from '../utils/orderTown';
+import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from '../utils/supplierPricing';
+import { verificarOrdenColaborador } from '../services/api';
 import AdrPanel from "../components/AdrPanel";
 import QuickAssignModal from "../components/QuickAssignModal";
 import { buildPedidoUpdatePatch } from "../utils/pedidoUpdatePatch";
@@ -641,7 +644,7 @@ function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
     destino_provincia: geoMerged.destino_provincia || null,
     cmr_tipo: cmrTypeForPedidoStops(geoMerged),
     importe: calcImporte(merged),
-    precio_colaborador: merged.colaborador_id ? (importeColaboradorCalculado(merged) || merged.precio_colaborador || null) : merged.precio_colaborador,
+    precio_colaborador: merged.colaborador_id ? (importeColaboradorCalculado(merged) ?? null) : merged.precio_colaborador,
     puntos_carga: mergePrimaryStopSchedule(geoMerged.puntos_carga, {
       fecha: geoMerged.fecha_carga,
       hora: geoMerged.hora_carga,
@@ -994,8 +997,12 @@ function precioKmPedidoInfo(form) {
 }
 
 function importeColaboradorCalculado(form) {
+  if (supplierPriceType(form) === "tonelada") {
+    const agreement = supplierTonneAgreement(form);
+    return agreement ? Number((agreement.precioTonelada * agreement.toneladasFacturables).toFixed(2)) : 0;
+  }
   const unit = parseLocaleNumber(form?.precio_colaborador_unitario, NaN);
-  if (Number.isFinite(unit) && unit > 0 && form?.tipo_precio !== "viaje") {
+  if (!form?.tipo_precio_colaborador && Number.isFinite(unit) && unit > 0 && form?.tipo_precio !== "viaje") {
     const unidades = unidadesFacturablesPedido(form, form?.minimo_colaborador_unidades);
     const total = unit * unidades;
     return Number.isFinite(total) && total > 0 ? Number(total.toFixed(2)) : "";
@@ -1007,34 +1014,18 @@ function importeColaboradorCalculado(form) {
 function syncPrecioColaboradorCalc(draft) {
   if (!draft?.colaborador_id) return draft;
   const total = importeColaboradorCalculado(draft);
-  return total ? { ...draft, precio_colaborador: total } : draft;
+  return total || supplierPriceType(draft) === "tonelada" ? { ...draft, precio_colaborador: total } : draft;
 }
 
 function getPagoColaboradorPorTonelada(form) {
-  if (!form?.colaborador_id || String(form?.tipo_precio || "") !== "tonelada") return null;
-  const unitarioManual = parseLocaleNumber(form?.precio_colaborador_unitario, NaN);
-  const minimoToneladasManual = parseLocaleNumber(form?.minimo_colaborador_unidades, NaN);
-  const minimoToneladasPedido = parseLocaleNumber(form?.minimo_unidades, NaN);
-  if (!Number.isFinite(unitarioManual) || unitarioManual <= 0) return null;
-  const minimoToneladas = Number.isFinite(minimoToneladasManual) && minimoToneladasManual > 0
-    ? minimoToneladasManual
-    : (Number.isFinite(minimoToneladasPedido) && minimoToneladasPedido > 0 ? minimoToneladasPedido : 0);
-  const toneladasFacturables = unidadesFacturablesPedido(form, minimoToneladas);
-  if (!Number.isFinite(minimoToneladas) || minimoToneladas <= 0 || !Number.isFinite(toneladasFacturables) || toneladasFacturables <= 0) return null;
-  const total = unitarioManual * toneladasFacturables;
-  return {
-    precioTonelada: unitarioManual,
-    minimoToneladas,
-    toneladasFacturables,
-    total: Number.isFinite(total) ? Number(total.toFixed(2)) : 0,
-  };
+  return form?.colaborador_id ? supplierTonneAgreement(form) : null;
 }
 
 function getPagoColaboradorTotalCerrado(form) {
   if (!form?.colaborador_id && !form?.colaborador_nombre) return null;
   const total = parseLocaleNumber(form?.precio_colaborador, NaN);
   if (!Number.isFinite(total) || total <= 0) return null;
-  if (String(form?.tipo_precio || "") === "tonelada" && getPagoColaboradorPorTonelada(form)) return null;
+  if (supplierPriceType(form) === "tonelada") return null;
   return { total: Number(total.toFixed(2)) };
 }
 
@@ -1246,6 +1237,10 @@ function normalizePedidoTarifaDraft(draft = {}) {
     tipo_iva: draft.tipo_iva ?? 21,
     iva_regimen: draft.iva_regimen || ivaOptionValue(draft),
   };
+  if (!draft.tipo_precio_colaborador && supplierPriceType(draft) === 'tonelada') {
+    next.tipo_precio_colaborador = 'tonelada';
+    next.minimo_colaborador_unidades = supplierTonneAgreement(draft)?.minimoToneladas || 0;
+  }
   for (const key of ["puntos_carga", "puntos_descarga"]) {
     const stops = parseStops(next[key]);
     if (stops.length) {
@@ -2043,74 +2038,18 @@ function stopDisplayParts(stop = {}, fallback = "", clienteId = "", tipo = "ambo
   return { nombre, direccion };
 }
 
-function cleanListPlace(value = "") {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .replace(/\s+->\s+/g, " -> ")
-    .trim();
-}
 
-function likelyTownFromListText(value = "") {
-  const raw = cleanListPlace(value);
-  if (!raw) return "";
-  const stop = new Set(["S.L.", "SL", "S.L.U.", "SLU", "S.A.", "SA", "S.A.U.", "SAU", "SCL", "POL", "POLIGONO", "PARCELA", "NAVE"]);
-  const parts = raw
-    .split(/\s+->\s+|,| - |–|;/)
-    .map(part => cleanListPlace(part))
-    .filter(Boolean)
-    .filter(part => !stop.has(part.toUpperCase()))
-    .filter(part => !/^\d+$/.test(part))
-    .filter(part => part.length >= 3 && part.length <= 42);
-  const preferred = [...parts].reverse().find(part => !/\d/.test(part)) || [...parts].reverse()[0] || raw;
-  return cleanListPlace(preferred).toUpperCase();
-}
-
-function stopTownLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
-  const punto = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
-  const source = { ...(punto || {}), ...(stop || {}) };
-  const direccion = cleanListPlace(stopAddress(stop) || source.direccion || fallback || "");
-  // Sin punto guardado que case, si la direccion escrita parece un municipio de
-  // verdad (poblacion simple, sin guion y pocas palabras), ESA manda: es lo que el
-  // usuario escribio y ve en el formulario, no una ciudad heredada/vieja de otra
-  // parada. Asi "fuera" (lista) y "dentro" (formulario) coinciden.
-  const pareceMunicipio = direccion
-    && !/\d|[,;]/.test(direccion)
-    && !/\b(?:autovia|autopista|avenida|av|calle|camino|carretera|ctra|km|paseo|plaza|poligono|ronda|ruta|via)\b/i.test(direccion)
-    && !direccion.includes("-")
-    && direccion.split(/\s+/).filter(Boolean).length <= 4;
-  if (!punto && pareceMunicipio) return direccion.toUpperCase();
-  const town = cleanListPlace(source.ciudad || source.poblacion || source.localidad || source.municipio || "");
-  if (town) return town.toUpperCase();
-  if (!direccion) return "";
-  return likelyTownFromListText(direccion);
-}
-
-function stopPointNameLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
-  const punto = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
-  const source = { ...(punto || {}), ...(stop || {}) };
-  const name = cleanListPlace(source.cliente_nombre || source.nombre || source.name || punto?.nombre || "");
-  const town = stopTownLabel(stop, fallback, clienteId, tipo);
-  if (!name) return town;
-  if (!town || normalizePlaceText(name) === normalizePlaceText(town)) return name.toUpperCase();
-  return `${name.toUpperCase()} - ${town}`;
-}
 
 function pedidoRouteDisplayForList(pedido = {}, cargaPrincipal = {}, descargaPrincipal = {}) {
   const clienteId = pedido.cliente_id || "";
-  const origenTown = stopTownLabel(cargaPrincipal, pedido.origen, clienteId, "carga") || cleanListPlace(pedido.origen || "").toUpperCase();
-  const destinoTown = stopTownLabel(descargaPrincipal, pedido.destino, clienteId, "descarga") || cleanListPlace(pedido.destino || "").toUpperCase();
-  const origenPoint = stopPointNameLabel(cargaPrincipal, pedido.origen, clienteId, "carga");
-  const destinoPoint = stopPointNameLabel(descargaPrincipal, pedido.destino, clienteId, "descarga");
-  const main = origenTown && destinoTown ? `${origenTown} -> ${destinoTown}` : cleanListPlace(`${pedido.origen || ""}${pedido.destino ? ` -> ${pedido.destino}` : ""}`) || "-";
-  const detail = origenPoint && destinoPoint && (
-    normalizePlaceText(origenPoint) !== normalizePlaceText(origenTown) ||
-    normalizePlaceText(destinoPoint) !== normalizePlaceText(destinoTown)
-  ) ? `${origenPoint} -> ${destinoPoint}` : "";
-  return { main, detail };
+  const origenTown = pedidoStopListLabel(cargaPrincipal, pedido.origen, clienteId, 'carga');
+  const destinoTown = pedidoStopListLabel(descargaPrincipal, pedido.destino, clienteId, 'descarga');
+  return { main:`${origenTown} -> ${destinoTown}`, detail:'' };
 }
 
 function pedidoStopListLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
-  return stopPointNameLabel(stop, fallback, clienteId, tipo) || stopTownLabel(stop, fallback, clienteId, tipo) || cleanListPlace(stopAddress(stop) || fallback || "Sin poblacion");
+  const saved = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
+  return orderTown({...(saved || {}), ...stop}, fallback);
 }
 
 function stopPostalLine(stop = {}, fallbackProvincia = "", fallbackPais = "España", clienteId = "", tipo = "ambos") {
@@ -5650,7 +5589,7 @@ ${bloqueCombustible}
             <div style={{fontSize:11,color:"var(--text4)",background:"var(--bg3)",borderRadius:7,padding:"8px 10px",marginBottom:10}}>
               <strong>Forma de pago:</strong> {condicionesPagoColaborador}
             </div>
-            <PagoColaboradorPanel pedido={pedido} onUpdated={onClose}/>
+            {supplierPriceType(pedido) !== "tonelada" && <PagoColaboradorPanel pedido={pedido} onUpdated={onClose}/>}
           </div>
         )}
         </div>
@@ -7822,7 +7761,7 @@ async function guardar() {
           });
         setPendingDocs([]);
       }
-      if (colaboradorId && precioColaborador) {
+      if (colaboradorId && (precioColaborador || supplierTonneAgreement(payload))) {
         enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
       }
       notify("Pedido creado correctamente.", "success");
@@ -7859,7 +7798,7 @@ async function guardar() {
       setPendingDocs([]);
     }
 
-    if (pedidoId && payload.colaborador_id && Number(payload.precio_colaborador || 0)) {
+    if (pedidoId && payload.colaborador_id && (Number(payload.precio_colaborador || 0) || supplierTonneAgreement(payload))) {
       enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
     }
 
@@ -9339,7 +9278,17 @@ useEffect(() => {
                         }}
                         placeholder="Ej: 850"/>
                     </div>
-                    {form.tipo_precio==="tonelada" ? (<>
+                    <div>
+                      <label style={S.label}>Tarifa del proveedor</label>
+                      <select style={S.sel} value={supplierPriceType(form)} onChange={e=>setForm(p=>({
+                        ...p, tipo_precio_colaborador:e.target.value, precio_colaborador:"",
+                        precio_colaborador_unitario:"", minimo_colaborador_unidades:"",
+                      }))}>
+                        <option value="viaje">Precio cerrado por viaje</option>
+                        <option value="tonelada">Por tonelada cargada</option>
+                      </select>
+                    </div>
+                    {supplierPriceType(form)==="tonelada" ? (<>
                       <div>
                         <label style={S.label}>Precio acordado EUR/tonelada</label>
                         <input type="text" inputMode="decimal" style={S.input}
@@ -9355,13 +9304,8 @@ useEffect(() => {
                           placeholder="Ej: 25,5"/>
                       </div>
                       <div>
-                        <label style={S.label}>Total colaborador (EUR)</label>
-                        <input type="text" inputMode="decimal" style={{...S.input,background:"var(--bg3)"}} value={form.precio_colaborador ?? ""}
-                          onChange={e=>setForm(p=>({...p,precio_colaborador:e.target.value,precio_colaborador_unitario:"",minimo_colaborador_unidades:""}))}
-                          placeholder="Ej: 650 (precio cerrado)"/>
-                        <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>
-                          Si escribes aqui, se guarda como precio cerrado y se limpian los campos por tonelada.
-                        </div>
+                        <label style={S.label}>Liquidacion</label>
+                        <div style={{...S.input,background:"var(--bg3)"}}>Segun toneladas cargadas</div>
                       </div>
                     </>) : (
                       <div><label style={S.label}>Lo que pagamos al colaborador (EUR, sin IVA)</label>
@@ -9374,7 +9318,7 @@ useEffect(() => {
                     <div><label style={S.label}>Matricula remolque colaborador</label>
                       <input style={S.input} value={form.remolque_matricula_colaborador||""} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Opcional"/>
                     </div>
-                    {(calcImporte(form)>0&&parseLocaleNumber(form.precio_colaborador)>0)&&(
+                    {(supplierPriceType(form)!=="tonelada"&&calcImporte(form)>0&&parseLocaleNumber(form.precio_colaborador)>0)&&(
                       <div style={{gridColumn:"1/-1",display:"flex",gap:16,background:"var(--bg3)",borderRadius:7,padding:"8px 14px",alignItems:"center"}}>
                         <div><span style={{fontSize:11,color:"var(--text5)"}}>Beneficio viaje: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:calcImporte(form)-parseLocaleNumber(form.precio_colaborador)>=0?"var(--green)":"var(--red)"}}>{(calcImporte(form)-parseLocaleNumber(form.precio_colaborador)).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span></div>
                         <div><span style={{fontSize:11,color:"var(--text5)"}}>Margen: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#f59e0b"}}>{calcImporte(form)>0?((1-parseLocaleNumber(form.precio_colaborador)/calcImporte(form))*100).toFixed(1):0}%</span></div>
@@ -10907,16 +10851,22 @@ export default function Pedidos() {
     let pedidoCompleto = p;
     if (p?.id) {
       try {
+        await verificarOrdenColaborador(p.id);
         const fetched = await getPedido(p.id);
         if (fetched?.id) pedidoCompleto = fetched;
       } catch (e) {
-        notify("No se pudo refrescar el pedido completo. Se abre la version disponible.", "warning");
+        notify("No se pudo verificar el pedido. Vuelve a intentarlo antes de emitir la orden.", "warning");
+        return;
       }
+    }
+    if (!canIssueSupplierOrder(pedidoCompleto, vehiculos)) {
+      notify('La orden de carga es para colaboradores. Para flota propia utiliza el DCD o la carta de porte.', 'info');
+      return;
     }
     // Si el viaje forma parte de un grupaje, la orden debe recoger TODAS las
     // cargas y descargas del camion, no solo las de este pedido.
     const hermanos = pedidoCompleto?.grupaje_id
-      ? pedidos.filter(x => String(x.grupaje_id || "") === String(pedidoCompleto.grupaje_id))
+      ? pedidos.filter(x => String(x.grupaje_id || "") === String(pedidoCompleto.grupaje_id) && canIssueSupplierOrder(x, vehiculos) && x.colaborador_id === pedidoCompleto.colaborador_id)
       : [];
     setOrdenCargaGrupaje(hermanos.length > 1 ? hermanos : []);
     setOrdenCarga(normalizePedidoTarifaDraft(pedidoCompleto));
@@ -12264,7 +12214,7 @@ export default function Pedidos() {
                     ? <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                         <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)"}}>BORRADOR</span>
                         <span style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{p.factura_numero||""}</span>
-                        {canEdit && <button style={{...S.btn,padding:"5px 8px",fontSize:11}} onClick={()=>abrirOrdenCarga(p)}>Orden de carga</button>}
+                        {canEdit && canIssueSupplierOrder(p, vehiculos) && <button style={{...S.btn,padding:"5px 8px",fontSize:11}} onClick={()=>abrirOrdenCarga(p)}>Orden de carga</button>}
                       </div>
                     : <div style={{display:"flex",gap:5,flexWrap:"wrap",position:"relative"}}>
                         {canEdit && priorityMeta.validationIssues.length > 0 && (
@@ -12437,7 +12387,7 @@ export default function Pedidos() {
                                 )}
                               </>
                             )}
-                            {canEdit&&!pedidoTieneFacturaFinal(p)&&(
+                            {canEdit&&canIssueSupplierOrder(p, vehiculos)&&!pedidoTieneFacturaFinal(p)&&(
                               <button style={{...S.btn,textAlign:"left",background:"rgba(99,102,241,.1)",color:"#818cf8",border:"1px solid rgba(99,102,241,.2)",padding:"6px 10px",fontSize:11}}
                                 onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirOrdenCarga(p);}}>
                                 Orden de carga

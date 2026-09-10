@@ -1,14 +1,14 @@
 export const BRAND_NAME = "TransGest";
-export const BRAND_VERSION_NAME = "TMS";
+export const BRAND_VERSION_NAME = process.env.REACT_APP_PRODUCT === 'planner' ? 'Planner' : 'TMS';
 export const BRAND_VERSION = "1.0.0";
 export const BRAND_VERSION_LABEL = `${BRAND_VERSION_NAME} v${BRAND_VERSION}`;
 export const BRAND_FULL_NAME = `${BRAND_NAME} ${BRAND_VERSION_LABEL}`;
 
 const PLAN_BRAND_SUFFIX = {
-  lite: "Lite",
-  basico: "Basic",
+  lite: "Go",
+  basico: "Control",
   profesional: "Pro",
-  enterprise: "Enterprise",
+  enterprise: "Pro Intelligence",
 };
 
 export function getBrandEdition(plan = "enterprise") {
@@ -16,6 +16,7 @@ export function getBrandEdition(plan = "enterprise") {
 }
 
 export function getBrandDisplayName(plan = "enterprise") {
+  if (process.env.REACT_APP_PRODUCT === 'planner') return 'TransGest Planner';
   return `${BRAND_NAME} ${getBrandEdition(plan)}`;
 }
 

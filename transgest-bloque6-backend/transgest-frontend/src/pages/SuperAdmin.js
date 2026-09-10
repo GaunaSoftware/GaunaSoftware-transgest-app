@@ -1,3 +1,4 @@
+import { getBrandDisplayName } from "../branding";
 import { useState, useEffect, useCallback } from "react";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
 import { removeToken, setToken, setUser } from "../services/api";
@@ -188,7 +189,7 @@ function ModalNuevaEmpresa({ onClose, onCreada }){
           <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={f("cif")} placeholder="B12345678"/></div>
           <div><label style={lbl}>Plan</label>
             <select style={inp} value={form.plan} onChange={f("plan")}>
-              {PLANES_OPTS.map(p=><option key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</option>)}
+              {PLANES_OPTS.map(p=><option key={p} value={p}>{getBrandDisplayName(p)}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Facturacion</label>
@@ -364,7 +365,7 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <div><label style={lbl}>Plan</label>
             <select style={inp} value={form.plan} onChange={f("plan")}>
-              {PLANES_OPTS.map(p=><option key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</option>)}
+              {PLANES_OPTS.map(p=><option key={p} value={p}>{getBrandDisplayName(p)}</option>)}
             </select></div>
           <div><label style={lbl}>Estado</label>
             <select style={inp} value={form.estado} onChange={f("estado")}>
@@ -2994,7 +2995,7 @@ export default function SuperAdmin(){
   async function crearEmpresaDemo() {
     const ok = await confirmDialog({
       title: "Crear empresa demo",
-      message: "Se creara una empresa enterprise sin limites con gerente activo, clientes, vehiculos, choferes y pedidos de ejemplo. La contrasena inicial sera demo1234.",
+      message: "Se creara una empresa TransGest Pro Intelligence sin limites con gerente activo, clientes, vehiculos, choferes y pedidos de ejemplo. La contrasena inicial sera demo1234.",
       confirmText: "Crear demo",
     });
     if (!ok) return;
@@ -3193,7 +3194,7 @@ export default function SuperAdmin(){
                   return(
                     <div key={plan} style={{marginBottom:10}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                        <span style={{fontSize:12,color:"#e2e8f0",fontWeight:600}}>{plan.charAt(0).toUpperCase()+plan.slice(1)}</span>
+                        <span style={{fontSize:12,color:"#e2e8f0",fontWeight:600}}>{getBrandDisplayName(plan)}</span>
                         <div style={{display:"flex",gap:12,fontSize:11}}>
                           <span style={{color:PLAN_COLOR[plan],fontWeight:700}}>{count} empresas</span>
                           <span style={{color:"#64748b"}}>{fmt2(revenue)} EUR/mes</span>
@@ -3246,7 +3247,7 @@ export default function SuperAdmin(){
                     <div style={{fontSize:13,color:"#e2e8f0",fontWeight:600}}>{e.nombre}</div>
                     <div style={{fontSize:11,color:"#64748b"}}>{e.email_admin} - {fmtDate(e.created_at)}</div>
                   </div>
-                  <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:`${PLAN_COLOR[e.plan]}20`,color:PLAN_COLOR[e.plan]}}>{e.plan}</span>
+                  <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:`${PLAN_COLOR[e.plan]}20`,color:PLAN_COLOR[e.plan]}}>{getBrandDisplayName(e.plan)}</span>
                   <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:`${ESTADO_COLOR[e.estado]}18`,color:ESTADO_COLOR[e.estado]}}>{e.estado}</span>
                 </div>
               ))}
@@ -3310,7 +3311,7 @@ export default function SuperAdmin(){
                             <div style={{fontSize:11,color:"#64748b"}}>{e.email_admin}</div>
                             {e.cif&&<div style={{fontSize:10,color:"#475569"}}>{e.cif}</div>}
                           </td>
-                          <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${PLAN_COLOR[e.plan]}20`,color:PLAN_COLOR[e.plan],border:`1px solid ${PLAN_COLOR[e.plan]}40`}}>{e.plan}</span></td>
+                          <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${PLAN_COLOR[e.plan]}20`,color:PLAN_COLOR[e.plan],border:`1px solid ${PLAN_COLOR[e.plan]}40`}}>{getBrandDisplayName(e.plan)}</span></td>
                           <td style={S.td}>
                             <span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${ESTADO_COLOR[e.estado]}18`,color:ESTADO_COLOR[e.estado]}}>{e.estado}</span>
                             {e.bloqueo_manual && <div style={{marginTop:4,padding:"2px 7px",borderRadius:20,fontSize:9,fontWeight:800,background:"rgba(239,68,68,.15)",color:"#f87171",display:"inline-block",letterSpacing:".04em"}}>BLOQUEADA{e.bloqueo_motivo?` · ${e.bloqueo_motivo}`:""}</div>}

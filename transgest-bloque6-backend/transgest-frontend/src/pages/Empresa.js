@@ -973,7 +973,7 @@ export default function Empresa() {
         </div>
         {!puedePersonalizarColores && (
           <div style={{marginTop:10,fontSize:12,color:"#b45309",background:"rgba(245,158,11,.10)",border:"1px solid rgba(245,158,11,.25)",borderRadius:8,padding:"8px 10px"}}>
-            Disponible para planes Profesional, Enterprise o Premium.
+            Disponible para planes TransGest Pro o TransGest Pro Intelligence.
           </div>
         )}
       </div>

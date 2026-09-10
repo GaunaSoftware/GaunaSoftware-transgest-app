@@ -6,24 +6,25 @@ const workshopImg = "https://images.unsplash.com/photo-1487754180451-c456f719a1f
 const officeImg = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=1400&q=80";
 
 const plans = [
+  { name: "TransGest Go", price: "49 EUR/mes", text: "Pedidos y documentacion de transporte.", items: ["App chofer", "Clientes y rutas", "Pedidos y DCD con QR"] },
   {
-    name: "Basico",
+    name: "TransGest Control",
     price: "99 EUR/mes",
     text: "Operativa completa para trafico, flota, clientes, rutas, facturacion y taller.",
     items: ["Vehiculos ilimitados", "Usuarios ilimitados", "Pedidos y cuadrantes", "Facturacion operativa"],
   },
   {
-    name: "Profesional",
+    name: "TransGest Pro",
     price: "199 EUR/mes",
     text: "Control de gestion con KPIs, objetivos y seguimiento economico de la empresa.",
-    items: ["Todo Basico", "KPIs de gestion", "Objetivos y tarifas", "Informes avanzados"],
+    items: ["Todo TransGest Control", "KPIs de gestion", "Objetivos y tarifas", "Informes avanzados"],
     featured: true,
   },
   {
-    name: "Enterprise",
+    name: "TransGest Pro Intelligence",
     price: "399 EUR/mes",
     text: "Inteligencia artificial, acompanamiento y configuracion avanzada para equipos exigentes.",
-    items: ["Todo Profesional", "IA incluida", "Soporte prioritario", "Configuracion avanzada"],
+    items: ["Todo TransGest Pro", "IA incluida", "Soporte prioritario", "Configuracion avanzada"],
   },
 ];
 

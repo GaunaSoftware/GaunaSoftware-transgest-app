@@ -1,0 +1,11 @@
+name: transgest-planner-local
+services:
+  api:
+    image: transgest-planner-api:1.0.0
+    environment:
+      TRANSGEST_PRODUCT: planner
+  frontend:
+    image: transgest-planner-web:1.0.0
+    build:
+      args:
+        TRANSGEST_PRODUCT: planner

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, getTallerSolicitudCapacidades, crearTallerSolicitud, subirPedidoDoc, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
+import { getPedidos, crearPedidoChofer, getChoferClientes, getChoferClientePuntosCarga, crearChoferClientePuntoCarga, getChoferClienteRutas, crearChoferRuta, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, getTallerSolicitudCapacidades, crearTallerSolicitud, subirPedidoDocChofer, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido, getToken, getChoferJornadaApp, iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, solicitarChoferVacacionesApp, firmarChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion, adrRequisitos } from "../utils/adr";
 import { confirmDialog, notify } from "../services/notify";
@@ -601,7 +601,7 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
         const uploadEvidence = buildUploadEvidence(`incidencia_${fase}`, location);
         uploadPayload = {
           nombre: `Incidencia ${faseLabel(fase)} - ${pedido.numero || pedido.id}`,
-          tipo: `incidencia_${fase}`,
+          tipo: "incidencia_chofer",
           file_base64: doc.base64,
           file_mime: doc.mime,
           file_size_kb: doc.sizeKb,
@@ -611,7 +611,7 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
       }
       await cambiarEstadoPedido(pedido.id, "incidencia", incidenciaPayload);
       if (doc) {
-        await subirPedidoDoc(pedido.id, uploadPayload);
+        await subirPedidoDocChofer(pedido.id, uploadPayload);
       }
       onGuardado();
     } catch (err) {
@@ -630,7 +630,7 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
               throw new Error("La foto se queda fuera de la cola porque pesa demasiado. Sube la evidencia cuando vuelva la cobertura.");
             }
             encolarOffline({
-              tipo: "pedido_doc_empresa",
+              tipo: "pedido_doc_chofer",
               pedido_id: pedido.id,
               body: uploadPayload,
               dedupe_key: `pedido_doc_empresa:${pedido.id}:${uploadPayload.tipo}:${uploadPayload.metadata?.captured_at || Date.now()}`,
@@ -3108,7 +3108,7 @@ export default function AppChofer(){
       if (puedeLeerAvisos) {
         const avisos = await getNotificaciones(20).catch(() => ({ data: [] }));
         setRouteNotifications((Array.isArray(avisos?.data) ? avisos.data : [])
-          .filter(n => String(n.tipo || "") === "ruta_chofer_app")
+          .filter(n => ['ruta_chofer_app','plan_diario','pedido_app_chofer'].includes(String(n.tipo || '')))
           .slice(0, 3));
       } else {
         setRouteNotifications([]);
@@ -3373,7 +3373,7 @@ export default function AppChofer(){
           } else if (item.tipo === "pedido_doc_chofer" && item.pedido_id && item.body) {
             await subirPedidoDocChofer(item.pedido_id, item.body);
           } else if (item.tipo === "pedido_doc_empresa" && item.pedido_id && item.body) {
-            await subirPedidoDoc(item.pedido_id, item.body);
+            await subirPedidoDocChofer(item.pedido_id, {...item.body, tipo:String(item.body.tipo || '').startsWith('incidencia_') ? 'incidencia_chofer' : item.body.tipo});
           } else if (item.tipo === "pedido_firma" && item.pedido_id && item.body) {
             await guardarFirmaEntrega(item.pedido_id, item.body);
           } else if (item.tipo === "pedido_estado" && item.pedido_id && item.estado) {
@@ -3571,7 +3571,7 @@ export default function AppChofer(){
             return (
               <div key={n.id} style={{background:"var(--accent-a10)",border:"1px solid var(--accent-a28)",borderRadius:10,padding:"10px 12px"}}>
                 <div style={{fontSize:12,fontWeight:900,color:"#2dd4bf"}}>{n.titulo || "Ruta enviada"}</div>
-                <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.4,marginTop:3}}>{n.mensaje || "Tienes una ruta recomendada pendiente de revisar."}</div>
+                <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.4,marginTop:3,whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{n.mensaje || "Tienes una ruta recomendada pendiente de revisar."}</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,marginTop:9}}>
                   <button onClick={()=>rutaUrl && window.open(rutaUrl, "_blank", "noopener,noreferrer")} disabled={!rutaUrl}
                     style={{padding:"9px 10px",borderRadius:8,border:"1px solid var(--accent-a36)",background:rutaUrl ? "var(--accent)" : "var(--border2)",color:"#fff",fontSize:12,fontWeight:900,cursor:rutaUrl?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>

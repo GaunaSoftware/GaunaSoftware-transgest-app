@@ -7,10 +7,10 @@ const fmt  = d => d ? new Date(d).toLocaleDateString("es-ES") : "Sin límite";
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 
 const PLAN_INFO = {
-  lite:        { label:"Lite",        color:"var(--accent)", precio:"Consultar", features:["App chofer","Clientes y rutas","Pedidos y DCD con QR"] },
-  basico:      { label:"Basico",      color:"#6b7280", precio:"99 EUR/mes",  features:["Vehiculos ilimitados","Usuarios ilimitados","Pedidos y facturacion"] },
-  profesional: { label:"Profesional", color:"#3b82f6", precio:"199 EUR/mes", features:["Vehiculos ilimitados","Usuarios ilimitados","KPIs de gestion","Tarifas y objetivos"] },
-  enterprise:  { label:"Enterprise",  color:"#8b5cf6", precio:"399 EUR/mes", features:["Vehiculos ilimitados","Usuarios ilimitados","KPIs e IA","Soporte prioritario"] },
+  lite:        { label: "TransGest Go",        color:"var(--accent)", precio:"Consultar", features:["App chofer","Clientes y rutas","Pedidos y DCD con QR"] },
+  basico:      { label: "TransGest Control",      color:"#6b7280", precio:"99 EUR/mes",  features:["Vehiculos ilimitados","Usuarios ilimitados","Pedidos y facturacion"] },
+  profesional: { label: "TransGest Pro", color:"#3b82f6", precio:"199 EUR/mes", features:["Vehiculos ilimitados","Usuarios ilimitados","KPIs de gestion","Tarifas y objetivos"] },
+  enterprise:  { label: "TransGest Pro Intelligence",  color:"#8b5cf6", precio:"399 EUR/mes", features:["Vehiculos ilimitados","Usuarios ilimitados","KPIs e IA","Soporte prioritario"] },
 };
 
 const EF = { pendiente:"#f59e0b", pagada:"#10b981", vencida:"#ef4444" };

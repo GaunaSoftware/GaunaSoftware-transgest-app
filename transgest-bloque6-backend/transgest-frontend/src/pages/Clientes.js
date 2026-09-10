@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { routeMargin } from '../utils/routeMargin';
 import {
   getClientes, crearCliente, editarCliente, borrarCliente,
   getRutasCliente, getRutasClienteSalud, crearRutaCliente, editarRutaCliente, borrarRutaCliente,
@@ -171,27 +172,8 @@ const fmtMinimoRuta = r => {
   if (tipo === "viaje") return r?.minimo_facturable ? `${fmt2(r.minimo_facturable)} EUR` : "-";
   return r?.minimo_unidades ? `${fmt2(r.minimo_unidades)} u.` : "-";
 };
-const margenRuta = r => {
-  const precio = Number(r?.precio_base ?? r?.precio ?? 0);
-  const recargo = Number(r?.recargo_combustible_pct || 0) || 0;
-  const km = Number(r?.km || 0);
-  const peajes = Number(r?.peajes || 0);
-  const tipo = String(r?.tarifa_tipo || r?.tipo_precio || "viaje");
-  const costeKm = 0.42 + (km > 0 ? peajes / km : 0);
-  const precioFinal = precio * (1 + recargo / 100);
-  // Cantidad para tarifas por unidad: el minimo facturable de la tarifa (p.ej.
-  // 25 toneladas). Sin multiplicar por las unidades el ingreso salia como
-  // precio/tn suelto (0,07 EUR/km) y el margen quedaba negativo/erroneo.
-  const minUnidades = Number(r?.minimo_unidades ?? r?.minimo_facturable ?? r?.minimo ?? 0) || 0;
-  const ingresoTotal =
-    tipo === "km" ? precioFinal * km
-      : (tipo === "tonelada" || tipo === "hora") ? precioFinal * minUnidades
-        : precioFinal; // viaje = precio fijo total
-  const ingresoKm = km > 0 ? ingresoTotal / km : 0;
-  const margenKm = km > 0 ? ingresoKm - costeKm : 0;
-  const margen = km > 0 ? margenKm * km : ingresoTotal - peajes;
-  const pct = ingresoKm > 0 ? (margenKm / ingresoKm) * 100 : 0;
-  return { margen, pct, margenKm, ingresoKm, costeKm };
+const margenRuta = (r, client) => {
+  return routeMargin(r, client);
 };
 
 const rutaEditPayload = r => ({
@@ -1194,7 +1176,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
               <label style={S.lbl}>Motivo del bloqueo</label>
               <input style={S.inp} value={form.bloqueo_motivo||""} onChange={f("bloqueo_motivo")} placeholder="Ej: impago, documentacion pendiente, decision comercial..."/>
               <label style={S.lbl}>Minimo facturable por toneladas (T)</label>
-              <input type="number" step="0.01" style={S.inp} value={form.minimo_facturable_toneladas||""} onChange={f("minimo_facturable_toneladas")} placeholder="Ej: 25"/>
+              <input type="text" inputMode="decimal" style={S.inp} value={form.minimo_facturable_toneladas||""} onChange={f("minimo_facturable_toneladas")} placeholder="Ej: 25,5"/>
               <label style={S.lbl}>Modo de facturación</label>
               <select style={S.sel} value={form.modo_facturacion||"por_viaje"} onChange={f("modo_facturacion")}>
                 <option value="por_viaje">Por viaje (una factura por viaje)</option>
@@ -1407,14 +1389,15 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                       <td style={{...S.td,color:"var(--text2)"}}>{fmtMinimoRuta(r)}</td>
                       <td style={{...S.td,color:"#f59e0b"}}>{Number(r.recargo_combustible_pct||0) ? `${fmt2(r.recargo_combustible_pct)} %` : "-"}</td>
                       <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace"}}
-                        title={`Ingreso ${fmt2(margenRuta(r).ingresoKm)} EUR/km - coste ${fmt2(margenRuta(r).costeKm)} EUR/km - margen total ${fmt2(margenRuta(r).margen)} EUR`}>
+                        title={`Ingreso ${fmt2(margenRuta(r, form).ingresoKm)} EUR/km - coste estimado ${fmt2(margenRuta(r, form).costeKm)} EUR/km - margen estimado total ${fmt2(margenRuta(r, form).margen)} EUR`}>
                         {r.km ? (() => {
-                          const m = margenRuta(r);
+                          const m = margenRuta(r, form);
                           return (
                             <div style={{display:"grid",gap:2}}>
                               <span style={{fontSize:11,color:"var(--text4)"}}>Ing. {fmt2(m.ingresoKm)}</span>
-                              <span style={{fontSize:11,color:"var(--text5)"}}>Coste {fmt2(m.costeKm)}</span>
-                              <span style={{fontWeight:900,color:m.margenKm>=0?"var(--green)":"#ef4444"}}>Margen {fmt2(m.margenKm)}</span>
+                              <span style={{fontSize:11,color:"var(--text5)"}}>Coste est. {fmt2(m.costeKm)}</span>
+                              <span style={{fontWeight:900,color:m.margenKm>=0?"var(--green)":"#ef4444"}}>Margen est. {fmt2(m.margenKm)}</span>
+                              {(r.tarifa_tipo || r.tipo_precio)==='tonelada' && <span style={{fontSize:11}}>Base: {fmt2(m.units)} t</span>}
                             </div>
                           );
                         })() : "-"}

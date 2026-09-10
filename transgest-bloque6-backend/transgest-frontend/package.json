@@ -22,6 +22,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "planner:build": "cross-env REACT_APP_PRODUCT=planner REACT_APP_LOCAL_SERVER=true BUILD_PATH=build-planner react-scripts build",
     "mobile:sync": "npm run build && npx cap sync",
     "mobile:add:ios": "npx cap add ios",
     "mobile:add:android": "npx cap add android",
@@ -79,6 +80,7 @@
     },
     "files": [
       "build/**/*",
+      "!build/qa{,/**/*}",
       "electron/**/*",
       "package.json",
       "!node_modules/**/*"

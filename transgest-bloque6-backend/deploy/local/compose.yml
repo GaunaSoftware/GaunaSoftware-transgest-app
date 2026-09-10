@@ -1,0 +1,65 @@
+name: transgest-local
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: transgest
+      POSTGRES_USER: transgest
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Prepara primero la instalacion}
+    volumes:
+      - database:/var/lib/postgresql/data
+      - ../../transgest-backend/scripts/install_completo.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U transgest -d transgest"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  api:
+    image: transgest-local-api:1.0.0
+    build: ../../transgest-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      LOCAL_DEPLOYMENT: 'true'
+      PORT: 3001
+      DB_HOST: postgres
+      DB_NAME: transgest
+      DB_USER: transgest
+      DB_PASSWORD: ${DB_PASSWORD:?}
+      JWT_SECRET: ${JWT_SECRET:?}
+      USER_JWT_SECRET: ${USER_JWT_SECRET:?}
+      SUPERADMIN_JWT_SECRET: ${SUPERADMIN_JWT_SECRET:?}
+      ACCOUNTING_SSO_JWT_SECRET: ${ACCOUNTING_SSO_JWT_SECRET:?}
+      API_KEYS_ENCRYPTION_SECRET: ${API_KEYS_ENCRYPTION_SECRET:?}
+      DOC_CONTROL_SECRET: ${DOC_CONTROL_SECRET:?}
+      DEMO_SHOWCASE_SEED: 'false'
+      ALLOW_DEMO_SEED: 'false'
+      APP_URL: ${LOCAL_URL:?}
+      PUBLIC_APP_URL: ${LOCAL_URL:?}
+      FRONTEND_URL: ${LOCAL_URL:?}
+      CORS_ORIGINS: ${LOCAL_URL:?},transgest://app
+      BACKUP_DIR: /app/backups
+    volumes:
+      - backups:/app/backups
+      - logs:/app/logs
+  frontend:
+    image: transgest-local-web:1.0.0
+    build:
+      context: ../../transgest-frontend
+      dockerfile: Dockerfile.frontend
+      args:
+        LOCAL_SERVER: 'true'
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '${LOCAL_PORT:-8088}:80'
+volumes:
+  database:
+  backups:
+  logs:

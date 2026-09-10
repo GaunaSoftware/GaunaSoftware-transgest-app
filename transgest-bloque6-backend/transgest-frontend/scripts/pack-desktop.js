@@ -6,8 +6,7 @@
 // sin Modo desarrollador), que impide el icono/instalador nativos de
 // electron-builder. Genera un ejecutable portable con el icono de TransGest y un
 // zip distribuible:
-//   1. electron-builder --win dir  -> dist-desktop/win-unpacked (ignoramos su
-//      fallo de winCodeSign; el .exe ya queda escrito antes de ese paso).
+//   1. electron-builder --win dir -> dist-desktop/win-unpacked sin winCodeSign.
 //   2. rcedit  -> incrusta assets/icon.ico + datos de version en TransGest.exe.
 //   3. Compress-Archive -> dist-desktop/TransGest-portable-win-x64.zip.
 //
@@ -21,7 +20,7 @@
 const { spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const rcedit = require("rcedit");
+const { rcedit } = require("rcedit");
 
 const ROOT = path.join(__dirname, "..");
 const OUT = path.join(ROOT, "dist-desktop");
@@ -37,14 +36,14 @@ async function main() {
   }
 
   console.log("1/3  electron-builder --win dir ...");
-  // Puede salir con codigo != 0 por winCodeSign; lo toleramos si el .exe existe.
-  spawnSync("npx", ["electron-builder", "--win", "dir", "--publish", "never"], {
+  // Un fallo debe parar el empaquetado para no distribuir un ejecutable antiguo.
+  const packed = spawnSync(process.execPath, [require.resolve('electron-builder/cli.js'), "--win", "dir", "--publish", "never", "-c.win.signAndEditExecutable=false"], {
     cwd: ROOT,
     stdio: "inherit",
-    shell: true,
+    shell: false,
     env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: "false" },
   });
-  if (!fs.existsSync(EXE)) {
+  if (packed.status !== 0 || !fs.existsSync(EXE)) {
     console.error("No se genero " + EXE);
     process.exit(1);
   }
@@ -64,7 +63,7 @@ async function main() {
   console.log("3/3  zip ...");
   if (fs.existsSync(ZIP)) fs.unlinkSync(ZIP);
   if (process.platform === "win32") {
-    spawnSync(
+    const zipped = spawnSync(
       "powershell",
       [
         "-NoProfile",
@@ -73,6 +72,7 @@ async function main() {
       ],
       { stdio: "inherit" }
     );
+    if (zipped.status !== 0 || !fs.existsSync(ZIP)) throw new Error('No se pudo generar el ZIP de escritorio.');
     console.log("Listo -> " + ZIP);
   } else {
     console.log("win-unpacked listo en " + UNPACKED + " (comprime segun tu SO).");

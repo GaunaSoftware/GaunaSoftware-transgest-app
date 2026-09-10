@@ -17,6 +17,10 @@ RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY . .
 ENV CI=false
 ENV DISABLE_ESLINT_PLUGIN=true
+ARG LOCAL_SERVER=false
+ENV REACT_APP_LOCAL_SERVER=$LOCAL_SERVER
+ARG TRANSGEST_PRODUCT=tms
+ENV REACT_APP_PRODUCT=$TRANSGEST_PRODUCT
 RUN npm run build
 
 # ── Etapa 2: Servir con nginx ─────────────────────────

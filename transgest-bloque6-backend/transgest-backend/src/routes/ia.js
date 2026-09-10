@@ -7,6 +7,7 @@ const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetti
 const { normalizeAiProvider, normalizeAiModel, normalizeAiBaseUrl, fetchWithTimeout } = require("../services/aiProvider");
 
 router.use(authenticate);
+router.use('/intelligence', require('./intelligence'));
 
 const IA_LIMITES_PLAN = {
   basico: 0,
@@ -144,7 +145,7 @@ async function comprobarCupoIA(req) {
 
   const limite = Number(empresa.ia_limite_mensual || IA_LIMITES_PLAN[empresa.plan] || 0);
   if (limite <= 0) {
-    const err = new Error("La IA esta incluida solo en el plan Enterprise.");
+    const err = new Error("La IA esta incluida solo en el plan TransGest Pro Intelligence.");
     err.status = 403;
     throw err;
   }
@@ -283,6 +284,7 @@ router.post("/chat", async (req, res) => {
         body: JSON.stringify({
           model: iaConfig.model,
           input: openAiResponsesInput(messages, system),
+          store: false,
           max_output_tokens: Math.max(32, Math.min(Number(max_tokens || 1000), 4000)),
         }),
       }, 45000);

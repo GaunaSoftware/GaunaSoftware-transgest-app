@@ -4,14 +4,14 @@ import { resolveApiBase } from "../utils/serverConfig";
 const BASE = resolveApiBase();
 
 const REGISTRO_PLANES = [
-  { id:"lite",        nombre:"Lite",        precio:49,  veh:"DCD", usr:"2", color:"var(--accent)",
+  { id:"lite",        nombre: "TransGest Go",        precio:49,  veh:"DCD", usr:"2", color:"var(--accent)",
     features:["App chofer","Clientes, rutas y pedidos","DCD con QR"] },
-  { id:"basico",      nombre:"Basico",      precio:99,  veh:"Ilimitados", usr:"ilimitados", color:"#6b7280",
+  { id:"basico",      nombre: "TransGest Control",      precio:99,  veh:"Ilimitados", usr:"ilimitados", color:"#6b7280",
     features:["Vehiculos ilimitados","Usuarios ilimitados","Pedidos y trafico","Facturacion operativa"] },
-  { id:"profesional", nombre:"Profesional", precio:199, veh:"Ilimitados", usr:"ilimitados", color:"#3b82f6", recommended:true,
-    features:["Todo lo del Basico","KPIs de gestion","Informes avanzados","Tarifas y objetivos"] },
-  { id:"enterprise",  nombre:"Enterprise",  precio:399, veh:"Ilimitados", usr:"ilimitados", color:"#8b5cf6",
-    features:["Todo lo del Profesional","IA incluida","Portal de clientes","App choferes","Soporte prioritario"] },
+  { id:"profesional", nombre: "TransGest Pro", precio:199, veh:"Ilimitados", usr:"ilimitados", color:"#3b82f6", recommended:true,
+    features:["Todo TransGest Control","KPIs de gestion","Informes avanzados","Tarifas y objetivos"] },
+  { id:"enterprise",  nombre: "TransGest Pro Intelligence",  precio:399, veh:"Ilimitados", usr:"ilimitados", color:"#8b5cf6",
+    features:["Todo TransGest Pro","IA incluida","Portal de clientes","App choferes","Soporte prioritario"] },
 ];
 
 export default function Registro() {

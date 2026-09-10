@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { editarPedido, getPlanDiario, guardarPlanDiarioNota, guardarPlanDiarioOrden, notificarPedidoChoferApp } from "../services/api";
+import { editarPedido, getPlanDiario, guardarPlanDiarioNota, guardarPlanDiarioOrden, enviarPlanDiario } from "../services/api";
+import { dailyDeliveries } from '../utils/dailyPlan';
+import { useAuth } from '../context/AuthContext';
 import { notify } from "../services/notify";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 
@@ -177,6 +179,8 @@ function buildPlanChoferText(row, fecha) {
     ].filter(Boolean)),
     "",
     row?.nota_plan ? `Nota: ${row.nota_plan}` : "",
+    'Orden de descargas:',
+    ...dailyDeliveries(pedidos,row.descarga_orden || []).map(stop=>`${stop.orden}. ${stop.lugar} (${stop.numero}) ${String(stop.fecha).slice(0,10)} ${stop.hora}`),
   ].filter(line => line !== "");
   return lines.join("\n");
 }
@@ -237,6 +241,8 @@ function Kpi({ label, value, tone = "info", icon = "truck", caption = "" }) {
 }
 
 export default function PlanDiario() {
+  const { puedeEditar } = useAuth();
+  const canEdit = puedeEditar('plan_diario');
   const [fecha, setFecha] = useState(() => addDays(ymd(new Date()), 1));
   const [data, setData] = useState({ rows: [], unassigned: [], resumen: {} });
   const [loading, setLoading] = useState(true);
@@ -284,6 +290,7 @@ export default function PlanDiario() {
   }
 
   async function saveNote(row, value) {
+    if (!canEdit) return;
     setSavingNote(String(row.id));
     try {
       await guardarPlanDiarioNota({ fecha, vehiculo_id: row.id, nota: value, color:"info" });
@@ -322,7 +329,8 @@ export default function PlanDiario() {
     e.stopPropagation();
     const pedidoId = e.dataTransfer.getData("pedido_id");
     const fromVehiculoId = e.dataTransfer.getData("from_vehiculo_id");
-    if (!pedidoId || String(fromVehiculoId) !== String(row.id)) return;
+    if (!canEdit || !pedidoId) return;
+    if (String(fromVehiculoId) !== String(row.id)) return dropPedidoOnRow(e,row);
     const nextPedidos = moveBefore(row.pedidos || [], pedidoId, targetPedido.id);
     setData(prev => ({
       ...prev,
@@ -338,6 +346,7 @@ export default function PlanDiario() {
 
   async function dropPedidoOnRow(e, row) {
     e.preventDefault();
+    if (!canEdit || savingPlan) return;
     setDragOverRow("");
     const pedidoId = e.dataTransfer.getData("pedido_id");
     const fromVehiculoId = e.dataTransfer.getData("from_vehiculo_id");
@@ -365,8 +374,8 @@ export default function PlanDiario() {
         vehiculo_id: row.id,
         chofer_id: row.chofer_id || pedido.chofer_id || "",
         remolque_id: row.remolque_id || pedido.remolque_id || "",
-        fecha_carga: fecha,
       });
+      await saveRowOrder(row,[...(row.pedidos || []).filter(p=>p.id!==pedido.id),pedido]);
       notify(`${pedido.numero || "Pedido"} asignado a ${row.matricula}.`, "success");
       await cargar();
     } catch (e2) {
@@ -396,21 +405,23 @@ export default function PlanDiario() {
 
   // Aviso dentro de la app del chofer (uno por viaje del dia).
   async function avisarAppChofer(row) {
-    const pedidos = (row?.pedidos || []).filter(p => p?.id);
-    if (!pedidos.length) { notify("Este chofer no tiene viajes asignados este dia.", "info"); return; }
-    let ok = 0; const fallos = [];
-    for (const p of pedidos) {
-      try {
-        await notificarPedidoChoferApp(p.id, {
-          mensaje: `Plan del ${fecha}: ${p.origen || "-"} -> ${p.destino || "-"}`,
-        });
-        ok++;
-      } catch (e) { fallos.push(e.message || "error"); }
-    }
-    notify(
-      fallos.length ? `Avisados ${ok} de ${pedidos.length} viajes. ${fallos[0]}` : `Aviso enviado a la app (${ok} viaje/s).`,
-      fallos.length ? "warning" : "success"
-    );
+    if (!canEdit || savingPlan) return;
+    setSavingPlan(String(row.id));
+    try { const result=await enviarPlanDiario({fecha,vehiculo_id:row.id}); notify(`Plan completo enviado: ${result.pedidos} pedidos y ${result.descargas} descargas.`, 'success'); }
+    catch(error){ notify(error.message,'error'); }
+    finally { setSavingPlan(''); }
+  }
+
+  async function moveDelivery(row,index,direction) {
+    if (!canEdit || savingPlan) return;
+    const sequence=dailyDeliveries(row.pedidos || [],row.descarga_orden || []).map(stop=>stop.key);
+    const target=index+direction;
+    if(target<0 || target>=sequence.length)return;
+    [sequence[index],sequence[target]]=[sequence[target],sequence[index]];
+    setSavingPlan(String(row.id));
+    try { await guardarPlanDiarioOrden({fecha,vehiculo_id:row.id,pedido_orden:(row.pedidos || []).map(p=>p.id),descarga_orden:sequence}); await cargar(); }
+    catch(error){notify(error.message,'error');}
+    finally{setSavingPlan('');}
   }
 
   const resumen = data.resumen || {};
@@ -491,7 +502,7 @@ export default function PlanDiario() {
 
       <div className="tg-plandiario-grid" style={{ display:"grid", gridTemplateColumns:"minmax(0, 1fr) 320px", gap:12, alignItems:"start" }}>
         <div style={{ ...S.panel, overflowX:"auto" }}>
-          <table style={{ width:"100%", minWidth:820, borderCollapse:"collapse", tableLayout:"fixed" }}>
+          <table style={{ width:"100%", minWidth:1280, borderCollapse:"collapse", tableLayout:"fixed" }}>
             <colgroup>
               <col style={{ width:116 }} />
               <col style={{ width:118 }} />
@@ -545,14 +556,18 @@ export default function PlanDiario() {
                           key={p.id}
                           pedido={p}
                           onOpen={openPedido}
-                          draggable
+                          draggable={canEdit}
                           onDragStart={(e, pedido) => startPedidoDrag(e, pedido, row)}
                           onDragOverPedido={(e) => e.preventDefault()}
                           onDropPedido={(e, target) => reorderPedidoInRow(e, row, target)}
-                        />) : (
+                        />) : !bloqueado && (
                           <div style={{ minHeight:34, padding:"8px 10px", border:"1px dashed var(--border2)", borderRadius:7, color:"var(--text5)", fontSize:12, display:"flex", alignItems:"center", justifyContent:"center", textAlign:"center" }}>Sin trabajo planificado</div>
                         )}
                         {savingPlan && <div style={{fontSize:10,color:"var(--text5)"}}>Guardando asignacion...</div>}
+                        {dailyDeliveries(row.pedidos || [],row.descarga_orden || []).map((stop,index,list)=><div key={stop.key} style={{display:'flex',alignItems:'center',gap:6,fontSize:11,padding:'4px 0',borderBottom:'1px solid var(--border)'}}>
+                          <strong style={{flexShrink:0}}>{stop.orden}.</strong><span style={{flex:1,overflowWrap:'anywhere'}}>Descarga: {stop.lugar}</span>
+                          {canEdit && <><button title="Subir descarga" aria-label={`Subir descarga ${stop.orden}`} disabled={index===0 || !!savingPlan} onClick={()=>moveDelivery(row,index,-1)} style={{...S.btn,padding:'3px 6px'}}>↑</button><button title="Bajar descarga" aria-label={`Bajar descarga ${stop.orden}`} disabled={index===list.length-1 || !!savingPlan} onClick={()=>moveDelivery(row,index,1)} style={{...S.btn,padding:'3px 6px'}}>↓</button></>}
+                        </div>)}
                       </div>
                     </td>
                     <td style={S.td}>
@@ -566,6 +581,7 @@ export default function PlanDiario() {
                     <td style={S.td}>
                       {row.notas_operacion && <div style={{ marginBottom:6, padding:"6px 8px", borderRadius:7, background:"rgba(59,130,246,.08)", color:"#60a5fa", fontSize:11, fontWeight:800 }}>{row.notas_operacion}</div>}
                       <textarea
+                        disabled={!canEdit}
                         value={notas[row.id] || ""}
                         onChange={e => setNotas(prev => ({ ...prev, [row.id]: e.target.value }))}
                         onBlur={e => saveNote(row, e.target.value)}
@@ -574,10 +590,11 @@ export default function PlanDiario() {
                       />
                       {savingNote === String(row.id) && <div style={{ marginTop:4, fontSize:10, color:"var(--text5)" }}>Guardando...</div>}
                       <button
+                        disabled={!canEdit || !!savingPlan || !(row.pedidos || []).length}
                         onClick={() => setEnvioAbierto(v => v === String(row.id) ? "" : String(row.id))}
                         style={{ ...S.btn, marginTop:7, width:"100%", padding:"6px 8px", background:"rgba(16,185,129,.10)", color:"#10b981", border:"1px solid rgba(16,185,129,.24)" }}
                       >
-                        Enviar al chofer {envioAbierto === String(row.id) ? "^" : "v"}
+                        Enviar al chófer
                       </button>
                       {envioAbierto === String(row.id) && (
                         <div style={{ display:"flex", flexDirection:"column", gap:4, marginTop:5 }}>

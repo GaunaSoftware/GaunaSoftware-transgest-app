@@ -45,8 +45,10 @@ function validateEnv() {
     .split(",")
     .map(value => value.trim())
     .filter(Boolean);
-  const secureOrigin = value => /^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(value)
-    || /^http:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/i.test(value);
+  const secureOrigin = value => value === 'transgest://app'
+    || /^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(value)
+    || /^http:\/\/(localhost|127\.0\.0\.1)(?::\d+)?$/i.test(value)
+    || (process.env.LOCAL_DEPLOYMENT === 'true' && /^http:\/\/(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?::\d+)?$/.test(value));
   if (isProd && corsOrigins.some(value => value === "*" || !secureOrigin(value))) {
     critical.push("CORS_ORIGINS solo puede contener origenes HTTPS concretos en produccion.");
   }

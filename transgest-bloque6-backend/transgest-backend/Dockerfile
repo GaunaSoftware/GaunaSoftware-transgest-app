@@ -6,8 +6,8 @@ RUN apk add --no-cache postgresql-client
 WORKDIR /app
 
 # Copy package file and install dependencies
-COPY package.json ./
-RUN npm install --only=production --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
 
 # Copy source code
 COPY src/ ./src/

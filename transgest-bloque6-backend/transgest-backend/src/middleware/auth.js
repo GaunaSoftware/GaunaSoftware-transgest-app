@@ -228,9 +228,16 @@ function presetPermisosRol(rol) {
 function normalizePermissionsForRole(permisos, rol) {
   const normalizedRole = String(rol || "").toLowerCase();
   const base = presetPermisosRol(rol);
-  if (["chofer", "cliente", "cliente_portal"].includes(normalizedRole)) return base;
   const raw = permisos && typeof permisos === "object" && !Array.isArray(permisos) ? permisos : {};
   const modulos = raw.modulos && typeof raw.modulos === "object" ? raw.modulos : raw;
+  if (["chofer", "cliente", "cliente_portal"].includes(normalizedRole)) {
+    // Restricted roles can lose a preset permission, never gain office access.
+    for (const id of MODULE_IDS) {
+      if (modulos[id]?.ver === false) base.modulos[id] = { ver: false, editar: false };
+      else if (modulos[id]?.editar === false) base.modulos[id].editar = false;
+    }
+    return base;
+  }
   for (const id of MODULE_IDS) {
     const regla = modulos[id];
     if (regla && typeof regla === "object" && !Array.isArray(regla)) {
@@ -580,6 +587,8 @@ function requireModulePermission(modulo) {
       return next();
     }
     if (modulo === "pedidos" && req.user.rol === "chofer" && isChoferPedidosOperationalPath(req)) {
+      const operation = ['GET','HEAD'].includes(String(req.method || 'GET').toUpperCase()) ? 'ver' : 'editar';
+      if (reglas.app_chofer?.[operation] !== true) return res.status(403).json({error:'Permiso denegado para la app del chofer',modulo:'app_chofer',tipo:operation});
       return next();
     }
 

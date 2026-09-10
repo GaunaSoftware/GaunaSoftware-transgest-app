@@ -1,3 +1,6 @@
+const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
+const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
+const { assertSupplierOrder } = require("../services/supplierOrder");
 const express = require("express");
 const { body, validationResult } = require("express-validator");
 const db      = require("../services/db");
@@ -8,7 +11,8 @@ const pdfParse = require("pdf-parse");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
 const { pedidoDateFilter } = require("../services/pedidoDateFilter");
 const { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } = require("../utils/number");
-const { authenticate, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
+const { authenticate, requireRole, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
+const GESTION_PEDIDOS_ESCRITURA = requireRole('gerente','trafico','administrativo');
 const { enviarEmail } = require("../services/email");
 const { crearNotificacion, notificarUsuariosCliente } = require("../services/notificaciones");
 const { buildDocumentoControlPayload, buildDocumentoControlPublicPayload, buildDocumentoControlExpediente, buildDocumentoControlStructuredExport, buildDocumentoControlSignaturePackage, buildDocumentoControlQrDataUrl, buildDocumentoControlHtml, generateDocumentoControlPdf, buildDocumentoControlFilename, buildDocumentoControlExportFilename, verifyPublicToken, verifyPublicVerificationCode } = require("../services/documentoControl");
@@ -577,6 +581,7 @@ async function ensureColaboradorWorkflowSchema() {
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_iva NUMERIC(5,2) NOT NULL DEFAULT 21").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS iva_regimen VARCHAR(30) NOT NULL DEFAULT 'general'").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio_colaborador_unitario NUMERIC(12,4)").catch(() => {});
+      await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_precio_colaborador TEXT CHECK (tipo_precio_colaborador IN ('viaje','tonelada'))");
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS minimo_colaborador_unidades NUMERIC(12,3)").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_precio_confirmado BOOLEAN DEFAULT false").catch(() => {});
       await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS colaborador_precio_confirmado_at TIMESTAMPTZ").catch(() => {});
@@ -3198,31 +3203,11 @@ function renderColaboradorDocumentoControlBox(docControl) {
 }
 
 function getColaboradorPrecioTonelada(data) {
-  if (!data || String(data.tipo_precio || "").toLowerCase() !== "tonelada") return null;
-  const unitarioManual = parseLocaleNumber(data.precio_colaborador_unitario);
-  if (!Number.isFinite(unitarioManual) || unitarioManual <= 0) return null;
-  const minimoManual = parseLocaleNumber(data.minimo_colaborador_unidades);
-  const minimoPedido = parseLocaleNumber(data.minimo_unidades);
-  const cantidad = parseLocaleNumber(data.cantidad);
-  const pesoKg = parseLocaleNumber(data.peso_kg || data.kg);
-  const toneladasBase = Number.isFinite(cantidad) && cantidad > 0
-    ? cantidad
-    : (Number.isFinite(pesoKg) && pesoKg > 0 ? (pesoKg < 1000 ? pesoKg : Number((pesoKg / 1000).toFixed(3))) : 0);
-  const minimoToneladas = Number.isFinite(minimoManual) && minimoManual > 0
-    ? minimoManual
-    : (Number.isFinite(minimoPedido) && minimoPedido > 0 ? minimoPedido : toneladasBase);
-  const toneladasFacturables = Math.max(toneladasBase || 0, minimoToneladas || 0);
-  if (!Number.isFinite(minimoToneladas) || minimoToneladas <= 0 || !Number.isFinite(toneladasFacturables) || toneladasFacturables <= 0) return null;
-  return {
-    precioTonelada: unitarioManual,
-    minimoToneladas,
-    toneladasFacturables,
-  };
+  return data ? supplierTonneAgreement(data) : null;
 }
 
 function getColaboradorPrecioCerradoTonelada(data) {
-  if (!data || String(data.tipo_precio || "").toLowerCase() !== "tonelada") return null;
-  if (getColaboradorPrecioTonelada(data)) return null;
+  if (!data || supplierPriceType(data) === "tonelada") return null;
   const total = parseLocaleNumber(data.precio_colaborador);
   if (!Number.isFinite(total) || total <= 0) return null;
   return { total };
@@ -3372,7 +3357,9 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
       numero: pedido.numero,
       ruta: `${pedido.origen || ""} -> ${pedido.destino || ""}`,
       fecha_carga: pedido.fecha_carga || "",
-      precio: Number(pedido.precio_colaborador || 0).toLocaleString("es-ES", { minimumFractionDigits: 2 }),
+      precio: supplierPriceType(pedido) === "tonelada"
+        ? `${getColaboradorPrecioTonelada(pedido)?.precioTonelada || 0} EUR/tn. Liquidacion segun carga; minimo ${getColaboradorPrecioTonelada(pedido)?.minimoToneladas || 0} tn`
+        : Number(pedido.precio_colaborador || 0).toLocaleString("es-ES", { minimumFractionDigits: 2 }),
       url: links[accion],
       map_links: buildColaboradorMapLinks(pedido),
       dcd_url: docControl?.soporte_url || docControl?.documento?.url_publica || supportFromDownload || "",
@@ -5498,24 +5485,20 @@ async function queryWithColaboradorFallback(sqlWithColaborador, sqlFallback, par
   }
 }
 
-const ROLES_GESTION_PEDIDOS = new Set(["gerente", "trafico"]);
+const ROLES_GESTION_PEDIDOS = new Set(["gerente", "trafico", "administrativo", "contable", "visualizador"]);
 
 async function getChoferIdsForUser(user, empresaId) {
   if (!user || user.rol !== "chofer") return [];
   const ids = new Set();
   if (user.id) ids.add(String(user.id));
   if (user.chofer_id) ids.add(String(user.chofer_id));
+  if (user.chofer_id) return [...ids];
 
   const clauses = [];
   const params = [empresaId];
   if (user.email) {
     params.push(String(user.email).toLowerCase());
     clauses.push(`LOWER(email) = $${params.length}`);
-  }
-  if (user.nombre) {
-    params.push(String(user.nombre).trim().toLowerCase());
-    clauses.push(`LOWER(TRIM(CONCAT(nombre, ' ', COALESCE(apellidos, '')))) = $${params.length}`);
-    clauses.push(`LOWER(TRIM(nombre)) = $${params.length}`);
   }
   if (!clauses.length) return [...ids];
 
@@ -5653,7 +5636,7 @@ async function usuarioPuedeGestionarPedido(req, pedido) {
   const empresaId = req.empresaId || req.user.empresa_id;
   const access = await getChoferAccessForUser(req.user, empresaId);
   return access.choferIds.some(id => id === String(pedido.chofer_id || "") || id === String(pedido.chofer2_id || ""))
-    || access.vehiculoIds.some(id => id === String(pedido.vehiculo_id || ""));
+    || (!pedido.chofer_id && !pedido.chofer2_id && access.vehiculoIds.some(id => id === String(pedido.vehiculo_id || "")));
 }
 
 async function assertUnicoViajeActivoChofer({ pedido, empresaId, estadoDestino }) {
@@ -6557,14 +6540,27 @@ router.get("/resumen-lista", async (req, res) => {
 });
 
 // GET /pedidos/:id
+router.get("/:id/orden-colaborador", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const pedido = await getPedidoColaboradorData(req.params.id, empresaId);
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    await assertSupplierOrder(db, pedido, empresaId);
+    return res.json({ permitido: true });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.status ? error.message : "No se pudo verificar la orden" });
+  }
+});
+
 router.post("/:id/colaborador/notificar", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
     const pedido = await getPedidoColaboradorData(req.params.id, empresaId);
     if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
     if (!pedido.colaborador_id) return res.status(400).json({ error: "Este pedido no tiene colaborador asignado" });
+    await assertSupplierOrder(db, pedido, empresaId);
     if (!pedido.colaborador_email) return res.status(400).json({ error: "El colaborador no tiene email configurado" });
-    if (!Number(pedido.precio_colaborador || 0)) return res.status(400).json({ error: "Indica el precio acordado con el colaborador antes de enviar el enlace" });
+    if (!Number(pedido.precio_colaborador || 0) && !getColaboradorPrecioTonelada(pedido)) return res.status(400).json({ error: "Indica el precio acordado con el colaborador antes de enviar el enlace" });
     if (pedido.colaborador_workflow_enviado_at && !req.body?.force) {
       return res.json({ ok: true, already: true, message: "El flujo del colaborador ya estaba enviado" });
     }
@@ -6578,7 +6574,7 @@ router.post("/:id/colaborador/notificar", GERENTE_O_TRAFICO, async (req, res) =>
     res.json({ ok: true, already: false });
   } catch (e) {
     logger.error("Error notificando colaborador:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -7866,7 +7862,7 @@ router.get("/:id/chofer-docs", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows: pedidoRows } = await db.query(
-      "SELECT id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, chofer_id, chofer2_id, vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId]
     );
     const pedido = pedidoRows[0];
@@ -7886,7 +7882,7 @@ router.get("/:id/chofer-docs/:docId/archivo", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows: pedidoRows } = await db.query(
-      "SELECT id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, chofer_id, chofer2_id, vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId]
     );
     const pedido = pedidoRows[0];
@@ -7915,7 +7911,7 @@ router.post("/:id/chofer-docs", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows: pedidoRows } = await db.query(
-      "SELECT id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, chofer_id, chofer2_id, vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId]
     );
     const pedido = pedidoRows[0];
@@ -7944,16 +7940,16 @@ router.post("/:id/chofer-docs", async (req, res) => {
     let rows;
     try {
       ({ rows } = await db.query(
-        `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+        `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,metadata,visible_chofer)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,true)
          RETURNING id,nombre,tipo,file_mime,file_size_kb,metadata,created_at`,
         [...values, JSON.stringify(metadata && typeof metadata === "object" ? metadata : {})]
       ));
     } catch (err) {
       if (err.code !== "42703") throw err;
       ({ rows } = await db.query(
-        `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas,visible_chofer)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true)
          RETURNING id,nombre,tipo,file_mime,file_size_kb,created_at`,
         values
       ));
@@ -8654,8 +8650,9 @@ async function asociarPuntosInteresUsados(empresaId, clienteId, ...stopArrays) {
   }
 }
 
-router.post("/", GERENTE_O_TRAFICO,
+router.post("/", GESTION_PEDIDOS_ESCRITURA,
   body("cliente_id").isUUID(),
+  body("tipo_precio_colaborador").optional({ nullable: true }).isIn(["viaje", "tonelada"]),
   body("importe").optional({ checkFalsy: true }).custom(value => parseLocaleNumber(value) !== null),
   async (req, res) => {
     await ensureColaboradorWorkflowSchema();
@@ -8757,6 +8754,7 @@ router.post("/", GERENTE_O_TRAFICO,
         }
       }
 
+      await confirmWorkshopAssignment(client, empresaId, {...req.body, remolque_id:remolque_id_efectivo});
       const numero = await nextGestionPedidoNumero(client, empresaId);
 
       // Check if remolque columns exist (migration may not have run)
@@ -8848,6 +8846,7 @@ router.post("/", GERENTE_O_TRAFICO,
         precio_cliente_col: req.body.precio_cliente_col !== undefined ? (req.body.precio_cliente_col ?? null) : undefined,
         precio_colaborador: req.body.precio_colaborador !== undefined ? (req.body.precio_colaborador ?? null) : undefined,
         precio_colaborador_unitario: req.body.precio_colaborador_unitario !== undefined ? (req.body.precio_colaborador_unitario ?? null) : undefined,
+        tipo_precio_colaborador: req.body.tipo_precio_colaborador,
         minimo_colaborador_unidades: req.body.minimo_colaborador_unidades !== undefined ? (req.body.minimo_colaborador_unidades ?? null) : undefined,
         reparto_chofer1: req.body.reparto_chofer1 ?? 50,
         etiquetas: Array.isArray(req.body.etiquetas) ? [...new Set(req.body.etiquetas.map(e => String(e || "").trim()).filter(Boolean))] : undefined,
@@ -8914,8 +8913,10 @@ router.post("/", GERENTE_O_TRAFICO,
         }
       }
       if (normalizedExtraFieldMap.colaborador_id) normalizedExtraFieldMap.coste_gasoil = 0;
+      const supplierPriceUpdated = applySupplierPricing(normalizedExtraFieldMap, req.body);
       const extraFields = Object.entries(normalizedExtraFieldMap).filter(([k]) => (
         (k in req.body) ||
+        (k === "precio_colaborador" && supplierPriceUpdated) ||
         ((k === "tipo_iva" || k === "iva_regimen") && ivaPedido) ||
         ["origen_pais","destino_pais","cmr_tipo"].includes(k) ||
         (["origen_provincia","destino_provincia"].includes(k) && (req.body.puntos_carga !== undefined || req.body.puntos_descarga !== undefined)) ||
@@ -9029,6 +9030,7 @@ router.post("/", GERENTE_O_TRAFICO,
           code: "PEDIDO_NUMERO_DUPLICADO",
         });
       }
+      if (e.code === 'VEHICULO_EN_TALLER') return res.status(409).json({error:e.message,code:e.code,requiere_confirmacion:true,vehiculos:e.vehiculos});
       if (e.code === "22001") {
         return res.status(400).json({ error: "Alguno de los textos del pedido supera la longitud permitida. Revisa ventanas horarias, matriculas o referencias." });
       }
@@ -9248,10 +9250,13 @@ router.patch("/:id/estado",
 );
 
 // PUT /pedidos/:id
-router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
+router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
   await ensureColaboradorWorkflowSchema();
   const empresaId = req.empresaId||req.user?.empresa_id;
   const body = req.body;
+  if (body.tipo_precio_colaborador != null && !["viaje", "tonelada"].includes(body.tipo_precio_colaborador)) {
+    return res.status(400).json({ error: "Tipo de tarifa del proveedor no valido" });
+  }
   const { rows: pedidoActualRows } = await db.query(
     "SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2",
     [req.params.id, empresaId]
@@ -9381,6 +9386,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     precio_cliente_col: body.precio_cliente_col !== undefined ? (body.precio_cliente_col ?? null) : undefined,
     precio_colaborador: body.precio_colaborador !== undefined ? (body.precio_colaborador ?? null) : undefined,
     precio_colaborador_unitario: body.precio_colaborador_unitario !== undefined ? (body.precio_colaborador_unitario ?? null) : undefined,
+    tipo_precio_colaborador: body.tipo_precio_colaborador,
     minimo_colaborador_unidades: body.minimo_colaborador_unidades !== undefined ? (body.minimo_colaborador_unidades ?? null) : undefined,
     reparto_chofer1: body.reparto_chofer1 ?? 50,
     etiquetas: Array.isArray(body.etiquetas) ? [...new Set(body.etiquetas.map(e => String(e || "").trim()).filter(Boolean))] : undefined,
@@ -9489,11 +9495,13 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     }
   }
   if (normalizedFieldMap.colaborador_id) normalizedFieldMap.coste_gasoil = 0;
+  const supplierPriceUpdated = applySupplierPricing(normalizedFieldMap, body, pedidoActualRows[0]);
 
   // Remove fields not sent in request body (undefined = not sent at all)
   const fields = Object.entries(normalizedFieldMap)
     .filter(([k]) => (
       (k in body) ||
+      (k === "precio_colaborador" && supplierPriceUpdated) ||
       ((k === "tipo_iva" || k === "iva_regimen") && ivaPedido) ||
       (["origen_pais","origen_provincia","destino_pais","destino_provincia","cmr_tipo"].includes(k) && geoTouched) ||
       (k === "origen_pais" && ("pais_origen" in body)) ||
@@ -9525,10 +9533,12 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
   values.push(req.params.id, empresaId);
 
   try {
-    const { rows } = await db.query(
-      `UPDATE pedidos SET ${setClauses} WHERE id=$${values.length-1} AND empresa_id=$${values.length} RETURNING *`,
-      values
-    );
+    const { rows } = await db.transaction(async tx => {
+      const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id,empresaId]);
+      if (!current.rows[0]) return {rows:[]};
+      await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+      return tx.query(`UPDATE pedidos SET ${setClauses} WHERE id=$${values.length-1} AND empresa_id=$${values.length} RETURNING *`, values);
+    });
     if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
     let pedidoActualizado = rows[0];
     pedidoActualizado = await limpiarPendienteCompletarSiProcede(pedidoActualizado, empresaId, req.user);
@@ -9597,7 +9607,12 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     res.json(pedidoActualizado);
   } catch(e) {
     if (e.code === '42703') {
-      let updatedPedido = await updateExistingPedidoFields(db, fields, req.params.id, empresaId);
+      let updatedPedido = await db.transaction(async tx => {
+        const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id,empresaId]);
+        if (!current.rows[0]) return null;
+        await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+        return updateExistingPedidoFields(tx, fields, req.params.id, empresaId);
+      });
       if (!updatedPedido) return res.status(400).json({ error: "No hay campos compatibles para actualizar" });
       updatedPedido = await limpiarPendienteCompletarSiProcede(updatedPedido, empresaId, req.user);
       updatedPedido = await confirmarPedidoPorAsignacionSiProcede(updatedPedido, empresaId, req.user);
@@ -9641,6 +9656,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
       }
       return res.json(updatedPedido);
     }
+    if (e.code === 'VEHICULO_EN_TALLER') return res.status(409).json({error:e.message,code:e.code,requiere_confirmacion:true,vehiculos:e.vehiculos});
     if (e.code === "22P02") {
       return res.status(400).json({
         error: "Alguno de los importes, pesos, bultos o identificadores del pedido no tiene un formato valido.",
@@ -10121,6 +10137,6 @@ table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid
 router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
 router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
-router._test = { pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate };
+router._test = { pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox };
 
 module.exports = router;

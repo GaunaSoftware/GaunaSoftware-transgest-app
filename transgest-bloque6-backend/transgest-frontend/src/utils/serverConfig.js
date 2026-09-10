@@ -12,7 +12,9 @@
 // (Electron): el .exe es la misma web empaquetada, solo cambia el "envoltorio".
 
 export const DEFAULT_API_URL =
-  process.env.REACT_APP_API_URL || "https://transgest-backend.onrender.com";
+  process.env.REACT_APP_LOCAL_SERVER === 'true'
+    ? window.location.origin
+    : process.env.REACT_APP_API_URL || "https://transgest-backend.onrender.com";
 
 const STORAGE_KEY = "transgest_api_url";
 
@@ -31,7 +33,11 @@ function normalizeUrl(raw) {
   if (!v) return "";
   // Aceptar "localhost:3000" o "192.168.1.20:3000" sin protocolo.
   if (!/^https?:\/\//i.test(v)) v = "http://" + v;
-  return v.replace(/\/+$/, ""); // sin barra final
+  const url = new URL(v);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+    throw new Error('Indica solo la direccion del servidor, sin credenciales, rutas ni parametros.');
+  }
+  return url.origin;
 }
 
 // URL efectiva del backend (llamar en tiempo de carga de cada modulo).
@@ -62,6 +68,8 @@ export function isDesktopApp() {
 // Guarda una URL de servidor. Devuelve la URL normalizada guardada.
 export function setConfiguredServer(raw) {
   const normalized = normalizeUrl(raw);
+  // Do not carry cloud credentials or cached company data to another server.
+  if (normalized !== readOverride()) clearServerSession();
   try {
     if (typeof window !== "undefined" && window.localStorage) {
       if (normalized) window.localStorage.setItem(STORAGE_KEY, normalized);
@@ -75,6 +83,7 @@ export function setConfiguredServer(raw) {
 
 // Vuelve al servidor por defecto (nube).
 export function clearConfiguredServer() {
+  clearServerSession();
   try {
     if (typeof window !== "undefined" && window.localStorage) {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -82,4 +91,13 @@ export function clearConfiguredServer() {
   } catch {
     /* noop */
   }
+}
+
+function clearServerSession() {
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (/^(tms_|transgest_)/.test(key) && key !== STORAGE_KEY) localStorage.removeItem(key);
+    }
+    sessionStorage.clear();
+  } catch {}
 }

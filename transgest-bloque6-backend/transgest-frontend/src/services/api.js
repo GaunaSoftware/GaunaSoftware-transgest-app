@@ -4,6 +4,7 @@
 
 import { fixMojibakePayload } from "../utils/mojibake";
 import { resolveApiBase } from "../utils/serverConfig";
+import { confirmDialog } from './notify';
 
 // El backend puede ser la nube (por defecto) o uno local/on-premise si el
 // usuario lo configura en Ajustes -> Servidor (ver utils/serverConfig.js).
@@ -211,6 +212,11 @@ async function apiFetch(path, options = {}) {
 
   const data = await parseApiResponse(res);
   if (!res.ok) {
+    if (data.code === 'VEHICULO_EN_TALLER' && data.requiere_confirmacion && !fetchOptions.body?.salida_taller_confirmada) {
+      const accepted = await confirmDialog({ title:'Vehiculo en taller', message:`${(data.vehiculos || []).map(v=>v.matricula).join(', ')} esta en taller. Quieres confirmar su salida y asignar el viaje? No se cerraran las reparaciones pendientes.`, confirmText:'Sacar del taller y asignar', cancelText:'Mantener en taller' });
+      if (!accepted) throw new Error('Asignacion cancelada. El vehiculo se mantiene en taller.');
+      return apiFetch(path, {...options, body:{...fetchOptions.body, salida_taller_confirmada:data.vehiculos.map(v=>v.id)}});
+    }
     const validationMsg = Array.isArray(data.errors) && data.errors[0]?.msg;
     const fallbackText = data.raw_text || "";
     const requestId = extractRequestId(res, data);
@@ -467,6 +473,9 @@ export async function getPedidosResumenLista(params = {}, options = {}) {
   }
 }
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
+export const verificarOrdenColaborador = id => apiFetch(`/pedidos/${id}/orden-colaborador`);
+export const getProduct = () => apiFetch('/producto');
+export const enviarPlanDiario = data => apiFetch('/plan-diario/enviar', {method:'POST',body:data});
 export const getPedidoIdaRetorno = (id)   => apiFetch(`/pedidos/${id}/ida-retorno`);
 // Enlace temporal del portal del proveedor para un viaje (valido 7 dias tras la
 // descarga). Devuelve { url, dias_validez }.
@@ -1076,6 +1085,8 @@ export const getLogo       = ()     => apiFetch("/empresa/logo");
 export const subirLogo     = (data) => apiFetch("/empresa/logo", {method:"POST",body:data});
 export const eliminarLogo  = ()     => apiFetch("/empresa/logo", {method:"DELETE"});
 export const chatIA        = (data) => apiFetch("/ia/chat", { method:"POST", body:data });
+export const getIntelligenceStatus = () => apiFetch('/ia/intelligence/estado', { silentError:true });
+export const queryIntelligence = data => apiFetch('/ia/intelligence/chat', { method:'POST', body:data, timeoutMs:85000, silentSuccess:true, silentError:true });
 
 // ── Documentos de pedido ─────────────────────────────────────────────────
 export const getPedidoDocs      = (pid)       => apiFetch(`/empresa/pedido-docs/${pid}`);
@@ -1174,4 +1185,3 @@ export const calcularDistanciaGeo = (origin, destination) =>
     { label: origin, role: "origen" },
     { label: destination, role: "destino" },
   ]);
-

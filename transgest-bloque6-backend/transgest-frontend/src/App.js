@@ -14,6 +14,8 @@ import { saveCompanyPalette } from "./utils/companyPalette";
 
 // Carga perezosa de todos los mÃƒÂ³dulos
 const Dashboard    = lazy(() => import("./pages/Dashboard"));
+const Intelligence = lazy(() => import('./pages/Intelligence'));
+const PlannerApp = lazy(() => import('./planner/PlannerApp'));
 const ControlTower = lazy(() => import("./pages/ControlTower"));
 const Clientes     = lazy(() => import("./pages/Clientes"));
 const Pedidos      = lazy(() => import("./pages/Pedidos"));
@@ -481,6 +483,7 @@ function VISTA_DEFAULT(rol) {
 
 // Mapa de ID de mÃƒÂ³dulo Ã¢â€ â€™ componente React
 const VISTAS = {
+  ia: <Intelligence />,
   dashboard:    <Dashboard />,
   control_tower:<ControlTower />,
   agenda:       <Agenda />,
@@ -539,6 +542,7 @@ function onboardingStorageKey(user) {
 }
 
 const GUIDED_MODULE_LABELS = {
+  ia: 'TransGest Intelligence',
   dashboard: "Dashboard",
   control_tower: "Control Tower",
   agenda: "Agenda",
@@ -1202,19 +1206,19 @@ function StartupTasksPanel({ data, onClose, onOpenAgenda, onComplete, onSnooze }
 
 const DEMO_PLAN_META = {
   lite: {
-    label: "TransGest Lite",
+    label: "TransGest Go",
     detail: "DCD, app chofer, pedidos, clientes, rutas/tarifas y tacografo. Sin IA ni modulos avanzados.",
   },
   basico: {
-    label: "Basico",
+    label: "TransGest Control",
     detail: "Trafico core con documentos y facturacion basica. Sin IA, KPIs avanzados, taller ni contabilidad.",
   },
   profesional: {
-    label: "Profesional",
+    label: "TransGest Pro",
     detail: "KPIs, informes, rutas avanzadas, taller y contabilidad. IA desactivada.",
   },
   enterprise: {
-    label: "Enterprise",
+    label: "TransGest Pro Intelligence",
     detail: "Suite completa con IA, KPIs avanzados y todos los modulos.",
   },
 };
@@ -1790,7 +1794,10 @@ function AppInner() {
   // Obtener plan de la empresa del usuario
   const empresaPlan = normalizePlan(user?.plan || getEmpresaPlanLocal());
 
-  const modulosBase = modulosBaseParaUsuario(user);
+  const modulosBase = [...modulosBaseParaUsuario(user)];
+  if (['gerente','trafico','administrativo','contable'].includes(user.rol)) {
+    modulosBase.push({ titulo:'Intelligence', items:[{id:'ia', icon:IC.docs, label:'TransGest Intelligence'}] });
+  }
   const modulosPlan = empresaPlan ? filtrarModulosPorPlan(modulosBase, empresaPlan) : modulosBase;
   const modulos = ocultarModulos(filtrarModulosPorPermisos(modulosPlan, user.permisos, user.rol));
   const modulosVisibles = new Set(
@@ -2069,7 +2076,9 @@ export default function App() {
       <MojibakeFixer />
       <ToastProvider>
         <AuthProvider>
-          <AppInner />
+          {process.env.REACT_APP_PRODUCT === 'planner'
+            ? <Suspense fallback={<Spinner />}><PlannerApp PasswordChangeComponent={PasswordChangeRequired} /></Suspense>
+            : <AppInner />}
         </AuthProvider>
       </ToastProvider>
     </ThemeProvider>

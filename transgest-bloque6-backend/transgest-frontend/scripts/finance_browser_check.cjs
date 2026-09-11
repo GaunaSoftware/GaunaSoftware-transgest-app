@@ -70,6 +70,29 @@ async function main(){
   assert.equal(await page.getByRole('tab',{name:'Cobros',exact:true}).getAttribute('aria-selected'),'true');
   await page.keyboard.press('ArrowLeft');
   checks.push('keyboard-tabs');
+  const sidebar=page.locator('.tg-sidebar');
+  assert.deepEqual(await sidebar.locator('.tg-sidebar-scroll > div > .tg-nav-depth-0 > button .tg-nav-item-label').allTextContents(), ['Dashboard','Agenda','TransGest Intelligence','Operaciones','Clientes','Flota','Finanzas','Gestión']);
+  for(const [value,label] of [['resumen','Resumen'],['facturas','Facturas'],['cobros','Cobros'],['pagos','Pagos'],['tesoreria','Tesorería'],['fiscal','Fiscal (AEAT)']]) {
+   await sidebar.locator(`[data-tour="module-finance-${value}"]`).click();
+   assert.equal(await page.getByRole('tab',{name:label,exact:true}).getAttribute('aria-selected'),'true');
+   assert.equal(await sidebar.locator(`[data-tour="module-finance-${value}"]`).getAttribute('aria-current'),'page');
+  }
+  await page.getByRole('tab',{name:'Facturas',exact:true}).click();
+  assert.equal(await sidebar.locator('[data-tour="module-finance-facturas"]').getAttribute('aria-current'),'page');
+  await sidebar.locator('[data-tour="module-nav_flota"]').click();
+  await sidebar.locator('[data-tour="module-vehiculos"]').click();
+  assert.ok(await sidebar.getByRole('button',{name:'Tractoras',exact:true}).isVisible());
+  assert.ok(await sidebar.getByRole('button',{name:'Remolques',exact:true}).isVisible());
+  assert.ok(await sidebar.locator('#sidebar-nav_flota [data-tour="module-colaboradores"]').isVisible());
+  await sidebar.locator('[data-tour="module-nav_gestion"]').click();
+  await sidebar.locator('[data-tour="module-nav_configuracion"]').click();
+  assert.ok(await sidebar.locator('#sidebar-nav_configuracion [data-tour="module-mi_cuenta"]').isVisible());
+  await sidebar.locator('[data-tour="module-nav_informes"]').click();
+  assert.ok(await sidebar.locator('#sidebar-nav_informes [data-tour="module-objetivos"]').isVisible());
+  for(const id of ['nav_flota','nav_gestion','nav_informes'])await sidebar.locator(`[data-tour="module-${id}"]`).click();
+  await sidebar.locator('.tg-sidebar-scroll').evaluate(el=>{el.scrollTop=0;});
+  checks.push('sidebar-organization','finance-sidebar-sync','nested-vehicle-navigation','nested-settings-navigation','objectives-in-reports','collaborators-in-fleet');
+
   const noOverflow=async label=>{
    const issues=await page.evaluate(()=>[...document.querySelectorAll('.finance-page, .tgui-dialog-body')].filter(el=>el.getClientRects().length).filter(el=>el.scrollWidth>el.clientWidth+2).map(el=>({className:el.className,width:el.clientWidth,scroll:el.scrollWidth})));
    assert.deepEqual(issues,[],`Horizontal overflow: ${label}`); checks.push(label);
@@ -78,7 +101,7 @@ async function main(){
    if(await page.locator('html').getAttribute('data-theme')!==theme)await page.locator('.tg-topbar').getByRole('button',{name:/tema|claro|oscuro/i}).click();
    for(const width of [390,430,767,768,1024,1366,1440,1600,1920]){
     await page.setViewportSize({width,height:({390:844,430:932,768:1024,1024:768,1366:768,1600:900}[width]||1000)});
-    for(const tab of ['Facturas','Cobros','Pagos','Tesorería','Fiscal']){
+    for(const tab of ['Resumen','Facturas','Cobros','Pagos','Tesorería','Fiscal (AEAT)']){
      await page.getByRole('tab',{name:tab,exact:true}).click();
      await page.locator('.tg-content').evaluate(el=>{el.scrollTop=0;});
      assert.equal(await page.getByRole('tab',{name:tab,exact:true}).getAttribute('aria-selected'),'true');
@@ -176,6 +199,9 @@ async function main(){
   await page.getByPlaceholder('Describe tu consulta, incidencia o solicitud de cambio de plan...').waitFor();
   assert.ok(!mutations.some(m=>m.pathname==='/mi-cuenta/soporte'),'Opening support must not send a message');
   checks.push('single-profile','footer-actions-collapsed','support-navigation-and-reopen');
+  await sidebar.locator('[data-tour="module-nav_finanzas"]').click();
+  assert.ok(!(await sidebar.getAttribute('class')).includes('collapsed'),'Opening a collapsed group exposes its children');
+  await sidebar.locator('[data-tour="module-finance-facturas"]').click();
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'facturacion'})));
   await page.getByRole('heading',{name:'Gestión financiera',exact:true}).waitFor();
   await page.setViewportSize({width:390,height:1000});await page.locator('.tg-mobile-menu-btn').click();assert.ok((await page.locator('.tg-sidebar').getAttribute('class')).includes('mobile-open'));await page.locator('.tg-sidebar-backdrop').click({position:{x:380,y:500}});
@@ -195,6 +221,11 @@ async function main(){
   assert.equal(await page.getByRole('button',{name:/Acciones de A-2026/}).count(),0);
   assert.ok(await page.getByRole('button',{name:'Ver factura A-2026-0059',exact:true}).filter({visible:true}).isVisible());
   await page.getByText('Fiscal: resumen no disponible',{exact:true}).waitFor();checks.push('read-only-permissions','fiscal-unavailable');
+  await page.locator('.tg-mobile-menu-btn').click();
+  await sidebar.locator('[data-tour="module-finance-pagos"]').click();
+  assert.ok(!(await sidebar.getAttribute('class')).includes('mobile-open'));
+  assert.equal(await page.getByRole('tab',{name:'Pagos',exact:true}).getAttribute('aria-selected'),'true');
+  checks.push('mobile-submenu-navigation');
   await page.locator('.tg-mobile-menu-btn').click();
   await page.screenshot({path:path.join(out,'mobile-sidebar-footer.png')});
   await page.getByRole('button',{name:'Cerrar sesión',exact:true}).click();

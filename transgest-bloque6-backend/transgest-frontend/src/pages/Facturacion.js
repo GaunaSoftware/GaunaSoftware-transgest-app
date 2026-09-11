@@ -1,4 +1,4 @@
-import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal } from "../ui";
+import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal, Icon, AlertCard } from "../ui";
 import InvoiceList from "./finance/InvoiceList";
 import TreasuryView from "./finance/TreasuryView";
 import "./finance/finance.css";
@@ -2140,7 +2140,7 @@ export default function Facturacion() {
     const found = facturas.find(f => String(f.id) === String(focusFactura.factura_id));
     if (!found) return;
     const t = window.setTimeout(() => {
-      const targetId = `factura-row-${focusFactura.factura_id}${window.matchMedia("(max-width: 639px)").matches ? "-mobile" : ""}`;
+      const targetId = `factura-row-${focusFactura.factura_id}${window.matchMedia("(max-width: 767px)").matches ? "-mobile" : ""}`;
       document.getElementById(targetId)?.scrollIntoView({ behavior:"smooth", block:"center" });
       clearRuntimeFocus("tms_facturacion_focus");
     }, 180);
@@ -2707,8 +2707,8 @@ export default function Facturacion() {
 
   return (
     <Page className="finance-page">
-      <PageHeader title="Gestión financiera" description="Facturación, cobros, pagos y tesorería" actions={canEdit && <Button variant="primary" onClick={() => setModalMulti(true)}>+ Nueva factura</Button>} />
-      <Tabs idPrefix="finance" label="Finanzas" value={activeFacturacionTab} onChange={setActiveFacturacionTab} items={[{value:"facturas",label:"Facturas"},{value:"cobros",label:"Cobros"},{value:"pagos",label:"Pagos"},{value:"tesoreria",label:"Tesorería"},{value:"fiscal",label:"Fiscal"}]} />
+      <PageHeader title="Gestión financiera" description="Controla la facturación, los cobros, los pagos y la tesorería de tu empresa." actions={canEdit && <Button variant="primary" onClick={() => setModalMulti(true)}>+ Nueva factura</Button>} />
+      <Tabs idPrefix="finance" label="Finanzas" value={activeFacturacionTab} onChange={setActiveFacturacionTab} items={[{value:"facturas",label:"Facturas",icon:"invoice"},{value:"cobros",label:"Cobros",icon:"coins"},{value:"pagos",label:"Pagos",icon:"wallet"},{value:"tesoreria",label:"Tesorería",icon:"clock"},{value:"fiscal",label:"Fiscal",icon:"shield"}]} />
       {focusFactura?.source === "control_tower" && !focusFactura?.factura_id && (
         <div style={{...S.card,marginBottom:14,borderColor:"var(--accent-a35)",background:"var(--accent-a07)"}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
@@ -2725,15 +2725,22 @@ export default function Facturacion() {
       )}
 
       <div className="finance-kpis">
-        <KpiCard label="Facturado" value={`${fmt2(total)} €`} detail="Facturas cargadas del período" />
-        <KpiCard label="Por cobrar" value={`${fmt2(pendiente)} €`} detail="Facturas cargadas del período" />
-        <KpiCard label="Por pagar" value={`${fmt2(totalPorPagar)} €`} detail="Pagos pendientes cargados" />
-        <KpiCard label="Tesorería 30 días" value={`${fmt2(previsionTesoreria.saldoPrevisto30)} €`} tone={previsionTesoreria.saldoPrevisto30 < 0 ? "danger" : "neutral"} />
+        {activeFacturacionTab === "cobros" ? <>
+          <KpiCard icon="coins" label="Por cobrar" value={`${fmt2(controlResumen.importe_pendiente || 0)} €`} detail="Resumen de control de cobros" />
+          <KpiCard icon="clock" label="Vencido" value={`${Number(controlResumen.vencidas || 0)} facturas`} tone="danger" />
+          <KpiCard icon="invoice" label="Reclamado" value={`${Number(controlResumen.reclamadas || 0)} facturas`} tone="warning" />
+          <KpiCard icon="shield" label="Bloqueado documentalmente" value={`${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} €`} />
+        </> : <>
+          <KpiCard icon="invoice" label="Total facturado" value={`${fmt2(total)} €`} detail="Facturas cargadas del período" />
+          <KpiCard icon="coins" label="Por cobrar" value={`${fmt2(pendiente)} €`} detail="Facturas cargadas del período" />
+          <KpiCard icon="wallet" label="Por pagar" value={`${fmt2(totalPorPagar)} €`} detail="Pagos pendientes cargados" />
+          <KpiCard icon="clock" label="Tesorería 30 días" value={`${fmt2(previsionTesoreria.saldoPrevisto30)} €`} tone={previsionTesoreria.saldoPrevisto30 < 0 ? "danger" : "neutral"} detail="Saldo previsto" />
+        </>}
       </div>
       <div className="finance-signals" aria-label="Señales financieras">
-        <Button onClick={() => { setActiveFacturacionTab("cobros"); setDocumentosOpen(true); }}>{Number(bloqueoDocResumen.total_bloqueos || bloqueoDocItems.length || 0)} incidencias documentales</Button>
-        <Button onClick={() => setActiveFacturacionTab("cobros")}>{Number(controlResumen.revisar_hoy || 0)} cobros a revisar</Button>
-        <Button onClick={() => setActiveFacturacionTab("fiscal")}><Badge tone={fiscalAttention || fiscalNeedsSetup ? "warning" : "neutral"}>{!fiscalResumen ? "Fiscal: resumen no disponible" : fiscalNeedsSetup ? "Fiscal: revisar configuración" : fiscalAttention ? `Fiscal: ${fiscalAttention} incidencias` : "Fiscal sin incidencias"}</Badge></Button>
+        <AlertCard icon="invoice" tone={Number(bloqueoDocResumen.total_bloqueos || bloqueoDocItems.length || 0) > 0 ? "danger" : "neutral"} title={`${Number(bloqueoDocResumen.total_bloqueos || bloqueoDocItems.length || 0)} incidencias documentales`} description="Revisa POD, albaranes y CMR" onClick={() => { setActiveFacturacionTab("cobros"); setDocumentosOpen(true); }} />
+        <AlertCard icon="clock" tone={Number(controlResumen.revisar_hoy || 0) > 0 ? "warning" : "neutral"} title={`${Number(controlResumen.revisar_hoy || 0)} cobros a revisar`} description="Seguimiento de facturas" onClick={() => setActiveFacturacionTab("cobros")} />
+        <AlertCard icon="shield" tone={!fiscalResumen ? "neutral" : fiscalAttention || fiscalNeedsSetup ? "warning" : "success"} title={!fiscalResumen ? "Fiscal: resumen no disponible" : fiscalNeedsSetup ? "Fiscal: revisar configuración" : fiscalAttention ? `Fiscal: ${fiscalAttention} incidencias` : "Fiscal sin incidencias"} description="Consultar estado y configuración AEAT" onClick={() => setActiveFacturacionTab("fiscal")} />
       </div>
       <div id="finance-panel" role="tabpanel" aria-labelledby={`finance-${activeFacturacionTab}`} tabIndex={0}>
       {activeFacturacionTab === "tesoreria" && <TreasuryView forecast={previsionTesoreria} money={fmt2} date={fmtDate} onReport={descargarInformeTesoreria} />}
@@ -2975,12 +2982,6 @@ export default function Facturacion() {
 
       {activeFacturacionTab === "cobros" && (
       <>
-      <div className="finance-kpis">
-        <KpiCard label="Por cobrar" value={`${fmt2(controlResumen.importe_pendiente || 0)} €`} />
-        <KpiCard label="Vencido" value={`${Number(controlResumen.vencidas || 0)} facturas`} tone="danger" />
-        <KpiCard label="Reclamado" value={`${Number(controlResumen.reclamadas || 0)} facturas`} tone="warning" />
-        <KpiCard label="Bloqueado documentalmente" value={`${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} €`} />
-      </div>
       <Card className="finance-backlog"><div><strong>{Number(bloqueoDocResumen.pedidos_sin_soporte || 0)} pedidos sin soporte documental</strong><p>{Number(controlResumen.revisar_hoy || 0)} facturas necesitan revisión</p></div><Button onClick={() => setDocumentosOpen(true)}>Revisar documentación</Button></Card>
       <Drawer open={documentosOpen} title="Bloqueos documentales" width={620} onClose={() => setDocumentosOpen(false)}>
       <div style={{...S.card,padding:14,marginBottom:16,borderColor:Number(bloqueoDocResumen.total_bloqueos||0)>0?"rgba(239,68,68,.35)":"rgba(34,211,160,.24)"}}>
@@ -3130,6 +3131,9 @@ export default function Facturacion() {
 
       {["facturas", "cobros"].includes(activeFacturacionTab) && (
       <>
+      {activeFacturacionTab === "facturas" && <Card className="finance-backlog finance-backlog--pending"><span className="finance-backlog-icon"><Icon name="truck" size={26} /></span><div className="finance-backlog-copy"><strong>{sinFacturar.length} viajes pendientes de facturar</strong><p><span className="tgui-number">{fmt2(sinFacturarTotal)} €</span> · Todos los períodos</p></div><Button onClick={() => setSinFacturarOpen(true)}>Revisar viajes <Icon name="chevron" size={16} /></Button></Card>}
+      <Card as="section" className="finance-invoices" aria-label="Facturas de clientes">
+      <header className="finance-invoices-header"><div><h2>Facturas de clientes <span>({totalCount})</span></h2><p>Emisión, fiscalidad y seguimiento de facturas.</p></div></header>
       {/* Filtros */}
       <FilterBar search={<SearchInput value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar por número o cliente…" />} advanced={<>
         <select aria-label="Estado fiscal" value={fiscalEstadoFiltro} onChange={e=>setFiscalEstadoFiltro(e.target.value)} style={S.sel}>
@@ -3194,8 +3198,6 @@ export default function Facturacion() {
         </button>
         <span style={{fontSize:12,color:"var(--text3)"}}>{nRect} rectificadas · Cobrado {fmt2(cobrado)} € · {totalCount} facturas en el período</span>
       </div>
-      {activeFacturacionTab === "facturas" && <Card className="finance-backlog"><div><strong>{sinFacturar.length} viajes pendientes de facturar</strong><p className="tgui-number">{fmt2(sinFacturarTotal)} € · Todos los períodos</p></div><div className="tgui-actions"><Button onClick={() => setSinFacturarOpen(true)}>Revisar viajes</Button>{canEdit && <Button onClick={() => setModalMulti(true)}>Facturar pedidos</Button>}</div></Card>}
-      {canEdit && <details className="finance-accounting"><summary>Exportación contable</summary><ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} /></details>}
       <Drawer open={sinFacturarOpen} title="Viajes entregados sin facturar" width={620} onClose={() => setSinFacturarOpen(false)} footer={<><strong className="tgui-number">Total {fmt2(sinFacturarTotal)} €</strong><Button onClick={cargarSinFacturar}>Actualizar</Button>{canEdit && <Button variant="primary" onClick={() => { setSinFacturarOpen(false); setModalMulti(true); }}>Facturar pedidos</Button>}</>}>
         <p>Todos los clientes y fechas. Se conserva el listado cargado de hasta 1.000 viajes.</p>
         <DataTable rows={sinFacturarOrdenados} loading={sinFacturarLoad} emptyTitle="No hay viajes entregados pendientes de facturar" columns={[
@@ -3207,6 +3209,8 @@ export default function Facturacion() {
       </Drawer>
 
       {invoiceList}
+      {canEdit && <details className="finance-accounting"><summary>Exportación contable</summary><ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} /></details>}
+      </Card>
 
       </>
       )}

@@ -15,15 +15,39 @@ export function Section({ title, actions, children, ...props }) {
   return <Card as="section" {...props}><header className="tgui-section-header"><h2>{title}</h2><div className="tgui-actions">{actions}</div></header>{children}</Card>;
 }
 export function Badge({ tone = "neutral", className, ...props }) { return <span className={cx("tgui-badge", `tgui-tone--${tone}`, className)} {...props} />; }
-export function KpiCard({ label, value, detail, tone = "neutral" }) {
-  return <Card className="tgui-kpi"><div className="tgui-kpi-label">{label}</div><strong className={cx("tgui-number", `tgui-tone--${tone}`)}>{value}</strong>{detail && <small>{detail}</small>}</Card>;
+export function Icon({ name, size = 20 }) {
+  const paths = {
+    invoice: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z M14 2v6h6 M8 12h8 M8 16h6",
+    clock: "M12 8v5l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
+    coins: "M15 7a5 5 0 1 0 0 10 M6 10h8 M6 14h8 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
+    wallet: "M20 8V5H5a2 2 0 0 1 0-4h13v4 M3 3v16a2 2 0 0 0 2 2h16V8H5 M21 12h-5v5h5",
+    shield: "M12 2 3 6v6c0 5 9 10 9 10s9-5 9-10V6Z M8 12l3 3 5-6",
+    truck: "M1 3h13v14H1Z M14 8h4l4 5v4h-8 M8 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0 M20 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0",
+    headset: "M3 14v-3a9 9 0 0 1 18 0v3 M3 12h3v7H3a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2 M21 12h-3v7h3a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2 M21 19v1a2 2 0 0 1-2 2h-5",
+    logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9",
+    chevron: "m9 5 7 7-7 7",
+  };
+  return <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name] || paths.invoice} /></svg>;
+}
+export function KpiCard({ label, value, detail, tone = "neutral", icon }) {
+  return <Card className={cx("tgui-kpi", icon && "tgui-kpi--icon")}>
+    {icon && <span className={cx("tgui-kpi-icon", `tgui-tone--${tone}`)}><Icon name={icon} size={24} /></span>}
+    <div className="tgui-kpi-copy"><div className="tgui-kpi-label">{label}</div><strong className={cx("tgui-number", `tgui-tone--${tone}`)}>{value}</strong>{detail && <small>{detail}</small>}</div>
+  </Card>;
+}
+export function AlertCard({ icon, title, description, tone = "neutral", onClick }) {
+  return <Button className={cx("tgui-alert", `tgui-alert--${tone}`)} onClick={onClick}>
+    <span className={cx("tgui-alert-icon", `tgui-tone--${tone}`)}><Icon name={icon} /></span>
+    <span className="tgui-alert-copy"><strong>{title}</strong>{description && <small>{description}</small>}</span>
+    <Icon name="chevron" size={16} />
+  </Button>;
 }
 export function Tabs({ items, value, onChange, label = "Secciones", idPrefix = "tabs" }) {
   const refs = useRef([]);
   return <div className="tgui-tabs" role="tablist" aria-label={label}>{items.map((item, index) => <button key={item.value} ref={el => { refs.current[index] = el; }} type="button" role="tab" id={`${idPrefix}-${item.value}`} aria-controls={`${idPrefix}-panel`} aria-selected={value === item.value} tabIndex={value === item.value ? 0 : -1} onClick={() => onChange(item.value)} onKeyDown={e => {
     const next = e.key === "ArrowRight" ? (index + 1) % items.length : e.key === "ArrowLeft" ? (index + items.length - 1) % items.length : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : null;
     if (next !== null) { e.preventDefault(); onChange(items[next].value); refs.current[next]?.focus(); refs.current[next]?.scrollIntoView({ block: "nearest", inline: "nearest" }); }
-  }}>{item.label}</button>)}</div>;
+  }}>{item.icon && <Icon name={item.icon} size={18} />}{item.label}</button>)}</div>;
 }
 export const SearchInput = forwardRef(function SearchInput({ label = "Buscar", className, ...props }, ref) { return <input ref={ref} type="search" aria-label={label} className={cx("tgui-input", className)} {...props} />; });
 export const Select = forwardRef(function Select({ label, className, ...props }, ref) { return <select ref={ref} aria-label={label} className={cx("tgui-input", className)} {...props} />; });

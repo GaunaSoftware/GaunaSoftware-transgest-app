@@ -21,6 +21,22 @@ section.tgui-card { padding:16px; margin-bottom:16px; }
 .tgui-number { font-family:'JetBrains Mono',monospace; font-variant-numeric:tabular-nums; }
 .tgui-kpi { padding:14px 16px; } .tgui-kpi-label { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text3); }
 .tgui-kpi strong { display:block; font-size:clamp(16px,1.6vw,23px); margin-top:5px; overflow-wrap:anywhere; } .tgui-kpi small { display:block; color:var(--text3); }
+.tgui-kpi--icon { display:flex; align-items:flex-start; gap:14px; }
+.tgui-kpi-icon, .tgui-alert-icon { display:flex; align-items:center; justify-content:center; flex-shrink:0; border-radius:10px; }
+.tgui-kpi-icon { width:48px; height:48px; color:var(--link); background:var(--accent-soft); }
+.tgui-kpi-icon.tgui-tone--danger { color:var(--red); background:color-mix(in srgb,var(--red) 9%,var(--card-bg)); }
+.tgui-kpi-icon.tgui-tone--warning { color:var(--orange); background:color-mix(in srgb,var(--orange) 9%,var(--card-bg)); }
+.tgui-kpi-copy { min-width:0; flex:1; }
+.tgui-alert { width:100%; min-width:0; justify-content:flex-start; text-align:left; padding:14px; gap:12px; background:var(--card-bg); border-color:var(--border); }
+.tgui-alert--danger { background:color-mix(in srgb,var(--red) 5%,var(--card-bg)); border-color:color-mix(in srgb,var(--red) 22%,var(--border)); }
+.tgui-alert--warning { background:color-mix(in srgb,var(--orange) 5%,var(--card-bg)); border-color:color-mix(in srgb,var(--orange) 22%,var(--border)); }
+.tgui-alert--success { background:var(--accent-soft); border-color:var(--accent-border); }
+.tgui-alert-icon { width:32px; height:32px; }
+.tgui-alert-copy { flex:1; min-width:0; }
+.tgui-alert strong { display:block; font-size:13px; font-weight:700; color:var(--text); }
+.tgui-alert small { display:block; font-size:12px; font-weight:400; color:var(--text3); margin-top:3px; }
+.tgui-alert > svg { flex-shrink:0; }
+.tgui-tabs button { display:inline-flex; align-items:center; gap:10px; }
 .tgui-tabs { display:flex; overflow-x:auto; border-bottom:1px solid var(--border); gap:8px; margin-bottom:16px; scrollbar-width:thin; }
 .tgui-tabs button { flex:none; font:600 13px 'DM Sans',sans-serif; padding:12px 16px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--text3); cursor:pointer; }
 .tgui-tabs button[aria-selected="true"] { border-bottom-color:var(--accent); color:var(--link); }
@@ -46,8 +62,8 @@ section.tgui-card { padding:16px; margin-bottom:16px; }
 .tgui-menu { position:fixed; z-index:300; width:224px; max-height:calc(100dvh - 16px); overflow-y:auto; padding:6px; border:1px solid var(--border2); background:var(--card-bg); box-shadow:var(--shadow); border-radius:var(--radius-md); }
 .tgui-menu button { display:block; width:100%; text-align:left; padding:9px 10px; background:transparent; border:0; border-radius:var(--radius-sm); font:600 12px 'DM Sans',sans-serif; color:var(--text); cursor:pointer; }
 .tgui-menu button:hover, .tgui-menu button:focus { background:var(--row-hover); } .tgui-menu button.tgui-tone--danger { color:var(--red); }
-@media (min-width:640px) and (max-width:1023px) { .tgui-drawer { width:75vw; } .tgui-table .tgui-table-secondary { display:none; } }
-@media (max-width:639px) {
+@media (min-width:768px) and (max-width:1023px) { .tgui-drawer { width:75vw; } .tgui-table .tgui-table-secondary { display:none; } }
+@media (max-width:767px) {
  .tgui-page { padding:16px 12px; } .tgui-page-header h1 { font-size:23px; } .tgui-page-header { gap:12px; }
  .tgui-button, .tgui-input, .tgui-menu button { min-height:44px; } .tgui-input { font-size:16px; }
  .tgui-filter-desktop { display:none; } .tgui-filter-toggle { display:inline-flex; }

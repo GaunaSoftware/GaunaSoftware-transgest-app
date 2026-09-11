@@ -2,6 +2,8 @@
 
 Se aplica el esquema facilitado por el usuario y su aclaración sobre Colaboradores, Nóminas, Hojas de ruta y Objetivos. El estilo toma como referencia la barra oscura de la segunda captura. Los logos, sus archivos y su renderizado no cambian. Soporte y Cerrar sesión permanecen abajo; el perfil permanece solo en la cabecera.
 
+La composición final y la entrada inicial por Resumen se detallan en [UI_FACTURACION_RESUMEN_FINAL.md](UI_FACTURACION_RESUMEN_FINAL.md).
+
 ## Jerarquía
 
 ```text

@@ -227,6 +227,8 @@ async function main(){
   assert.equal(await page.getByRole('tab',{name:'Pagos',exact:true}).getAttribute('aria-selected'),'true');
   checks.push('mobile-submenu-navigation');
   await page.locator('.tg-mobile-menu-btn').click();
+  await page.waitForFunction(()=>Math.abs(document.querySelector('.tg-sidebar').getBoundingClientRect().left)<1);
+  assert.ok((await sidebar.boundingBox()).width>=300,'Mobile sidebar finishes opening within the viewport');
   await page.screenshot({path:path.join(out,'mobile-sidebar-footer.png')});
   await page.getByRole('button',{name:'Cerrar sesión',exact:true}).click();
   await page.locator('.tg-sidebar').waitFor({state:'hidden'});

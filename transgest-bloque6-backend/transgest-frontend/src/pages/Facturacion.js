@@ -10,6 +10,7 @@ import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
+import { FINANCE_TABS, useFinanceTab } from "../services/financeNavigation";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 
 const ESTADOS = ["borrador","emitida","enviada","cobrada","vencida","reclamada","sin_cobrar"];
@@ -2013,7 +2014,7 @@ export default function Facturacion() {
   // Los ajustes contables (programa y cuentas) los cambia solo gerencia.
   const esGerenteFacturacion = String(user?.rol || "").toLowerCase() === "gerente";
   const aiDisponible      = planHasFeature(getEmpresaPlanLocal(), "ai");
-  const [activeFacturacionTab, setActiveFacturacionTab] = useState("facturas");
+  const [activeFacturacionTab, setActiveFacturacionTab] = useFinanceTab();
   const [focusFactura]    = useState(() => readFacturacionFocus());
   const [facturas,     setFacturas]     = useState([]);
   const [loading,      setLoading]      = useState(true);
@@ -2708,7 +2709,7 @@ export default function Facturacion() {
   return (
     <Page className="finance-page">
       <PageHeader title="Gestión financiera" description="Controla la facturación, los cobros, los pagos y la tesorería de tu empresa." actions={canEdit && <Button variant="primary" onClick={() => setModalMulti(true)}>+ Nueva factura</Button>} />
-      <Tabs idPrefix="finance" label="Finanzas" value={activeFacturacionTab} onChange={setActiveFacturacionTab} items={[{value:"facturas",label:"Facturas",icon:"invoice"},{value:"cobros",label:"Cobros",icon:"coins"},{value:"pagos",label:"Pagos",icon:"wallet"},{value:"tesoreria",label:"Tesorería",icon:"clock"},{value:"fiscal",label:"Fiscal",icon:"shield"}]} />
+      <Tabs idPrefix="finance" label="Finanzas" value={activeFacturacionTab} onChange={setActiveFacturacionTab} items={FINANCE_TABS} />
       {focusFactura?.source === "control_tower" && !focusFactura?.factura_id && (
         <div style={{...S.card,marginBottom:14,borderColor:"var(--accent-a35)",background:"var(--accent-a07)"}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
@@ -2743,6 +2744,10 @@ export default function Facturacion() {
         <AlertCard icon="shield" tone={!fiscalResumen ? "neutral" : fiscalAttention || fiscalNeedsSetup ? "warning" : "success"} title={!fiscalResumen ? "Fiscal: resumen no disponible" : fiscalNeedsSetup ? "Fiscal: revisar configuración" : fiscalAttention ? `Fiscal: ${fiscalAttention} incidencias` : "Fiscal sin incidencias"} description="Consultar estado y configuración AEAT" onClick={() => setActiveFacturacionTab("fiscal")} />
       </div>
       <div id="finance-panel" role="tabpanel" aria-labelledby={`finance-${activeFacturacionTab}`} tabIndex={0}>
+      {activeFacturacionTab === "resumen" && <>
+        <Card className="finance-backlog finance-backlog--pending"><span className="finance-backlog-icon"><Icon name="truck" size={26} /></span><div className="finance-backlog-copy"><strong>{sinFacturar.length} viajes pendientes de facturar</strong><p><span className="tgui-number">{fmt2(sinFacturarTotal)} €</span> · Todos los períodos</p></div><Button onClick={() => { setActiveFacturacionTab("facturas"); setSinFacturarOpen(true); }}>Revisar viajes <Icon name="chevron" size={16} /></Button></Card>
+        <TreasuryView forecast={previsionTesoreria} money={fmt2} date={fmtDate} onReport={descargarInformeTesoreria} />
+      </>}
       {activeFacturacionTab === "tesoreria" && <TreasuryView forecast={previsionTesoreria} money={fmt2} date={fmtDate} onReport={descargarInformeTesoreria} />}
 
       {activeFacturacionTab === "fiscal" && (

@@ -7,6 +7,9 @@ import { getEmpresaPlanLocal } from "../utils/planFeatures";
 import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
 import { Icon } from "../ui";
 import { setRuntimeFocus } from "../services/runtimeFocus";
+import { FINANCE_TABS, selectFinanceTab, useFinanceTab } from "../services/financeNavigation";
+import { flattenNavigation, organizeSidebar } from "../utils/sidebarNavigation";
+import "./sidebar.css";
 
 const ROL_LABEL = { gerente:"Gerente", contable:"Contable", trafico:"Tráfico", visualizador:"Visualizador", chofer:"Chófer", cliente:"Cliente" };
 const ROL_COLOR = { gerente:"var(--accent)", contable:"#10b981", trafico:"#f97316", visualizador:"#64746f", chofer:"#f97316", cliente:"var(--accent-l)" };
@@ -461,9 +464,9 @@ const CSS = `
   }
 `;
 
-function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendientes = 0, tallerPendientes = 0, vehiculoAlertas = 0, solicitudesPendientes = 0, excepcionesPendientes = 0, colaboradoresPendientes = 0 }) {
+function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendientes = 0, tallerPendientes = 0, vehiculoAlertas = 0, solicitudesPendientes = 0, excepcionesPendientes = 0, colaboradoresPendientes = 0, depth = 0, onExpand }) {
   const hasChildren = item.children?.length > 0;
-  const childActive = hasChildren && item.children.some(c => c.id === vistaActiva);
+  const childActive = hasChildren && flattenNavigation(item.children).some(c => c.id === vistaActiva);
   const isActive    = vistaActiva === item.id;
   const [open, setOpen] = useState(childActive || isActive);
 
@@ -473,11 +476,12 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
 
   function handleClick() {
     if (hasChildren) {
-      setOpen(o => !o);
+      const expandedSidebar = onExpand?.();
+      setOpen(o => expandedSidebar || !o);
     } else if (item.href) {
       return;
     } else {
-      setVista(item.id);
+      setVista(item);
     }
   }
 
@@ -498,6 +502,7 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
 
   return (
     <>
+      <div className={`tg-nav-node tg-nav-depth-${depth}`} >
       {item.href && !hasChildren ? (
         <a
           className={`tg-nav-item ${(isActive || (hasChildren && childActive)) ? "active" : ""}`}
@@ -507,17 +512,21 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
           target={item.external ? "_blank" : undefined}
           rel={item.external ? "noopener noreferrer" : undefined}
         >
-          <span className="tg-nav-item-icon">{item.icon}</span>
+          <span className="tg-nav-item-icon">{item.icon || <Icon name="chevron" size={16} />}</span>
           <span className="tg-nav-item-label">{item.label}</span>
         </a>
       ) : (
       <button
         className={`tg-nav-item ${(isActive || (hasChildren && childActive)) ? "active" : ""}`}
         onClick={handleClick}
+        type="button"
+        aria-expanded={hasChildren ? open : undefined}
+        aria-controls={hasChildren ? `sidebar-${item.id}` : undefined}
+        aria-current={!hasChildren && isActive ? "page" : undefined}
         title={item.label}
         data-tour={`module-${item.id}`}
       >
-        <span className="tg-nav-item-icon">{item.icon}</span>
+        <span className="tg-nav-item-icon">{item.icon || <Icon name="chevron" size={16} />}</span>
         <span className="tg-nav-item-label">{item.label}</span>
         {showBadge && (
           <span style={{ fontSize:9, fontWeight:800, padding:"1px 6px", borderRadius:20,
@@ -576,40 +585,11 @@ function NavItem({ item, vistaActiva, setVista, avisosCriticos, clientesPendient
       )}
 
       {hasChildren && open && (
-        <div className="tg-nav-sub">
-          {item.children.map(sub => (
-            sub.href ? (
-            <a
-              key={sub.id}
-              className={`tg-nav-subitem ${vistaActiva === sub.id ? "active" : ""}`}
-              href={sub.href}
-              data-tour={`module-${sub.id}`}
-              target={sub.external ? "_blank" : undefined}
-              rel={sub.external ? "noopener noreferrer" : undefined}
-            >
-              <span className="tg-nav-dot"/>
-              <span style={{flex:1}}>{sub.label}</span>
-            </a>
-            ) : (
-            <button
-              key={sub.id}
-              className={`tg-nav-subitem ${vistaActiva === sub.id ? "active" : ""}`}
-              onClick={() => setVista(sub.id)}
-              data-tour={`module-${sub.id}`}
-            >
-              <span className="tg-nav-dot"/>
-              <span style={{flex:1}}>{sub.label}</span>
-                {sub.id === "excepciones" && excepcionesPendientes > 0 && (
-                  <span style={{ fontSize:9, fontWeight:900, padding:"1px 6px", borderRadius:20,
-                                 background:"rgba(239,68,68,.18)", color:"#ef4444", flexShrink:0 }}>
-                    {excepcionesPendientes}
-                  </span>
-                )}
-            </button>
-            )
-          ))}
+        <div className="tg-nav-sub" id={`sidebar-${item.id}`}>
+          {item.children.map(sub => <NavItem key={sub.id} item={sub} vistaActiva={vistaActiva} setVista={setVista} depth={depth + 1} onExpand={onExpand} avisosCriticos={avisosCriticos} clientesPendientes={clientesPendientes} tallerPendientes={tallerPendientes} vehiculoAlertas={vehiculoAlertas} solicitudesPendientes={solicitudesPendientes} excepcionesPendientes={excepcionesPendientes} colaboradoresPendientes={colaboradoresPendientes} />)}
         </div>
       )}
+      </div>
     </>
   );
 }
@@ -618,6 +598,10 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
   // Roles que usan pantalla completa sin sidebar (móvil-first)
   const { user, logout } = useAuth();
   const { toggle, isDark } = useTheme();
+  const [financeTab] = useFinanceTab();
+  const sidebarModules = organizeSidebar(modulos, FINANCE_TABS, user?.rol);
+  const sidebarItems = flattenNavigation(sidebarModules.flatMap(group => group.items));
+  const activeNavId = vistaActiva === "facturacion" ? `finance-${financeTab}` : vistaActiva;
   const brandDisplayName = getBrandDisplayName(getEmpresaPlanLocal());
   const [appMeta, setAppMeta] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -663,6 +647,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
   }
 
   function getLabelForId(id, mods) {
+    if (id === "facturacion") return "Finanzas";
     for (const g of (mods || [])) {
       for (const item of g.items) {
         if (item.id === id) return item.label;
@@ -675,7 +660,9 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
     return id;
   }
 
-  function handleSetVista(id) {
+  function handleSetVista(item) {
+    const id = typeof item === "string" ? item : item.target || item.id;
+    if (item.financeTab) selectFinanceTab(item.financeTab);
     setVista(id);
     setMobileMenuOpen(false);
   }
@@ -699,7 +686,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
   }
 
   // Get current label for breadcrumb
-  const currentLabel = getLabelForId(vistaActiva, modulos);
+  const currentLabel = sidebarItems.find(item => item.id === activeNavId)?.label || getLabelForId(vistaActiva, modulos);
 
   return (
     <>
@@ -768,16 +755,21 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
 
           {/* Nav */}
           <div className="tg-sidebar-scroll">
-            {modulos.map(grupo => (
+            {sidebarModules.map(grupo => (
               <div key={grupo.titulo}>
-                <div className="tg-nav-group" style={{ color: GRUPO_COLOR[grupo.titulo] ? `${GRUPO_COLOR[grupo.titulo]}99` : "var(--text5)" }}>
+                {grupo.titulo && <div className="tg-nav-group" style={{ color: GRUPO_COLOR[grupo.titulo] ? `${GRUPO_COLOR[grupo.titulo]}99` : "var(--text5)" }}>
                   {grupo.titulo}
-                </div>
+                </div>}
                 {grupo.items.map(item => (
                   <NavItem
                     key={item.id}
                     item={item}
-                    vistaActiva={vistaActiva}
+                    vistaActiva={activeNavId}
+                    onExpand={() => {
+                      const expand = sidebarCollapsed && window.matchMedia("(min-width: 1025px)").matches;
+                      if (expand) setSidebarCollapsed(false);
+                      return expand;
+                    }}
                     setVista={handleSetVista}
                     avisosCriticos={avisosCriticos}
                     clientesPendientes={clientesPendientes}
@@ -794,7 +786,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
 
           {/* Accesos inferiores; la identidad permanece en la cabecera. */}
           <div className="tg-sidebar-footer">
-            {modulos.some(grupo => grupo.items.some(item => item.id === "mi_cuenta" || item.children?.some(child => child.id === "mi_cuenta"))) && (
+            {sidebarItems.some(item => item.id === "mi_cuenta") && (
               <button className="tg-sidebar-footer-action tg-sidebar-support" type="button" title="Contactar soporte" aria-label="Contactar soporte" onClick={() => {
                 setRuntimeFocus("tms_cuenta_tab", "soporte");
                 handleSetVista("mi_cuenta");

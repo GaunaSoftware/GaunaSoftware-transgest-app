@@ -1,0 +1,25 @@
+/* Visual hierarchy inspired by the supplied sidebar; branding assets stay intact. */
+.tg-sidebar.tg-sidebar { background:var(--sidebar-bg); box-shadow:4px 0 20px rgba(0,0,0,.06); }
+.tg-sidebar.tg-sidebar::before { display:none; }
+.tg-sidebar .tg-sidebar-scroll { padding:8px 0 16px; }
+.tg-sidebar .tg-nav-item { min-height:42px; padding:10px 12px; gap:12px; font-size:13px; font-weight:500; color:rgba(255,255,255,.76); }
+.tg-sidebar .tg-nav-item:hover { transform:none; color:white; background:rgba(255,255,255,.055); }
+.tg-sidebar .tg-nav-item.active { background:var(--accent-a18); border-color:transparent; box-shadow:none; color:white; font-weight:650; }
+.tg-sidebar .tg-nav-item-icon { color:rgba(255,255,255,.64); opacity:1; }
+.tg-sidebar .tg-nav-item.active .tg-nav-item-icon { color:var(--accent-xl); }
+.tg-sidebar .tg-nav-item-label { min-width:0; line-height:1.35; }
+.tg-sidebar .tg-nav-chevron { opacity:.8; }
+.tg-sidebar .tg-nav-sub { margin:3px 12px 8px 24px; padding-left:0; border-left:0; }
+.tg-sidebar .tg-nav-sub .tg-nav-item { width:100%; margin:2px 0; min-height:36px; padding:8px 10px; font-size:12px; gap:8px; }
+.tg-sidebar .tg-nav-sub .tg-nav-item-icon { width:14px; height:16px; }
+.tg-sidebar .tg-nav-sub .tg-nav-item-icon svg { width:14px; height:14px; }
+.tg-sidebar .tg-nav-sub .tg-nav-item.active { background:var(--accent-a35); }
+.tg-sidebar .tg-nav-sub .tg-nav-sub { margin-left:16px; margin-right:0; border-left:1px solid rgba(255,255,255,.09); padding-left:8px; }
+.tg-sidebar .tg-nav-item:focus-visible { outline:2px solid var(--accent-l); outline-offset:1px; }
+.tg-sidebar .tg-sidebar-footer { padding-bottom:max(12px,env(safe-area-inset-bottom)); }
+@media (min-width:1025px) {
+ .tg-sidebar.collapsed .tg-nav-item { padding:0; }
+}
+@media (max-width:1024px) {
+ .tg-sidebar .tg-nav-item, .tg-sidebar .tg-nav-sub .tg-nav-item { min-height:44px; font-size:13px; }
+}

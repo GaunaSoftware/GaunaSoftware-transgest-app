@@ -31,14 +31,43 @@ export function EmptyState({ title = "Sin datos", text, action }) { return <div 
 export function MobileDataCard({ title, amount, subtitle, children, actions }) {
   return <Card className="tgui-mobile-card"><div className="tgui-mobile-card-heading"><strong>{title}</strong><strong className="tgui-number">{amount}</strong></div>{subtitle && <p>{subtitle}</p>}<div className="tgui-mobile-card-body">{children}</div>{actions && <footer className="tgui-actions">{actions}</footer>}</Card>;
 }
-export function DataTable({ rows, columns, renderMobile, rowKey = row => row.id, loading, emptyTitle = "Sin datos", onRowClick, renderGroup, rowClassName }) {
+export function DataTable({ rows, columns, renderMobile, rowKey = row => row.id, loading, emptyTitle = "Sin datos", onRowClick, renderGroup, rowClassName, rowId }) {
   if (loading) return <div className="tgui-empty" role="status">Cargando…</div>;
   if (!rows.length) return <EmptyState title={emptyTitle} />;
-  return <div className="tgui-data"><div className={cx("tgui-table-wrap", renderMobile && "tgui-desktop-data")}><table className="tgui-table"><thead><tr>{columns.map(col => <th key={col.key} scope="col" className={col.className}>{col.label}</th>)}</tr></thead><tbody>{rows.map(row => row.__group && renderGroup ? <tr key={rowKey(row)}><td colSpan={columns.length}>{renderGroup(row)}</td></tr> : <tr key={rowKey(row)} className={rowClassName?.(row)} onClick={onRowClick ? () => onRowClick(row) : undefined}>{columns.map(col => <td key={col.key} className={col.className}>{col.render ? col.render(row) : row[col.key]}</td>)}</tr>)}</tbody></table></div>{renderMobile && <div className="tgui-mobile-data">{rows.map(row => <div key={rowKey(row)}>{row.__group && renderGroup ? renderGroup(row) : renderMobile(row)}</div>)}</div>}</div>;
+  return (
+    <div className="tgui-data">
+      <div className={cx("tgui-table-wrap", renderMobile && "tgui-desktop-data")}>
+        <table className="tgui-table">
+          <thead>
+            <tr>{columns.map(col => <th key={col.key} scope="col" className={col.className}>{col.label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {rows.map(row => row.__group && renderGroup ? (
+              <tr key={rowKey(row)}><td colSpan={columns.length}>{renderGroup(row)}</td></tr>
+            ) : (
+              <tr key={rowKey(row)} id={rowId?.(row)} className={rowClassName?.(row)} onClick={onRowClick ? () => onRowClick(row) : undefined}>
+                {columns.map(col => <td key={col.key} className={col.className}>{col.render ? col.render(row) : row[col.key]}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {renderMobile && (
+        <div className="tgui-mobile-data">
+          {rows.map(row => (
+            <div key={rowKey(row)} id={!row.__group && rowId ? `${rowId(row)}-mobile` : undefined} className={rowClassName?.(row)}>
+              {row.__group && renderGroup ? renderGroup(row) : renderMobile(row)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Shared focus and scroll handling for nested modal/drawer surfaces.
 const overlayStack = [];
+let bodyOverflowBeforeOverlays = "";
 const focusable = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]';
 function Overlay({ title, children, footer, onClose, width = 560, drawer, closeOnBackdrop = true }) {
   const ref = useRef(null);
@@ -48,7 +77,7 @@ function Overlay({ title, children, footer, onClose, width = 560, drawer, closeO
   useEffect(() => {
     const previous = document.activeElement;
     const panel = ref.current;
-    const oldOverflow = document.body.style.overflow;
+    if (!overlayStack.length) bodyOverflowBeforeOverlays = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     overlayStack.push(panel);
     panel.focus();
@@ -64,15 +93,37 @@ function Overlay({ title, children, footer, onClose, width = 560, drawer, closeO
       }
     };
     document.addEventListener("keydown", keydown);
-    return () => { overlayStack.splice(overlayStack.indexOf(panel), 1); document.body.style.overflow = oldOverflow; document.removeEventListener("keydown", keydown); if (previous?.isConnected) previous.focus(); };
+    return () => { overlayStack.splice(overlayStack.indexOf(panel), 1); if (!overlayStack.length) document.body.style.overflow = bodyOverflowBeforeOverlays; document.removeEventListener("keydown", keydown); if (previous?.isConnected) previous.focus(); };
   }, []);
-  return createPortal(<div className={cx("tgui-overlay", drawer && "tgui-overlay--drawer")} onMouseDown={e => closeOnBackdrop && e.target === e.currentTarget && onClose?.()}><div ref={ref} className={cx("tgui-dialog", drawer && "tgui-drawer")} style={{ "--dialog-width": `${width}px` }} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}><header className="tgui-dialog-header"><h2 id={titleId}>{title || "Detalle"}</h2>{onClose && <Button aria-label="Cerrar" onClick={onClose}>×</Button>}</header><div className="tgui-dialog-body">{children}</div>{footer && <footer className="tgui-dialog-footer">{footer}</footer>}</div></div>, document.body);
+  return createPortal(
+    <div className={cx("tgui-overlay", drawer && "tgui-overlay--drawer")} onMouseDown={e => closeOnBackdrop && e.target === e.currentTarget && onClose?.()}>
+      <div ref={ref} className={cx("tgui-dialog", drawer && "tgui-drawer")} style={{ "--dialog-width": `${width}px` }} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
+        <header className="tgui-dialog-header">
+          <h2 id={titleId}>{title || "Detalle"}</h2>
+          {onClose && <Button aria-label="Cerrar" onClick={onClose}>×</Button>}
+        </header>
+        <div className="tgui-dialog-body">{children}</div>
+        {footer && <footer className="tgui-dialog-footer">{footer}</footer>}
+      </div>
+    </div>, document.body
+  );
 }
 export function Drawer({ open = true, ...props }) { return open ? <Overlay drawer {...props} /> : null; }
 export function Modal({ open = true, ...props }) { return open ? <Overlay {...props} /> : null; }
-export function FilterBar({ search, children }) {
+export function FilterBar({ search, children, advanced }) {
   const [open, setOpen] = useState(false);
-  return <div className="tgui-filterbar"><div className="tgui-filter-search">{search}</div><div className="tgui-filter-desktop">{children}</div><Button className="tgui-filter-toggle" onClick={() => setOpen(true)}>Filtros</Button><Drawer open={open} title="Filtros" onClose={() => setOpen(false)} footer={<Button variant="primary" onClick={() => setOpen(false)}>Ver resultados</Button>}><div className="tgui-filter-fields">{children}</div></Drawer></div>;
+  return (
+    <div className="tgui-filterbar">
+      <div className="tgui-filter-search">{search}</div>
+      <div className="tgui-filter-desktop">
+        {children}{advanced && <Button onClick={() => setOpen(true)}>Más filtros</Button>}
+      </div>
+      <Button className="tgui-filter-toggle" onClick={() => setOpen(true)}>Filtros</Button>
+      <Drawer open={open} title="Filtros" onClose={() => setOpen(false)} footer={<Button variant="primary" onClick={() => setOpen(false)}>Ver resultados</Button>}>
+        <div className="tgui-filter-fields">{children}{advanced}</div>
+      </Drawer>
+    </div>
+  );
 }
 export function DropdownMenu({ label = "Más acciones", items }) {
   const [open, setOpen] = useState(false);

@@ -1,3 +1,7 @@
+import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal } from "../ui";
+import InvoiceList from "./finance/InvoiceList";
+import TreasuryView from "./finance/TreasuryView";
+import "./finance/finance.css";
 import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
@@ -32,43 +36,16 @@ const ivaLabel = (tipoIva, regimen) => {
 };
 
 const S = {
-  page: {flex:1, padding:"32px 40px",fontFamily:"'DM Sans',sans-serif",background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)",minHeight:"100vh"},
-  title:{fontFamily:"'Syne',sans-serif",fontSize:30,fontWeight:900,color:"var(--text)",marginBottom:6},
-  sub:  {fontSize:13,color:"var(--text4)",marginBottom:28},
   card: {background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",marginBottom:18,boxShadow:"0 10px 30px rgba(15,23,42,.04)"},
-  th:   {textAlign:"left",padding:"14px 16px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",borderBottom:"1px solid var(--border)",background:"rgba(248,250,252,.86)",whiteSpace:"nowrap"},
+  th:   {textAlign:"left",padding:"14px 16px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",borderBottom:"1px solid var(--border)",background:"var(--table-head-bg)",whiteSpace:"nowrap"},
   td:   {padding:"14px 16px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text2)",verticalAlign:"middle"},
   btn:  {padding:"10px 14px",borderRadius:8,border:"1px solid var(--border2)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:7,background:"var(--bg3)",color:"var(--text3)"},
   sel:  {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none"},
   inp:  {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
-  modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
   badge:{display:"inline-flex",alignItems:"center",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700},
   lbl:  {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4,marginTop:10},
 };
 
-function FinanceIcon({ icon = "wallet" }) {
-  const common = { width:28, height:28, viewBox:"0 0 24 24", fill:"none", stroke:"currentColor", strokeWidth:"1.8", strokeLinecap:"round", strokeLinejoin:"round", "aria-hidden":"true" };
-  if (icon === "check") return <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="m8.5 12 2.2 2.2 4.8-5" /></svg>;
-  if (icon === "clock") return <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></svg>;
-  if (icon === "doc") return <svg {...common}><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v5h5" /><path d="M9 13h6" /><path d="M9 17h5" /></svg>;
-  return <svg {...common}><path d="M4 7h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4z" /><path d="M4 7V5a2 2 0 0 1 2-2h11" /><path d="M16 13h.01" /></svg>;
-}
-
-function FinanceKpi({ label, value, color, icon }) {
-  const softBg = String(color).startsWith("#") ? `${color}12` : "var(--accent-a10)";
-  const softBorder = String(color).startsWith("#") ? `${color}22` : "var(--accent-a22)";
-  return (
-    <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"26px 28px",display:"flex",alignItems:"center",gap:20,minHeight:106,boxShadow:"0 12px 34px rgba(15,23,42,.05)"}}>
-      <div style={{width:58,height:58,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",color,background:softBg,border:`1px solid ${softBorder}`,flexShrink:0}}>
-        <FinanceIcon icon={icon} />
-      </div>
-      <div>
-        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:22,fontWeight:900,color,lineHeight:1}}>{value}</div>
-        <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginTop:11}}>{label}</div>
-      </div>
-    </div>
-  );
-}
 
 function fmtDate(value, withTime = false) {
   if (!value) return "-";
@@ -590,13 +567,13 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
   // Safety: ensure factura has required fields
   if (!factura || !factura.id) {
     return (
-      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-        <div style={{background:"var(--bg2)",borderRadius:12,padding:32,textAlign:"center"}}>
+      <Modal title="Factura no disponible" width={560} onClose={onClose}>
+        <div className="finance-dialog-content">
           <div style={{fontSize:24,marginBottom:12}}>Aviso</div>
           <div style={{color:"var(--text)"}}>Error al cargar la factura</div>
           <button onClick={onClose} style={{marginTop:16,padding:"8px 20px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",cursor:"pointer"}}>Cerrar</button>
         </div>
-      </div>
+      </Modal>
     );
   }
   const esRect  = factura.estado==="rectificada" || factura.serie?.startsWith("R") || (factura.factura_original_numero);
@@ -661,10 +638,10 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
   }
 
   return (
-    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:"var(--bg2)",border:`1px solid ${esRect?"rgba(249,115,22,.4)":"var(--border2)"}`,borderRadius:14,width:"min(820px,97vw)",maxHeight:"96vh",overflowY:"auto",display:"flex",flexDirection:"column"}}>
+    <Modal title="Detalle de factura" width={900} onClose={onClose}>
+      <div className="finance-dialog-content">
         {/* Toolbar */}
-        <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 18px",borderBottom:"1px solid #141a28",flexShrink:0}}>
+        <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:8,padding:"12px 18px",borderBottom:"1px solid var(--border)",flexShrink:0}}>
           <span style={{flex:1,fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:14,color:"var(--text)"}}>
             {factura.numero}
             {esRect&&<span style={{fontSize:11,color:"#f97316",marginLeft:8,fontFamily:"'DM Sans',sans-serif",fontWeight:600}}>FACTURA RECTIFICATIVA</span>}
@@ -685,7 +662,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
               Enviar
               {factura.estado==="enviada" && <span style={{fontSize:9,marginLeft:4,opacity:0.7}}>enviada</span>}
             </button>
-          <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid #1e2d45"}} onClick={()=>{
+          <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid var(--border)"}} onClick={()=>{
             // Open new window with invoice HTML for printing
             const wrapper = document.getElementById("factura-print-wrapper");
             if (!wrapper) { notify("Error: no se encontro el contenido de la factura", "error"); return; }
@@ -749,7 +726,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
         {/* Contenido */}
         <div style={{padding:"28px 32px"}} id="factura-print-wrapper">
           {/* Cabecera */}
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
+          <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
             <div>
               {getLogoDataUrl() && (
                 <img src={getLogoDataUrl()} alt="Logo"
@@ -781,7 +758,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
             </div>
           </div>
 
-          <div style={{borderBottom:"1px solid #141a28",marginBottom:18}}/>
+          <div style={{borderBottom:"1px solid var(--border)",marginBottom:18}}/>
 
           {/* Cliente */}
           <div style={{background:"var(--bg3)",borderRadius:8,padding:"12px 16px",marginBottom:20}}>
@@ -816,7 +793,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
           )}
 
           {/* Lineas */}
-          <table style={{width:"100%",borderCollapse:"collapse",marginBottom:20}}>
+          <table className="finance-record-table" style={{width:"100%",borderCollapse:"collapse",marginBottom:20}}>
             <thead>
               <tr style={{borderBottom:"2px solid #141a28"}}>
                 {["Descripcion","Cant.","Precio unit.","Subtotal"].map(h=>(
@@ -827,10 +804,10 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
             <tbody>
               {lineas.map((l,i)=>(
                 <tr key={i} style={{borderBottom:"1px solid #0f1520"}}>
-                  <td style={{padding:"8px 12px",fontSize:13,color:"var(--text2)"}}>{l.concepto}</td>
-                  <td style={{padding:"8px 12px",textAlign:"right",fontSize:13,color:"var(--text2)",fontFamily:"'JetBrains Mono',monospace"}}>{l.cantidad}</td>
-                  <td style={{padding:"8px 12px",textAlign:"right",fontSize:13,color:"var(--text2)",fontFamily:"'JetBrains Mono',monospace"}}>{fmt2(l.precio_unit)} EUR</td>
-                  <td style={{padding:"8px 12px",textAlign:"right",fontWeight:600,color:"var(--text)",fontFamily:"'JetBrains Mono',monospace"}}>{fmt2((l.cantidad||0)*(l.precio_unit||0))} EUR</td>
+                  <td data-label="Descripción" style={{padding:"8px 12px",fontSize:13,color:"var(--text2)"}}>{l.concepto}</td>
+                  <td data-label="Cantidad" style={{padding:"8px 12px",textAlign:"right",fontSize:13,color:"var(--text2)",fontFamily:"'JetBrains Mono',monospace"}}>{l.cantidad}</td>
+                  <td data-label="Precio unitario" style={{padding:"8px 12px",textAlign:"right",fontSize:13,color:"var(--text2)",fontFamily:"'JetBrains Mono',monospace"}}>{fmt2(l.precio_unit)} EUR</td>
+                  <td data-label="Subtotal" style={{padding:"8px 12px",textAlign:"right",fontWeight:600,color:"var(--text)",fontFamily:"'JetBrains Mono',monospace"}}>{fmt2((l.cantidad||0)*(l.precio_unit||0))} EUR</td>
                 </tr>
               ))}
               {lineas.length===0&&<tr><td colSpan={4} style={{padding:12,textAlign:"center",color:"var(--text5)",fontSize:12}}>Sin lineas registradas</td></tr>}
@@ -911,10 +888,10 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
           )}
 
           {documentos.length>0&&(
-            <div style={{background:"var(--bg3)",border:"1px solid #141a28",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
+            <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginBottom:6}}>Albaranes y documentos vinculados</div>
               {documentos.map(doc=>(
-                <div key={doc.id} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"5px 0",borderTop:"1px solid #0f1520",fontSize:12,color:"var(--text3)"}}>
+                <div key={doc.id} style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:10,padding:"5px 0",borderTop:"1px solid #0f1520",fontSize:12,color:"var(--text3)"}}>
                   <span style={{fontWeight:600,color:"var(--text2)"}}>{doc.nombre}</span>
                   <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text5)"}}>{doc.tipo || doc.file_mime || "documento"}</span>
                 </div>
@@ -923,11 +900,11 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
           )}
 
           {emailLog.length > 0 && (
-            <div style={{background:"var(--bg3)",border:"1px solid #141a28",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
+            <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginBottom:6}}>Envios por email</div>
               {emailLog.slice(0,6).map(item=>(
                 <div key={item.id} style={{padding:"7px 0",borderTop:"1px solid #0f1520"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:11}}>
+                  <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:10,fontSize:11}}>
                     <span style={{color:"var(--text2)",fontWeight:800}}>{item.destinatario || "-"}</span>
                     <span style={{color:item.estado==="error"?"#ef4444":item.estado==="simulado"?"#f59e0b":"var(--green)",fontWeight:800}}>{item.estado}</span>
                   </div>
@@ -941,11 +918,11 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
           )}
 
           {auditLog.length > 0 && (
-            <div style={{background:"var(--bg3)",border:"1px solid #141a28",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
+            <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 14px",marginBottom:18}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginBottom:6}}>Historial de acciones</div>
               {auditLog.slice(0,8).map(item=>(
                 <div key={item.id} style={{padding:"7px 0",borderTop:"1px solid #0f1520"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:11}}>
+                  <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:10,fontSize:11}}>
                     <span style={{color:"var(--text2)",fontWeight:700}}>
                       {item.campo === "estado" ? "Cambio de estado" : item.campo || "Actualizacion"}
                     </span>
@@ -963,14 +940,14 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
           )}
 
           {/* Totales */}
-          <div style={{display:"flex",justifyContent:"flex-end"}}>
+          <div style={{display:"flex",flexWrap:"wrap",justifyContent:"flex-end"}}>
             <div style={{width:260}}>
               {[ ["Base imponible",`${fmt2(factura.base_imponible||0)} EUR`], [`IVA (${ivaLabel(factura.tipo_iva, factura.iva_regimen || factura.cliente_iva_regimen)})`,`${fmt2(factura.cuota_iva||0)} EUR`] ].map(([k,v])=>(
-                <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0f1520",fontSize:13,color:"var(--text3)"}}>
+                <div key={k} style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #0f1520",fontSize:13,color:"var(--text3)"}}>
                   <span>{k}</span><span style={{fontFamily:"'JetBrains Mono',monospace"}}>{v}</span>
                 </div>
               ))}
-              <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0",marginTop:4}}>
+              <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",padding:"10px 0",marginTop:4}}>
                 <span style={{fontWeight:800,fontSize:15,color:"var(--text)"}}>TOTAL</span>
                 <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:17,color:"var(--green)"}}>{fmt2(factura.total)} EUR</span>
               </div>
@@ -978,7 +955,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
           </div>
 
           {fiscal && (
-            <div className="fiscal-box" style={{marginTop:18,paddingTop:14,borderTop:"1px solid #141a28"}}>
+            <div className="fiscal-box" style={{marginTop:18,paddingTop:14,borderTop:"1px solid var(--border)"}}>
               <div
                 className="fiscal-summary"
                 style={{
@@ -1039,8 +1016,8 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                   ))}
                 </div>
               )}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,marginBottom:10}}>
-                <div style={{padding:"8px 10px",borderRadius:8,border:"1px solid #1e2d45",background:"var(--bg3)"}}>
+              <div className="finance-grid" style={{display:"grid","--finance-columns":"repeat(auto-fit,minmax(180px,1fr))",gap:8,marginBottom:10}}>
+                <div style={{padding:"8px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg3)"}}>
                   <div style={{fontSize:10,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>Aceptacion fiscal</div>
                   <div style={{fontSize:12,fontWeight:800,color:fiscalAcceptedRef ? "var(--green)" : "#f59e0b",marginTop:4}}>
                     {fiscalAcceptedRef ? "Aceptada" : "Pendiente"}
@@ -1049,7 +1026,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                     {fiscalAcceptedRef ? "Ya existe una referencia aceptada del canal." : "Todavia no consta referencia aceptada."}
                   </div>
                 </div>
-                <div style={{padding:"8px 10px",borderRadius:8,border:"1px solid #1e2d45",background:"var(--bg3)"}}>
+                <div style={{padding:"8px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg3)"}}>
                   <div style={{fontSize:10,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>Encadenado</div>
                   <div style={{fontSize:12,fontWeight:800,color:fiscal.hash_anterior ? "var(--green)" : "#94a3b8",marginTop:4}}>
                     {fiscal.hash_anterior ? "Con cadena previa" : "Inicio de cadena"}
@@ -1059,7 +1036,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                   </div>
                 </div>
               </div>
-              <div className="fiscal-grid" style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:"8px 18px",fontSize:12}}>
+              <div className="fiscal-grid finance-grid" style={{display:"grid","--finance-columns":"repeat(2,minmax(0,1fr))",gap:"8px 18px",fontSize:12}}>
                 <div>
                   <div style={{color:"var(--text5)",fontSize:10,textTransform:"uppercase",fontWeight:700,letterSpacing:".06em"}}>Modo</div>
                   <div style={{color:"var(--text2)",fontWeight:700}}>{String(fiscal.modo || "ninguno").toUpperCase()} - {fiscal.entorno || "pruebas"}</div>
@@ -1126,7 +1103,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                 )}
               </div>
               {(fiscalQueueOutcome || ultimoEnvioFiscal?.next_retry_at || ultimoEnvioFiscal?.processed_at) && (
-                <div style={{marginTop:12,background:"var(--bg3)",border:"1px solid #141a28",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{marginTop:12,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px"}}>
                   <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginBottom:8}}>Ultimo resultado del canal</div>
                   {fiscalQueueOutcome && (
                     <div style={{fontSize:12,fontWeight:800,color:fiscalQueueOutcome.tone}}>
@@ -1138,7 +1115,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                       {fiscalQueueOutcome.detail}
                     </div>
                   )}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:"8px 18px",marginTop:8}}>
+                  <div className="finance-grid" style={{display:"grid","--finance-columns":"repeat(2,minmax(0,1fr))",gap:"8px 18px",marginTop:8}}>
                     {ultimoEnvioFiscal?.next_retry_at && (
                       <div>
                         <div style={{color:"var(--text5)",fontSize:10,textTransform:"uppercase",fontWeight:700,letterSpacing:".06em"}}>Siguiente reintento</div>
@@ -1158,11 +1135,11 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
                 Este documento incorpora la huella y la trazabilidad fiscal asociada a la factura. Conviene conservar esta referencia junto al PDF final y cualquier justificante vinculado.
               </div>
               {fiscalEventos.length > 0 && (
-                <div style={{marginTop:12,background:"var(--bg3)",border:"1px solid #141a28",borderRadius:8,padding:"8px 10px"}}>
+                <div style={{marginTop:12,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px"}}>
                   <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginBottom:6}}>Trazabilidad fiscal</div>
                   {fiscalEventos.slice(0,5).map((ev) => (
                     <div key={ev.id} style={{padding:"6px 0",borderTop:"1px solid #0f1520"}}>
-                      <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11}}>
+                      <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:8,fontSize:11}}>
                         <span style={{color:"var(--text2)",fontWeight:700}}>{ev.evento_tipo}</span>
                         <span style={{color:"var(--text5)"}}>{new Date(ev.created_at).toLocaleString("es-ES")}</span>
                       </div>
@@ -1176,11 +1153,11 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
           )}
 
           {/* IBAN */}
-          {empresa.iban&&<div style={{marginTop:18,paddingTop:14,borderTop:"1px solid #141a28",fontSize:11,color:"var(--text5)"}}><strong style={{color:"var(--text4)"}}>Datos bancarios:</strong> {empresa.iban}{empresa.bic?` - BIC: ${empresa.bic}`:""}{empresa.banco?` - ${empresa.banco}`:""}</div>}
+          {empresa.iban&&<div style={{marginTop:18,paddingTop:14,borderTop:"1px solid var(--border)",fontSize:11,color:"var(--text5)"}}><strong style={{color:"var(--text4)"}}>Datos bancarios:</strong> {empresa.iban}{empresa.bic?` - BIC: ${empresa.bic}`:""}{empresa.banco?` - ${empresa.banco}`:""}</div>}
           {empresa.texto_pie&&<div style={{marginTop:10,fontSize:11,color:"var(--text5)",lineHeight:1.6}}>{empresa.texto_pie}</div>}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1237,16 +1214,16 @@ function ModalCorregirPedidoFactura({ pedido, onClose, onSaved }) {
 
   const input = {...S.inp,padding:"8px 10px",fontSize:12};
   return (
-    <div style={{position:"fixed",inset:0,zIndex:360,background:"rgba(0,0,0,.78)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{width:"min(760px,96vw)",maxHeight:"92vh",overflowY:"auto",background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:20}}>
-        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
+    <Modal title="Corregir pedido para factura" width={760} onClose={onClose}>
+      <div className="finance-dialog-content">
+        <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
           <div>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:900,color:"var(--text)"}}>Corregir pedido para factura</div>
             <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Pedido {pedido?.numero || "-"} · Estado {pedido?.estado || "-"}. No se cambia el estado desde aqui.</div>
           </div>
           <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",cursor:"pointer"}}>Cerrar</button>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
+        <div className="finance-grid" style={{display:"grid","--finance-columns":"repeat(2,minmax(0,1fr))",gap:10}}>
           <label><span style={S.lbl}>Referencia cliente</span><input value={form.referencia_cliente} onChange={f("referencia_cliente")} style={input}/></label>
           <label><span style={S.lbl}>Mercancia</span><input value={form.mercancia} onChange={f("mercancia")} style={input}/></label>
           <label><span style={S.lbl}>Origen</span><input value={form.origen} onChange={f("origen")} style={input}/></label>
@@ -1271,14 +1248,14 @@ function ModalCorregirPedidoFactura({ pedido, onClose, onSaved }) {
             <div style={{fontSize:12,color:"var(--text4)",marginTop:5}}>Referencia, mercancia, peso e importe tienen valor revisable.</div>
           )}
         </div>
-        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:16}}>
+        <div style={{display:"flex",flexWrap:"wrap",justifyContent:"flex-end",gap:10,marginTop:16}}>
           <button onClick={onClose} style={{...S.btn,background:"transparent",color:"var(--text3)"}}>Cancelar</button>
           <button onClick={guardar} disabled={saving} style={{...S.btn,background:"var(--accent)",color:"#fff",border:"1px solid var(--accent)",opacity:saving?0.7:1}}>
             {saving ? "Guardando..." : "Guardar correccion"}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1325,8 +1302,8 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
   }
 
   return (
-    <div style={{...S.modal,zIndex:300}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:"var(--bg2)",border:"1px solid rgba(249,115,22,.3)",borderRadius:14,padding:26,width:"min(540px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
+    <Modal title="Factura rectificativa" width={560} onClose={onClose}>
+      <div className="finance-dialog-content">
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"#f97316",marginBottom:6}}>Factura rectificativa</div>
         <div style={{fontSize:12,color:"var(--text3)",marginBottom:16}}>Rectifica: <strong style={{color:"var(--text2)"}}>{facturaOriginal.numero}</strong> - {facturaOriginal.cliente_nombre} - {fmt2(facturaOriginal.total)} EUR</div>
 
@@ -1346,7 +1323,7 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
           <label style={S.lbl}>Tipo de rectificacion</label>
           <div style={{display:"flex",gap:10,marginTop:4,flexWrap:"wrap"}}>
             {[{v:"diferencia",l:"Por diferencia"},{v:"sustitucion",l:"Por sustitucion (anulacion total)"}].map(opt=>(
-              <label key={opt.v} style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",padding:"7px 12px",borderRadius:7,border:`1px solid ${tipoRect===opt.v?"#f97316":"var(--border2)"}`,background:tipoRect===opt.v?"rgba(249,115,22,.1)":"transparent",fontSize:12,color:tipoRect===opt.v?"#f97316":"var(--text3)"}}>
+              <label key={opt.v} style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:7,cursor:"pointer",padding:"7px 12px",borderRadius:7,border:`1px solid ${tipoRect===opt.v?"#f97316":"var(--border2)"}`,background:tipoRect===opt.v?"rgba(249,115,22,.1)":"transparent",fontSize:12,color:tipoRect===opt.v?"#f97316":"var(--text3)"}}>
                 <input type="radio" value={opt.v} checked={tipoRect===opt.v} onChange={()=>setTipoRect(opt.v)} style={{accentColor:"#f97316"}}/>
                 {opt.l}
               </label>
@@ -1367,14 +1344,14 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
           </div>
         )}
 
-        <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
-          <button style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid #1e2d45"}} onClick={onClose}>Cancelar</button>
+        <div style={{display:"flex",flexWrap:"wrap",gap:10,marginTop:20,justifyContent:"flex-end"}}>
+          <button style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border)"}} onClick={onClose}>Cancelar</button>
           <button style={{...S.btn,background:"rgba(249,115,22,.2)",color:"#f97316",border:"1px solid rgba(249,115,22,.4)"}} onClick={emitir} disabled={saving}>
             {saving?"Emitiendo...":"Emitir rectificativa"}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1629,17 +1606,10 @@ function ModalFacturarMultiple({ onClose }) {
   const td  = {padding:"7px 10px",borderBottom:"1px solid var(--border2)",fontSize:12,color:"var(--text2)"};
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-      onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:22,width:"min(760px,96vw)",maxHeight:"93vh",overflowY:"auto"}}>
+    <Modal title="Facturar pedidos de cliente" width={820} onClose={onClose}>
+      <div className="finance-dialog-content">
 
-        {/* Header */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"var(--text)"}}>Facturar pedidos de cliente</div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",fontSize:14,cursor:"pointer"}}>Cerrar</button>
-        </div>
-
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:14}}>
+        <div className="finance-grid finance-wizard-steps" style={{display:"grid","--finance-columns":"repeat(4,1fr)",gap:6,marginBottom:14}}>
           {[
             [1,"Cliente y periodo"],
             [2,"Viajes"],
@@ -1653,7 +1623,7 @@ function ModalFacturarMultiple({ onClose }) {
         </div>
 
         {/* Seleccion cliente + periodo */}
-        {paso===1 && <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10,marginBottom:14}}>
+        {paso===1 && <div className="finance-grid" style={{display:"grid","--finance-columns":"2fr 1fr 1fr",gap:10,marginBottom:14}}>
           <div>
             <label style={lbl}>Cliente *</label>
             <select value={clienteSel} onChange={e=>{ setClienteSel(e.target.value); setFechaVencimiento(""); }} style={inp}>
@@ -1672,7 +1642,7 @@ function ModalFacturarMultiple({ onClose }) {
         </div>}
 
         {paso===1 && <div style={{marginBottom:14,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"var(--bg3)"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"8px 10px",borderBottom:"1px solid var(--border)"}}>
+          <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",gap:10,padding:"8px 10px",borderBottom:"1px solid var(--border)"}}>
             <div>
               <div style={{fontSize:11,fontWeight:800,color:"var(--text3)",textTransform:"uppercase",letterSpacing:".06em"}}>Pedidos pendientes por cliente</div>
               <div style={{fontSize:11,color:"var(--text5)"}}>Selecciona un cliente para desplegar sus viajes facturables del periodo.</div>
@@ -1690,14 +1660,14 @@ function ModalFacturarMultiple({ onClose }) {
               {resumenClientes.map(g => {
                 const active = String(clienteSel || "") === String(g.cliente_id || "");
                 return (
-                  <button
+                  <button className="finance-grid"
                     key={g.cliente_id || g.cliente_nombre}
                     type="button"
                     onClick={()=>{ setClienteSel(g.cliente_id); setPaso(2); }}
                     style={{
                       width:"100%",
                       display:"grid",
-                      gridTemplateColumns:"1fr auto auto",
+                      "--finance-columns":"1fr auto auto",
                       gap:10,
                       alignItems:"center",
                       textAlign:"left",
@@ -1756,7 +1726,7 @@ function ModalFacturarMultiple({ onClose }) {
         {/* Lista pedidos */}
         {paso===2 && clienteSel && (
           <>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+            <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
               <div style={{fontSize:12,fontWeight:700,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".06em"}}>
                 Pedidos entregados pendientes de emitir ({pedidos.length})
               </div>
@@ -1773,10 +1743,10 @@ function ModalFacturarMultiple({ onClose }) {
               </div>
             ) : (
               <div style={{border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",marginBottom:14,maxHeight:280,overflowY:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <table className="finance-record-table" style={{width:"100%",borderCollapse:"collapse"}}>
                   <thead style={{position:"sticky",top:0,zIndex:2}}>
                     <tr>
-                      <th style={{...th,width:32}}><input type="checkbox" checked={selIds.size===pedidos.length} onChange={toggleAll}/></th>
+                      <th style={{...th,width:32}}><input aria-label="Seleccionar todos los pedidos" type="checkbox" checked={selIds.size===pedidos.length} onChange={toggleAll}/></th>
                       <th style={th}>No. Pedido</th><th style={th}>Fecha</th><th style={th}>Origen -> Destino</th>
                       <th style={th}>Ref.</th><th style={th}>Docs</th><th style={th}>Kg</th><th style={th}>Importe</th><th style={th}>Factura</th>
                     </tr>
@@ -1784,11 +1754,11 @@ function ModalFacturarMultiple({ onClose }) {
                   <tbody>
                     {pedidos.map(p=>(
                       <tr key={p.id} onClick={()=>toggleSel(p.id)} style={{cursor:"pointer",background:selIds.has(p.id)?"rgba(59,130,246,.06)":"transparent"}}>
-                        <td style={{...td,textAlign:"center"}}><input type="checkbox" checked={selIds.has(p.id)} onChange={()=>toggleSel(p.id)} onClick={e=>e.stopPropagation()}/></td>
-                        <td style={{...td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--accent)",fontSize:11}}>{p.numero}</td>
-                        <td style={{...td,fontSize:11}}>{p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"-"}</td>
-                        <td style={{...td,fontSize:11}}>{p.origen||""}{p.destino?" -> "+p.destino:""}</td>
-                        <td style={{...td,fontSize:11}}>
+                        <td data-label="Seleccionar" style={{...td,textAlign:"center"}}><input aria-label={`Seleccionar pedido ${p.numero}`} type="checkbox" checked={selIds.has(p.id)} onChange={()=>toggleSel(p.id)} onClick={e=>e.stopPropagation()}/></td>
+                        <td data-label="Pedido" style={{...td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--accent)",fontSize:11}}>{p.numero}</td>
+                        <td data-label="Fecha" style={{...td,fontSize:11}}>{p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"-"}</td>
+                        <td data-label="Ruta" style={{...td,fontSize:11}}>{p.origen||""}{p.destino?" -> "+p.destino:""}</td>
+                        <td data-label="Referencia" style={{...td,fontSize:11}}>
                           {tieneReferenciaCliente(p) ? (
                             <button
                               type="button"
@@ -1805,16 +1775,16 @@ function ModalFacturarMultiple({ onClose }) {
                             >Falta</button>
                           )}
                         </td>
-                        <td style={{...td,fontSize:11}}>
+                        <td data-label="Documentación" style={{...td,fontSize:11}}>
                           {tieneSoportePedido(p) ? (
                             <span style={{display:"inline-flex",padding:"2px 7px",borderRadius:5,background:"rgba(16,185,129,.10)",color:"var(--green)",fontWeight:800}}>{documentosPedido(p) || "OK"}</span>
                           ) : (
                             <span style={{display:"inline-flex",padding:"2px 7px",borderRadius:5,background:"rgba(239,68,68,.10)",color:"#ef4444",fontWeight:800}}>No</span>
                           )}
                         </td>
-                        <td style={{...td,fontSize:11,textAlign:"right"}}>{fmtN(p.peso_kg||p.kg||0)}</td>
-                        <td style={{...td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)",textAlign:"right"}}>{fmt2(p.importe||0)} EUR</td>
-                        <td style={{...td,fontSize:11}}>
+                        <td data-label="Kg" style={{...td,fontSize:11,textAlign:"right"}}>{fmtN(p.peso_kg||p.kg||0)}</td>
+                        <td data-label="Importe" style={{...td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)",textAlign:"right"}}>{fmt2(p.importe||0)} EUR</td>
+                        <td data-label="Factura" style={{...td,fontSize:11}}>
                           {p.factura_estado==="borrador" ? (
                             <span style={{display:"inline-flex",padding:"2px 7px",borderRadius:5,background:"rgba(245,158,11,.12)",color:"#f59e0b",fontWeight:700}}>
                               Borrador {p.factura_numero || ""}
@@ -1837,12 +1807,12 @@ function ModalFacturarMultiple({ onClose }) {
                   Preview - {buildLineas().length} linea(s) en la factura
                 </div>
                 {buildLineas().map((l,i)=>(
-                  <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid rgba(16,185,129,.1)",fontSize:12,color:"var(--text2)"}}>
+                  <div key={i} style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid rgba(16,185,129,.1)",fontSize:12,color:"var(--text2)"}}>
                     <span style={{flex:1,paddingRight:12}}>{l.concepto}</span>
                     <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)",whiteSpace:"nowrap"}}>{fmt2(l.cantidad*l.precio_unit)} EUR</span>
                   </div>
                 ))}
-                <div style={{display:"flex",justifyContent:"space-between",marginTop:8,paddingTop:6,borderTop:"2px solid rgba(16,185,129,.3)"}}>
+                <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",marginTop:8,paddingTop:6,borderTop:"2px solid rgba(16,185,129,.3)"}}>
                   <div style={{fontSize:12,color:"var(--text4)"}}>
                     {selArr.length} viaje(s) - {fmtN(totalKg)} kg - {modo==="linea"?"1 linea":`${buildLineas().length} lineas`}
                   </div>
@@ -1866,7 +1836,7 @@ function ModalFacturarMultiple({ onClose }) {
               />
               <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>Es independiente del numero legal correlativo de factura.</div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+            <div className="finance-grid" style={{display:"grid","--finance-columns":"1fr 1fr",gap:10,marginBottom:12}}>
               <div>
                 <label style={lbl}>Fecha factura</label>
                 <input type="date" value={fechaFactura} onChange={e=>{ setFechaFactura(e.target.value); setFechaVencimiento(""); }} style={inp}/>
@@ -1876,7 +1846,7 @@ function ModalFacturarMultiple({ onClose }) {
                 <input type="date" value={fechaVencimiento} onChange={e=>setFechaVencimiento(e.target.value)} style={inp}/>
               </div>
             </div>
-            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
+            <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
               <div>
                 <div style={{fontWeight:800,fontSize:12,color:"#10b981",textTransform:"uppercase",letterSpacing:".06em"}}>Revision de lineas de factura</div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>Ajusta conceptos, cantidades o importes antes de crear el borrador.</div>
@@ -1885,15 +1855,15 @@ function ModalFacturarMultiple({ onClose }) {
             </div>
             <div style={{display:"grid",gap:8}}>
               {lineasEdit.map((l,i)=>(
-                <div key={l.id || i} style={{display:"grid",gridTemplateColumns:"1fr 90px 120px 34px",gap:8,alignItems:"center"}}>
-                  <input value={l.concepto || ""} onChange={e=>updateLineaFactura(i,"concepto",e.target.value)} style={inp} />
-                  <input value={l.cantidad ?? ""} onChange={e=>updateLineaFactura(i,"cantidad",e.target.value)} style={{...inp,textAlign:"right"}} />
-                  <input value={l.precio_unit ?? ""} onChange={e=>updateLineaFactura(i,"precio_unit",e.target.value)} style={{...inp,textAlign:"right"}} />
-                  <button type="button" onClick={()=>setLineasEdit(prev=>prev.filter((_,idx)=>idx!==i))} style={{...S.btn,padding:"7px 9px",background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.24)"}}>x</button>
+                <div className="finance-grid finance-line-editor" key={l.id || i} style={{display:"grid","--finance-columns":"1fr 90px 120px 34px",gap:8,alignItems:"end"}}>
+                  <label><span>Concepto</span><input value={l.concepto || ""} onChange={e=>updateLineaFactura(i,"concepto",e.target.value)} style={inp} /></label>
+                  <label><span>Cantidad</span><input value={l.cantidad ?? ""} onChange={e=>updateLineaFactura(i,"cantidad",e.target.value)} style={{...inp,textAlign:"right"}} /></label>
+                  <label><span>Precio unitario</span><input value={l.precio_unit ?? ""} onChange={e=>updateLineaFactura(i,"precio_unit",e.target.value)} style={{...inp,textAlign:"right"}} /></label>
+                  <button type="button" aria-label={`Eliminar línea ${i + 1}`} onClick={()=>setLineasEdit(prev=>prev.filter((_,idx)=>idx!==i))} style={{...S.btn,padding:"7px 9px",background:"rgba(239,68,68,.10)",color:"var(--red)",border:"1px solid rgba(239,68,68,.24)"}}>×</button>
                 </div>
               ))}
             </div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12,paddingTop:8,borderTop:"1px solid rgba(16,185,129,.2)"}}>
+            <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"center",marginTop:12,paddingTop:8,borderTop:"1px solid rgba(16,185,129,.2)"}}>
               <div style={{fontSize:12,color:"var(--text4)"}}>{selArr.length} viaje(s) - {fmtN(totalKg)} kg - {lineasValidas.length} linea(s)</div>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:18,color:"var(--green)"}}>{fmt2(totalLineasEdit)} EUR</div>
             </div>
@@ -1902,7 +1872,7 @@ function ModalFacturarMultiple({ onClose }) {
 
         {paso===4 && (
           <div style={{border:"1px solid var(--border)",borderRadius:9,padding:14,background:"var(--bg3)",marginBottom:14}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:12}}>
+            <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:12}}>
               <div>
                 <div style={{fontWeight:800,fontSize:13,color:"var(--text)",marginBottom:4}}>Control previo antes de facturar</div>
                 <div style={{fontSize:11,color:"var(--text5)"}}>Este paso evita devoluciones por referencias, albaranes, tickets de bascula o importes incorrectos.</div>
@@ -1913,7 +1883,7 @@ function ModalFacturarMultiple({ onClose }) {
                 </button>
               )}
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+            <div className="finance-grid" style={{display:"grid","--finance-columns":"repeat(4,1fr)",gap:8,marginBottom:12}}>
               {[
                 ["Pedidos", selArr.length, "var(--accent)", "rgba(59,130,246,.10)"],
                 ["Referencias pendientes", pedidosSinReferencia.length, pedidosSinReferencia.length ? "#f59e0b" : "var(--green)", pedidosSinReferencia.length ? "rgba(245,158,11,.12)" : "rgba(16,185,129,.10)"],
@@ -1946,7 +1916,7 @@ function ModalFacturarMultiple({ onClose }) {
                     const r = analisisIA[p.id];
                     const diffs = Array.isArray(r?.resultado?.diferencias) ? r.resultado.diferencias : [];
                     return (
-                      <div key={p.id} style={{fontSize:11,color:"var(--text3)",display:"grid",gridTemplateColumns:"110px 1fr auto",gap:8,alignItems:"center"}}>
+                      <div className="finance-grid" key={p.id} style={{fontSize:11,color:"var(--text3)",display:"grid","--finance-columns":"110px 1fr auto",gap:8,alignItems:"center"}}>
                         <strong style={{fontFamily:"'JetBrains Mono',monospace",color:"var(--text)"}}>{p.numero}</strong>
                         <span>{r?.resultado?.resumen || r?.error || "Analisis realizado."}</span>
                         <span style={{color:diffs.length ? "#f59e0b" : "var(--green)",fontWeight:900}}>{diffs.length ? `${diffs.length} aviso(s)` : "OK"}</span>
@@ -1957,15 +1927,15 @@ function ModalFacturarMultiple({ onClose }) {
               </div>
             )}
             <div style={{display:"grid",gap:8}}>
-              <label style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text3)"}}>
+              <label style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text3)"}}>
                 <input type="checkbox" checked={confirmCantidades} onChange={e=>setConfirmCantidades(e.target.checked)} />
                 <span>He revisado cantidades, precios e IVA de las lineas. Total previsto: <strong>{fmt2(totalLineasEdit)} EUR</strong>.</span>
               </label>
-              <label style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text3)"}}>
+              <label style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text3)"}}>
                 <input type="checkbox" checked={confirmReferencias} onChange={e=>setConfirmReferencias(e.target.checked)} />
                 <span>Las referencias del cliente y el periodo de factura son correctos.</span>
               </label>
-              <label style={{display:"flex",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text3)"}}>
+              <label style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"flex-start",fontSize:13,color:"var(--text3)"}}>
                 <input type="checkbox" checked={confirmAlbaranes} onChange={e=>setConfirmAlbaranes(e.target.checked)} />
                 <span>Albaranes/soportes revisados o marcados como pendientes asumidos antes de emitir.</span>
               </label>
@@ -1974,8 +1944,8 @@ function ModalFacturarMultiple({ onClose }) {
         )}
 
         {refEdit && (
-          <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(15,23,42,.42)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setRefEdit(null)}>
-            <div style={{width:"min(420px,96vw)",background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,boxShadow:"0 24px 64px rgba(15,23,42,.28)",padding:18}}>
+          <Modal title="Referencia cliente" width={440} onClose={() => setRefEdit(null)}>
+            <div className="finance-dialog-content">
               <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:800,color:"var(--text)",marginBottom:6}}>Referencia cliente</div>
               <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.4,marginBottom:12}}>
                 Pedido {refEdit.pedido?.numero || "-"} · {refEdit.pedido?.origen || "-"} -&gt; {refEdit.pedido?.destino || "-"}
@@ -1989,16 +1959,16 @@ function ModalFacturarMultiple({ onClose }) {
                 style={{...inp,width:"100%"}}
                 placeholder="Referencia / pedido del cliente"
               />
-              <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:16}}>
+              <div style={{display:"flex",flexWrap:"wrap",gap:10,justifyContent:"flex-end",marginTop:16}}>
                 <button type="button" onClick={()=>setRefEdit(null)} style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)"}}>Cancelar</button>
                 <button type="button" onClick={guardarReferenciaPedido} style={{...S.btn,background:"var(--accent)",color:"#fff",border:"1px solid var(--accent)"}}>Guardar referencia</button>
               </div>
             </div>
-          </div>
+          </Modal>
         )}
 
         {/* Actions */}
-        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+        <div style={{display:"flex",flexWrap:"wrap",gap:10,justifyContent:"flex-end"}}>
           <button onClick={onClose} style={{padding:"8px 18px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>
             Cancelar
           </button>
@@ -2017,7 +1987,7 @@ function ModalFacturarMultiple({ onClose }) {
           </button>}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -2072,7 +2042,9 @@ export default function Facturacion() {
   const [bloqueosDocCobro,setBloqueosDocCobro] = useState(null);
   const [fiscalResumen,setFiscalResumen]= useState(null);
   const [pagosProveedor, setPagosProveedor] = useState([]);
-  const [proveedoresAbiertos, setProveedoresAbiertos] = useState({});
+  const [proveedorAbierto, setProveedorAbierto] = useState(null);
+  const [documentosOpen, setDocumentosOpen] = useState(false);
+  const [estadoFacturaEdit, setEstadoFacturaEdit] = useState(null);
   const [filtroPagosProveedor, setFiltroPagosProveedor] = useState("todos");
   const [pagoProveedorEdit, setPagoProveedorEdit] = useState(null);
   const [pagoProveedorForm, setPagoProveedorForm] = useState({});
@@ -2168,7 +2140,8 @@ export default function Facturacion() {
     const found = facturas.find(f => String(f.id) === String(focusFactura.factura_id));
     if (!found) return;
     const t = window.setTimeout(() => {
-      document.getElementById(`factura-row-${focusFactura.factura_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
+      const targetId = `factura-row-${focusFactura.factura_id}${window.matchMedia("(max-width: 639px)").matches ? "-mobile" : ""}`;
+      document.getElementById(targetId)?.scrollIntoView({ behavior:"smooth", block:"center" });
       clearRuntimeFocus("tms_facturacion_focus");
     }, 180);
     return () => window.clearTimeout(t);
@@ -2723,32 +2696,19 @@ export default function Facturacion() {
   const fiscalQuickFilters = [
     { key: "todos", label: "Todo", value: Number(fiscalInfo.total_registros || 0), color: "var(--text3)" },
     { key: "aceptado", label: "Aceptadas", value: Number(fiscalInfo.aceptados || 0), color: "var(--green)" },
-    { key: "pendiente", label: "Pendientes", value: Number(fiscalInfo.pendientes || 0), color: "#f59e0b" },
-    { key: "error", label: "Errores", value: Number(fiscalInfo.con_error || 0), color: "#ef4444" },
-    { key: "sin_registro", label: "Sin registro", value: facturas.filter(f=>!f.fiscal_modo).length, color: "#94a3b8" },
+    { key: "pendiente", label: "Pendientes", value: Number(fiscalInfo.pendientes || 0), color: "var(--orange)" },
+    { key: "error", label: "Errores", value: Number(fiscalInfo.con_error || 0), color: "var(--red)" },
+    { key: "sin_registro", label: "Sin registro", value: facturas.filter(f=>!f.fiscal_modo).length, color: "var(--text3)" },
   ];
-  const resumenGestionFinanciera = [
-    { label:"Cobros a revisar", value:Number(controlResumen.revisar_hoy || 0), detail:`${Number(controlResumen.vencidas || 0)} vencidas`, color:Number(controlResumen.vencidas || 0) ? "#ef4444" : "var(--green)" },
-    { label:"Riesgo documental", value:Number(bloqueoDocResumen.total || bloqueoDocResumen.bloqueos || bloqueoDocItems.length || 0), detail:`${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion || 0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente || 0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental || 0))} EUR`, color:Number(bloqueoDocItems.length || 0) ? "#f59e0b" : "var(--green)" },
-    { label:"Fiscal pendiente", value:Number(fiscalInfo.pendientes || 0)+Number(fiscalInfo.con_error || 0)+Number(fiscalInfo.atascados || 0), detail:`${Number(fiscalInfo.aceptados || 0)} aceptadas`, color:Number(fiscalInfo.con_error || 0) ? "#ef4444" : "#f59e0b" },
-    { label:"Tesoreria 30 dias", value:`${fmt2(previsionTesoreria.saldoPrevisto30)} EUR`, detail:`Neto ${fmt2(previsionTesoreria.neto30)} EUR`, color:previsionTesoreria.saldoPrevisto30 < 0 ? "#ef4444" : "var(--green)" },
-    { label:"Pagos proveedor", value:pagosProveedor.length, detail:`${fmt2(previsionTesoreria.totalPagos30)} EUR proximos`, color:"#f59e0b" },
-  ];
+  const fiscalAttention = Number(fiscalInfo.pendientes || 0) + Number(fiscalInfo.con_error || 0) + Number(fiscalInfo.atascados || 0);
+  const fiscalNeedsSetup = fiscalSetupStatus && fiscalSetupStatus.level !== "ok";
+  const totalPorPagar = pagosProveedor.reduce((sum, pago) => sum + Number(pago.importe || pago.precio_colaborador || 0), 0);
+  const invoiceList = <InvoiceList rows={tableItems} loading={loading} canEdit={canEdit} states={ESTADOS} stateLabel={estadoFacturaLabel} money={fmt2} date={fmtDate} fiscalMeta={getFacturaFiscalRowMeta} openInvoice={abrirFacturaPorId} rowClick={handleRowClick} changeState={cambiarEstado} sendInvoice={enviarFacturaRapida} rectify={setModalRect} remove={eliminarFacturaBorrador} retryFiscal={async id => { try { await reencolarFacturaFiscal(id); await cargar(); } catch(e) { notify(e.message, "error"); } }} openStates={setEstadoFacturaEdit} openGroups={clientesAbiertos} toggleGroup={key => setClientesAbiertos(prev => ({...prev, [key]: !prev[key]}))} focusedId={focusFactura?.factura_id} />;
 
   return (
-    <div className="tg-responsive-page" style={S.page}>
-      <div style={{display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",marginBottom:24}}>
-        <div style={{display:"flex",gap:18,alignItems:"flex-start"}}>
-          <div style={{width:46,height:46,borderRadius:10,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"var(--accent-a10)",border:"1px solid var(--accent-a20)",color:"var(--accent-xl)",flexShrink:0}}>
-            <FinanceIcon icon="wallet" />
-          </div>
-          <div>
-            <div style={S.title}>Gestión financiera</div>
-            <div style={{...S.sub,marginBottom:0}}>Facturas de clientes, seguimiento de cobros, pagos a proveedores y tesorería en una sola vista.</div>
-          </div>
-        </div>
-      </div>
-
+    <Page className="finance-page">
+      <PageHeader title="Gestión financiera" description="Facturación, cobros, pagos y tesorería" actions={canEdit && <Button variant="primary" onClick={() => setModalMulti(true)}>+ Nueva factura</Button>} />
+      <Tabs idPrefix="finance" label="Finanzas" value={activeFacturacionTab} onChange={setActiveFacturacionTab} items={[{value:"facturas",label:"Facturas"},{value:"cobros",label:"Cobros"},{value:"pagos",label:"Pagos"},{value:"tesoreria",label:"Tesorería"},{value:"fiscal",label:"Fiscal"}]} />
       {focusFactura?.source === "control_tower" && !focusFactura?.factura_id && (
         <div style={{...S.card,marginBottom:14,borderColor:"var(--accent-a35)",background:"var(--accent-a07)"}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
@@ -2764,112 +2724,25 @@ export default function Facturacion() {
         </div>
       )}
 
-      {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(180px,1fr))",gap:24,marginBottom:28}}>
-        {[
-          {l:"Total facturado",    v:`${fmt2(total)} EUR`,     c:"var(--text)", icon:"wallet"},
-          {l:"Cobrado",            v:`${fmt2(cobrado)} EUR`,   c:"var(--green)", icon:"check"},
-          {l:"Pendiente cobro",    v:`${fmt2(pendiente)} EUR`, c:"#f59e0b", icon:"clock"},
-          {l:"Rectificadas",       v:nRect,                    c:"#fb7185", icon:"doc"},
-        ].map((k,i)=><FinanceKpi key={i} label={k.l} value={k.v} color={k.c} icon={k.icon} />)}
+      <div className="finance-kpis">
+        <KpiCard label="Facturado" value={`${fmt2(total)} €`} detail="Facturas cargadas del período" />
+        <KpiCard label="Por cobrar" value={`${fmt2(pendiente)} €`} detail="Facturas cargadas del período" />
+        <KpiCard label="Por pagar" value={`${fmt2(totalPorPagar)} €`} detail="Pagos pendientes cargados" />
+        <KpiCard label="Tesorería 30 días" value={`${fmt2(previsionTesoreria.saldoPrevisto30)} €`} tone={previsionTesoreria.saldoPrevisto30 < 0 ? "danger" : "neutral"} />
       </div>
-
-      <div style={{...S.card,marginBottom:22,borderColor:"var(--accent-a24)",background:"linear-gradient(135deg, var(--accent-a07), var(--card-bg))"}}>
-        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
-          <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:16,color:"var(--text)"}}>Resumen general financiero</div>
-            <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Cobros, pagos, fiscalidad, soporte documental y caja prevista en una sola lectura.</div>
-          </div>
-          <span style={{fontSize:11,color:pendiente>0?"#f59e0b":"var(--green)",fontWeight:900}}>
-            Pendiente {fmt2(pendiente)} EUR
-          </span>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
-          {resumenGestionFinanciera.map(item=>(
-            <div key={item.label} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"10px 12px",minWidth:0}}>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:600,color:item.color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.value}</div>
-              <div style={{fontSize:10,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.label}</div>
-              <div style={{fontSize:11,color:"var(--text4)",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}} title={item.detail}>{item.detail}</div>
-            </div>
-          ))}
-        </div>
+      <div className="finance-signals" aria-label="Señales financieras">
+        <Button onClick={() => { setActiveFacturacionTab("cobros"); setDocumentosOpen(true); }}>{Number(bloqueoDocResumen.total_bloqueos || bloqueoDocItems.length || 0)} incidencias documentales</Button>
+        <Button onClick={() => setActiveFacturacionTab("cobros")}>{Number(controlResumen.revisar_hoy || 0)} cobros a revisar</Button>
+        <Button onClick={() => setActiveFacturacionTab("fiscal")}><Badge tone={fiscalAttention || fiscalNeedsSetup ? "warning" : "neutral"}>{!fiscalResumen ? "Fiscal: resumen no disponible" : fiscalNeedsSetup ? "Fiscal: revisar configuración" : fiscalAttention ? `Fiscal: ${fiscalAttention} incidencias` : "Fiscal sin incidencias"}</Badge></Button>
       </div>
+      <div id="finance-panel" role="tabpanel" aria-labelledby={`finance-${activeFacturacionTab}`} tabIndex={0}>
+      {activeFacturacionTab === "tesoreria" && <TreasuryView forecast={previsionTesoreria} money={fmt2} date={fmtDate} onReport={descargarInformeTesoreria} />}
 
-      <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:22,padding:"0 6px",alignItems:"center"}}>
-        <label style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Area de trabajo</label>
-        <select value={activeFacturacionTab} onChange={e=>setActiveFacturacionTab(e.target.value)} style={{...S.sel,minWidth:260,fontWeight:800}}>
-          <option value="facturas">Facturas de clientes ({totalCount})</option>
-          <option value="cobros">Seguimiento de cobros ({Number(controlResumen.revisar_hoy || 0)} a revisar)</option>
-          <option value="pagos">Pagos a proveedores y tesoreria ({pagosProveedor.length})</option>
-        </select>
-        <span style={{fontSize:12,color:"var(--text5)"}}>
-          {activeFacturacionTab === "facturas" && "Emision, fiscalidad y listado de facturas de clientes."}
-          {activeFacturacionTab === "cobros" && "Vencimientos, reclamaciones y riesgo de impago."}
-          {activeFacturacionTab === "pagos" && "Pagos a colaboradores/proveedores y saldo previsto de caja."}
-        </span>
-      </div>
-
-      {activeFacturacionTab === "pagos" && (
-      <div style={{...S.card,padding:14,marginBottom:16,borderColor:previsionTesoreria.saldoPrevisto30 < 0 ? "rgba(239,68,68,.35)" : "rgba(34,211,160,.28)"}}>
-        <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
-          <div style={{flex:"1 1 360px"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Tesoreria real</div>
-            <div style={{fontSize:12,color:"var(--text4)"}}>Saldo actual de caja/bancos mas cobros previstos menos pagos a colaboradores, usando vencimientos y fechas de pago configuradas.</div>
-            <div style={{display:"inline-flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:10,padding:"8px 10px",borderRadius:8,border:"1px solid #1e2d45",background:"var(--bg3)"}}>
-              <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>Capital actual</span>
-              <strong style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,color:"var(--text)"}}>{fmt2(previsionTesoreria.capitalActual)} EUR</strong>
-              <span style={{fontSize:11,color:"var(--text5)"}}>Se modifica desde Mi Empresa &gt; Tesoreria.</span>
-            </div>
-          </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>Saldo previsto a 30 dias</div>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:19,fontWeight:900,color:previsionTesoreria.saldoPrevisto30 < 0 ? "#ef4444" : "var(--green)"}}>
-              {fmt2(previsionTesoreria.saldoPrevisto30)} EUR
-            </div>
-            <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>
-              Capital {fmt2(previsionTesoreria.capitalActual)} + neto {fmt2(previsionTesoreria.neto30)}
-            </div>
-            <button onClick={descargarInformeTesoreria} style={{...S.btn,marginTop:8,background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.25)"}}>Informe tesoreria</button>
-          </div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
-          {previsionTesoreria.buckets.map(b => {
-            const neto = b.cobros - b.pagos;
-            return (
-              <div key={b.key} style={{border:"1px solid #1e2d45",borderRadius:8,padding:"9px 10px",background:"var(--bg3)"}}>
-                <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>{b.label}</div>
-                <div style={{display:"grid",gap:2,marginTop:6,fontSize:11,color:"var(--text4)"}}>
-                  <span>Cobros <strong style={{color:"var(--green)",fontFamily:"'JetBrains Mono',monospace"}}>{fmt2(b.cobros)}</strong></span>
-                  <span>Pagos <strong style={{color:"#f59e0b",fontFamily:"'JetBrains Mono',monospace"}}>{fmt2(b.pagos)}</strong></span>
-                </div>
-                <div style={{marginTop:6,fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:neto < 0 ? "#ef4444" : "var(--text)"}}>
-                  {fmt2(neto)} EUR
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {previsionTesoreria.proximos.length > 0 && (
-          <div style={{marginTop:10,borderTop:"1px solid #1e2d45",paddingTop:9,display:"grid",gap:6}}>
-            {previsionTesoreria.proximos.map((item, idx) => (
-              <div key={`${item.tipo}-${item.id || item.pedido_id || idx}`} style={{display:"grid",gridTemplateColumns:"85px 1fr auto",gap:10,alignItems:"center",fontSize:12,color:"var(--text3)"}}>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",color:"var(--text5)"}}>{fmtDate(item.fecha)}</span>
-                <span><strong style={{color:item.tipo === "cobro" ? "var(--green)" : "#f59e0b"}}>{item.tipo === "cobro" ? "Cobro" : "Pago"}</strong> {item.titulo} - {item.subtitulo}</span>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:item.tipo === "cobro" ? "var(--green)" : "#f59e0b"}}>
-                  {item.tipo === "cobro" ? "+" : "-"}{fmt2(item.importe)} EUR
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      )}
-
-      {activeFacturacionTab === "facturas" && (
-      <div style={{...S.card,padding:"24px 26px",marginBottom:22,borderColor:(Number(fiscalInfo.con_error||0)>0||Number(fiscalInfo.atascados||0)>0||fiscalCola.some(i=>i.estado==="error"||i.atascado))?"rgba(239,68,68,.24)":"var(--border)"}}>
+      {activeFacturacionTab === "fiscal" && (
+      <div style={{...S.card,padding:"24px 26px",marginBottom:22,borderColor:"var(--border)"}}>
         <div style={{display:"flex",alignItems:"center",gap:18,flexWrap:"wrap"}}>
           <div style={{flex:"1 1 260px"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:20,color:"var(--text)",marginBottom:8}}>Bloque fiscal AEAT</div>
+            <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:900,fontSize:20,color:"var(--text)",marginBottom:8}}>Bloque fiscal AEAT</div>
             <div style={{fontSize:13,color:"var(--text4)"}}>
               Modo {String(fiscalResumen?.config?.modo || "ninguno").toUpperCase()} - {Number(fiscalInfo.total_registros||0)} registros - {Number(fiscalInfo.pendientes||0)} pendientes
             </div>
@@ -2905,10 +2778,10 @@ export default function Facturacion() {
           ))}
         </div>
         {(fiscalRecientes.length>0 || fiscalCola.length>0) && (
-          <div style={{marginTop:22,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:18}}>
+          <div className="finance-grid" style={{marginTop:22,display:"grid","--finance-columns":"repeat(auto-fit,minmax(260px,1fr))",gap:18}}>
             {fiscalRecientes.slice(0,4).map(item=>(
               <div key={item.id} style={{border:"1px solid var(--border)",borderRadius:10,padding:"16px 18px",background:"var(--card-bg)",boxShadow:"0 8px 22px rgba(15,23,42,.04)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:15,fontWeight:900,color:"var(--text)"}}>
+                <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:8,fontSize:15,fontWeight:900,color:"var(--text)"}}>
                   <span>{item.numero}</span>
                   <span style={{color:item.estado_envio==="aceptado"?"var(--green)":item.estado_envio==="error"?"#ef4444":"#f59e0b",background:item.estado_envio==="aceptado"?"rgba(16,185,129,.12)":"rgba(245,158,11,.10)",borderRadius:7,padding:"3px 10px",fontSize:11}}>{item.estado_envio}</span>
                 </div>
@@ -2958,8 +2831,8 @@ export default function Facturacion() {
               </div>
             ))}
             {fiscalCola.slice(0,4).map(item=>(
-              <div key={`cola-${item.id}`} style={{border:item.atascado ? "1px solid rgba(251,113,133,.35)" : "1px solid #1e2d45",borderRadius:8,padding:"8px 10px",background:item.atascado ? "rgba(251,113,133,.07)" : "rgba(15,21,32,.55)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:12,fontWeight:800,color:"var(--text)"}}>
+              <div key={`cola-${item.id}`} style={{border:item.atascado ? "1px solid rgba(251,113,133,.35)" : "1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:item.atascado ? "rgba(251,113,133,.07)" : "rgba(15,21,32,.55)"}}>
+                <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:8,fontSize:12,fontWeight:800,color:"var(--text)"}}>
                   <span>{item.numero || "Factura pendiente"}</span>
                   <span style={{color:item.atascado ? "#fb7185" : item.estado==="error"?"#ef4444":item.estado==="procesando"?"#22d3ee":"#f59e0b"}}>
                     {item.atascado ? "atascado" : item.estado}
@@ -3007,14 +2880,14 @@ export default function Facturacion() {
       )}
 
       {activeFacturacionTab === "pagos" && pagosProveedor.length > 0 && (
-        <div style={{...S.card,padding:14,marginBottom:16,borderColor:"rgba(251,191,36,.35)"}}>
+        <div style={{...S.card,padding:14,marginBottom:16,borderColor:"var(--border)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:10}}>
             <div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Pagos pendientes a proveedores</div>
+              <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Pagos pendientes a proveedores</div>
               <div style={{fontSize:12,color:"var(--text4)"}}>Abre cada proveedor para revisar viajes, factura, documentacion, vencimientos y ordenes de pago.</div>
             </div>
             <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-              <select value={filtroPagosProveedor} onChange={e=>setFiltroPagosProveedor(e.target.value)} style={S.sel}>
+              <select aria-label="Filtrar proveedores" value={filtroPagosProveedor} onChange={e=>setFiltroPagosProveedor(e.target.value)} style={S.sel}>
                 <option value="todos">Todos</option>
                 <option value="vencidos">Vencidos</option>
                 <option value="sin_factura">Sin factura</option>
@@ -3024,19 +2897,16 @@ export default function Facturacion() {
               <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:"#f59e0b"}}>{fmt2(pagosProveedor.reduce((s,p)=>s+Number(p.importe || p.precio_colaborador || 0),0))} EUR</span>
             </div>
           </div>
-          <div style={{display:"grid",gap:8}}>
-            {pagosProveedorPorColaborador.map(group=>{
-              const open = Boolean(proveedoresAbiertos[group.key]);
-              return (
-                <div key={group.key} style={{border:"1px solid #1e2d45",borderRadius:8,overflow:"hidden",background:"var(--bg3)"}}>
-                  <button type="button" onClick={()=>setProveedoresAbiertos(prev=>({...prev,[group.key]:!prev[group.key]}))} style={{width:"100%",border:0,background:open?"rgba(251,191,36,.08)":"transparent",color:"var(--text)",padding:"10px 12px",display:"grid",gridTemplateColumns:"minmax(180px,1fr) auto auto auto",gap:10,alignItems:"center",textAlign:"left",cursor:"pointer"}}>
-                    <span><span style={{fontWeight:900,fontSize:13}}>{open ? "v " : "> "}{group.nombre}</span><span style={{display:"block",fontSize:11,color:"var(--text5)",marginTop:2}}>{group.formaPago || "Sin condiciones guardadas"} - {group.viajes.length} viaje(s)</span></span>
-                    <span style={{...S.badge,background:group.pendientesFactura?"rgba(251,191,36,.12)":"rgba(34,211,160,.12)",color:group.pendientesFactura?"#f59e0b":"var(--green)"}}>{group.pendientesFactura} sin factura</span>
-                    <span style={{...S.badge,background:group.pendientesDocumentacion?"rgba(59,130,246,.12)":"rgba(34,211,160,.12)",color:group.pendientesDocumentacion?"var(--accent)":"var(--green)"}}>{group.pendientesDocumentacion} sin docs</span>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:group.vencidos?"#ef4444":"#f59e0b",textAlign:"right"}}>{fmt2(group.total)} EUR</span>
-                  </button>
-                  {open && (
-                    <div style={{display:"grid",gap:6,padding:10,borderTop:"1px solid #1e2d45"}}>
+          <DataTable rows={pagosProveedorPorColaborador} rowKey={g => g.key} emptyTitle="Sin proveedores para este filtro" columns={[
+            {key:"nombre",label:"Proveedor",render:g => <Button onClick={() => setProveedorAbierto(g.key)}>{g.nombre}</Button>},
+            {key:"viajes",label:"Viajes",render:g => g.viajes.length},
+            {key:"documentacion",label:"Documentación",render:g => <span>{g.pendientesFactura} sin factura · {g.pendientesDocumentacion} sin docs</span>},
+            {key:"vencimiento",label:"Vencimiento",render:g => <span>{g.vencidos} vencidos<br />{g.formaPago || "Sin condiciones guardadas"}</span>},
+            {key:"total",label:"Importe",render:g => <strong className="tgui-number">{fmt2(g.total)} €</strong>},
+            {key:"acciones",label:"Acciones",render:g => <Button onClick={() => setProveedorAbierto(g.key)}>Ver detalle</Button>},
+          ]} renderMobile={g => <MobileDataCard title={g.nombre} amount={`${fmt2(g.total)} €`} subtitle={`${g.viajes.length} viajes · ${g.formaPago || "Sin condiciones guardadas"}`} actions={<Button onClick={() => setProveedorAbierto(g.key)}>Ver proveedor</Button>}><span>{g.pendientesFactura} sin factura · {g.pendientesDocumentacion} sin docs · {g.vencidos} vencidos</span></MobileDataCard>} />
+          {pagosProveedorPorColaborador.filter(g => g.key === proveedorAbierto).map(group => <Drawer key={group.key} title={group.nombre} width={620} onClose={() => setProveedorAbierto(null)}>
+                    <div style={{display:"grid",gap:6,padding:10,borderTop:"1px solid var(--border)"}}>
                       <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",flexWrap:"wrap",padding:"0 2px 4px"}}>
                         <span style={{fontSize:11,color:"var(--text5)"}}>
                           {group.vencidos ? `${group.vencidos} vencido(s). ` : ""}Revisa factura y documentacion antes de autorizar el pago.
@@ -3044,7 +2914,7 @@ export default function Facturacion() {
                         <button onClick={()=>imprimirOrdenPagoProveedor(group)} style={{...S.btn,padding:"5px 9px",background:"rgba(251,191,36,.12)",color:"#f59e0b",border:"1px solid rgba(251,191,36,.28)"}}>Orden de pago</button>
                       </div>
                       {group.viajes.map(p=>(
-                        <div key={`${p.pedido_id}-${p.pago_id || "pendiente"}`} style={{display:"grid",gridTemplateColumns:"minmax(210px,1.3fr) minmax(180px,1fr) minmax(110px,.5fr) auto",gap:10,alignItems:"center",padding:"8px 9px",border:"1px solid #1e2d45",borderRadius:8,background:p.pendiente_factura ? "rgba(251,191,36,.06)" : "rgba(15,21,32,.55)"}}>
+                        <div key={`${p.pedido_id}-${p.pago_id || "pendiente"}`} className="finance-provider-trip">
                           <div>
                             <button type="button" onClick={()=>abrirGestionPagoProveedor(p)} style={{border:0,background:"transparent",color:"var(--accent)",fontWeight:900,cursor:"pointer",padding:0}}>{p.numero}</button>
                             <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{p.origen} -&gt; {p.destino}</div>
@@ -3060,25 +2930,22 @@ export default function Facturacion() {
                             {canEdit && !p.documentacion_recibida && <button onClick={()=>accionRapidaPagoProveedor(p,"documentacion")} style={{...S.btn,padding:"5px 8px",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)"}}>Docs recibida</button>}
                             {canEdit && !p.factura_nombre && <button onClick={()=>accionRapidaPagoProveedor(p,"factura")} style={{...S.btn,padding:"5px 8px",background:"rgba(251,191,36,.12)",color:"#f59e0b",border:"1px solid rgba(251,191,36,.24)"}}>Factura recibida</button>}
                             {p.factura_data && <button onClick={()=>verFacturaProveedor(p.factura_data)} style={{...S.btn,padding:"5px 8px",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)"}}>Ver factura</button>}
-                            <button onClick={()=>abrirGestionPagoProveedor(p)} style={{...S.btn,padding:"5px 8px",background:"var(--bg4)",color:"var(--text3)",border:"1px solid #1e2d45"}}>Gestionar</button>
+                            <button onClick={()=>abrirGestionPagoProveedor(p)} style={{...S.btn,padding:"5px 8px",background:"var(--bg4)",color:"var(--text3)",border:"1px solid var(--border)"}}>Gestionar</button>
                             {canEdit && <button onClick={()=>accionRapidaPagoProveedor(p,"pagado")} style={{...S.btn,padding:"5px 8px",background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.24)"}}>Pagado</button>}
                           </div>
                         </div>
                       ))}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          </Drawer>)}
         </div>
       )}
+      {activeFacturacionTab === "pagos" && pagosProveedor.length === 0 && <EmptyState title="Sin pagos pendientes" />}
 
       {false && pagosProveedor.length > 0 && (
-        <div style={{...S.card,padding:14,marginBottom:16,borderColor:"rgba(251,191,36,.35)"}}>
+        <div style={{...S.card,padding:14,marginBottom:16,borderColor:"var(--border)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:10}}>
             <div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Pagos pendientes a proveedores</div>
+              <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Pagos pendientes a proveedores</div>
               <div style={{fontSize:12,color:"var(--text4)"}}>
                 Viajes de colaborador pendientes de factura recibida o de pago. Las fechas se calculan con Mi Empresa &gt; condiciones de pago a colaboradores.
               </div>
@@ -3087,10 +2954,10 @@ export default function Facturacion() {
               {fmt2(pagosProveedor.reduce((s,p)=>s+Number(p.importe || p.precio_colaborador || 0),0))} EUR
             </div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
+          <div className="finance-grid" style={{display:"grid","--finance-columns":"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
             {pagosProveedor.slice(0,6).map(p=>(
-              <div key={`${p.pedido_id}-${p.pago_id || "pendiente"}`} style={{border:"1px solid #1e2d45",borderRadius:8,padding:"9px 10px",background:p.pendiente_factura ? "rgba(251,191,36,.07)" : "var(--bg3)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:12,fontWeight:800,color:"var(--text)"}}>
+              <div key={`${p.pedido_id}-${p.pago_id || "pendiente"}`} style={{border:"1px solid var(--border)",borderRadius:8,padding:"9px 10px",background:p.pendiente_factura ? "rgba(251,191,36,.07)" : "var(--bg3)"}}>
+                <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:8,fontSize:12,fontWeight:800,color:"var(--text)"}}>
                   <span>{p.numero}</span>
                   <span style={{color:p.pendiente_factura ? "#f59e0b" : "var(--green)"}}>{p.pendiente_factura ? "falta factura" : "vto. pago"}</span>
                 </div>
@@ -3108,10 +2975,18 @@ export default function Facturacion() {
 
       {activeFacturacionTab === "cobros" && (
       <>
+      <div className="finance-kpis">
+        <KpiCard label="Por cobrar" value={`${fmt2(controlResumen.importe_pendiente || 0)} €`} />
+        <KpiCard label="Vencido" value={`${Number(controlResumen.vencidas || 0)} facturas`} tone="danger" />
+        <KpiCard label="Reclamado" value={`${Number(controlResumen.reclamadas || 0)} facturas`} tone="warning" />
+        <KpiCard label="Bloqueado documentalmente" value={`${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} €`} />
+      </div>
+      <Card className="finance-backlog"><div><strong>{Number(bloqueoDocResumen.pedidos_sin_soporte || 0)} pedidos sin soporte documental</strong><p>{Number(controlResumen.revisar_hoy || 0)} facturas necesitan revisión</p></div><Button onClick={() => setDocumentosOpen(true)}>Revisar documentación</Button></Card>
+      <Drawer open={documentosOpen} title="Bloqueos documentales" width={620} onClose={() => setDocumentosOpen(false)}>
       <div style={{...S.card,padding:14,marginBottom:16,borderColor:Number(bloqueoDocResumen.total_bloqueos||0)>0?"rgba(239,68,68,.35)":"rgba(34,211,160,.24)"}}>
         <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:12}}>
           <div style={{flex:"1 1 320px"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Bloqueos documental-cobro</div>
+            <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Bloqueos documental-cobro</div>
             <div style={{fontSize:12,color:"var(--text4)"}}>Viajes y facturas que pueden frenar emision, reclamacion o cobro por falta de POD, albaran o CMR.</div>
           </div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
@@ -3121,7 +2996,7 @@ export default function Facturacion() {
               ["Cobros en riesgo", bloqueoDocResumen.cobros_en_riesgo_documental, "#b91c1c"],
               ["Importe bloqueado", `${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} EUR`, "var(--text)"],
             ].map(([label,value,color])=>(
-              <div key={label} style={{minWidth:130,border:"1px solid #1e2d45",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
+              <div key={label} style={{minWidth:130,border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
                 <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:900,color}}>{value || 0}</div>
                 <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginTop:2}}>{label}</div>
               </div>
@@ -3141,7 +3016,7 @@ export default function Facturacion() {
                 ? `${item.cliente_nombre || "Cliente"} - ${[item.origen,item.destino].filter(Boolean).join(" > ") || "Ruta sin datos"}`
                 : `${item.cliente_nombre || "Cliente"} - ${estadoFacturaLabel(item.estado)} - ${fmt2(item.total)} EUR`;
               return (
-                <div key={`${item.tipo}-${item.id || idx}`} style={{display:"grid",gridTemplateColumns:"110px minmax(0,1fr) auto",gap:10,alignItems:"center",border:"1px solid #1e2d45",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
+                <div key={`${item.tipo}-${item.id || idx}`} className="finance-doc-item">
                   <span style={{...S.badge,background:`${color}18`,border:`1px solid ${color}44`,color}}>{isPedido ? "Pedido" : isCobro ? "Cobro" : "Factura"}</span>
                   <div>
                     <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{titulo}</div>
@@ -3158,26 +3033,18 @@ export default function Facturacion() {
           </div>
         )}
       </div>
-      <div style={{...S.card,padding:14,borderColor:Number(controlResumen.revisar_hoy||0)>0?"rgba(249,115,22,.45)":"#141a28"}}>
+      </Drawer>
+      <div style={{...S.card,padding:14,borderColor:"var(--border)"}}>
         <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
           <div style={{flex:"1 1 260px"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Control de cobros</div>
+            <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Control de cobros</div>
             <div style={{fontSize:12,color:"var(--text4)"}}>
               {Number(controlResumen.revisar_hoy||0)} factura(s) a revisar hoy - {fmt2(controlResumen.importe_pendiente||0)} EUR pendientes
             </div>
           </div>
           {canEdit && (<button onClick={async()=>{ try { const r = await procesarReclamacionesFacturas(); notify(`Revision cobro: ${r.reclamadas||0} reclamadas, ${r.sin_cobrar||0} sin cobrar, ${r.emails||0} emails`, "success"); cargar(); } catch(e) { notify(e.message, "error"); } }} style={{...S.btn,background:"rgba(249,115,22,.12)",color:"#f97316",border:"1px solid rgba(249,115,22,.25)"}}>Revisar cobros</button>)}
           <button onClick={descargarInformeCobros} style={{...S.btn,background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.25)"}}>Informe cobros</button>
-          {[ 
-            ["Vencidas", controlResumen.vencidas, "#ef4444"],
-            ["Reclamadas", controlResumen.reclamadas, "#f97316"],
-            ["Sin cobrar", controlResumen.sin_cobrar, "#b91c1c"],
-          ].map(([label,value,color])=>(
-            <div key={label} style={{minWidth:110,background:`${color}12`,border:`1px solid ${color}33`,borderRadius:8,padding:"8px 10px"}}>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color}}>{Number(value||0)}</div>
-              <div style={{fontSize:10,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>{label}</div>
-            </div>
-          ))}
+          <Badge tone="danger">{Number(controlResumen.sin_cobrar || 0)} sin cobrar</Badge>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
           <button onClick={()=>setFiltro("todos")} style={{...S.btn,background:filtro==="todos"?"var(--accent)":"var(--bg3)",color:filtro==="todos"?"#fff":"var(--text3)",border:`1px solid ${filtro==="todos"?"var(--accent)":"var(--border2)"}`}}>Todos</button>
@@ -3186,11 +3053,12 @@ export default function Facturacion() {
           <button onClick={()=>setFiltro("sin_cobrar")} style={{...S.btn,background:filtro==="sin_cobrar"?"#b91c1c":"var(--bg3)",color:filtro==="sin_cobrar"?"#fff":"var(--text3)",border:`1px solid ${filtro==="sin_cobrar"?"#b91c1c":"var(--border2)"}`}}>Sin cobrar</button>
           <button onClick={()=>setFiltro("enviada")} style={{...S.btn,background:filtro==="enviada"?"#0891b2":"var(--bg3)",color:filtro==="enviada"?"#fff":"var(--text3)",border:`1px solid ${filtro==="enviada"?"#0891b2":"var(--border2)"}`}}>Enviadas</button>
         </div>
+        <details className="finance-accounting"><summary>Seguimiento prioritario y próximas revisiones</summary>
         {proximasCobro.length>0 && (
-          <div style={{marginTop:12,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8}}>
+          <div className="finance-grid" style={{marginTop:12,display:"grid","--finance-columns":"repeat(auto-fit,minmax(200px,1fr))",gap:8}}>
             {proximasCobro.slice(0,4).map(f=>(
-              <div key={`proxima-${f.id}`} style={{border:"1px solid #1e2d45",borderRadius:8,padding:"8px 10px",background:"rgba(15,21,32,.45)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:12,fontWeight:800,color:"var(--text)"}}>
+              <div key={`proxima-${f.id}`} style={{border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
+                <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:8,fontSize:12,fontWeight:800,color:"var(--text)"}}>
                   <span>{f.numero}</span>
                   <span style={{color:EC[f.estado]||"#f59e0b"}}>{estadoFacturaLabel(f.estado)}</span>
                 </div>
@@ -3205,10 +3073,10 @@ export default function Facturacion() {
           </div>
         )}
         {facturasRiesgo.length>0 && (
-          <div style={{marginTop:12,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:8}}>
+          <div className="finance-grid" style={{marginTop:12,display:"grid","--finance-columns":"repeat(auto-fit,minmax(210px,1fr))",gap:8}}>
             {facturasRiesgo.slice(0,4).map(f=>(
-              <div key={f.id} style={{border:"1px solid #1e2d45",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:12,fontWeight:800,color:"var(--text)"}}>
+              <div key={f.id} style={{border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
+                <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:8,fontSize:12,fontWeight:800,color:"var(--text)"}}>
                   <span>{f.numero}</span><span style={{color:EC[f.estado]||"#f97316"}}>{estadoFacturaLabel(f.estado)}</span>
                 </div>
                 <div style={{fontSize:11,color:"var(--text4)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{f.cliente_nombre}</div>
@@ -3255,109 +3123,28 @@ export default function Facturacion() {
             ))}
           </div>
         )}
+        </details>
       </div>
       </>
       )}
 
-      {activeFacturacionTab === "facturas" && (
+      {["facturas", "cobros"].includes(activeFacturacionTab) && (
       <>
       {/* Filtros */}
-      <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
-        {!filtroFechasCustom ? (
-          <input type="month" value={periodoMes} onChange={e=>cambiarMesPeriodo(e.target.value)} style={{...S.inp,width:150}}/>
-        ) : (
-          <>
-            <input type="date" value={fechaDesde} onChange={e=>setFechaDesde(e.target.value)} style={{...S.inp,width:150}}/>
-            <input type="date" value={fechaHasta} onChange={e=>setFechaHasta(e.target.value)} style={{...S.inp,width:150}}/>
-          </>
-        )}
-        <button
-          onClick={alternarFiltroFechas}
-          style={{...S.btn,background:filtroFechasCustom?"var(--accent)":"var(--bg3)",color:filtroFechasCustom?"#fff":"var(--text3)",border:`1px solid ${filtroFechasCustom?"var(--accent)":"var(--border2)"}`}}
-        >
-          {filtroFechasCustom ? "Usar mes" : "Filtro personalizado"}
-        </button>
-        <select value={filtro} onChange={e=>setFiltro(e.target.value)} style={S.sel}>
-          <option value="todos">Todos los estados</option>
-          {[...ESTADOS,"rectificada"].map(e=><option key={e} value={e}>{estadoFacturaLabel(e)}</option>)}
-        </select>
-        <select value={fiscalEstadoFiltro} onChange={e=>setFiscalEstadoFiltro(e.target.value)} style={S.sel}>
+      <FilterBar search={<SearchInput value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar por número o cliente…" />} advanced={<>
+        <select aria-label="Estado fiscal" value={fiscalEstadoFiltro} onChange={e=>setFiscalEstadoFiltro(e.target.value)} style={S.sel}>
           <option value="todos">Fiscal: todos</option>
           <option value="aceptado">Fiscal aceptado</option>
           <option value="pendiente">Fiscal pendiente</option>
           <option value="error">Fiscal con error</option>
           <option value="sin_registro">Sin registro fiscal</option>
         </select>
-        <select value={fiscalModoFiltro} onChange={e=>setFiscalModoFiltro(e.target.value)} style={{...S.sel,padding:"7px 12px",fontSize:13}}>
+        <select aria-label="Modo fiscal" value={fiscalModoFiltro} onChange={e=>setFiscalModoFiltro(e.target.value)} style={{...S.sel,padding:"7px 12px",fontSize:13}}>
           <option value="todos">Modo fiscal: todos</option>
           <option value="verifactu">VERIFACTU</option>
           <option value="sii">SII</option>
           <option value="ninguno">Sin modo</option>
         </select>
-        <input value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Buscar por numero o cliente..." style={{...S.inp,width:270}}/>
-        {canEdit && (
-          <button onClick={()=>setModalMulti(true)} style={{...S.btn,background:"rgba(16,185,129,.15)",color:"#10b981",border:"1px solid rgba(16,185,129,.25)"}}>
-            Facturar pedidos de cliente
-          </button>
-        )}
-        <button onClick={()=>setSinFacturarOpen(v=>!v)}
-          style={{...S.btn,background:sinFacturarOpen?"rgba(245,158,11,.16)":"var(--bg3)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.28)"}}>
-          {sinFacturarOpen ? "v" : ">"} Viajes sin facturar ({sinFacturar.length})
-        </button>
-        <button
-          onClick={()=>setAgruparCliente(v=>!v)}
-          style={{...S.btn,background:agruparCliente?"rgba(34,211,160,.12)":"var(--bg3)",color:agruparCliente?"var(--green)":"var(--text4)",border:"1px solid rgba(34,211,160,.22)"}}
-        >
-          {agruparCliente ? "Vista por cliente" : "Agrupar por cliente"}
-        </button>
-        <span style={{marginLeft:"auto",fontSize:11,color:"var(--text5)"}}>Doble clic o boton Ver para abrir la factura</span>
-      </div>
-      {canEdit && <ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} />}
-      {sinFacturarOpen && (
-        <div style={{border:"1px solid rgba(245,158,11,.28)",borderRadius:10,background:"var(--bg2)",marginBottom:16,overflow:"hidden"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"10px 14px",borderBottom:"1px solid var(--border)",background:"rgba(245,158,11,.06)"}}>
-            <div>
-              <div style={{fontWeight:800,color:"var(--text)"}}>Viajes entregados sin facturar</div>
-              <div style={{fontSize:11,color:"var(--text5)"}}>Todos los clientes y de cualquier fecha (backlog completo, no solo el periodo). Usa "Facturar pedidos de cliente" para emitir.</div>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:12}}>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"#f59e0b",fontSize:15}}>{fmt2(sinFacturarTotal)} EUR</div>
-                <div style={{fontSize:11,color:"var(--text5)"}}>{sinFacturar.length} viaje(s)</div>
-              </div>
-              <button onClick={cargarSinFacturar} title="Actualizar" style={{...S.btn,background:"var(--bg3)",color:"var(--text3)",border:"1px solid var(--border)",padding:"5px 10px",fontSize:12}}>Actualizar</button>
-            </div>
-          </div>
-          {sinFacturarLoad ? (
-            <div style={{padding:16,textAlign:"center",color:"var(--text5)",fontSize:12}}>Cargando...</div>
-          ) : sinFacturar.length===0 ? (
-            <div style={{padding:16,textAlign:"center",color:"var(--text5)",fontSize:12}}>No hay viajes entregados pendientes de facturar.</div>
-          ) : (
-            <div style={{maxHeight:340,overflowY:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                <thead><tr>{["Fecha","Nº","Cliente","Ruta","Importe"].map(h=><th key={h} style={{...S.th,position:"sticky",top:0,background:"var(--bg2)",zIndex:1}}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {sinFacturarOrdenados.map(p=>(
-                    <tr key={p.id} style={{borderBottom:"1px solid var(--border2)"}}>
-                      <td style={{...S.td,whiteSpace:"nowrap",color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{(p.fecha_descarga||p.fecha_carga) ? new Date(p.fecha_descarga||p.fecha_carga).toLocaleDateString("es-ES") : "-"}</td>
-                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"var(--accent-xl)"}}>{p.numero||"-"}</td>
-                      <td style={{...S.td,fontWeight:700,color:"var(--text)"}}>{p.cliente_nombre||"-"}</td>
-                      <td style={{...S.td,color:"var(--text3)"}}>{(p.origen||"?")+" -> "+(p.destino||"?")}</td>
-                      <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)",textAlign:"right",whiteSpace:"nowrap"}}>{fmt2(Number(p.importe||p.precio||0))} EUR</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{position:"sticky",bottom:0,background:"var(--bg3)",borderTop:"2px solid rgba(245,158,11,.4)"}}>
-                    <td colSpan={4} style={{...S.td,fontWeight:900,color:"var(--text)",textAlign:"right"}}>TOTAL a facturar ({sinFacturar.length} viaje{sinFacturar.length!==1?"s":""})</td>
-                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:"#f59e0b",textAlign:"right",whiteSpace:"nowrap",fontSize:14}}>{fmt2(sinFacturarTotal)} EUR</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
         {fiscalQuickFilters.map((item) => {
           const active = fiscalEstadoFiltro === item.key || (item.key === "todos" && fiscalEstadoFiltro === "todos");
@@ -3368,9 +3155,9 @@ export default function Facturacion() {
               style={{
                 ...S.btn,
                 padding:"6px 10px",
-                background: active ? `${item.color}18` : "var(--bg3)",
+                background: active ? "var(--accent-soft)" : "var(--bg3)",
                 color: item.color,
-                border:`1px solid ${active ? `${item.color}55` : "#1e2d45"}`,
+                border:`1px solid ${active ? "var(--accent-border)" : "var(--border)"}`,
               }}
             >
               {item.label} <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:800}}>{Number(item.value || 0)}</span>
@@ -3378,143 +3165,54 @@ export default function Facturacion() {
           );
         })}
       </div>
-
-      <div style={{...S.card,borderRadius:12}}>
-        <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead>
-            <tr>{["No. Factura","Cliente","Fecha","Vcto.","Base","IVA","Total","Estado","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {loading
-              ? <tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--text5)"}}>Cargando...</td></tr>
-              : filtradas.length===0
-              ? <tr><td colSpan={9} style={{...S.td,textAlign:"center",color:"var(--text5)",padding:40}}>Sin facturas</td></tr>
-              : tableItems.map(f=>{
-                if (f.__group) {
-                  const open = !!clientesAbiertos[f.key];
-                  return (
-                    <tr key={`cliente-${f.key}`} onClick={()=>setClientesAbiertos(prev=>({...prev,[f.key]:!open}))} style={{cursor:"pointer",background:"rgba(34,211,160,.07)"}}>
-                      <td colSpan={9} style={{...S.td,borderBottom:"1px solid #1e2d45",padding:"10px 14px"}}>
-                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
-                          <div style={{fontWeight:800,color:"var(--text)"}}>{open ? "v" : ">"} {f.cliente}</div>
-                          <div style={{display:"flex",gap:12,alignItems:"center",fontSize:12,color:"var(--text4)"}}>
-                            <span>{f.facturas.length} factura(s)</span>
-                            <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:"var(--green)"}}>{fmt2(f.total)} EUR</span>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
-                const esRect = f.estado==="rectificada" || (f.serie && f.serie !== "A" && f.serie !== "B");
-                const fiscalRowMeta = getFacturaFiscalRowMeta(f);
-                return (
-                  <tr key={f.id} id={`factura-row-${f.id}`} onClick={()=>handleRowClick(f)} style={{
-                    cursor:"pointer",
-                    background: String(focusFactura?.factura_id || "") === String(f.id) ? "rgba(34,211,160,.10)" : undefined,
-                    boxShadow: String(focusFactura?.factura_id || "") === String(f.id) ? "inset 3px 0 0 var(--green)" : undefined,
-                  }}
-                    onMouseEnter={e=>e.currentTarget.style.background="var(--bg5)"}
-                    onMouseLeave={e=>e.currentTarget.style.background=String(focusFactura?.factura_id || "") === String(f.id) ? "rgba(34,211,160,.10)" : "transparent"}>
-                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:esRect?"#f97316":"var(--accent-xl)"}}>
-                      {f.numero}{esRect&&<span style={{fontSize:9,marginLeft:4,color:"#f97316"}}>RECT.</span>}{Number(f.num_pedidos||0)===0&&["emitida","enviada","cobrada"].includes(f.estado)&&<span title="Sin pedidos vinculados" style={{fontSize:9,marginLeft:4,color:"#ef4444",fontWeight:700}}>REVISION</span>}{Number(f.num_pedidos||0)===0&&!esRect&&<span title="Sin pedidos vinculados" style={{fontSize:9,marginLeft:4,color:"#ef4444",fontWeight:700}}>HUERFANA</span>}
-                    </td>
-                    <td style={{...S.td,fontWeight:600,color:"var(--text)",fontSize:12}}>{f.cliente_nombre}</td>
-                    <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{f.fecha?new Date(f.fecha).toLocaleDateString("es-ES"):"-"}</td>
-                    <td style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{f.fecha_vencimiento?new Date(f.fecha_vencimiento).toLocaleDateString("es-ES"):"-"}</td>
-                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>{fmt2(f.base_imponible)} EUR</td>
-                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text4)"}}>{ivaLabel(f.tipo_iva, f.iva_regimen)}</td>
-                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{fmt2(f.total)} EUR</td>
-                    <td style={S.td}>
-                      <div style={{display:"flex",flexDirection:"column",gap:5,alignItems:"flex-start"}}>
-                        <span style={{...S.badge,background:`${EC[f.estado]||"#6b7280"}1a`,color:EC[f.estado]||"#6b7280"}}>{estadoFacturaLabel(f.estado)}</span>
-                        {f.fiscal_modo ? (
-                          <span style={{
-                            ...S.badge,
-                            background:`${f.fiscal_estado_envio==="aceptado"?"rgba(16,185,129,.14)":f.fiscal_estado_envio==="error"?"rgba(239,68,68,.14)":"rgba(245,158,11,.14)"}`,
-                            color:f.fiscal_estado_envio==="aceptado"?"var(--green)":f.fiscal_estado_envio==="error"?"#ef4444":"#f59e0b",
-                          }}>
-                            {String(f.fiscal_modo).toUpperCase()} - {f.fiscal_estado_envio || "pendiente"}
-                          </span>
-                        ) : (
-                          <span style={{...S.badge,background:"rgba(148,163,184,.12)",color:"#94a3b8"}}>
-                            Sin registro fiscal
-                          </span>
-                        )}
-                        <div style={{
-                          fontSize:10,
-                          lineHeight:1.45,
-                          color:fiscalRowMeta.tone,
-                          background:fiscalRowMeta.bg,
-                          border:`1px solid ${fiscalRowMeta.tone}30`,
-                          borderRadius:7,
-                          padding:"5px 7px",
-                          maxWidth:220,
-                        }}>
-                          <div style={{fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",fontSize:9,marginBottom:2}}>
-                            {fiscalRowMeta.label}
-                          </div>
-                          <div style={{color:"var(--text4)"}}>{fiscalRowMeta.detail}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={S.td} onClick={e=>e.stopPropagation()}>
-                      {f.estado==="rectificada"
-                        ? <span style={{fontSize:11,color:"#f97316",fontWeight:700}}>Rectificada</span>
-                        : f.estado==="borrador"
-                          ? canEdit && (
-                            <div style={{display:"flex",gap:5,alignItems:"center"}}>
-                              <button title="Abrir factura" style={{...S.btn,background:"rgba(59,130,246,.10)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.20)",padding:"5px 8px"}} onClick={()=>abrirFacturaPorId(f.id, f)}>Ver</button>
-                              <button title="Emitir factura" style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)",padding:"5px 8px"}} onClick={()=>cambiarEstado(f.id,"emitida")}>Emitir</button>
-                              <select value={f.estado} onChange={e=>cambiarEstado(f.id,e.target.value)} style={S.sel}>
-                                {ESTADOS.map(e=><option key={e} value={e}>{estadoFacturaLabel(e)}</option>)}
-                              </select>
-                              <button title="Emitir rectificativa" style={{...S.btn,background:"rgba(249,115,22,.1)",color:"#f97316",border:"1px solid rgba(249,115,22,.2)",padding:"5px 8px"}} onClick={()=>setModalRect(f)}>Rectificar</button>
-                              <button title="Eliminar borrador" style={{...S.btn,background:"rgba(239,68,68,.1)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",padding:"5px 8px"}} onClick={()=>eliminarFacturaBorrador(f.id)}>Eliminar</button>
-                            </div>
-                          )
-                          : (
-                            <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
-                              <button title="Abrir factura" style={{...S.btn,background:"rgba(59,130,246,.10)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.20)",padding:"5px 8px"}} onClick={()=>abrirFacturaPorId(f.id, f)}>Ver</button>
-                              {canEdit && ["emitida","enviada"].includes(f.estado) && (
-                                <button title={f.estado==="enviada" ? "Reenviar factura" : "Enviar factura"} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)",padding:"5px 8px"}} onClick={()=>enviarFacturaRapida(f)}>
-                                  {f.estado==="enviada" ? "Reenviar" : "Enviar"}
-                                </button>
-                              )}
-                              <span style={{fontSize:11,padding:"3px 10px",borderRadius:20,background:`${EC[f.estado]||"#6b7280"}22`,color:EC[f.estado]||"#6b7280",fontWeight:700}}>{estadoFacturaLabel(f.estado)}</span>
-                              {canEdit && f.estado !== "cobrada" && (
-                                <button title="Marcar cobrada" style={{...S.btn,background:"rgba(16,185,129,.10)",color:"var(--green)",border:"1px solid rgba(16,185,129,.20)",padding:"5px 8px"}} onClick={()=>cambiarEstado(f.id,"cobrada")}>Cobrada</button>
-                              )}
-                              {canEdit && !["reclamada","sin_cobrar","cobrada","rectificada"].includes(f.estado) && (
-                                <button title="Marcar reclamada" style={{...S.btn,background:"rgba(249,115,22,.10)",color:"#f97316",border:"1px solid rgba(249,115,22,.20)",padding:"5px 8px"}} onClick={()=>cambiarEstado(f.id,"reclamada")}>Reclamar</button>
-                              )}
-                              {canEdit && f.estado === "reclamada" && (
-                                <button title="Pasar a sin cobrar" style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.20)",padding:"5px 8px"}} onClick={()=>cambiarEstado(f.id,"sin_cobrar")}>Sin cobrar</button>
-                              )}
-                              {canEdit&&<button title="Emitir rectificativa" style={{...S.btn,background:"rgba(249,115,22,.1)",color:"#f97316",border:"1px solid rgba(249,115,22,.2)",padding:"5px 8px"}} onClick={()=>setModalRect(f)}>Rectificar</button>}
-                              {canEdit && f.fiscal_modo && (
-                                <button
-                                  title="Reencolar envio fiscal"
-                                  style={{...S.btn,background:"rgba(34,211,238,.10)",color:"#22d3ee",border:"1px solid rgba(34,211,238,.25)",padding:"5px 8px"}}
-                                  onClick={async()=>{ try { await reencolarFacturaFiscal(f.id); await cargar(); } catch(e) { notify(e.message, "error"); } }}
-                                >
-                                  Fiscal
-                                </button>
-                              )}
-                            </div>
-                          )
-                      }
-                    </td>
-                  </tr>
-                );
-              })
-            }
-          </tbody>
-        </table>
+      </>}>
+        {!filtroFechasCustom ? (
+          <input aria-label="Mes de facturación" type="month" value={periodoMes} onChange={e=>cambiarMesPeriodo(e.target.value)} style={{...S.inp,width:190}}/>
+        ) : (
+          <>
+            <input aria-label="Desde" type="date" value={fechaDesde} onChange={e=>setFechaDesde(e.target.value)} style={{...S.inp,width:150}}/>
+            <input aria-label="Hasta" type="date" value={fechaHasta} onChange={e=>setFechaHasta(e.target.value)} style={{...S.inp,width:150}}/>
+          </>
+        )}
+        <button
+          onClick={alternarFiltroFechas}
+          style={{...S.btn,background:filtroFechasCustom?"var(--accent)":"var(--bg3)",color:filtroFechasCustom?"#fff":"var(--text3)",border:`1px solid ${filtroFechasCustom?"var(--accent)":"var(--border2)"}`}}
+        >
+          {filtroFechasCustom ? "Usar mes" : "Filtro personalizado"}
+        </button>
+        <select aria-label="Estado de factura" value={filtro} onChange={e=>setFiltro(e.target.value)} style={S.sel}>
+          <option value="todos">Todos los estados</option>
+          {[...ESTADOS,"rectificada"].map(e=><option key={e} value={e}>{estadoFacturaLabel(e)}</option>)}
+        </select>
+      </FilterBar>
+      <div className="finance-toolbar">
+        <button
+          onClick={()=>setAgruparCliente(v=>!v)}
+          style={{...S.btn,background:agruparCliente?"rgba(34,211,160,.12)":"var(--bg3)",color:agruparCliente?"var(--green)":"var(--text4)",border:"1px solid rgba(34,211,160,.22)"}}
+        >
+          {agruparCliente ? "Vista por cliente" : "Agrupar por cliente"}
+        </button>
+        <span style={{fontSize:12,color:"var(--text3)"}}>{nRect} rectificadas · Cobrado {fmt2(cobrado)} € · {totalCount} facturas en el período</span>
       </div>
+      {activeFacturacionTab === "facturas" && <Card className="finance-backlog"><div><strong>{sinFacturar.length} viajes pendientes de facturar</strong><p className="tgui-number">{fmt2(sinFacturarTotal)} € · Todos los períodos</p></div><div className="tgui-actions"><Button onClick={() => setSinFacturarOpen(true)}>Revisar viajes</Button>{canEdit && <Button onClick={() => setModalMulti(true)}>Facturar pedidos</Button>}</div></Card>}
+      {canEdit && <details className="finance-accounting"><summary>Exportación contable</summary><ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} /></details>}
+      <Drawer open={sinFacturarOpen} title="Viajes entregados sin facturar" width={620} onClose={() => setSinFacturarOpen(false)} footer={<><strong className="tgui-number">Total {fmt2(sinFacturarTotal)} €</strong><Button onClick={cargarSinFacturar}>Actualizar</Button>{canEdit && <Button variant="primary" onClick={() => { setSinFacturarOpen(false); setModalMulti(true); }}>Facturar pedidos</Button>}</>}>
+        <p>Todos los clientes y fechas. Se conserva el listado cargado de hasta 1.000 viajes.</p>
+        <DataTable rows={sinFacturarOrdenados} loading={sinFacturarLoad} emptyTitle="No hay viajes entregados pendientes de facturar" columns={[
+          {key:"fecha",label:"Fecha",render:p => fmtDate(p.fecha_descarga || p.fecha_carga)},
+          {key:"numero",label:"Nº"},{key:"cliente_nombre",label:"Cliente"},
+          {key:"ruta",label:"Ruta",render:p => `${p.origen || "?"} → ${p.destino || "?"}`},
+          {key:"importe",label:"Importe",render:p => `${fmt2(Number(p.importe || p.precio || 0))} €`},
+        ]} renderMobile={p => <MobileDataCard title={p.numero || "—"} amount={`${fmt2(Number(p.importe || p.precio || 0))} €`} subtitle={p.cliente_nombre}>{fmtDate(p.fecha_descarga || p.fecha_carga)} · {p.origen || "?"} → {p.destino || "?"}</MobileDataCard>} />
+      </Drawer>
+
+      {invoiceList}
+
       </>
       )}
 
+      </div>
+      <Drawer open={!!estadoFacturaEdit} title="Cambiar estado del borrador" onClose={() => setEstadoFacturaEdit(null)}><div className="tgui-filter-fields">{ESTADOS.map(estado => <Button key={estado} onClick={() => { cambiarEstado(estadoFacturaEdit.id, estado); setEstadoFacturaEdit(null); }}>{estadoFacturaLabel(estado)}</Button>)}</div></Drawer>
       {vistaFact && (() => {
         const cli = clientes.find(c=>c.id===vistaFact.cliente_id);
         const direccionApi = formatDireccion({
@@ -3552,7 +3250,7 @@ export default function Facturacion() {
         />;
       })()}
       {/* Paginacion */}
-      {activeFacturacionTab === "facturas" && totalPages>1&&(
+      {["facturas", "cobros"].includes(activeFacturacionTab) && totalPages>1&&(
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"12px 0",flexWrap:"wrap"}}>
           <button onClick={()=>setPage(1)} disabled={page===1} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===1?"not-allowed":"pointer",opacity:page===1?.5:1}}>{"<<"}</button>
           <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} style={{padding:"5px 12px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===1?"not-allowed":"pointer",opacity:page===1?.5:1}}>{"< Anterior"}</button>
@@ -3563,19 +3261,19 @@ export default function Facturacion() {
       )}
 
       {pagoProveedorEdit && (
-        <div style={{...S.modal,zIndex:260}} onMouseDown={e=>e.target===e.currentTarget&&setPagoProveedorEdit(null)}>
-          <div style={{background:"var(--bg2)",border:"1px solid #1e2d45",borderRadius:10,width:"min(760px,96vw)",maxHeight:"90vh",overflow:"auto",padding:18}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
+        <Modal title="Gestión de pago a proveedor" width={760} onClose={() => setPagoProveedorEdit(null)}>
+          <div className="finance-dialog-content">
+            <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
               <div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"var(--text)"}}>Gestion pago proveedor</div>
+                <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:900,fontSize:18,color:"var(--text)"}}>Gestion pago proveedor</div>
                 <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
                   {pagoProveedorEdit.numero} - {pagoProveedorEdit.colaborador_nombre} - {pagoProveedorEdit.origen} &gt; {pagoProveedorEdit.destino}
                 </div>
               </div>
-              <button onClick={()=>setPagoProveedorEdit(null)} style={{...S.btn,background:"var(--bg4)",color:"var(--text3)",border:"1px solid #1e2d45"}}>Cerrar</button>
+              <button onClick={()=>setPagoProveedorEdit(null)} style={{...S.btn,background:"var(--bg4)",color:"var(--text3)",border:"1px solid var(--border)"}}>Cerrar</button>
             </div>
 
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:10}}>
+            <div className="finance-grid" style={{display:"grid","--finance-columns":"repeat(auto-fit,minmax(190px,1fr))",gap:10}}>
               <label>
                 <span style={S.lbl}>Importe proveedor</span>
                 <input value={pagoProveedorForm.importe ?? ""} onChange={e=>setPagoProveedorForm(prev=>({...prev,importe:e.target.value}))} style={S.inp} />
@@ -3594,7 +3292,7 @@ export default function Facturacion() {
               </label>
             </div>
 
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:10,marginTop:8}}>
+            <div className="finance-grid" style={{display:"grid","--finance-columns":"repeat(auto-fit,minmax(240px,1fr))",gap:10,marginTop:8}}>
               <label>
                 <span style={S.lbl}>Factura proveedor</span>
                 <input value={pagoProveedorForm.factura_nombre || ""} onChange={e=>setPagoProveedorForm(prev=>({...prev,factura_nombre:e.target.value}))} placeholder="Numero o nombre de factura" style={S.inp} />
@@ -3610,11 +3308,11 @@ export default function Facturacion() {
             </div>
 
             <div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:12}}>
-              <label style={{display:"flex",alignItems:"center",gap:7,fontSize:13,color:"var(--text3)",fontWeight:700}}>
+              <label style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:7,fontSize:13,color:"var(--text3)",fontWeight:700}}>
                 <input type="checkbox" checked={Boolean(pagoProveedorForm.documentacion_recibida)} onChange={e=>setPagoProveedorForm(prev=>({...prev,documentacion_recibida:e.target.checked,fecha_documentacion_recepcion:e.target.checked && !prev.fecha_documentacion_recepcion ? new Date().toISOString().slice(0,10) : prev.fecha_documentacion_recepcion}))} />
                 Documentacion recepcionada
               </label>
-              <label style={{display:"flex",alignItems:"center",gap:7,fontSize:13,color:"var(--text3)",fontWeight:700}}>
+              <label style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:7,fontSize:13,color:"var(--text3)",fontWeight:700}}>
                 <input type="checkbox" checked={Boolean(pagoProveedorForm.pagado)} onChange={e=>setPagoProveedorForm(prev=>({...prev,pagado:e.target.checked,fecha_pago_real:e.target.checked && !prev.fecha_pago_real ? new Date().toISOString().slice(0,10) : prev.fecha_pago_real}))} />
                 Pagado
               </label>
@@ -3647,7 +3345,7 @@ export default function Facturacion() {
               <button onClick={()=>guardarGestionPagoProveedor()} style={{...S.btn,background:"var(--green)",color:"#04130f"}}>Guardar</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {modalMulti && <ModalFacturarMultiple onClose={()=>{setModalMulti(false);cargar();cargarSinFacturar();}}/>}
@@ -3664,6 +3362,6 @@ export default function Facturacion() {
         />
       )}
       {modalRect && <ModalRectificativa facturaOriginal={modalRect} onClose={()=>setModalRect(null)} onSaved={()=>{setModalRect(null);cargar();}}/>}
-    </div>
+    </Page>
   );
 }

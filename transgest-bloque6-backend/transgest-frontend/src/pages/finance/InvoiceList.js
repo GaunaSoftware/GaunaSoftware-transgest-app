@@ -24,7 +24,7 @@ export default function InvoiceList({ rows, loading, canEdit, states, stateLabel
     }
     return <div className="tgui-actions" onClick={e => e.stopPropagation()}><Button onClick={() => openInvoice(f.id, f)} aria-label={`Ver factura ${f.numero}`}>Ver</Button><DropdownMenu label={`Acciones de ${f.numero}`} items={items} /></div>;
   };
-  return <DataTable rows={rows} loading={loading} emptyTitle="Sin facturas" rowKey={f => f.__group ? `cliente-${f.key}` : f.id} onRowClick={rowClick} rowClassName={f => String(focusedId || "") === String(f.id) ? "finance-row-focused" : undefined} renderGroup={group => <Button className="finance-client-group" aria-expanded={!!openGroups[group.key]} onClick={() => toggleGroup(group.key)}><span>{openGroups[group.key] ? "⌄" : "›"} {group.cliente}</span><span>{group.facturas.length} facturas · <span className="tgui-number">{money(group.total)} €</span></span></Button>} columns={[
+  return <DataTable rowId={f => `factura-row-${f.id}`} rows={rows} loading={loading} emptyTitle="Sin facturas" rowKey={f => f.__group ? `cliente-${f.key}` : f.id} onRowClick={rowClick} rowClassName={f => String(focusedId || "") === String(f.id) ? "finance-row-focused" : undefined} renderGroup={group => <Button className="finance-client-group" aria-expanded={!!openGroups[group.key]} onClick={() => toggleGroup(group.key)}><span>{openGroups[group.key] ? "⌄" : "›"} {group.cliente}</span><span>{group.facturas.length} facturas · <span className="tgui-number">{money(group.total)} €</span></span></Button>} columns={[
     { key: "numero", label: "Factura", render: number },
     { key: "cliente_nombre", label: "Cliente" },
     { key: "fecha", label: "Fecha", className: "tgui-table-secondary", render: f => date(f.fecha) },

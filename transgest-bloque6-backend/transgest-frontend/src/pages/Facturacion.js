@@ -1,7 +1,9 @@
 import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal, Icon, AlertCard } from "../ui";
 import InvoiceList from "./finance/InvoiceList";
 import TreasuryView from "./finance/TreasuryView";
+import FinanceSummary, { FinanceIncidents } from "./finance/FinanceSummary";
 import "./finance/finance.css";
+import "./finance/summary.css";
 import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
@@ -2016,6 +2018,10 @@ export default function Facturacion() {
   const aiDisponible      = planHasFeature(getEmpresaPlanLocal(), "ai");
   const [activeFacturacionTab, setActiveFacturacionTab] = useFinanceTab();
   const [focusFactura]    = useState(() => readFacturacionFocus());
+  const [summaryClient, setSummaryClient] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const isSummary = activeFacturacionTab === "resumen";
+  useEffect(() => { if (focusFactura) setActiveFacturacionTab("facturas"); }, [focusFactura, setActiveFacturacionTab]);
   const [facturas,     setFacturas]     = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [filtro,       setFiltro]       = useState(() => focusFactura?.estado || "todos");
@@ -2704,11 +2710,72 @@ export default function Facturacion() {
   const fiscalAttention = Number(fiscalInfo.pendientes || 0) + Number(fiscalInfo.con_error || 0) + Number(fiscalInfo.atascados || 0);
   const fiscalNeedsSetup = fiscalSetupStatus && fiscalSetupStatus.level !== "ok";
   const totalPorPagar = pagosProveedor.reduce((sum, pago) => sum + Number(pago.importe || pago.precio_colaborador || 0), 0);
-  const invoiceList = <InvoiceList rows={tableItems} loading={loading} canEdit={canEdit} states={ESTADOS} stateLabel={estadoFacturaLabel} money={fmt2} date={fmtDate} fiscalMeta={getFacturaFiscalRowMeta} openInvoice={abrirFacturaPorId} rowClick={handleRowClick} changeState={cambiarEstado} sendInvoice={enviarFacturaRapida} rectify={setModalRect} remove={eliminarFacturaBorrador} retryFiscal={async id => { try { await reencolarFacturaFiscal(id); await cargar(); } catch(e) { notify(e.message, "error"); } }} openStates={setEstadoFacturaEdit} openGroups={clientesAbiertos} toggleGroup={key => setClientesAbiertos(prev => ({...prev, [key]: !prev[key]}))} focusedId={focusFactura?.factura_id} />;
+  const summaryInvoices = useMemo(() => filtradas.filter(f => !summaryClient || String(f.cliente_id) === summaryClient), [filtradas, summaryClient]);
+  const summaryClientOptions = new Map([...clientes.map(c => [String(c.id), c.nombre]), ...facturas.filter(f => f.cliente_id).map(f => [String(f.cliente_id), f.cliente_nombre])]);
+  if (summaryClient && !summaryClientOptions.has(summaryClient)) summaryClientOptions.set(summaryClient, "Cliente seleccionado (sin facturas cargadas)");
+  const renderInvoiceList = (rows = tableItems) => <InvoiceList rows={rows} loading={loading} canEdit={canEdit} states={ESTADOS} stateLabel={estadoFacturaLabel} money={fmt2} date={fmtDate} fiscalMeta={getFacturaFiscalRowMeta} openInvoice={abrirFacturaPorId} rowClick={handleRowClick} changeState={cambiarEstado} sendInvoice={enviarFacturaRapida} rectify={setModalRect} remove={eliminarFacturaBorrador} retryFiscal={async id => { try { await reencolarFacturaFiscal(id); await cargar(); } catch(e) { notify(e.message, "error"); } }} openStates={setEstadoFacturaEdit} openGroups={clientesAbiertos} toggleGroup={key => setClientesAbiertos(prev => ({...prev, [key]: !prev[key]}))} focusedId={focusFactura?.factura_id} />;
+
+  const invoiceFilters = (
+      <FilterBar search={<SearchInput value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar por número o cliente…" />} advanced={<>
+        <select aria-label="Estado fiscal" value={fiscalEstadoFiltro} onChange={e=>setFiscalEstadoFiltro(e.target.value)} style={S.sel}>
+          <option value="todos">Fiscal: todos</option>
+          <option value="aceptado">Fiscal aceptado</option>
+          <option value="pendiente">Fiscal pendiente</option>
+          <option value="error">Fiscal con error</option>
+          <option value="sin_registro">Sin registro fiscal</option>
+        </select>
+        <select aria-label="Modo fiscal" value={fiscalModoFiltro} onChange={e=>setFiscalModoFiltro(e.target.value)} style={{...S.sel,padding:"7px 12px",fontSize:13}}>
+          <option value="todos">Modo fiscal: todos</option>
+          <option value="verifactu">VERIFACTU</option>
+          <option value="sii">SII</option>
+          <option value="ninguno">Sin modo</option>
+        </select>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
+        {fiscalQuickFilters.map((item) => {
+          const active = fiscalEstadoFiltro === item.key || (item.key === "todos" && fiscalEstadoFiltro === "todos");
+          return (
+            <button
+              key={item.key}
+              onClick={() => setFiscalEstadoFiltro(item.key)}
+              style={{
+                ...S.btn,
+                padding:"6px 10px",
+                background: active ? "var(--accent-soft)" : "var(--bg3)",
+                color: item.color,
+                border:`1px solid ${active ? "var(--accent-border)" : "var(--border)"}`,
+              }}
+            >
+              {item.label} <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:800}}>{Number(item.value || 0)}</span>
+            </button>
+          );
+        })}
+      </div>
+      </>}>
+        {!filtroFechasCustom ? (!isSummary && (
+          <input aria-label="Mes de facturación" type="month" value={periodoMes} onChange={e=>cambiarMesPeriodo(e.target.value)} style={{...S.inp,width:190}}/>
+        )) : (
+          <>
+            <input aria-label="Desde" type="date" value={fechaDesde} onChange={e=>setFechaDesde(e.target.value)} style={{...S.inp,width:150}}/>
+            <input aria-label="Hasta" type="date" value={fechaHasta} onChange={e=>setFechaHasta(e.target.value)} style={{...S.inp,width:150}}/>
+          </>
+        )}
+        <button
+          onClick={alternarFiltroFechas}
+          style={{...S.btn,background:filtroFechasCustom?"var(--accent)":"var(--bg3)",color:filtroFechasCustom?"#fff":"var(--text3)",border:`1px solid ${filtroFechasCustom?"var(--accent)":"var(--border2)"}`}}
+        >
+          {filtroFechasCustom ? "Usar mes" : "Filtro personalizado"}
+        </button>
+        <select aria-label="Estado de factura" value={filtro} onChange={e=>setFiltro(e.target.value)} style={S.sel}>
+          <option value="todos">Todos los estados</option>
+          {[...ESTADOS,"rectificada"].map(e=><option key={e} value={e}>{estadoFacturaLabel(e)}</option>)}
+        </select>
+        {isSummary && <select className="tgui-input" aria-label="Cliente del resumen" value={summaryClient} onChange={e => setSummaryClient(e.target.value)}><option value="">Todos los clientes</option>{Array.from(summaryClientOptions.entries()).map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>}
+      </FilterBar>
+  );
 
   return (
-    <Page className="finance-page">
-      <PageHeader title="Gestión financiera" description="Controla la facturación, los cobros, los pagos y la tesorería de tu empresa." actions={canEdit && <Button variant="primary" onClick={() => setModalMulti(true)}>+ Nueva factura</Button>} />
+    <Page className={`finance-page${isSummary ? " finance-page--summary" : ""}`}>
+      <PageHeader title="Gestión financiera" description="Controla la facturación, los cobros, los pagos y la tesorería de tu empresa." actions={<>{isSummary && !filtroFechasCustom && <input className="tgui-input finance-header-month" aria-label="Mes de facturación" type="month" value={periodoMes} onChange={e => cambiarMesPeriodo(e.target.value)} />}{canEdit && <Button variant="primary" onClick={() => setModalMulti(true)}>+ Nueva factura</Button>}</>} />
       <Tabs idPrefix="finance" label="Finanzas" value={activeFacturacionTab} onChange={setActiveFacturacionTab} items={FINANCE_TABS} />
       {focusFactura?.source === "control_tower" && !focusFactura?.factura_id && (
         <div style={{...S.card,marginBottom:14,borderColor:"var(--accent-a35)",background:"var(--accent-a07)"}}>
@@ -2725,6 +2792,7 @@ export default function Facturacion() {
         </div>
       )}
 
+      <div className={isSummary ? "finance-overview-kpis" : undefined}>
       <div className="finance-kpis">
         {activeFacturacionTab === "cobros" ? <>
           <KpiCard icon="coins" label="Por cobrar" value={`${fmt2(controlResumen.importe_pendiente || 0)} €`} detail="Resumen de control de cobros" />
@@ -2732,22 +2800,25 @@ export default function Facturacion() {
           <KpiCard icon="invoice" label="Reclamado" value={`${Number(controlResumen.reclamadas || 0)} facturas`} tone="warning" />
           <KpiCard icon="shield" label="Bloqueado documentalmente" value={`${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} €`} />
         </> : <>
-          <KpiCard icon="invoice" label="Total facturado" value={`${fmt2(total)} €`} detail="Facturas cargadas del período" />
-          <KpiCard icon="coins" label="Por cobrar" value={`${fmt2(pendiente)} €`} detail="Facturas cargadas del período" />
-          <KpiCard icon="wallet" label="Por pagar" value={`${fmt2(totalPorPagar)} €`} detail="Pagos pendientes cargados" />
+          <KpiCard icon="invoice" label="Total facturado" value={`${fmt2(total)} €`} detail={isSummary ? "Facturas cargadas" : "Facturas cargadas del período"} />
+          <KpiCard icon="coins" label="Por cobrar" value={`${fmt2(pendiente)} €`} detail={isSummary ? "Facturas cargadas" : "Facturas cargadas del período"} />
+          <KpiCard icon="wallet" label="Por pagar" value={`${fmt2(totalPorPagar)} €`} detail={isSummary ? "Pagos cargados" : "Pagos pendientes cargados"} />
           <KpiCard icon="clock" label="Tesorería 30 días" value={`${fmt2(previsionTesoreria.saldoPrevisto30)} €`} tone={previsionTesoreria.saldoPrevisto30 < 0 ? "danger" : "neutral"} detail="Saldo previsto" />
         </>}
       </div>
-      <div className="finance-signals" aria-label="Señales financieras">
+      {isSummary && <FinanceIncidents reviews={Number(controlResumen.revisar_hoy || 0)} documents={Number(bloqueoDocResumen.total_bloqueos || bloqueoDocItems.length || 0)} fiscal={fiscalAttention} fiscalAvailable={!!fiscalResumen} onCollections={() => setActiveFacturacionTab("cobros")} onDocuments={() => { setActiveFacturacionTab("cobros"); setDocumentosOpen(true); }} onFiscal={() => setActiveFacturacionTab("fiscal")} />}
+      </div>
+      {!isSummary && <div className="finance-signals" aria-label="Señales financieras">
         <AlertCard icon="invoice" tone={Number(bloqueoDocResumen.total_bloqueos || bloqueoDocItems.length || 0) > 0 ? "danger" : "neutral"} title={`${Number(bloqueoDocResumen.total_bloqueos || bloqueoDocItems.length || 0)} incidencias documentales`} description="Revisa POD, albaranes y CMR" onClick={() => { setActiveFacturacionTab("cobros"); setDocumentosOpen(true); }} />
         <AlertCard icon="clock" tone={Number(controlResumen.revisar_hoy || 0) > 0 ? "warning" : "neutral"} title={`${Number(controlResumen.revisar_hoy || 0)} cobros a revisar`} description="Seguimiento de facturas" onClick={() => setActiveFacturacionTab("cobros")} />
         <AlertCard icon="shield" tone={!fiscalResumen ? "neutral" : fiscalAttention || fiscalNeedsSetup ? "warning" : "success"} title={!fiscalResumen ? "Fiscal: resumen no disponible" : fiscalNeedsSetup ? "Fiscal: revisar configuración" : fiscalAttention ? `Fiscal: ${fiscalAttention} incidencias` : "Fiscal sin incidencias"} description="Consultar estado y configuración AEAT" onClick={() => setActiveFacturacionTab("fiscal")} />
-      </div>
+      </div>}
       <div id="finance-panel" role="tabpanel" aria-labelledby={`finance-${activeFacturacionTab}`} tabIndex={0}>
-      {activeFacturacionTab === "resumen" && <>
-        <Card className="finance-backlog finance-backlog--pending"><span className="finance-backlog-icon"><Icon name="truck" size={26} /></span><div className="finance-backlog-copy"><strong>{sinFacturar.length} viajes pendientes de facturar</strong><p><span className="tgui-number">{fmt2(sinFacturarTotal)} €</span> · Todos los períodos</p></div><Button onClick={() => { setActiveFacturacionTab("facturas"); setSinFacturarOpen(true); }}>Revisar viajes <Icon name="chevron" size={16} /></Button></Card>
-        <TreasuryView forecast={previsionTesoreria} money={fmt2} date={fmtDate} onReport={descargarInformeTesoreria} />
-      </>}
+      {isSummary && <FinanceSummary forecast={previsionTesoreria} money={fmt2} backlogCount={sinFacturar.length} backlogAmount={sinFacturarTotal} invoices={summaryInvoices} totalCount={totalCount} filters={invoiceFilters} renderInvoices={renderInvoiceList} canEdit={canEdit}
+        onBacklog={() => { setActiveFacturacionTab("facturas"); setSinFacturarOpen(true); }} onInvoice={() => setModalMulti(true)} onAllInvoices={() => setActiveFacturacionTab("facturas")} onExport={() => setExportOpen(true)}
+        documents={Number(bloqueoDocResumen.pedidos_sin_soporte || 0)} reviews={Number(controlResumen.revisar_hoy || 0)} pending={Number(controlResumen.importe_pendiente || 0)}
+        fiscalLabel={!fiscalResumen ? "Resumen no disponible" : fiscalNeedsSetup ? "Revisar configuración" : fiscalAttention ? `${fiscalAttention} incidencias` : "Sin incidencias"} fiscalMode={fiscalResumen ? `Modo ${String(fiscalResumen.config?.modo || "ninguno").toUpperCase()} · ${Number(fiscalInfo.total_registros || 0)} registros` : "Estado fiscal no disponible"}
+        onDocuments={() => { setActiveFacturacionTab("cobros"); setDocumentosOpen(true); }} onCollections={() => setActiveFacturacionTab("cobros")} onFiscal={() => setActiveFacturacionTab("fiscal")} />}
       {activeFacturacionTab === "tesoreria" && <TreasuryView forecast={previsionTesoreria} money={fmt2} date={fmtDate} onReport={descargarInformeTesoreria} />}
 
       {activeFacturacionTab === "fiscal" && (
@@ -3140,60 +3211,7 @@ export default function Facturacion() {
       <Card as="section" className="finance-invoices" aria-label="Facturas de clientes">
       <header className="finance-invoices-header"><div><h2>Facturas de clientes <span>({totalCount})</span></h2><p>Emisión, fiscalidad y seguimiento de facturas.</p></div></header>
       {/* Filtros */}
-      <FilterBar search={<SearchInput value={busqueda} onChange={e => setBusqueda(e.target.value)} placeholder="Buscar por número o cliente…" />} advanced={<>
-        <select aria-label="Estado fiscal" value={fiscalEstadoFiltro} onChange={e=>setFiscalEstadoFiltro(e.target.value)} style={S.sel}>
-          <option value="todos">Fiscal: todos</option>
-          <option value="aceptado">Fiscal aceptado</option>
-          <option value="pendiente">Fiscal pendiente</option>
-          <option value="error">Fiscal con error</option>
-          <option value="sin_registro">Sin registro fiscal</option>
-        </select>
-        <select aria-label="Modo fiscal" value={fiscalModoFiltro} onChange={e=>setFiscalModoFiltro(e.target.value)} style={{...S.sel,padding:"7px 12px",fontSize:13}}>
-          <option value="todos">Modo fiscal: todos</option>
-          <option value="verifactu">VERIFACTU</option>
-          <option value="sii">SII</option>
-          <option value="ninguno">Sin modo</option>
-        </select>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
-        {fiscalQuickFilters.map((item) => {
-          const active = fiscalEstadoFiltro === item.key || (item.key === "todos" && fiscalEstadoFiltro === "todos");
-          return (
-            <button
-              key={item.key}
-              onClick={() => setFiscalEstadoFiltro(item.key)}
-              style={{
-                ...S.btn,
-                padding:"6px 10px",
-                background: active ? "var(--accent-soft)" : "var(--bg3)",
-                color: item.color,
-                border:`1px solid ${active ? "var(--accent-border)" : "var(--border)"}`,
-              }}
-            >
-              {item.label} <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,fontWeight:800}}>{Number(item.value || 0)}</span>
-            </button>
-          );
-        })}
-      </div>
-      </>}>
-        {!filtroFechasCustom ? (
-          <input aria-label="Mes de facturación" type="month" value={periodoMes} onChange={e=>cambiarMesPeriodo(e.target.value)} style={{...S.inp,width:190}}/>
-        ) : (
-          <>
-            <input aria-label="Desde" type="date" value={fechaDesde} onChange={e=>setFechaDesde(e.target.value)} style={{...S.inp,width:150}}/>
-            <input aria-label="Hasta" type="date" value={fechaHasta} onChange={e=>setFechaHasta(e.target.value)} style={{...S.inp,width:150}}/>
-          </>
-        )}
-        <button
-          onClick={alternarFiltroFechas}
-          style={{...S.btn,background:filtroFechasCustom?"var(--accent)":"var(--bg3)",color:filtroFechasCustom?"#fff":"var(--text3)",border:`1px solid ${filtroFechasCustom?"var(--accent)":"var(--border2)"}`}}
-        >
-          {filtroFechasCustom ? "Usar mes" : "Filtro personalizado"}
-        </button>
-        <select aria-label="Estado de factura" value={filtro} onChange={e=>setFiltro(e.target.value)} style={S.sel}>
-          <option value="todos">Todos los estados</option>
-          {[...ESTADOS,"rectificada"].map(e=><option key={e} value={e}>{estadoFacturaLabel(e)}</option>)}
-        </select>
-      </FilterBar>
+      {invoiceFilters}
       <div className="finance-toolbar">
         <button
           onClick={()=>setAgruparCliente(v=>!v)}
@@ -3213,7 +3231,7 @@ export default function Facturacion() {
         ]} renderMobile={p => <MobileDataCard title={p.numero || "—"} amount={`${fmt2(Number(p.importe || p.precio || 0))} €`} subtitle={p.cliente_nombre}>{fmtDate(p.fecha_descarga || p.fecha_carga)} · {p.origen || "?"} → {p.destino || "?"}</MobileDataCard>} />
       </Drawer>
 
-      {invoiceList}
+      {renderInvoiceList()}
       {canEdit && <details className="finance-accounting"><summary>Exportación contable</summary><ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} /></details>}
       </Card>
 
@@ -3221,6 +3239,7 @@ export default function Facturacion() {
       )}
 
       </div>
+      <Drawer open={exportOpen && canEdit} title="Exportación contable" width={760} onClose={() => setExportOpen(false)}><ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} /></Drawer>
       <Drawer open={!!estadoFacturaEdit} title="Cambiar estado del borrador" onClose={() => setEstadoFacturaEdit(null)}><div className="tgui-filter-fields">{ESTADOS.map(estado => <Button key={estado} onClick={() => { cambiarEstado(estadoFacturaEdit.id, estado); setEstadoFacturaEdit(null); }}>{estadoFacturaLabel(estado)}</Button>)}</div></Drawer>
       {vistaFact && (() => {
         const cli = clientes.find(c=>c.id===vistaFact.cliente_id);

@@ -29,6 +29,8 @@ export default function InvoiceList({ rows, loading, canEdit, states, stateLabel
     { key: "cliente_nombre", label: "Cliente" },
     { key: "fecha", label: "Fecha", className: "tgui-table-secondary", render: f => date(f.fecha) },
     { key: "vencimiento", label: "Vencimiento", render: f => date(f.fecha_vencimiento) },
+    { key: "base_imponible", label: "Base", className: "finance-tax-column", render: f => f.base_imponible == null ? "—" : `${money(f.base_imponible)} €` },
+    { key: "tipo_iva", label: "IVA", className: "finance-tax-column", render: f => f.tipo_iva == null ? "—" : `${Number(f.tipo_iva)}%` },
     { key: "total", label: "Total", render: f => <strong className="tgui-number">{money(f.total)} €</strong> },
     { key: "estado", label: "Estado", render: status },
     { key: "fiscal", label: "Fiscal", render: fiscal },

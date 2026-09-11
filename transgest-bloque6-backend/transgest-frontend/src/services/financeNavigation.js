@@ -17,7 +17,7 @@ export function selectFinanceTab(value) {
 }
 
 export function useFinanceTab() {
-  const [value, setValue] = useState(() => readRuntimeFocus("tms_finance_tab") || "facturas");
+  const [value, setValue] = useState(() => readRuntimeFocus("tms_finance_tab") || "resumen");
   useEffect(() => {
     const sync = event => { if (FINANCE_TABS.some(tab => tab.value === event.detail)) setValue(event.detail); };
     window.addEventListener("tms:finance-tab", sync);

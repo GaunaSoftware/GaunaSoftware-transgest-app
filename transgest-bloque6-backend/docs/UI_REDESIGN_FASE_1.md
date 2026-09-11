@@ -2,6 +2,8 @@
 
 Rama: `ui-redesign-v1`. Alcance: Fase 1. Las pantallas de Fase 2 no se migran en este bloque.
 
+Actualización del 11/09/2026: el refinamiento basado en las referencias de Facturación se documenta en [UI_REDESIGN_REFERENCIAS_FINANZAS.md](UI_REDESIGN_REFERENCIAS_FINANZAS.md). Esa entrega actualiza la densidad, el breakpoint móvil a 768 px, los indicadores contextuales y los accesos inferiores de soporte/salida. Los detalles siguientes describen la primera entrega.
+
 ## Arquitectura
 
 - `src/ui/index.js` expone Button, Card, Badge, Tabs, Page, PageHeader, Section, KpiCard, FilterBar, DataTable, MobileDataCard, Drawer, Modal, EmptyState, SearchInput y Select, además de DropdownMenu.

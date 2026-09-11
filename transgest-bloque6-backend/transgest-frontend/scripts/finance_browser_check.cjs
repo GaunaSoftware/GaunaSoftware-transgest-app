@@ -37,6 +37,7 @@ async function main(){
    let data=[];
    if(req.method()!=='GET')mutations.push({pathname,method:req.method(),body:req.postData()});
    if(pathname==='/auth/me')data=user;
+   else if(pathname==='/mi-cuenta/')data={nombre:'TransGest QA',plan:'enterprise',estado:'activa'};
    else if(pathname==='/facturas/control-cobros')data={resumen:{revisar_hoy:13,importe_pendiente:929.28,vencidas:2,reclamadas:1,sin_cobrar:1},proximas:[invoices[1]],riesgo:[invoices[4],invoices[5]],config:{}};
    else if(pathname==='/facturas/bloqueos-documentales')data={resumen:{total_bloqueos:12,pedidos_sin_soporte:6,importe_bloqueado_facturacion:2304},pedidos:orders.map(p=>({...p,bloqueos:['Falta POD'],accion:'Revisar documentación'})),facturas:[],cobros:[]};
    else if(pathname==='/facturas/fiscal/resumen')data=fiscalUnavailable?null:{resumen:{total_registros:7,aceptados:6,con_error:1,pendientes:0},status:{level:'ok',summary:'Configuración completa'},config:{modo:'verifactu'},recientes:[{id:'fiscal-4',factura_id:'factura-4',numero:invoices[4].numero,estado_envio:'error',modo:'verifactu',cliente_nombre:client.nombre}],cola:[]};
@@ -75,16 +76,18 @@ async function main(){
   };
   for(const theme of ['light','dark']){
    if(await page.locator('html').getAttribute('data-theme')!==theme)await page.locator('.tg-topbar').getByRole('button',{name:/tema|claro|oscuro/i}).click();
-   for(const width of [390,430,768,1024,1366,1440,1920]){
-    await page.setViewportSize({width,height:1000});
+   for(const width of [390,430,767,768,1024,1366,1440,1600,1920]){
+    await page.setViewportSize({width,height:({390:844,430:932,768:1024,1024:768,1366:768,1600:900}[width]||1000)});
     for(const tab of ['Facturas','Cobros','Pagos','Tesorería','Fiscal']){
      await page.getByRole('tab',{name:tab,exact:true}).click();
      await page.locator('.tg-content').evaluate(el=>{el.scrollTop=0;});
      assert.equal(await page.getByRole('tab',{name:tab,exact:true}).getAttribute('aria-selected'),'true');
      if(tab==='Facturas') {
-      assert.equal(await page.locator('.tgui-mobile-data:visible').count(),width<640?1:0);
+      assert.equal(await page.locator('.tgui-mobile-data:visible').count(),width<768?1:0);
       if(width>=1366)assert.ok((await page.locator('.tgui-table tbody tr').first().boundingBox()).height<=72);
      }
+     assert.equal(await page.locator('.finance-kpis .tgui-kpi').count(),4,'One contextual KPI row');
+     if(tab==='Tesorería')assert.equal(await page.getByText('Saldo previsto 30 días',{exact:true}).count(),0,'No duplicate treasury KPI');
      await noOverflow(`${theme}-${width}-${tab}`);
      if(width===390||width===1440)await page.screenshot({path:path.join(out,`${theme}-${width}-${tab}.png`)});
     }
@@ -160,6 +163,21 @@ async function main(){
   await page.getByRole('button',{name:'Revisar documentación',exact:true}).click();await noOverflow('document-drawer-mobile');await page.keyboard.press('Escape');
   await page.setViewportSize({width:1440,height:1000});
   await page.locator('.tg-sidebar-toggle').click();assert.ok((await page.locator('.tg-sidebar').getAttribute('class')).includes('collapsed'));await noOverflow('collapsed-sidebar');
+  assert.equal(await page.locator('.tg-sidebar .tg-sidebar-user-copy').count(),0);
+  assert.equal(await page.locator('.tg-user-chip').count(),1);
+  for(const name of ['Contactar soporte','Cerrar sesión']) {
+   const button=page.getByRole('button',{name,exact:true});
+   assert.ok(await button.isVisible());assert.ok((await button.boundingBox()).height>=44);
+  }
+  await page.getByRole('button',{name:'Contactar soporte',exact:true}).click();
+  await page.getByPlaceholder('Describe tu consulta, incidencia o solicitud de cambio de plan...').waitFor();
+  await page.getByRole('button',{name:/Mi plan/}).click();
+  await page.getByRole('button',{name:'Contactar soporte',exact:true}).click();
+  await page.getByPlaceholder('Describe tu consulta, incidencia o solicitud de cambio de plan...').waitFor();
+  assert.ok(!mutations.some(m=>m.pathname==='/mi-cuenta/soporte'),'Opening support must not send a message');
+  checks.push('single-profile','footer-actions-collapsed','support-navigation-and-reopen');
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'facturacion'})));
+  await page.getByRole('heading',{name:'Gestión financiera',exact:true}).waitFor();
   await page.setViewportSize({width:390,height:1000});await page.locator('.tg-mobile-menu-btn').click();assert.ok((await page.locator('.tg-sidebar').getAttribute('class')).includes('mobile-open'));await page.locator('.tg-sidebar-backdrop').click({position:{x:380,y:500}});
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:company-palette-changed',{detail:{id:'custom',accent:'#7c3aed',accentLight:'#a78bfa',sidebar:'#23103b'}})));
   assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()),'#7c3aed');
@@ -177,6 +195,12 @@ async function main(){
   assert.equal(await page.getByRole('button',{name:/Acciones de A-2026/}).count(),0);
   assert.ok(await page.getByRole('button',{name:'Ver factura A-2026-0059',exact:true}).filter({visible:true}).isVisible());
   await page.getByText('Fiscal: resumen no disponible',{exact:true}).waitFor();checks.push('read-only-permissions','fiscal-unavailable');
+  await page.locator('.tg-mobile-menu-btn').click();
+  await page.screenshot({path:path.join(out,'mobile-sidebar-footer.png')});
+  await page.getByRole('button',{name:'Cerrar sesión',exact:true}).click();
+  await page.locator('.tg-sidebar').waitFor({state:'hidden'});
+  assert.equal(await page.evaluate(()=>localStorage.getItem('tms_token')),null);
+  checks.push('logout-mobile');
   assert.deepEqual(errors,[],'Browser console errors');
   fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({checks,errors,mutations,screenshots:out},null,2));
   console.log(`PASS: ${checks.length} finance checks; ${mutations.length} simulated mutations; no console errors. Screenshots: ${out}`);

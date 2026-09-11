@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { getToken, getUser } from "../services/api";
 import { resolveApiBase } from "../utils/serverConfig";
+import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
 
 const BASE = resolveApiBase();
 const fmt  = d => d ? new Date(d).toLocaleDateString("es-ES") : "Sin límite";
@@ -59,7 +60,13 @@ export default function MiCuenta(){
   const [cuenta,   setCuenta]   = useState(null);
   const [facturas, setFacturas] = useState([]);
   const [loading,  setLoading]  = useState(true);
-  const [tab,      setTab]      = useState("plan"); // plan | facturas | datos | password
+  const [tab,      setTab]      = useState(() => readRuntimeFocus("tms_cuenta_tab") === "soporte" ? "soporte" : "plan");
+  useEffect(() => {
+    clearRuntimeFocus("tms_cuenta_tab");
+    const openSupport = () => { setTab("soporte"); clearRuntimeFocus("tms_cuenta_tab"); };
+    window.addEventListener("tms:cuenta-soporte", openSupport);
+    return () => window.removeEventListener("tms:cuenta-soporte", openSupport);
+  }, []);
   const esGerente = String(getUser()?.rol || "").toLowerCase() === "gerente";
   const [apiKeys,    setApiKeys]    = useState([]);
   const [apiKeyForm, setApiKeyForm] = useState({ nombre:"", scopes:[], dias:365 });

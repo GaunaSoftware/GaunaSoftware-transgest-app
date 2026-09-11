@@ -5,6 +5,8 @@ import { BRAND_NAME, getBrandDisplayName, getBrandVersionLabel } from "../brandi
 import { getPublicAppMeta } from "../services/api";
 import { getEmpresaPlanLocal } from "../utils/planFeatures";
 import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
+import { Icon } from "../ui";
+import { setRuntimeFocus } from "../services/runtimeFocus";
 
 const ROL_LABEL = { gerente:"Gerente", contable:"Contable", trafico:"Tráfico", visualizador:"Visualizador", chofer:"Chófer", cliente:"Cliente" };
 const ROL_COLOR = { gerente:"var(--accent)", contable:"#10b981", trafico:"#f97316", visualizador:"#64746f", chofer:"#f97316", cliente:"var(--accent-l)" };
@@ -46,8 +48,16 @@ const CSS = `
   .tg-sidebar.collapsed .tg-brand-mark { display:flex !important; }
   .tg-sidebar.collapsed .tg-nav-item { width:44px; height:42px; margin:4px auto; padding:0; justify-content:center; border-radius:10px; }
   .tg-sidebar.collapsed .tg-sidebar-footer { padding:12px 10px !important; }
-  .tg-sidebar.collapsed .tg-sidebar-footer > div { justify-content:center; }
-  .tg-sidebar.collapsed .tg-sidebar-footer button { display:none !important; }
+  .tg-sidebar-footer { padding:12px 14px; border-top:1px solid rgba(255,255,255,.08); flex-shrink:0; background:rgba(255,255,255,.025); display:grid; gap:8px; }
+  .tg-sidebar-footer-action { display:flex; align-items:center; gap:10px; width:100%; min-height:44px; padding:10px; border:1px solid transparent; border-radius:8px; background:transparent; color:rgba(255,255,255,.8); font:600 13px 'DM Sans',sans-serif; text-align:left; cursor:pointer; }
+  .tg-sidebar-footer-action svg { flex-shrink:0; }
+  .tg-sidebar-support { background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.12); }
+  .tg-sidebar-footer-action strong, .tg-sidebar-footer-action small { display:block; }
+  .tg-sidebar-footer-action small { margin-top:3px; color:rgba(255,255,255,.6); font-size:12px; font-weight:400; }
+  .tg-sidebar-footer-action:hover { background:rgba(255,255,255,.1); color:white; }
+  .tg-sidebar-footer-action:focus-visible { outline:2px solid var(--accent-l); outline-offset:2px; }
+  .tg-sidebar.collapsed .tg-sidebar-footer-action { justify-content:center; padding:10px; }
+  .tg-sidebar.collapsed .tg-sidebar-footer-copy { display:none; }
   .tg-nav-badge { font-size:9px; font-weight:800; padding:1px 6px; border-radius:4px; background:var(--bg4); color:var(--text5); letter-spacing:.04em; flex-shrink:0; }
   .tg-nav-item.active .tg-nav-badge { background:var(--accent-dim); color:var(--accent-xl); }
   .tg-nav-chevron { width:14px; height:14px; flex-shrink:0; transition:transform .18s; opacity:.4; }
@@ -121,7 +131,8 @@ const CSS = `
     .tg-sidebar.collapsed .tg-brand-wordmark, .tg-sidebar.collapsed .tg-brand-pill, .tg-sidebar.collapsed .tg-nav-group, .tg-sidebar.collapsed .tg-nav-item-label, .tg-sidebar.collapsed .tg-nav-badge, .tg-sidebar.collapsed .tg-nav-chevron, .tg-sidebar.collapsed .tg-sidebar-user-copy { display:flex !important; }
     .tg-sidebar.collapsed .tg-nav-group { display:block !important; }
     .tg-sidebar.collapsed .tg-nav-sub { display:block !important; }
-    .tg-sidebar.collapsed .tg-sidebar-footer button { display:flex !important; }
+    .tg-sidebar.collapsed .tg-sidebar-footer-action { justify-content:flex-start; }
+    .tg-sidebar.collapsed .tg-sidebar-footer-copy { display:block; }
     .tg-sidebar.collapsed .tg-brand-mark { display:none !important; }
     .tg-sidebar.collapsed .tg-sidebar-brand { padding:20px 16px 16px !important; }
     .tg-sidebar.collapsed .tg-nav-item { width:calc(100% - 20px); height:auto; margin:2px 10px; padding:9px 12px 9px 14px; justify-content:flex-start; }
@@ -781,34 +792,21 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
             ))}
           </div>
 
-          {/* User footer */}
-          <div className="tg-sidebar-footer" style={{ padding:"12px 14px", borderTop:"1px solid rgba(255,255,255,.08)", flexShrink:0, background:"rgba(255,255,255,.025)" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:9 }}>
-              <div style={{
-                width:30, height:30, borderRadius:7, flexShrink:0,
-                background: ROL_COLOR[user?.rol] || "var(--accent)",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                fontSize:11, fontWeight:800, color:"#fff", fontFamily:"'Syne',sans-serif",
+          {/* Accesos inferiores; la identidad permanece en la cabecera. */}
+          <div className="tg-sidebar-footer">
+            {modulos.some(grupo => grupo.items.some(item => item.id === "mi_cuenta" || item.children?.some(child => child.id === "mi_cuenta"))) && (
+              <button className="tg-sidebar-footer-action tg-sidebar-support" type="button" title="Contactar soporte" aria-label="Contactar soporte" onClick={() => {
+                setRuntimeFocus("tms_cuenta_tab", "soporte");
+                handleSetVista("mi_cuenta");
+                window.dispatchEvent(new CustomEvent("tms:cuenta-soporte"));
               }}>
-                {user?.nombre?.slice(0,2)?.toUpperCase() || "??"}
-              </div>
-              <div className="tg-sidebar-user-copy" style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:12, fontWeight:600, color:"#ffffff", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                  {user?.nombre?.split(" ")[0]}
-                </div>
-                <div style={{ fontSize:10, color:ROL_COLOR[user?.rol]||"var(--accent-l)", fontWeight:700 }}>{ROL_LABEL[user?.rol]}</div>
-              </div>
-              <button onClick={logout} title="Cerrar sesión"
-                style={{ background:"none", border:"none", padding:4, cursor:"pointer", color:"rgba(255,255,255,0.5)",
-                         borderRadius:5, transition:"color .15s" }}
-                onMouseEnter={e=>e.currentTarget.style.color="#f05252"}
-                onMouseLeave={e=>e.currentTarget.style.color="rgba(255,255,255,0.5)"}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
+                <Icon name="headset" />
+                <span className="tg-sidebar-footer-copy"><strong>Soporte</strong><small>¿Necesitas ayuda?</small></span>
               </button>
-            </div>
+            )}
+            <button className="tg-sidebar-footer-action" type="button" onClick={logout} title="Cerrar sesión" aria-label="Cerrar sesión">
+              <Icon name="logout" /><span className="tg-sidebar-footer-copy">Cerrar sesión</span>
+            </button>
           </div>
         </div>
 

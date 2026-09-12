@@ -24,4 +24,4 @@ Los indicadores se calculan sobre el listado cargado, limitado actualmente a 100
 
 ## Publicación
 
-El dominio configurado que responde es `https://app.gauna.es`, sin `www`. El rediseño se mantiene en `ui-redesign-v1`; subir esta rama no implica actualizar el dominio de producción ni aplicar migraciones en Render. El header de identificación del frontend se actualiza a `2026-09-12-clientes-ui` para facilitar la verificación del despliegue. No se modifica `main`.
+El dominio configurado que responde es `https://app.gauna.es`, sin `www`. La entrega conjunta de Facturación, Clientes/Tarifas y Pedidos se publica en `main`, según autorización del usuario. Subir el código no aplica la migración de Render. El header de identificación del frontend es `2026-09-12-finanzas-clientes-pedidos`. Consulta `UI_PEDIDOS_TRAFICO.md` para los pasos de despliegue de frontend y API.

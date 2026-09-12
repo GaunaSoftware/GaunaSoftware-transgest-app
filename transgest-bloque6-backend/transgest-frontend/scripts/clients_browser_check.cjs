@@ -105,6 +105,7 @@ async function main(){
     if(width===390)await page.screenshot({path:path.join(out,'clientes-mobile.png'),fullPage:true});
     await page.getByRole('button',{name:'+ Nuevo cliente',exact:true}).click();
     assert.equal(await dialog.locator('img').count(),0);
+    await page.screenshot({path:path.join(out,`cliente-form-${width}.png`)});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),false,`Editor overflow ${width}`);
     await dialog.getByRole('button',{name:'Cerrar',exact:true}).click();
     checks.push(`Responsive list, summary and editor ${width}`);
@@ -113,6 +114,15 @@ async function main(){
   await page.getByRole('heading',{name:'Rutas y tarifas'}).waitFor();
   await page.getByText('VALENCIA -> MADRID',{exact:false}).first().waitFor();
   for(const width of [390,768,1440]) {await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),false,`Rutas overflow ${width}`);await page.screenshot({path:path.join(out,`rutas-${width}.png`),fullPage:true});}
+  for(const width of [390,768,1440]){
+    await page.setViewportSize({width,height:1000});
+    await page.getByRole('button',{name:'+ Nueva ruta',exact:true}).click();
+    const newRoute=page.getByRole('dialog',{name:'Nueva ruta',exact:true});await newRoute.waitFor();
+    assert.ok(await newRoute.evaluate(el=>el.scrollWidth<=el.clientWidth+1),`Route form overflow ${width}`);
+    await page.screenshot({path:path.join(out,`ruta-form-${width}.png`)});
+    await newRoute.getByRole('button',{name:'Cerrar',exact:true}).click();
+  }
+
   await page.getByRole('navigation',{name:'Clientes y tarifas'}).getByRole('button',{name:'Clientes',exact:true}).click();
   await page.getByRole('heading',{name:'Clientes',exact:true}).waitFor();
   for(const theme of ['dark','light']) {

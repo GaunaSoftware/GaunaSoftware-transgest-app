@@ -13,3 +13,7 @@ El botón «Análisis detallado» conserva el Dashboard anterior, sus filtros de
 - `npm run build`: compilación de producción.
 - `node scripts/dashboard_browser_check.cjs`: Edge con API simulada; recuentos, exclusión de borradores, agenda, clasificación, vencimientos, permisos, apertura de pedidos, análisis detallado, estados vacíos, error/reintento y tamaños 390–1672 px en temas claro/oscuro.
 - No requiere migraciones ni cambios en el backend. Desplegar el frontend desde `main` tras publicar este bloque. Para las imágenes del bloque anterior sigue siendo necesaria la migración `013_clientes_imagen_opcional.sql`.
+
+## Formularios internos
+
+Los formularios de Pedidos, Clientes, Facturación y Rutas comparten superficies, campos, etiquetas, foco visible y tamaños táctiles mediante `ui/forms.css`. Se mantienen los tipos de campo, datos, eventos y botones. Nueva/editar ruta y su editor de tarifas usan el Modal compartido (título, cierre, foco y comportamiento móvil). El editor de pedidos conserva su flujo de cierre y validaciones propios. Las pruebas de Clientes y Pedidos incluyen capturas de formularios en 390, 768 y 1440 px; la batería financiera comprueba detalle y creación de facturas.

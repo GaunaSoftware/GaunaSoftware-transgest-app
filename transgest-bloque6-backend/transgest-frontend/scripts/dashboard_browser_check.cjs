@@ -65,6 +65,11 @@ async function main(){fs.mkdirSync(out,{recursive:true});
       if(width===390)await page.waitForFunction(()=>{const el=document.querySelector('.tg-sidebar');return !el||el.getBoundingClientRect().right<=1;});
       await page.screenshot({path:path.join(out,`dashboard-${theme}-${width}.png`),fullPage:width>600});
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),`${theme} ${width} horizontal overflow`);
+      if(width===1672){
+        await page.locator('.tg-content').evaluate(el=>{el.scrollTop=el.scrollHeight;});
+        await page.screenshot({path:path.join(out,`dashboard-${theme}-bottom.png`)});
+        await page.locator('.tg-content').evaluate(el=>{el.scrollTop=0;});
+      }
       checks.push(`${theme} ${width} responsive`);
     }
   }

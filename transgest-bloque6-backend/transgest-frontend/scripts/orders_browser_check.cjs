@@ -86,6 +86,12 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   await page.setViewportSize({width:1440,height:1000});
   await page.getByRole('button',{name:'Ver pedido P-QA-001',exact:true}).first().click();
   const editor=page.locator('.tg-pedido-modal');await editor.waitFor();
+  for(const width of [390,768,1440]){
+    await page.setViewportSize({width,height:1000});
+    assert.ok(await editor.evaluate(el=>el.scrollWidth<=el.clientWidth+1),`Order form overflow ${width}`);
+    await page.screenshot({path:path.join(out,`pedido-form-${width}.png`)});
+  }
+
   await editor.locator('.tg-pedido-modal-header button').click();await editor.waitFor({state:'hidden'});
   checks.push('Mobile filters and existing full order editor');
   user.rol='visualizador';await page.reload({waitUntil:'networkidle'});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'})));

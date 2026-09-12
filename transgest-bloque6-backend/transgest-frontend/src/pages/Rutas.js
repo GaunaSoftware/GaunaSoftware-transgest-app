@@ -1,3 +1,4 @@
+import { Modal } from "../ui";
 import { CommercialNav } from "./clients/CommercialViews";
 import { useState, useEffect, useMemo } from "react";
 import { routeMargin } from '../utils/routeMargin';
@@ -491,11 +492,7 @@ export default function Rutas(){
 
       {/* Modal Ruta */}
       {modal&&(
-        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setModal(false)}>
-          <div style={S.mbox}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,color:"var(--text)",marginBottom:20}}>
-              {editando?"Editar ruta":"Nueva ruta"}
-            </div>
+        <Modal title={editando ? "Editar ruta" : "Nueva ruta"} onClose={() => setModal(false)} width={720}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div>
                 <label style={S.label}>Cliente (opcional)</label>
@@ -565,17 +562,12 @@ export default function Rutas(){
                 {saving?"Guardando...":editando?"Guardar cambios":"Crear ruta"}
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Modal Precios */}
       {showPrecios&&(
-        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&setShowPrecios(null)}>
-          <div style={{...S.mbox,width:"min(1080px,96vw)"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:4}}>
-              Tarifa de ruta - {showPrecios.origen} -> {showPrecios.destino}
-            </div>
+        <Modal title={`Tarifa de ruta · ${showPrecios.origen} → ${showPrecios.destino}`} onClose={() => setShowPrecios(null)} width={1080}>
             <div style={{fontSize:12,color:"var(--text4)",marginBottom:20}}>
               {showPrecios.km?`${showPrecios.km} km`:""}{showPrecios.peajes>0?` · Peajes: ${fmt2(showPrecios.peajes)} €`:""}
               {showPrecios.tipo_vehiculo&&showPrecios.tipo_vehiculo!=="cualquiera"
@@ -587,8 +579,7 @@ export default function Rutas(){
               ?<div style={{color:"var(--text4)",textAlign:"center",padding:20}}>Cargando...</div>
               :<PreciosEditor ruta={showPrecios} data={preciosData} clientes={clientes} canEdit={canEdit} onClose={()=>{setShowPrecios(null);cargar();}}/>
             }
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

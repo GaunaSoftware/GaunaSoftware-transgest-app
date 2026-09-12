@@ -104,7 +104,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   checks.push('Read-only role cannot assign/copy/send/create');
   orders[0].fecha_carga='2026-08-03';orders[1].fecha_carga='2026-08-31';orders[2].fecha_carga='2026-09-01';
   await page.getByRole('button',{name:'Quitar selección',exact:true}).click();
-  await page.locator('.orders-list-card').getByRole('button',{name:/filtros/i}).click();
+  await page.locator('.orders-list-card').getByRole('button',{name:"Más filtros",exact:true}).click();
   const history=page.getByRole('dialog',{name:'Filtros'});await history.getByLabel('Incluir meses anteriores').check();await history.getByRole('button',{name:'Ver resultados'}).click();
   await page.locator('.tgui-desktop-data .orders-date-group-month').filter({hasText:'agosto'}).waitFor();
   assert.ok(await page.locator('.tgui-desktop-data .orders-date-group-week').count()>=2);

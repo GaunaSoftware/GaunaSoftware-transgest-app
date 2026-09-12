@@ -1,3 +1,4 @@
+import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
 import { orderTown } from '../utils/orderTown';
 import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from '../utils/supplierPricing';
@@ -10181,6 +10182,7 @@ export default function Pedidos() {
     const focus = readGuidedPedidoTutorial();
     return focus ? { active:true, modalOpened:false, saved:false, progress:buildGuidedPedidoProgress({}, { modalOpened:false, saved:false }) } : null;
   });
+  const [trafficAdvanced, setTrafficAdvanced] = useState(false);
   const [pedidos,    setPedidos]    = useState([]);
   const [clientes,   setClientes]   = useState([]);
   const [vehiculos,  setVehiculos]  = useState([]);
@@ -11626,7 +11628,26 @@ export default function Pedidos() {
 
 
   return (
-    <div className="tg-responsive-page" style={S.page}>
+    <div className={trafficAdvanced ? "tg-responsive-page" : "orders-page"} style={trafficAdvanced ? S.page : undefined}>
+      {!trafficAdvanced ? <OrdersWorkspace
+        items={pedidosVisibles} allItems={pedidosConMeta} loading={loading} error={loadError} reload={() => cargar()}
+        clients={clientes} drivers={choferes} labels={LABEL_ESTADO}
+        serverPage={page} serverPages={totalPages} totalCount={totalCount} setServerPage={setPage}
+        selectedIds={selectedPedidoIds} toggleSelected={togglePedidoSelected} advanced={() => setTrafficAdvanced(true)}
+        permissions={{edit:canEdit, invoice:canFacturarPedidos, finalInvoice:pedidoTieneFacturaFinal, draftInvoice:pedidoTieneFacturaBorrador, supplierOrder:p => canIssueSupplierOrder(p,vehiculos)}}
+        actions={{new:abrirNuevo, quick:() => setQuickCreando(true), open:abrirEditar, assign:setQuickAssignPedido, copy:abrirCopiarPedido, order:abrirOrdenCarga, send:p => enviarWhatsappPedidoAccion(p,"cliente"), invoice:setFacturando, clearSelection:() => setSelectedPedidoIds([])}}
+        describe={p => {
+          const loads = pedidoStopsForList(p,"carga"), unloads = pedidoStopsForList(p,"descarga");
+          return {origin:pedidoStopListLabel(loads[0] || {},p.origen,p.cliente_id || "","carga"), destination:pedidoStopListLabel(unloads[0] || {},p.destino,p.cliente_id || "","descarga"), loads:loads.length, unloads:unloads.length};
+        }}
+        filters={{q,setQ,state:filtroEst,setState:setFiltroEst,client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
+          setFrom:value => {setFiltroFechasCustom(true);setFiltroDesde(value);},setTo:value => {setFiltroFechasCustom(true);setFiltroHasta(value);},
+          history:mostrarHistorico,setHistory:value => {setMostrarHistorico(value);setFiltroFechasCustom(false);setFiltroMes("");setFiltroDesde("");setFiltroHasta("");setPage(1);setSelectedPedidoIds([]);},
+          unassigned:filtroSinAsignacion,setUnassigned:setFiltroSinAsignacion,critical:soloCriticos,setCritical:setSoloCriticos,
+          reset:() => {setMostrarHistorico(false);setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);setSoloCriticos(false);}
+        }}
+      /> : <>
+      <button className="orders-back" onClick={() => setTrafficAdvanced(false)}>Volver al resumen de tráfico</button>
       <div style={S.title}>Pedidos / Tráfico</div>
       <div style={{display:"flex",gap:8,margin:"-4px 0 24px",flexWrap:"wrap"}}>
         {[
@@ -12491,6 +12512,8 @@ export default function Pedidos() {
           </button>
         </div>
       )}
+
+      </>}
 
       {copyPlan && (
         <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget && !copySaving && setCopyPlan(null)}>

@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { useAuth } from "../../context/AuthContext";
 import { Button, Card, Icon, KpiCard, DataTable, MobileDataCard, EmptyState, Badge } from "../../ui";
 import "./dashboard.css";
+import LiveOperations from "./LiveOperations";
 
 const money = n => Number(n || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" });
 const dayKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -15,7 +16,7 @@ function Section({ title, icon, action, children, className = "" }) {
   return <Card className={`dashboard-card ${className}`}><header><h2><Icon name={icon} size={19}/>{title}</h2>{action}</header>{children}</Card>;
 }
 
-export default function DashboardWorkspace({ pedidos, facturas, vehiculos, choferes, alertas, tareas, loadErrors, reload, loading, today, navigate, openOrder, openAlert, advanced, stateMeta }) {
+export default function DashboardWorkspace({ pedidos, facturas, vehiculos, choferes, alertas, tareas, loadErrors, reload, loading, today, navigate, openOrder, openAlert, advanced, showBI, onSnapshot, stateMeta }) {
   const { puedeVer, puedeEditar } = useAuth();
   const data = useMemo(() => {
     const now = new Date(), todayKey = dayKey(now), month = todayKey.slice(0,7);
@@ -75,12 +76,13 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
     {key:"importe",label:"Importe",render:p => money(p.importe ?? p.precio ?? p.precio_cliente_col)},
   ];
   return <main className="dashboard-workspace">
-    <div className="dashboard-heading"><div><h1>Dashboard</h1><p>Vista general de la actividad de tu empresa de transporte. Todo lo importante, en un solo lugar.</p></div><div className="dashboard-heading-actions"><span><Icon name="clock" size={17}/>{today}</span><Button onClick={advanced}>Análisis detallado</Button></div></div>
+    <div className="dashboard-heading"><div><h1>Dashboard</h1><p>Vista general de la actividad de tu empresa de transporte. Todo lo importante, en un solo lugar.</p></div><div className="dashboard-heading-actions"><span><Icon name="clock" size={17}/>{today}</span>{showBI&&<Button onClick={advanced}>Análisis BI</Button>}</div></div>
     {!!loadErrors.length && <div className="dashboard-error" role="alert">No se pudieron cargar: {loadErrors.join(", ")}. El resumen está incompleto. <Button onClick={reload}>Reintentar</Button></div>}
     {loading ? <div role="status" className="dashboard-loading">Cargando actividad…</div> : <>
     <div className="dashboard-kpis">
       {[["Viajes activos",data.active,"truck","success","pedidos","Confirmados y en operación"],["Pedidos de hoy",data.today,"invoice","info","pedidos","Con fecha de carga hoy"],["Facturación del mes",money(data.billed),"coins","success","facturacion","Base imponible · sin borradores"],["Incidencias activas",data.incidents,"alert","danger","pedidos","Pedidos en estado incidencia"]].filter(k => puedeVer(k[4])).map(([label,value,icon,tone,view,detail]) => <button key={label} className="dashboard-kpi-button" onClick={() => label==="Incidencias activas" ? openOrder({estado:"incidencia"}) : navigate(view)}><KpiCard {...{label,value,icon,tone,detail}}/></button>)}
     </div>
+    {puedeVer("pedidos")&&<LiveOperations initialItems={pedidos} onSnapshot={onSnapshot} openOrder={openOrder}/>}
     <div className="dashboard-grid">
       {puedeVer("pedidos") && <Section title="Agenda de hoy" icon="clock" className="dashboard-agenda" action={link("Ver agenda completa","agenda")}><p className="dashboard-caption">Cargas y descargas previstas · {data.agenda.length} eventos</p><div className="dashboard-scroll">{data.agenda.length ? data.agenda.map(e => <button key={e.id} className="dashboard-agenda-row" onClick={() => openOrder({pedido_id:e.p.id,numero:e.p.numero})}><time>{e.time || "Sin hora"}</time><Badge tone={e.kind === "carga" ? "success" : "info"}>{e.kind === "carga" ? "Carga" : "Descarga"}</Badge><span>{e.p.cliente_nombre || "Sin cliente"}</span><span>{e.place || "Sin ubicación"}</span><small>{e.p.vehiculo_matricula || "Sin asignar"}</small></button>) : <EmptyState title="Sin cargas ni descargas previstas hoy"/>}</div></Section>}
       <Section title="Acciones rápidas" icon="route" className="dashboard-quick"><div className="dashboard-quick-grid">{quick.map(([label,icon,view,,action]) => <Button key={label} onClick={action || (() => navigate(view))}><Icon name={icon} size={19}/>{label}</Button>)}</div>{!quick.length && <EmptyState title="Sin accesos disponibles"/>}</Section>

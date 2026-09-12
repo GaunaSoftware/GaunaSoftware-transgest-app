@@ -10060,6 +10060,11 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
     aviso_completar: "Pedido iniciado desde Gestion de trafico: completar cliente, ruta, precio y documentacion.",
     _focus_asignacion: true,
     _nuevo_desde_trafico: true,
+    ...(focus.source === "almacen_palets" ? {
+      cliente_id: defaults.cliente_id || "",
+      mercancia: String(defaults.mercancia || "Devolucion de palets"),
+      aviso_completar: "Transporte de devolucion de palets: completar origen, destino, vehiculo, conductor y peso. Despues vincular el pedido desde Almacen.",
+    } : {}),
   });
 }
 

@@ -1185,3 +1185,5 @@ export const calcularDistanciaGeo = (origin, destination) =>
     { label: origin, role: "origen" },
     { label: destination, role: "destino" },
   ]);
+
+export const vincularPaletTransporte = (id, pedido_id) => apiFetch(`/palets/movimientos/${id}/transporte`, { method:"PUT", body:{pedido_id}, silentSuccess:true });

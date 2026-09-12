@@ -1,3 +1,5 @@
+import WarehouseWorkspace from "./warehouse/WarehouseWorkspace";
+import { buildWarehouseDelivery, openWarehouseDocument } from "./warehouse/documents";
 import { useState, useEffect, useCallback } from "react";
 import {
   getClientes, crearFactura, crearCliente as crearClienteApi,
@@ -97,23 +99,6 @@ function getStockEmpresa(movimientos){
   },0);
 }
 
-function direccionCliente(cliente){
-  const parts = [
-    cliente?.direccion,
-    cliente?.direccion_completa,
-    cliente?.domicilio,
-    cliente?.codigo_postal,
-    cliente?.poblacion,
-    cliente?.provincia,
-    cliente?.pais,
-  ]
-    .filter(Boolean)
-    .map(v => String(v).trim())
-    .filter(Boolean);
-  return [...new Set(parts)].join(", ");
-}
-
-// Modal movimiento
 function diasDesde(fecha){
   if (!fecha) return 0;
   const base = new Date(`${String(fecha).slice(0,10)}T12:00:00`);
@@ -168,6 +153,7 @@ function buildAlertasAntiguedadPalets(movimientos, clientes, cfgPalets){
 }
 
 function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServerSave, onServerUpdate, initial, cfgPalets }){
+  const empresa = useEmpresaPerfil();
   const cfg = normalizePaletsCfg(cfgPalets);
   const editando = !!initial?.id;
   const [form,setForm]=useState(()=>{
@@ -334,95 +320,8 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
   }
 
   function imprimirAlbaran() {
-    const cliente = clientes.find(cl=>cl.id===form.cliente_id);
-    const obra = clientes.find(cl=>cl.id===form.cliente_movimiento_id);
-    const obraNombre = obra?.nombre || form.pedido_ref || "";
-    const direccionDevolucion = direccionCliente(obra) || direccionCliente(cliente);
-    const fecha   = new Date(form.fecha+"T12:00:00").toLocaleDateString("es-ES");
-    const win = window.open("","_blank","width=800,height=600");
-    win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>Albaran ${form.num_albaran||"BORRADOR"}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:30px;}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:14px;border-bottom:3px solid #1a3a6e;}
-  .doc-num{font-size:22px;font-weight:700;color:#1a3a6e;text-align:right;}
-  .doc-label{font-size:10px;color:#666;letter-spacing:1px;text-transform:uppercase;text-align:right;}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}
-  .box{border:1px solid #ddd;border-radius:4px;padding:12px;}
-  .box-title{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
-  .box-val{font-size:13px;font-weight:600;}
-  table{width:100%;border-collapse:collapse;margin:16px 0;}
-  th{background:#1a3a6e;color:#fff;padding:8px 10px;text-align:left;font-size:11px;}
-  td{padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;}
-  .total-row{background:#f5f5f5;font-weight:700;font-size:14px;}
-  .firma{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:30px;}
-  .firma-box{border:1px solid #ddd;border-radius:4px;padding:10px;min-height:70px;}
-  .firma-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
-  .firma-line{margin-top:50px;border-top:1px solid #999;font-size:9px;color:#666;padding-top:3px;}
-  @media print{@page{margin:1cm}body{padding:0}}
-</style></head><body>
-<div class="header">
-  <div>
-    <div style="font-size:18px;font-weight:700;color:#1a3a6e;">TransGest TMS</div>
-    <div style="color:#555;font-size:11px;margin-top:4px;">Gestion de Almacen - Palets</div>
-  </div>
-  <div>
-    <div class="doc-label">Albaran de devolucion</div>
-    <div class="doc-num">${form.num_albaran||"BORRADOR"}</div>
-    <div style="font-size:10px;color:#555;text-align:right;margin-top:4px;">${fecha}</div>
-  </div>
-</div>
-
-<div class="grid2">
-  <div class="box">
-    <div class="box-title">Cliente / Remitente</div>
-    <div class="box-val">${escHtml(cliente?.nombre||"-")}</div>
-    ${cliente?.cif?`<div style="font-size:11px;color:#555;">CIF: ${escHtml(cliente.cif)}</div>`:""}
-    ${cliente?.telefono?`<div style="font-size:11px;color:#555;">Tel: ${escHtml(cliente.telefono)}</div>`:""}
-    ${direccionCliente(cliente)?`<div style="font-size:11px;color:#555;margin-top:4px;">${escHtml(direccionCliente(cliente))}</div>`:""}
-  </div>
-  <div class="box">
-    <div class="box-title">Obra / destino de devolucion</div>
-    <div class="box-val">${escHtml(obraNombre || "-")}</div>
-    ${direccionDevolucion?`<div style="font-size:11px;color:#555;margin-top:4px;">Direccion devolucion: <b>${escHtml(direccionDevolucion)}</b></div>`:""}
-    <div class="box-title" style="margin-top:10px;">Datos del documento</div>
-    <div style="font-size:11px;color:#555;margin-bottom:3px;">Fecha devolucion: <b>${fecha}</b></div>
-    ${form.pedido_ref?`<div style="font-size:11px;color:#555;">Ref. pedido: <b>${escHtml(form.pedido_ref)}</b></div>`:""}
-    ${form.notas?`<div style="font-size:11px;color:#555;margin-top:4px;">${escHtml(form.notas)}</div>`:""}
-  </div>
-</div>
-
-<table>
-  <thead><tr>
-    <th>Descripcion</th><th style="text-align:right;">Cantidad</th>
-  </tr></thead>
-  <tbody>
-    <tr>
-      <td>Devolucion de palets europeos</td>
-      <td style="text-align:right;font-weight:600;">${form.cantidad} uds</td>
-    </tr>
-  </tbody>
-</table>
-
-<div class="firma">
-  <div class="firma-box">
-    <div class="firma-label">Firma del cliente / entregador</div>
-    <div class="firma-line">Nombre y DNI</div>
-  </div>
-  <div class="firma-box">
-    <div class="firma-label">Sello y firma almacen receptor</div>
-    <div class="firma-line">Fecha y firma</div>
-  </div>
-</div>
-
-<div style="margin-top:20px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:8px;">
-  Documento generado por TransGest TMS  -  ${new Date().toLocaleString("es-ES")}
-</div>
-</body></html>`);
-    win.document.close();
-    win.focus();
-    setTimeout(()=>win.print(), 400);
+    try { openWarehouseDocument(buildWarehouseDelivery(form, clientes.find(c=>c.id===form.cliente_id), empresa, clientes.find(c=>c.id===form.cliente_movimiento_id))); }
+    catch(e) { notify(e.message,"warning"); }
   }
 
   return(
@@ -601,21 +500,7 @@ function ModalMovimiento({ clientes, movimientos = [], onClose, onSaved, onServe
 
 // Generar albaran desde historial
 function generarHtmlAlbaran(mv, cliente, empresa, obraCliente) {
-  const fecha = new Date((mv.fecha||"")+"T12:00:00").toLocaleDateString("es-ES");
-  const empNombre = empresa?.razon_social || empresa?.nombre || "TransGest TMS";
-  const empCif    = empresa?.cif || "";
-  const empDir    = empresa?.domicilio || empresa?.direccion || "";
-  const empTel    = empresa?.telefono || "";
-  const obraNombre = obraCliente?.nombre || mv.obra_nombre || mv.cliente_movimiento_nombre || mv.pedido_ref || "";
-  const direccionDevolucion = direccionCliente(obraCliente) || direccionCliente(cliente);
-  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>Albaran ${mv.num_albaran||"HISTORICO"}</title>
-<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:30px;}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid #1a3a6e;}.doc-num{font-size:22px;font-weight:700;color:#1a3a6e;text-align:right;}.doc-label{font-size:10px;color:#666;letter-spacing:1px;text-transform:uppercase;text-align:right;}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}.box{border:1px solid #ddd;border-radius:4px;padding:12px;}.box-title{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}.box-val{font-size:13px;font-weight:600;}table{width:100%;border-collapse:collapse;margin:16px 0;}th{background:#1a3a6e;color:#fff;padding:8px 10px;text-align:left;font-size:11px;}td{padding:8px 10px;border-bottom:1px solid #eee;font-size:12px;}.total-row{background:#f5f5f5;font-weight:700;font-size:14px;}.firma{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:30px;}.firma-box{border:1px solid #ddd;border-radius:4px;padding:10px;min-height:70px;}.firma-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}.firma-line{margin-top:50px;border-top:1px solid #999;font-size:9px;color:#666;padding-top:3px;}@media print{@page{margin:1cm}body{padding:0}}</style></head><body>
-<div class="header"><div><div style="font-size:18px;font-weight:700;color:#1a3a6e;">${escHtml(empNombre)}</div>${empCif?`<div style="color:#555;font-size:11px;">CIF: ${escHtml(empCif)}</div>`:""} ${empDir?`<div style="color:#555;font-size:11px;">${escHtml(empDir)}</div>`:""} ${empTel?`<div style="color:#555;font-size:11px;">Tel: ${escHtml(empTel)}</div>`:""}<div style="color:#555;font-size:11px;margin-top:4px;">Gestion de Almacen - Palets</div></div><div><div class="doc-label">Albaran de devolucion</div><div class="doc-num">${escHtml(mv.num_albaran||"HISTORICO")}</div><div style="font-size:10px;color:#555;text-align:right;margin-top:4px;">${fecha}</div></div></div>
-<div class="grid2"><div class="box"><div class="box-title">Cliente</div><div class="box-val">${escHtml(cliente?.nombre||"-")}</div>${cliente?.cif?`<div style="font-size:11px;color:#555;">CIF: ${escHtml(cliente.cif)}</div>`:""}${direccionCliente(cliente)?`<div style="font-size:11px;color:#555;margin-top:4px;">${escHtml(direccionCliente(cliente))}</div>`:""}</div><div class="box"><div class="box-title">Obra / destino de devolucion</div><div class="box-val">${escHtml(obraNombre || "-")}</div>${direccionDevolucion?`<div style="font-size:11px;color:#555;margin-top:4px;">Direccion devolucion: <b>${escHtml(direccionDevolucion)}</b></div>`:""}<div class="box-title" style="margin-top:10px;">Documento</div><div style="font-size:11px;color:#555;">Fecha devolucion: <b>${fecha}</b></div>${mv.pedido_ref?`<div style="font-size:11px;color:#555;">Ref: <b>${escHtml(mv.pedido_ref)}</b></div>`:""} ${mv.notas?`<div style="font-size:11px;color:#555;">${escHtml(mv.notas)}</div>`:""}</div></div>
-<table><thead><tr><th>Descripcion</th><th style="text-align:right;">Cantidad</th></tr></thead><tbody><tr><td>Devolucion de palets europeos</td><td style="text-align:right;font-weight:600;">${mv.cantidad} uds</td></tr></tbody></table>
-<div class="firma"><div class="firma-box"><div class="firma-label">Firma cliente</div><div class="firma-line">Nombre y DNI</div></div><div class="firma-box"><div class="firma-label">Sello almacen</div><div class="firma-line">Fecha y firma</div></div></div>
-</body></html>`;
+  return buildWarehouseDelivery(mv, cliente, empresa, obraCliente);
 }
 
 function generarHtmlDevClienteInforme({ grupos, movimientos, empresa, filtroNombre, periodoTexto }) {
@@ -701,6 +586,9 @@ ${rows || `<div class="muted">Sin movimientos de cliente registrados.</div>`}
 
 export default function Palets(){
     const [movimientos,setMovimientos]=useState([]);
+    const [warehouseDetailed,setWarehouseDetailed]=useState(false);
+    const [warehouseLoading,setWarehouseLoading]=useState(true);
+    const [warehouseError,setWarehouseError]=useState("");
     const [clientes,setClientes]=useState([]);
     const [empresaCfg,setEmpresaCfg]=useState({});
     const [modal,setModal]=useState(false);
@@ -732,13 +620,14 @@ export default function Palets(){
   }
 
   const cargarMovimientos = useCallback(async function cargarMovimientos(){
+    setWarehouseLoading(true);setWarehouseError("");
     try {
       const data = await getPaletMovimientos();
       const arr = Array.isArray(data) ? data : [];
       setMovimientos(arr.map(normalizarMovimientoApi));
     } catch {
-      setMovimientos([]);
-    }
+      setWarehouseError("No se pudieron cargar los movimientos. Reintenta antes de consultar saldos o emitir informes.");
+    } finally { setWarehouseLoading(false); }
   }, []);
 
     useEffect(()=>{
@@ -1198,7 +1087,12 @@ export default function Palets(){
   };
 
   return(
-    <div className="tg-palets-page tg-responsive-page" style={{flex:1, padding:"30px 36px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"linear-gradient(180deg,#f8fbfd 0%,#ffffff 44%,#f7fafc 100%)"}}>
+    <div className={warehouseDetailed ? "tg-palets-page tg-responsive-page" : "warehouse-root"} style={warehouseDetailed ? {flex:1,padding:24,fontFamily:"'DM Sans',sans-serif",background:"var(--bg)",color:"var(--text)"} : undefined}>
+      {!warehouseDetailed ? <WarehouseWorkspace movements={movimientos} loading={warehouseLoading} error={warehouseError} reload={cargarMovimientos} stock={stockEmpresa} alerts={alertasNoLeidas} empresa={empresa} sign={signoPaletsMovimiento}
+        create={tipo=>{setMovimientoEditando(tipo ? {tipo,estado_salida:"pendiente"}:null);setModal(true)}} edit={m=>{setMovimientoEditando(m);setModal(true)}} confirm={confirmarSalida} rectify={rectificarDevolucion}
+        albaran={m=>{try{openWarehouseDocument(generarHtmlAlbaran(m,clientes.find(c=>c.id===(m.propietario_cliente_id||m.cliente_id)),empresa,clientes.find(c=>c.id===m.cliente_movimiento_id)));}catch(e){notify(e.message,"warning")}}}
+        advanced={value=>{setTab(value);setWarehouseDetailed(true)}} setAlert={cambiarEstadoAlerta}/> : <>
+      <button onClick={()=>setWarehouseDetailed(false)} className="tgui-button">Volver al resumen de almacén</button>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:26,flexWrap:"wrap"}}>
         <div style={{width:44,height:44,borderRadius:10,border:"1px solid #dbe5ec",background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>⌂</div>
@@ -1739,6 +1633,7 @@ export default function Palets(){
       {/* Almacen propio / cliente */}
       {tab==="almacen_propio"&&<AlmacenPropio/>}
       {tab==="almacen_cliente"&&<AlmacenCliente/>}
+      </>}
         {modal&&<ModalMovimiento
           clientes={clientes}
           movimientos={movimientos}
@@ -2074,7 +1969,7 @@ function AlmacenPropio() {
       {/* Modal nueva mercancia */}
       {modal==="nueva_mercan" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>{ if(e.target===e.currentTarget){ setModal(false); setMovEditando(null); setSelMercan(null); setForm({}); } }}>
-          <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(500px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
+          <div className="warehouse-editor" style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(500px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:14}}>Nueva mercancia</div>
             {[["nombre","Nombre del articulo *","Ej: Palet europeo"],["sku","Referencia / SKU","REF-001"],["categoria","Categoria","Embalaje"],["unidad","Unidad de medida","ud, kg, m3..."]].map(([k,l,ph])=>(
               <div key={k}><label style={lbl}>{l}</label><input style={inp} value={form[k]||""} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))} placeholder={ph}/></div>
@@ -2095,7 +1990,7 @@ function AlmacenPropio() {
       {/* Modal movimiento */}
       {modal==="movimiento" && selMercan && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&setModal(false)}>
-          <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(560px,96vw)"}}>
+          <div className="warehouse-editor" style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(560px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:14}}>
               {movEditando?.id ? "Editar movimiento" : form.tipo==="entrada" ? "Entrada" : "Salida"} - {selMercan.nombre}
             </div>
@@ -2461,7 +2356,7 @@ ${dep.notas?`<div style="font-size:11px;color:#555;margin-top:8px">Notas: ${dep.
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:200,
           display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
           onMouseDown={e=>e.target===e.currentTarget&&setModal(false)}>
-          <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,
+          <div className="warehouse-editor" style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,
             padding:22,width:"min(520px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,
               color:"var(--text)",marginBottom:14}}>

@@ -644,6 +644,19 @@ router.put("/movimientos/:id", PUEDE_EDITAR, async (req, res) => {
   res.json(rows[0]);
 });
 
+// Linking documents never confirms stock or creates a second order.
+router.put("/movimientos/:id/transporte", PUEDE_EDITAR, async (req, res) => {
+  try {
+    const row = await db.transaction(client => require("../services/paletTransport").linkPaletTransport(client, {
+      empresa: empresaId(req), movimientoId: req.params.id, pedidoId: req.body?.pedido_id,
+    }));
+    res.json(row);
+  } catch (err) {
+    if (err.code === "42703") return res.status(503).json({error:"Actualiza la API y ejecuta npm run migrate para vincular transportes de palets."});
+    res.status(err.status || 500).json({error:err.message});
+  }
+});
+
 router.patch("/movimientos/:id/confirmar-salida", PUEDE_EDITAR, async (req, res) => {
   await ensurePaletsWorkflowSchema();
   const empresa = empresaId(req);

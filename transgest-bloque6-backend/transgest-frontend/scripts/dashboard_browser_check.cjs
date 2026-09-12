@@ -33,6 +33,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
     }
     else if(/^\/pedidos\/order-\d+$/.test(p))data=orders.find(o=>p.endsWith('/'+o.id));
     else if(p==='/facturas')data=empty?[]:invoices;
+    else if(p==='/informes/bi/resumen')data={kpis:{facturado:u.searchParams.get('periodo')==='7d'?200:100}};
     else if(p==='/clientes')data=clients;
     else if(p==='/vehiculos')data=empty?[]:[{id:'truck-1',matricula:'1234-BCD',clase:'tractora',estado:'taller',fecha_itv:'2026-09-20'}];
     else if(p==='/choferes')data=[];
@@ -53,10 +54,17 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   assert.equal(await page.locator('.dashboard-due-row').count(),2);
   assert.equal(await page.locator('.dashboard-recent tbody tr').count(),5);
   checks.push('Real daily counts, emitted base only, cargo agenda, ranking, invoices and fleet deadlines');
-  await page.getByRole('button',{name:'Análisis detallado',exact:true}).click();await page.getByRole('button',{name:'Volver al Dashboard',exact:true}).click();
+  await page.getByRole('button',{name:'Análisis BI',exact:true}).click();const bi=page.getByRole('dialog',{name:'Análisis BI',exact:true});await bi.waitFor();
+  assert.equal(await page.getByText('Dashboard Ejecutivo',{exact:true}).count(),0);
+  await bi.getByLabel('Periodo del análisis BI').selectOption('7d');await bi.getByText('200,00 €',{exact:true}).first().waitFor();
+  const biExport=page.waitForEvent('download');await bi.getByRole('button',{name:'Exportar indicadores'}).click();assert.equal((await biExport).suggestedFilename(),'dashboard-bi-7d.csv');await bi.getByRole('button',{name:'Cerrar',exact:true}).click();
+  await page.locator('.dashboard-live-states').waitFor();orders[1].estado='cargando';
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:pedidos-changed')));
+  await page.waitForFunction(()=>[...document.querySelectorAll('.dashboard-live-states button')].some(b=>b.textContent.includes('Cargando')&&b.querySelector('strong').textContent==='1'));
+  checks.push('Live operating states refresh after order event; BI period filter and export; old dashboard removed');
   await page.locator('.dashboard-quick').getByRole('button',{name:'Nuevo pedido',exact:true}).click();await page.locator('.tg-pedido-modal').waitFor();await page.locator('.tg-pedido-modal-header button').click();await home();
   await page.locator('.dashboard-recent').getByRole('button',{name:'P-QA-001',exact:true}).first().click();await page.locator('.tg-pedido-modal').waitFor();await page.locator('.tg-pedido-modal-header button').click();await home();
-  checks.push('Detailed analysis, new order and recent order open existing views');
+  checks.push('New order and recent order open existing forms');
   for(const theme of ['light','dark']){
     if(await page.locator('html').getAttribute('data-theme')!==theme)await page.locator('.tg-topbar').getByRole('button',{name:/tema|claro|oscuro/i}).click();
     assert.equal(await page.locator('html').getAttribute('data-theme'),theme);

@@ -102,6 +102,15 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   assert.equal(await quick.getByRole('button',{name:'Copiar pedido',exact:true}).isEnabled(),false);
   assert.equal(await quick.getByRole('button',{name:'Avisar al cliente',exact:true}).isEnabled(),false);
   checks.push('Read-only role cannot assign/copy/send/create');
+  orders[0].fecha_carga='2026-08-03';orders[1].fecha_carga='2026-08-31';orders[2].fecha_carga='2026-09-01';
+  await page.getByRole('button',{name:'Quitar selección',exact:true}).click();
+  await page.locator('.orders-list-card').getByRole('button',{name:'Filtros',exact:true}).click();
+  const history=page.getByRole('dialog',{name:'Filtros'});await history.getByLabel('Incluir meses anteriores').check();await history.getByRole('button',{name:'Ver resultados'}).click();
+  await page.locator('.tgui-desktop-data .orders-date-group-month').filter({hasText:'agosto'}).waitFor();
+  assert.ok(await page.locator('.tgui-desktop-data .orders-date-group-week').count()>=2);
+  await page.screenshot({path:path.join(out,'pedidos-history-month-week-day.png'),fullPage:true});
+  checks.push('Historical orders separated into month, week and day within filtered results');
+
   assert.deepEqual(errors,[]);
   assert.equal(writes.filter(w=>!w.path.includes('tutorial')).length,0,'No operational data mutated by these checks');
   fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({checks,errors,writes,requests},null,2));console.log(JSON.stringify({checks,errors},null,2));

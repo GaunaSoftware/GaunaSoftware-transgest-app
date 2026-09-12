@@ -17,3 +17,5 @@ El botón «Análisis detallado» conserva el Dashboard anterior, sus filtros de
 ## Formularios internos
 
 Los formularios de Pedidos, Clientes, Facturación y Rutas comparten superficies, campos, etiquetas, foco visible y tamaños táctiles mediante `ui/forms.css`. Se mantienen los tipos de campo, datos, eventos y botones. Nueva/editar ruta y su editor de tarifas usan el Modal compartido (título, cierre, foco y comportamiento móvil). El editor de pedidos conserva su flujo de cierre y validaciones propios. Las pruebas de Clientes y Pedidos incluyen capturas de formularios en 390, 768 y 1440 px; la batería financiera comprueba detalle y creación de facturas.
+
+Identificador del despliegue: `X-TransGest-Frontend-Build: 2026-09-12-dashboard-formularios`.

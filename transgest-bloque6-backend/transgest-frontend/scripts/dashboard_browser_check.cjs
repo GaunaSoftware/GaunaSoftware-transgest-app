@@ -56,7 +56,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   checks.push('Real daily counts, emitted base only, cargo agenda, ranking, invoices and fleet deadlines');
   await page.getByRole('button',{name:'Análisis BI',exact:true}).click();const bi=page.getByRole('dialog',{name:'Análisis BI',exact:true});await bi.waitFor();
   assert.equal(await page.getByText('Dashboard Ejecutivo',{exact:true}).count(),0);
-  await bi.getByLabel('Periodo del análisis BI').selectOption('7d');await bi.getByText('200,00 €',{exact:true}).first().waitFor();
+  await bi.getByLabel('Periodo del análisis BI').selectOption('7d');await bi.getByText('200,00 €',{exact:true}).first().waitFor();await page.screenshot({path:path.join(out,'dashboard-bi.png'),fullPage:true});
   const biExport=page.waitForEvent('download');await bi.getByRole('button',{name:'Exportar indicadores'}).click();assert.equal((await biExport).suggestedFilename(),'dashboard-bi-7d.csv');await bi.getByRole('button',{name:'Cerrar',exact:true}).click();
   await page.locator('.dashboard-live-states').waitFor();orders[1].estado='cargando';
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:pedidos-changed')));

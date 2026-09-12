@@ -1,3 +1,5 @@
+import { PageHeader } from "../ui";
+import "./operations/operations.css";
 import { useState } from "react";
 import { notify } from "../services/notify";
 import { calcularDistanciaGeo } from "../services/api";
@@ -112,31 +114,9 @@ export default function CalculadorPortes() {
   const fmt = n => toNumber(n).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <div style={{ flex: 1, padding: "36px 44px", fontFamily: "'DM Sans',sans-serif", minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 8, maxWidth: 1500, marginLeft: "auto", marginRight: "auto" }}>
-        <button type="button" onClick={() => window.history.back()} style={{
-          width: 42,
-          height: 42,
-          borderRadius: 8,
-          border: "1px solid var(--accent-border)",
-          background: "var(--button-bg)",
-          color: "var(--accent)",
-          fontSize: 24,
-          fontWeight: 800,
-          lineHeight: 1,
-          cursor: "pointer",
-        }}>
-          ‹
-        </button>
-        <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 34, fontWeight: 900, color: "var(--text)" }}>
-          Calculador de portes
-        </div>
-      </div>
-      <div style={{ fontSize: 16, color: "var(--text4)", marginBottom: 28, maxWidth: 1500, marginLeft: "auto", marginRight: "auto", paddingLeft: 60 }}>
-        Calcula el coste real del transporte, el consumo estimado y el precio a cobrar con margen real sobre venta.
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(430px, .95fr) minmax(430px, 1fr)", gap: 24, maxWidth: 1500, margin: "0 auto", alignItems: "start" }}>
+    <div className="operations-workspace operations-calculator">
+      <PageHeader title="Calculador de portes" description="Calcula costes, consumo y precio de venta con el margen que necesitas."/>
+      <div className="operations-calculator-grid" style={{ display: "grid", gridTemplateColumns: "minmax(430px, .95fr) minmax(430px, 1fr)", gap: 24, maxWidth: 1500, margin: "0 auto", alignItems: "start" }}>
         <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: 26, boxShadow: "var(--shadow-card)" }}>
           <div style={{ fontSize: 14, fontWeight: 900, color: "var(--accent-xl)", marginBottom: 18, textTransform: "uppercase", letterSpacing: ".06em" }}>
             Datos del viaje
@@ -222,7 +202,7 @@ export default function CalculadorPortes() {
             onChange={e => setPrecioGas(e.target.value)} placeholder="1,45" />
 
           <label style={lbl}>Margen objetivo (%) sobre venta</label>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
             <input style={{ ...inp, flex: 1 }} type="text" inputMode="decimal" value={margenPct}
               onChange={e => setMargenPct(e.target.value)} />
             {[15, 20, 25, 30, 35].map(m => (

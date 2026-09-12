@@ -25,7 +25,7 @@ export function organizeSidebar(modules, financeTabs, role) {
     take("dashboard", "Dashboard"), take("agenda", "Agenda"), take("ia", "TransGest Intelligence"),
     group("nav_operaciones", "Operaciones", "pedidos", [
       take("pedidos", "Pedidos / tráfico"), take("gestion_trafico", "Mesa de tráfico"), take("control_tower", "Control Tower"),
-      take("solicitudes", "Peticiones de viaje"), take("calculador_portes", "Calculador de portes"), take("plan_diario"), take("excepciones"),
+      take("solicitudes", "Peticiones de viaje"), take("calculador_portes", "Calculador de portes"), take("plan_diario"),
     ]),
     group("nav_clientes", "Clientes", "clientes", [
       take("clientes", "Clientes"),
@@ -41,7 +41,7 @@ export function organizeSidebar(modules, financeTabs, role) {
     group("nav_gestion", "Gestión", "empresa", [
       take("control_horario", "Control horario"),
       group("nav_configuracion", "Configuración", "empresa", [take("avisos", "Avisos"), take("empresa", "Mi empresa"), take("usuarios", "Usuarios y roles"), take("importacion", "Importación"), take("mi_cuenta", "Mi cuenta")]),
-      take("actividad", "Trazabilidad"), take("documentos", "Documentación"),
+      group("nav_trazabilidad", "Trazabilidad", "actividad", [take("actividad", "Registro de actividad"), take("excepciones", "Excepciones operativas")]), take("documentos", "Documentación"),
     ]),
   ].filter(Boolean);
   // Keep any future/unknown accessible leaves reachable without duplicating routes.

@@ -1,3 +1,5 @@
+import { PageHeader } from "../ui";
+import "./operations/operations.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   actualizarPortalSolicitudAdmin,
@@ -641,24 +643,16 @@ export default function Solicitudes() {
 
   const S = {
     page: { padding: "30px 36px", fontFamily: "'DM Sans',sans-serif", minHeight: "100vh", background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)" },
-    card: { background: "rgba(255,255,255,.94)", border: "1px solid #dbe5ec", borderRadius: 12, padding: "16px 18px", marginBottom: 14, boxShadow:"0 14px 32px rgba(15,23,42,.05)" },
-    btn: { padding: "10px 15px", borderRadius: 8, border: "1px solid #cfdbe5", background: "#fff", color: "#0f172a", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:7, boxShadow:"0 8px 18px rgba(15,23,42,.04)" },
-    input: { background: "#fff", border: "1px solid #cfdbe5", color: "#0f172a", padding: "12px 14px", borderRadius: 8, fontSize: 13, outline: "none", boxShadow:"0 6px 14px rgba(15,23,42,.03)" },
-    kpi: { background: "rgba(255,255,255,.95)", border: "1px solid #dbe5ec", borderRadius: 12, padding: "18px 20px", minHeight: 112, boxShadow:"0 16px 34px rgba(15,23,42,.06)" },
+    card: { background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 18px", marginBottom: 14, boxShadow:"0 14px 32px rgba(15,23,42,.05)" },
+    btn: { padding: "10px 15px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--card-bg)", color: "var(--text)", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:7, boxShadow:"0 8px 18px rgba(15,23,42,.04)" },
+    input: { background: "var(--card-bg)", border: "1px solid var(--border)", color: "var(--text)", padding: "12px 14px", borderRadius: 8, fontSize: 13, outline: "none", boxShadow:"0 6px 14px rgba(15,23,42,.03)" },
+    kpi: { background: "var(--card-bg)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", minHeight: 112, boxShadow:"0 16px 34px rgba(15,23,42,.06)" },
   };
 
   return (
-    <div className="tg-responsive-page" style={S.page}>
+    <div className="tg-responsive-page operations-workspace operations-requests" style={S.page}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 28 }}>
-        <div>
-          <div style={{ fontFamily: "'Syne',sans-serif", fontSize: 32, fontWeight: 900, color: "#0f172a", letterSpacing:"-.02em" }}>
-            Peticiones de viaje
-            {pendientes > 0 && <span style={{ marginLeft: 10, padding: "3px 10px", borderRadius: 20, background: "rgba(249,115,22,.15)", color: "#f97316", fontSize: 14 }}>{pendientes}</span>}
-          </div>
-          <div style={{ fontSize: 14, color: "#64748b", marginTop: 8 }}>
-            Bandeja de peticiones de clientes y proveedores asociadas a viajes.
-          </div>
-        </div>
+        <PageHeader title="Peticiones de viaje" description="Gestiona las peticiones de clientes y proveedores y conviértelas en viajes."/>
         <button onClick={cargar} style={{...S.btn,color:"var(--accent)"}}>Actualizar</button>
       </div>
 
@@ -676,24 +670,24 @@ export default function Solicitudes() {
               if (valueEstado === "vencidas") { setSoloVencidas(v => !v); setEstado(""); }
               else { setEstado(valueEstado); setSoloVencidas(false); }
             }}
-            style={{ ...S.kpi, textAlign:"left", cursor:"pointer", borderColor: (valueEstado === "rechazadas" ? enRechazadas : valueEstado === "vencidas" ? soloVencidas : !enRechazadas && estado === valueEstado) ? color : "#dbe5ec", display:"grid", gridTemplateColumns:"54px 1fr", alignItems:"center", gap:14 }}>
+            style={{ ...S.kpi, textAlign:"left", cursor:"pointer", borderColor: (valueEstado === "rechazadas" ? enRechazadas : valueEstado === "vencidas" ? soloVencidas : !enRechazadas && estado === valueEstado) ? color : "var(--border)", display:"grid", gridTemplateColumns:"54px 1fr", alignItems:"center", gap:14 }}>
             <div style={{width:46,height:46,borderRadius:14,display:"grid",placeItems:"center",background:`${color}12`,color,fontSize:20,fontWeight:900}}>!</div>
             <div style={{minWidth:0}}>
               <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:26, fontWeight:900, color, lineHeight:1 }}>{value}</div>
-              <div style={{ fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:".07em", fontWeight:900, marginTop:9, lineHeight:1.25, overflowWrap:"anywhere" }}>{label}</div>
+              <div style={{ fontSize:11, color:"var(--text3)", textTransform:"uppercase", letterSpacing:".07em", fontWeight:900, marginTop:9, lineHeight:1.25, overflowWrap:"anywhere" }}>{label}</div>
             </div>
           </button>
         ))}
       </div>
 
       <div style={{ ...S.card, display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))", gap:12, alignItems:"center", padding:"22px 26px" }}>
-        <div style={{ display:"flex", gap:6, background:"#f8fafc", padding:4, borderRadius:9, border:"1px solid #dbe5ec", flexWrap:"wrap" }}>
+        <div style={{ display:"flex", gap:6, background:"var(--bg3)", padding:4, borderRadius:9, border:"1px solid var(--border)", flexWrap:"wrap" }}>
           {[
             ["activas", "Activas"],
             ["rechazadas", `Rechazadas (${resumen.rechazadas})`],
           ].map(([key, label]) => (
             <button key={key} onClick={() => { setVista(key); setEstado(""); setSoloVencidas(false); }}
-              style={{ ...S.btn, border:"none", background:vista===key ? "linear-gradient(135deg,var(--accent),#0d9488)" : "transparent", color:vista===key ? "#fff" : "#64748b", padding:"10px 16px", boxShadow:"none" }}>
+              style={{ ...S.btn, border:"none", background:vista===key ? "linear-gradient(135deg,var(--accent),#0d9488)" : "transparent", color:vista===key ? "#fff" : "var(--text3)", padding:"10px 16px", boxShadow:"none" }}>
               {label}
             </button>
           ))}
@@ -723,7 +717,7 @@ export default function Solicitudes() {
         )}
       </div>
       {!loading && sols.length > 0 && (
-        <div style={{ margin:"0 0 16px", fontSize:14, color:"#64748b" }}>
+        <div style={{ margin:"0 0 16px", fontSize:14, color:"var(--text3)" }}>
           {enRechazadas ? "Rechazadas: " : "Activas: "}
           Mostrando <strong style={{color:"var(--accent)"}}>{visibles.length}</strong> de {totalVistaActual} solicitudes
           {soloVencidas ? " · solo sin atender mas de 24 h" : ""}
@@ -732,13 +726,13 @@ export default function Solicitudes() {
 
       {loading && <div style={{ ...S.card, textAlign: "center", color: "var(--text4)", padding: 28 }}>Cargando solicitudes...</div>}
       {!loading && (sols.length === 0 || visibles.length === 0) && (
-        <div style={{ ...S.card, textAlign: "center", color: "#64748b", padding: "58px 24px", minHeight: 250, display:"grid", placeItems:"center" }}>
+        <div style={{ ...S.card, textAlign: "center", color: "var(--text3)", padding: "58px 24px", minHeight: 250, display:"grid", placeItems:"center" }}>
           <div>
             <div style={{width:128,height:128,borderRadius:"50%",background:"rgba(15,118,110,.10)",margin:"0 auto 18px",display:"grid",placeItems:"center",color:"var(--accent)",fontSize:64}}>▱</div>
-            <div style={{fontSize:22,fontWeight:900,color:"#0f172a",marginBottom:8}}>
+            <div style={{fontSize:22,fontWeight:900,color:"var(--text)",marginBottom:8}}>
               {enRechazadas && sols.length > 0 ? "No hay solicitudes rechazadas." : "No hay solicitudes con esos filtros."}
             </div>
-            <div style={{fontSize:14,color:"#94a3b8"}}>Prueba a cambiar los filtros o el criterio de busqueda.</div>
+            <div style={{fontSize:14,color:"var(--text4)"}}>Prueba a cambiar los filtros o el criterio de busqueda.</div>
           </div>
         </div>
       )}
@@ -831,7 +825,7 @@ export default function Solicitudes() {
 
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               {!rejected && (
-                <button onClick={() => convertir(sol)} disabled={conversionDisabled} title={pricePending ? "Pendiente de respuesta del cliente a la contraoferta" : ""} style={{ ...S.btn, background: "#10b981", color: "#fff", borderColor: "#10b981", opacity: conversionDisabled ? .55 : 1 }}>
+                <button onClick={() => convertir(sol)} disabled={conversionDisabled} title={pricePending ? "Pendiente de respuesta del cliente a la contraoferta" : ""} style={{ ...S.btn, background: "#10b981", color: "var(--card-bg)", borderColor: "#10b981", opacity: conversionDisabled ? .55 : 1 }}>
                   {trabajando === sol.id ? "Procesando..." : pricePending ? "Esperando precio" : "Convertir en pedido"}
                 </button>
               )}
@@ -920,7 +914,7 @@ export default function Solicitudes() {
                     placeholder="Escribe un mensaje para el cliente..."
                     style={{ ...S.input, flex: 1, margin: 0 }}
                   />
-                  <button onClick={() => enviarMensajeEmpresa(sol)} disabled={enviandoMsg === sol.id} style={{ ...S.btn, background: "var(--accent)", color: "#fff", borderColor: "var(--accent)", opacity: enviandoMsg === sol.id ? .55 : 1 }}>
+                  <button onClick={() => enviarMensajeEmpresa(sol)} disabled={enviandoMsg === sol.id} style={{ ...S.btn, background: "var(--accent)", color: "var(--card-bg)", borderColor: "var(--accent)", opacity: enviandoMsg === sol.id ? .55 : 1 }}>
                     {enviandoMsg === sol.id ? "Enviando..." : "Enviar al cliente"}
                   </button>
                 </div>
@@ -1010,7 +1004,7 @@ export default function Solicitudes() {
             </div>
             <div style={{ display:"flex", justifyContent:"flex-end", gap:10, flexWrap:"wrap", marginTop:16 }}>
               <button type="button" onClick={()=>setEditando(null)} style={S.btn}>Cancelar</button>
-              <button type="button" onClick={guardarEditor} disabled={trabajando === editando.id} style={{ ...S.btn, background:"var(--accent)", color:"#fff", borderColor:"var(--accent)", opacity: trabajando === editando.id ? .65 : 1 }}>
+              <button type="button" onClick={guardarEditor} disabled={trabajando === editando.id} style={{ ...S.btn, background:"var(--accent)", color:"var(--card-bg)", borderColor:"var(--accent)", opacity: trabajando === editando.id ? .65 : 1 }}>
                 {trabajando === editando.id ? "Guardando..." : "Guardar cambios"}
               </button>
             </div>

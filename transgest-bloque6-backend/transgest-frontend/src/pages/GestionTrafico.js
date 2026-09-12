@@ -1,3 +1,5 @@
+import { PageHeader } from "../ui";
+import "./operations/operations.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, confirmarGrupaje, separarGrupaje, getColaboradores, crearColaborador } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -4184,8 +4186,9 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   }, []);
 
   return (
-    <div className="tg-traffic-page" style={{ fontFamily:"'DM Sans',sans-serif", height:"100%", display:"flex", flexDirection:"column", overflow:"hidden", background:"var(--bg)" }}>
+    <div className="tg-traffic-page operations-workspace operations-traffic" style={{ fontFamily:"'DM Sans',sans-serif", height:"100%", display:"flex", flexDirection:"column", overflow:"hidden", background:"var(--bg)" }}>
 
+      {!esModoChoferOptimizacion && <PageHeader title="Mesa de tráfico" description="Planifica cargas, vehículos y conductores. Supervisa la semana y organiza tus rutas."/>}
       {/* â”€â”€ Vista tabs â”€â”€ */}
       {!esModoChoferOptimizacion && !hideInternalTabs && <div className="tg-traffic-tabs" style={{padding:"6px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
         {[["cuadrante","Cuadrante semanal"],["grupajes","Grupajes"],["optimizacion","Optimizacion de rutas"]].map(([v,lbl])=>(

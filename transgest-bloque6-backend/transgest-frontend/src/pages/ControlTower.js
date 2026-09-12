@@ -1,3 +1,5 @@
+import { PageHeader } from "../ui";
+import "./operations/operations.css";
 import { useEffect, useMemo, useState } from "react";
 import { getControlTower } from "../services/api";
 import { setRuntimeFocus } from "../services/runtimeFocus";
@@ -392,12 +394,9 @@ export default function ControlTower() {
   }, [visible]);
 
   return (
-    <div className="tg-responsive-page tg-controltower-page" style={S.page}>
+    <div className="tg-responsive-page tg-controltower-page operations-workspace operations-tower" style={S.page}>
       <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:18}}>
-        <div>
-          <div style={S.title}>Control Tower</div>
-          <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Prioridades de tráfico, margen, documentos, cobros y GPS.</div>
-        </div>
+        <PageHeader title="Control Tower" description="Prioridades de tráfico, margen, documentos, cobros y GPS."/>
         <div style={{display:"flex",gap:5,background:"var(--bg3)",padding:4,borderRadius:9,border:"1px solid var(--border)"}}>
           {Object.entries(PERIODS).map(([key,label])=>(
             <button key={key} onClick={()=>setPeriod(key)} style={{padding:"5px 12px",borderRadius:6,border:"none",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:700,cursor:"pointer",background:period===key?"var(--accent)":"transparent",color:period===key?"#fff":"var(--text4)"}}>

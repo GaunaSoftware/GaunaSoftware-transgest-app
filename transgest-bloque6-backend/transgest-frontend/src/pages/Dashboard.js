@@ -5,6 +5,8 @@ import { setRuntimeFocus } from "../services/runtimeFocus";
 import { confirmDialog, notify } from "../services/notify";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
+import DashboardWorkspace from "./dashboard/DashboardWorkspace";
+
 const fmt2   = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtN   = n => Number(n||0).toLocaleString("es-ES");
 const S = {
@@ -358,6 +360,9 @@ function PanelTitle({ icon, title, action }) {
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const [detailed, setDetailed] = useState(false);
+  const [loadErrors, setLoadErrors] = useState([]);
+  const [reloadKey, setReloadKey] = useState(0);
   const [period,    setPeriod]    = useState("mes");
   const [pedidos,   setPedidos]   = useState([]);
   const [facturas,  setFacturas]  = useState([]);
@@ -374,17 +379,20 @@ export default function Dashboard() {
     let active = true;
     async function load() {
       setLoading(true);
+      setLoadErrors([]);
+      const failed = [];
+      const unavailable = (name, fallback) => { failed.push(name); return fallback; };
       try {
-      const _tout = (p, ms=8000) => Promise.race([p, new Promise(r=>setTimeout(()=>r([]),ms))]);
+      const _tout = (p, ms=8000) => { let timer; return Promise.race([p, new Promise(r=>{ timer=setTimeout(()=>r(unavailable("Pedidos", [])),ms); })]).finally(()=>clearTimeout(timer)); };
         const [p, f, v, c, ex, cfg, taller, palets] = await Promise.all([
-          _tout(getPedidosTodos({}, { timeoutMs: 45000, silentError: true }).catch(()=>[]), 45000),
-          getFacturasTodas({}, { silentError: true }).catch(()=>[]),
-          getVehiculos().catch(()=>[]),
-          getChoferes().catch(()=>[]),
-          getExcepcionesOperativas().catch(()=>null),
-          getEmpresaConfig().catch(()=>null),
-          getTallerEstado().catch(()=>null),
-          getPaletMovimientos().catch(()=>[]),
+          _tout(getPedidosTodos({}, { timeoutMs: 45000, silentError: true }).catch(()=>unavailable("Pedidos", [])), 45000),
+          getFacturasTodas({}, { silentError: true }).catch(()=>unavailable("Facturación", [])),
+          getVehiculos().catch(()=>unavailable("Vehículos", [])),
+          getChoferes().catch(()=>unavailable("Conductores", [])),
+          getExcepcionesOperativas().catch(()=>unavailable("Tareas", null)),
+          getEmpresaConfig().catch(()=>unavailable("Configuración", null)),
+          getTallerEstado().catch(()=>unavailable("Taller", null)),
+          getPaletMovimientos().catch(()=>unavailable("Palets", [])),
         ]);
         if (!active) return;
         setPedidos(Array.isArray(p)?p:Array.isArray(p?.data)?p.data:[]);
@@ -400,11 +408,11 @@ export default function Dashboard() {
         setTallerEstado(taller && typeof taller === "object" ? taller : { stock: [], reparaciones: [] });
         setPaletMovimientos(Array.isArray(palets) ? palets : Array.isArray(palets?.data) ? palets.data : []);
       } catch(e) { console.error(e); }
-      finally { if (active) setLoading(false); }
+      finally { if (active) { setLoadErrors([...new Set(failed)]); setLoading(false); } }
     }
     load();
     return () => { active = false; };
-  }, [user?.id, user?.rol]);
+  }, [user?.id, user?.rol, reloadKey]);
 
   useEffect(() => {
     let active = true;
@@ -748,8 +756,11 @@ export default function Dashboard() {
   const abrirControlAnalysisAction = () => {};
   const renderTowerItem = () => null;
 
+  if (!detailed) return <DashboardWorkspace pedidos={pedidos} facturas={facturas} vehiculos={vehiculos} choferes={choferes} alertas={alertas} tareas={misTareas} loadErrors={loadErrors} reload={() => setReloadKey(k => k+1)} loading={loading} today={today} navigate={navegar} openOrder={enfocarPedidos} openAlert={abrirAlerta} advanced={() => setDetailed(true)} stateMeta={estadoPedidoMeta}/>;
+
   return (
     <div className="tg-responsive-page" style={S.page}>
+      <button onClick={() => setDetailed(false)} style={{...S.badge,background:"var(--card-bg)",color:"var(--accent)",border:"1px solid var(--border)",padding:"10px 14px",cursor:"pointer",marginBottom:14}}>Volver al Dashboard</button>
       {/* Header */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:26, flexWrap:"wrap", gap:16 }}>
         <div>

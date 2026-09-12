@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const scope={};vm.createContext(scope);vm.runInContext(fs.readFileSync('src/pages/orders/dateGroups.js','utf8').replace(/export /g,''),scope);
+const items=['2026-09-12','2026-08-31','2026-08-03','2026-09-01','',null,'2026-09-12'].map((date,id)=>({pedido:{id,fecha_carga:date}}));
+const sorted=scope.orderByDate(items),rows=scope.groupOrderDates(sorted,items);
+assert.equal(rows.filter(r=>r.level==='month').length,2);assert.equal(rows.filter(r=>r.level==='day').length,5);assert.equal(rows.filter(r=>!r.__group).length,7);assert.equal(rows.at(-1).pedido.fecha_carga,null);assert.equal(rows.find(r=>r.id==='day-2026-09-12').count,2);
+const page=scope.groupOrderDates(sorted.slice(3,5),items);assert.equal(page[0].level,'month');assert.equal(page.filter(r=>!r.__group).length,2);
+assert.equal(new Set(rows.filter(r=>r.__group).map(r=>r.id)).size,rows.filter(r=>r.__group).length);
+vm.runInContext(fs.readFileSync('src/utils/sidebarNavigation.js','utf8').replace(/export /g,''),scope);
+const nav=scope.organizeSidebar([{items:[{id:'pedidos'},{id:'excepciones'},{id:'actividad'}]}],[],'gerente')[0].items;
+assert(!nav.find(n=>n.id==='nav_operaciones').children.some(n=>n.id==='excepciones'));
+assert(nav.find(n=>n.id==='nav_gestion').children.find(n=>n.id==='nav_trazabilidad').children.some(n=>n.id==='excepciones'));
+console.log('PASS date/month/week boundaries, undated orders, pagination, stable rows, sidebar placement');

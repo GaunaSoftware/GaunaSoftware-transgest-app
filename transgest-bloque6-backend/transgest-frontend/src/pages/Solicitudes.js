@@ -242,7 +242,7 @@ export default function Solicitudes() {
     vencidas: sols.filter(isAged).length,
   }), [sols]);
 
-  const pendientes = resumen.pendientes;
+
   const enRechazadas = vista === "rechazadas";
   const totalVistaActual = enRechazadas
     ? resumen.rechazadas
@@ -653,7 +653,7 @@ export default function Solicitudes() {
     <div className="tg-responsive-page operations-workspace operations-requests" style={S.page}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 28 }}>
         <PageHeader title="Peticiones de viaje" description="Gestiona las peticiones de clientes y proveedores y conviértelas en viajes."/>
-        <button onClick={cargar} style={{...S.btn,color:"var(--accent)"}}>Actualizar</button>
+        <button onClick={cargar} style={{...S.btn,color:"var(--accent-xl)"}}>Actualizar</button>
       </div>
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:16, marginBottom:28 }}>
@@ -710,8 +710,8 @@ export default function Solicitudes() {
           <option value="carga">Orden: fecha carga</option>
           <option value="cliente">Orden: cliente</option>
         </select>
-        <button onClick={exportarCsv} style={{...S.btn,color:"var(--accent)"}}>Exportar CSV</button>
-        <button onClick={exportarInformeHtml} style={{...S.btn,color:"var(--accent)"}}>Informe HTML</button>
+        <button onClick={exportarCsv} style={{...S.btn,color:"var(--accent-xl)"}}>Exportar CSV</button>
+        <button onClick={exportarInformeHtml} style={{...S.btn,color:"var(--accent-xl)"}}>Informe HTML</button>
         {(q || estado || soloVencidas || enRechazadas) && (
           <button onClick={()=>{setQ("");setEstado("");setSoloVencidas(false);setVista("activas");}} style={S.btn}>Limpiar</button>
         )}
@@ -719,7 +719,7 @@ export default function Solicitudes() {
       {!loading && sols.length > 0 && (
         <div style={{ margin:"0 0 16px", fontSize:14, color:"var(--text3)" }}>
           {enRechazadas ? "Rechazadas: " : "Activas: "}
-          Mostrando <strong style={{color:"var(--accent)"}}>{visibles.length}</strong> de {totalVistaActual} solicitudes
+          Mostrando <strong style={{color:"var(--accent-xl)"}}>{visibles.length}</strong> de {totalVistaActual} solicitudes
           {soloVencidas ? " · solo sin atender mas de 24 h" : ""}
         </div>
       )}
@@ -728,7 +728,7 @@ export default function Solicitudes() {
       {!loading && (sols.length === 0 || visibles.length === 0) && (
         <div style={{ ...S.card, textAlign: "center", color: "var(--text3)", padding: "58px 24px", minHeight: 250, display:"grid", placeItems:"center" }}>
           <div>
-            <div style={{width:128,height:128,borderRadius:"50%",background:"rgba(15,118,110,.10)",margin:"0 auto 18px",display:"grid",placeItems:"center",color:"var(--accent)",fontSize:64}}>▱</div>
+            <div style={{width:128,height:128,borderRadius:"50%",background:"rgba(15,118,110,.10)",margin:"0 auto 18px",display:"grid",placeItems:"center",color:"var(--accent-xl)",fontSize:64}}>▱</div>
             <div style={{fontSize:22,fontWeight:900,color:"var(--text)",marginBottom:8}}>
               {enRechazadas && sols.length > 0 ? "No hay solicitudes rechazadas." : "No hay solicitudes con esos filtros."}
             </div>
@@ -840,7 +840,7 @@ export default function Solicitudes() {
                 </button>
               )}
               {!rejected && (
-                <button onClick={() => abrirEditor(sol)} disabled={trabajando === sol.id} style={{ ...S.btn, color:"var(--accent)", borderColor:"rgba(15,118,110,.25)" }}>
+                <button onClick={() => abrirEditor(sol)} disabled={trabajando === sol.id} style={{ ...S.btn, color:"var(--accent-xl)", borderColor:"rgba(15,118,110,.25)" }}>
                   Editar
                 </button>
               )}
@@ -996,7 +996,7 @@ export default function Solicitudes() {
                         <div style={{ fontWeight:900, color:"var(--text)", fontSize:13 }}>{doc.nombre || "orden-carga"}</div>
                         <div style={{ color:"var(--text5)", fontSize:11 }}>{doc.file_mime || "archivo"} · {doc.file_size_kb || "-"} KB</div>
                       </div>
-                      <button type="button" onClick={()=>descargarDocumentoSolicitud(doc)} style={{ ...S.btn, color:"var(--accent)" }}>Descargar</button>
+                      <button type="button" onClick={()=>descargarDocumentoSolicitud(doc)} style={{ ...S.btn, color:"var(--accent-xl)" }}>Descargar</button>
                     </div>
                   ))}
                 </div>

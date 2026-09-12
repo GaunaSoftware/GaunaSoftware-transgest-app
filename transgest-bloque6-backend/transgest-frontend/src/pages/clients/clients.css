@@ -1,0 +1,86 @@
+.clients-page { padding: 22px; }
+.clients-nav { display:flex; gap:8px; border-bottom:1px solid var(--border); margin:0 0 18px; }
+.clients-nav .tgui-button { border:0; border-radius:6px 6px 0 0; background:transparent; padding:12px 18px; color:var(--text3); border-bottom:3px solid transparent; }
+.clients-nav .tgui-button[aria-current="page"] { color:var(--accent); background:var(--accent-a08); border-bottom-color:var(--accent); }
+.clients-workspace { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:18px; }
+.clients-workspace--selected { grid-template-columns:minmax(0,1.8fr) minmax(360px,1fr); }
+.clients-list { min-width:0; }
+.clients-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:18px; }
+.clients-kpis .tgui-kpi { min-width:0; padding:16px 12px; gap:12px; }
+.clients-kpis .tgui-kpi-label { font-size:12px; }
+.clients-kpis .tgui-number { font-size:24px; }
+.clients-kpis small { font-size:11px; }
+.clients-table { overflow:hidden; }
+.clients-table .tgui-table { font-size:12px; }
+.clients-table .tgui-table th { font-size:10px; white-space:nowrap; }
+.clients-table .tgui-table td { height:44px; padding:7px 10px; }
+.clients-table .tgui-table .tgui-button { min-height:28px; padding:2px 8px; }
+.clients-name { border:0; background:none; color:var(--text); cursor:pointer; display:flex; gap:10px; align-items:center; text-align:left; font:inherit; font-weight:600; padding:0; }
+.clients-name:hover { color:var(--accent); }
+.clients-name:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
+.clients-photo { width:42px; height:42px; object-fit:contain; flex-shrink:0; border-radius:8px; }
+.clients-name .clients-photo { width:28px; height:28px; }
+.clients-selected { background:var(--accent-a10); }
+.clients-pagination { padding:16px; border-top:1px solid var(--border); display:flex; gap:14px; align-items:center; justify-content:space-between; flex-wrap:wrap; color:var(--text3); }
+.clients-pagination > div { display:flex; align-items:center; gap:10px; }
+.clients-pagination .tgui-input { width:auto; }
+.clients-detail { position:sticky; top:16px; min-width:0; padding:16px; }
+.clients-detail-heading { display:flex; align-items:flex-start; gap:12px; margin-bottom:18px; }
+.clients-detail-heading > div { flex:1; min-width:0; }
+.clients-detail-heading h2 { margin:0 0 8px; font-size:18px; overflow-wrap:anywhere; }
+.clients-detail-heading .tgui-badge { margin:0 4px 4px 0; }
+.clients-detail-content { min-width:0; }
+.clients-detail-content .tgui-tabs { gap:0; margin-bottom:12px; }
+.clients-detail-content .tgui-tabs button { padding:12px 9px; font-size:12px; }
+.clients-info { padding:12px; margin-bottom:12px; }
+.clients-info header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+.clients-info h3 { font-size:14px; margin:0; }
+.clients-info .tgui-button { font-size:12px; padding:6px 10px; }
+.clients-info dl { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin:12px 0; }
+.clients-info dt { font-size:11px; color:var(--text3); margin-bottom:6px; }
+.clients-info dd { margin:0; font-size:13px; color:var(--text); overflow-wrap:anywhere; white-space:pre-line; }
+.clients-info .tgui-table td,.clients-info .tgui-table th { font-size:11px; padding:10px 6px; }
+.clients-info .tgui-table td { height:40px; }
+.clients-price { white-space:nowrap; }
+.clients-price small { display:block; color:var(--text3); }
+.clients-detail-footer { display:grid; gap:10px; }
+.clients-detail-footer small { color:var(--text3); line-height:1.6; }
+.clients-error { color:var(--red,#dc2626); padding:12px; }
+.clients-photo-field { display:flex; align-items:center; gap:16px; padding:16px; margin-bottom:16px; border:1px dashed var(--border); border-radius:10px; }
+.clients-photo-field .clients-photo { width:72px; height:72px; }
+.clients-photo-field strong { font-size:14px; }
+.clients-photo-field p,.clients-photo-field small { font-size:12px; color:var(--text3); }
+.clients-photo-field small { display:block; margin-top:8px; }
+.clients-upload { display:inline-block; cursor:pointer; padding:8px 10px; color:var(--accent); border:1px solid var(--border); border-radius:6px; margin-right:8px; font-size:13px; }
+.clients-upload:focus-within { outline:2px solid var(--accent); }
+.clients-upload input { position:absolute; width:1px; height:1px; opacity:0; }
+.clients-editor { min-width:0; }
+.clients-editor > div:nth-child(1) { overflow-x:auto; }
+.clients-editor input,.clients-editor select,.clients-editor textarea { max-width:100%; box-sizing:border-box; }
+.clients-routes { padding:22px !important; min-width:0; }
+.clients-routes h1 { font-family:inherit !important; font-size:28px !important; margin:0 0 8px; }
+.clients-routes .tg-rutas-filters { grid-template-columns:repeat(4,minmax(0,1fr)) !important; gap:10px !important; background:var(--card-bg,var(--bg2)); border:1px solid var(--border); border-radius:10px; padding:14px; }
+.clients-routes .tg-rutas-filters > * { min-width:0; max-width:100%; box-sizing:border-box; }
+.clients-routes table th,.clients-routes table td { font-size:12px !important; padding:10px 12px !important; }
+.clients-routes [style*="overflow"] { max-width:100%; }
+.clients-routes [style*="position: fixed"] { padding:12px !important; }
+@media (min-width:1100px) and (max-width:1535px) { .clients-workspace--selected .clients-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:1099px) { .clients-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } .clients-routes .tg-rutas-filters { grid-template-columns:repeat(2,minmax(0,1fr)) !important; } }
+@media (max-width:767px) {
+  .clients-page,.clients-routes { padding:14px !important; }
+  .clients-kpis { gap:8px; }
+  .clients-kpis .tgui-kpi { padding:12px; gap:8px; }
+  .clients-kpis .tgui-kpi-icon { display:none; }
+  .clients-kpis .tgui-number { font-size:22px; }
+  .clients-pagination { padding:12px; }
+  .clients-pagination > div { gap:8px; flex-wrap:wrap; }
+  .clients-detail-content .tgui-tabs { max-width:100%; }
+  .clients-info dl { gap:14px; }
+  .clients-editor [style*="grid-template-columns"] { grid-template-columns:minmax(0,1fr) !important; }
+  .clients-editor [style*="grid-template-columns"] > * { min-width:0; }
+  .clients-editor [style*="position: fixed"] { padding:8px !important; }
+  .clients-editor [style*="width: 1000"],.clients-editor [style*="width: 1100"] { width:100% !important; }
+  .clients-routes .tg-rutas-filters { grid-template-columns:minmax(0,1fr) !important; }
+  .clients-routes [style*="grid-template-columns"] { grid-template-columns:minmax(0,1fr) !important; }
+  .clients-routes [style*="min-width: 340"],.clients-routes [style*="min-width: 400"] { min-width:0 !important; }
+}

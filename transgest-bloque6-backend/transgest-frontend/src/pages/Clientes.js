@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
+import { Modal } from "../ui";
+import ClientsWorkspace, { ClientPhotoInput } from "./clients/CommercialViews";
 import { routeMargin } from '../utils/routeMargin';
 import {
   getClientes, crearCliente, editarCliente, borrarCliente,
@@ -95,7 +97,6 @@ const ivaOption = (tipoIva, regimen) => {
   const pct = Number(tipoIva);
   return TIPOS_IVA.find(o => o.pct === pct && o.value !== "exento") || TIPOS_IVA[0];
 };
-const ivaLabel = (tipoIva, regimen) => ivaOption(tipoIva, regimen).label;
 const FORMAS_PAGO = ["transferencia","domiciliacion","cheque","efectivo","confirming"];
 const PLAZOS_PAGO_CLIENTE = [
   "Al finalizar viaje",
@@ -574,14 +575,15 @@ function buildClienteForm(cliente) {
   };
 }
 
-function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExistentes = [] }) {
+function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExistentes = [], initialTab = "datos" }) {
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("clientes");
   const esNuevo = !cliente;
 
-  const [tab,       setTab]       = useState("datos");
+  const [tab,       setTab]       = useState(initialTab);
   const [form,      setForm]      = useState(() => buildClienteForm(cliente));
   const [saving,    setSaving]    = useState(false);
+  const [imageReading, setImageReading] = useState(false);
 
   // Rutas del cliente
   const [rutas,     setRutas]     = useState([]);
@@ -705,7 +707,11 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
       };
       const saved = esNuevo ? await crearCliente(payload) : await editarCliente(cliente.id, payload);
       if (!saved?.id) throw new Error("El servidor no ha confirmado el cliente. No repitas el alta: recarga la lista y revisa la API.");
+      if (form.imagen_data !== undefined && (saved.imagen_data || null) !== (form.imagen_data || null)) {
+        notify("Cliente guardado, pero la imagen no se ha guardado. Es necesario actualizar el servidor para usar fotos de clientes.", "warning");
+      } else {
       notify(esNuevo ? "Cliente creado correctamente." : "Cliente actualizado correctamente.", "success");
+      }
       onSaved?.(saved);
     } catch(e) { notify(e.message, "error"); }
     finally { setSaving(false); }
@@ -1025,19 +1031,8 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
   }
 
   return (
-    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={S.mbox}>
-        {/* Cabecera */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
-          <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:19,fontWeight:800,color:"var(--text)"}}>
-              {esNuevo ? "Nuevo cliente" : form.nombre}
-            </div>
-            {!esNuevo && <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{form.cif||"Sin CIF"}</div>}
-          </div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",fontSize:13,cursor:"pointer",padding:4}}>Cerrar</button>
-        </div>
-
+    <Modal title={esNuevo ? "Nuevo cliente" : form.nombre} onClose={onClose} width={1100}>
+      <div className="clients-editor">
         {/* Tabs */}
         <div style={{display:"flex",gap:0,borderBottom:"1px solid var(--border)",marginBottom:18,marginTop:12}}>
           {(esNuevo ? TABS.filter(t => ["datos","facturacion"].includes(t.id)) : TABS).map(t=>(
@@ -1048,6 +1043,8 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
             </button>
           ))}
         </div>
+
+        {tab === "datos" && <ClientPhotoInput value={form.imagen_data} onReadingChange={setImageReading} disabled={!canEdit || saving} onChange={value => setForm(prev => ({...prev, imagen_data:value}))} />}
 
         {/* TAB: Datos */}
         {tab==="datos" && (
@@ -1422,8 +1419,8 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
               </div>
             )}
             {modalRuta && (
-              <div style={{...S.modal,zIndex:200}} onMouseDown={e=>e.target===e.currentTarget&&setModalRuta(false)}>
-                <div style={{...S.mbox,width:"min(620px,96vw)"}}>
+              <Modal title={editRuta ? "Editar ruta" : "Nueva ruta"} onClose={() => setModalRuta(false)} width={620}>
+                <div className="clients-editor">
                   <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:18,color:"var(--text)"}}>{editRuta?"Editar ruta":"Nueva ruta para "+form.nombre}</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <div><label style={S.lbl}>Origen *</label><input style={S.inp} value={formRuta.origen||""} onChange={fr("origen")}/></div>
@@ -1452,7 +1449,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                     <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={guardarRuta} disabled={saving}>{saving?"Guardando...":editRuta?"Guardar":"Crear ruta"}</button>
                   </div>
                 </div>
-              </div>
+              </Modal>
             )}
           </div>
         )}
@@ -1832,13 +1829,13 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
         {(tab==="datos"||tab==="facturacion") && canEdit && (
           <div style={{display:"flex",gap:10,marginTop:24,justifyContent:"flex-end",borderTop:"1px solid var(--border)",paddingTop:18}}>
             <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}} onClick={onClose}>Cancelar</button>
-            <button style={{...S.btn,background:"#3b6ef5",color:"#fff",opacity:saving?0.7:1}} onClick={guardarCliente} disabled={saving}>
+            <button style={{...S.btn,background:"#3b6ef5",color:"#fff",opacity:saving?0.7:1}} onClick={guardarCliente} disabled={saving || imageReading}>
               {saving?"Guardando...":esNuevo?"Crear cliente":"Guardar cambios"}
             </button>
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1851,6 +1848,7 @@ export default function Clientes() {
   const [clientes, setClientes]   = useState([]);
   const [loading,  setLoading]    = useState(true);
   const [q,        setQ]          = useState("");
+  const [initialTab, setInitialTab] = useState("datos");
   const [ficha,    setFicha]      = useState(null);  // null | "nuevo" | {cliente}
   const [rutasG,   setRutasG]     = useState([]);
   const [soloPendientes, setSoloPendientes] = useState(false);
@@ -1896,151 +1894,18 @@ export default function Clientes() {
     catch(e) { notify(e.message, "error"); }
   }
 
-  const clientesPendientes = clientes.filter(c=>c.pendiente_revision);
-  const clientesVisibles = soloPendientes ? clientesPendientes : clientes;
-  const resumenClientes = {
-    total: clientes.length,
-    bloqueados: clientes.filter(c=>c.bloqueado).length,
-    revisar: clientesPendientes.length,
-    conRiesgo: clientes.filter(c=>Number(c.limite_riesgo || 0) > 0).length,
-    conEmailFacturacion: clientes.filter(c=>c.email_facturacion || c.email).length,
-    rutas: rutasG.length,
-  };
-
   return (
-    <div className="tg-responsive-page" style={S.page}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:18}}>
-        <div style={S.title}>Clientes</div>
-        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:"var(--text3)",cursor:"pointer",userSelect:"none",fontWeight:700}}>
-          <input type="checkbox" checked={mostrarBaja} onChange={e=>{setMostrarBaja(e.target.checked);}}
-            style={{accentColor:"var(--accent)",cursor:"pointer"}}/>
-          Ver dados de baja
-        </label>
-      </div>
-
-      <div style={S.bar}>
-        {canEdit && (
-          <button style={{...S.btn,background:"#3b6ef5",color:"#fff"}} onClick={()=>setFicha("nuevo")}>
-            + Nuevo cliente
-          </button>
-        )}
-        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar por nombre, CIF..."
-          style={{...S.inp,width:330}}/>
-        <span style={{fontSize:13,color:"var(--text4)",marginLeft:"auto",fontWeight:700}}>
-          {clientes.length} cliente{clientes.length!==1?"s":""}
-        </span>
-      </div>
-
-      {clientesPendientes.length > 0 && (
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:14,padding:"12px 14px",borderRadius:8,border:"1px solid rgba(245,158,11,.28)",background:"rgba(245,158,11,.10)",color:"#f59e0b"}}>
-          <div>
-            <div style={{fontWeight:900,fontSize:13}}>Hay {clientesPendientes.length} cliente{clientesPendientes.length!==1?"s":""} pendiente{clientesPendientes.length!==1?"s":""} de revisar</div>
-            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Revisa datos fiscales, contacto, forma de pago, direcciones y tarifas antes de usarlo de forma operativa.</div>
-          </div>
-          <button style={{...S.btn,background:soloPendientes?"rgba(245,158,11,.20)":"rgba(245,158,11,.12)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.35)",boxShadow:"none"}} onClick={()=>setSoloPendientes(v=>!v)}>
-            {soloPendientes ? "Ver todos" : "Ver pendientes"}
-          </button>
-        </div>
-      )}
-
-      {loadError && (
-        <div style={{marginBottom:14,padding:"12px 14px",borderRadius:8,border:"1px solid rgba(239,68,68,.35)",background:"rgba(239,68,68,.10)",color:"#fecaca",fontWeight:800}}>
-          {loadError}
-        </div>
-      )}
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:14}}>
-        {[
-          ["Clientes activos", resumenClientes.total, "var(--text)", "Listado visible"],
-          ["Bloqueados", resumenClientes.bloqueados, resumenClientes.bloqueados ? "#ef4444" : "var(--green)", "No admiten viajes"],
-          ["A revisar", resumenClientes.revisar, resumenClientes.revisar ? "#f59e0b" : "var(--green)", "Pendiente validacion"],
-          ["Con riesgo", resumenClientes.conRiesgo, "var(--accent-xl)", "Limite configurado"],
-          ["Email fact.", resumenClientes.conEmailFacturacion, "var(--green)", "Preparados para envio"],
-          ["Rutas/tarifas", resumenClientes.rutas, "var(--accent-xl)", "Tarifas activas"],
-        ].map(([label,value,color,detail])=>(
-          <div key={label} style={{...S.card,padding:"12px 14px",marginBottom:0}}>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:900,color}}>{value}</div>
-            <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",marginTop:4}}>{label}</div>
-            <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{detail}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={S.card}>
-        <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr>
-            {["Nombre","CIF","Teléfono","Email","IVA","Forma pago","País","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}
-          </tr></thead>
-          <tbody>
-            {loading ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
-            : clientesVisibles.length===0 ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>
-                Sin clientes. {canEdit&&"Crea el primero con el botón de arriba."}
-              </td></tr>
-            : clientesVisibles.map(c=>(
-              <tr key={c.id}
-                style={{
-                  cursor:"pointer",
-                  background: c.pendiente_revision
-                    ? "linear-gradient(90deg, rgba(251,191,36,.14), rgba(251,191,36,.03) 24%)"
-                    : "transparent",
-                  boxShadow: c.pendiente_revision ? "inset 3px 0 0 #f59e0b" : "inset 3px 0 0 transparent",
-                }}
-                onClick={()=>setFicha(c)}>
-                <td style={{...S.td,fontWeight:700,color:"var(--text)"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    {c.nombre}
-                    {c.pendiente_revision && (
-                      <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:10,
-                        background:"rgba(251,191,36,.15)",color:"#f59e0b",
-                        border:"1px solid rgba(251,191,36,.3)",whiteSpace:"nowrap",flexShrink:0}}>
-                        REVISAR
-                      </span>
-                    )}
-                    {c.bloqueado && (
-                      <span title={c.bloqueo_motivo || "Cliente bloqueado"} style={{fontSize:9,fontWeight:900,padding:"2px 7px",borderRadius:10,
-                        background:"rgba(239,68,68,.12)",color:"#ef4444",
-                        border:"1px solid rgba(239,68,68,.26)",whiteSpace:"nowrap",flexShrink:0}}>
-                        BLOQUEADO
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--text2)"}}>{c.cif||"-"}</td>
-                <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>{c.telefono||"-"}</td>
-                <td style={{...S.td,fontSize:12,color:"var(--text2)"}}>{c.email||"-"}</td>
-                <td style={S.td}>
-                  <span style={{display:"inline-flex",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:"rgba(59,110,245,.14)",color:"var(--accent-xl)"}}>
-                    {ivaLabel(c.tipo_iva, c.iva_regimen)}
-                  </span>
-                </td>
-                <td style={{...S.td,fontSize:12,color:"var(--text2)",textTransform:"capitalize"}}>{c.forma_pago||"transferencia"}</td>
-                <td style={{...S.td,fontSize:11,color:"var(--text2)"}}>
-                  {c.calle ? `${c.calle}${c.num_ext?" "+c.num_ext:""}` : c.direccion||"-"}
-                  {c.cod_postal||c.municipio ? <><br/><span style={{color:"var(--text4)"}}>{[c.cod_postal,c.municipio].filter(Boolean).join(" ")}</span></> : null}
-                </td>
-                <td style={S.td} onClick={e=>e.stopPropagation()}>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                    <button style={{...S.btn,background:"rgba(148,163,184,.08)",color:"var(--text)",padding:"6px 12px",fontSize:12,boxShadow:"none"}} onClick={()=>setFicha(c)}>Abrir ficha</button>
-                    {c.pendiente_revision && canEdit && (
-                      <button style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#059669",padding:"6px 12px",fontSize:12,border:"1px solid rgba(16,185,129,.25)",boxShadow:"none"}}
-                        onClick={async e=>{
-                          e.stopPropagation();
-                          await marcarClienteRevisado(c.id);
-                          cargar();
-                        }}> Revisado</button>
-                    )}
-                    {canEdit && <button style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#ef4444",padding:"6px 12px",fontSize:12,border:"1px solid rgba(239,68,68,.18)",boxShadow:"none"}} onClick={()=>eliminar(c)}>Eliminar</button>}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <>
+      <ClientsWorkspace clientes={clientes} rutas={rutasG} loading={loading} error={loadError} reload={cargar}
+        q={q} setQ={setQ} mostrarBaja={mostrarBaja} setMostrarBaja={setMostrarBaja}
+        soloPendientes={soloPendientes} setSoloPendientes={setSoloPendientes} canEdit={canEdit}
+        onEdit={(cliente, tab) => { setInitialTab(tab); setFicha(cliente || "nuevo"); }} onDelete={eliminar}
+        onReviewed={async c => { try { await marcarClienteRevisado(c.id); cargar(); } catch(e) { notify(e.message,"error"); } }} />
 
       {/* Ficha cliente */}
       {ficha && (
         <FichaCliente
+          initialTab={initialTab}
           cliente={ficha==="nuevo" ? null : ficha}
           rutasGlobales={rutasG}
           clientesExistentes={clientes}
@@ -2052,6 +1917,6 @@ export default function Clientes() {
           }}
         />
       )}
-    </div>
+    </>
   );
 }

@@ -901,7 +901,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
           </div>
 
           {/* Content */}
-          <div className={`tg-content${vistaActiva === "facturacion" ? "" : " tg-content--legacy"}`}>
+          <div className={`tg-content${["facturacion", "clientes", "rutas", "tarifas"].includes(vistaActiva) ? "" : " tg-content--legacy"}`}>
             {children}
           </div>
         </div>

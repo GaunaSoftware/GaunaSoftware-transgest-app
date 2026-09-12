@@ -9,10 +9,11 @@ const { body, validationResult } = require("express-validator");
 const db      = require("../services/db");
 const { authenticate, GERENTE_O_CONTABLE } = require("../middleware/auth");
 
+const { normalizeClientImage } = require("../services/clientImage");
 const router = express.Router();
 
 const CLIENTES_CREATE_BASE_COLUMNS = new Set([
-  "empresa_id", "nombre", "cif", "direccion", "cp", "ciudad", "pais",
+  "imagen_data", "empresa_id", "nombre", "cif", "direccion", "cp", "ciudad", "pais",
   "email", "contacto", "telefono", "forma_pago", "vencimiento",
   "tipo_iva", "tipo_irpf", "precio_tn_km", "activo", "notas",
   "iva_regimen", "calle", "num_ext", "piso_puerta", "cod_postal", "municipio",
@@ -266,6 +267,14 @@ function firstDefined(source, keys, fallback = null) {
     if (Object.prototype.hasOwnProperty.call(source || {}, key) && source[key] !== undefined) return source[key];
   }
   return fallback;
+}
+
+async function validatedClientImage(body = {}) {
+  const image = normalizeClientImage(body.imagen_data);
+  if (image !== undefined && !(await getClientesColumns()).has("imagen_data")) {
+    throw Object.assign(new Error("La foto requiere actualizar la base de datos (migración 013). Guarda el cliente sin cambiar la foto o contacta con soporte."), { status: 503 });
+  }
+  return image;
 }
 
 function normalizeClienteWrite(body = {}) {
@@ -923,6 +932,7 @@ router.post("/", GERENTE_O_CONTABLE,
     if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0]?.msg || "Datos de cliente no válidos.", errors: errors.array() });
 
     const clienteData = normalizeClienteWrite(req.body);
+    const imagenData = await validatedClientImage(req.body);
     const { nombre, direccion, cp, ciudad, pais, email, contacto, telefono,
             forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, notas,
             calle, num_ext, codigo_postal, pendiente_revision,
@@ -946,6 +956,7 @@ router.post("/", GERENTE_O_CONTABLE,
       (!cp?.trim() && !codigo_postal?.trim()) || (!ciudad?.trim());
 
     const created = await insertClienteCompat({
+      imagen_data: imagenData,
       nombre,
       cif: cif || null,
       direccion: direccion || null,
@@ -1027,6 +1038,7 @@ router.post("/", GERENTE_O_CONTABLE,
 router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   try {
   const clienteData = normalizeClienteWrite(req.body);
+  const imagenData = await validatedClientImage(req.body);
   const { nombre, cif, direccion, cp, ciudad, pais, email, contacto, telefono,
           forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, activo, notas,
           email_facturacion, emails_albaranes, iban, horario_carga, horario_descarga,
@@ -1044,6 +1056,7 @@ router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   }
 
   const updated = await updateClienteCompat(req.params.id, empresaId, {
+    imagen_data: imagenData,
     nombre,
     cif,
     direccion,

@@ -1,3 +1,4 @@
+import { CommercialNav } from "./clients/CommercialViews";
 import { useState, useEffect, useMemo } from "react";
 import { routeMargin } from '../utils/routeMargin';
 import { getRutas, crearRuta, editarRuta, borrarRuta, getRutaPrecios, editarRutaPrecios, getClientes, importarRutas } from "../services/api";
@@ -289,10 +290,11 @@ export default function Rutas(){
   },[rutas,filtroCliente,filtroTexto,filtroTipo,filtroTarifa,soloMargenNegativo,clientes]);
 
   return(
-    <div className="tg-responsive-page" style={S.page}>
+    <div className="tg-responsive-page clients-routes" style={S.page}>
+      <CommercialNav active="rutas" />
       <div style={{marginBottom:20}}>
         <div>
-          <div style={S.title}>Rutas y tarifas</div>
+          <h1 style={S.title}>Rutas y tarifas</h1>
           <div style={{fontSize:15,color:"#475569",maxWidth:820,lineHeight:1.45}}>
             Configura rutas por cliente, minimos facturables, recargo de combustible y compatibilidad por tipo de remolque. En Pedidos solo aparecen las rutas del cliente seleccionado.
           </div>

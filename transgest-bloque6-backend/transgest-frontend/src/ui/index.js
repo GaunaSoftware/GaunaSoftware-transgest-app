@@ -17,6 +17,9 @@ export function Section({ title, actions, children, ...props }) {
 export function Badge({ tone = "neutral", className, ...props }) { return <span className={cx("tgui-badge", `tgui-tone--${tone}`, className)} {...props} />; }
 export function Icon({ name, size = 20 }) {
   const paths = {
+    clients: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",
+    route: "M7 5a2 2 0 1 1-4 0 2 2 0 0 1 4 0 M21 19a2 2 0 1 1-4 0 2 2 0 0 1 4 0 M7 5h8a4 4 0 0 1 0 8H9a3 3 0 0 0 0 6h8",
+    alert: "M10.3 3.4 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.4a2 2 0 0 0-3.4 0 M12 9v4 M12 17h.01",
     invoice: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z M14 2v6h6 M8 12h8 M8 16h6",
     clock: "M12 8v5l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
     coins: "M15 7a5 5 0 1 0 0 10 M6 10h8 M6 14h8 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",

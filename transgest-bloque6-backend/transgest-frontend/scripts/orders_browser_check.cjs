@@ -56,7 +56,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   await quick.getByRole('button',{name:'Asignar camión',exact:true}).click();
   const assign=page.getByRole('dialog',{name:'Asignar recursos'});await assign.waitFor();await assign.getByRole('button',{name:'Cancelar',exact:true}).click();
   await quick.getByRole('button',{name:'Copiar pedido',exact:true}).click();
-  const copy=page.getByRole('dialog',{name:'Copiar viaje'});await copy.waitFor();await copy.getByRole('button',{name:'Cancelar',exact:true}).click();
+  const copy=page.getByText('Copiar viaje',{exact:true}).locator('..');await copy.waitFor();await copy.getByRole('button',{name:'Cancelar',exact:true}).click();
   await page.getByRole('button',{name:'Quitar selección',exact:true}).click();
   checks.push('Default compact view, real KPIs, pagination, selection, existing assignment and copy dialogs');
   await page.getByLabel('Estado del pedido').first().selectOption('incidencia');await page.waitForFunction(()=>document.querySelectorAll('.orders-list-card tbody tr').length===2);

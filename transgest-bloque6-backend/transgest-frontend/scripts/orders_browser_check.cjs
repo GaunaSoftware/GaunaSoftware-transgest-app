@@ -94,7 +94,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
 
   await editor.locator('.tg-pedido-modal-header button').click();await editor.waitFor({state:'hidden'});
   checks.push('Mobile filters and existing full order editor');
-  user.rol='visualizador';await page.reload({waitUntil:'networkidle'});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'})));
+  user.rol='visualizador';await page.evaluate(u=>localStorage.setItem(`tms_onboarding_done:${u.empresa_id}:${u.rol}:${u.id}`,'1'),user);await page.reload({waitUntil:'networkidle'});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'})));
   await page.locator('.orders-list-card tbody tr').first().waitFor();
   assert.equal(await page.getByRole('button',{name:'+ Nuevo pedido',exact:true}).count(),0);
   await page.getByLabel('Seleccionar P-QA-001',{exact:true}).first().check();

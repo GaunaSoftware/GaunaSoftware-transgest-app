@@ -14,7 +14,7 @@
 export const DEFAULT_API_URL =
   process.env.REACT_APP_LOCAL_SERVER === 'true'
     ? window.location.origin
-    : process.env.REACT_APP_API_URL || "https://transgest-backend.onrender.com";
+    : process.env.REACT_APP_API_URL || "https://api.transgest.app";
 
 const STORAGE_KEY = "transgest_api_url";
 

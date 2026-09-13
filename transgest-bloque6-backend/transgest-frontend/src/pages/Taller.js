@@ -1,4 +1,4 @@
-import {PageHeader,Button} from "../ui";
+import {PageHeader,Button,KpiCard} from "../ui";
 import WorkshopOrders from "./workshop/WorkshopOrders";
 import "./workshop/workshop.css";
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -2665,31 +2665,11 @@ export default function Taller() {
     <div className="tg-responsive-page workshop-workspace" style={S.page}>
       <PageHeader title="Taller" description="Gestiona el mantenimiento de tu flota, las reparaciones y los recambios."/>
 
-      {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:18,marginBottom:28}}>
-        {[
-          {l:"Total intervenciones",  v:taller.reparaciones.length, c:"var(--accent-xl)", icon:"tool", bg:"#dcfce7"},
-          {l:"Coste este mes",        v:`${fmt2(costoMes)} EUR`,       c:"var(--accent)", icon:"money", bg:"#d1fae5", title:`Mano de obra: ${fmt2(gastoTaller.manoObra)} EUR - Piezas: ${fmt2(gastoTaller.piezas)} EUR`},
-          ...(vehiculosEnTaller.length>0?[{l:`Lucro cesante (${vehiculosEnTaller.length} veh.)`,v:`${fmt2(lucroTotal)} EUR`,c:"#ef4444",title:"Ingresos perdidos por vehículos en taller"}]:[]),
-          {l:"Piezas en stock",       v:stockTotalUnidades,          c:"#7c3aed", icon:"cube", bg:"#ede9fe"},
-          {l:"Stock bajo mínimo",     v:stockBajo.length,             c:stockBajo.length>0?"#2563eb":"var(--accent)", icon:"layers", bg:"#dbeafe"},
-          ...(()=>{
-            const cnt = {};
-            taller.reparaciones.forEach(r=>{ if(r.vehiculo_matricula) cnt[r.vehiculo_matricula]=(cnt[r.vehiculo_matricula]||0)+1; });
-            const top = Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
-            return top ? [{l:"Más intervenciones", v:`${top[0]} (${top[1]}x)`, c:"#f59e0b"}] : [];
-          })(),
-        ].map((k,i)=>(
-          <div key={i} title={k.title || ""} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"26px 28px",display:"flex",alignItems:"center",gap:20,minHeight:102,boxShadow:"0 16px 34px rgba(15,23,42,.06)"}}>
-            <div style={{width:54,height:54,borderRadius:"50%",display:"grid",placeItems:"center",background:k.bg || `${k.c}14`,color:k.c,flexShrink:0}}>
-              <TallerIcon name={k.icon || "tool"} color={k.c} size={27} />
-            </div>
-            <div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:900,color:k.c,lineHeight:1}}>{k.v}</div>
-              <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text3)",marginTop:10}}>{k.l}</div>
-            </div>
-          </div>
-        ))}
+      <div className="workshop-kpis">
+        <KpiCard label="Órdenes abiertas" value={taller.reparaciones.filter(r=>r.estado!=='cerrada').length} icon="invoice" detail="Intervenciones pendientes de cierre"/>
+        <KpiCard label="Coste del mes" value={`${fmt2(costoMes)} €`} icon="coins" detail="Mano de obra y recambios"/>
+        <KpiCard label="Piezas en stock" value={stockTotalUnidades} icon="truck" detail="Unidades registradas"/>
+        <KpiCard label="Stock bajo mínimo" value={stockBajo.length} icon="alert" tone={stockBajo.length?'warning':'success'} detail="Referencias para revisar"/>
       </div>
 
       {solicitudesPendientes > 0 && (

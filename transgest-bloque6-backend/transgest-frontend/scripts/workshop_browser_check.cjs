@@ -20,7 +20,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   const page=await browser.newPage({viewport:{width:1672,height:1040}});
   await page.clock.setFixedTime(new Date('2026-09-12T08:00:00Z'));
   page.on('pageerror',e=>errors.push(e.message));
-  let failList=false;
+  let failList=false,vehicleImage=null;
   await page.route('**/api/v1/**',async route=>{
     const req=route.request(),u=new URL(req.url()),p=u.pathname.replace('/api/v1','');let data=[];
     requests.push({path:p,query:u.search});
@@ -35,7 +35,8 @@ async function main(){fs.mkdirSync(out,{recursive:true});
     else if(p==='/taller/intervenciones')data=[{id:'repair-1',vehiculo_id:'truck-1',vehiculo_matricula:'1234-BCD',tipo:'Mantenimiento preventivo',descripcion:'Revisión de frenos',fecha:'2026-09-12',estado:'abierta',coste_total:120,piezas:[]}];
     else if(p==='/taller/estado')data={proveedores:[],avisos_mant:[],tareas_mecanicos:[],neumaticos_stock:[],neumaticos_vehiculos:{}};
     else if(p==='/clientes')data=clients;
-    else if(p==='/vehiculos')data=[{id:'truck-1',matricula:'1234-BCD',clase:'tractora',activo:true}];
+    else if(p==='/vehiculos/truck-1/imagen'&&req.method()==='PUT'){vehicleImage=req.postDataJSON().imagen_data;data={id:'truck-1',imagen_data:vehicleImage};}
+    else if(p==='/vehiculos')data=[{imagen_data:vehicleImage,id:'truck-1',matricula:'1234-BCD',clase:'tractora',activo:true}];
     else if(p==='/choferes')data=[{id:'driver-1',nombre:'Conductor QA',activo:true}];
     else if(p.includes('disponibilidad'))data={vehiculos:[],choferes:[],colaboradores:[]};
     else if(p.includes('notificaciones'))data={data:[],no_leidas:0,items:[],resumen:{}};
@@ -58,13 +59,17 @@ async function main(){fs.mkdirSync(out,{recursive:true});
       await page.screenshot({path:path.join(out,`workshop-${theme}-${width}.png`),fullPage:true});
     }
   }
+  await page.getByLabel('Foto del vehículo').setInputFiles({name:'truck.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNlsAAAAASUVORK5CYII=','base64')});
+  await page.locator('.workshop-portrait img').waitFor();assert.ok(vehicleImage?.startsWith('data:image/png'));
+  await page.getByRole('button',{name:'Quitar foto',exact:true}).click();await page.getByRole('img',{name:'Icono de tractora'}).waitFor();assert.equal(vehicleImage,null);
   await page.getByRole('button',{name:'+ Nueva orden de taller',exact:true}).click();await page.locator('.workshop-form').waitFor();
   for(const width of [390,768,1440]){await page.setViewportSize({width,height:1000});assert(await page.locator('.workshop-form').evaluate(el=>el.scrollWidth<=el.clientWidth+1));await page.screenshot({path:path.join(out,`order-form-${width}.png`)});}
   await page.locator('.workshop-form').getByRole('button',{name:'Cancelar',exact:true}).click();
-  await page.getByRole('button',{name:'Exportar',exact:true}).click();
+  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Exportar',exact:true}).click();assert.equal((await download).suggestedFilename(),'ordenes-taller.csv');
   for(const name of ['Mantenimiento preventivo','Neumáticos','Talleres y proveedores','Trazabilidad de piezas','Tareas de mecánicos']){
     await page.getByRole('button',{name,exact:true}).first().click();await page.waitForTimeout(200);
     await page.screenshot({path:path.join(out,`tab-${name.replaceAll(' ','-')}.png`),fullPage:true});
+    await page.setViewportSize({width:390,height:1000});await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false,`submenu overflow ${name}`);await page.setViewportSize({width:1440,height:1000});
   }
   checks.push('Orders, vehicle icon fallback, internal forms, submenus, desktop/mobile and both themes');
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({checks,errors},null,2));console.log(JSON.stringify({checks,errors}));

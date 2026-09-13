@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {PGlite}=require('@electric-sql/pglite');const {saveVehicleImage}=require('../src/services/vehicleImage');
+(async()=>{const db=new PGlite();await db.exec('CREATE TABLE vehiculos(id UUID PRIMARY KEY,empresa_id UUID,matricula TEXT);');const id='11111111-1111-4111-8111-111111111111',empresaId='22222222-2222-4222-8222-222222222222';await db.query('INSERT INTO vehiculos VALUES($1,$2,$3)',[id,empresaId,'1234-BCD']);const migration=fs.readFileSync(path.join(__dirname,'migrations/015_vehiculos_imagen.sql'),'utf8');await db.exec(migration);await db.exec(migration);
+const image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNlsAAAAASUVORK5CYII=';
+assert.equal((await saveVehicleImage(db,{id,empresaId,image})).imagen_data,image);
+await assert.rejects(()=>saveVehicleImage(db,{id,empresaId:id,image:null}),e=>e.status===404);
+await assert.rejects(()=>saveVehicleImage(db,{id,empresaId,image:'data:image/svg+xml;base64,PHN2Zz4='}),e=>e.status===400);
+await assert.rejects(()=>saveVehicleImage(db,{id,empresaId,image:'data:image/png;base64,'+'A'.repeat(400000)}),e=>e.status===400);
+await assert.rejects(()=>saveVehicleImage(db,{id:'bad',empresaId,image:null}),e=>e.status===400);
+assert.equal((await saveVehicleImage(db,{id,empresaId,image:null})).imagen_data,null);assert.equal((await db.query('SELECT matricula FROM vehiculos')).rows[0].matricula,'1234-BCD');await db.close();console.log('PASS photo save/remove, tenant isolation, format/size guards, migration idempotence, vehicle preserved');})().catch(e=>{console.error(e);process.exitCode=1});

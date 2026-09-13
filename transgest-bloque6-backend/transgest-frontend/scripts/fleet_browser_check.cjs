@@ -19,7 +19,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   browser=await chromium.launch({headless:true,channel:'msedge'});
   const page=await browser.newPage({viewport:{width:1672,height:1040}});
   await page.clock.setFixedTime(new Date('2026-09-12T08:00:00Z'));
-  page.on('pageerror',e=>errors.push(e.message));
+  page.on('pageerror',e=>{errors.push(e.message);console.error(e.message);});
   let failList=false;
   await page.route('**/api/v1/**',async route=>{
     const req=route.request(),u=new URL(req.url()),p=u.pathname.replace('/api/v1','');let data=[];
@@ -45,7 +45,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
 
 
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'vehiculos'})));
-  await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor();await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});await page.locator('.fleet-list tbody tr').first().waitFor();
+  await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor().catch(async e=>{console.error(await page.locator('body').innerText());throw e;});await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});await page.locator('.fleet-list tbody tr').first().waitFor();
   assert.equal(await page.locator('.fleet-list tbody tr').count(),2);
   await page.getByLabel('Buscar vehículos').fill('1234-BCD');assert.equal(await page.locator('.fleet-list tbody tr').count(),1);await page.getByLabel('Buscar vehículos').fill('');
   await page.getByLabel('Tipo de vehículo').selectOption('remolques');assert.equal(await page.locator('.fleet-list tbody tr').count(),1);await page.getByLabel('Tipo de vehículo').selectOption('todos');
@@ -69,9 +69,9 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   }
   await form.getByRole('button',{name:'Cerrar',exact:true}).first().click();
   await page.getByRole('button',{name:'+ Nuevo vehículo',exact:true}).click();await form.getByText('Nueva tractora',{exact:true}).waitFor();await form.getByRole('button',{name:'Cerrar',exact:true}).first().click();
-  await page.getByRole('button',{name:'Gestión de flota y GPS',exact:true}).click();await page.getByRole('button',{name:'Volver al resumen de vehículos',exact:true}).click();await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Gestión de flota y GPS',exact:true}).click();await page.getByRole('button',{name:'Volver al resumen de vehículos',exact:true}).click();await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor().catch(async e=>{console.error(await page.locator('body').innerText());throw e;});
   checks.push('Search/type filters, export, table/cards, type-specific icons, existing create/edit and all internal tabs, mobile and desktop');
-  user.rol='visualizador';await page.evaluate(u=>localStorage.setItem(`tms_onboarding_done:${u.empresa_id}:${u.rol}:${u.id}`,'1'),user);await page.reload({waitUntil:'networkidle'});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'vehiculos'})));await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor();await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});
+  user.rol='visualizador';await page.evaluate(u=>localStorage.setItem(`tms_onboarding_done:${u.empresa_id}:${u.rol}:${u.id}`,'1'),user);await page.reload({waitUntil:'networkidle'});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'vehiculos'})));await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor().catch(async e=>{console.error(await page.locator('body').innerText());throw e;});await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});
   assert.equal(await page.getByRole('button',{name:'+ Nuevo vehículo',exact:true}).count(),0);checks.push('Read-only cannot create; photo save/remove uses existing API');
 
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({checks,errors},null,2));console.log(JSON.stringify({checks,errors}));

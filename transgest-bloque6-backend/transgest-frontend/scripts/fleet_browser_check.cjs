@@ -60,6 +60,9 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   }
   await page.getByRole('button',{name:'Ver tarjetas',exact:true}).click();await page.getByRole('img',{name:'Icono de bañera'}).waitFor();
   await page.getByRole('button',{name:'Ver 1234-BCD',exact:true}).click();const form=page.locator('.fleet-form');await form.waitFor();
+  await form.getByLabel('Foto del vehículo').setInputFiles({name:'vehicle.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNlsAAAAASUVORK5CYII=','base64')});await form.locator('.workshop-portrait img').waitFor();
+  assert(writes.some(w=>w.path==='/vehiculos/truck-1/imagen'&&w.body.imagen_data));await form.getByRole('button',{name:'Quitar foto',exact:true}).click();await form.getByRole('img',{name:'Icono de tractora'}).waitFor();
+
   for(const tab of ['Identificación','Ficha técnica','Compra / Venta','Documentación','Plataformas','Conjunto / conductor','Historial']){
     await form.getByRole('button',{name:tab,exact:true}).click();
     for(const width of [390,1440]){await page.setViewportSize({width,height:1000});assert(await form.evaluate(el=>el.scrollWidth<=el.clientWidth+1),`form overflow ${tab}`);await page.screenshot({path:path.join(out,`form-${tab.replaceAll('/','-')}-${width}.png`)});}
@@ -68,6 +71,9 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   await page.getByRole('button',{name:'+ Nuevo vehículo',exact:true}).click();await form.getByText('Nueva tractora',{exact:true}).waitFor();await form.getByRole('button',{name:'Cerrar',exact:true}).first().click();
   await page.getByRole('button',{name:'Gestión de flota y GPS',exact:true}).click();await page.getByRole('button',{name:'Volver al resumen de vehículos',exact:true}).click();await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor();
   checks.push('Search/type filters, export, table/cards, type-specific icons, existing create/edit and all internal tabs, mobile and desktop');
+  user.rol='visualizador';await page.evaluate(u=>localStorage.setItem(`tms_onboarding_done:${u.empresa_id}:${u.rol}:${u.id}`,'1'),user);await page.reload({waitUntil:'networkidle'});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'vehiculos'})));await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor();await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});
+  assert.equal(await page.getByRole('button',{name:'+ Nuevo vehículo',exact:true}).count(),0);checks.push('Read-only cannot create; photo save/remove uses existing API');
+
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({checks,errors},null,2));console.log(JSON.stringify({checks,errors}));
  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}
 }

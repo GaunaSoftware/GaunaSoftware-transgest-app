@@ -108,6 +108,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   const history=page.getByRole('dialog',{name:'Filtros'});await history.getByLabel('Incluir meses anteriores').check();await history.getByRole('button',{name:'Ver resultados'}).click();
   await page.locator('.tgui-desktop-data .orders-date-group-month').filter({hasText:'agosto'}).waitFor();
   assert.ok(await page.locator('.tgui-desktop-data .orders-date-group-week').count()>=2);
+  await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});
   await page.screenshot({path:path.join(out,'pedidos-history-month-week-day.png'),fullPage:true});
   checks.push('Historical orders separated into month, week and day within filtered results');
 

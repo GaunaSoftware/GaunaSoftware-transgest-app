@@ -1,3 +1,6 @@
+import FleetWorkspace from "./fleet/FleetWorkspace";
+import VehiclePhotoEditor from "./fleet/VehiclePhotoEditor";
+import "./fleet/fleet.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, actualizarKmVehiculo, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -523,7 +526,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
         {chip("Vehiculos", status?.counts?.activos ?? vehiculos.length, "#475569", "truck")}
         {chip("Enlazados", status?.counts?.enlazados ?? mapped, "#10b981", "link")}
         {chip("Pendientes", status?.counts?.pendientes ?? pendientes, (status?.counts?.pendientes ?? pendientes) ? "var(--accent)" : "#10b981", "clock")}
-        {chip("Senal reciente", status?.counts?.senal_reciente ?? 0, (status?.counts?.senal_reciente ?? 0) ? "var(--accent)" : "#64748b", "signal")}
+        {chip("Senal reciente", status?.counts?.senal_reciente ?? 0, (status?.counts?.senal_reciente ?? 0) ? "var(--accent)" : "var(--text3)", "signal")}
         {chip("Sin senal", status?.counts?.sin_senal_reciente ?? 0, (status?.counts?.sin_senal_reciente ?? 0) ? "#ef4444" : "#10b981", "signalOff")}
         {chip("Nunca recibida", status?.counts?.nunca_senal ?? 0, (status?.counts?.nunca_senal ?? 0) ? "#f97316" : "#10b981", "signalOff")}
         {chip("Proveedor activo", GPS_PROVIDER_LABELS[activeProvider] || activeProvider || "Sin proveedor", "var(--accent)", "database")}
@@ -611,7 +614,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
               {status.stale_vehicles.slice(0, 6).map(v => (
                 <div key={v.id} style={{fontSize:12,color:"var(--text3)",lineHeight:1.5}}>
                   - {v.matricula} - {GPS_PROVIDER_LABELS[v.gps_provider] || v.gps_provider} / {v.gps_external_id}
-                  {v.ubicacion_ts ? ` - ultima senal ${new Date(v.ubicacion_ts).toLocaleString("es-ES")}` : " - sin senal recibida"}
+                  {v.ubicacion_ts ? ` - última señal ${new Date(v.ubicacion_ts).toLocaleString("es-ES")}` : " - sin señal recibida"}
                 </div>
               ))}
             </div>
@@ -648,7 +651,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
                     {linked ? `Enlazado: ${GPS_PROVIDER_LABELS[v.gps_provider] || v.gps_provider} / ${v.gps_external_id}` : "Pendiente de enlazar"}
                     {dirty ? " - cambiado" : ""}
                   </div>
-                  {v.ubicacion_actual && <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Ultima: {v.ubicacion_actual}</div>}
+                  {v.ubicacion_actual && <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Última: {v.ubicacion_actual}</div>}
                 </div>
                   <select disabled={!canEdit} value={draft.provider || "manual"} onChange={e=>setDrafts(p=>({...p,[v.id]:{...(p[v.id]||{}),provider:e.target.value,external_id:e.target.value==="manual"?"":(p[v.id]?.external_id || "")}}))} style={{...S.sel,background:"var(--bg2)",color:"var(--text)"}}>
                     {selectableProviders.map(p => <option key={p.id} value={p.id}>{p.label}{p.id !== "manual" && !p.configured ? " (sin configurar)" : ""}</option>)}
@@ -732,9 +735,9 @@ function TabGpsHistorial({ vehiculo }) {
       </div>
 
       <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:12,marginBottom:14}}>
-        <div style={{fontSize:12,fontWeight:800,color:"var(--text)",marginBottom:5}}>Ubicacion actual</div>
+        <div style={{fontSize:12,fontWeight:800,color:"var(--text)",marginBottom:5}}>Ubicación actual</div>
         <div style={{fontSize:13,color:vehiculo?.ubicacion_actual ? "var(--text)" : "var(--text4)",fontWeight:700}}>
-          {vehiculo?.ubicacion_actual || "Sin ubicacion registrada"}
+          {vehiculo?.ubicacion_actual || "Sin ubicación registrada"}
         </div>
         {hasCurrentCoords && (
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:8}}>
@@ -1187,19 +1190,19 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
   const marcaListId = `vehiculo-marcas-${esRemolque ? "remolque" : "tractora"}`;
 
   const TABS = [
-    { id:"identificacion", l:"Identificacion" },
-    { id:"tecnica",        l:"Ficha tecnica" },
+    { id:"identificacion", l:"Identificación" },
+    { id:"tecnica",        l:"Ficha técnica" },
     { id:"economico",      l:"Compra / Venta" },
-    { id:"docs",           l:"Documentacion" },
+    { id:"docs",           l:"Documentación" },
     { id:"plataformas",    l:"Plataformas" },
     ...(gpsOculto() ? [] : [{ id:"gps", l:"GPS" }]),
-    { id:"conjunto",       l:"Conjunto / Chofer" },
+    { id:"conjunto",       l:"Conjunto / conductor" },
     ...(editando ? [{ id:"historial", l:"Historial" }] : []),
   ];
 
   return (
-    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:14,
+    <div className="fleet-overlay" style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="fleet-form" style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:14,
                     width:"min(920px,calc(100vw - 24px))", maxWidth:"calc(100vw - 24px)", maxHeight:"97vh", display:"flex", flexDirection:"column", overflow:"hidden" }}>
 
         {/* Header */}
@@ -1253,10 +1256,11 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
           {/*  Identificacion */}
           {tab === "identificacion" && (
             <div>
-              <div style={S.sec}>Datos de identificacion</div>
+              <VehiclePhotoEditor vehicle={form} onChange={v=>{setForm(p=>({...p,imagen_data:v.imagen_data}));onVehiculoActualizado?.({id:v.id,imagen_data:v.imagen_data});}}/>
+              <div style={S.sec}>Datos de identificación</div>
               <div style={S.grid2}>
                 <div>
-                  <label style={S.lbl}>Matricula *</label>
+                  <label style={S.lbl}>Matrícula *</label>
                   <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace", fontWeight:700, textTransform:"uppercase" }}
                     value={form.matricula||""} onChange={e=>setForm(p=>({...p,matricula:formatMatricula(e.target.value)}))} placeholder="1234-ABC"/>
                 </div>
@@ -1316,7 +1320,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                   <input type="number" min="0" style={S.inp} value={form.km_actuales||""} onChange={f("km_actuales")} onBlur={e=>{ const id=editando?.id||form?.id; if(id&&e.target.value) actualizarKmVehiculo(id, Number(e.target.value)).catch(()=>{}); }} onFocus={e=>e.target.select()}/>
                 </div>
                 <div>
-                  <label style={S.lbl}>Ubicacion actual</label>
+                  <label style={S.lbl}>Ubicación actual</label>
                   <input style={S.inp} value={form.ubicacion_actual||""} onChange={f("ubicacion_actual")} placeholder="GPS pendiente / ultimo destino"/>
                 </div>
                   <div>
@@ -1780,7 +1784,9 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
 }
 
 export default function Vehiculos({ initialTipo = "todos" }) {
-  const { puedeEditar, user } = useAuth();
+  const [advancedFleet,setAdvancedFleet]=useState(false);
+  const [loadError,setLoadError]=useState("");
+  const { puedeEditar, puedeVer, user } = useAuth();
   const canEdit  = puedeEditar("vehiculos");
   // Dar de baja: gerente y contable
   const canBaja    = user?.rol === "gerente" || user?.rol === "contable";
@@ -1822,6 +1828,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
     if (silencioso) backgroundRefreshInFlight.current = true;
     else setLoading(true);
     try {
+      setLoadError("");
       const _t = (p,ms=8000)=>Promise.race([p, new Promise(r=>setTimeout(()=>r([]),ms))]);
       if (soloVehiculos) {
         // Quick reload: only vehicles (used after estado change)
@@ -1843,7 +1850,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
         setChoferes(chArr);
       }
     }
-    catch(e) { console.error(e); }
+    catch(e) { setLoadError("No se pudieron actualizar los vehículos. Inténtalo de nuevo."); }
     finally {
       if (silencioso) backgroundRefreshInFlight.current = false;
       else setLoading(false);
@@ -1972,12 +1979,14 @@ export default function Vehiculos({ initialTipo = "todos" }) {
   };
 
   return (
-    <div className="tg-responsive-page" style={S.page}>
+    <div className="tg-responsive-page fleet-page" style={S.page}>
+      {!advancedFleet&&<FleetWorkspace vehicles={vehiculos} items={filtrados} loading={loading} error={loadError} reload={()=>cargar()} type={filtroTipo} setType={v=>{setFiltroTipo(v);setFiltroEstado('todos');}} state={filtroEstado} setState={setFiltroEstado} canEdit={canEdit} canDrivers={puedeVer('choferes')} onNew={abrirNuevoVehiculo} onOpen={v=>{setEditando(v);setModal(true);}} advanced={()=>setAdvancedFleet(true)} isTrailer={v=>esRemolqueVehiculo(v,vehiculos)}/>}
+      {advancedFleet&&<><button className="tgui-button" onClick={()=>setAdvancedFleet(false)}>Volver al resumen de vehículos</button>
       <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18, flexWrap:"wrap" }}>
         <div style={S.title}>Vehículos</div>
 
         {/* Filtros tipo - separador visual */}
-        <div style={{ display:"flex", gap:4, marginLeft:8, background:"#fff", padding:"4px", borderRadius:9, border:"1px solid #dbe5ec", boxShadow:"0 8px 18px rgba(15,23,42,.04)" }}>
+        <div style={{ display:"flex", gap:4, marginLeft:8, background:"var(--card-bg)", padding:"4px", borderRadius:9, border:"1px solid var(--border)", boxShadow:"0 8px 18px rgba(15,23,42,.04)" }}>
           {[
             ["todos",     "Todos"],
             ["tractoras", "Tractoras"],
@@ -2016,7 +2025,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
 
         {/* Subfiltro estado - separador visual, solo si no es "baja" */}
         {filtroTipo !== "baja" && (
-          <div style={{ display:"flex", gap:4, background:"#fff", padding:"4px", borderRadius:9, border:"1px solid #dbe5ec", boxShadow:"0 8px 18px rgba(15,23,42,.04)" }}>
+          <div style={{ display:"flex", gap:4, background:"var(--card-bg)", padding:"4px", borderRadius:9, border:"1px solid var(--border)", boxShadow:"0 8px 18px rgba(15,23,42,.04)" }}>
             {[
               ["todos",      "Todos"],
               ["disponible", "Disponible"],
@@ -2332,6 +2341,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
         )
       }
 
+      </>}
       {/*  Picker chofer al cambiar a En Ruta  */}
       {choferPicker && (
         <ModalChoferPicker

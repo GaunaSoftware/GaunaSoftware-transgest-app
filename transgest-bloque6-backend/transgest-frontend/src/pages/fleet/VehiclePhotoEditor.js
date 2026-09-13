@@ -1,0 +1,8 @@
+import {useState} from 'react';
+import {Button} from '../../ui';
+import {useAuth} from '../../context/AuthContext';
+import {guardarImagenVehiculo} from '../../services/api';
+import VehiclePortrait from '../workshop/VehiclePortrait';
+export default function VehiclePhotoEditor({vehicle,onChange}){const {user}=useAuth();const [busy,setBusy]=useState(false),[error,setError]=useState('');const allowed=['gerente','trafico'].includes(user?.rol);
+async function save(file){setError('');if(file&&(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>256*1024)){setError('Elige PNG, JPG o WebP de hasta 256 KB.');return;}setBusy(true);try{const image=file?await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);}):null;await guardarImagenVehiculo(vehicle.id,image);onChange({...vehicle,imagen_data:image});}catch(e){setError(e.message||'No se pudo guardar la foto.');}finally{setBusy(false);}}
+return <section className="fleet-photo"><VehiclePortrait vehicle={vehicle}/><div><h3>Foto del vehículo</h3>{vehicle.id&&allowed?<><label>{busy?'Guardando…':'Añadir o cambiar foto'}<input type="file" aria-label="Foto del vehículo" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={e=>{if(e.target.files?.[0])save(e.target.files[0]);e.target.value='';}}/></label>{vehicle.imagen_data&&<Button disabled={busy} onClick={()=>save(null)}>Quitar foto</Button>}<small>Opcional · hasta 256 KB</small></>:!vehicle.id?<p>Guarda el vehículo para añadir una foto. Sin foto se muestra el icono de su tipo.</p>:null}{error&&<p role="alert">{error}</p>}</div></section>;}

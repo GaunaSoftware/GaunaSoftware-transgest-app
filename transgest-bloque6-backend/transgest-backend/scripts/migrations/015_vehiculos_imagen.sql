@@ -1,0 +1,1 @@
+ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS imagen_data TEXT;

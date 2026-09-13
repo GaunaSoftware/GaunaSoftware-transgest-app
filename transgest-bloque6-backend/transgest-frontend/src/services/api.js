@@ -1187,3 +1187,5 @@ export const calcularDistanciaGeo = (origin, destination) =>
   ]);
 
 export const vincularPaletTransporte = (id, pedido_id) => apiFetch(`/palets/movimientos/${id}/transporte`, { method:"PUT", body:{pedido_id}, silentSuccess:true });
+
+export const guardarImagenVehiculo = (id, imagen_data) => apiFetch(`/vehiculos/${id}/imagen`, { method:"PUT", body:{imagen_data} });

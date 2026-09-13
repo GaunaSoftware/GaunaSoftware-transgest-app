@@ -8,6 +8,16 @@ const r1 = express.Router();
 r1.use(authenticate);
 const GERENTE_TRAFICO_O_CHOFER = requireRole("gerente", "trafico", "chofer");
 
+r1.put('/:id/imagen', GERENTE_O_TRAFICO, async (req,res) => {
+  try {
+    const image = require('../services/clientImage').normalizeClientImage(req.body?.imagen_data);
+    if (image === undefined) return res.status(400).json({error:'Indica una foto o elimina la existente.'});
+    const {rows} = await db.query('UPDATE vehiculos SET imagen_data=$1 WHERE id=$2 AND empresa_id=$3 RETURNING id,imagen_data',[image,req.params.id,req.empresaId || req.user.empresa_id]);
+    if (!rows[0]) return res.status(404).json({error:'Vehículo no encontrado.'});
+    res.json(rows[0]);
+  } catch(e) { res.status(e.code==='42703'?503:e.status||500).json({error:e.code==='42703'?'Actualiza la base de datos: migración 015 para fotos de vehículos.':e.status?e.message:'No se pudo guardar la foto.'}); }
+});
+
 const GPS_PROVIDERS = {
   locatel: "Locatel",
   tacogest: "Tacogest",

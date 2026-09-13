@@ -1,3 +1,6 @@
+import {PageHeader,Button} from "../ui";
+import WorkshopOrders from "./workshop/WorkshopOrders";
+import "./workshop/workshop.css";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   getVehiculos, getAlertasDocVehiculos, actualizarKmVehiculo, getPedidosTodos,
@@ -334,14 +337,14 @@ function TallerIcon({ name = "tool", color = "var(--accent)", size = 24 }) {
 
 const S = {
   page: {flex:1, padding:"30px 36px",fontFamily:"'DM Sans',sans-serif",background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)",minHeight:"100vh"},
-  title:{fontFamily:"'Syne',sans-serif",fontSize:32,fontWeight:900,color:"#0f172a",marginBottom:6,letterSpacing:"-.02em"},
-  sub:  {fontSize:15,color:"#64748b",marginBottom:28},
-  card: {background:"rgba(255,255,255,.95)",border:"1px solid #dbe5ec",borderRadius:12,overflow:"hidden",marginBottom:14,boxShadow:"0 14px 32px rgba(15,23,42,.05)"},
-  th:   {textAlign:"left",padding:"13px 16px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"#64748b",borderBottom:"1px solid #dbe5ec",background:"rgba(248,250,252,.9)",whiteSpace:"nowrap"},
-  td:   {padding:"12px 16px",borderBottom:"1px solid #e5edf2",fontSize:13,color:"#334155",verticalAlign:"middle"},
-  btn:  {padding:"10px 15px",borderRadius:8,border:"1px solid #cfdbe5",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:7,boxShadow:"0 8px 18px rgba(15,23,42,.04)"},
-  inp:  {background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 13px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxShadow:"0 6px 14px rgba(15,23,42,.03)"},
-  sel:  {background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 13px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxShadow:"0 6px 14px rgba(15,23,42,.03)"},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:32,fontWeight:900,color:"var(--text)",marginBottom:6,letterSpacing:"-.02em"},
+  sub:  {fontSize:15,color:"var(--text3)",marginBottom:28},
+  card: {background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",marginBottom:14,boxShadow:"0 14px 32px rgba(15,23,42,.05)"},
+  th:   {textAlign:"left",padding:"13px 16px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text3)",borderBottom:"1px solid var(--border)",background:"var(--bg3)",whiteSpace:"nowrap"},
+  td:   {padding:"12px 16px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text2)",verticalAlign:"middle"},
+  btn:  {padding:"10px 15px",borderRadius:8,border:"1px solid var(--border)",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:7,boxShadow:"0 8px 18px rgba(15,23,42,.04)"},
+  inp:  {background:"var(--card-bg)",border:"1px solid var(--border)",color:"var(--text)",padding:"11px 13px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxShadow:"0 6px 14px rgba(15,23,42,.03)"},
+  sel:  {background:"var(--card-bg)",border:"1px solid var(--border)",color:"var(--text)",padding:"11px 13px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxShadow:"0 6px 14px rgba(15,23,42,.03)"},
   modal:{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20},
   mbox: {background:"var(--bg2)",border:"1px solid #1e2d45",borderRadius:14,padding:26,width:"min(660px,96vw)",maxHeight:"92vh",overflowY:"auto"},
   lbl:  {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:4,marginTop:10},
@@ -423,7 +426,7 @@ function ModalPieza({editando, stockActual = [], onClose, onSaved}) {
     tallerSave(d); onSaved();
   }
   return (
-    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="workshop-overlay" style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(520px,96vw)"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editando?"Editar pieza":"Nueva pieza al stock"}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -576,7 +579,7 @@ function UnidadesPiezaModal({ pieza, onClose }) {
 
   const stockUnits = unidades.filter(u => u.estado === "stock");
   return (
-    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="workshop-overlay" style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{...S.mbox,width:"min(820px,96vw)"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:14}}>
           <div>
@@ -1007,26 +1010,26 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
   }
 
   return (
-    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={S.mbox}>
+    <div className="workshop-overlay" style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="workshop-form" style={S.mbox}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>
-          {editando?"Editar intervencion":"Nueva intervencion"}
+          {editando?"Editar intervención":"Nueva intervención"}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div><label style={S.lbl}>Vehiculo *</label>
+          <div><label style={S.lbl}>Vehículo *</label>
             <select value={form.vehiculo_id} onChange={f("vehiculo_id")} style={S.sel}>
               <option value="">Seleccionar...</option>
               {vehiculos.map(v=><option key={v.id} value={v.id}>{v.matricula} - {v.marca} {v.modelo}</option>)}
             </select>
           </div>
           <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={form.fecha} onChange={f("fecha")}/></div>
-          <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Tipo de intervencion</label>
+          <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Tipo de intervención</label>
             <select value={form.tipo} onChange={f("tipo")} style={S.sel}>{TIPOS_INT.map(t=><option key={t} value={t}>{t}</option>)}</select>
           </div>
-          <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Descripcion *</label>
-            <textarea style={{...S.inp,height:70,resize:"vertical"}} value={form.descripcion} onChange={f("descripcion")} placeholder="Describe la intervencion..."/>
+          <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Descripción *</label>
+            <textarea style={{...S.inp,height:70,resize:"vertical"}} value={form.descripcion} onChange={f("descripcion")} placeholder="Describe la intervención…"/>
           </div>
-          <div><label style={S.lbl}>Km en intervencion</label><input type="number" style={S.inp} value={form.km_en_intervencion} onChange={f("km_en_intervencion")} onFocus={e=>e.target.select()}/></div>
+          <div><label style={S.lbl}>Kilómetros en la intervención</label><input type="number" style={S.inp} value={form.km_en_intervencion} onChange={f("km_en_intervencion")} onFocus={e=>e.target.select()}/></div>
           <div><label style={S.lbl}>Dónde se hace</label>
             <select value={form.origen_taller} onChange={f("origen_taller")} style={S.sel}>
               <option value="propio">Taller propio</option>
@@ -1054,7 +1057,7 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
             </div>
           )}
           <div style={{gridColumn:"1/-1",background:"rgba(59,130,246,.06)",border:"1px solid rgba(59,130,246,.2)",borderRadius:8,padding:"10px 12px"}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--accent)",textTransform:"uppercase",marginBottom:8}}>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--accent-xl)",textTransform:"uppercase",marginBottom:8}}>
               {form.origen_taller === "externo" ? "Factura del taller externo" : "Factura de compra / proveedor"}
             </div>
             <div style={{display:"grid",gridTemplateColumns:form.origen_taller === "externo" ? "1fr 1fr" : "1fr 1fr 1fr",gap:8}}>
@@ -1483,7 +1486,7 @@ function AvisosTab({ vehiculos, reparaciones, avisosMant, alertasDoc, neumaticos
                   <div style={{fontSize:11, color:"var(--text5)"}}>{v.marca} {v.modelo}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
-                  <div style={{fontFamily:"'JetBrains Mono',monospace", fontWeight:800, fontSize:18, color:"var(--accent)"}}>
+                  <div style={{fontFamily:"'JetBrains Mono',monospace", fontWeight:800, fontSize:18, color:"var(--accent-xl)"}}>
                     {v.km_actuales ? Number(v.km_actuales).toLocaleString("es-ES") : "-"}
                   </div>
                   <div style={{fontSize:10, color:"var(--text5)"}}>km actuales</div>
@@ -1834,8 +1837,8 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
   tractoras.forEach(v=>{ Object.values(neumaticosVehiculos?.[v.id] || {}).forEach(d=>{ if(d.marca) marcaCount[d.marca]=(marcaCount[d.marca]||0)+1; }); });
   const topMarcas = Object.entries(marcaCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
 
-  const inp={background:"#fff",border:"1px solid #cfdbe5",color:"#0f172a",padding:"11px 13px",borderRadius:8,fontSize:13,outline:"none",boxShadow:"0 6px 14px rgba(15,23,42,.03)"};
-  const btn={padding:"11px 16px",borderRadius:8,border:"1px solid #cfdbe5",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"'DM Sans',sans-serif",boxShadow:"0 8px 18px rgba(15,23,42,.04)"};
+  const inp={background:"var(--card-bg)",border:"1px solid var(--border)",color:"var(--text)",padding:"11px 13px",borderRadius:8,fontSize:13,outline:"none",boxShadow:"0 6px 14px rgba(15,23,42,.03)"};
+  const btn={padding:"11px 16px",borderRadius:8,border:"1px solid var(--border)",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"'DM Sans',sans-serif",boxShadow:"0 8px 18px rgba(15,23,42,.04)"};
 
   return (
     <div>
@@ -1846,7 +1849,7 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
         </select>
         {["diagrama","stock","estadisticas"].map(t=>(
           <button key={t} onClick={()=>setTabN(t)}
-            style={{...btn,background:tabN===t?"linear-gradient(135deg,var(--accent),#0d9488)":"#f1f5f9",color:tabN===t?"#fff":"#64748b",border:"1px solid #dbe5ec"}}>
+            style={{...btn,background:tabN===t?"linear-gradient(135deg,var(--accent),#0d9488)":"#f1f5f9",color:tabN===t?"#fff":"var(--text3)",border:"1px solid var(--border)"}}>
             {t==="diagrama"?"Diagrama":t==="stock"?"Stock":"Estadisticas"}
           </button>
         ))}
@@ -1854,7 +1857,7 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
           + Añadir al stock
         </button>
         {/* Stock badge */}
-        <div style={{fontSize:14,color:"#64748b"}}>
+        <div style={{fontSize:14,color:"var(--text3)"}}>
           Stock: <strong style={{color:stock.length>0?"var(--accent)":"#ef4444"}}>{stock.reduce((s,x)=>s+x.cantidad,0)} ud.</strong>
         </div>
       </div>
@@ -1863,8 +1866,8 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
       {tabN==="diagrama" && (
         <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 360px",gap:18}}>
           {/* SVG */}
-          <div style={{background:"rgba(255,255,255,.95)",border:"1px solid #dbe5ec",borderRadius:12,padding:22,boxShadow:"0 14px 32px rgba(15,23,42,.05)"}}>
-            <div style={{fontSize:15,color:"#64748b",marginBottom:12}}>
+          <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:22,boxShadow:"0 14px 32px rgba(15,23,42,.05)"}}>
+            <div style={{fontSize:15,color:"var(--text3)",marginBottom:12}}>
               Haz clic en las ruedas para seleccionarlas -> selecciona un neumático del stock -> registrar cambio
             </div>
             <svg viewBox="0 0 580 280" style={{width:"100%",maxWidth:760,display:"block",margin:"22px auto 10px"}}>
@@ -1897,7 +1900,7 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
               })}
             </svg>
             {/* Legend */}
-            <div style={{display:"flex",gap:18,fontSize:13,color:"#64748b",marginTop:14,flexWrap:"wrap"}}>
+            <div style={{display:"flex",gap:18,fontSize:13,color:"var(--text3)",marginTop:14,flexWrap:"wrap"}}>
               {[["#22c55e","<18m"],["#f59e0b","18-24m"],["#ef4444",">24m"],["#3b82f6","Selec."],["var(--bg3)","Sin datos"]].map(([color,label])=>(
                 <span key={label} style={{display:"flex",alignItems:"center",gap:4}}>
                   <span style={{width:10,height:10,borderRadius:"50%",background:color,display:"inline-block"}}/>
@@ -1908,8 +1911,8 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
           </div>
 
           {/* Form cambio */}
-          <div style={{background:"rgba(255,255,255,.95)",border:"1px solid #dbe5ec",borderRadius:12,padding:22,boxShadow:"0 14px 32px rgba(15,23,42,.05)"}}>
-            <div style={{fontWeight:900,fontSize:18,color:"#0f172a",marginBottom:18}}>
+          <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:22,boxShadow:"0 14px 32px rgba(15,23,42,.05)"}}>
+            <div style={{fontWeight:900,fontSize:18,color:"var(--text)",marginBottom:18}}>
               Registrar cambio {sel.size>0?`(${sel.size} rueda${sel.size>1?"s":""})`:""}
             </div>
 
@@ -1955,7 +1958,7 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
                   onFocus={e=>e.target.select()}
                   onBlur={e=>{ if(vSel&&e.target.value) import("../services/api").then(m=>m.actualizarKmVehiculo(vSel,Number(e.target.value)).catch(()=>{})); }}
                   placeholder={tractoras.find(v=>v.id===vSel)?.km_actuales ? `Actuales: ${Number(tractoras.find(v=>v.id===vSel)?.km_actuales).toLocaleString("es-ES")} km`:"0"}/>
-                {form.km && <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Próximo cambio: <strong style={{color:"var(--accent)"}}>{(Number(form.km)+120000).toLocaleString("es-ES")} km</strong></div>}
+                {form.km && <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Próximo cambio: <strong style={{color:"var(--accent-xl)"}}>{(Number(form.km)+120000).toLocaleString("es-ES")} km</strong></div>}
               </div>
               <button onClick={registrarCambio} disabled={sel.size===0||sinStock}
                 style={{...btn,background:sel.size>0&&!sinStock?"var(--accent)":"var(--bg4)",color:sel.size>0&&!sinStock?"#fff":"var(--text4)",marginTop:4}}>
@@ -2003,7 +2006,7 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
                     {stock.map(s=>(
                       <tr key={s.id} style={{borderBottom:"1px solid var(--border2)"}}>
                         <td style={{padding:"8px 12px",fontSize:12}}>
-                          <span style={{padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700,background:"rgba(59,130,246,.1)",color:"var(--accent)"}}>
+                          <span style={{padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700,background:"rgba(59,130,246,.1)",color:"var(--accent-xl)"}}>
                             {TIPOS_NEUMAT.find(t=>t.id===s.tipo)?.label||s.tipo}
                           </span>
                         </td>
@@ -2035,7 +2038,7 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
               ? <div style={{color:"var(--text5)",fontSize:12}}>Registra cambios para ver estadísticas</div>
               : topMarcas.map(([marca,count],i)=>(
                 <div key={marca} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <span style={{fontFamily:"monospace",fontWeight:800,fontSize:16,color:"var(--accent)",width:20}}>{i+1}</span>
+                  <span style={{fontFamily:"monospace",fontWeight:800,fontSize:16,color:"var(--accent-xl)",width:20}}>{i+1}</span>
                   <div style={{flex:1}}>
                     <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
                       <span style={{fontWeight:700,fontSize:13,color:"var(--text)"}}>{marca}</span>
@@ -2278,7 +2281,7 @@ function SolicitudesChoferesProfesionalTab({ vehiculos = [], focus = null, solic
                   tallerSave(d);
                   await marcarEstado(s.id,"en_proceso", { orden_trabajo_id: ot.id, orden_trabajo_numero: ot.id, taller_notas: "OT creada desde solicitud de chofer" });
                   notify("OT creada en Intervenciones", "success");
-                }} style={{padding:"3px 10px",borderRadius:6,border:"none",background:"rgba(59,130,246,.15)",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer"}}>+ Crear OT</button>
+                }} style={{padding:"3px 10px",borderRadius:6,border:"none",background:"rgba(59,130,246,.15)",color:"var(--accent-xl)",fontSize:11,fontWeight:700,cursor:"pointer"}}>+ Crear OT</button>
               </div>
             : <span style={{fontSize:11,padding:"2px 8px",borderRadius:10,fontWeight:700,background:s.estado==="resuelto"?"rgba(16,185,129,.15)":"rgba(59,130,246,.15)",color:s.estado==="resuelto"?"var(--green)":"var(--accent)"}}>{s.estado}</span>
           }
@@ -2379,6 +2382,7 @@ function readTallerFocus() {
 }
 
 export default function Taller() {
+  const [advancedOrders,setAdvancedOrders]=useState(false);
   const [focusTaller] = useState(() => readTallerFocus());
   const [tab,       setTab]       = useState(() => {
     const focus = readTallerFocus();
@@ -2658,18 +2662,17 @@ export default function Taller() {
   }, 0);
 
   return (
-    <div className="tg-responsive-page" style={S.page}>
-      <div style={S.title}>Taller</div>
-      <div style={S.sub}>Intervenciones, reparaciones y stock de piezas y repuestos</div>
+    <div className="tg-responsive-page workshop-workspace" style={S.page}>
+      <PageHeader title="Taller" description="Gestiona el mantenimiento de tu flota, las reparaciones y los recambios."/>
 
       {/* KPIs */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:18,marginBottom:28}}>
         {[
-          {l:"Total intervenciones",  v:taller.reparaciones.length, c:"#0f2a6b", icon:"tool", bg:"#dcfce7"},
+          {l:"Total intervenciones",  v:taller.reparaciones.length, c:"var(--accent-xl)", icon:"tool", bg:"#dcfce7"},
           {l:"Coste este mes",        v:`${fmt2(costoMes)} EUR`,       c:"var(--accent)", icon:"money", bg:"#d1fae5", title:`Mano de obra: ${fmt2(gastoTaller.manoObra)} EUR - Piezas: ${fmt2(gastoTaller.piezas)} EUR`},
           ...(vehiculosEnTaller.length>0?[{l:`Lucro cesante (${vehiculosEnTaller.length} veh.)`,v:`${fmt2(lucroTotal)} EUR`,c:"#ef4444",title:"Ingresos perdidos por vehículos en taller"}]:[]),
           {l:"Piezas en stock",       v:stockTotalUnidades,          c:"#7c3aed", icon:"cube", bg:"#ede9fe"},
-          {l:"Stock bajo minimo",     v:stockBajo.length,             c:stockBajo.length>0?"#2563eb":"var(--accent)", icon:"layers", bg:"#dbeafe"},
+          {l:"Stock bajo mínimo",     v:stockBajo.length,             c:stockBajo.length>0?"#2563eb":"var(--accent)", icon:"layers", bg:"#dbeafe"},
           ...(()=>{
             const cnt = {};
             taller.reparaciones.forEach(r=>{ if(r.vehiculo_matricula) cnt[r.vehiculo_matricula]=(cnt[r.vehiculo_matricula]||0)+1; });
@@ -2677,13 +2680,13 @@ export default function Taller() {
             return top ? [{l:"Más intervenciones", v:`${top[0]} (${top[1]}x)`, c:"#f59e0b"}] : [];
           })(),
         ].map((k,i)=>(
-          <div key={i} title={k.title || ""} style={{background:"rgba(255,255,255,.95)",border:"1px solid #dbe5ec",borderRadius:12,padding:"26px 28px",display:"flex",alignItems:"center",gap:20,minHeight:102,boxShadow:"0 16px 34px rgba(15,23,42,.06)"}}>
+          <div key={i} title={k.title || ""} style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"26px 28px",display:"flex",alignItems:"center",gap:20,minHeight:102,boxShadow:"0 16px 34px rgba(15,23,42,.06)"}}>
             <div style={{width:54,height:54,borderRadius:"50%",display:"grid",placeItems:"center",background:k.bg || `${k.c}14`,color:k.c,flexShrink:0}}>
               <TallerIcon name={k.icon || "tool"} color={k.c} size={27} />
             </div>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontSize:28,fontWeight:900,color:k.c,lineHeight:1}}>{k.v}</div>
-              <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"#64748b",marginTop:10}}>{k.l}</div>
+              <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text3)",marginTop:10}}>{k.l}</div>
             </div>
           </div>
         ))}
@@ -2696,19 +2699,20 @@ export default function Taller() {
       )}
 
       {/* Tabs */}
-      <div style={{display:"flex",gap:20,borderBottom:"1px solid #dbe5ec",marginBottom:16,overflowX:"auto"}}>
-        {[["reparaciones","Intervenciones"],[`stock`,`Stock${stockBajo.length>0?` (${stockBajo.length} bajo minimo)`:""}`],["trazabilidad","Trazabilidad piezas"],["neumaticos","Neumaticos"],["proveedores","Talleres / Proveedores"],["avisos_mant","Avisos mantenimiento"],["solicitudes","Solicitudes choferes"],["tareas","Tareas mecanicos"]].map(([id,l])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{...S.tab,borderBottomColor:tab===id?"var(--accent)":"transparent",color:tab===id?"var(--accent)":"#64748b",padding:"12px 0",fontSize:14,fontWeight:900,whiteSpace:"nowrap"}}>{l}</button>
+      <div style={{display:"flex",gap:20,borderBottom:"1px solid var(--border)",marginBottom:16,overflowX:"auto"}}>
+        {[["reparaciones","Órdenes de taller"],[`stock`,`Stock${stockBajo.length>0?` (${stockBajo.length} bajo mínimo)`:""}`],["trazabilidad","Trazabilidad de piezas"],["neumaticos","Neumáticos"],["proveedores","Talleres y proveedores"],["avisos_mant","Mantenimiento preventivo"],["solicitudes","Solicitudes de conductores"],["tareas","Tareas de mecánicos"]].map(([id,l])=>(
+          <button key={id} onClick={()=>setTab(id)} style={{...S.tab,borderBottomColor:tab===id?"var(--accent)":"transparent",color:tab===id?"var(--accent)":"var(--text3)",padding:"12px 0",fontSize:14,fontWeight:900,whiteSpace:"nowrap"}}>{l}</button>
         ))}
       </div>
 
       {/*  Intervenciones  */}
-      {tab==="reparaciones" && <>
+      {tab==="reparaciones"&&<><Button onClick={()=>setAdvancedOrders(v=>!v)}>{advancedOrders?'Volver a órdenes de taller':'Historial y gestión avanzada'}</Button>{!advancedOrders&&<WorkshopOrders orders={taller.reparaciones} vehicles={vehiculos} onVehicles={setVehiculos} onNew={()=>{setEditRep(null);setModalRep(true);}} onEdit={r=>{setEditRep(r);setModalRep(true);}} onClose={cerrarIntervencion} showTyres={()=>setTab('neumaticos')} showHistory={()=>setTab('trazabilidad')}/>}</>}
+      {tab==="reparaciones" && advancedOrders && <>
         {vehiculosEnTaller.length>0&&<LucroCesanteBanner vehiculos={vehiculosEnTaller} lucroData={lucroData} lucroTotal={lucroTotal} onUpdate={(d)=>{
           updateLucro(d);
         }}/>}
         <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
-          <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={()=>{setEditRep(null);setModalRep(true);}}>+ Nueva intervencion</button>
+          <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={()=>{setEditRep(null);setModalRep(true);}}>+ Nueva intervención</button>
           <select value={filtroVh} onChange={e=>setFiltroVh(e.target.value)} style={{...S.sel,width:200}}>
             <option value="">Todos los vehículos</option>
             {vehiculos.map(v=><option key={v.id} value={v.id}>{v.matricula} - {v.marca} {v.modelo}</option>)}
@@ -2741,7 +2745,7 @@ export default function Taller() {
                   <td style={{...S.td,fontSize:11}}>
                     {r.factura_proveedor_num
                       ? <div>
-                          <div style={{fontWeight:700,color:"var(--accent)",fontFamily:"monospace"}}>{r.factura_proveedor_num}</div>
+                          <div style={{fontWeight:700,color:"var(--accent-xl)",fontFamily:"monospace"}}>{r.factura_proveedor_num}</div>
                           <div style={{color:"var(--text5)"}}>{r.factura_proveedor_nombre}</div>
                           {r.factura_proveedor_importe&&<div style={{color:"var(--green)",fontWeight:700}}>{fmt2(r.factura_proveedor_importe)} EUR</div>}
                           {r.factura_proveedor_file_base64&&(
@@ -2813,7 +2817,7 @@ export default function Taller() {
             <option value="pieza_taller">Piezas / recambios</option>
             <option value="producto_venta">Productos de venta</option>
           </select>
-          {stockBajo.length>0 && <div style={{padding:"6px 12px",background:"rgba(249,115,22,.1)",border:"1px solid rgba(249,115,22,.25)",borderRadius:7,fontSize:12,color:"#f97316",fontWeight:600}}>! {stockBajo.length} pieza{stockBajo.length!==1?"s":""} bajo minimo</div>}
+          {stockBajo.length>0 && <div style={{padding:"6px 12px",background:"rgba(249,115,22,.1)",border:"1px solid rgba(249,115,22,.25)",borderRadius:7,fontSize:12,color:"#f97316",fontWeight:600}}>! {stockBajo.length} pieza{stockBajo.length!==1?"s":""} bajo mínimo</div>}
           <span style={{marginLeft:"auto",fontSize:12,color:"var(--text5)"}}>{stockFiltrado.length} de {(taller.stock || []).length} referencias</span>
         </div>
         <div style={{...S.card,overflowX:"auto"}}>
@@ -2944,7 +2948,7 @@ export default function Taller() {
 
       {/* Modal Proveedor */}
       {modalProv && (
-        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&recargarProv()}>
+        <div className="workshop-overlay" style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&recargarProv()}>
           <div style={{...S.mbox,width:"min(600px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editProv?"Editar proveedor/taller":"Nuevo proveedor / taller"}</div>
             <ModalProveedorForm editando={editProv} proveedores={proveedores} onSaved={guardarProveedores} onClose={recargarProv}/>
@@ -2954,7 +2958,7 @@ export default function Taller() {
 
       {/* Modal Aviso mantenimiento */}
       {modalAviso && (
-        <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&recargarAvisos()}>
+        <div className="workshop-overlay" style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&recargarAvisos()}>
           <div style={{...S.mbox,width:"min(520px,96vw)"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:18}}>{editAviso?"Editar aviso":"Nuevo aviso de mantenimiento"}</div>
             <ModalAvisoForm editando={editAviso} tipos={TIPOS_INT} avisosMant={avisosMant} onSaved={guardarAvisosMantenimiento} onClose={recargarAvisos}/>
@@ -3202,7 +3206,7 @@ function TareasMecanicos({ vehiculos, tareas = [], onChange }) {
                     <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:6}}>Mecanico · {m.nombre}</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,fontSize:11}}>
                       <div style={{color:"var(--text5)"}}>Completadas</div><div style={{fontWeight:700,color:"var(--green)"}}>{m.completadas}</div>
-                      <div style={{color:"var(--text5)"}}>En curso</div><div style={{fontWeight:700,color:"var(--accent)"}}>{m.activas}</div>
+                      <div style={{color:"var(--text5)"}}>En curso</div><div style={{fontWeight:700,color:"var(--accent-xl)"}}>{m.activas}</div>
                       <div style={{color:"var(--text5)"}}>T. total</div><div style={{fontWeight:700,color:"var(--text)"}}>{fmtTiempo(m.tiempoTotal)}</div>
                       <div style={{color:"var(--text5)"}}>T. medio</div><div style={{fontWeight:700,color:promedio>7200000?"#ef4444":promedio>3600000?"#f59e0b":"var(--green)"}}>{fmtTiempo(promedio)}</div>
                     </div>
@@ -3239,7 +3243,7 @@ function TareasMecanicos({ vehiculos, tareas = [], onChange }) {
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(480px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:14}}>Nueva tarea de mecanico</div>
 
-            <div><label style={lbl}>Descripcion *</label>
+            <div><label style={lbl}>Descripción *</label>
               <input style={inp} value={form.descripcion||""} onChange={e=>setForm(p=>({...p,descripcion:e.target.value}))} placeholder="Ej: Cambio de neumaticos delanteros"/></div>
 
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -3249,7 +3253,7 @@ function TareasMecanicos({ vehiculos, tareas = [], onChange }) {
                   {MECANICOS.map(m=><option key={m} value={m}>{m}</option>)}
                 </select></div>
 
-              <div><label style={lbl}>Vehiculo *</label>
+              <div><label style={lbl}>Vehículo *</label>
                 <select style={inp} value={form.vehiculo_id||""} onChange={e=>setForm(p=>({...p,vehiculo_id:e.target.value}))}>
                   <option value="">Seleccionar...</option>
                   {vehiculos?.filter(v=>v.activo).map(v=><option key={v.id} value={v.id}>{v.matricula} - {v.marca}</option>)}

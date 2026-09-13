@@ -507,7 +507,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
         <div style={{marginTop:12,background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:12}}>
           <div style={{fontSize:12,fontWeight:800,color:"var(--text)",marginBottom:5}}>Pegar listado de enlaces GPS</div>
           <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.5,marginBottom:8}}>
-            Formato por linea: <strong>matricula;ID GPS</strong>. Tambien acepta coma o tabulador.
+            Formato por linea: <strong>matrícula;ID GPS</strong>. Tambien acepta coma o tabulador.
           </div>
           <textarea
             value={importText}
@@ -536,7 +536,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
         <div style={{marginTop:10,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
           {status?.last_position && (
             <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 11px"}}>
-              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Ultima posicion recibida</div>
+              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Última posicion recibida</div>
               <div style={{fontSize:12,color:"var(--text)",fontWeight:800,marginTop:4}}>
                 {status.last_position.matricula || status.last_position.vehiculo_id} - {status.last_position.ubicacion || "Sin texto"}
               </div>
@@ -552,7 +552,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
                 {status.webhook.activo ? "Activo" : "Inactivo"} - {status.webhook.token_mask || "sin token"}
               </div>
               <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
-                Ultimo uso: {status.webhook.last_used_at ? new Date(status.webhook.last_used_at).toLocaleString("es-ES") : "todavia sin uso"}
+                Último uso: {status.webhook.last_used_at ? new Date(status.webhook.last_used_at).toLocaleString("es-ES") : "todavia sin uso"}
               </div>
             </div>
           )}
@@ -714,7 +714,7 @@ function TabGpsHistorial({ vehiculo }) {
 
   return (
     <div>
-      <div style={S.sec}>GPS del vehiculo</div>
+      <div style={S.sec}>GPS del vehículo</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:14}}>
         <div style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:8,padding:10}}>
           <div style={{fontSize:9,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em"}}>Proveedor</div>
@@ -725,7 +725,7 @@ function TabGpsHistorial({ vehiculo }) {
           <div style={{fontSize:13,fontWeight:800,color:"var(--text)",fontFamily:"'JetBrains Mono',monospace"}}>{vehiculo?.gps_external_id || "Pendiente"}</div>
         </div>
         <div style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:8,padding:10}}>
-          <div style={{fontSize:9,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em"}}>Ultima fuente</div>
+          <div style={{fontSize:9,color:"var(--text5)",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em"}}>Última fuente</div>
           <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{GPS_PROVIDER_LABELS[vehiculo?.ubicacion_fuente] || vehiculo?.ubicacion_fuente || "Sin fuente"}</div>
         </div>
         <div style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:8,padding:10}}>
@@ -769,7 +769,7 @@ function TabGpsHistorial({ vehiculo }) {
         <div style={{color:"var(--text4)",fontSize:13,padding:16}}>Cargando historial GPS...</div>
       ) : items.length === 0 ? (
         <div style={{background:"var(--bg3)",border:"1px dashed var(--border2)",borderRadius:8,padding:18,textAlign:"center",color:"var(--text4)",fontSize:13}}>
-          Aun no hay posiciones guardadas para este vehiculo. Cuando se sincronice un proveedor GPS o la app del chofer envie posicion, apareceran aqui.
+          Aun no hay posiciones guardadas para este vehículo. Cuando se sincronice un proveedor GPS o la app del chofer envie posicion, apareceran aqui.
         </div>
       ) : (
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -849,10 +849,10 @@ function TabVehiculoEventos({ vehiculo }) {
 
   return (
     <div>
-      <div style={S.sec}>Historial del vehiculo</div>
+      <div style={S.sec}>Historial del vehículo</div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}>
         <div style={{fontSize:12,color:"var(--text4)"}}>
-          Trazabilidad real del vehiculo: cambios de estado, enlace GPS, ediciones y posiciones manuales.
+          Trazabilidad real del vehículo: cambios de estado, enlace GPS, ediciones y posiciones manuales.
         </div>
         <button type="button" onClick={cargar} disabled={loading} style={{...S.btn,background:"var(--bg4)",color:"var(--text)",border:"1px solid var(--border2)"}}>
           {loading ? "Actualizando..." : "Actualizar"}
@@ -863,7 +863,7 @@ function TabVehiculoEventos({ vehiculo }) {
         <div style={{color:"var(--text4)",fontSize:13,padding:16}}>Cargando historial...</div>
       ) : items.length === 0 ? (
         <div style={{background:"var(--bg3)",border:"1px dashed var(--border2)",borderRadius:8,padding:18,textAlign:"center",color:"var(--text4)",fontSize:13}}>
-          Todavia no hay eventos registrados para este vehiculo.
+          Todavia no hay eventos registrados para este vehículo.
         </div>
       ) : (
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -918,7 +918,7 @@ function ModalChoferPicker({ vehiculoId, matricula, estado, choferes, onConfirm,
           Cambiar a En Ruta
         </div>
         <div style={{fontSize:12,color:"var(--text4)",marginBottom:16}}>
-          Vehiculo <strong style={{color:"var(--accent-xl)",fontFamily:"'JetBrains Mono',monospace"}}>{matricula}</strong> - Quien lo lleva?
+          Vehículo <strong style={{color:"var(--accent-xl)",fontFamily:"'JetBrains Mono',monospace"}}>{matricula}</strong> - Quien lo lleva?
         </div>
 
         {/* Buscador */}
@@ -1265,7 +1265,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                     value={form.matricula||""} onChange={e=>setForm(p=>({...p,matricula:formatMatricula(e.target.value)}))} placeholder="1234-ABC"/>
                 </div>
                 <div>
-                  <label style={S.lbl}>Clase de vehiculo *</label>
+                  <label style={S.lbl}>Clase de vehículo *</label>
                   <select value={form.clase||""} onChange={f("clase")} style={S.sel}>
                     {CLASES_VEHICULO.map(c=><option key={c} value={c}>{c}</option>)}
                   </select>
@@ -1288,7 +1288,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                   <input style={S.inp} value={form.modelo||""} onChange={f("modelo")} placeholder={esRemolque ? "Tautliner, frigorifico, bañera..." : "FH 460, XF 480..."}/>
                 </div>
                 <div>
-                  <label style={S.lbl}>Ano de fabricacion</label>
+                  <label style={S.lbl}>Año de fabricación</label>
                   <input type="number" min="1990" max="2035" style={S.inp} value={form.anio||""} onChange={f("anio")} placeholder="2023"/>
                 </div>
                 <div>
@@ -1321,10 +1321,10 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                 </div>
                 <div>
                   <label style={S.lbl}>Ubicación actual</label>
-                  <input style={S.inp} value={form.ubicacion_actual||""} onChange={f("ubicacion_actual")} placeholder="GPS pendiente / ultimo destino"/>
+                  <input style={S.inp} value={form.ubicacion_actual||""} onChange={f("ubicacion_actual")} placeholder="GPS pendiente / último destino"/>
                 </div>
                   <div>
-                    <label style={S.lbl}>Proveedor GPS del vehiculo</label>
+                    <label style={S.lbl}>Proveedor GPS del vehículo</label>
                     <select value={form.gps_provider || gpsProviderActivo || "manual"} onChange={e=>setForm(p=>({...p,gps_provider:e.target.value,gps_external_id:e.target.value==="manual"?"":(p.gps_external_id || "")}))} style={S.sel}>
                       {gpsProviderOptions.map(p => <option key={p.id} value={p.id}>{p.label}{p.id !== "manual" && !p.configured ? " (sin configurar)" : ""}</option>)}
                     </select>
@@ -1384,7 +1384,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                         notify(err.message || "No se pudo actualizar la ubicacion", "error");
                       }
                     }}>
-                    Fijar ubicacion manual
+                    Fijar ubicación manual
                   </button>
                 )}
                 {form.ubicacion_fuente && (
@@ -1397,11 +1397,11 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
 
               <div style={S.sec}>Notas</div>
               <textarea style={{ ...S.inp, height:70, resize:"vertical" }}
-                value={form.notas||""} onChange={f("notas")} placeholder="Observaciones generales del vehiculo..."/>
+                value={form.notas||""} onChange={f("notas")} placeholder="Observaciones generales del vehículo..."/>
 
               <div style={S.sec}>Aviso Avisos operacionales</div>
               <div style={{background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.3)",borderRadius:8,padding:"10px 12px",marginBottom:6,fontSize:12,color:"var(--text4)"}}>
-                Escribe aqui limitaciones o avisos importantes que deben mostrarse cada vez que se asigne este vehiculo a un pedido.
+                Escribe aqui limitaciones o avisos importantes que deben mostrarse cada vez que se asigne este vehículo a un pedido.
                 Por ejemplo: <i>"No eleva techo"</i>, <i>"Max 20.000 kg"</i>, <i>"Sin lona lateral"</i>, <i>"Precaucion: frenos revisados 15/03"</i>
               </div>
               <textarea style={{ ...S.inp, height:80, resize:"vertical",
@@ -1416,7 +1416,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
           {tab === "tecnica" && (
             <div>
               <div style={{ background:"rgba(59,130,246,.07)", border:"1px solid rgba(59,130,246,.15)", borderRadius:8, padding:"9px 14px", marginBottom:16, fontSize:12, color:"var(--text3)" }}>
-                Datos conforme a la ficha tecnica oficial del vehiculo (Permiso de Circulacion / Ficha Reducida)
+                Datos conforme a la ficha técnica oficial del vehículo (Permiso de Circulacion / Ficha Reducida)
               </div>
 
               <div style={S.sec}>Masas (kg)</div>
@@ -1625,10 +1625,10 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
           {/*  Documentacion  */}
           {tab === "docs" && (
             <div>
-              <div style={S.sec}>ITV y documentacion</div>
+              <div style={S.sec}>ITV y documentación</div>
               <div style={S.grid2}>
                 <div>
-                  <label style={S.lbl}>Proxima ITV</label>
+                  <label style={S.lbl}>Próxima ITV</label>
                   <input type="date" style={S.inp} value={form.fecha_itv||""} onChange={f("fecha_itv")}/>
                 </div>
               </div>
@@ -1644,7 +1644,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                   <input style={S.inp} value={form.compania_seguro||""} onChange={f("compania_seguro")} placeholder="Mapfre, AXA, Generali..."/>
                 </div>
                 <div>
-                  <label style={S.lbl}>Numero de poliza</label>
+                  <label style={S.lbl}>Número de poliza</label>
                   <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={form.numero_poliza||""} onChange={f("numero_poliza")}/>
                 </div>
               </div>
@@ -1655,8 +1655,8 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                   {canEdit && (
                     <label style={{border:"1px dashed var(--border2)",borderRadius:8,padding:"12px 14px",background:"var(--bg3)",cursor:docUploading?"wait":"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
                       <span>
-                        <span style={{display:"block",fontWeight:800,color:"var(--text)",fontSize:13}}>Subir documento del vehiculo</span>
-                        <span style={{display:"block",color:"var(--text5)",fontSize:11,marginTop:2}}>PDF o imagen. Se archiva en la ficha y se clasifica por nombre: ITV, seguro, tacografo, tarjeta de transporte o permiso.</span>
+                        <span style={{display:"block",fontWeight:800,color:"var(--text)",fontSize:13}}>Subir documento del vehículo</span>
+                        <span style={{display:"block",color:"var(--text5)",fontSize:11,marginTop:2}}>PDF o imagen. Se archiva en la ficha y se clasifica por nombre: ITV, seguro, tacógrafo, tarjeta de transporte o permiso.</span>
                       </span>
                       <span style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>
                         {docUploading ? "Subiendo..." : "Seleccionar"}
@@ -1695,7 +1695,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
                   )}
                 </div>
               ) : (
-                <div style={{color:"var(--text5)",fontSize:12,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:12}}>Guarda primero el vehiculo para adjuntar documentos.</div>
+                <div style={{color:"var(--text5)",fontSize:12,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:12}}>Guarda primero el vehículo para adjuntar documentos.</div>
               )}
             </div>
           )}
@@ -1717,7 +1717,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
 
           {tab === "gps" && !editando && (
             <div style={{background:"var(--bg3)",border:"1px dashed var(--border2)",borderRadius:8,padding:18,textAlign:"center",color:"var(--text4)",fontSize:13}}>
-              Guarda primero el vehiculo para activar el historial GPS.
+              Guarda primero el vehículo para activar el historial GPS.
             </div>
           )}
 
@@ -2018,7 +2018,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
 
         <button
           onClick={() => { const v = !ocultarGps; setOcultarGps(v); try { localStorage.setItem("tms_ocultar_gps", v ? "1" : "0"); } catch {} }}
-          title="Mostrar u ocultar todo lo relativo a GPS (panel y pestana del vehiculo)"
+          title="Mostrar u ocultar todo lo relativo a GPS (panel y pestana del vehículo)"
           style={{ ...S.btn, marginLeft:"auto", background: ocultarGps ? "var(--bg3)" : "var(--accent-a10)", color: ocultarGps ? "var(--text4)" : "var(--accent-xl)", border:`1px solid ${ocultarGps ? "var(--border2)" : "var(--accent-a30)"}`, fontSize:12, padding:"7px 12px" }}>
           {ocultarGps ? "Mostrar GPS" : "Ocultar GPS"}
         </button>
@@ -2166,7 +2166,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
                       </>
                     ) : (
                       <div style={{gridColumn:"1/-1",background:v.tractora_id ? "var(--accent-a08)" : "rgba(245,158,11,.08)",border:`1px solid ${v.tractora_id ? "var(--accent-a22)" : "rgba(245,158,11,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
-                        <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Asignacion del remolque</div>
+                        <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Asignación del remolque</div>
                         <div style={{fontSize:12,fontWeight:800,color:v.tractora_id ? "var(--text)" : "#f59e0b"}}>
                           {v.tractora_matricula ? `${v.tractora_matricula}${v.tractora_chofer_nombre ? ` · ${v.tractora_chofer_nombre}` : ""}` : "Libre / a espera de tractora"}
                         </div>
@@ -2175,7 +2175,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
                   </div>
 
                   <div style={{marginBottom:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:7,padding:"8px 10px"}}>
-                    <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Ubicacion</div>
+                    <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Ubicación</div>
                     <div style={{fontSize:12,fontWeight:700,color:v.ubicacion_actual?"var(--text)":"var(--text5)"}}>
                       {v.ubicacion_actual || "Sin datos GPS"}
                     </div>

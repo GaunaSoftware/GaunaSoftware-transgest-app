@@ -193,8 +193,10 @@ function printPiezaEtiqueta(pieza) {
     <div class="name">${escapeHtml(pieza.nombre)}</div>
     ${svg}
     <div class="code">${escapeHtml(code)}</div>
-  </div><script>window.onload=function(){setTimeout(function(){window.print();},120);};</script></body></html>`);
+  </div></body></html>`);
   win.document.close();
+  win.opener=null;
+  setTimeout(()=>{if(!win.closed)win.print();},150);
 }
 
 function printUnidadEtiquetas(pieza, unidades = []) {
@@ -222,9 +224,11 @@ function printUnidadEtiquetas(pieza, unidades = []) {
         <div class="code">${escapeHtml(code)}</div>
       </div>`;
     }).join("")}
-    <script>window.onload=function(){setTimeout(function(){window.print();},150);};</script>
+    
   </body></html>`);
   win.document.close();
+  win.opener=null;
+  setTimeout(()=>{if(!win.closed)win.print();},150);
 }
 
 function piezaApiToLocal(p) {
@@ -300,39 +304,6 @@ function resumenGastoTaller(reparaciones = []) {
     acc.piezas += Math.max(0, coste - Number(r?.coste_mano_obra || 0));
     return acc;
   }, { total:0, mes:0, manoObra:0, piezas:0 });
-}
-
-function TallerIcon({ name = "tool", color = "var(--accent)", size = 24 }) {
-  const common = { fill:"none", stroke:color, strokeWidth:2, strokeLinecap:"round", strokeLinejoin:"round" };
-  const shapes = {
-    tool: <path {...common} d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l2.6-2.6a6 6 0 0 1-7.9 7.9l-6.8 6.8a2 2 0 0 1-2.8-2.8l6.8-6.8a6 6 0 0 1 7.9-7.9l-2.8 2.8Z" />,
-    money: (
-      <>
-        <rect {...common} x="3" y="6" width="18" height="12" rx="2" />
-        <circle {...common} cx="12" cy="12" r="3" />
-      </>
-    ),
-    cube: (
-      <>
-        <path {...common} d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
-        <path {...common} d="M4 7.5 12 12l8-4.5" />
-        <path {...common} d="M12 12v9" />
-      </>
-    ),
-    layers: (
-      <>
-        <path {...common} d="m12 3 9 5-9 5-9-5 9-5Z" />
-        <path {...common} d="m3 13 9 5 9-5" />
-      </>
-    ),
-    clock: (
-      <>
-        <circle {...common} cx="12" cy="12" r="8" />
-        <path {...common} d="M12 8v5l3 2" />
-      </>
-    ),
-  };
-  return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">{shapes[name] || shapes.tool}</svg>;
 }
 
 const S = {

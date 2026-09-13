@@ -65,7 +65,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
 
   for(const tab of ['Identificación','Ficha técnica','Compra / Venta','Documentación','Plataformas','Conjunto / conductor','Historial']){
     await form.getByRole('button',{name:tab,exact:true}).click();
-    for(const width of [390,1440]){await page.setViewportSize({width,height:1000});await page.waitForTimeout(150);await page.screenshot({path:path.join(out,'form-current.png')});assert(await form.evaluate(el=>{if(el.scrollWidth>el.clientWidth+1)console.error('overflow',el.scrollWidth,el.clientWidth);return el.scrollWidth<=el.clientWidth+1;}),`form overflow ${tab}`);await page.screenshot({path:path.join(out,`form-${tab.replaceAll('/','-')}-${width}.png`)});}
+    for(const width of [390,1440]){await page.setViewportSize({width,height:1000});await page.waitForTimeout(150);await page.screenshot({path:path.join(out,'form-current.png')});const dims=await form.evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth,children:[...el.children].map(x=>({style:x.getAttribute('style'),rect:x.getBoundingClientRect().toJSON(),scroll:x.scrollWidth}))}));if(dims.scroll>dims.width+1)console.log(JSON.stringify(dims));assert(dims.scroll<=dims.width+1,`form overflow ${tab}`);await page.screenshot({path:path.join(out,`form-${tab.replaceAll('/','-')}-${width}.png`)});}
   }
   await form.getByRole('button',{name:'Cerrar',exact:true}).first().click();
   await page.getByRole('button',{name:'+ Nuevo vehículo',exact:true}).click();await form.getByText('Nueva tractora',{exact:true}).waitFor();await form.getByRole('button',{name:'Cerrar',exact:true}).first().click();

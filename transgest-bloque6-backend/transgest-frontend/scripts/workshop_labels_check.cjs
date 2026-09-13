@@ -1,0 +1,6 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),parser=require('@babel/parser');
+const src=fs.readFileSync('src/pages/Taller.js','utf8'),ast=parser.parse(src,{sourceType:'module',plugins:['jsx']});
+const names=['escapeHtml','code39Svg','printPiezaEtiqueta','printUnidadEtiquetas'];const parts=ast.program.body.filter(n=>n.type==='FunctionDeclaration'&&names.includes(n.id.name)||n.type==='VariableDeclaration'&&n.declarations.some(d=>d.id.name==='CODE39')).map(n=>src.slice(n.start,n.end));
+let printed=0,html='',alerts=0;const scope={setTimeout:fn=>fn(),notify:()=>alerts++,window:{open:()=>({document:{write:x=>html=x,close:()=>{}},print:()=>printed++})}};vm.createContext(scope);vm.runInContext(parts.join('\n'),scope);
+scope.printPiezaEtiqueta({codigo_barras:'PART-1',nombre:'<b>Filtro</b>',etiqueta_tamano:'50x25'});assert.equal(printed,1);assert(html.includes('&lt;b&gt;'));assert(!html.includes('<script>'));assert(html.includes('50mm 25mm'));
+scope.printUnidadEtiquetas({nombre:'Filtro'},[{codigo_unidad:'U-1'},{codigo_unidad:'U-2'}]);assert.equal(printed,2);assert(html.includes('U-2'));scope.window.open=()=>null;scope.printPiezaEtiqueta({referencia:'PART-1'});assert.equal(alerts,1);console.log('PASS label print callbacks, dimensions, escaping and popup failure');

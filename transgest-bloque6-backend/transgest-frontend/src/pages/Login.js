@@ -9,6 +9,8 @@ import { useTheme } from "../context/ThemeContext";
 import transgestLogoDark from "../assets/brand/transgest_logo_dark.svg";
 import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
 
+import "./driver/login.css";
+
 const IS_DEMO = process.env.REACT_APP_DEMO_MODE === "true";
 
 const S = {
@@ -45,7 +47,7 @@ const S = {
 
 export default function Login() {
   const { login }   = useAuth();
-  const { isDark } = useTheme() || {};
+  const { isDark, toggle } = useTheme() || {};
   const plan = getEmpresaPlanLocal();
   const brandDisplayName = getBrandDisplayName(plan);
   const [appMeta, setAppMeta] = useState(null);
@@ -53,6 +55,7 @@ export default function Login() {
   const versionLabel = getBrandVersionLabel(appMeta);
   const [email, setEmail] = useState("");
   const [pass,  setPass]  = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checkingServer, setCheckingServer] = useState(false);
@@ -152,7 +155,7 @@ export default function Login() {
       if (String(err.message || "").toLowerCase().includes("credenciales incorrectas")) {
         await confirmDialog({
           title: "Credenciales incorrectas",
-          message: "La combinacion de usuario/email y contrasena no es correcta. Revisa los datos e intentalo de nuevo.",
+          message: "La combinación de usuario/email y contraseña no es correcta. Revisa los datos e inténtalo de nuevo.",
           confirmText: "Aceptar",
           cancelText: "",
           tone: "warning",
@@ -163,7 +166,7 @@ export default function Login() {
         String(err.message || "").includes("problema interno del servidor")
       ) {
         setServerOk(false);
-        setServerMessage("El backend no esta disponible o ha devuelto un error interno.");
+        setServerMessage("El servicio no está disponible. Vuelve a intentarlo en unos instantes.");
       }
     } finally {
       setLoading(false);
@@ -181,7 +184,7 @@ export default function Login() {
     setForgotMessage("");
     try {
       const data = await requestPasswordReset(identifier);
-      setForgotMessage(data?.message || "Solicitud enviada. Superadmin recibira el aviso.");
+      setForgotMessage(data?.message || "Solicitud enviada. Superadmin recibirá el aviso.");
     } catch (err) {
       setForgotMessage(err?.message || "No se pudo registrar la solicitud.");
     } finally {
@@ -191,18 +194,6 @@ export default function Login() {
 
   return (
     <>
-    <style>{`
-      .tg-login-page, .tg-login-page * { box-sizing:border-box; }
-      .tg-login-card { width:min(430px, calc(100vw - 28px)) !important; }
-      @media (max-width: 520px) {
-        .tg-login-page { align-items:flex-start !important; padding:14px !important; overflow:auto; }
-        .tg-login-card { padding:24px 18px !important; border-radius:12px !important; }
-        .tg-login-card img { max-width:min(260px, 82vw) !important; }
-        .tg-login-page [style*="position:fixed"],
-        .tg-login-page [style*="position: fixed"] { padding:10px !important; align-items:flex-start !important; overflow:auto !important; }
-        .tg-login-page form { width:100% !important; max-width:calc(100vw - 20px) !important; padding:18px !important; }
-      }
-    `}</style>
     <div className="tg-login-page" style={S.bg}>
       <div className="tg-login-card" style={S.card}>
         {/* Logo */}
@@ -222,11 +213,12 @@ export default function Login() {
           <div style={S.logoSub}>
             {loginBrand?.empresa_nombre && !loginBrand?.portal_cliente
               ? `Acceso ${loginBrand.empresa_nombre}`
-              : "Sistema de gestion de transporte"}
+              : "Sistema de gestión de transporte"}
           </div>
         </div>
 
-        {error && <div style={S.err}>{error}</div>}
+        <div className="login-intro"><h1>Iniciar sesión</h1><p>Accede a tu espacio de trabajo con tu usuario de empresa.</p></div>
+        {error && <div role="alert" style={S.err}>{error}</div>}
         {serverOk === false && (
           <div style={S.server}>
             <div style={{fontWeight:800, color:"#fbbf24", marginBottom:4}}>Estado del servidor</div>
@@ -238,24 +230,23 @@ export default function Login() {
               disabled={checkingServer}
               style={{marginTop:8,padding:"6px 10px",borderRadius:6,border:"1px solid rgba(59,130,246,.24)",background:"rgba(59,130,246,.10)",color:"#93c5fd",fontWeight:800,fontSize:11,cursor:checkingServer?"not-allowed":"pointer",fontFamily:"'DM Sans',sans-serif",opacity:checkingServer?0.6:1}}
             >
-              {checkingServer ? "Comprobando..." : "Reintentar conexion"}
+              {checkingServer ? "Comprobando..." : "Reintentar conexión"}
             </button>
           </div>
         )}
 
+        <form onSubmit={handleLogin} aria-label="Iniciar sesión">
         <div style={{ marginBottom:14 }}>
-          <label style={S.label}>Usuario o email</label>
-          <input style={S.input} type="text" value={email}
+          <label style={S.label} htmlFor="login-identifier">Usuario o correo electrónico</label>
+          <input id="login-identifier" autoComplete="username" autoCapitalize="none" spellCheck={false} style={S.input} type="text" value={email}
             onChange={e=>setEmail(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&handleLogin()}
             placeholder="usuario o tu@empresa.com" autoFocus />
         </div>
         <div style={{ marginBottom:20 }}>
-          <label style={S.label}>Contraseña</label>
-          <input style={S.input} type="password" value={pass}
+          <label style={S.label} htmlFor="login-password">Contraseña</label>
+          <div className="login-password"><input id="login-password" autoComplete="current-password" style={S.input} type={showPassword ? "text" : "password"} value={pass}
             onChange={e=>setPass(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&handleLogin()}
-            placeholder="••••••••" />
+            placeholder="Tu contraseña" /><button type="button" aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"} aria-pressed={showPassword} onClick={()=>setShowPassword(v=>!v)}>{showPassword ? "Ocultar" : "Mostrar"}</button></div>
         </div>
 
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginTop:-8,marginBottom:18,flexWrap:"wrap"}}>
@@ -286,10 +277,12 @@ export default function Login() {
           </button>
         </div>
 
-        <button style={{ ...S.btn, opacity: loading ? .7 : 1 }}
-          onClick={handleLogin} disabled={loading}>
+        <button type="submit" style={{ ...S.btn, opacity: loading ? .7 : 1 }} disabled={loading}>
           {loading ? "Entrando..." : "Iniciar sesión"}
         </button>
+
+        </form>
+        <button className="login-theme" onClick={toggle}>{isDark ? "Usar tema claro" : "Usar tema oscuro"}</button>
 
         {/* Panel demo - solo en modo demo */}
         {IS_DEMO && (
@@ -322,17 +315,17 @@ export default function Login() {
       </div>
       {forgotOpen && (
         <div style={{position:"fixed",inset:0,zIndex:8000,background:"rgba(15,20,32,.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
-          <form onSubmit={handleForgotPassword} style={{width:"min(390px,96vw)",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:22,boxShadow:"var(--shadow)"}}>
-            <div style={{fontSize:17,fontWeight:900,color:"var(--text)",marginBottom:6}}>Recuperar contrasena</div>
+          <form role="dialog" aria-modal="true" aria-label="Recuperar contraseña" onSubmit={handleForgotPassword} style={{width:"min(390px,96vw)",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:22,boxShadow:"var(--shadow)"}}>
+            <div style={{fontSize:17,fontWeight:900,color:"var(--text)",marginBottom:6}}>Recuperar contraseña</div>
             <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:14}}>
-              Se enviara un aviso a superadmin para revisar y resetear la clave de este usuario.
+              Enviaremos una solicitud al administrador para recuperar el acceso a tu cuenta.
             </div>
-            <label style={S.label}>Usuario o email</label>
+            <label style={S.label} htmlFor="forgot-identifier">Usuario o correo electrónico</label>
             <input
               autoFocus
               style={S.input}
               type="text"
-              value={forgotIdentifier}
+              id="forgot-identifier" value={forgotIdentifier}
               onChange={e=>setForgotIdentifier(e.target.value)}
               placeholder="usuario o tu@empresa.com"
             />
@@ -355,18 +348,18 @@ export default function Login() {
           <div style={{width:"min(430px,96vw)",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:22,boxShadow:"var(--shadow)"}}>
             <div style={{fontSize:17,fontWeight:900,color:"var(--text)",marginBottom:6}}>Servidor de datos</div>
             <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:14}}>
-              Deja el campo vacio para usar el servidor en la nube (recomendado). Si tu empresa tiene una
-              instalacion propia (on-premise), escribe aqui la direccion de su servidor.
+              Deja el campo vacío para usar el servidor en la nube (recomendado). Si tu empresa tiene una
+              instalación propia (on-premise), escribe aquí la dirección de su servidor.
             </div>
-            <label style={S.label}>Direccion del servidor</label>
+            <label style={S.label}>Dirección del servidor</label>
             <input
               autoFocus
               style={S.input}
               type="text"
-              value={srvUrl}
+              aria-label="Dirección del servidor" value={srvUrl}
               onChange={e=>setSrvUrl(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&guardarServidor()}
-              placeholder="Ej: http://192.168.1.20:3000  ·  vacio = nube"
+              placeholder="Ej: http://192.168.1.20:3000  ·  vacío = nube"
             />
             <div style={{marginTop:8,fontSize:11,color:"var(--text5)"}}>
               Por defecto: {DEFAULT_API_URL}

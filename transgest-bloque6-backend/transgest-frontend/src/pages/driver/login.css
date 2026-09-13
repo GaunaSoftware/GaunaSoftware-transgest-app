@@ -1,0 +1,19 @@
+.tg-login-page { min-height:100dvh!important; padding:32px 16px; background:radial-gradient(ellipse at top left,var(--accent-a10),transparent 55%),var(--bg)!important; }
+.tg-login-page,.tg-login-page * { box-sizing:border-box; }
+.tg-login-card { width:460px!important; max-width:100%; padding:38px!important; border-radius:24px!important; border:1px solid var(--border)!important; box-shadow:0 16px 65px rgba(15,45,65,.07)!important; }
+.tg-login-card h1 { font-family:'DM Sans',sans-serif; font-size:28px; letter-spacing:-.7px; margin:0 0 8px; color:var(--text); }
+.login-intro { margin-bottom:26px; }
+.login-intro p { font-size:14px; line-height:1.6; margin:0; color:var(--text3); }
+.tg-login-card label,.tg-login-page [role=dialog] label { text-transform:none!important; letter-spacing:0!important; font-size:14px!important; color:var(--text3)!important; margin-bottom:8px!important; }
+.tg-login-page input:not([type=checkbox]) { min-height:50px; border-radius:11px!important; background:var(--bg2)!important; color:var(--text)!important; font-size:16px!important; }
+.tg-login-page input[type=checkbox] { width:18px; height:18px; accent-color:var(--accent); }
+.tg-login-page button { min-height:44px; font-family:inherit; }
+.tg-login-page :is(button,input):focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+.login-password { position:relative; }
+.login-password input { padding-right:86px!important; }
+.login-password button { position:absolute; right:5px; top:3px; padding:0 10px; border:0; color:var(--accent); background:transparent; font-weight:700; border-radius:8px; }
+.tg-login-card>form>button[type=submit] { min-height:52px; border-radius:11px!important; box-shadow:none!important; background:var(--accent)!important; }
+.tg-login-page [role=alert] { color:#be123c!important; }
+.tg-login-page [role=dialog] { max-height:calc(100dvh - 32px); overflow:auto; border-radius:18px!important; max-width:100%; }
+.login-theme { display:block; margin:14px auto 0; border:0; background:transparent; color:var(--text3); font-size:12px; }
+@media(max-width:520px) { .tg-login-page { padding:16px 12px!important; align-items:center!important; } .tg-login-card { padding:26px 22px!important; border-radius:20px!important; } .tg-login-card img { max-width:230px!important; } }

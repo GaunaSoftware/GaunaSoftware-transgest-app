@@ -6,6 +6,8 @@ import { confirmDialog, notify } from "../services/notify";
 import { getCurrentLocation, requestForegroundLocationPermission, watchForegroundLocation, isNativeMobileApp } from "../services/mobileRuntime";
 import { enqueueOfflineItem, markOfflineAttempt, queueSummary, readOfflineQueue, readyOfflineItems, writeOfflineQueue } from "../services/offlineQueue";
 
+import { DriverHeader, DriverNavigation, DriverHome, DriverMore, DriverIcon, DriverHeading } from "./driver/DriverUI";
+
 const EC = {
   pendiente:  { l:"Pendiente",   c:"#9ca3af", bg:"rgba(156,163,175,.15)" },
   confirmado: { l:"Confirmado",  c:"#3b82f6", bg:"rgba(59,130,246,.15)" },
@@ -22,12 +24,12 @@ const EC = {
 const PASOS_KEY = id => `tms_chofer_pasos_${id}`;
 const LEGACY_SOLICITUDES_KEY = "tms_solicitudes_mecanico";
 const PROTOCOLO_CISTERNA = [
-  { key:"protocolo_cisterna_epi", label:"EPI colocado", detail:"Guantes, gafas/pantalla y proteccion requerida para el producto." },
-  { key:"protocolo_cisterna_zona", label:"Zona segura", detail:"Vehiculo inmovilizado, zona acotada y sin fuentes de ignicion." },
+  { key:"protocolo_cisterna_epi", label:"EPI colocado", detail:"Guantes, gafas/pantalla y protección requerida para el producto." },
+  { key:"protocolo_cisterna_zona", label:"Zona segura", detail:"Vehículo inmovilizado, zona acotada y sin fuentes de ignición." },
   { key:"protocolo_cisterna_tierra", label:"Toma de tierra", detail:"Puesta a tierra conectada antes de manipular mangueras." },
-  { key:"protocolo_cisterna_producto", label:"Producto/cisterna verificados", detail:"Mercancia, compatibilidad, compartimento y documentacion revisados." },
-  { key:"protocolo_cisterna_mangueras", label:"Mangueras y valvulas OK", detail:"Conexiones, juntas, valvulas y tapas revisadas antes de carga/descarga." },
-  { key:"protocolo_cisterna_fugas", label:"Sin fugas", detail:"Comprobacion visual de fugas y derrames antes de iniciar operacion." },
+  { key:"protocolo_cisterna_producto", label:"Producto/cisterna verificados", detail:"Mercancía, compatibilidad, compartimento y documentación revisados." },
+  { key:"protocolo_cisterna_mangueras", label:"Mangueras y válvulas OK", detail:"Conexiones, juntas, válvulas y tapas revisadas antes de carga/descarga." },
+  { key:"protocolo_cisterna_fugas", label:"Sin fugas", detail:"Comprobación visual de fugas y derrames antes de iniciar operación." },
 ];
 let choferPasosCache = {};
 let solicitudesTallerCache = null;
@@ -193,7 +195,7 @@ function esErrorOffline(error) {
   const msg = String(error?.message || error || "").toLowerCase();
   return (
     msg.includes("no se pudo conectar con el servidor") ||
-    msg.includes("la conexion con el servidor se ha cortado") ||
+    msg.includes("la conexión con el servidor se ha cortado") ||
     msg.includes("failed to fetch") ||
     msg.includes("network request failed") ||
     msg.includes("fetch failed")
@@ -398,7 +400,7 @@ function buildUploadEvidence(kind, location) {
   };
   const locText = location
     ? `ubicacion ${location.lat.toFixed(6)},${location.lng.toFixed(6)} precision ${location.accuracy_m || "-"}m`
-    : "ubicacion no disponible";
+    : "ubicación no disponible";
   return {
     evidence,
     note: `Evidencia app chofer: ${new Date(at).toLocaleString("es-ES")} - ${locText}`,
@@ -424,7 +426,7 @@ function puntoCargaToPedidoStop(punto = {}, fallbackDate = "", fallbackTime = ""
     fecha: fallbackDate || "",
     hora: fallbackTime || "",
     ventana: punto.ventana || "",
-    notas: punto.pendiente_revision ? "Punto creado por chofer pendiente de revision de trafico" : (punto.notas || ""),
+    notas: punto.pendiente_revision ? "Punto creado por chófer pendiente de revisión de tráfico" : (punto.notas || ""),
     pais: punto.pais || "Espana",
     provincia: punto.provincia || "",
     google_maps_url: punto.google_maps_url || punto.metadata?.google_maps_url || "",
@@ -436,25 +438,21 @@ function puntoCargaToPedidoStop(punto = {}, fallbackDate = "", fallbackTime = ""
 }
 
 function Mini({ label, value }) {
-  return (
-    <div style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 10px"}}>
-      <div style={{fontSize:9,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",fontWeight:800}}>{label}</div>
-      <div style={{marginTop:2,color:"var(--text)",fontSize:12,fontWeight:800}}>{value || "-"}</div>
-    </div>
-  );
+  return <div className="driver-mini"><span>{label}</span><strong>{value || "—"}</strong></div>;
 }
 
 // Firma canvas
-function FirmaCanvas({ pedido, onFirma, onCancel, title = "Confirmacion de entrega", detail = "", confirmLabel = "Confirmar", placeholder = "Nombre y apellidos de quien firma" }){
+function FirmaCanvas({ pedido, onFirma, onCancel, title = "Confirmación de entrega", detail = "", confirmLabel = "Confirmar", placeholder = "Nombre y apellidos de quien firma" }){
   const canvasRef = useRef(null);
   const drawing   = useRef(false);
+  const hasInk = useRef(false);
   const lastPt    = useRef(null);
   const [firmaNombre, setFirmaNombre] = useState("");
 
   function getPos(e, canvas){
     const rect = canvas.getBoundingClientRect();
     const src = e.touches?.[0] || e;
-    return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+    return { x: (src.clientX - rect.left) * canvas.width / rect.width, y: (src.clientY - rect.top) * canvas.height / rect.height };
   }
   function start(e){ e.preventDefault(); drawing.current=true; lastPt.current=getPos(e,canvasRef.current); }
   function move(e){
@@ -465,35 +463,36 @@ function FirmaCanvas({ pedido, onFirma, onCancel, title = "Confirmacion de entre
     ctx.beginPath(); ctx.strokeStyle="#111"; ctx.lineWidth=2.5; ctx.lineCap="round";
     ctx.moveTo(lastPt.current.x,lastPt.current.y);
     ctx.lineTo(pt.x,pt.y); ctx.stroke();
+    if (Math.hypot(pt.x-lastPt.current.x,pt.y-lastPt.current.y)>1) hasInk.current=true;
     lastPt.current=pt;
   }
   function end(){ drawing.current=false; }
-  function limpiar(){ const ctx=canvasRef.current.getContext("2d"); ctx.clearRect(0,0,300,150); }
+  function limpiar(){ const ctx=canvasRef.current.getContext("2d"); ctx.clearRect(0,0,300,150); hasInk.current=false; }
   function confirmar(){
     if (!String(firmaNombre || "").trim()) {
       notify("Indica el nombre de quien firma la entrega", "warning");
       return;
     }
+    if (!hasInk.current) { notify("Firma en el recuadro antes de continuar.", "warning"); return; }
     onFirma(canvasRef.current.toDataURL("image/png"), String(firmaNombre || "").trim());
   }
 
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:16}}>
+    <div role="dialog" aria-modal="true" aria-label={title} className="driver-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:16}}>
       <div style={{background:"#fff",borderRadius:12,padding:16,width:"min(340px,95vw)"}}>
         <div style={{fontWeight:700,fontSize:15,color:"#111",marginBottom:8,textAlign:"center"}}>{title}</div>
-        <div style={{fontSize:11,color:"#666",marginBottom:10,textAlign:"center"}}>
-          Documento interno de entrega correcta. Origen: {pedido?.origen || "-"} · Destino: {pedido?.destino || "-"} · Mercancia: {pedido?.mercancia || pedido?.descripcion_carga || "-"}
+        <div style={{fontSize:14,color:"#666",marginBottom:10,textAlign:"center"}}>
+          Documento interno de entrega correcta. Origen: {pedido?.origen || "-"} · Destino: {pedido?.destino || "-"} · Mercancía: {pedido?.mercancia || pedido?.descripcion_carga || "-"}
         </div>
-        <input value={firmaNombre} onChange={e=>setFirmaNombre(e.target.value)} placeholder="Nombre y apellidos de quien firma"
-          style={{width:"100%",boxSizing:"border-box",border:"1px solid #ddd",borderRadius:8,padding:"9px 10px",fontSize:13,marginBottom:10,color:"#111"}}/>
+        <input aria-label="Nombre y apellidos de quien firma" value={firmaNombre} onChange={e=>setFirmaNombre(e.target.value)} placeholder="Nombre y apellidos de quien firma"
+          style={{width:"100%",boxSizing:"border-box",border:"1px solid #ddd",borderRadius:8,padding:"9px 10px",fontSize:14,marginBottom:10,color:"#111"}}/>
         <canvas ref={canvasRef} width={300} height={150}
           style={{border:"2px solid #ddd",borderRadius:8,width:"100%",height:150,touchAction:"none",background:"#fafafa"}}
-          onMouseDown={start} onMouseMove={move} onMouseUp={end}
-          onTouchStart={start} onTouchMove={move} onTouchEnd={end}/>
+          onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);start(e);}} onPointerMove={move} onPointerUp={end} onPointerCancel={end}/>
         <div style={{display:"flex",gap:8,marginTop:12}}>
-          <button onClick={limpiar} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Borrar</button>
-          <button onClick={onCancel} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
-          <button onClick={confirmar} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Confirmar</button>
+          <button onClick={limpiar} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:14,fontWeight:600,cursor:"pointer"}}>Borrar</button>
+          <button onClick={onCancel} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+          <button onClick={confirmar} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>Confirmar</button>
         </div>
       </div>
     </div>
@@ -502,6 +501,7 @@ function FirmaCanvas({ pedido, onFirma, onCancel, title = "Confirmacion de entre
 
 function FirmaLaboralCanvas({ title = "Firma", detail = "", defaultName = "", onFirma, onCancel, required = false }){
   const canvasRef = useRef(null);
+  const hasInk = useRef(false);
   const drawing = useRef(false);
   const lastPt = useRef(null);
   const [firmaNombre, setFirmaNombre] = useState(defaultName || "");
@@ -509,7 +509,7 @@ function FirmaLaboralCanvas({ title = "Firma", detail = "", defaultName = "", on
   function getPos(e, canvas){
     const rect = canvas.getBoundingClientRect();
     const src = e.touches?.[0] || e;
-    return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+    return { x: (src.clientX - rect.left) * canvas.width / rect.width, y: (src.clientY - rect.top) * canvas.height / rect.height };
   }
   function start(e){ e.preventDefault(); drawing.current=true; lastPt.current=getPos(e,canvasRef.current); }
   function move(e){
@@ -520,37 +520,38 @@ function FirmaLaboralCanvas({ title = "Firma", detail = "", defaultName = "", on
     ctx.beginPath(); ctx.strokeStyle="#111"; ctx.lineWidth=2.5; ctx.lineCap="round";
     ctx.moveTo(lastPt.current.x,lastPt.current.y);
     ctx.lineTo(pt.x,pt.y); ctx.stroke();
+    if (Math.hypot(pt.x-lastPt.current.x,pt.y-lastPt.current.y)>1) hasInk.current=true;
     lastPt.current=pt;
   }
   function end(){ drawing.current=false; }
-  function limpiar(){ const ctx=canvasRef.current.getContext("2d"); ctx.clearRect(0,0,300,150); }
+  function limpiar(){ const ctx=canvasRef.current.getContext("2d"); ctx.clearRect(0,0,300,150); hasInk.current=false; }
   function confirmar(){
     const nombre = String(firmaNombre || "").trim();
     if (!nombre) { notify("Indica nombre y apellidos para firmar", "warning"); return; }
+    if (!hasInk.current) { notify("Firma en el recuadro antes de continuar.", "warning"); return; }
     onFirma?.({ firma_png: canvasRef.current.toDataURL("image/png"), nombre, user_agent: navigator.userAgent, at: new Date().toISOString() });
   }
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:520,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+    <div role="dialog" aria-modal="true" aria-label={title} className="driver-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",zIndex:520,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div style={{background:"#fff",borderRadius:12,padding:16,width:"min(360px,95vw)"}}>
         <div style={{fontWeight:800,fontSize:15,color:"#111",marginBottom:6,textAlign:"center"}}>{title}</div>
-        {detail && <div style={{fontSize:11,color:"#666",marginBottom:10,textAlign:"center",lineHeight:1.35}}>{detail}</div>}
-        <input value={firmaNombre} onChange={e=>setFirmaNombre(e.target.value)} placeholder="Nombre y apellidos"
-          style={{width:"100%",boxSizing:"border-box",border:"1px solid #ddd",borderRadius:8,padding:"9px 10px",fontSize:13,marginBottom:10,color:"#111"}}/>
+        {detail && <div style={{fontSize:14,color:"#666",marginBottom:10,textAlign:"center",lineHeight:1.35}}>{detail}</div>}
+        <input aria-label="Nombre y apellidos" value={firmaNombre} onChange={e=>setFirmaNombre(e.target.value)} placeholder="Nombre y apellidos"
+          style={{width:"100%",boxSizing:"border-box",border:"1px solid #ddd",borderRadius:8,padding:"9px 10px",fontSize:14,marginBottom:10,color:"#111"}}/>
         <canvas ref={canvasRef} width={300} height={150}
           style={{border:"2px solid #ddd",borderRadius:8,width:"100%",height:150,touchAction:"none",background:"#fafafa"}}
-          onMouseDown={start} onMouseMove={move} onMouseUp={end}
-          onTouchStart={start} onTouchMove={move} onTouchEnd={end}/>
+          onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);start(e);}} onPointerMove={move} onPointerUp={end} onPointerCancel={end}/>
         <div style={{display:"flex",gap:8,marginTop:12}}>
-          <button onClick={limpiar} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Borrar</button>
+          <button onClick={limpiar} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:14,fontWeight:600,cursor:"pointer"}}>Borrar</button>
           {!required && (
-            <button onClick={onCancel} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+            <button onClick={onCancel} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
           )}
-          <button onClick={confirmar} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer"}}>Firmar</button>
+          <button onClick={confirmar} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer"}}>Firmar</button>
         </div>
         {required && (
-          <div style={{marginTop:10,fontSize:11,color:"#92400e",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"8px 10px",lineHeight:1.35}}>
-            La firma es obligatoria para usar la app. Se guardara en tu ficha de chofer y podras cambiarla despues desde Datos.
+          <div style={{marginTop:10,fontSize:14,color:"#92400e",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:8,padding:"8px 10px",lineHeight:1.35}}>
+            La firma es obligatoria para usar la app. Se guardará en tu ficha de chófer y podrás cambiarla después desde Datos.
           </div>
         )}
       </div>
@@ -640,7 +641,7 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
           onGuardado();
           return;
         } catch (queueErr) {
-          setError(queueErr.message || "No se pudo guardar la incidencia sin conexion");
+          setError(queueErr.message || "No se pudo guardar la incidencia sin conexión");
           return;
         }
       }
@@ -650,21 +651,21 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
     }
   }
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+    <div className="driver-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div style={{background:"var(--bg2)",borderRadius:12,padding:20,width:"min(360px,95vw)"}}>
         <div style={{fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Registrar incidencia</div>
-        <div style={{fontSize:11,color:"var(--text5)",marginBottom:10}}>Fase: {faseLabel(fase)}</div>
-        <textarea value={texto} onChange={e=>setTexto(e.target.value)} placeholder="Describe el problema: retraso, accidente, mercancia danada..."
-          style={{width:"100%",minHeight:100,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"none",boxSizing:"border-box"}}/>
+        <div style={{fontSize:14,color:"var(--text5)",marginBottom:10}}>Fase: {faseLabel(fase)}</div>
+        <textarea aria-label="Describe el problema: retraso, accidente, mercancía danada..." value={texto} onChange={e=>setTexto(e.target.value)} placeholder="Describe el problema: retraso, accidente, mercancía danada..."
+          style={{width:"100%",minHeight:100,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",resize:"none",boxSizing:"border-box"}}/>
         <input id={inputId} type="file" accept="image/*" capture="environment" onChange={seleccionarFoto} style={{display:"none"}}/>
         <button onClick={()=>document.getElementById(inputId)?.click()} disabled={procesando}
           style={{width:"100%",marginTop:10,padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
           {procesando ? "Preparando foto..." : archivo ? `Foto adjunta: ${archivo.name}` : "Adjuntar foto de la incidencia"}
         </button>
         {doc?.preview && (
-          <img src={doc.preview} alt="Vista previa albaran" style={{width:"100%",height:190,objectFit:"cover",display:"block",background:"#111827"}}/>
+          <img src={doc.preview} alt="Vista previa albarán" style={{width:"100%",height:190,objectFit:"cover",display:"block",background:"#111827"}}/>
         )}
-        {error && <div style={{fontSize:12,color:"#ef4444",marginTop:8}}>{error}</div>}
+        {error && <div style={{fontSize:14,color:"#ef4444",marginTop:8}}>{error}</div>}
         <div style={{display:"flex",gap:8,marginTop:12}}>
           <button onClick={onClose} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Cancelar</button>
           <button onClick={guardar} disabled={guardando} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#fbbf24",color:"#111",fontWeight:700,cursor:guardando?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>{guardando ? "Guardando..." : "Registrar"}</button>
@@ -740,7 +741,7 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
       if (esErrorOffline(err) && uploadPayload) {
         try {
           if (payloadSizeKb(uploadPayload) > 4200) {
-            throw new Error("El archivo es demasiado grande para guardarlo sin conexion. Intentalo cuando vuelva la cobertura.");
+            throw new Error("El archivo es demasiado grande para guardarlo sin conexión. Inténtalo cuando vuelva la cobertura.");
           }
           queueOfflineCriticalAction({
             tipo: "pedido_doc_chofer",
@@ -748,17 +749,17 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
             body: uploadPayload,
             dedupe_key: `pedido_doc_chofer:${pedido.id}:${tipo}:${uploadPayload.metadata?.captured_at || Date.now()}`,
             fecha: new Date().toISOString(),
-          }, "Albaran guardado para sincronizar");
+          }, "Albarán guardado para sincronizar");
           setArchivo(null);
           setDoc(null);
           await onUploaded?.(tipo);
           return;
         } catch (queueErr) {
-          setError(queueErr.message || "No se pudo guardar el albaran sin conexion");
+          setError(queueErr.message || "No se pudo guardar el albarán sin conexión");
           return;
         }
       }
-      setError(err.message || "No se pudo subir el albaran");
+      setError(err.message || "No se pudo subir el albarán");
     } finally {
       setSubiendo(false);
     }
@@ -768,20 +769,20 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
     <div style={{border:"1px solid var(--border)",background:"var(--bg4)",borderRadius:10,padding:12,marginTop:10}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
         <div>
-          <div style={{fontWeight:800,fontSize:13,color:"var(--text)"}}>Albaran de {faseLabel(fase).toLowerCase()}</div>
-          <div style={{fontSize:11,color:"var(--text5)"}}>Encuadra el documento y subelo al viaje</div>
+          <div style={{fontWeight:800,fontSize:14,color:"var(--text)"}}>Albarán de {faseLabel(fase).toLowerCase()}</div>
+          <div style={{fontSize:14,color:"var(--text5)"}}>Encuadra el documento y súbelo al viaje</div>
         </div>
-        <span style={{fontSize:10,fontWeight:800,color:"#3b82f6",background:"rgba(59,130,246,.12)",padding:"3px 8px",borderRadius:20}}>ESCANER</span>
+        <span style={{fontSize:12,fontWeight:800,color:"#3b82f6",background:"rgba(59,130,246,.12)",padding:"3px 8px",borderRadius:20}}>ESCÁNER</span>
       </div>
 
       <div
         style={{display:"block",position:"relative",minHeight:150,border:"2px dashed rgba(59,130,246,.55)",borderRadius:10,background:"#111827",overflow:"hidden"}}>
         {doc?.preview ? (
-          <img src={doc.preview} alt="Vista previa albaran" style={{width:"100%",height:190,objectFit:"cover",display:"block",background:"#111827"}}/>
+          <img src={doc.preview} alt="Vista previa albarán" style={{width:"100%",height:190,objectFit:"cover",display:"block",background:"#111827"}}/>
         ) : (
           <div style={{height:170,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:"#e5e7eb",textAlign:"center",padding:18,boxSizing:"border-box"}}>
-          <div style={{fontSize:13,fontWeight:800,marginBottom:6}}>Coloca el albaran dentro del marco</div>
-            <div style={{fontSize:11,lineHeight:1.45,color:"#cbd5e1"}}>La app detecta el papel, recorta el fondo y lo guarda con aspecto de escaner. Buena luz y esquinas visibles ayudan mucho.</div>
+          <div style={{fontSize:14,fontWeight:800,marginBottom:6}}>Coloca el albarán dentro del marco</div>
+            <div style={{fontSize:14,lineHeight:1.45,color:"#cbd5e1"}}>La app detecta el papel, recorta el fondo y lo guarda con aspecto de escáner. Buena luz y esquinas visibles ayudan mucho.</div>
           </div>
         )}
         {["tl","tr","bl","br"].map(pos => (
@@ -800,30 +801,30 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
       <input id={fileInputId} type="file" accept="image/*,application/pdf" onChange={seleccionarArchivo} style={{display:"none"}}/>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:9}}>
         <button type="button" disabled={procesando || subiendo} onClick={()=>document.getElementById(cameraInputId)?.click()}
-          style={{padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.35)",background:"rgba(59,130,246,.10)",color:"#60a5fa",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-          Abrir camara
+          style={{padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.35)",background:"rgba(59,130,246,.10)",color:"#60a5fa",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          Abrir cámara
         </button>
         <button type="button" disabled={procesando || subiendo} onClick={()=>document.getElementById(fileInputId)?.click()}
-          style={{padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text3)",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          style={{padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text3)",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
           Elegir archivo
         </button>
       </div>
 
       {archivo && (
-        <div style={{fontSize:11,color:"var(--text4)",marginTop:7}}>
+        <div style={{fontSize:14,color:"var(--text4)",marginTop:7}}>
           Preparado: <strong style={{color:"var(--text)"}}>{archivo.name}</strong> - {doc?.sizeKb || Math.round(archivo.size/1024)} KB
           {doc?.mime?.startsWith("image/") && (
             <span style={{display:"block",marginTop:3,color:doc.scan_detected ? "#10b981" : "#f59e0b",fontWeight:800}}>
-              {doc.scan_detected ? "Documento detectado y recortado automaticamente." : "Imagen limpiada como escaner; no se detectaron bien los bordes del papel."}
+              {doc.scan_detected ? "Documento detectado y recortado automáticamente." : "Imagen limpiada como escáner; no se detectaron bien los bordes del papel."}
             </span>
           )}
         </div>
       )}
-      {error && <div style={{fontSize:12,color:"#ef4444",marginTop:8}}>{error}</div>}
+      {error && <div style={{fontSize:14,color:"#ef4444",marginTop:8}}>{error}</div>}
 
       <div style={{display:"flex",gap:8,marginTop:10}}>
         <button onClick={subir} disabled={!doc || subiendo}
-          style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:doc ? "#10b981" : "var(--border2)",color:"#fff",fontWeight:800,fontSize:12,cursor:doc?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
+          style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:doc ? "#10b981" : "var(--border2)",color:"#fff",fontWeight:800,fontSize:14,cursor:doc?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
           {subiendo ? "Subiendo..." : "Adjuntar"}
         </button>
       </div>
@@ -1007,11 +1008,11 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   async function marcarDcdRevisado() {
     const data = docControl || await cargarDocumentoControl();
     if (!data?.documento) {
-      notify("No se pudo cargar el DCD. Revisa la conexion o avisa a trafico.", "warning");
+      notify("No se pudo cargar el DCD. Revisa la conexión o avisa a tráfico.", "warning");
       return;
     }
     if (!data?.status?.ready) {
-      notify("El DCD aun tiene datos pendientes. Puedes consultarlo, pero trafico debe completarlo.", "warning");
+      notify("El DCD aun tiene datos pendientes. Puedes consultarlo, pero tráfico debe completarlo.", "warning");
     }
     registrarDcdEvento("consultado");
     registrarDcdEvento("revisado");
@@ -1029,7 +1030,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     if (!data?.documento) {
       const ok = await confirmDialog({
         title: "DCD no disponible",
-        message: "No se ha podido cargar el documento de control digital. Puedes continuar para no bloquear la operativa, pero quedara pendiente para trafico.",
+        message: "No se ha podido cargar el documento de control digital. Puedes continuar para no bloquear la operativa, pero quedara pendiente para tráfico.",
         confirmText: "Continuar igualmente",
         cancelText: "Revisar",
         tone: "warning",
@@ -1040,8 +1041,8 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     const ok = await confirmDialog({
       title: data?.status?.ready ? "Confirmar DCD" : "DCD con datos pendientes",
       message: data?.status?.ready
-        ? "Antes de salir, confirma que has revisado el DCD y lo llevas disponible en el movil o impreso."
-        : "El DCD esta pendiente de revision interna. Puedes continuar con aviso, pero informa a trafico si necesitas el soporte definitivo.",
+        ? "Antes de salir, confirma que has revisado el DCD y lo llevas disponible en el móvil o impreso."
+        : "El DCD esta pendiente de revisión interna. Puedes continuar con aviso, pero informa a tráfico si necesitas el soporte definitivo.",
       confirmText: data?.status?.ready ? "Lo llevo revisado" : "Continuar con aviso",
       cancelText: "Volver",
       tone: data?.status?.ready ? "success" : "warning",
@@ -1111,12 +1112,12 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     const palets = String(mercanciaCarga.palets || "").trim();
     const peso = String(mercanciaCarga.peso_kg || "").trim();
     if (!mercancia || !palets || !peso) {
-      notify("Indica mercancia, palets/bultos y peso antes de cerrar la carga.", "warning");
+      notify("Indica mercancía, palets/bultos y peso antes de cerrar la carga.", "warning");
       return;
     }
     const pesoNum = Number(String(peso).replace(",", "."));
     if (!Number.isFinite(pesoNum) || pesoNum <= 0) {
-      notify("El peso debe ser un numero valido.", "warning");
+      notify("El peso debe ser un número válido.", "warning");
       return;
     }
     await persistirPasos({
@@ -1129,7 +1130,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     }, { silent: true });
     const fresh = await cargarDocumentoControl().catch(() => null);
     if (fresh) setDocControl(fresh);
-    notify("Datos de mercancia guardados.", "success");
+    notify("Datos de mercancía guardados.", "success");
     onActualizar();
   }
 
@@ -1192,7 +1193,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   useEffect(() => {
     if (!timerActual || timerActual.mins <= 60 || pasos[timerActual.alertKey]) return;
     persistirPasos({ [timerActual.alertKey]: true, [`${timerActual.alertKey}_at`]: new Date().toISOString() }, { silent: true })
-      .then(() => notify("Aviso enviado a trafico y gerencia por superar 60 minutos.", "warning"))
+      .then(() => notify("Aviso enviado a tráfico y gerencia por superar 60 minutos.", "warning"))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerActual?.fase, timerActual?.mins, timerActual?.alertKey, pasos.aviso_espera_carga, pasos.aviso_espera_descarga]);
@@ -1207,7 +1208,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     setLoading(true);
     try {
       const location = await capturarUbicacionActual();
-      if (!location) notify("No se pudo capturar la ubicacion de carga. Puedes continuar, queda pendiente para trafico.", "warning");
+      if (!location) notify("No se pudo capturar la ubicación de carga. Puedes continuar, queda pendiente para tráfico.", "warning");
       if (!["en_curso","descarga","entregado"].includes(pedido.estado)) await cambiarEstadoPedido(pedido.id, "en_curso");
       await persistirPasos({
         carga_iniciada:true,
@@ -1242,17 +1243,17 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       return;
     }
     if (!pasos.mercancia_confirmada || !pasos.albaran_carga || !pasos.firma_cargador) {
-      notify("Antes de finalizar la carga debes confirmar mercancia, adjuntar albaran y registrar la firma del remitente.", "warning");
+      notify("Antes de finalizar la carga debes confirmar mercancía, adjuntar albarán y registrar la firma del remitente.", "warning");
       return;
     }
     await marcarPaso("carga_ok");
-    notify("Carga finalizada con mercancia, albaran y firma registrados.", "success");
+    notify("Carga finalizada con mercancía, albarán y firma registrados.", "success");
     onActualizar();
   }
 
   async function iniciarViaje() {
     if (!pasos.albaran_carga) {
-      notify("Sube el albaran de carga antes de iniciar el viaje.", "warning");
+      notify("Sube el albarán de carga antes de iniciar el viaje.", "warning");
       return;
     }
     if (!(await confirmarDcdAntesDeSalir())) return;
@@ -1301,24 +1302,24 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       return;
     }
     await marcarPaso("descarga_ok");
-    notify("Descarga finalizada. Sube el albaran de descarga para poder firmar.", "success");
+    notify("Descarga finalizada. Sube el albarán de descarga para poder firmar.", "success");
   }
 
   function siguientePaso() {
     if (!pasos.carga_iniciada) {
-      return { label:"Posicionado en carga", help:"Registra que ya estas en el punto de carga. Desde aqui empieza la espera.", run: iniciarPosicionCarga, color:"#3b82f6" };
+      return { label:"Posicionado en carga", help:"Registra que ya estas en el punto de carga. Desde aquí empieza la espera.", run: iniciarPosicionCarga, color:"#3b82f6" };
     }
-    if (!pasos.carga_proceso) return { label:"Iniciar carga", help:"Empieza el contador real de carga y reinicia el temporizador visual del chofer.", run: iniciarCarga, color:"#f59e0b" };
-    if (!pasos.mercancia_confirmada) return { type:"mercancia_carga", label:"Confirmar mercancia cargada", help:"Antes de firmar la carga, introduce mercancia, palets/bultos, peso y referencia si procede." };
-    if (!pasos.albaran_carga) return { type:"albaran_carga", label:"Subir albaran de carga", help:"Adjunta el albaran de carga para incorporarlo al DCD." };
+    if (!pasos.carga_proceso) return { label:"Iniciar carga", help:"Empieza el contador real de carga y reinicia el temporizador visual del chófer.", run: iniciarCarga, color:"#f59e0b" };
+    if (!pasos.mercancia_confirmada) return { type:"mercancia_carga", label:"Confirmar mercancía cargada", help:"Antes de firmar la carga, introduce mercancía, palets/bultos, peso y referencia si procede." };
+    if (!pasos.albaran_carga) return { type:"albaran_carga", label:"Subir albarán de carga", help:"Adjunta el albarán de carga para incorporarlo al DCD." };
     if (!pasos.firma_cargador) return { label:"Firma del remitente", help:"El remitente/cargador firma la carga y la firma aparece en el bloque Sender del DCD.", run:()=>setFirmandoCargador(true), color:"#10b981" };
-    if (!pasos.carga_ok) return { label:"Carga finalizada", help:"Marca este paso cuando la mercancia ya este cargada, documentada y firmada.", run: finalizarCarga, color:"#10b981" };
+    if (!pasos.carga_ok) return { label:"Carga finalizada", help:"Marca este paso cuando la mercancía ya este cargada, documentada y firmada.", run: finalizarCarga, color:"#10b981" };
     if (!pasos.viaje_iniciado) return { label:"Iniciar viaje", help:"Comienza el trayecto hacia destino. El viaje sigue activo hasta finalizar descarga y firma.", run: iniciarViaje, color:"#3b82f6" };
     if (!pasos.posicionado_descarga) return { label:"Posicionado para descarga", help:"Registra la llegada o posicionamiento en destino. Empieza la espera de descarga.", run: posicionarDescarga, color:"#3b82f6" };
     if (!pasos.descarga_iniciada) return { label:"Descarga iniciada", help:"Empieza el contador de descarga y avisa si supera 60 minutos.", run: iniciarDescarga, color:"#a78bfa" };
     if (!pasos.descarga_ok) return { label:"Descarga finalizada", help:"Marca este paso al terminar la descarga.", run: finalizarDescarga, color:"#10b981" };
-    if (!pasos.albaran_descarga) return { type:"albaran_descarga", label:"Subir albaran de descarga", help:"El albaran de descarga aparece ahora porque la descarga ya esta marcada como finalizada." };
-    if (!pasos.firma_entrega) return { label:"Firmar entrega cliente", help:"Firma interna de entrega correcta con origen, destino y mercancia.", run:()=>setFirmando(true), color:"#10b981" };
+    if (!pasos.albaran_descarga) return { type:"albaran_descarga", label:"Subir albarán de descarga", help:"El albarán de descarga aparece ahora porque la descarga ya esta marcada como finalizada." };
+    if (!pasos.firma_entrega) return { label:"Firmar entrega cliente", help:"Firma interna de entrega correcta con origen, destino y mercancía.", run:()=>setFirmando(true), color:"#10b981" };
     return null;
   }
 
@@ -1396,7 +1397,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       try {
         await cambiarEstadoPedido(pedido.id,"entregado");
       } catch (estadoErr) {
-        notify(estadoErr.message || "Firma guardada, pero no se pudo marcar entregado automaticamente.", "warning");
+        notify(estadoErr.message || "Firma guardada, pero no se pudo marcar entregado automáticamente.", "warning");
       }
       await persistirPasos({ descarga_ok:true, firma_entrega:true, firma_entrega_at:new Date().toISOString(), ...patchKmParaPaso("firma_entrega") }, { silent:true });
       const fresh = await cargarDocumentoControl().catch(() => null);
@@ -1433,7 +1434,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   async function abrirFirmaFinalizacionManual() {
     const faltan = [];
     if (!pasos.descarga_ok) faltan.push("descarga finalizada");
-    if (!pasos.albaran_descarga) faltan.push("albaran de descarga");
+    if (!pasos.albaran_descarga) faltan.push("albarán de descarga");
     if (faltan.length) {
       const ok = await confirmDialog({
         title: "Finalizar viaje",
@@ -1476,7 +1477,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   async function abrirUbicacionEnApps(){
     const location = await capturarUbicacionActual();
     if (!location) {
-      notify("No se pudo obtener la ubicacion", "error");
+      notify("No se pudo obtener la ubicación", "error");
       return;
     }
     const label = encodeURIComponent(`TransGest ${pedido.numero || "viaje"}`);
@@ -1497,11 +1498,11 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   async function registrarVariacionCarga(){
-    const peso = window.prompt("Peso real o variacion detectada (opcional)", pedido.peso_kg || "");
+    const peso = window.prompt("Peso real o variación detectada (opcional)", pedido.peso_kg || "");
     if (peso === null) return;
-    const mercancia = window.prompt("Mercancia real o variacion detectada (opcional)", pedido.mercancia || pedido.descripcion_carga || "");
+    const mercancia = window.prompt("Mercancía real o variación detectada (opcional)", pedido.mercancia || pedido.descripcion_carga || "");
     if (mercancia === null) return;
-    const detalle = window.prompt("Describe la variacion/incidencia para trafico", "");
+    const detalle = window.prompt("Describe la variación/incidencia para tráfico", "");
     if (detalle === null) return;
     const partes = [
       peso ? `Peso indicado por chofer: ${peso}` : null,
@@ -1509,15 +1510,15 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       detalle ? `Detalle: ${detalle}` : null,
     ].filter(Boolean);
     if (!partes.length) {
-      notify("No se ha indicado ninguna variacion.", "warning");
+      notify("No se ha indicado ninguna variación.", "warning");
       return;
     }
     try {
       await cambiarEstadoPedido(pedido.id, "incidencia", { incidencia: `[Variacion carga] ${partes.join(" | ")}` });
-      notify("Variacion registrada para revision de trafico.", "success");
+      notify("Variación registrada para revisión de tráfico.", "success");
       onActualizar();
     } catch (err) {
-      notify(err.message || "No se pudo registrar la variacion", "error");
+      notify(err.message || "No se pudo registrar la variación", "error");
     }
   }
 
@@ -1536,13 +1537,13 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       {/* Proxima carga banner */}
       {proximaCarga&&(
         <div style={{background:"rgba(16,185,129,.12)",border:"1.5px solid rgba(16,185,129,.4)",borderRadius:12,padding:"12px 16px",marginBottom:8,animation:"pulse 2s infinite"}}>
-          <div style={{fontWeight:800,fontSize:13,color:"#10b981",marginBottom:4}}>Tu proxima carga esta lista</div>
+          <div style={{fontWeight:800,fontSize:14,color:"#10b981",marginBottom:4}}>Tu próxima carga esta lista</div>
           <div style={{fontWeight:700,fontSize:15,color:"var(--text)"}}>{proximaCarga.origen||"-"} -> {proximaCarga.destino||"-"}</div>
-          <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>{proximaCarga.numero} - {proximaCarga.cliente_nombre||""}</div>
-          <button onClick={()=>setProximaCarga(null)} style={{marginTop:8,padding:"6px 14px",borderRadius:7,border:"none",background:"#10b981",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Ver detalles</button>
+          <div style={{fontSize:14,color:"var(--text4)",marginTop:2}}>{proximaCarga.numero} - {proximaCarga.cliente_nombre||""}</div>
+          <button onClick={()=>setProximaCarga(null)} style={{marginTop:8,padding:"6px 14px",borderRadius:7,border:"none",background:"#10b981",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>Ver detalles</button>
         </div>
       )}
-      <div onClick={()=>onExpandedChange?.(!expanded)}
+      <div className="driver-trip-header" role="button" tabIndex={0} aria-expanded={expanded} aria-label={`Ver detalles del viaje ${pedido.numero || ""}`} onKeyDown={e=>{if(e.target===e.currentTarget && ["Enter"," "].includes(e.key)){e.preventDefault();onExpandedChange?.(!expanded);}}} onClick={()=>onExpandedChange?.(!expanded)}
         style={{background:isEnCurso?"rgba(249,115,22,.06)":isProxima?"rgba(59,130,246,.06)":"var(--bg2)",
           border:`1.5px solid ${e.c}${isEnCurso?"99":"40"}`,
           borderLeft:`4px solid ${e.c}`,borderRadius:12,padding:"14px 16px",marginBottom:10,cursor:"pointer",userSelect:"none",
@@ -1550,12 +1551,12 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
         {/* En curso indicator */}
         {isEnCurso&&<div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
           <span style={{width:8,height:8,borderRadius:"50%",background:"#f97316",display:"inline-block",animation:"pulse 1.5s infinite"}}/>
-          <span style={{fontSize:11,fontWeight:700,color:"#f97316",textTransform:"uppercase",letterSpacing:".06em"}}>En curso ahora</span>
+          <span style={{fontSize:14,fontWeight:700,color:"#f97316",textTransform:"uppercase",letterSpacing:".06em"}}>En curso ahora</span>
         </div>}
         {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
           <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:14,color:e.c}}>{pedido.numero}</div>
-          <span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:e.bg,color:e.c}}>{e.l}</span>
+          <span style={{padding:"3px 10px",borderRadius:20,fontSize:14,fontWeight:700,background:e.bg,color:e.c}}>{e.l}</span>
         </div>
 
         {/* Ruta */}
@@ -1564,14 +1565,14 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
         </div>
 
         {/* Meta */}
-        <div style={{display:"flex",gap:12,fontSize:12,color:"var(--text4)",flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:12,fontSize:14,color:"var(--text4)",flexWrap:"wrap"}}>
           {pedido.hora_carga&&<span>Hora {pedido.hora_carga}</span>}
           {pedido.cliente_nombre&&<span>Cliente {pedido.cliente_nombre}</span>}
           {pedido.fecha_carga&&<span>Fecha {new Date(pedido.fecha_carga).toLocaleDateString("es-ES")}</span>}
         </div>
 
         {/* Expand indicator */}
-        <div style={{textAlign:"right",fontSize:11,color:"var(--text5)",marginTop:4}}>{expanded?"Menos":"Mas detalles"}</div>
+        <div style={{textAlign:"right",fontSize:14,color:"var(--text5)",marginTop:4}}>{expanded?"Menos":"Mas detalles"}</div>
       </div>
 
       {expanded&&(
@@ -1579,7 +1580,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
           {/* Detalles */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
             {[
-              ["Mercancia",pedido.mercancia||pedido.descripcion_carga||"-"],
+              ["Mercancía",pedido.mercancia||pedido.descripcion_carga||"-"],
               ["Peso",pedido.peso_kg?(pedido.peso_kg+" kg"):"-"],
               ["Bultos/Palets",pedido.bultos||"-"],
               ["Km ruta",pedido.km_ruta||pedido.km?(pedido.km_ruta||pedido.km)+" km":"-"],
@@ -1587,8 +1588,8 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
               ["Hora descarga",pedido.hora_descarga||"-"],
             ].map(([l,v])=>(
               <div key={l} style={{background:"var(--bg4)",borderRadius:7,padding:"8px 10px"}}>
-                <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>{l}</div>
-                <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{v}</div>
+                <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>{l}</div>
+                <div style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{v}</div>
               </div>
             ))}
           </div>
@@ -1601,16 +1602,16 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
               <div style={{border:"2px solid #b91c1c",borderRadius:10,padding:"12px 14px",marginBottom:12,background:"rgba(239,68,68,.06)"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
                   <span style={{display:"inline-block",width:18,height:18,background:"#f59e0b",border:"2px solid #111",transform:"rotate(45deg)",borderRadius:3}}/>
-                  <strong style={{fontSize:13,color:"#b91c1c"}}>Mercancia peligrosa (ADR)</strong>
-                  <span style={{marginLeft:"auto",fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:20,background:ex.exento?"rgba(16,185,129,.15)":"rgba(239,68,68,.15)",color:ex.exento?"#10b981":"#ef4444"}}>{ex.exento?"Exencion 1.1.3.6":"ADR completo"}</span>
+                  <strong style={{fontSize:14,color:"#b91c1c"}}>Mercancía peligrosa (ADR)</strong>
+                  <span style={{marginLeft:"auto",fontSize:12,fontWeight:800,padding:"2px 8px",borderRadius:20,background:ex.exento?"rgba(16,185,129,.15)":"rgba(239,68,68,.15)",color:ex.exento?"#10b981":"#ef4444"}}>{ex.exento?"Exencion 1.1.3.6":"ADR completo"}</span>
                 </div>
                 {adrItems.map((it,i)=>(
-                  <div key={i} style={{fontFamily:"monospace",fontSize:11,color:"var(--text)",background:"var(--bg4)",borderRadius:6,padding:"6px 8px",marginBottom:4,wordBreak:"break-word"}}>{adrDocLine(it)}</div>
+                  <div key={i} style={{fontFamily:"monospace",fontSize:14,color:"var(--text)",background:"var(--bg4)",borderRadius:6,padding:"6px 8px",marginBottom:4,wordBreak:"break-word"}}>{adrDocLine(it)}</div>
                 ))}
-                <div style={{fontSize:11,color:"var(--text4)",margin:"6px 0 8px"}}>{ex.resumen}</div>
-                <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",marginBottom:4}}>Comprobar antes de cargar</div>
+                <div style={{fontSize:14,color:"var(--text4)",margin:"6px 0 8px"}}>{ex.resumen}</div>
+                <div style={{fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",marginBottom:4}}>Comprobar antes de cargar</div>
                 {reqs.filter(r=>r.obligatorio).map(r=>(
-                  <div key={r.clave} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text3)",padding:"3px 0"}}>
+                  <div key={r.clave} style={{display:"flex",alignItems:"center",gap:8,fontSize:14,color:"var(--text3)",padding:"3px 0"}}>
                     <span style={{color:"#ef4444",fontWeight:900}}>&#9744;</span>{r.etiqueta}
                   </div>
                 ))}
@@ -1619,23 +1620,23 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
           })()}
           {choferDocs.length > 0 && (
             <div style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:12}}>
-              <div style={{fontSize:12,fontWeight:900,color:"var(--text)",marginBottom:8}}>Documentos del viaje ({choferDocs.length})</div>
+              <div style={{fontSize:14,fontWeight:900,color:"var(--text)",marginBottom:8}}>Documentos del viaje ({choferDocs.length})</div>
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {choferDocs.map(doc => (
                   <div key={doc.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:"var(--bg3)",borderRadius:8,border:"1px solid var(--border)"}}>
-                    <span style={{fontSize:12,fontWeight:800,color:"var(--text5)"}}>{doc.file_mime?.includes("pdf")?"PDF":doc.file_mime?.startsWith("image/")?"IMG":"DOC"}</span>
+                    <span style={{fontSize:14,fontWeight:800,color:"var(--text5)"}}>{doc.file_mime?.includes("pdf")?"PDF":doc.file_mime?.startsWith("image/")?"IMG":"DOC"}</span>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{doc.nombre}</div>
-                      {doc.tipo && <div style={{fontSize:10,color:"var(--text5)"}}>{doc.tipo}</div>}
+                      <div style={{fontSize:14,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{doc.nombre}</div>
+                      {doc.tipo && <div style={{fontSize:12,color:"var(--text5)"}}>{doc.tipo}</div>}
                     </div>
-                    <button onClick={()=>verChoferDoc(doc)} style={{border:"1px solid var(--border2)",background:"var(--bg)",color:"var(--accent)",borderRadius:7,padding:"6px 12px",fontSize:12,fontWeight:800,cursor:"pointer",flexShrink:0}}>Ver</button>
+                    <button onClick={()=>verChoferDoc(doc)} style={{border:"1px solid var(--border2)",background:"var(--bg)",color:"var(--accent)",borderRadius:7,padding:"6px 12px",fontSize:14,fontWeight:800,cursor:"pointer",flexShrink:0}}>Ver</button>
                   </div>
                 ))}
               </div>
             </div>
           )}
           {pedido.notas&&(
-            <div style={{background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.2)",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:12,color:"var(--text3)"}}>
+            <div style={{background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.2)",borderRadius:7,padding:"8px 12px",marginBottom:12,fontSize:14,color:"var(--text3)"}}>
               Notas: {pedido.notas}
             </div>
           )}
@@ -1644,12 +1645,12 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
             <div style={{background:protocoloCisternaCompletado ? "rgba(16,185,129,.08)" : "rgba(245,158,11,.08)",border:`1px solid ${protocoloCisternaCompletado ? "rgba(16,185,129,.24)" : "rgba(245,158,11,.28)"}`,borderRadius:10,padding:12,marginBottom:12}}>
               <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:8}}>
                 <div>
-                  <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Protocolo cisterna</div>
-                  <div style={{fontSize:11,color:"var(--text5)",lineHeight:1.4}}>
+                  <div style={{fontSize:14,fontWeight:900,color:"var(--text)"}}>Protocolo cisterna</div>
+                  <div style={{fontSize:14,color:"var(--text5)",lineHeight:1.4}}>
                     Confirma los pasos de seguridad antes de iniciar carga o descarga. Queda registrado con fecha y hora.
                   </div>
                 </div>
-                <span style={{fontSize:11,fontWeight:900,color:protocoloCisternaCompletado ? "#10b981" : "#f59e0b",whiteSpace:"nowrap"}}>
+                <span style={{fontSize:14,fontWeight:900,color:protocoloCisternaCompletado ? "#10b981" : "#f59e0b",whiteSpace:"nowrap"}}>
                   {protocoloCisternaCompletado ? "Completo" : `${protocoloCisternaPendientes.length} pendiente(s)`}
                 </span>
               </div>
@@ -1663,12 +1664,12 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                       onClick={() => persistirPasos({ [step.key]: !ok, [`${step.key}_at`]: new Date().toISOString() }, { silent:true })}
                       style={{display:"grid",gridTemplateColumns:"28px 1fr",gap:8,textAlign:"left",alignItems:"center",padding:"8px 9px",borderRadius:8,border:`1px solid ${ok ? "rgba(16,185,129,.26)" : "var(--border)"}`,background:ok ? "rgba(16,185,129,.08)" : "var(--bg4)",color:"var(--text)",cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
                     >
-                      <span style={{width:22,height:22,borderRadius:999,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,background:ok ? "#10b981" : "rgba(148,163,184,.16)",color:ok ? "#fff" : "var(--text5)"}}>
+                      <span style={{width:22,height:22,borderRadius:999,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900,background:ok ? "#10b981" : "rgba(148,163,184,.16)",color:ok ? "#fff" : "var(--text5)"}}>
                         {ok ? "OK" : ""}
                       </span>
                       <span>
-                        <span style={{display:"block",fontSize:12,fontWeight:900}}>{step.label}</span>
-                        <span style={{display:"block",fontSize:10,color:"var(--text5)",marginTop:2,lineHeight:1.35}}>{step.detail}</span>
+                        <span style={{display:"block",fontSize:14,fontWeight:900}}>{step.label}</span>
+                        <span style={{display:"block",fontSize:12,color:"var(--text5)",marginTop:2,lineHeight:1.35}}>{step.detail}</span>
                       </span>
                     </button>
                   );
@@ -1680,14 +1681,14 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
           <div style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:12}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
               <div>
-                <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Documento de control digital</div>
-                <div style={{fontSize:11,color:"var(--text5)"}}>
+                <div style={{fontSize:14,fontWeight:900,color:"var(--text)"}}>Documento de control digital</div>
+                <div style={{fontSize:14,color:"var(--text5)"}}>
                   {docControlLoading
                     ? "Preparando documento..."
-                    : docControlSupportUrl ? "Documento disponible para mostrar, descargar o compartir." : "Documento pendiente de preparar por trafico."}
+                    : docControlSupportUrl ? "Documento disponible para mostrar, descargar o compartir." : "Documento pendiente de preparar por tráfico."}
                 </div>
               </div>
-              <div style={{fontSize:11,fontWeight:800,color:dcdOperativoOk ? "#10b981" : dcdReady ? "#60a5fa" : "#f59e0b"}}>
+              <div style={{fontSize:14,fontWeight:800,color:dcdOperativoOk ? "#10b981" : dcdReady ? "#60a5fa" : "#f59e0b"}}>
                 {dcdOperativoOk ? "Disponible" : dcdReady ? "Listo" : "Pendiente"}
               </div>
             </div>
@@ -1697,34 +1698,34 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                   {[
                     ["DCD listo", dcdReady],
                     ["Revisado", dcdRevisado],
-                    ["En movil/impreso", dcdDisponible],
+                    ["En móvil/impreso", dcdDisponible],
                   ].map(([label, ok]) => (
                     <div key={label} style={{background:ok ? "rgba(16,185,129,.09)" : "rgba(245,158,11,.08)",border:`1px solid ${ok ? "rgba(16,185,129,.22)" : "rgba(245,158,11,.2)"}`,borderRadius:8,padding:"7px 8px",textAlign:"center"}}>
                       <div style={{fontSize:14,fontWeight:900,color:ok ? "#10b981" : "#f59e0b"}}>{ok ? "OK" : "Pend."}</div>
-                      <div style={{fontSize:9,fontWeight:800,textTransform:"uppercase",letterSpacing:".04em",color:"var(--text5)"}}>{label}</div>
+                      <div style={{fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".04em",color:"var(--text5)"}}>{label}</div>
                     </div>
                   ))}
                 </div>
                 <div className="tg-driver-dcd-internal" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
                   <div style={{background:"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
-                    <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Sistema</div>
-                    <div style={{fontSize:12,fontWeight:800,color:"var(--text)"}}>{docControl.documento.sistema === "qr_url" ? "QR / URL" : "Codigo numerico"}</div>
+                    <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Sistema</div>
+                    <div style={{fontSize:14,fontWeight:800,color:"var(--text)"}}>{docControl.documento.sistema === "qr_url" ? "QR / URL" : "Codigo numerico"}</div>
                   </div>
                   <div style={{background:"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
-                    <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Codigo</div>
-                    <div style={{fontSize:12,fontWeight:800,color:"var(--text)",fontFamily:"'JetBrains Mono',monospace"}}>{docControl.documento.codigo_control || "Pendiente"}</div>
+                    <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Codigo</div>
+                    <div style={{fontSize:14,fontWeight:800,color:"var(--text)",fontFamily:"'JetBrains Mono',monospace"}}>{docControl.documento.codigo_control || "Pendiente"}</div>
                   </div>
                 </div>
                 <div className="tg-driver-dcd-internal" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
                   <div style={{background:"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
-                    <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Carga DCD</div>
-                    <div style={{fontSize:12,fontWeight:800,color:"var(--text)"}}>{fmtDcdFecha(dcdHorarios.fecha_carga)}</div>
-                    <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{fmtDcdHora(dcdHorarios.hora_carga, dcdHorarios.ventana_carga)}</div>
+                    <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Carga DCD</div>
+                    <div style={{fontSize:14,fontWeight:800,color:"var(--text)"}}>{fmtDcdFecha(dcdHorarios.fecha_carga)}</div>
+                    <div style={{fontSize:14,color:"var(--text4)",marginTop:2}}>{fmtDcdHora(dcdHorarios.hora_carga, dcdHorarios.ventana_carga)}</div>
                   </div>
                   <div style={{background:"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
-                    <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Descarga DCD</div>
-                    <div style={{fontSize:12,fontWeight:800,color:"var(--text)"}}>{fmtDcdFecha(dcdHorarios.fecha_descarga)}</div>
-                    <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{fmtDcdHora(dcdHorarios.hora_descarga, dcdHorarios.ventana_descarga)}</div>
+                    <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>Descarga DCD</div>
+                    <div style={{fontSize:14,fontWeight:800,color:"var(--text)"}}>{fmtDcdFecha(dcdHorarios.fecha_descarga)}</div>
+                    <div style={{fontSize:14,color:"var(--text4)",marginTop:2}}>{fmtDcdHora(dcdHorarios.hora_descarga, dcdHorarios.ventana_descarga)}</div>
                   </div>
                 </div>
                 {(dcdCargas.length > 0 || dcdDescargas.length > 0) && (
@@ -1734,34 +1735,34 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                       ["Descargas", dcdDescargas],
                     ].map(([titulo, items])=>(
                       <div key={titulo} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px"}}>
-                        <div style={{fontSize:9,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:6}}>{titulo}</div>
+                        <div style={{fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:6}}>{titulo}</div>
                         {items.length === 0 ? (
-                          <div style={{fontSize:11,color:"var(--text5)"}}>Sin paradas adicionales</div>
+                          <div style={{fontSize:14,color:"var(--text5)"}}>Sin paradas adicionales</div>
                         ) : items.slice(0,3).map(stop=>(
-                          <div key={`${titulo}-${stop.orden}-${stop.direccion}`} style={{fontSize:11,color:"var(--text3)",padding:"5px 0",borderTop:stop.orden>1?"1px solid var(--border2)":"none"}}>
+                          <div key={`${titulo}-${stop.orden}-${stop.direccion}`} style={{fontSize:14,color:"var(--text3)",padding:"5px 0",borderTop:stop.orden>1?"1px solid var(--border2)":"none"}}>
                             <div style={{fontWeight:800,color:"var(--text)"}}>{stop.orden}. {stop.nombre || stop.direccion || "-"}</div>
                             <div style={{color:"var(--text4)"}}>{stop.direccion || "-"}</div>
                             <div style={{color:"var(--text5)"}}>{stop.fecha || "-"} · {stop.hora || stop.ventana || "-"}</div>
                             {stop.google_maps_url && (
                               <button type="button" onClick={()=>window.open(stop.google_maps_url,"_blank","noopener,noreferrer")}
-                                style={{marginTop:4,padding:"4px 7px",borderRadius:7,border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                                style={{marginTop:4,padding:"4px 7px",borderRadius:7,border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                                 Abrir Maps
                               </button>
                             )}
                           </div>
                         ))}
-                        {items.length > 3 && <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>+ {items.length - 3} paradas mas en el soporte</div>}
+                        {items.length > 3 && <div style={{fontSize:12,color:"var(--text5)",marginTop:4}}>+ {items.length - 3} paradas mas en el soporte</div>}
                       </div>
                     ))}
                   </div>
                 )}
                 {Array.isArray(docControl.status?.faltantes) && docControl.status.faltantes.length > 0 && (
-                  <div className="tg-driver-dcd-internal" style={{fontSize:11,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.2)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                  <div className="tg-driver-dcd-internal" style={{fontSize:14,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.2)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
                     Faltan datos: {docControl.status.faltantes.slice(0, 3).join(" | ")}{docControl.status.faltantes.length > 3 ? "..." : ""}
                   </div>
                 )}
                 {docControl?.remision && (
-                  <div className="tg-driver-dcd-internal" style={{fontSize:11,color:"var(--text3)",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                  <div className="tg-driver-dcd-internal" style={{fontSize:14,color:"var(--text3)",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
                     <div style={{fontWeight:800,color:"var(--text)",marginBottom:4}}>Remision</div>
                     <div>{docControl.remision.etiqueta}</div>
                   </div>
@@ -1770,32 +1771,32 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                     <button
                       onClick={marcarDcdRevisado}
-                      style={{gridColumn:"1/-1",padding:"11px",borderRadius:8,border:"1px solid rgba(16,185,129,.35)",background:dcdOperativoOk ? "rgba(16,185,129,.16)" : "rgba(16,185,129,.08)",color:"#10b981",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      style={{gridColumn:"1/-1",padding:"11px",borderRadius:8,border:"1px solid rgba(16,185,129,.35)",background:dcdOperativoOk ? "rgba(16,185,129,.16)" : "rgba(16,185,129,.08)",color:"#10b981",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       {dcdOperativoOk ? "DCD revisado y disponible" : "Marcar DCD revisado y disponible"}
                     </button>
                     <button
                       onClick={verQrDocumentoControl}
-                      style={{gridColumn:"1/-1",padding:"13px",borderRadius:8,border:"1px solid var(--accent-a38)",background:"var(--accent-a12)",color:"#2dd4bf",fontSize:13,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      style={{gridColumn:"1/-1",padding:"13px",borderRadius:8,border:"1px solid var(--accent-a38)",background:"var(--accent-a12)",color:"#2dd4bf",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Ver QR
                     </button>
                     <button
                       onClick={()=>abrirDocumentoControl(false)}
-                      style={{padding:"10px",borderRadius:8,border:"1px solid rgba(16,185,129,.3)",background:"rgba(16,185,129,.08)",color:"#10b981",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      style={{padding:"10px",borderRadius:8,border:"1px solid rgba(16,185,129,.3)",background:"rgba(16,185,129,.08)",color:"#10b981",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Mostrar DCD
                     </button>
                     <button
                       onClick={()=>abrirDocumentoControl(true)}
-                      style={{padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      style={{padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Imprimir
                     </button>
                     <button
                       onClick={descargarDocumentoControl}
-                      style={{padding:"10px",borderRadius:8,border:"1px solid rgba(139,92,246,.3)",background:"rgba(139,92,246,.08)",color:"#c4b5fd",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      style={{padding:"10px",borderRadius:8,border:"1px solid rgba(139,92,246,.3)",background:"rgba(139,92,246,.08)",color:"#c4b5fd",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Descargar
                     </button>
                     <button
                       onClick={compartirDocumentoControl}
-                      style={{padding:"10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg3)",color:"var(--text3)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                      style={{padding:"10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg3)",color:"var(--text3)",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                       Compartir o copiar enlace
                     </button>
                   </div>
@@ -1811,8 +1812,8 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
               borderRadius:10,padding:12,marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10
             }}>
               <div>
-                <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{timerActual.label}</div>
-                <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
+                <div style={{fontSize:14,fontWeight:900,color:"var(--text)"}}>{timerActual.label}</div>
+                <div style={{fontSize:14,color:"var(--text5)",marginTop:2}}>
                   {timerActual.totalSeconds ? `Total espera + operacion: ${fmtDuracionSegundos(timerActual.totalSeconds)}` : "Aviso automatico al superar 60 minutos."}
                 </div>
               </div>
@@ -1824,25 +1825,25 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
 
           {nextStep && (
             <div style={{background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.22)",borderRadius:10,padding:12,marginBottom:12}}>
-              <div style={{fontWeight:900,fontSize:13,color:"var(--text)",marginBottom:4}}>{nextStep.label}</div>
-              <div style={{fontSize:11,color:"var(--text5)",marginBottom:10,lineHeight:1.45}}>{nextStep.help}</div>
+              <div style={{fontWeight:900,fontSize:14,color:"var(--text)",marginBottom:4}}>{nextStep.label}</div>
+              <div style={{fontSize:14,color:"var(--text5)",marginBottom:10,lineHeight:1.45}}>{nextStep.help}</div>
               {nextStep.type === "mercancia_carga" ? (
                 <div style={{display:"grid",gap:8}}>
-                  <input
+                  <input aria-label="Mercancía cargada"
                     value={mercanciaCarga.mercancia}
                     onChange={e=>setMercanciaCarga(p=>({...p,mercancia:e.target.value}))}
-                    placeholder="Mercancia cargada"
+                    placeholder="Mercancía cargada"
                     style={{width:"100%",boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg2)",color:"var(--text)",borderRadius:8,padding:"10px 12px",fontFamily:"'DM Sans',sans-serif"}}
                   />
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <input
+                    <input aria-label="Palets / bultos"
                       value={mercanciaCarga.palets}
                       onChange={e=>setMercanciaCarga(p=>({...p,palets:e.target.value}))}
                       placeholder="Palets / bultos"
                       inputMode="numeric"
                       style={{width:"100%",minWidth:0,boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg2)",color:"var(--text)",borderRadius:8,padding:"10px 12px",fontFamily:"'DM Sans',sans-serif"}}
                     />
-                    <input
+                    <input aria-label="Peso kg"
                       value={mercanciaCarga.peso_kg}
                       onChange={e=>setMercanciaCarga(p=>({...p,peso_kg:e.target.value}))}
                       placeholder="Peso kg"
@@ -1850,14 +1851,14 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                       style={{width:"100%",minWidth:0,boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg2)",color:"var(--text)",borderRadius:8,padding:"10px 12px",fontFamily:"'DM Sans',sans-serif"}}
                     />
                   </div>
-                  <input
+                  <input aria-label="Referencia de carga (opcional)"
                     value={mercanciaCarga.referencia}
                     onChange={e=>setMercanciaCarga(p=>({...p,referencia:e.target.value}))}
                     placeholder="Referencia de carga (opcional)"
                     style={{width:"100%",boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg2)",color:"var(--text)",borderRadius:8,padding:"10px 12px",fontFamily:"'DM Sans',sans-serif"}}
                   />
                   <button onClick={confirmarDatosMercanciaCarga} disabled={loading}
-                    style={{width:"100%",padding:"12px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:13,fontWeight:900,cursor:loading?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    style={{width:"100%",padding:"12px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:14,fontWeight:900,cursor:loading?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                     Guardar datos de carga
                   </button>
                 </div>
@@ -1867,7 +1868,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                 <EscanerAlbaran pedido={pedido} fase="descarga" onUploaded={()=>albaranSubido("albaran_descarga")} />
               ) : (
                 <button onClick={nextStep.run} disabled={loading}
-                  style={{width:"100%",padding:"12px",borderRadius:8,border:"none",background:nextStep.color || "#10b981",color:"#fff",fontSize:13,fontWeight:900,cursor:loading?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  style={{width:"100%",padding:"12px",borderRadius:8,border:"none",background:nextStep.color || "#10b981",color:"#fff",fontSize:14,fontWeight:900,cursor:loading?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   {loading ? "Actualizando..." : nextStep.label}
                 </button>
               )}
@@ -1876,7 +1877,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
 
           {["en_curso","descarga"].includes(pedido.estado) && pasos.descarga_ok && (!pasos.firma_entrega || !pedido.firma_fecha) && (
             <button onClick={abrirFirmaFinalizacionManual} disabled={loading}
-              style={{width:"100%",padding:"11px",borderRadius:8,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.12)",color:"#10b981",fontSize:13,fontWeight:900,cursor:loading?"default":"pointer",fontFamily:"'DM Sans',sans-serif",marginBottom:12}}>
+              style={{width:"100%",padding:"11px",borderRadius:8,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.12)",color:"#10b981",fontSize:14,fontWeight:900,cursor:loading?"default":"pointer",fontFamily:"'DM Sans',sans-serif",marginBottom:12}}>
               {pasos.firma_entrega && !pedido.firma_fecha ? "Firmar y cerrar viaje" : "Finalizar / firmar entrega"}
             </button>
           )}
@@ -1884,15 +1885,15 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
           {/* Km actuales al entregar */}
           {(pedido.estado==="en_curso"||pedido.estado==="descarga")&&(
             <div style={{marginBottom:12,background:"var(--bg4)",borderRadius:8,padding:"10px 12px"}}>
-              <label style={{display:"block",fontSize:10,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:6}}>
-                Km actuales del vehiculo (opcional)
+              <label style={{display:"block",fontSize:12,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:6}}>
+                Km actuales del vehículo (opcional)
               </label>
-              <input type="number" value={kmActuales} onChange={e=>setKmActuales(e.target.value)}
+              <input aria-label="Ej: 125000" type="number" value={kmActuales} onChange={e=>setKmActuales(e.target.value)}
                 onFocus={e=>e.target.select()}
                 placeholder="Ej: 125000"
                 style={{background:"var(--bg2)",border:"1px solid var(--border2)",color:"var(--text)",padding:"8px 12px",borderRadius:7,fontSize:14,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"'JetBrains Mono',monospace"}}/>
-              <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
-                Al marcar carga o descarga se actualiza el camion y se calcula el km en vacio entre la descarga anterior y esta carga.
+              <div style={{fontSize:14,color:"var(--text5)",marginTop:4}}>
+                Al marcar carga o descarga se actualiza el camion y se calcula el km en vacío entre la descarga anterior y esta carga.
                 {(pasos.km_carga||pasos.km_descarga)&&<span> Ultimos km: carga {pasos.km_carga||"-"} / descarga {pasos.km_descarga||"-"}.</span>}
               </div>
             </div>
@@ -1906,8 +1907,8 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                   if(a.action==="firma"){
                     if(!pasos.albaran_descarga) {
                       const ok = await confirmDialog({
-                        title: "Entregar sin albaran",
-                        message: "Aun no has adjuntado el albaran?",
+                        title: "Entregar sin albarán",
+                        message: "Aun no has adjuntado el albarán?",
                         confirmText: "Firmar igualmente",
                         tone: "warning",
                       });
@@ -1933,25 +1934,25 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
 
           {/* Acciones secundarias */}
           <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
-            <button onClick={actualizarPosicion} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-              Mi ubicacion
+            <button onClick={actualizarPosicion} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Mi ubicación
             </button>
-            <button onClick={abrirUbicacionEnApps} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(16,185,129,.3)",background:"rgba(16,185,129,.1)",color:"#10b981",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            <button onClick={abrirUbicacionEnApps} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(16,185,129,.3)",background:"rgba(16,185,129,.1)",color:"#10b981",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               Abrir mapas
             </button>
-            <button onClick={()=>onFoto?.(pedido)} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.1)",color:"#60a5fa",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+            <button onClick={()=>onFoto?.(pedido)} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.1)",color:"#60a5fa",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               Foto
             </button>
-            <button onClick={registrarVariacionCarga} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(245,158,11,.3)",background:"rgba(245,158,11,.1)",color:"#fbbf24",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-              Variacion
+            <button onClick={registrarVariacionCarga} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(245,158,11,.3)",background:"rgba(245,158,11,.1)",color:"#fbbf24",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Variación
             </button>
             {pedido.estado!=="entregado"&&pedido.estado!=="cancelado"&&(
-              <button onClick={()=>abrirIncidencia(pedido.estado==="descarga"?"descarga":"ruta")} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(251,191,36,.3)",background:"rgba(251,191,36,.1)",color:"#fbbf24",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              <button onClick={()=>abrirIncidencia(pedido.estado==="descarga"?"descarga":"ruta")} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(251,191,36,.3)",background:"rgba(251,191,36,.1)",color:"#fbbf24",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                 Aviso viaje
               </button>
             )}
             {pasos.firma_entrega&&(
-              <div style={{fontSize:10,color:"#10b981",display:"flex",alignItems:"center",gap:4,padding:"0 8px"}}>Firmado</div>
+              <div style={{fontSize:12,color:"#10b981",display:"flex",alignItems:"center",gap:4,padding:"0 8px"}}>Firmado</div>
             )}
           </div>
         </div>
@@ -1968,22 +1969,22 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       )}
       {incidencia&&<ModalIncidencia pedido={pedido} fase={incidenciaFase} onClose={()=>setIncidencia(false)} onGuardado={()=>{setIncidencia(false);onActualizar();}}/>}
       {qrVisible&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(2,6,23,.96)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
+        <div className="driver-overlay" style={{position:"fixed",inset:0,background:"rgba(2,6,23,.96)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
           <div style={{width:"min(390px,94vw)",background:"#fff",color:"#111827",borderRadius:12,padding:18,textAlign:"center",boxShadow:"0 24px 80px rgba(0,0,0,.45)"}}>
-            <div style={{fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent)",marginBottom:4}}>Documento de control digital</div>
+            <div style={{fontSize:14,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--accent)",marginBottom:4}}>Documento de control digital</div>
             <div style={{fontSize:18,fontWeight:900,marginBottom:4}}>{pedido.numero || dcd?.referencia_pedido || "Viaje"}</div>
-            <div style={{fontSize:11,color:"#64748b",marginBottom:12}}>Muestra este QR para abrir el documento alojado en el servidor.</div>
+            <div style={{fontSize:14,color:"#64748b",marginBottom:12}}>Muestra este QR para abrir el documento alojado en el servidor.</div>
             {docControl?.qr?.data_url ? (
               <img src={docControl.qr.data_url} alt="QR documento de control" style={{width:"min(300px,78vw)",height:"min(300px,78vw)",objectFit:"contain",border:"1px solid #e5e7eb",borderRadius:8,padding:10,background:"#fff"}}/>
             ) : (
-              <div style={{border:"1px solid #e5e7eb",borderRadius:8,padding:14,fontSize:12,wordBreak:"break-all",color:"var(--accent)"}}>
+              <div style={{border:"1px solid #e5e7eb",borderRadius:8,padding:14,fontSize:14,wordBreak:"break-all",color:"var(--accent)"}}>
                 {docControl?.qr?.url || docControlSupportUrl}
               </div>
             )}
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:900,marginTop:10,color:"#0f172a"}}>{dcd?.codigo_control || ""}</div>
+            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:900,marginTop:10,color:"#0f172a"}}>{dcd?.codigo_control || ""}</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:14}}>
-              <button onClick={()=>abrirDocumentoControl(false)} style={{padding:"11px",borderRadius:8,border:"1px solid #99f6e4",background:"#ccfbf1",color:"var(--accent)",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Abrir DCD</button>
-              <button onClick={()=>setQrVisible(false)} style={{padding:"11px",borderRadius:8,border:"1px solid #cbd5e1",background:"#f8fafc",color:"#334155",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Cerrar</button>
+              <button onClick={()=>abrirDocumentoControl(false)} style={{padding:"11px",borderRadius:8,border:"1px solid #99f6e4",background:"#ccfbf1",color:"var(--accent)",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Abrir DCD</button>
+              <button onClick={()=>setQrVisible(false)} style={{padding:"11px",borderRadius:8,border:"1px solid #cbd5e1",background:"#f8fafc",color:"#334155",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Cerrar</button>
             </div>
           </div>
         </div>
@@ -1994,12 +1995,12 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
 
 // Solicitudes de taller desde app chofer
 const MOTIVOS_AVERIA = [
-  { id:"neumatico_pinchado",  l:"Neumatico pinchado" },
-  { id:"averia_motor",        l:"Averia motor" },
+  { id:"neumatico_pinchado",  l:"Neumático pinchado" },
+  { id:"averia_motor",        l:"Avería motor" },
   { id:"frenos",              l:"Problema frenos" },
-  { id:"luces_electrico",     l:"Luces / electrico" },
+  { id:"luces_electrico",     l:"Luces / eléctrico" },
   { id:"caja_cambios",        l:"Caja de cambios" },
-  { id:"sistema_hidraulico",  l:"Sistema hidraulico" },
+  { id:"sistema_hidraulico",  l:"Sistema hidráulico" },
   { id:"accidente_golpe",     l:"Accidente / golpe" },
   { id:"remolque_semirremolque", l:"Problema remolque" },
   { id:"temperatura_motor",   l:"Temperatura motor" },
@@ -2068,11 +2069,11 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
   }, [solicitudes]);
 
   async function enviar() {
-    if (!motivo) { notify("Selecciona el motivo de la averia", "warning"); return; }
+    if (!motivo) { notify("Selecciona el motivo de la avería", "warning"); return; }
     const puedeMecanico = !!capacidades?.puede_mecanico;
     const puedeTallerExterno = !!capacidades?.puede_taller_externo;
     if (!puedeMecanico && !puedeTallerExterno) {
-      notify("No hay mecanicos ni talleres externos configurados para recibir solicitudes.", "warning");
+      notify("No hay mecánicos ni talleres externos configurados para recibir solicitudes.", "warning");
       return;
     }
     const canalSolicitud = canal || (puedeMecanico ? "mecanico" : "taller_externo");
@@ -2082,7 +2083,7 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
     }
     const solicitud = {
       id: "sol_"+Date.now(),
-      chofer_nombre: chofer?.nombre || "Chofer",
+      chofer_nombre: chofer?.nombre || "Chófer",
       chofer_id: chofer?.id,
       vehiculo: vehiculo?.matricula || "-",
       motivo,
@@ -2126,7 +2127,7 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
         dedupe_key: `solicitud_taller:${solicitud.id}`,
         fecha: new Date().toISOString(),
       });
-      notify("Sin conexion: la solicitud se ha guardado y se enviara en cuanto vuelva el sistema.", "warning");
+      notify("Sin conexión: la solicitud se ha guardado y se enviará en cuanto vuelva el sistema.", "warning");
       setEnviado(true);
       setMotivo(""); setObs("");
       onEnviado?.();
@@ -2144,41 +2145,41 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
           borderRadius:12,padding:24,textAlign:"center",marginBottom:16}}>
           <div style={{fontSize:16,marginBottom:8,fontWeight:800,color:"var(--green)"}}>OK</div>
           <div style={{fontWeight:800,fontSize:16,color:"var(--green)",marginBottom:4}}>Solicitud enviada</div>
-          <div style={{fontSize:13,color:"var(--text4)",marginBottom:16}}>El equipo de taller ha sido notificado</div>
+          <div style={{fontSize:14,color:"var(--text4)",marginBottom:16}}>El equipo de taller ha sido notificado</div>
           <button onClick={()=>setEnviado(false)}
             style={{padding:"8px 20px",borderRadius:8,border:"none",background:"var(--accent)",
-              color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+              color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>
             Nueva solicitud
           </button>
         </div>
       ) : (
-        <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{fontWeight:800,fontSize:16,color:"var(--text)",marginBottom:16}}>Solicitar asistencia de taller</div>
+        <div className="tg-chofer-card" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:16,marginBottom:16}}>
+          <DriverHeading icon="solicitud" title="Solicitar asistencia de taller"/>
 
           {/* Vehiculo info */}
           {vehiculo && (
-            <div style={{padding:"8px 12px",background:"var(--bg3)",borderRadius:8,marginBottom:14,fontSize:13,color:"var(--text4)"}}>
-              Vehiculo: <strong style={{color:"var(--text)"}}>{vehiculo.matricula||"-"}</strong>
+            <div style={{padding:"8px 12px",background:"var(--bg3)",borderRadius:8,marginBottom:14,fontSize:14,color:"var(--text4)"}}>
+              Vehículo: <strong style={{color:"var(--text)"}}>{vehiculo.matricula||vehiculo.vehiculo_matricula||"-"}</strong>
               {vehiculo.numero&&<span style={{marginLeft:8}}> - Pedido {vehiculo.numero}</span>}
             </div>
           )}
 
           {capacidades && !capacidades.puede_mecanico && !capacidades.puede_taller_externo && (
-            <div style={{padding:"10px 12px",borderRadius:8,border:"1px solid rgba(245,158,11,.28)",background:"rgba(245,158,11,.10)",color:"#f59e0b",fontSize:12,fontWeight:800,lineHeight:1.4,marginBottom:14}}>
-              La empresa no tiene mecanico interno ni talleres externos configurados. Pide a gerencia que configure al menos un canal de taller.
+            <div style={{padding:"10px 12px",borderRadius:8,border:"1px solid rgba(245,158,11,.28)",background:"rgba(245,158,11,.10)",color:"#f59e0b",fontSize:14,fontWeight:800,lineHeight:1.4,marginBottom:14}}>
+              La empresa no tiene mecánico interno ni talleres externos configurados. Pide a gerencia que configure al menos un canal de taller.
             </div>
           )}
 
           {capacidades && capacidades.puede_mecanico && capacidades.puede_taller_externo && (
             <div style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Enviar a</div>
+              <div style={{fontSize:14,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Enviar a</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                 <button type="button" onClick={()=>setCanal("mecanico")}
-                  style={{padding:"10px",borderRadius:8,border:`1.5px solid ${canal==="mecanico"?"var(--accent)":"var(--border)"}`,background:canal==="mecanico"?"rgba(59,130,246,.10)":"var(--bg3)",color:canal==="mecanico"?"var(--accent)":"var(--text3)",fontSize:12,fontWeight:900,cursor:"pointer"}}>
-                  Mecanico interno
+                  style={{padding:"10px",borderRadius:8,border:`1.5px solid ${canal==="mecanico"?"var(--accent)":"var(--border)"}`,background:canal==="mecanico"?"rgba(59,130,246,.10)":"var(--bg3)",color:canal==="mecanico"?"var(--accent)":"var(--text3)",fontSize:14,fontWeight:900,cursor:"pointer"}}>
+                  Mecánico interno
                 </button>
                 <button type="button" onClick={()=>setCanal("taller_externo")}
-                  style={{padding:"10px",borderRadius:8,border:`1.5px solid ${canal==="taller_externo"?"var(--accent)":"var(--border)"}`,background:canal==="taller_externo"?"rgba(59,130,246,.10)":"var(--bg3)",color:canal==="taller_externo"?"var(--accent)":"var(--text3)",fontSize:12,fontWeight:900,cursor:"pointer"}}>
+                  style={{padding:"10px",borderRadius:8,border:`1.5px solid ${canal==="taller_externo"?"var(--accent)":"var(--border)"}`,background:canal==="taller_externo"?"rgba(59,130,246,.10)":"var(--bg3)",color:canal==="taller_externo"?"var(--accent)":"var(--text3)",fontSize:14,fontWeight:900,cursor:"pointer"}}>
                   Taller externo
                 </button>
               </div>
@@ -2186,14 +2187,14 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
           )}
 
           {capacidades && !capacidades.puede_mecanico && capacidades.puede_taller_externo && (
-            <div style={{padding:"9px 11px",borderRadius:8,background:"var(--accent-a08)",border:"1px solid var(--accent-a22)",color:"var(--accent-l)",fontSize:12,fontWeight:800,marginBottom:14}}>
-              Se enviara a taller externo.
+            <div style={{padding:"9px 11px",borderRadius:8,background:"var(--accent-a08)",border:"1px solid var(--accent-a22)",color:"var(--accent-l)",fontSize:14,fontWeight:800,marginBottom:14}}>
+              Se enviará a taller externo.
             </div>
           )}
 
           {canal === "taller_externo" && Array.isArray(capacidades?.proveedores) && capacidades.proveedores.length > 0 && (
             <div style={{marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Taller externo</div>
+              <div style={{fontSize:14,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Taller externo</div>
               <select value={proveedorId} onChange={e=>setProveedorId(e.target.value)} style={inp}>
                 {capacidades.proveedores.map(p => <option key={p.id || p.nombre} value={p.id || p.nombre}>{p.nombre}</option>)}
               </select>
@@ -2202,14 +2203,14 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
 
           {/* Urgencia */}
           <div style={{marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Urgencia</div>
+            <div style={{fontSize:14,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Urgencia</div>
             <div style={{display:"flex",gap:8}}>
-              {[["normal","Normal",""],["urgente","Urgente",""],["critica","Critica",""]].map(([v,l,icon])=>(
+              {[["normal","Normal",""],["urgente","Urgente",""],["critica","Crítica",""]].map(([v,l,icon])=>(
                 <button key={v} onClick={()=>setUrgencia(v)}
                   style={{flex:1,padding:"10px 6px",borderRadius:8,border:`2px solid ${urgencia===v?URGENCIA_COLORS[v]:"var(--border)"}`,
                     background:urgencia===v?`${URGENCIA_COLORS[v]}22`:"transparent",
                     color:urgencia===v?URGENCIA_COLORS[v]:"var(--text4)",
-                    fontWeight:urgencia===v?800:500,fontSize:13,cursor:"pointer"}}>
+                    fontWeight:urgencia===v?800:500,fontSize:14,cursor:"pointer"}}>
                   {icon} {l}
                 </button>
               ))}
@@ -2218,11 +2219,11 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
 
           {/* Motivo */}
           <div style={{marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Motivo de la averia *</div>
+            <div style={{fontSize:14,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>Motivo de la avería *</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
               {MOTIVOS_AVERIA.map(m=>(
                 <button key={m.id} onClick={()=>setMotivo(m.id)}
-                  style={{padding:"10px 8px",borderRadius:8,textAlign:"left",fontSize:12,
+                  style={{padding:"10px 8px",borderRadius:8,textAlign:"left",fontSize:14,
                     border:`1.5px solid ${motivo===m.id?"var(--accent)":"var(--border)"}`,
                     background:motivo===m.id?"rgba(59,130,246,.1)":"var(--bg3)",
                     color:motivo===m.id?"var(--accent)":"var(--text3)",
@@ -2235,10 +2236,10 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
 
           {/* Observaciones */}
           <div style={{marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>
+            <div style={{fontSize:14,fontWeight:700,color:"var(--text5)",textTransform:"uppercase",marginBottom:8}}>
               Describe el problema (opcional)
             </div>
-            <textarea value={obs} onChange={e=>setObs(e.target.value)}
+            <textarea aria-label="Describe con detalle lo que ocurre..." value={obs} onChange={e=>setObs(e.target.value)}
               rows={3} placeholder="Describe con detalle lo que ocurre..."
               style={{...inp,resize:"none"}}/>
           </div>
@@ -2256,7 +2257,7 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
       {/* Historial de solicitudes */}
       {historial.length>0 && (
         <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:16}}>
-          <div style={{fontWeight:700,fontSize:13,color:"var(--text5)",textTransform:"uppercase",marginBottom:10}}>
+          <div style={{fontWeight:700,fontSize:14,color:"var(--text5)",textTransform:"uppercase",marginBottom:10}}>
             Mis solicitudes recientes
           </div>
           {historial.slice(0,5).map(s=>{
@@ -2266,41 +2267,41 @@ function SolicitudMecanico({ chofer, vehiculo, solicitudes = [], onEnviado, onSo
               <div key={s.id} style={{borderBottom:"1px solid var(--border)",padding:"9px 0"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
                   <div style={{minWidth:0}}>
-                    <div style={{fontWeight:800,fontSize:13,color:"var(--text)"}}>{s.motivo_label || s.motivo}</div>
-                    <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
+                    <div style={{fontWeight:800,fontSize:14,color:"var(--text)"}}>{s.motivo_label || s.motivo}</div>
+                    <div style={{fontSize:14,color:"var(--text5)",marginTop:2}}>
                       {new Date(s.fecha || s.created_at || Date.now()).toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
                       {s.vehiculo&&<span style={{marginLeft:6}}> - {s.vehiculo}</span>}
                     </div>
                   </div>
                   <div style={{display:"flex",gap:5,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                    <span style={{fontSize:10,padding:"3px 8px",borderRadius:10,fontWeight:800,background:estadoMeta.bg,color:estadoMeta.c}}>
+                    <span style={{fontSize:12,padding:"3px 8px",borderRadius:10,fontWeight:800,background:estadoMeta.bg,color:estadoMeta.c}}>
                       {estadoMeta.l}
                     </span>
                     {s.canal && (
-                      <span style={{fontSize:10,padding:"3px 8px",borderRadius:10,fontWeight:800,background:"var(--accent-a12)",color:"var(--accent-l)"}}>
-                        {s.canal === "taller_externo" ? (s.proveedor_nombre || "Taller") : "Mecanico"}
+                      <span style={{fontSize:12,padding:"3px 8px",borderRadius:10,fontWeight:800,background:"var(--accent-a12)",color:"var(--accent-l)"}}>
+                        {s.canal === "taller_externo" ? (s.proveedor_nombre || "Taller") : "Mecánico"}
                       </span>
                     )}
-                    <span style={{fontSize:10,padding:"3px 8px",borderRadius:10,fontWeight:800,
+                    <span style={{fontSize:12,padding:"3px 8px",borderRadius:10,fontWeight:800,
                       background:s.urgencia==="critica"?"rgba(239,68,68,.15)":s.urgencia==="urgente"?"rgba(245,158,11,.15)":"rgba(59,130,246,.15)",
                       color:s.urgencia==="critica"?"#ef4444":s.urgencia==="urgente"?"#f59e0b":"var(--accent)"}}>
                       {s.urgencia || "normal"}
                     </span>
                   </div>
                 </div>
-                {s.observaciones&&<div style={{fontSize:12,color:"var(--text4)",marginTop:4,fontStyle:"italic"}}>"{s.observaciones}"</div>}
+                {s.observaciones&&<div style={{fontSize:14,color:"var(--text4)",marginTop:4,fontStyle:"italic"}}>"{s.observaciones}"</div>}
                 {s.respuesta_taller&&(
-                  <div style={{fontSize:12,color:"var(--green)",marginTop:7,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.18)",borderRadius:8,padding:"7px 9px"}}>
+                  <div style={{fontSize:14,color:"var(--green)",marginTop:7,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.18)",borderRadius:8,padding:"7px 9px"}}>
                     Taller: {s.respuesta_taller}
                   </div>
                 )}
                 {s.orden_trabajo_numero&&(
-                  <div style={{fontSize:11,color:"var(--text5)",marginTop:5}}>Orden de trabajo: {s.orden_trabajo_numero}</div>
+                  <div style={{fontSize:14,color:"var(--text5)",marginTop:5}}>Orden de trabajo: {s.orden_trabajo_numero}</div>
                 )}
                 {eventos.length > 0 && (
                   <div style={{marginTop:7,display:"grid",gap:4}}>
                     {eventos.map((ev, idx)=>(
-                      <div key={`${s.id}-ev-${idx}`} style={{fontSize:10,color:"var(--text5)"}}>
+                      <div key={`${s.id}-ev-${idx}`} style={{fontSize:12,color:"var(--text5)"}}>
                         {new Date(ev.created_at || ev.fecha || Date.now()).toLocaleDateString("es-ES",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
                         {" - "}{String(ev.tipo || ev.evento || "actualizacion").replace(/\./g, " ")}
                       </div>
@@ -2324,9 +2325,9 @@ function ConjuntoChofer({ onRefresh }) {
   const [saving, setSaving] = useState(false);
   const S = {
     card:{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14},
-    btn:{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12},
+    btn:{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:14},
     input:{width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)",fontFamily:"'DM Sans',sans-serif"},
-    label:{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"},
+    label:{display:"block",fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"},
   };
   const load = useCallback(async () => {
     setLoading(true);
@@ -2350,7 +2351,7 @@ function ConjuntoChofer({ onRefresh }) {
     setSaving(true);
     try {
       await cambiarChoferConjuntoApp({ vehiculo_id: vehiculoId || null, remolque_id: remolqueId || null });
-      notify("Conjunto actualizado. Trafico queda avisado.", "success");
+      notify("Conjunto actualizado. Tráfico queda avisado.", "success");
       await load();
       await onRefresh?.();
     } catch (e) {
@@ -2361,28 +2362,28 @@ function ConjuntoChofer({ onRefresh }) {
   }
   return (
     <div className="tg-chofer-card" style={S.card}>
-      <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"var(--text)"}}>Mi conjunto</div>
-      <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
-        Puedes seleccionar una tractora y remolque libres. Si necesitas mover un equipo ocupado, lo revisa trafico.
+      <DriverHeading icon="activos" title="Mi conjunto"/>
+      <div style={{fontSize:14,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
+        Puedes seleccionar una tractora y remolque libres. Si necesitas mover un equipo ocupado, lo revisa tráfico.
       </div>
       {loading ? (
-        <div style={{fontSize:12,color:"var(--text4)",marginTop:10}}>Cargando conjunto...</div>
+        <div style={{fontSize:14,color:"var(--text4)",marginTop:10}}>Cargando conjunto...</div>
       ) : data?.error ? (
-        <div style={{fontSize:12,color:"#ef4444",marginTop:10}}>{data.error}</div>
+        <div style={{fontSize:14,color:"#ef4444",marginTop:10}}>{data.error}</div>
       ) : (
         <>
-          <label style={S.label}>Tractora</label>
-          <select style={S.input} value={vehiculoId} onChange={e => { setVehiculoId(e.target.value); if (!e.target.value) setRemolqueId(""); }}>
+          <label style={S.label} htmlFor="driver-tractor">Tractora</label>
+          <select id="driver-tractor" style={S.input} value={vehiculoId} onChange={e => { setVehiculoId(e.target.value); if (!e.target.value) setRemolqueId(""); }}>
             <option value="">Sin tractora</option>
             {tractorasVisibles.map(v => (
-              <option key={v.id} value={v.id}>{v.matricula || "Sin matricula"}</option>
+              <option key={v.id} value={v.id}>{v.matricula || "Sin matrícula"}</option>
             ))}
           </select>
-          <label style={S.label}>Remolque</label>
-          <select style={S.input} value={remolqueId} onChange={e => setRemolqueId(e.target.value)} disabled={!vehiculoId}>
+          <label style={S.label} htmlFor="driver-trailer">Remolque</label>
+          <select id="driver-trailer" style={S.input} value={remolqueId} onChange={e => setRemolqueId(e.target.value)} disabled={!vehiculoId}>
             <option value="">Sin remolque</option>
             {remolquesVisibles.map(r => (
-              <option key={r.id} value={r.id}>{r.matricula || "Sin matricula"}</option>
+              <option key={r.id} value={r.id}>{r.matricula || "Sin matrícula"}</option>
             ))}
           </select>
           <button disabled={saving} onClick={guardar} style={{...S.btn,width:"100%",marginTop:12,background:"var(--accent)",color:"#fff",borderColor:"var(--accent)",opacity:saving?0.65:1}}>
@@ -2407,9 +2408,9 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
   const [tick, setTick] = useState(Date.now());
   const S = {
     card:{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14},
-    btn:{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:12},
+    btn:{padding:"10px 12px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontSize:14},
     input:{width:"100%",boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)",fontFamily:"'DM Sans',sans-serif"},
-    label:{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"},
+    label:{display:"block",fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"},
   };
   const fmtMin = (m=0) => {
     const mins = Math.max(0, Number(m || 0));
@@ -2437,7 +2438,7 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
   const descanso9RestanteLive = Math.max(0, Number(resumen.limites?.descansoDiarioReducidoMin || 540) - descansoActualLive);
   const descanso11RestanteLive = Math.max(0, Number(resumen.limites?.descansoDiarioNormalMin || 660) - descansoActualLive);
   const eventos = Array.isArray(jornada?.eventos) ? jornada.eventos : [];
-  const actividadLabel = (v) => v === "conduccion" ? "Conduccion" : v === "pausa" ? "Pausa" : v === "descanso" ? "Descanso" : v === "disponibilidad" ? "Disponibilidad" : v === "fin" ? "Fin" : "Otros trabajos";
+  const actividadLabel = (v) => v === "conduccion" ? "Conducción" : v === "pausa" ? "Pausa" : v === "descanso" ? "Descanso" : v === "disponibilidad" ? "Disponibilidad" : v === "fin" ? "Fin" : "Otros trabajos";
   async function run(fn) {
     setSaving(true);
     try {
@@ -2487,11 +2488,14 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
   }
   return (
     <div>
-      <div style={S.card}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)"}}>Registro de jornada</div>
-        <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
-          Registro interno de jornada y asistente de tiempos. No sustituye al tacografo legal del vehiculo.
+      <div className="tg-chofer-card" style={S.card}>
+        <DriverHeading icon="jornada" title="Registro de jornada"/>
+        <span className="driver-status">{jornada ? "Jornada en curso" : "Jornada sin iniciar"}</span>
+        {jornada && <div className="driver-jornada-summary"><Mini label="Inicio de jornada" value={jornada.inicio_at ? new Date(jornada.inicio_at).toLocaleString("es-ES",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "Sin registro"}/><Mini label="Tiempo transcurrido" value={jornada.inicio_at && Number.isFinite(new Date(jornada.inicio_at).getTime()) ? fmtMin(Math.floor(Math.max(0,tick-new Date(jornada.inicio_at).getTime())/60000)) : "Sin registro"}/></div>}
+        <div style={{fontSize:14,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
+          Registro interno de jornada y asistente de tiempos. No sustituye al tacógrafo legal del vehículo.
         </div>
+        <details className="driver-details"><summary>Información del registro y GPS</summary>
         {gpsSeguimientoEstado?.text && (
           <div style={{
             marginTop:10,
@@ -2500,7 +2504,7 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
             border:`1px solid ${gpsSeguimientoEstado.active ? "rgba(16,185,129,.28)" : "rgba(245,158,11,.28)"}`,
             background:gpsSeguimientoEstado.active ? "rgba(16,185,129,.10)" : "rgba(245,158,11,.10)",
             color:gpsSeguimientoEstado.active ? "#10b981" : "#f59e0b",
-            fontSize:11,
+            fontSize:14,
             fontWeight:900,
           }}>
             {gpsSeguimientoEstado.text}
@@ -2512,42 +2516,44 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
             <Mini label="Conjunto" value={`${chofer.vehiculo_matricula || "Sin tractora"}${chofer.remolque_matricula ? ` + ${chofer.remolque_matricula}` : ""}`} />
           </div>
         )}
+        </details>
       </div>
       <ConjuntoChofer onRefresh={onRefresh} />
       {!jornada ? (
-        <div style={S.card}>
-          <label style={S.label}>Km inicio</label>
-          <input type="number" style={S.input} value={kmInicio} onChange={e=>setKmInicio(e.target.value)} placeholder={chofer?.km_actuales ? String(chofer.km_actuales) : "Kilometros actuales"} />
-          <label style={S.label}>Notas inicio</label>
-          <input style={S.input} value={notas} onChange={e=>setNotas(e.target.value)} placeholder="Base, incidencia inicial, observaciones..." />
+        <div className="tg-chofer-card" style={S.card}>
+          <DriverHeading icon="jornada" title="Iniciar jornada"/><label style={S.label}>Kilómetros al iniciar</label>
+          <input aria-label="Kilómetros al iniciar" type="number" style={S.input} value={kmInicio} onChange={e=>setKmInicio(e.target.value)} placeholder={chofer?.km_actuales ? String(chofer.km_actuales) : "Kilómetros actuales"} />
+          <label style={S.label}>Notas de inicio</label>
+          <input aria-label="Base, incidencia inicial, observaciones..." style={S.input} value={notas} onChange={e=>setNotas(e.target.value)} placeholder="Base, incidencia inicial, observaciones..." />
           <button disabled={saving} onClick={iniciarJornadaConKm} style={{...S.btn,width:"100%",marginTop:12,background:"var(--accent)",color:"#fff",borderColor:"var(--accent)"}}>
             Iniciar jornada
           </button>
         </div>
       ) : (
         <>
-          <div style={S.card}>
+          <div className="tg-chofer-card" style={S.card}>
+            <DriverHeading icon="jornada" title="Tiempos de conducción y descanso"/>
             <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
               <Mini label="Actividad" value={actividadLabel(jornada.actividad_actual)} />
               <Mini label="Desde" value={jornada.inicio_at ? new Date(jornada.inicio_at).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}) : "-"} />
               <Mini label="Conduccion hoy" value={fmtMin(conduccionHoyLive)} />
               <Mini label="Desde pausa" value={fmtMin(conduccionDesdePausaLive)} />
             </div>
-            <div style={{marginTop:10,padding:"9px 10px",borderRadius:8,background:puedeArrancarLive?"rgba(16,185,129,.10)":"rgba(239,68,68,.10)",border:`1px solid ${puedeArrancarLive?"rgba(16,185,129,.25)":"rgba(239,68,68,.25)"}`,color:puedeArrancarLive?"#10b981":"#ef4444",fontWeight:800,fontSize:12}}>
-              {puedeArrancarLive ? `Puede conducir. Proxima pausa en ${fmtMin(proximaPausaLive)}.` : "No deberia iniciar conduccion hasta realizar la pausa/descanso necesario."}
+            <div style={{marginTop:10,padding:"9px 10px",borderRadius:8,background:puedeArrancarLive?"rgba(16,185,129,.10)":"rgba(239,68,68,.10)",border:`1px solid ${puedeArrancarLive?"rgba(16,185,129,.25)":"rgba(239,68,68,.25)"}`,color:puedeArrancarLive?"#10b981":"#ef4444",fontWeight:800,fontSize:14}}>
+              {puedeArrancarLive ? `Puede conducir. Proxima pausa en ${fmtMin(proximaPausaLive)}.` : "No debería iniciar conducción hasta realizar la pausa/descanso necesario."}
             </div>
             <div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
               <Mini label="Pausa actual" value={["pausa","descanso"].includes(actividadActual) ? `${fmtMin(pausaActualLive)} / faltan ${fmtMin(pausaRestanteLive)}` : "-"} />
               <Mini label="Descanso diario" value={actividadActual === "descanso" ? `9h: ${fmtMin(descanso9RestanteLive)} | 11h: ${fmtMin(descanso11RestanteLive)}` : "-"} />
             </div>
-            <div style={{marginTop:8,fontSize:11,color:"var(--text4)",lineHeight:1.45}}>
-              Pausa valida: 45 minutos seguidos o partida 15 + 30. Descanso diario: 11h normal o 9h reducido cuando proceda.
+            <div style={{marginTop:8,fontSize:14,color:"var(--text4)",lineHeight:1.45}}>
+              Pausa válida: 45 minutos seguidos o partida 15 + 30. Descanso diario: 11h normal o 9h reducido cuando proceda.
             </div>
             {Array.isArray(resumen.avisos) && resumen.avisos.map((a,idx)=>(
-              <div key={idx} style={{marginTop:8,fontSize:12,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.22)",borderRadius:8,padding:"8px 10px",lineHeight:1.4}}>{a}</div>
+              <div key={idx} style={{marginTop:8,fontSize:14,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.22)",borderRadius:8,padding:"8px 10px",lineHeight:1.4}}>{a}</div>
             ))}
           </div>
-          <div style={{...S.card,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div className="tg-chofer-card" style={{...S.card,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <button disabled={saving || !puedeArrancarLive} onClick={()=>cambiarActividad("conduccion")} style={{...S.btn,background:"rgba(249,115,22,.12)",color:"#f97316",borderColor:"rgba(249,115,22,.25)",opacity:puedeArrancarLive?1:.55}}>Conducir</button>
             <button disabled={saving} onClick={()=>cambiarActividad("pausa", { notas:"Pausa 45 min o pausa partida 15 + 30" })} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"#10b981",borderColor:"rgba(16,185,129,.25)"}}>Pausa 45 / partida</button>
             <button disabled={saving} onClick={()=>cambiarActividad("descanso", { objetivo_descanso_min:540, notas:"Descanso diario reducido 9h" })} style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#3b82f6",borderColor:"rgba(59,130,246,.25)"}}>Descanso 9h</button>
@@ -2556,11 +2562,11 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
             <button disabled={saving} onClick={()=>cambiarActividad("otros_trabajos")} style={S.btn}>Otros trabajos</button>
           </div>
           {eventos.length > 0 && (
-            <div style={S.card}>
-              <div style={{fontWeight:900,fontSize:13,color:"var(--text)",marginBottom:8}}>Registro de eventos</div>
+            <div className="tg-chofer-card" style={S.card}>
+              <div style={{fontWeight:900,fontSize:14,color:"var(--text)",marginBottom:8}}>Registro de eventos</div>
               <div style={{display:"grid",gap:7}}>
                 {eventos.slice(-8).reverse().map((ev, idx)=>(
-                  <div key={`${ev.at || idx}-${idx}`} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12,color:"var(--text3)",borderBottom:idx===Math.min(7,eventos.length-1)?"none":"1px solid var(--border)",paddingBottom:6}}>
+                  <div key={`${ev.at || idx}-${idx}`} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:14,color:"var(--text3)",borderBottom:idx===Math.min(7,eventos.length-1)?"none":"1px solid var(--border)",paddingBottom:6}}>
                     <span style={{fontWeight:800,color:"var(--text)"}}>{actividadLabel(ev.tipo)}{ev.objetivo_descanso_min ? ` ${fmtMin(ev.objetivo_descanso_min)}` : ""}</span>
                     <span>{ev.at ? new Date(ev.at).toLocaleString("es-ES",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "-"}</span>
                   </div>
@@ -2568,21 +2574,21 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
               </div>
             </div>
           )}
-          <div style={S.card}>
-            <label style={S.label}>Km cierre</label>
-            <input type="number" style={S.input} value={kmFin} onChange={e=>setKmFin(e.target.value)} placeholder="Kilometros al terminar" />
-            <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,color:"var(--text3)",fontWeight:800,marginTop:10}}>
+          <div className="tg-chofer-card" style={S.card}>
+            <DriverHeading icon="jornada" title="Finalizar jornada"/><label style={S.label}>Kilómetros al terminar</label>
+            <input aria-label="Kilómetros al terminar" type="number" style={S.input} value={kmFin} onChange={e=>setKmFin(e.target.value)} placeholder="Kilómetros al terminar" />
+            <label style={{display:"flex",gap:8,alignItems:"center",fontSize:14,color:"var(--text3)",fontWeight:800,marginTop:10}}>
               <input type="checkbox" checked={haceNoche} onChange={e=>setHaceNoche(e.target.checked)} />
               He hecho noche fuera
             </label>
             {haceNoche && (
               <>
                 <label style={S.label}>Lugar de noche</label>
-                <input style={S.input} value={nocheLugar} onChange={e=>setNocheLugar(e.target.value)} placeholder="Ciudad / parking / base" />
+                <input aria-label="Ciudad / parking / base" style={S.input} value={nocheLugar} onChange={e=>setNocheLugar(e.target.value)} placeholder="Ciudad / parking / base" />
               </>
             )}
-            <label style={S.label}>Notas cierre</label>
-            <input style={S.input} value={notas} onChange={e=>setNotas(e.target.value)} placeholder="Observaciones de cierre" />
+            <label style={S.label}>Notas de cierre</label>
+            <input aria-label="Observaciones de cierre" style={S.input} value={notas} onChange={e=>setNotas(e.target.value)} placeholder="Observaciones de cierre" />
             <button disabled={saving} onClick={cerrarJornadaCompleta} style={{...S.btn,width:"100%",marginTop:12,background:"#ef4444",color:"#fff",borderColor:"#ef4444"}}>
               Cerrar jornada
             </button>
@@ -2642,55 +2648,55 @@ function VacacionesChofer({ items = [], chofer, onRefresh }) {
   return (
     <div>
       <div className="tg-chofer-card" style={{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)"}}>Vacaciones</div>
-        <div style={{fontSize:12,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
+        <DriverHeading icon="vacaciones" title="Vacaciones"/>
+        <div style={{fontSize:14,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
           Solicita vacaciones y firma la solicitud desde la app. Si gerencia aprueba sin firma directa, aparecerá aquí para firmar la aceptación.
         </div>
         <div className="tg-chofer-vacaciones-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}>
           <div>
-            <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Inicio</label>
-            <input type="date" value={form.fecha_inicio} onChange={e=>setForm(p=>({...p,fecha_inicio:e.target.value}))}
+            <label style={{display:"block",fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Inicio</label>
+            <input aria-label="Inicio de vacaciones" type="date" value={form.fecha_inicio} onChange={e=>setForm(p=>({...p,fecha_inicio:e.target.value}))}
               style={{width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)"}} />
           </div>
           <div>
-            <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Fin</label>
-            <input type="date" value={form.fecha_fin} onChange={e=>setForm(p=>({...p,fecha_fin:e.target.value}))}
+            <label style={{display:"block",fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:4}}>Fin</label>
+            <input aria-label="Fin de vacaciones" type="date" value={form.fecha_fin} onChange={e=>setForm(p=>({...p,fecha_fin:e.target.value}))}
               style={{width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)"}} />
           </div>
         </div>
-        <label style={{display:"block",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"}}>Motivo / notas</label>
-        <textarea value={form.motivo} onChange={e=>setForm(p=>({...p,motivo:e.target.value}))} placeholder="Opcional"
+        <label style={{display:"block",fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",margin:"10px 0 4px"}}>Motivo / notas</label>
+        <textarea aria-label="Motivo de las vacaciones" value={form.motivo} onChange={e=>setForm(p=>({...p,motivo:e.target.value}))} placeholder="Opcional"
           style={{width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"10px 12px",color:"var(--text)",minHeight:70,resize:"vertical",fontFamily:"'DM Sans',sans-serif"}} />
         <button disabled={saving || !form.fecha_inicio || !form.fecha_fin} onClick={()=>setFirma("solicitud")}
-          style={{width:"100%",marginTop:12,padding:"12px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",opacity:saving ? .6 : 1}}>
+          style={{width:"100%",marginTop:12,padding:"12px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",opacity:saving ? .6 : 1}}>
           Solicitar y firmar
         </button>
       </div>
 
       <div className="tg-chofer-card" style={{margin:"12px 16px",background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
-        <div style={{fontWeight:900,fontSize:13,color:"var(--text)",marginBottom:8}}>Mis solicitudes</div>
+        <div style={{fontWeight:900,fontSize:14,color:"var(--text)",marginBottom:8}}>Mis solicitudes</div>
         {items.length === 0 ? (
-          <div style={{fontSize:12,color:"var(--text5)"}}>Sin solicitudes registradas.</div>
+          <div style={{fontSize:14,color:"var(--text5)"}}>Sin solicitudes registradas.</div>
         ) : items.map(item => {
           const [label, color] = estados[item.estado] || [item.estado || "Estado", "var(--text5)"];
           return (
             <div key={item.id} style={{borderTop:"1px solid var(--border)",padding:"10px 0"}}>
               <div className="tg-chofer-vacaciones-row" style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}>
                 <div>
-                  <div style={{fontWeight:900,fontSize:13,color:"var(--text)"}}>
+                  <div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>
                     {String(item.fecha_inicio || "").slice(0,10)} a {String(item.fecha_fin || "").slice(0,10)}
                   </div>
-                  <div style={{fontSize:11,color:"var(--text4)",marginTop:2}}>{Number(item.dias || 0)} días {item.motivo ? `- ${item.motivo}` : ""}</div>
+                  <div style={{fontSize:14,color:"var(--text4)",marginTop:2}}>{Number(item.dias || 0)} días {item.motivo ? `- ${item.motivo}` : ""}</div>
                 </div>
-                <span style={{fontSize:10,fontWeight:900,color,background:`${color}18`,border:`1px solid ${color}30`,borderRadius:99,padding:"3px 8px",whiteSpace:"nowrap"}}>{label}</span>
+                <span style={{fontSize:12,fontWeight:900,color,background:`${color}18`,border:`1px solid ${color}30`,borderRadius:99,padding:"3px 8px",whiteSpace:"nowrap"}}>{label}</span>
               </div>
               {item.estado === "aprobada_pendiente_firma" && (
                 <button disabled={saving} onClick={()=>setFirmaPendiente(item)}
-                  style={{marginTop:8,padding:"9px 11px",borderRadius:8,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.10)",color:"#10b981",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  style={{marginTop:8,padding:"9px 11px",borderRadius:8,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.10)",color:"#10b981",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   Firmar aceptación
                 </button>
               )}
-              {item.observaciones && <div style={{fontSize:11,color:"var(--text4)",marginTop:6}}>Gerencia: {item.observaciones}</div>}
+              {item.observaciones && <div style={{fontSize:14,color:"var(--text4)",marginTop:6}}>Gerencia: {item.observaciones}</div>}
             </div>
           );
         })}
@@ -2719,12 +2725,12 @@ function VacacionesChofer({ items = [], chofer, onRefresh }) {
 }
 
 function DatosChofer({ chofer = {}, user = {}, onCambiarFirma }) {
-  const nombreCompleto = `${chofer?.nombre || user?.nombre || ""} ${chofer?.apellidos || ""}`.trim() || "Chofer";
+  const nombreCompleto = `${chofer?.nombre || user?.nombre || ""} ${chofer?.apellidos || ""}`.trim() || "Chófer";
   const firmaFecha = chofer?.firma_base_fecha ? new Date(chofer.firma_base_fecha).toLocaleDateString("es-ES") : "";
   const datos = [
     ["Nombre", nombreCompleto],
     ["DNI/NIE", chofer?.dni || user?.dni || "No informado"],
-    ["Telefono", chofer?.telefono || user?.telefono || "No informado"],
+    ["Teléfono", chofer?.telefono || user?.telefono || "No informado"],
     ["Email", chofer?.email || user?.email || "No informado"],
     ["Tractora", chofer?.matricula || chofer?.vehiculo_matricula || "Sin asignar"],
     ["Remolque", chofer?.remolque_matricula || "Sin asignar"],
@@ -2733,15 +2739,15 @@ function DatosChofer({ chofer = {}, user = {}, onCambiarFirma }) {
   return (
     <div className="tg-chofer-section-shell" style={{padding:"14px 16px"}}>
       <div className="tg-chofer-card" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:16}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"var(--text)",marginBottom:4}}>Mis datos</div>
-        <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:14}}>
-          Revisa tus datos de chofer. Si algun dato no es correcto, solicita la modificacion a trafico o gerencia.
+        <DriverHeading icon="datos" title="Mis datos"/>
+        <div style={{fontSize:14,color:"var(--text4)",lineHeight:1.45,marginBottom:14}}>
+          Revisa tus datos de chófer. Si algún dato no es correcto, solicita la modificación a tráfico o gerencia.
         </div>
         <div className="tg-chofer-datos-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {datos.map(([label, value]) => (
             <div key={label} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px"}}>
-              <div style={{fontSize:10,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>{label}</div>
-              <div style={{fontSize:13,color:"var(--text)",fontWeight:800,overflowWrap:"anywhere"}}>{value}</div>
+              <div style={{fontSize:12,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>{label}</div>
+              <div style={{fontSize:14,color:"var(--text)",fontWeight:800,overflowWrap:"anywhere"}}>{value}</div>
             </div>
           ))}
         </div>
@@ -2749,22 +2755,22 @@ function DatosChofer({ chofer = {}, user = {}, onCambiarFirma }) {
       <div className="tg-chofer-card" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:14,padding:16,marginTop:12}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:12}}>
           <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)"}}>Firma</div>
-            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>
+            <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:900,fontSize:17,color:"var(--text)"}}>Firma</div>
+            <div style={{fontSize:14,color:"var(--text4)",marginTop:2}}>
               {chofer?.firma_base ? `Guardada${firmaFecha ? ` el ${firmaFecha}` : ""}` : "Pendiente de registrar"}
             </div>
           </div>
-          <span style={{padding:"5px 9px",borderRadius:999,background:chofer?.firma_base ? "rgba(16,185,129,.12)" : "rgba(245,158,11,.14)",color:chofer?.firma_base ? "#10b981" : "#d97706",fontSize:11,fontWeight:900}}>
+          <span style={{padding:"5px 9px",borderRadius:999,background:chofer?.firma_base ? "rgba(16,185,129,.12)" : "rgba(245,158,11,.14)",color:chofer?.firma_base ? "#10b981" : "#d97706",fontSize:14,fontWeight:900}}>
             {chofer?.firma_base ? "Activa" : "Pendiente"}
           </span>
         </div>
         {chofer?.firma_base && (
           <div style={{background:"#fff",border:"1px solid var(--border)",borderRadius:10,padding:10,marginBottom:12,textAlign:"center"}}>
-            <img src={chofer.firma_base} alt="Firma del chofer" style={{maxHeight:90,objectFit:"contain"}} />
+            <img src={chofer.firma_base} alt="Firma del chófer" style={{maxHeight:90,objectFit:"contain"}} />
           </div>
         )}
         <button onClick={onCambiarFirma}
-          style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"none",background:"var(--accent)",color:"#fff",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
           {chofer?.firma_base ? "Cambiar firma" : "Registrar firma"}
         </button>
       </div>
@@ -2801,7 +2807,7 @@ function NuevoViajeChofer({ onCreado }) {
   const [creatingRuta, setCreatingRuta] = useState(false);
   const [creatingPunto, setCreatingPunto] = useState(false);
   const set = (key, value) => setForm(prev => ({ ...prev, [key]: value }));
-  const inputStyle = {width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:8,padding:"10px 11px",fontSize:13,fontFamily:"'DM Sans',sans-serif",outline:"none"};
+  const inputStyle = {width:"100%",maxWidth:"100%",minWidth:0,boxSizing:"border-box",border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",borderRadius:8,padding:"10px 11px",fontSize:14,fontFamily:"'DM Sans',sans-serif",outline:"none"};
 
   useEffect(() => {
     const q = form.cliente_nombre.trim();
@@ -2872,7 +2878,7 @@ function NuevoViajeChofer({ onCreado }) {
       };
     });
     if (punto?.pendiente_revision || punto?.metadata?.pending_review) {
-      notify("Punto de carga pendiente de revision por trafico.", "warning");
+      notify("Punto de carga pendiente de revisión por tráfico.", "warning");
     }
   }
 
@@ -2899,7 +2905,7 @@ function NuevoViajeChofer({ onCreado }) {
         destino: form.destino,
         notas: "Propuesta desde nuevo viaje DCD.",
       });
-      notify("Ruta creada y enviada a trafico para revisar tarifa.", "success");
+      notify("Ruta creada y enviada a tráfico para revisar tarifa.", "success");
       const fresh = await getChoferClienteRutas(form.cliente_id).catch(() => []);
       setRutas(Array.isArray(fresh) ? fresh : []);
       setForm(prev => ({ ...prev, ruta_id: ruta?.ruta_id || prev.ruta_id }));
@@ -2926,13 +2932,13 @@ function NuevoViajeChofer({ onCreado }) {
         nombre: direccion,
         direccion,
         ventana: form.hora_carga ? `Hora indicada por chofer: ${form.hora_carga}` : "",
-        notas: "Alta rapida desde nuevo viaje del chofer.",
+        notas: "Alta rapida desde nuevo viaje del chófer.",
       });
       const punto = result?.punto || result;
       const fresh = await getChoferClientePuntosCarga(form.cliente_id).catch(() => []);
       setPuntosCarga(Array.isArray(fresh) ? fresh : []);
       if (punto?.id) seleccionarPuntoCarga(punto);
-      notify("Punto de carga creado y enviado a trafico para revisar.", "success");
+      notify("Punto de carga creado y enviado a tráfico para revisar.", "success");
     } catch (err) {
       notify(err.message || "No se pudo crear el punto de carga", "error");
     } finally {
@@ -2942,7 +2948,7 @@ function NuevoViajeChofer({ onCreado }) {
 
   async function guardar() {
     if (!form.cliente_nombre.trim() || !form.origen.trim() || !form.destino.trim() || !form.mercancia.trim()) {
-      notify("Completa cliente, origen, destino y mercancia.", "warning");
+      notify("Completa cliente, origen, destino y mercancía.", "warning");
       return;
     }
     setSaving(true);
@@ -2976,18 +2982,18 @@ function NuevoViajeChofer({ onCreado }) {
   return (
     <div className="tg-chofer-section-shell" style={{padding:"12px 16px"}}>
       <div className="tg-chofer-card" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
-        <div style={{fontSize:15,fontWeight:900,color:"var(--text)",marginBottom:4}}>Nuevo viaje DCD</div>
-        <div style={{fontSize:11,color:"var(--text5)",lineHeight:1.4,marginBottom:12}}>Crea un viaje propio para disponer del documento de control digital y su QR.</div>
+        <DriverHeading icon="nuevo" title="Nuevo viaje DCD"/>
+        <div style={{fontSize:14,color:"var(--text5)",lineHeight:1.4,marginBottom:12}}>Crea un viaje propio para disponer del documento de control digital y su QR.</div>
         <div style={{display:"grid",gap:10}}>
-          <input value={form.cliente_nombre} onChange={e=>cambiarClienteNombre(e.target.value)} placeholder="Cliente / destinatario" style={inputStyle}/>
+          <label className="driver-field"><span>Cliente o destinatario</span><input aria-label="Cliente / destinatario" value={form.cliente_nombre} onChange={e=>cambiarClienteNombre(e.target.value)} placeholder="Cliente / destinatario" style={inputStyle}/></label>
           {clientes.length > 0 && (
             <div style={{display:"grid",gap:6}}>
-              <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>
-                {form.cliente_nombre.trim() ? "Coincidencias" : "Acceso rapido por cargas"}
+              <div style={{fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>
+                {form.cliente_nombre.trim() ? "Coincidencias" : "Acceso rápido por cargas"}
               </div>
               {clientes.slice(0, form.cliente_nombre.trim() ? 8 : 5).map(cliente => (
                 <button key={cliente.id} type="button" onClick={()=>seleccionarCliente(cliente)}
-                  style={{textAlign:"left",padding:"8px 10px",borderRadius:8,border:`1px solid ${form.cliente_id===cliente.id ? "var(--accent-a45)" : "var(--border2)"}`,background:form.cliente_id===cliente.id ? "var(--accent-a10)" : "var(--bg3)",color:"var(--text)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  style={{textAlign:"left",padding:"8px 10px",borderRadius:8,border:`1px solid ${form.cliente_id===cliente.id ? "var(--accent-a45)" : "var(--border2)"}`,background:form.cliente_id===cliente.id ? "var(--accent-a10)" : "var(--bg3)",color:"var(--text)",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   {cliente.nombre}
                   {cliente.cif ? <span style={{fontWeight:600,color:"var(--text5)"}}> · {cliente.cif}</span> : null}
                   {Number(cliente.cargas_total || 0) > 0 ? <span style={{fontWeight:700,color:"var(--accent-l)"}}> · {cliente.cargas_total} cargas</span> : null}
@@ -3005,59 +3011,59 @@ function NuevoViajeChofer({ onCreado }) {
               </select>
             </div>
           )}
-          <input value={form.origen} onChange={e=>set("origen", e.target.value)} placeholder="Origen / punto de carga" style={inputStyle}/>
+          <label className="driver-field"><span>Origen / punto de carga</span><input aria-label="Origen / punto de carga" value={form.origen} onChange={e=>set("origen", e.target.value)} placeholder="Origen / punto de carga" style={inputStyle}/></label>
           {form.cliente_id && (
             <div style={{display:"grid",gap:7,background:"var(--accent-a06)",border:"1px solid var(--accent-a18)",borderRadius:8,padding:9}}>
-              <div style={{fontSize:11,color:"var(--text4)",fontWeight:800}}>
+              <div style={{fontSize:14,color:"var(--text4)",fontWeight:800}}>
                 {loadingPuntos ? "Cargando puntos de carga..." : puntosCarga.length ? "Puntos de carga del cliente" : "Este cliente no tiene puntos de carga guardados."}
               </div>
               {puntosCarga.slice(0, 6).map(punto => (
                 <button key={punto.id} type="button" onClick={()=>seleccionarPuntoCarga(punto)}
-                  style={{textAlign:"left",padding:"8px 9px",borderRadius:8,border:`1px solid ${String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "var(--accent-a45)" : "var(--accent-a18)"}`,background:String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "var(--accent-a12)" : "var(--bg3)",color:"var(--text)",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  style={{textAlign:"left",padding:"8px 9px",borderRadius:8,border:`1px solid ${String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "var(--accent-a45)" : "var(--accent-a18)"}`,background:String(form.puntos_carga?.[0]?.punto_interes_id || "") === String(punto.id) ? "var(--accent-a12)" : "var(--bg3)",color:"var(--text)",fontSize:14,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   {punto.nombre || punto.direccion}
-                  <span style={{display:"block",fontSize:10,fontWeight:700,color:"var(--text5)",marginTop:2}}>{direccionCompletaPuntoChofer(punto) || punto.direccion}</span>
-                  {punto.pendiente_revision ? <span style={{display:"inline-block",fontSize:10,fontWeight:900,color:"#f59e0b",marginTop:4}}>Pendiente de revision trafico</span> : null}
+                  <span style={{display:"block",fontSize:12,fontWeight:700,color:"var(--text5)",marginTop:2}}>{direccionCompletaPuntoChofer(punto) || punto.direccion}</span>
+                  {punto.pendiente_revision ? <span style={{display:"inline-block",fontSize:12,fontWeight:900,color:"#f59e0b",marginTop:4}}>Pendiente de revisión tráfico</span> : null}
                 </button>
               ))}
               {form.origen.trim() && (
                 <button type="button" onClick={crearPuntoCargaPendiente} disabled={creatingPunto}
-                  style={{padding:"10px",borderRadius:8,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",color:"var(--accent-l)",fontSize:12,fontWeight:900,cursor:creatingPunto?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                  style={{padding:"10px",borderRadius:8,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",color:"var(--accent-l)",fontSize:14,fontWeight:900,cursor:creatingPunto?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                   {creatingPunto ? "Creando punto..." : "Crear punto de carga para revisar"}
                 </button>
               )}
             </div>
           )}
-          <input value={form.destino} onChange={e=>set("destino", e.target.value)} placeholder="Destino / punto de descarga" style={inputStyle}/>
+          <label className="driver-field"><span>Destino / punto de descarga</span><input aria-label="Destino / punto de descarga" value={form.destino} onChange={e=>set("destino", e.target.value)} placeholder="Destino / punto de descarga" style={inputStyle}/></label>
           {form.cliente_id && form.origen.trim() && form.destino.trim() && !form.ruta_id && (
             <button type="button" onClick={crearRutaPendiente} disabled={creatingRuta}
-              style={{padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontSize:12,fontWeight:900,cursor:creatingRuta?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              style={{padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontSize:14,fontWeight:900,cursor:creatingRuta?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
               {creatingRuta ? "Creando ruta..." : "Crear ruta para revisar"}
             </button>
           )}
           <div className="tg-chofer-nuevo-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <input type="date" value={form.fecha_carga} onChange={e=>set("fecha_carga", e.target.value)} style={inputStyle}/>
-            <input type="time" value={form.hora_carga} onChange={e=>set("hora_carga", e.target.value)} style={inputStyle}/>
+            <label className="driver-field"><span>Fecha de carga</span><input type="date" value={form.fecha_carga} onChange={e=>set("fecha_carga", e.target.value)} style={inputStyle}/></label>
+            <label className="driver-field"><span>Hora de carga</span><input type="time" value={form.hora_carga} onChange={e=>set("hora_carga", e.target.value)} style={inputStyle}/></label>
           </div>
           <div className="tg-chofer-nuevo-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <input type="date" value={form.fecha_descarga} onChange={e=>set("fecha_descarga", e.target.value)} style={inputStyle}/>
-            <input type="time" value={form.hora_descarga} onChange={e=>set("hora_descarga", e.target.value)} style={inputStyle}/>
+            <label className="driver-field"><span>Fecha de descarga</span><input type="date" value={form.fecha_descarga} onChange={e=>set("fecha_descarga", e.target.value)} style={inputStyle}/></label>
+            <label className="driver-field"><span>Hora de descarga</span><input type="time" value={form.hora_descarga} onChange={e=>set("hora_descarga", e.target.value)} style={inputStyle}/></label>
           </div>
-          <input value={form.mercancia} onChange={e=>set("mercancia", e.target.value)} placeholder="Mercancia" style={inputStyle}/>
+          <label className="driver-field"><span>Mercancía</span><input aria-label="Mercancía" value={form.mercancia} onChange={e=>set("mercancia", e.target.value)} placeholder="Mercancía" style={inputStyle}/></label>
           <div className="tg-chofer-nuevo-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <input inputMode="decimal" value={form.peso_kg} onChange={e=>set("peso_kg", e.target.value)} placeholder="Peso kg" style={inputStyle}/>
-            <input inputMode="numeric" value={form.bultos} onChange={e=>set("bultos", e.target.value)} placeholder="Bultos" style={inputStyle}/>
+            <label className="driver-field"><span>Peso (kg)</span><input aria-label="Peso kg" inputMode="decimal" value={form.peso_kg} onChange={e=>set("peso_kg", e.target.value)} placeholder="Peso kg" style={inputStyle}/></label>
+            <label className="driver-field"><span>Bultos</span><input aria-label="Bultos" inputMode="numeric" value={form.bultos} onChange={e=>set("bultos", e.target.value)} placeholder="Bultos" style={inputStyle}/></label>
           </div>
-          <input value={form.referencia_cliente} onChange={e=>set("referencia_cliente", e.target.value)} placeholder="Referencia cliente" style={inputStyle}/>
-          <textarea value={form.notas} onChange={e=>set("notas", e.target.value)} placeholder="Notas" rows={3} style={{...inputStyle,resize:"none"}}/>
-          <button onClick={guardar} disabled={saving} style={{padding:"13px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:13,fontWeight:900,cursor:saving?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          <label className="driver-field"><span>Referencia del cliente</span><input aria-label="Referencia cliente" value={form.referencia_cliente} onChange={e=>set("referencia_cliente", e.target.value)} placeholder="Referencia cliente" style={inputStyle}/></label>
+          <label className="driver-field"><span>Notas del viaje</span><textarea aria-label="Notas" value={form.notas} onChange={e=>set("notas", e.target.value)} placeholder="Notas" rows={3} style={{...inputStyle,resize:"none"}}/></label>
+          <button onClick={guardar} disabled={saving} style={{padding:"13px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:14,fontWeight:900,cursor:saving?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
             {saving ? "Creando..." : "Crear viaje y DCD"}
           </button>
         </div>
         {created?.documento_control?.qr?.data_url && (
           <div style={{marginTop:14,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.22)",borderRadius:10,padding:12,textAlign:"center"}}>
-            <div style={{fontSize:12,fontWeight:900,color:"#10b981",marginBottom:8}}>QR generado</div>
+            <div style={{fontSize:14,fontWeight:900,color:"#10b981",marginBottom:8}}>QR generado</div>
             <img src={created.documento_control.qr.data_url} alt="QR DCD creado" style={{width:190,height:190,objectFit:"contain",background:"#fff",borderRadius:8,padding:8}}/>
-            <div style={{fontSize:11,color:"var(--text5)",marginTop:8}}>El viaje aparece ya en Activos.</div>
+            <div style={{fontSize:14,color:"var(--text5)",marginTop:8}}>El viaje aparece ya en Activos.</div>
           </div>
         )}
       </div>
@@ -3085,6 +3091,7 @@ export default function AppChofer(){
   const [jornadaInfo, setJornadaInfo] = useState(null);
   const [expandedPedidoId, setExpandedPedidoId] = useState(null);
   const [routeNotifications, setRouteNotifications] = useState([]);
+  const [loadError, setLoadError] = useState("");
   const [firmaBaseOpen, setFirmaBaseOpen] = useState(false);
   const [firmaBaseForzada, setFirmaBaseForzada] = useState(false);
   const gpsSeguimientoRef = useRef({ lastSent: 0 });
@@ -3092,12 +3099,13 @@ export default function AppChofer(){
   const cargaInicialRef = useRef(false);
   const [gpsSeguimientoEstado, setGpsSeguimientoEstado] = useState({
     active: false,
-    text: "Ubicacion en espera hasta iniciar jornada.",
+    text: "Ubicación en espera hasta iniciar jornada.",
   });
 
   const cargar = useCallback(async (options = {}) => {
     const mostrarCarga = !!options.forceLoading || !cargaInicialRef.current;
     if (mostrarCarga) setLoading(true);
+    setLoadError("");
     try{
       const p = await getPedidos({chofer_id:user?.chofer_id || user?.id});
       const arr = Array.isArray(p) ? p : Array.isArray(p?.data) ? p.data : [];
@@ -3125,7 +3133,7 @@ export default function AppChofer(){
         setVacacionesChofer(vacacionesArr.slice(0, 50));
       }
       cargaInicialRef.current = true;
-    }catch(e){ console.error(e); }
+    }catch(e){ setLoadError(e.message || "No se pudo actualizar la información. Reintenta la conexión."); }
     finally{ if (mostrarCarga) setLoading(false); }
   }, [user?.id, user?.chofer_id, user?.rol, user?.permisos?.modulos?.avisos?.ver, user?.permisos?.avisos?.ver, isLitePlan]);
 
@@ -3146,7 +3154,7 @@ export default function AppChofer(){
       await guardarChoferFirmaBaseApp(firma);
       setFirmaBaseOpen(false);
       setFirmaBaseForzada(false);
-      notify("Firma guardada en tu ficha de chofer.", "success");
+      notify("Firma guardada en tu ficha de chófer.", "success");
       await cargar();
     } catch (e) {
       notify(e.message || "No se pudo guardar la firma", "error");
@@ -3212,33 +3220,33 @@ export default function AppChofer(){
     }
     if (!gpsJornadaId || gpsJornadaEstado !== "abierta") {
       gpsSeguimientoRef.current.lastSent = 0;
-      setGpsSeguimientoEstado({ active: false, text: "Ubicacion en espera hasta iniciar jornada." });
+      setGpsSeguimientoEstado({ active: false, text: "Ubicación en espera hasta iniciar jornada." });
       return;
     }
     if (["pausa", "descanso", "fin"].includes(actividad)) {
       gpsSeguimientoRef.current.lastSent = 0;
-      setGpsSeguimientoEstado({ active: false, text: "Ubicacion pausada durante pausa, descanso o fin de jornada." });
+      setGpsSeguimientoEstado({ active: false, text: "Ubicación pausada durante pausa, descanso o fin de jornada." });
       return;
     }
     if (hasExternalGps) {
       gpsSeguimientoRef.current.lastSent = 0;
-      setGpsSeguimientoEstado({ active: true, text: "Ubicacion gestionada por GPS del vehiculo." });
+      setGpsSeguimientoEstado({ active: true, text: "Ubicación gestionada por GPS del vehículo." });
       return;
     }
     if (!gpsChoferVehiculoId) {
       gpsSeguimientoRef.current.lastSent = 0;
-      setGpsSeguimientoEstado({ active: false, text: "Asigna una tractora para registrar ubicacion desde la app." });
+      setGpsSeguimientoEstado({ active: false, text: "Asigna una tractora para registrar ubicación desde la app." });
       return;
     }
     gpsSeguimientoRef.current.lastSent = 0;
     let cancelled = false;
     let stopWatch = null;
-    setGpsSeguimientoEstado({ active: false, text: "Solicitando permiso de ubicacion para jornada activa..." });
+    setGpsSeguimientoEstado({ active: false, text: "Solicitando permiso de ubicación para jornada activa..." });
     (async () => {
       const granted = await requestForegroundLocationPermission().catch(() => false);
       if (cancelled) return;
       if (!granted) {
-        setGpsSeguimientoEstado({ active: false, text: "Permiso de ubicacion denegado. Activalo para registrar posicion durante la jornada." });
+        setGpsSeguimientoEstado({ active: false, text: "Permiso de ubicación denegado. Activalo para registrar posicion durante la jornada." });
         return;
       }
       stopWatch = await watchForegroundLocation(
@@ -3262,7 +3270,7 @@ export default function AppChofer(){
         }).catch(()=>{});
         },
         () => {
-          setGpsSeguimientoEstado({ active: false, text: "Permiso de ubicacion denegado o no disponible." });
+          setGpsSeguimientoEstado({ active: false, text: "Permiso de ubicación denegado o no disponible." });
         }
       );
     })();
@@ -3316,7 +3324,6 @@ export default function AppChofer(){
     return p;
   });
 
-  const enCurso = pedidos.filter(p=>["en_curso","descarga"].includes(p.estado)).length;
   const offlineQueueSummary = queueSummary(offlineQueue);
   const solicitudesAbiertas = solicitudesChofer.filter(s => !["resuelto","cerrado","cancelado"].includes(String(s.estado || "").toLowerCase())).length;
   const vacacionesFirmaPendiente = vacacionesChofer.filter(v => v.estado === "aprobada_pendiente_firma").length;
@@ -3330,6 +3337,17 @@ export default function AppChofer(){
   const tabsChofer = isLitePlan
     ? [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["historial","Historial"]]
     : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Taller"]];
+
+  useEffect(() => {
+    const app = document.querySelector(".tg-app-chofer-page");
+    app?.scrollIntoView({ block:"start", behavior:"auto" });
+    const nav = app?.querySelector(".tg-chofer-tabs");
+    const active = nav?.querySelector('[aria-current="page"]');
+    if (nav && active) {
+      const item = active.getBoundingClientRect(), container = nav.getBoundingClientRect();
+      if (item.left < container.left || item.right > container.right) nav.scrollLeft += item.left - container.left - 12;
+    }
+  }, [tab]);
 
   // PWA helpers
   async function installApp() {
@@ -3352,7 +3370,7 @@ export default function AppChofer(){
   }
 
   async function marcarRutaNotificacionLeida(id) {
-    try { await marcarNotificacionLeida(id); } catch {}
+    try { await marcarNotificacionLeida(id); } catch (e) { notify(e.message || "No se pudo marcar el aviso como leído.", "error"); return; }
     setRouteNotifications(prev => prev.filter(n => String(n.id) !== String(id)));
   }
 
@@ -3416,135 +3434,17 @@ export default function AppChofer(){
 
   return(
     <>
-    <style>{`
-      .tg-app-chofer-page, .tg-app-chofer-page * { box-sizing:border-box; min-width:0; }
-      .tg-app-chofer-page { width:min(480px, 100vw); overflow-x:hidden; }
-      .tg-app-chofer-page img, .tg-app-chofer-page video, .tg-app-chofer-page canvas, .tg-app-chofer-page svg { max-width:100%; }
-      .tg-driver-dcd-internal { display:none !important; }
-      .tg-app-chofer-page input,
-      .tg-app-chofer-page select,
-      .tg-app-chofer-page textarea,
-      .tg-app-chofer-page button {
-        max-width:100%;
-        min-width:0;
-      }
-      .tg-app-chofer-page input[type="date"],
-      .tg-app-chofer-page input[type="time"] {
-        -webkit-appearance:none;
-        appearance:none;
-        min-height:42px;
-      }
-      .tg-chofer-header-main { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-      .tg-chofer-header-actions { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
-      .tg-chofer-tabs {
-        display:flex;
-        gap:2px;
-        overflow-x:auto;
-        overflow-y:hidden;
-        -webkit-overflow-scrolling:touch;
-        scrollbar-width:none;
-        scroll-snap-type:x proximity;
-      }
-      .tg-chofer-tabs::-webkit-scrollbar { display:none; }
-      .tg-chofer-tab {
-        flex:0 0 auto !important;
-        min-width:92px;
-        white-space:nowrap;
-        scroll-snap-align:start;
-      }
-      @media (max-width: 520px) {
-        .tg-chofer-section-shell {
-          padding:12px 10px !important;
-        }
-        .tg-chofer-card {
-          margin-left:10px !important;
-          margin-right:10px !important;
-          padding:12px !important;
-          border-radius:14px !important;
-        }
-        .tg-chofer-nuevo-grid,
-        .tg-chofer-vacaciones-grid {
-          grid-template-columns:1fr !important;
-        }
-        .tg-chofer-vacaciones-row {
-          display:grid !important;
-          grid-template-columns:1fr !important;
-        }
-        .tg-chofer-datos-grid {
-          grid-template-columns:1fr !important;
-        }
-        .tg-chofer-header-main {
-          align-items:flex-start;
-        }
-        .tg-chofer-header-actions {
-          gap:6px;
-        }
-        .tg-chofer-header-actions button {
-          padding:7px 9px !important;
-          font-size:11px !important;
-        }
-      }
-      @media (max-width: 380px) {
-        .tg-chofer-tab {
-          min-width:104px !important;
-        }
-        .tg-app-chofer-page [style*="grid-template-columns:1fr 1fr"],
-        .tg-app-chofer-page [style*="grid-template-columns: 1fr 1fr"],
-        .tg-app-chofer-page [style*="grid-template-columns:1fr 1fr 1fr"],
-        .tg-app-chofer-page [style*="grid-template-columns: 1fr 1fr 1fr"] {
-          grid-template-columns:1fr !important;
-        }
-        .tg-app-chofer-page [style*="position: fixed"],
-        .tg-app-chofer-page [style*="position:fixed"] {
-          align-items:flex-start !important;
-          padding:10px !important;
-          overflow:auto !important;
-        }
-        .tg-app-chofer-page [style*="position: fixed"] > div,
-        .tg-app-chofer-page [style*="position:fixed"] > div {
-          width:100% !important;
-          max-width:calc(100vw - 20px) !important;
-        }
-      }
-    `}</style>
-    <div className="tg-app-chofer-page" style={{fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"var(--bg)",maxWidth:480,margin:"0 auto",padding:"0 0 80px 0"}}>
-
-      {/* Header fijo movil */}
-      <div style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)",padding:"14px 16px",position:"sticky",top:0,zIndex:50}}>
-        <div className="tg-chofer-header-main">
-          <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"var(--text)"}}>Mis viajes</div>
-            <div style={{fontSize:11,color:"var(--text4)",marginTop:1,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-              <span>{user?.nombre}</span>
-              {enCurso>0&&<span style={{padding:"1px 7px",borderRadius:20,background:"rgba(249,115,22,.15)",color:"#f97316",fontWeight:700,fontSize:10,animation:"pulse 2s infinite"}}>{enCurso} EN RUTA</span>}
-              {pedidos.filter(p=>p.estado==="confirmado").length>0&&<span style={{padding:"1px 7px",borderRadius:20,background:"rgba(59,130,246,.15)",color:"var(--accent)",fontWeight:700,fontSize:10}}>{pedidos.filter(p=>p.estado==="confirmado").length} pendiente{pedidos.filter(p=>p.estado==="confirmado").length>1?"s":""}</span>}
-            </div>
-          </div>
-          <div className="tg-chofer-header-actions">
-            {notifPerm==="default" && (
-              <button onClick={pedirNotificaciones} title="Activar notificaciones"
-                style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,
-                  padding:"6px 10px",fontSize:14,cursor:"pointer"}}>Avisos</button>
-            )}
-            <button onClick={cargar}
-              style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,
-                padding:"6px 10px",fontSize:12,cursor:"pointer",color:"var(--text4)",
-                fontFamily:"'DM Sans',sans-serif"}}>Actualizar</button>
-            <button onClick={logout} title="Cerrar sesion"
-              style={{background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,
-                padding:"6px 10px",fontSize:12,cursor:"pointer",color:"#ef4444",fontWeight:800,
-                fontFamily:"'DM Sans',sans-serif"}}>Salir</button>
-          </div>
-        </div>
-      </div>
+    <div className="tg-app-chofer-page">
+      <DriverHeader user={user} tab={tab} onNavigate={setTab} onRefresh={()=>cargar({forceLoading:true})} unread={routeNotifications.length} loading={loading}/>
+      {loadError && <div className="driver-load-error" role="alert"><span>{loadError}</span><button onClick={()=>cargar({forceLoading:true})}>Reintentar</button></div>}
 
       {/* Banner offline */}
       {offline && (
         <div style={{background:"rgba(239,68,68,.15)",border:"1px solid rgba(239,68,68,.3)",
           padding:"8px 16px",display:"flex",alignItems:"center",gap:8,
-          fontSize:12,color:"#ef4444",fontWeight:600}}>
+          fontSize:14,color:"#ef4444",fontWeight:600}}>
           <span>Offline</span>
-          <span>Sin conexion - los cambios se sincronizaran cuando vuelvas a conectarte
+          <span>Sin conexión - los cambios se sincronizarán cuando vuelvas a conectarte
             {offlineQueueSummary.total>0?` (${offlineQueueSummary.pending} pendiente${offlineQueueSummary.pending===1?"":"s"})`:""}</span>
         </div>
       )}
@@ -3552,34 +3452,34 @@ export default function AppChofer(){
       {!offline && offlineQueueSummary.total > 0 && (
         <div style={{background:"rgba(245,158,11,.14)",border:"1px solid rgba(245,158,11,.34)",
           padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,
-          fontSize:12,color:"#d97706",fontWeight:700}}>
+          fontSize:14,color:"#d97706",fontWeight:700}}>
           <span>
-            {offlineQueueSummary.pending} accion{offlineQueueSummary.pending===1?"":"es"} pendiente{offlineQueueSummary.pending===1?"":"s"} de sincronizar
+            {offlineQueueSummary.pending} acción{offlineQueueSummary.pending===1?"":"es"} pendiente{offlineQueueSummary.pending===1?"":"s"} de sincronizar
             {offlineQueueSummary.blocked ? ` · ${offlineQueueSummary.blocked} bloqueada${offlineQueueSummary.blocked===1?"":"s"}` : ""}
           </span>
           <button onClick={syncOfflineQueue}
-            style={{border:"1px solid rgba(245,158,11,.45)",background:"rgba(255,255,255,.12)",color:"#d97706",borderRadius:8,padding:"5px 8px",fontSize:11,fontWeight:900,cursor:"pointer"}}>
+            style={{border:"1px solid rgba(245,158,11,.45)",background:"rgba(255,255,255,.12)",color:"#d97706",borderRadius:8,padding:"5px 8px",fontSize:14,fontWeight:900,cursor:"pointer"}}>
             Reintentar
           </button>
         </div>
       )}
 
-      {routeNotifications.length > 0 && (
+      {tab==="avisos" && routeNotifications.length > 0 && (
         <div style={{padding:"10px 14px",display:"grid",gap:8}}>
           {routeNotifications.map(n => {
             const rutaUrl = n?.data?.route_url || n?.data?.maps_url || "";
             return (
               <div key={n.id} style={{background:"var(--accent-a10)",border:"1px solid var(--accent-a28)",borderRadius:10,padding:"10px 12px"}}>
-                <div style={{fontSize:12,fontWeight:900,color:"#2dd4bf"}}>{n.titulo || "Ruta enviada"}</div>
-                <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.4,marginTop:3,whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{n.mensaje || "Tienes una ruta recomendada pendiente de revisar."}</div>
+                <div style={{fontSize:14,fontWeight:900,color:"#2dd4bf"}}>{n.titulo || "Ruta enviada"}</div>
+                <div style={{fontSize:14,color:"var(--text4)",lineHeight:1.4,marginTop:3,whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{n.mensaje || "Tienes una ruta recomendada pendiente de revisar."}</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,marginTop:9}}>
                   <button onClick={()=>rutaUrl && window.open(rutaUrl, "_blank", "noopener,noreferrer")} disabled={!rutaUrl}
-                    style={{padding:"9px 10px",borderRadius:8,border:"1px solid var(--accent-a36)",background:rutaUrl ? "var(--accent)" : "var(--border2)",color:"#fff",fontSize:12,fontWeight:900,cursor:rutaUrl?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
+                    style={{padding:"9px 10px",borderRadius:8,border:"1px solid var(--accent-a36)",background:rutaUrl ? "var(--accent)" : "var(--border2)",color:"#fff",fontSize:14,fontWeight:900,cursor:rutaUrl?"pointer":"not-allowed",fontFamily:"'DM Sans',sans-serif"}}>
                     Abrir ruta
                   </button>
                   <button onClick={()=>marcarRutaNotificacionLeida(n.id)}
-                    style={{padding:"9px 10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text3)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                    Leida
+                    style={{padding:"9px 10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text3)",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+                    Leída
                   </button>
                 </div>
               </div>
@@ -3594,12 +3494,12 @@ export default function AppChofer(){
           padding:"10px 16px",display:"flex",alignItems:"center",gap:10}}>
           <span style={{fontSize:20}}>App</span>
           <div style={{flex:1}}>
-            <div style={{fontSize:12,fontWeight:700,color:"var(--accent-xl)"}}>Instala la app</div>
-            <div style={{fontSize:11,color:"var(--text3)"}}>Acceso rapido desde tu movil, sin abrir el navegador</div>
+            <div style={{fontSize:14,fontWeight:700,color:"var(--accent-xl)"}}>Instala la app</div>
+            <div style={{fontSize:14,color:"var(--text3)"}}>Acceso rápido desde tu móvil, sin abrir el navegador</div>
           </div>
           <button onClick={installApp}
             style={{background:"var(--accent)",color:"#fff",border:"none",borderRadius:7,
-              padding:"6px 12px",fontSize:11,fontWeight:700,cursor:"pointer",
+              padding:"6px 12px",fontSize:14,fontWeight:700,cursor:"pointer",
               fontFamily:"'DM Sans',sans-serif"}}>Instalar</button>
           <button onClick={()=>setShowInstall(false)}
             style={{background:"none",border:"none",color:"var(--text4)",cursor:"pointer",fontSize:16}}>x</button>
@@ -3607,43 +3507,43 @@ export default function AppChofer(){
       )}
 
       {/* Tabs */}
-      <div className="tg-chofer-tabs" style={{background:"var(--bg2)",borderBottom:"1px solid var(--border)"}}>
+      <nav className="tg-chofer-tabs" aria-label="Apartados del chófer">
         {tabsChofer.map(([id,l])=>(
-          <button className="tg-chofer-tab" key={id} onClick={()=>setTab(id)}
-            style={{padding:"11px 12px",border:"none",borderBottom:`2px solid ${tab===id?"var(--accent)":"transparent"}`,
-              color:tab===id?"var(--accent)":"var(--text4)",background:"transparent",
-              fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-            {l}
+          <button className="tg-chofer-tab" key={id} onClick={()=>setTab(id)} aria-current={tab===id ? "page" : undefined}>
+            <DriverIcon name={id} size={20}/>{l}
             {id==="vacaciones" && vacacionesFirmaPendiente > 0 && (
-              <span style={{marginLeft:6,padding:"1px 6px",borderRadius:20,background:"rgba(59,130,246,.16)",color:"#60a5fa",fontSize:10,fontWeight:900}}>
+              <span style={{marginLeft:6,padding:"1px 6px",borderRadius:20,background:"rgba(59,130,246,.16)",color:"#60a5fa",fontSize:12,fontWeight:900}}>
                 {vacacionesFirmaPendiente}
               </span>
             )}
             {id==="solicitud" && solicitudesAbiertas > 0 && (
-              <span style={{marginLeft:6,padding:"1px 6px",borderRadius:20,background:"rgba(239,68,68,.16)",color:"#ef4444",fontSize:10,fontWeight:900}}>
+              <span style={{marginLeft:6,padding:"1px 6px",borderRadius:20,background:"rgba(239,68,68,.16)",color:"#ef4444",fontSize:12,fontWeight:900}}>
                 {solicitudesAbiertas}
               </span>
             )}
           </button>
         ))}
-      </div>
+      </nav>
 
       {vacacionesFirmaPendiente > 0 && tab !== "vacaciones" && (
         <button onClick={()=>setTab("vacaciones")}
-          style={{width:"100%",textAlign:"left",background:"rgba(59,130,246,.12)",border:"none",borderBottom:"1px solid rgba(59,130,246,.25)",padding:"9px 16px",color:"#60a5fa",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          style={{width:"100%",textAlign:"left",background:"rgba(59,130,246,.12)",border:"none",borderBottom:"1px solid rgba(59,130,246,.25)",padding:"9px 16px",color:"#60a5fa",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
           Tienes vacaciones aprobadas pendientes de firma. Toca para firmar la hoja.
         </button>
       )}
 
       {solicitudCritica && tab !== "solicitud" && (
         <button onClick={()=>setTab("solicitud")}
-          style={{width:"100%",textAlign:"left",background:"rgba(239,68,68,.12)",border:"none",borderBottom:"1px solid rgba(239,68,68,.25)",padding:"9px 16px",color:"#ef4444",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-          Taller tiene una solicitud critica abierta: {solicitudCritica.motivo_label || solicitudCritica.motivo}. Toca para verla.
+          style={{width:"100%",textAlign:"left",background:"rgba(239,68,68,.12)",border:"none",borderBottom:"1px solid rgba(239,68,68,.25)",padding:"9px 16px",color:"#ef4444",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+          Taller tiene una solicitud crítica abierta: {solicitudCritica.motivo_label || solicitudCritica.motivo}. Toca para verla.
         </button>
       )}
 
+      {tab==="inicio" && <DriverHome pedidos={pedidos} jornada={jornadaInfo?.jornada} onNavigate={setTab} loading={loading} offline={offline} pending={offlineQueueSummary.total}/>}
+      {tab==="mas" && <DriverMore tabs={tabsChofer} onNavigate={setTab} onLogout={logout} onNotifications={pedirNotificaciones} notificationPermission={notifPerm}/>}
+      {tab==="avisos" && routeNotifications.length===0 && <div className="driver-section-shell"><section className="driver-card"><DriverHeading icon="avisos" title="Avisos y rutas">Aquí encontrarás las rutas y avisos de tráfico disponibles para tu cuenta.</DriverHeading><p className="driver-empty">No hay avisos disponibles.</p></section></div>}
       {/* Lista viajes */}
-      {tab!=="solicitud" && tab!=="jornada" && tab!=="vacaciones" && tab!=="nuevo" && tab!=="datos" && (
+      {["activos","historial"].includes(tab) && (
         <div style={{padding:"12px 16px"}}>
           {loading?(
             <div style={{padding:40,textAlign:"center",color:"var(--text5)"}}>Cargando viajes...</div>
@@ -3654,7 +3554,7 @@ export default function AppChofer(){
           ):(
             <>
               {filtradosConProxima.filter(p => ["en_curso","descarga"].includes(String(p.estado || "").toLowerCase())).length > 1 && (
-                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:10,border:"1px solid rgba(239,68,68,.25)",background:"rgba(239,68,68,.08)",color:"#b91c1c",fontSize:12,fontWeight:800}}>
+                <div style={{marginBottom:10,padding:"10px 12px",borderRadius:10,border:"1px solid rgba(239,68,68,.25)",background:"rgba(239,68,68,.08)",color:"#b91c1c",fontSize:14,fontWeight:800}}>
                   Hay mas de un viaje activo asignado. Finaliza o corrige el viaje anterior antes de iniciar nuevos estados.
                 </div>
               )}
@@ -3675,15 +3575,15 @@ export default function AppChofer(){
                   <div key={bloque.key} style={{marginBottom:14,border:"2px solid rgba(16,185,129,.35)",borderRadius:14,overflow:"hidden",background:"rgba(16,185,129,.05)"}}>
                     <div style={{padding:"10px 12px",background:"rgba(16,185,129,.12)",borderBottom:"1px solid rgba(16,185,129,.25)"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                        <span style={{fontSize:12,fontWeight:900,color:"#0f766e"}}>GRUPAJE - un solo viaje</span>
+                        <span style={{fontSize:14,fontWeight:900,color:"#0f766e"}}>GRUPAJE - un solo viaje</span>
                         {bloque.borrador && (
-                          <span style={{fontSize:10,fontWeight:900,color:"#b45309",border:"1px dashed rgba(245,158,11,.5)",borderRadius:999,padding:"1px 7px"}}>Sin confirmar</span>
+                          <span style={{fontSize:12,fontWeight:900,color:"#b45309",border:"1px dashed rgba(245,158,11,.5)",borderRadius:999,padding:"1px 7px"}}>Sin confirmar</span>
                         )}
-                        <span style={{marginLeft:"auto",fontSize:11,fontWeight:800,color:"#0f766e"}}>
+                        <span style={{marginLeft:"auto",fontSize:14,fontWeight:800,color:"#0f766e"}}>
                           {hechas}/{bloque.pedidos.length} entregas
                         </span>
                       </div>
-                      <div style={{fontSize:11,color:"var(--text4,#64748b)",marginTop:4,lineHeight:1.5}}>
+                      <div style={{fontSize:14,color:"var(--text4,#64748b)",marginTop:4,lineHeight:1.5}}>
                         {bloque.pedidos.length} cargas y {bloque.pedidos.length} descargas que confirmar, una por parada:
                         {" "}{bloque.pedidos.map(p => `${p.origen || "?"} > ${p.destino || "?"}`).join("  |  ")}
                       </div>
@@ -3733,7 +3633,7 @@ export default function AppChofer(){
 
       {firmaBaseOpen && (
         <FirmaLaboralCanvas
-          title="Firma del chofer"
+          title="Firma del chófer"
           detail="Firma en la pantalla para guardar tu firma base en la ficha de chofer. Se usara en documentos internos cuando corresponda."
           defaultName={`${jornadaInfo?.chofer?.nombre || user?.nombre || ""} ${jornadaInfo?.chofer?.apellidos || ""}`.trim()}
           onFirma={guardarFirmaBaseChofer}
@@ -3744,10 +3644,10 @@ export default function AppChofer(){
 
     {/* Modal camara */}
     {cameraModal && (
-      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.95)",zIndex:600,
+      <div className="driver-overlay" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.95)",zIndex:600,
         display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-        <div style={{color:"var(--text2)",fontSize:13,marginBottom:16,textAlign:"center"}}>
-          Haz una foto de la entrega o incidencia. Se recortara y limpiara automaticamente como escaner.
+        <div style={{color:"var(--text2)",fontSize:14,marginBottom:16,textAlign:"center"}}>
+          Haz una foto de la entrega o incidencia. Se recortara y limpiara automáticamente como escáner.
         </div>
         <input type="file" accept="image/*" capture="environment"
           style={{display:"none"}} id="cam-input"
@@ -3790,16 +3690,17 @@ export default function AppChofer(){
           style={{background:"#3b6ef5",color:"#fff",border:"none",borderRadius:12,
             padding:"16px 32px",fontSize:16,fontWeight:700,cursor:"pointer",
             fontFamily:"'DM Sans',sans-serif",marginBottom:12}}>
-          Abrir camara
+          Abrir cámara
         </button>
         <button onClick={()=>setCameraModal(null)}
           style={{background:"var(--bg3)",color:"var(--text3)",border:"1px solid var(--border)",
-            borderRadius:8,padding:"10px 24px",fontSize:13,cursor:"pointer",
+            borderRadius:8,padding:"10px 24px",fontSize:14,cursor:"pointer",
             fontFamily:"'DM Sans',sans-serif"}}>
           Cancelar
         </button>
       </div>
     )}
+      <DriverNavigation tab={tab} onNavigate={setTab}/>
     </div>
     </>
   );

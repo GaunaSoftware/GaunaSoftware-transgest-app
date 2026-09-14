@@ -1,3 +1,4 @@
+import "./workspace/workspace.css";
 import { useState, useEffect, useMemo } from "react";
 import { getTodosLosDocs, getVehiculos, getChoferes, getNotificaciones, marcarNotificacionLeida, marcarTodasNotificacionesLeidas, getTallerEstado, getEmpresaConfig, setConfigAlertas } from "../services/api";
 import { confirmDialog } from "../services/notify";
@@ -376,7 +377,7 @@ export default function Avisos() {
   }
 
   return (
-    <div className="tg-responsive-page" style={S.page}>
+    <div className="tg-responsive-page modern-workspace notices-workspace" style={S.page}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
         <div style={S.title}>Avisos y vencimientos</div>
         {tab === "documentos" && (
@@ -677,7 +678,7 @@ export default function Avisos() {
 
       {/* Modal aviso config */}
       {modalAv && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+        <div className="modern-modal" role="dialog" aria-modal="true" aria-label="Aviso de mantenimiento" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
           <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:24,width:"min(480px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:16}}>{editAv?"Editar aviso":"Nuevo aviso de mantenimiento"}</div>
             <AvisoMantForm
@@ -718,7 +719,7 @@ function AvisoMantForm({ editando, tipos, listaActual, onSave, onClose }) {
       </select>
       <label style={lbl}>Descripción / aceite o piezas usadas</label>
       <input style={inp} value={form.descripcion} onChange={f("descripcion")} placeholder="Ej: Aceite 15W-40 + filtro aceite"/>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
+      <div className="modern-form-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
         <div>
           <label style={lbl}>Intervalo en días</label>
           <input type="number" min="0" style={inp} value={form.dias_aviso} onChange={f("dias_aviso")}/>

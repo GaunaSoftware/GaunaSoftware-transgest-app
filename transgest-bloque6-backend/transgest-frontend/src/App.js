@@ -1,3 +1,4 @@
+import "./pages/workspace/workspace.css";
 import { useState, lazy, Suspense, useEffect, useRef } from "react";
 import OnboardingWizard from "./components/OnboardingWizard";
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -983,8 +984,8 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
   }
 
   return (
-    <div style={{position:"fixed",left:position.x,top:position.y,zIndex:9000,width:open?430:300,maxWidth:"calc(100vw - 32px)",fontFamily:"'DM Sans',sans-serif"}}>
-      <div
+    <div className="avimp-panel" style={{position:"fixed",left:position.x,top:position.y,zIndex:9000,width:open?430:300,maxWidth:"calc(100vw - 32px)",fontFamily:"'DM Sans',sans-serif"}}>
+      <div className="avimp-heading"
         onPointerDown={startDrag}
         onPointerMove={moveDrag}
         onPointerUp={endDrag}
@@ -1018,12 +1019,12 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
           </button>
           <button
             type="button"
-            title="Marcar avisos como leidos"
+            title="Marcar avisos como leídos"
             onPointerDown={e=>e.stopPropagation()}
             onClick={() => onMarkRead?.(items)}
             style={{height:28,padding:"0 8px",borderRadius:999,border:"1px solid rgba(255,255,255,.18)",background:"rgba(255,255,255,.08)",color:"#fff",fontWeight:900,fontSize:11,cursor:"pointer"}}
           >
-            Leido
+            Leído
           </button>
           <span style={{minWidth:28,height:28,borderRadius:999,display:"inline-flex",alignItems:"center",justifyContent:"center",background:importantes.length?"#ef4444":"#f59e0b",color:"#fff",fontWeight:900,fontSize:12}}>
             {totalAvisos}
@@ -1035,14 +1036,14 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
           {esGerente && (
             <div style={{padding:"11px 12px",borderBottom:"1px solid var(--border)",background:"rgba(239,68,68,.06)"}}>
               <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"#ef4444"}}>Resumen gerencia</div>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+              <div className="avimp-summary" style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
                 <span style={{fontSize:11,fontWeight:900,color:"#ef4444"}}>{resumen.alta || 0} importantes</span>
                 <span style={{fontSize:11,fontWeight:900,color:"#f59e0b"}}>{resumen.albaranes_pendientes || 0} albaranes/POD</span>
                 <span style={{fontSize:11,fontWeight:900,color:"var(--accent-xl)"}}>{resumen.colaboradores || 0} colaborador(es)</span>
               </div>
             </div>
           )}
-          <div style={{maxHeight:430,overflowY:"auto",padding:10,display:"grid",gap:8}}>
+          <div className="avimp-items" style={{maxHeight:430,overflowY:"auto",padding:10,display:"grid",gap:8}}>
             {visibleItems.map(item => (
               <div key={item.key} style={{border:`1px solid ${item.severity === "alta" ? "rgba(239,68,68,.28)" : "rgba(245,158,11,.25)"}`,background:item.severity === "alta" ? "rgba(239,68,68,.07)" : "rgba(245,158,11,.07)",borderRadius:8,padding:"9px 10px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:8}}>

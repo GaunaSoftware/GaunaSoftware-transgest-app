@@ -1,3 +1,4 @@
+import "./workspace/workspace.css";
 import { useState, useEffect, useCallback } from "react";
 import { getChoferHistorialVehiculos, getTractoraPeriodos } from "../services/api";
 import { asignarRemolque } from "../services/api";
@@ -666,16 +667,16 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
 
   const TABS = [
     { id:"datos",       l:"Datos personales" },
-    { id:"contrato",    l:"Contrato & Carnets" },
+    { id:"contrato",    l:"Contrato y permisos" },
     { id:"nominas",  l:"Nóminas" },
     { id:"plataformas", l:"Plataformas" },
     { id:"equipos",     l:"Equipos / EPIs" },
     { id:"jornadas",    l:"Jornadas" },
-    { id:"historial_veh", l:"Historial vehículos" },
+    { id:"historial_veh", l:"Historial de vehículos" },
   ];
 
   return (
-    <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="modern-modal" role="dialog" aria-modal="true" aria-label="Ficha del conductor" style={S.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:14,
                     width:"min(780px,98vw)", maxHeight:"97vh", display:"flex", flexDirection:"column" }}>
 
@@ -685,7 +686,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
                         display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>CH</div>
           <div style={{ flex:1 }}>
             <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:15, color:"var(--text)" }}>
-              {editando ? (editando.nombre + (editando.apellidos ? " " + editando.apellidos : "")) : "Nuevo chofer"}
+              {editando ? (editando.nombre + (editando.apellidos ? " " + editando.apellidos : "")) : "Nuevo conductor"}
             </div>
             {editando && <div style={{ fontSize:11, color:"var(--text4)" }}>ID: {editando.id?.slice(0,8)}</div>}
           </div>
@@ -716,7 +717,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
           {tab === "datos" && (
             <div>
               <div style={S.sec}>Datos personales</div>
-              <div style={S.grid2}>
+              <div className="modern-form-grid" style={S.grid2}>
                 <div>
                   <label style={S.lbl}>Nombre *</label>
                   <input style={S.inp} value={form.nombre||""} onChange={f("nombre")} placeholder="José"/>
@@ -764,7 +765,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
               </div>
 
               <div style={S.sec}>Domicilio</div>
-              <div style={S.grid2}>
+              <div className="modern-form-grid" style={S.grid2}>
                 <div style={{ gridColumn:"1/-1" }}>
                   <label style={S.lbl}>Dirección (calle y número)</label>
                   <input style={S.inp} value={form.direccion||""} onChange={f("direccion")} placeholder="Calle Mayor, 10, 3º B"/>
@@ -786,7 +787,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
               </div>
 
               <div style={S.sec}>Alta / Baja</div>
-              <div style={S.grid2}>
+              <div className="modern-form-grid" style={S.grid2}>
                 <div>
                   <label style={S.lbl}>Fecha de alta *</label>
                   <input type="date" style={S.inp} value={form.fecha_alta||""} onChange={f("fecha_alta")}/>
@@ -840,7 +841,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
           {tab === "contrato" && (
             <div>
               <div style={S.sec}>DNI / NIE</div>
-              <div style={S.grid2}>
+              <div className="modern-form-grid" style={S.grid2}>
                 <div>
                   <label style={S.lbl}>Número DNI / NIE</label>
                   <input style={S.inp} value={form.dni||""} onChange={e=>setForm(p=>({...p,dni:formatDni(e.target.value)}))} placeholder="12345678-A"/>
@@ -852,7 +853,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
               </div>
 
               <div style={S.sec}>Carnet de conducir</div>
-              <div style={S.grid3}>
+              <div className="modern-form-grid" style={S.grid3}>
                 <div>
                   <label style={S.lbl}>Número carnet</label>
                   <input style={S.inp} value={form.carnet||""} onChange={f("carnet")} placeholder="12345678"/>
@@ -868,7 +869,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
               </div>
 
               <div style={S.sec}>CAP - Certificado de Aptitud Profesional</div>
-              <div style={S.grid2}>
+              <div className="modern-form-grid" style={S.grid2}>
                 <div>
                   <label style={S.lbl}>Fecha vencimiento CAP</label>
                   <input type="date" style={S.inp} value={form.cap_vencimiento||""} onChange={f("cap_vencimiento")}/>
@@ -876,7 +877,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
               </div>
 
               <div style={S.sec}>Tarjeta de conductor (tacógrafo digital)</div>
-              <div style={S.grid2}>
+              <div className="modern-form-grid" style={S.grid2}>
                 <div>
                   <label style={S.lbl}>Número tarjeta</label>
                   <input style={S.inp} value={form.tarjeta_tg||""} onChange={f("tarjeta_tg")} placeholder="ES1234567890"/>
@@ -888,7 +889,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
               </div>
 
               <div style={S.sec}>ADR - Mercancías peligrosas (si aplica)</div>
-              <div style={S.grid2}>
+              <div className="modern-form-grid" style={S.grid2}>
                 <div>
                   <label style={S.lbl}>Número certificado ADR</label>
                   <input style={S.inp} value={form.adr_numero||""} onChange={f("adr_numero")} placeholder="Opcional"/>
@@ -900,7 +901,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
               </div>
 
               <div style={S.sec}>Reconocimiento médico</div>
-              <div style={S.grid2}>
+              <div className="modern-form-grid" style={S.grid2}>
                 <div>
                   <label style={S.lbl}>Vencimiento reconocimiento médico</label>
                   <input type="date" style={S.inp} value={form.medico_vencimiento||""} onChange={f("medico_vencimiento")}/>
@@ -952,6 +953,10 @@ export default function Choferes() {
   const [loading,   setLoading]   = useState(true);
   const [modal,     setModal]     = useState(false);
   const [editando,  setEditando]  = useState(null);
+  const [query, setQuery] = useState("");
+  const [sinVehiculo, setSinVehiculo] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [filtro,    setFiltro]    = useState("todos");
 
   const cargar = useCallback(async () => {
@@ -991,26 +996,29 @@ export default function Choferes() {
     if (!focusChofer?.chofer_id || loading) return;
     const found = choferes.find(c => String(c.id) === String(focusChofer.chofer_id));
     if (!found) return;
+    setPage(Math.floor(choferes.indexOf(found)/pageSize)+1);
     const t = window.setTimeout(() => {
       document.getElementById(`chofer-row-${focusChofer.chofer_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
       clearRuntimeFocus("tms_choferes_focus");
     }, 180);
     return () => window.clearTimeout(t);
-  }, [choferes, focusChofer, loading]);
+  }, [choferes, focusChofer, loading, pageSize]);
 
-  const filtrados = choferes.filter(c => {
-    if (filtro === "activos")  return c.activo !== false;
-    if (filtro === "baja")     return c.activo === false;
-    return true;
-  });
+  const vehicleFor = c => vehiculos.find(v => String(v.id) === String(c.vehiculo_id) || String(v.chofer_id) === String(c.id));
+  const normalize = v => String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+  const filtrados = choferes.filter(c => (filtro === "todos" || (filtro === "activos" ? c.activo !== false : c.activo === false)) && (!sinVehiculo || !vehicleFor(c)) && normalize([c.nombre,c.apellidos,c.dni,c.telefono,c.poblacion,vehicleFor(c)?.matricula].join(" ")).includes(normalize(query)));
+  const pages = Math.max(1, Math.ceil(filtrados.length/pageSize));
+  const currentPage = Math.min(page,pages);
+  const visible = filtrados.slice((currentPage-1)*pageSize,currentPage*pageSize);
+  useEffect(()=>setPage(1),[query,filtro,sinVehiculo,pageSize]);
 
   // Badge de docs próximos a caducar
   const eliminarChofer = async (chofer, event) => {
     event?.stopPropagation?.();
     const nombre = `${chofer.nombre || ""} ${chofer.apellidos || ""}`.trim() || "este chofer";
     const ok = await confirmDialog({
-      title: "Eliminar chofer",
-      message: `Eliminar ${nombre}? Si tiene pedidos asociados, se dara de baja y se conservara el historico.`,
+      title: "Eliminar conductor",
+      message: `Eliminar ${nombre}? Si tiene pedidos asociados, se dará de baja y se conservará el histórico.`,
       confirmText: "Eliminar",
       tone: "danger",
     });
@@ -1019,7 +1027,7 @@ export default function Choferes() {
       const result = await borrarChofer(chofer.id);
       notify(
         result?.mode === "soft_delete"
-          ? "Chofer dado de baja y desasignado. Se conserva el historico de pedidos."
+          ? "Chofer dado de baja y desasignado. Se conserva el histórico de pedidos."
           : "Chofer eliminado correctamente.",
         "success"
       );
@@ -1035,9 +1043,9 @@ export default function Choferes() {
   }
 
   return (
-    <div className="tg-responsive-page" style={S.page}>
+    <div className="tg-responsive-page modern-workspace drivers-workspace" style={S.page}>
       <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
-        <div style={S.title}>Chóferes</div>
+        <div><h1>Conductores</h1><p className="workspace-muted">Gestiona tu equipo de conductores, su documentación y sus asignaciones.</p></div>
         <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
           {["todos","activos","baja"].map(v => (
             <button key={v} onClick={() => setFiltro(v)}
@@ -1049,25 +1057,27 @@ export default function Choferes() {
           {canEdit && (
             <button style={{ ...S.btn, background:"var(--accent)", color:"#fff" }}
               onClick={() => { setEditando(null); setModal(true); }}>
-              + Nuevo chofer
+              + Nuevo conductor
             </button>
           )}
         </div>
       </div>
 
+      <div className="workspace-metrics">{[["Total de conductores",choferes.length],["Activos",choferes.filter(c=>c.activo!==false).length],["De baja",choferes.filter(c=>c.activo===false).length],["Sin vehículo",choferes.filter(c=>!vehicleFor(c)).length]].map(([label,value])=><div key={label}><span>{label}</span><strong>{value}</strong><small>{choferes.length ? Math.round(value/choferes.length*100) : 0}% del total</small></div>)}</div>
+      <div className="workspace-toolbar"><input aria-label="Buscar conductores" placeholder="Buscar por nombre, DNI, teléfono o matrícula…" value={query} onChange={e=>setQuery(e.target.value)}/><label><input type="checkbox" checked={sinVehiculo} onChange={e=>setSinVehiculo(e.target.checked)}/> Sin vehículo asignado</label><span>{filtrados.length} conductores</span></div>
       <div style={S.card}>
         <table style={{ width:"100%", borderCollapse:"collapse" }}>
           <thead>
-            <tr>{["Nombre","DNI/NIE","Teléfono","Población","Alta","Carnet","Estado",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr>
+            <tr>{["Nombre","DNI/NIE","Teléfono","Población","Alta","Carnet","Estado","Vehículo asignado","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {loading
-              ? <tr><td colSpan={8} style={{ ...S.td, textAlign:"center", color:"var(--text5)" }}>Cargando...</td></tr>
+              ? <tr><td colSpan={9} style={{ ...S.td, textAlign:"center", color:"var(--text5)" }}>Cargando...</td></tr>
               : filtrados.length === 0
-              ? <tr><td colSpan={8} style={{ ...S.td, textAlign:"center", color:"var(--text5)", padding:32 }}>Sin choferes registrados</td></tr>
-              : filtrados.map(c => {
+              ? <tr><td colSpan={9} style={{ ...S.td, textAlign:"center", color:"var(--text5)", padding:32 }}>No hay conductores con estos filtros</td></tr>
+              : visible.map(c => {
                 const alerta = alertasDocs(c);
-                const veh    = vehiculos.find(v => v.id === c.vehiculo_id);
+                const veh    = vehicleFor(c);
                 return (
                   <tr key={c.id} id={`chofer-row-${c.id}`} onClick={() => { setEditando(c); setModal(true); }}
                     style={{
@@ -1112,6 +1122,7 @@ export default function Choferes() {
                     <td style={{ ...S.td, fontSize:11, color:"var(--text4)" }}>
                       {veh ? <span>{veh.matricula}</span> : <span style={{ color:"var(--text5)" }}>Sin vehículo</span>}
                     </td>
+                    <td style={S.td}><button className="workspace-view" onClick={event=>{event.stopPropagation();setEditando(c);setModal(true);}}>Ver</button></td>
                   </tr>
                 );
               })
@@ -1119,6 +1130,7 @@ export default function Choferes() {
           </tbody>
         </table>
       </div>
+      <div className="workspace-toolbar"><span>Mostrando {filtrados.length ? (currentPage-1)*pageSize+1 : 0}–{Math.min(currentPage*pageSize,filtrados.length)} de {filtrados.length}</span><button disabled={currentPage===1} onClick={()=>setPage(currentPage-1)}>Anterior</button><span>{currentPage} / {pages}</span><button disabled={currentPage===pages} onClick={()=>setPage(currentPage+1)}>Siguiente</button><select aria-label="Conductores por página" value={pageSize} onChange={e=>setPageSize(Number(e.target.value))}>{[10,25,50].map(n=><option key={n} value={n}>{n} por página</option>)}</select></div>
 
       {modal && (
         <ModalChofer

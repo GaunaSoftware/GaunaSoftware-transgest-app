@@ -1,3 +1,5 @@
+import AgendaTimeline from "./workspace/AgendaTimeline";
+import "./workspace/workspace.css";
 import { useEffect, useMemo, useState } from "react";
 import { borrarAgendaEvento, completarAgendaEvento, crearAgendaEvento, editarAgendaEvento, getAgendaEventos, getAgendaUsuarios, getAvisosOperativosIgnorados, posponerAgendaEvento } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -292,12 +294,12 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
   }
 
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.76)", zIndex:250, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="modern-modal" role="dialog" aria-modal="true" aria-label="Tarea de agenda" style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.76)", zIndex:250, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, width:"min(620px,96vw)", padding:20, maxHeight:"92vh", overflowY:"auto" }}>
         <div style={{ fontFamily:"'Syne',sans-serif", fontSize:18, fontWeight:800, color:"var(--text)", marginBottom:16 }}>
           {evento ? "Editar tarea / evento" : "Nueva tarea / evento"}
         </div>
-        <div style={{ display:"grid", gridTemplateColumns:"1.2fr .8fr", gap:12 }}>
+        <div className="modern-form-grid" style={{ display:"grid", gridTemplateColumns:"1.2fr .8fr", gap:12 }}>
           <div style={{ gridColumn:"1/-1" }}>
             <label style={S.label}>Título</label>
             <input style={S.input} value={form.titulo} onChange={f("titulo")} placeholder="Ej: Confirmar entregas de mañana" />
@@ -377,6 +379,8 @@ export default function Agenda() {
   const canEdit = puedeEditar("agenda");
   const esGerente = user?.rol === "gerente";
   const [tab, setTab] = useState("agenda");
+  const [vista, setVista] = useState("semana");
+  const [error, setError] = useState("");
   const [mes, setMes] = useState(() => monthKey(new Date()));
   const [usuarios, setUsuarios] = useState([]);
   const [eventos, setEventos] = useState([]);
@@ -403,6 +407,7 @@ export default function Agenda() {
 
   async function cargar() {
     setLoading(true);
+    setError("");
     try {
       const [rows, users] = await Promise.all([
         getAgendaEventos({
@@ -416,7 +421,7 @@ export default function Agenda() {
       ]);
       setEventos(Array.isArray(rows) ? rows : []);
       setUsuarios(Array.isArray(users) ? users : []);
-    } finally {
+    } catch (e) { setError(e.message || "No se pudo cargar la agenda."); } finally {
       setLoading(false);
     }
   }
@@ -484,9 +489,15 @@ export default function Agenda() {
     await cargar();
   }
 
+  function moveDate(amount) {
+    const d = new Date(`${selectedDay}T12:00:00`);
+    if(vista === "mes") { d.setDate(1); d.setMonth(d.getMonth()+amount); }
+    else d.setDate(d.getDate()+amount*(vista === "semana" ? 7 : 1));
+    setSelectedDay(dayKey(d)); setMes(monthKey(d));
+  }
   return (
-    <div className="tg-agenda-page tg-responsive-page" style={S.page}>
-      <div className="tg-agenda-title" style={S.title}>Agenda y tareas</div>
+    <div className="tg-agenda-page tg-responsive-page modern-workspace" style={S.page}>
+      <div className="tg-agenda-title" style={S.title}>Agenda operativa</div>
       <div style={S.sub}>Calendario operativo para usuarios, recordatorios y seguimiento interno del día a día.</div>
 
       {esGerente && (
@@ -506,8 +517,16 @@ export default function Agenda() {
         <AvisosIgnoradosTab mes={mes} setMes={setMes} />
       ) : (
         <>
+      <div className="workspace-toolbar">
+        <button onClick={()=>{setSelectedDay(dayKey(new Date()));setMes(monthKey(new Date()));}}>Hoy</button>
+        <button aria-label="Periodo anterior" onClick={()=>moveDate(-1)}>‹</button>
+        <strong>{new Date(`${selectedDay}T12:00:00`).toLocaleDateString("es-ES",{day:"numeric",month:"long",year:"numeric"})}</strong>
+        <button aria-label="Periodo siguiente" onClick={()=>moveDate(1)}>›</button>
+        <div className="workspace-tabs">{[["dia","Día"],["semana","Semana"],["mes","Mes"]].map(([v,l])=><button key={v} aria-pressed={vista===v} onClick={()=>setVista(v)}>{l}</button>)}</div>
+      </div>
+      {error&&<p role="alert">{error} <button onClick={cargar}>Reintentar</button></p>}
       <div className="tg-agenda-filters" style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center", marginBottom:16 }}>
-        <input type="month" value={mes} onChange={e=>setMes(e.target.value)} style={{ ...S.input, width:160 }} />
+        <input type="month" value={mes} aria-label="Mes de la agenda" onChange={e=>{if(e.target.value){setMes(e.target.value);setSelectedDay(`${e.target.value}-01`);}}} style={{ ...S.input, width:160 }} />
         <select value={estado} onChange={e=>setEstado(e.target.value)} style={{ ...S.input, width:170 }}>
           <option value="todas">Todos los estados</option>
           {Object.entries(STATE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -530,7 +549,7 @@ export default function Agenda() {
       </div>
 
       <div className="tg-agenda-shell" style={{ display:"grid", gridTemplateColumns:"minmax(0,1.4fr) minmax(320px,.9fr)", gap:16 }}>
-        <div style={S.card}>
+        {vista !== "mes" ? <AgendaTimeline day={selectedDay} view={vista} events={eventosPorDia} selectDay={setSelectedDay} openEvent={ev=>canEdit&&setModal(ev)}/> : <div style={S.card}>
           <div style={{ fontFamily:"'Syne',sans-serif", fontSize:17, fontWeight:800, color:"var(--text)", marginBottom:12 }}>
             {MONTH_NAMES[currentMonth.getMonth()]} {currentMonth.getFullYear()}
           </div>
@@ -576,7 +595,7 @@ export default function Agenda() {
               );
             })}
           </div>
-        </div>
+        </div>}
 
         <div className="tg-agenda-detail" style={{ display:"grid", gap:16 }}>
           <div style={S.card}>

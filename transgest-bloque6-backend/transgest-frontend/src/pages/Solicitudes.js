@@ -1,3 +1,4 @@
+import "./workspace/workspace.css";
 import { PageHeader } from "../ui";
 import "./operations/operations.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -14,7 +15,7 @@ import { notify, promptDialog } from "../services/notify";
 
 const ESTADO = {
   pendiente: { l: "Pendiente", c: "#f97316" },
-  revisada: { l: "En revision", c: "#3b82f6" },
+  revisada: { l: "En revisión", c: "#3b82f6" },
   propuesta: { l: "Propuesta enviada", c: "#8b5cf6" },
   convertida: { l: "Aceptada", c: "#10b981" },
   descartada: { l: "Rechazada", c: "#ef4444" },
@@ -135,7 +136,7 @@ function resumenSolicitud(sol) {
     `Carga: ${dateEs(sol.fecha_carga)} ${sol.hora_carga || ""}`.trim(),
     sol.fecha_descarga ? `Descarga: ${dateEs(sol.fecha_descarga)} ${sol.hora_descarga || ""}`.trim() : "",
     sol.referencia_cliente ? `Referencia cliente: ${sol.referencia_cliente}` : "",
-    sol.mercancia ? `Mercancia: ${sol.mercancia}` : "",
+    sol.mercancia ? `Mercancía: ${sol.mercancia}` : "",
     sol.peso_kg ? `Peso: ${Number(sol.peso_kg).toLocaleString("es-ES")} kg` : "",
     validBultos(sol.bultos) ? `Bultos: ${validBultos(sol.bultos)}` : "",
     precioSolicitudLabel(sol) ? `Precio indicado: ${precioSolicitudLabel(sol)}` : "",
@@ -650,7 +651,7 @@ export default function Solicitudes() {
   };
 
   return (
-    <div className="tg-responsive-page operations-workspace operations-requests" style={S.page}>
+    <div className="tg-responsive-page operations-workspace operations-requests modern-workspace" style={S.page}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 28 }}>
         <PageHeader title="Peticiones de viaje" description="Gestiona las peticiones de clientes y proveedores y conviértelas en viajes."/>
         <button onClick={cargar} style={{...S.btn,color:"var(--accent-xl)"}}>Actualizar</button>
@@ -671,7 +672,7 @@ export default function Solicitudes() {
               else { setEstado(valueEstado); setSoloVencidas(false); }
             }}
             style={{ ...S.kpi, textAlign:"left", cursor:"pointer", borderColor: (valueEstado === "rechazadas" ? enRechazadas : valueEstado === "vencidas" ? soloVencidas : !enRechazadas && estado === valueEstado) ? color : "var(--border)", display:"grid", gridTemplateColumns:"54px 1fr", alignItems:"center", gap:14 }}>
-            <div style={{width:46,height:46,borderRadius:14,display:"grid",placeItems:"center",background:`${color}12`,color,fontSize:20,fontWeight:900}}>!</div>
+            <div style={{width:46,height:46,borderRadius:14,display:"grid",placeItems:"center",background:`${color}12`,color,fontSize:20,fontWeight:900}}>{valueEstado === "convertida" ? "✓" : valueEstado === "cancelada" || valueEstado === "rechazadas" ? "×" : "!"}</div>
             <div style={{minWidth:0}}>
               <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:26, fontWeight:900, color, lineHeight:1 }}>{value}</div>
               <div style={{ fontSize:11, color:"var(--text3)", textTransform:"uppercase", letterSpacing:".07em", fontWeight:900, marginTop:9, lineHeight:1.25, overflowWrap:"anywhere" }}>{label}</div>
@@ -693,11 +694,11 @@ export default function Solicitudes() {
           ))}
         </div>
         <input value={q} onChange={e=>setQ(e.target.value)} style={{ ...S.input, width:"100%" }}
-          placeholder="Buscar por cliente, ruta, referencia, mercancia o pedido..." />
+          placeholder="Buscar por cliente, ruta, referencia, mercancía o pedido..." />
         <select value={estado} onChange={e => setEstado(e.target.value)} style={{ ...S.input, width:"100%" }}>
           <option value="">{enRechazadas ? "Todas las rechazadas" : "Todos los estados activos"}</option>
           {!enRechazadas && <option value="pendiente">Pendientes</option>}
-          {!enRechazadas && <option value="revisada">En revision</option>}
+          {!enRechazadas && <option value="revisada">En revisión</option>}
           {!enRechazadas && <option value="convertida">Aceptadas</option>}
           {!enRechazadas && <option value="cancelada">Canceladas</option>}
           {enRechazadas && <option value="rechazada">Rechazadas</option>}
@@ -705,8 +706,8 @@ export default function Solicitudes() {
         </select>
         <select value={orden} onChange={e => setOrden(e.target.value)} style={{ ...S.input, width:"100%" }}>
           <option value="prioridad">Orden: prioridad</option>
-          <option value="fecha_desc">Orden: mas recientes</option>
-          <option value="fecha_asc">Orden: mas antiguas</option>
+          <option value="fecha_desc">Orden: más recientes</option>
+          <option value="fecha_asc">Orden: más antiguas</option>
           <option value="carga">Orden: fecha carga</option>
           <option value="cliente">Orden: cliente</option>
         </select>
@@ -720,10 +721,11 @@ export default function Solicitudes() {
         <div style={{ margin:"0 0 16px", fontSize:14, color:"var(--text3)" }}>
           {enRechazadas ? "Rechazadas: " : "Activas: "}
           Mostrando <strong style={{color:"var(--accent-xl)"}}>{visibles.length}</strong> de {totalVistaActual} solicitudes
-          {soloVencidas ? " · solo sin atender mas de 24 h" : ""}
+          {soloVencidas ? " · solo sin atender más de 24 h" : ""}
         </div>
       )}
 
+      <div className="requests-workspace-grid"><section aria-label="Solicitudes"><h2>Solicitudes {enRechazadas ? "rechazadas" : "activas"}</h2>
       {loading && <div style={{ ...S.card, textAlign: "center", color: "var(--text4)", padding: 28 }}>Cargando solicitudes...</div>}
       {!loading && (sols.length === 0 || visibles.length === 0) && (
         <div style={{ ...S.card, textAlign: "center", color: "var(--text3)", padding: "58px 24px", minHeight: 250, display:"grid", placeItems:"center" }}>
@@ -732,7 +734,7 @@ export default function Solicitudes() {
             <div style={{fontSize:22,fontWeight:900,color:"var(--text)",marginBottom:8}}>
               {enRechazadas && sols.length > 0 ? "No hay solicitudes rechazadas." : "No hay solicitudes con esos filtros."}
             </div>
-            <div style={{fontSize:14,color:"var(--text4)"}}>Prueba a cambiar los filtros o el criterio de busqueda.</div>
+            <div style={{fontSize:14,color:"var(--text4)"}}>Prueba a cambiar los filtros o el criterio de búsqueda.</div>
           </div>
         </div>
       )}
@@ -762,7 +764,7 @@ export default function Solicitudes() {
                   {" · "}Recibida: {dateEs(sol.created_at)}
                 </div>
                 <div style={{ fontSize: 11, color: aged ? "#ef4444" : "var(--text5)", marginTop: 3, fontWeight: aged ? 900 : 700 }}>
-                  Antiguedad: {ageLabel(sol.created_at)}
+                  Antigüedad: {ageLabel(sol.created_at)}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--text5)", marginTop: 3 }}>
                   Movimientos: {Number(sol.eventos_count || 0)}
@@ -771,7 +773,7 @@ export default function Solicitudes() {
                 {sol.referencia_cliente && <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>Referencia: {sol.referencia_cliente}</div>}
                 {sol.fecha_propuesta && (
                   <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(59,130,246,.2)", background: "rgba(59,130,246,.08)", fontSize: 12, color: "var(--text3)" }}>
-                    Reprogramacion propuesta: <strong style={{ color: "var(--text)" }}>{dateEs(sol.fecha_propuesta)}{sol.hora_propuesta ? ` ${sol.hora_propuesta}` : ""}</strong>
+                    Reprogramación propuesta: <strong style={{ color: "var(--text)" }}>{dateEs(sol.fecha_propuesta)}{sol.hora_propuesta ? ` ${sol.hora_propuesta}` : ""}</strong>
                     {sol.decision_cliente === "aceptada" && " · Cliente: aceptada"}
                     {sol.decision_cliente === "rechazada" && " · Cliente: rechazada"}
                     {(!sol.decision_cliente || sol.decision_cliente === "pendiente") && " · Cliente pendiente de respuesta"}
@@ -790,8 +792,8 @@ export default function Solicitudes() {
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--text3)", marginTop: 12 }}>
-              {Number(sol.viajes || 1) > 1 && <span style={{ fontWeight: 900, color: "#3b82f6" }}>Viajes: {Number(sol.viajes)} (se crearan {Number(sol.viajes)} pedidos)</span>}
-              {sol.mercancia && <span>Mercancia: {sol.mercancia}</span>}
+              {Number(sol.viajes || 1) > 1 && <span style={{ fontWeight: 900, color: "#3b82f6" }}>Viajes: {Number(sol.viajes)} (se crearán {Number(sol.viajes)} pedidos)</span>}
+              {sol.mercancia && <span>Mercancía: {sol.mercancia}</span>}
               {sol.peso_kg && <span>Peso: {Number(sol.peso_kg).toLocaleString("es-ES")} kg</span>}
               {validBultos(sol.bultos) && <span>Bultos: {validBultos(sol.bultos)}</span>}
               {precioSolicitudLabel(sol) && <span>Precio cliente: {precioSolicitudLabel(sol)}</span>}
@@ -923,8 +925,13 @@ export default function Solicitudes() {
           </div>
         );
       })}
+      </section><aside className="requests-sidebar">
+        <section><h2>Incidencias y alertas</h2><button onClick={()=>{setVista("rechazadas");setEstado("");setSoloVencidas(false);}}><strong>{resumen.rechazadas}</strong> peticiones rechazadas <span>Revisar solicitudes →</span></button><button onClick={()=>{setVista("activas");setEstado("");setSoloVencidas(true);}}><strong>{resumen.vencidas}</strong> sin atender más de 24 h <span>Revisar pendientes →</span></button><p>{sols.filter(s=>!isRejected(s)&&(s.decision_precio==="pendiente" || (s.fecha_propuesta&&(!s.decision_cliente||s.decision_cliente==="pendiente")))).length} peticiones esperan respuesta del cliente</p></section>
+        <section><h2>Resumen rápido</h2><dl>{[["Aceptadas",resumen.aceptadas],["Pendientes",resumen.pendientes],["Canceladas",resumen.canceladas],["Con tractora asignada",sols.filter(s=>s.vehiculo_matricula||s.matricula_colaborador).length]].map(([l,n])=><div key={l}><dt>{l}</dt><dd>{n}</dd></div>)}</dl></section>
+        <section><h2>Informes y seguimiento</h2><button onClick={exportarCsv}>Exportar selección CSV</button><button onClick={exportarInformeHtml}>Informe de solicitudes</button><p className="workspace-muted">Los informes respetan los filtros actuales. Las solicitudes convertidas conservan su pedido y su historial.</p></section>
+      </aside></div>
       {editando && (
-        <div style={{ position:"fixed", inset:0, zIndex:2200, background:"rgba(15,23,42,.45)", display:"grid", placeItems:"center", padding:16 }}>
+        <div className="modern-modal" role="dialog" aria-modal="true" aria-label="Editar solicitud" style={{ position:"fixed", inset:0, zIndex:2200, background:"rgba(15,23,42,.45)", display:"grid", placeItems:"center", padding:16 }}>
           <div className="tg-responsive-modal" style={{ width:"min(920px,100%)", maxHeight:"92vh", overflowY:"auto", background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:14, padding:18, boxShadow:"0 24px 70px rgba(15,23,42,.25)" }}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", marginBottom:12 }}>
               <div>
@@ -941,7 +948,7 @@ export default function Solicitudes() {
                 ["hora_carga", "Hora carga", "text"],
                 ["fecha_descarga", "Fecha descarga", "date"],
                 ["hora_descarga", "Hora descarga", "text"],
-                ["mercancia", "Mercancia", "text"],
+                ["mercancia", "Mercancía", "text"],
                 ["peso_kg", "Peso kg", "number"],
                 ["bultos", "Bultos / palets", "number"],
                 ["referencia_cliente", "Referencia cliente", "text"],
@@ -949,8 +956,8 @@ export default function Solicitudes() {
                 ["importe", "Importe total EUR", "number"],
                 ["precio_unitario", "Precio unitario", "number"],
                 ["cantidad", "Cantidad", "number"],
-                ["importe_minimo", "Minimo EUR", "number"],
-                ["minimo_unidades", "Minimo unidades", "number"],
+                ["importe_minimo", "Mínimo EUR", "number"],
+                ["minimo_unidades", "Mínimo de unidades", "number"],
               ].map(([key, label, type]) => (
                 <label key={key} style={{ display:"grid", gap:5, fontSize:11, color:"var(--text5)", fontWeight:900, textTransform:"uppercase", letterSpacing:".05em" }}>
                   {label}
@@ -966,7 +973,7 @@ export default function Solicitudes() {
                 Tipo precio
                 <select value={editForm.tipo_precio || "viaje"} onChange={e=>setEditForm(p=>({...p,tipo_precio:e.target.value}))} style={{ ...S.input, width:"100%" }}>
                   <option value="viaje">Precio por viaje</option>
-                  <option value="km">Por kilometros</option>
+                  <option value="km">Por kilómetros</option>
                   <option value="tonelada">Por toneladas</option>
                   <option value="kg">Por 100 kg</option>
                   <option value="palet">Por palet</option>

@@ -36,7 +36,7 @@ export default function PortalPointPicker({ tipo, points = [], selectedId = "", 
     const direccion = String(form.direccion || form.ciudad || "").trim();
     const nombre = String(form.nombre || form.ciudad || direccion).trim();
     if (!nombre || !direccion) {
-      notify("Indica el nombre y la direccion o poblacion del punto", "warning");
+      notify("Indica el nombre y la dirección o población del punto", "warning");
       return;
     }
     setSaving(true);
@@ -57,7 +57,7 @@ export default function PortalPointPicker({ tipo, points = [], selectedId = "", 
   return (
     <div style={{ marginTop:8, padding:10, border:"1px solid var(--border2)", borderRadius:8, background:"var(--bg3)" }}>
       <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-        <select
+        <select aria-label={`Punto de ${tipo}`}
           value={selectedId || ""}
           onChange={event => onSelect?.(available.find(point => String(point.id) === event.target.value) || null)}
           style={{ ...inputStyle, flex:"1 1 260px" }}
@@ -72,22 +72,23 @@ export default function PortalPointPicker({ tipo, points = [], selectedId = "", 
         <button
           type="button"
           onClick={() => setOpen(value => !value)}
+          aria-expanded={open}
           style={{ border:"1px solid var(--border2)", background:"var(--bg4)", color:"var(--accent)", borderRadius:8, padding:"9px 12px", fontWeight:800, cursor:"pointer" }}
         >
           {open ? "Cancelar" : "+ Crear punto"}
         </button>
       </div>
-      <div style={{ fontSize:11, color:"var(--text5)", marginTop:6 }}>
-        Puedes elegir un punto guardado o escribir {isLoad ? "otro origen" : "solo la poblacion de destino"} en el campo superior.
+      <div style={{ fontSize:13, color:"var(--text5)", marginTop:6 }}>
+        Puedes elegir un punto guardado o escribir {isLoad ? "otro origen" : "solo la población de destino"} en el campo superior.
       </div>
 
       {open && (
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:8, marginTop:10 }}>
-          <input style={inputStyle} value={form.nombre} onChange={update("nombre")} placeholder="Nombre del punto" />
-          <input style={inputStyle} value={form.direccion} onChange={update("direccion")} placeholder={isLoad ? "Direccion de carga" : "Direccion o poblacion"} />
-          <input style={inputStyle} value={form.ciudad} onChange={update("ciudad")} placeholder="Poblacion" />
-          <input style={inputStyle} value={form.provincia} onChange={update("provincia")} placeholder="Provincia / region" />
-          <input style={inputStyle} value={form.pais} onChange={update("pais")} placeholder="Pais" />
+          <input aria-label="Nombre del punto" style={inputStyle} value={form.nombre} onChange={update("nombre")} placeholder="Nombre del punto" />
+          <input aria-label={isLoad ? "Direccion de carga" : "Direccion o poblacion"} style={inputStyle} value={form.direccion} onChange={update("direccion")} placeholder={isLoad ? "Dirección de carga" : "Dirección o población"} />
+          <input aria-label="Población" style={inputStyle} value={form.ciudad} onChange={update("ciudad")} placeholder="Población" />
+          <input aria-label="Provincia / región" style={inputStyle} value={form.provincia} onChange={update("provincia")} placeholder="Provincia / región" />
+          <input aria-label="País" style={inputStyle} value={form.pais} onChange={update("pais")} placeholder="País" />
           <button
             type="button"
             onClick={savePoint}

@@ -28,6 +28,8 @@ import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { notify } from "../services/notify";
 import PortalPointPicker from "../components/PortalPointPicker";
 
+import { PortalHeader, PortalOverview, PortalTracking, PortalHelp } from "./portal/PortalWorkspace";
+
 const fmt2 = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function fileToBase64(file) {
@@ -52,7 +54,7 @@ const ESTADOS = {
   descartada: { l: "Rechazada", c: "#ef4444" },
   rechazada: { l: "Rechazada", c: "#ef4444" },
   cancelada: { l: "Cancelada", c: "#ef4444" },
-  revisada: { l: "En revision", c: "#3b82f6" },
+  revisada: { l: "En revisión", c: "#3b82f6" },
 };
 
 const ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE = new Set([
@@ -80,7 +82,7 @@ const TIPOS_PRECIO = [
   { v: "viaje", l: "Precio por viaje (EUR fijo)" },
   { v: "kg", l: "Por kg (EUR/100kg)" },
   { v: "tonelada", l: "Por toneladas (EUR/tn)" },
-  { v: "km", l: "Por kilometro (EUR/km)" },
+  { v: "km", l: "Por kilómetro (EUR/km)" },
   { v: "hora", l: "Por hora (EUR/h)" },
   { v: "palet", l: "Por palet (EUR/palet)" },
 ];
@@ -165,7 +167,7 @@ async function downloadDoc(doc) {
     return;
   }
   if (!doc?.file_base64) {
-    notify("Este albaran no tiene archivo descargable", "warning");
+    notify("Este albarán no tiene archivo descargable", "warning");
     return;
   }
   const a = document.createElement("a");
@@ -376,11 +378,11 @@ function solicitudEventoLabel(tipo) {
     "solicitud.creada": "Solicitud creada",
     "solicitud.reprogramacion.cliente": "Respuesta a reprogramacion",
     "solicitud.reprogramacion.propuesta": "Reprogramacion propuesta",
-    "solicitud.propuesta": "Viaje propuesto por trafico",
+    "solicitud.propuesta": "Viaje propuesto por tráfico",
     "solicitud.aceptada.cliente": "Has aceptado el viaje",
     "solicitud.rechazada.cliente": "Has rechazado la propuesta",
     "mensaje.cliente": "Mensaje tuyo",
-    "mensaje.empresa": "Mensaje de trafico",
+    "mensaje.empresa": "Mensaje de tráfico",
     "solicitud.convertida": "Convertida en pedido",
     "solicitud.rechazada": "Solicitud rechazada",
     "solicitud.cancelada.cliente": "Cancelada por cliente",
@@ -399,9 +401,9 @@ function solicitudEventoResumen(ev) {
   const d = ev?.detalle || {};
   if (ev.tipo === "solicitud.creada") return [d.origen, d.destino].filter(Boolean).join(" -> ") || "Solicitud registrada.";
   if (ev.tipo === "solicitud.reprogramacion.cliente") return `${d.decision || "Decision"} ${d.fecha_propuesta || ""} ${d.hora_propuesta || ""}`.trim();
-  if (ev.tipo === "solicitud.reprogramacion.propuesta") return d.fecha_propuesta ? `${d.fecha_propuesta}${d.hora_propuesta ? ` ${d.hora_propuesta}` : ""}` : "Trafico ha propuesto una nueva fecha.";
+  if (ev.tipo === "solicitud.reprogramacion.propuesta") return d.fecha_propuesta ? `${d.fecha_propuesta}${d.hora_propuesta ? ` ${d.hora_propuesta}` : ""}` : "Tráfico ha propuesto una nueva fecha.";
   if (ev.tipo === "solicitud.convertida") return d.pedido_numero ? `Pedido ${d.pedido_numero}` : "Convertida en pedido.";
-  if (ev.tipo === "solicitud.rechazada") return d.respuesta || "Solicitud rechazada por trafico.";
+  if (ev.tipo === "solicitud.rechazada") return d.respuesta || "Solicitud rechazada por tráfico.";
   if (ev.tipo === "solicitud.cancelada.cliente") return d.motivo ? `Motivo: ${d.motivo}` : "Cancelada desde el portal cliente.";
   if (ev.tipo === "solicitud.pedido.cancelado.cliente") return d.pedido_numero ? `Pedido ${d.pedido_numero} cancelado. Motivo: ${d.motivo || "Cancela cliente"}` : `Pedido cancelado. Motivo: ${d.motivo || "Cancela cliente"}`;
   if (ev.tipo === "solicitud.editada.cliente") return [d.origen, d.destino].filter(Boolean).join(" -> ") || "Datos actualizados por el cliente.";
@@ -456,7 +458,6 @@ export default function PortalClientes() {
   const { user, logout } = useAuth();
   const empresa = useEmpresaPerfil();
   const isProviderPortal = String(user?.rol || "").toLowerCase().includes("colaborador") || String(user?.rol || "").toLowerCase().includes("proveedor") || !!user?.colaborador_id;
-  const portalName = isProviderPortal ? "Peticiones viajes" : "Portal cliente";
   const [pedidos, setPedidos] = useState([]);
   const [facturas, setFacturas] = useState([]);
   const [solicitudes, setSolicitudes] = useState([]);
@@ -472,7 +473,10 @@ export default function PortalClientes() {
   const [loadingSolicitudEventos, setLoadingSolicitudEventos] = useState(null);
   const [descargandoSolicitudHistorial, setDescargandoSolicitudHistorial] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("seguimiento");
+  const [tab, setTab] = useState("inicio");
+  const [trackingId, setTrackingId] = useState(null);
+  const [trackingEstado, setTrackingEstado] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [q, setQ] = useState("");
   const [pedSel, setPedSel] = useState(null);
   const [pedidoEventosAbierto, setPedidoEventosAbierto] = useState(null);
@@ -487,12 +491,14 @@ export default function PortalClientes() {
 
   const cargar = useCallback(async ({ silencioso = false } = {}) => {
     if (!silencioso) setLoading(true);
+    const failed = [];
+    const read = (promise, label, fallback) => promise.catch(() => { failed.push(label); return fallback; });
     try {
       if (silencioso) {
         const [p, s, n] = await Promise.all([
-          getPortalClientePedidos().catch(() => null),
-          getPortalClienteSolicitudes().catch(() => null),
-          getPortalClienteNotificaciones(20).catch(() => null),
+          read(getPortalClientePedidos(), "envíos", null),
+          read(getPortalClienteSolicitudes(), "solicitudes", null),
+          read(getPortalClienteNotificaciones(20), "avisos", null),
         ]);
         if (Array.isArray(p)) setPedidos(p);
         if (Array.isArray(s)) setSolicitudes(s);
@@ -503,12 +509,12 @@ export default function PortalClientes() {
         return;
       }
       const [p, f, s, dr, resumen, n] = await Promise.all([
-        getPortalClientePedidos().catch(() => []),
-        getPortalClienteFacturas().catch(() => []),
-        getPortalClienteSolicitudes().catch(() => []),
-        getPortalClienteDocumentosResumen().catch(() => null),
-        getPortalClienteResumen().catch(() => null),
-        getPortalClienteNotificaciones(20).catch(() => null),
+        read(getPortalClientePedidos(), "envíos", []),
+        read(getPortalClienteFacturas(), "facturas", []),
+        read(getPortalClienteSolicitudes(), "solicitudes", []),
+        read(getPortalClienteDocumentosResumen(), "documentos", null),
+        read(getPortalClienteResumen(), "resumen", null),
+        read(getPortalClienteNotificaciones(20), "avisos", null),
       ]);
       setPedidos(Array.isArray(p) ? p : []);
       setFacturas(Array.isArray(f) ? f : []);
@@ -518,6 +524,7 @@ export default function PortalClientes() {
       setPortalNotificaciones(n && Array.isArray(n.data) ? n.data : []);
       setPortalNotificacionesNoLeidas(Number(n?.no_leidas || 0));
     } finally {
+      if (!silencioso || failed.length) setLoadError(failed.length ? `No se pudo actualizar: ${[...new Set(failed)].join(", ")}. Reintenta la conexión.` : "");
       if (!silencioso) setLoading(false);
     }
   }, []);
@@ -544,7 +551,7 @@ export default function PortalClientes() {
       setPortalNotificaciones(prev => prev.filter(n => n.id !== item.id));
       setPortalNotificacionesNoLeidas(prev => Math.max(0, prev - 1));
     } catch (error) {
-      notify(error.message || "No se pudo marcar la novedad como leida", "error");
+      notify(error.message || "No se pudo marcar la novedad como leída", "error");
     }
   }
 
@@ -554,7 +561,7 @@ export default function PortalClientes() {
       setPortalNotificaciones([]);
       setPortalNotificacionesNoLeidas(0);
     } catch (error) {
-      notify(error.message || "No se pudieron marcar las novedades como leidas", "error");
+      notify(error.message || "No se pudieron marcar las novedades como leídas", "error");
     }
   }
 
@@ -563,6 +570,8 @@ export default function PortalClientes() {
   const reprogramacionesPendientes = solicitudes.filter(s => s.fecha_propuesta && (!s.decision_cliente || s.decision_cliente === "pendiente"));
   const movimientosSolicitudes = solicitudes.reduce((sum, s) => sum + Number(s.eventos_count || 0), 0);
   const pedidosFiltrados = pedidos.filter(p => matchesSearch(p, q, ["numero", "referencia_cliente", "origen", "destino", "mercancia", "vehiculo_matricula", "estado", "chofer_nombre", "chofer_dni", "chofer_telefono"]));
+  const trackingPedidos = pedidosFiltrados.filter(p => !trackingEstado || p.estado === trackingEstado);
+  const trackingPedido = trackingPedidos.find(p => p.id === trackingId) || trackingPedidos[0] || null;
   const facturasFiltradas = facturas.filter(f => matchesSearch(f, q, ["numero", "estado", "forma_pago"]));
   const solicitudesFiltradas = solicitudes.filter(s => matchesSearch(s, q, [
     "referencia_cliente",
@@ -592,7 +601,7 @@ export default function PortalClientes() {
       const data = await getPortalPedidoAlbaranes(pedidoId);
       setDocs(prev => ({ ...prev, [pedidoId]: Array.isArray(data) ? data : [] }));
       setPedSel(pedidoId);
-    } finally {
+    } catch (error) { notify(error.message || "No se pudieron cargar los documentos.", "error"); } finally {
       setLoadingDocs(null);
     }
   }
@@ -627,7 +636,7 @@ export default function PortalClientes() {
       const data = await getPortalClienteSolicitudEventos(s.id);
       setSolicitudEventos(prev => ({ ...prev, [s.id]: Array.isArray(data) ? data : [] }));
       setSolicitudEventosAbierta(s.id);
-      notify("Mensaje enviado a trafico.", "success");
+      notify("Mensaje enviado a tráfico.", "success");
     } catch (e) {
       notify(e.message || "No se pudo enviar el mensaje.", "error");
     } finally {
@@ -640,13 +649,13 @@ export default function PortalClientes() {
     const convertida = !!solicitud.pedido_id || String(solicitud.estado || "").toLowerCase() === "convertida";
     if (convertida) {
       if (pedidoNoAnulablePorCliente(solicitud.pedido_estado)) {
-        notify("El pedido ya esta en ruta, descarga o finalizado. Contacta con trafico para cualquier cambio.", "warning");
+        notify("El pedido ya esta en ruta, descarga o finalizado. Contacta con tráfico para cualquier cambio.", "warning");
         return;
       }
       const ok = window.confirm(`Esta solicitud ya tiene pedido${solicitud.pedido_numero ? ` ${solicitud.pedido_numero}` : ""}. Si continuas, el pedido quedara cancelado con motivo "Cancela cliente". ¿Quieres anularlo?`);
       if (!ok) return;
     }
-    const motivo = convertida ? "Cancela cliente" : (window.prompt("Motivo de cancelacion para trafico (opcional):") || "");
+    const motivo = convertida ? "Cancela cliente" : (window.prompt("Motivo de cancelación para tráfico (opcional):") || "");
     try {
       await cancelarPortalClienteSolicitud(solicitud.id, { motivo });
       notify(convertida ? "Pedido cancelado por solicitud del cliente." : "Solicitud cancelada.", "success");
@@ -737,7 +746,7 @@ export default function PortalClientes() {
       if (url) {
         window.open(url, "_blank", "noopener,noreferrer");
       } else {
-        notify("Este viaje todavia no tiene soporte digital disponible", "warning");
+        notify("Este viaje todavía no tiene soporte digital disponible", "warning");
       }
     } catch (e) {
       notify(e.message, "error");
@@ -834,117 +843,29 @@ export default function PortalClientes() {
 
   const S = {
     card: { background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: "14px 16px", marginBottom: 12 },
-    th: { textAlign: "left", padding: "8px 12px", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", borderBottom: "1px solid var(--border)" },
+    th: { textAlign: "left", padding: "8px 12px", fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", borderBottom: "1px solid var(--border)" },
     td: { padding: "10px 12px", borderBottom: "1px solid var(--border2)", fontSize: 13, color: "var(--text2)" },
     btn: { padding: "8px 13px", borderRadius: 7, border: "1px solid var(--border2)", background: "var(--bg3)", color: "var(--text)", fontWeight: 700, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" },
   };
 
   return (
     <div className="tg-portal-cliente-page" style={{ fontFamily: "'DM Sans',sans-serif", minHeight: "100vh", background: "var(--bg)", paddingBottom: 40 }}>
-      <style>{`
-        .tg-portal-cliente-page, .tg-portal-cliente-page * { box-sizing:border-box; min-width:0; }
-        .tg-portal-cliente-page table { width:100%; }
-        @media (max-width: 760px) {
-          .tg-portal-cliente-page { overflow-x:hidden; }
-          .tg-portal-cliente-page > div:first-of-type { padding:14px 16px !important; }
-          .tg-portal-cliente-page > div:first-of-type > div { align-items:flex-start !important; flex-direction:column !important; }
-          .tg-portal-cliente-page > div:first-of-type > div > div:last-child { align-items:flex-start !important; width:100%; }
-          .tg-portal-cliente-page > div:nth-of-type(2) { padding:16px 14px !important; max-width:100% !important; }
-          .tg-portal-cliente-page [style*="display: flex"],
-          .tg-portal-cliente-page [style*="display:flex"] { flex-wrap:wrap; }
-          .tg-portal-cliente-page [style*="justify-content:flex-end"] { justify-content:flex-start !important; }
-          .tg-portal-cliente-page input,
-          .tg-portal-cliente-page select,
-          .tg-portal-cliente-page textarea,
-          .tg-portal-cliente-page button { max-width:100% !important; }
-          .tg-portal-cliente-page table {
-            display:block;
-            overflow-x:auto;
-            white-space:nowrap;
-            -webkit-overflow-scrolling:touch;
-          }
-          .tg-portal-cliente-page [style*="position: fixed"],
-          .tg-portal-cliente-page [style*="position:fixed"] {
-            align-items:flex-start !important;
-            padding:10px !important;
-            overflow:auto !important;
-          }
-          .tg-portal-cliente-page [style*="position: fixed"] > div,
-          .tg-portal-cliente-page [style*="position:fixed"] > div {
-            width:100% !important;
-            max-width:calc(100vw - 20px) !important;
-            max-height:calc(100dvh - 20px) !important;
-          }
-        }
-      `}</style>
-      <div style={{ background: "var(--bg2)", borderBottom: "1px solid var(--border)", padding: "16px 24px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 1040, margin: "0 auto", gap: 12 }}>
-          <div>
-            <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 900, fontSize: 22, color: "var(--text)" }}>
-              {empresa.razon_social || portalName}
-            </div>
-            <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>
-              Bienvenido, <strong>{user?.nombre || user?.username}</strong>
-            </div>
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:8 }}>
-            <div style={{ fontSize: 11, color: "var(--text5)", textAlign: "right" }}>
-              <div>{empresa.telefono || "-"}</div>
-              <div>{empresa.email || "-"}</div>
-            </div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
-              <button
-                onClick={logout}
-                style={{ ...S.btn, padding:"6px 10px", fontSize:11, color:"#ef4444", borderColor:"rgba(239,68,68,.25)", background:"rgba(239,68,68,.08)" }}
-              >
-                Salir
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ maxWidth: 1040, margin: "0 auto", padding: "20px 24px" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10, marginBottom: 18 }}>
-          {[
-            ["Viajes activos", resumenPortal.pedidos?.activos || 0, "#3b82f6"],
-            [isProviderPortal ? "Peticiones abiertas" : "Solicitudes abiertas", resumenPortal.solicitudes?.abiertas || 0, "#f97316"],
-            ["Facturado", `${fmt2(resumenPortal.facturas?.total_facturado)} EUR`, "#10b981"],
-            ["Pendiente pago", `${fmt2(resumenPortal.facturas?.total_pendiente)} EUR`, "#f97316"],
-            ["Albaranes disponibles", `${resumenPortal.documentos?.con_albaran || 0}/${resumenPortal.documentos?.viajes || 0}`, "#3b82f6"],
-          ].map(([l, v, c]) => (
-            <div key={l} style={{ ...S.card, marginBottom: 0 }}>
-              <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 900, fontSize: 20, color: c }}>{v}</div>
-              <div style={{ fontSize: 11, color: "var(--text5)", textTransform: "uppercase", letterSpacing: ".05em" }}>{l}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ ...S.card, display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:10, alignItems:"center", marginBottom:16 }}>
-          <input
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            placeholder={isProviderPortal ? "Buscar viajes, facturas, peticiones, matriculas..." : "Buscar viajes, facturas, solicitudes, referencias..."}
-            style={{ background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)", borderRadius:8, padding:"10px 12px", outline:"none", fontFamily:"'DM Sans',sans-serif", fontSize:13, minWidth:0 }}
-          />
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"flex-end" }}>
-            <button style={S.btn} onClick={cargar} disabled={loading}>{loading ? "Actualizando..." : "Actualizar"}</button>
-            <button style={{ ...S.btn, background:"var(--accent)", color:"#fff", borderColor:"var(--accent)" }} onClick={() => setTab("nuevo")}>Nuevo servicio</button>
-            <button style={S.btn} onClick={() => setTab("cuenta")}>Estado de cuenta</button>
-            <button style={S.btn} onClick={() => setTab("albaranes")}>Documentos</button>
-          </div>
-        </div>
-
-        {portalNotificacionesNoLeidas > 0 && portalNotificaciones.length > 0 && (
+      <PortalHeader empresa={empresa} user={user} tab={tab} onNavigate={setTab} onLogout={logout} unread={portalNotificacionesNoLeidas}/>
+      <main className="portal-content">
+        <PortalOverview empresa={empresa} user={user} tab={tab} resumen={resumenPortal} loading={loading || !!loadError} onNavigate={setTab} provider={isProviderPortal}/>
+        {loadError && <div className="portal-load-error" role="alert"><span>{loadError}</span><button className="portal-secondary" onClick={()=>cargar()}>Reintentar</button></div>}
+        <div className="portal-toolbar"><input aria-label="Buscar en el portal" value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar envíos, facturas, solicitudes, referencias…" style={{padding:"11px 14px"}}/><button className="portal-secondary" onClick={()=>cargar()} disabled={loading}>{loading ? "Actualizando…" : "Actualizar"}</button></div>
+        <div id="portal-news">
+        {tab === "inicio" && portalNotificacionesNoLeidas > 0 && portalNotificaciones.length > 0 && (
           <section style={{ ...S.card, marginBottom:16, border:"1px solid rgba(59,130,246,.35)", background:"rgba(59,130,246,.07)" }} aria-label="Novedades de tus solicitudes y viajes">
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap", marginBottom:10 }}>
               <div>
                 <div style={{ fontWeight:900, color:"var(--text)" }}>Novedades para ti</div>
                 <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>
-                  {portalNotificacionesNoLeidas} actualizacion{portalNotificacionesNoLeidas === 1 ? "" : "es"} sin leer de trafico o gerencia.
+                  {portalNotificacionesNoLeidas} actualización{portalNotificacionesNoLeidas === 1 ? "" : "es"} sin leer de tráfico o gerencia.
                 </div>
               </div>
-              <button type="button" style={S.btn} onClick={marcarNovedadesClienteLeidas}>Marcar todas como leidas</button>
+              <button type="button" style={S.btn} onClick={marcarNovedadesClienteLeidas}>Marcar todas como leídas</button>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,240px),1fr))", gap:8 }}>
               {portalNotificaciones.slice(0, 3).map(item => (
@@ -954,21 +875,21 @@ export default function PortalClientes() {
                   onClick={() => abrirNovedadCliente(item)}
                   style={{ textAlign:"left", border:"1px solid rgba(59,130,246,.25)", background:"var(--bg3)", borderRadius:8, padding:"11px 12px", cursor:"pointer", minWidth:0 }}
                 >
-                  <div style={{ fontSize:13, fontWeight:900, color:"var(--text)", overflowWrap:"anywhere" }}>{item.titulo || "Actualizacion"}</div>
+                  <div style={{ fontSize:13, fontWeight:900, color:"var(--text)", overflowWrap:"anywhere" }}>{item.titulo || "Actualización"}</div>
                   <div style={{ fontSize:12, color:"var(--text4)", marginTop:4, lineHeight:1.4, overflowWrap:"anywhere" }}>{item.mensaje || "Consulta el detalle actualizado."}</div>
-                  <div style={{ fontSize:10, color:"var(--text5)", marginTop:7 }}>{item.created_at ? new Date(item.created_at).toLocaleString("es-ES") : ""}</div>
+                  <div style={{ fontSize:12, color:"var(--text5)", marginTop:7 }}>{item.created_at ? new Date(item.created_at).toLocaleString("es-ES") : ""}</div>
                 </button>
               ))}
             </div>
           </section>
         )}
 
-        {accionesPortal.length > 0 && (
+        {tab === "inicio" && accionesPortal.length > 0 && (
           <div style={{ ...S.card, marginBottom: 16 }}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
               <div>
                 <div style={{ fontWeight:900, color:"var(--text)" }}>Acciones pendientes</div>
-                <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>Prioridades detectadas automaticamente en viajes, facturas, documentos y solicitudes.</div>
+                <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>Prioridades detectadas automáticamente en viajes, facturas, documentos y solicitudes.</div>
               </div>
               <span style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:12, fontWeight:900, color:"var(--accent)" }}>{accionesPortal.length}</span>
             </div>
@@ -979,8 +900,8 @@ export default function PortalClientes() {
                   <button key={`${a.tipo || "accion"}-${idx}`} onClick={() => a.tab && setTab(a.tab)}
                     style={{ textAlign:"left", border:"1px solid var(--border2)", background:"var(--bg3)", borderRadius:8, padding:"10px 12px", cursor:a.tab ? "pointer" : "default" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", gap:8, alignItems:"center" }}>
-                      <span style={{ fontWeight:900, color:"var(--text)", fontSize:13 }}>{a.titulo || "Accion pendiente"}</span>
-                      <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:900, color, background:`${color}16`, textTransform:"uppercase" }}>{a.prioridad || "normal"}</span>
+                      <span style={{ fontWeight:900, color:"var(--text)", fontSize:13 }}>{a.titulo || "Acción pendiente"}</span>
+                      <span style={{ padding:"2px 7px", borderRadius:20, fontSize:12, fontWeight:900, color, background:`${color}16`, textTransform:"uppercase" }}>{a.prioridad || "normal"}</span>
                     </div>
                     <div style={{ marginTop:5, fontSize:12, color:"var(--text4)", lineHeight:1.35 }}>{a.detalle || "-"}</div>
                   </button>
@@ -990,43 +911,44 @@ export default function PortalClientes() {
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid var(--border)", marginBottom: 16 }}>
+        </div>
+        <nav className="portal-tabs" aria-label="Apartados del portal">
           {[
             ["seguimiento", "Seguimiento"],
-            ["nuevo", isProviderPortal ? "Nueva peticion" : "Solicitar servicio"],
+            ["nuevo", isProviderPortal ? "Nueva petición" : "Solicitar servicio"],
             ["albaranes", "Albaranes"],
             ["facturas", "Facturas"],
             ["cuenta", "Estado de cuenta"],
             ["solicitudes", isProviderPortal ? "Peticiones viajes" : "Mis solicitudes"],
           ].map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)}
+            <button key={id} aria-current={tab === id || (id === "seguimiento" && tab === "inicio") ? "page" : undefined} onClick={() => setTab(id)}
               style={{ padding: "9px 15px", border: "none", borderBottom: `2px solid ${tab === id ? "var(--accent)" : "transparent"}`, background: "transparent", color: tab === id ? "var(--accent)" : "var(--text4)", fontWeight: 800, cursor: "pointer" }}>
               {label}
             </button>
           ))}
-        </div>
+        </nav>
 
         {loading && <div style={{ ...S.card, textAlign: "center", color: "var(--text4)", padding: 28 }}>Cargando portal...</div>}
 
-        {!loading && tab === "seguimiento" && (
-          <div>
-            {pedidosFiltrados.length === 0 ? <Empty text={q ? "No hay viajes que coincidan con la busqueda." : "Todavia no hay viajes registrados."} /> : pedidosFiltrados.map(p => {
+        {!loading && ["inicio", "seguimiento"].includes(tab) && (
+          <PortalTracking pedidos={trackingPedidos} selected={trackingPedido} onSelect={setTrackingId} estado={trackingEstado} onEstado={setTrackingEstado} estados={ESTADOS} docs={docs} loadingDocs={loadingDocs} onDocuments={verAlbaranes} onDownload={downloadDoc}>
+            {!trackingPedido ? <Empty text={q ? "No hay viajes que coincidan con la búsqueda." : "Todavía no hay viajes registrados."} /> : [trackingPedido].map(p => {
               const estado = ESTADOS[p.estado] || ESTADOS.pendiente;
               const surface = estadoClienteSurface(p.estado);
-              const stIdx = Math.max(0, TIMELINE.findIndex(([k]) => k === p.estado));
+              const stIdx = p.estado === "facturado" ? TIMELINE.length - 1 : TIMELINE.findIndex(([k]) => k === p.estado);
               const dcd = docControl[p.id];
               return (
-                <div key={p.id} style={{ ...S.card, ...surface }}>
+                <div className="portal-card" key={p.id} style={{ ...S.card, ...surface }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                     <div>
                       <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 900, color: "var(--accent)", fontSize: 13 }}>{p.numero}</div>
                       <div style={{ fontWeight: 800, color: "var(--text)", marginTop: 4 }}>{p.origen || "-"} -> {p.destino || "-"}</div>
                       {p.referencia_cliente && <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>Ref. cliente: {p.referencia_cliente}</div>}
                     </div>
-                    <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, color: estado.c, background: `${estado.c}18`, border: `1px solid ${estado.c}30` }}>{estado.l}</span>
+                    <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 13, fontWeight: 800, color: estado.c, background: `${estado.c}18`, border: `1px solid ${estado.c}30` }}>{estado.l}</span>
                   </div>
 
-                  <div style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 16 }}>
+                  <div className="portal-timeline" style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 16 }}>
                     {TIMELINE.map(([k, label], i) => {
                       const done = i <= stIdx;
                       const curr = i === stIdx;
@@ -1036,7 +958,7 @@ export default function PortalClientes() {
                             <div style={{ width: 28, height: 28, borderRadius: "50%", margin: "0 auto 4px", display: "grid", placeItems: "center", fontSize: 13, fontWeight: 900, background: curr ? "var(--accent)" : done ? "rgba(16,185,129,.16)" : "var(--bg4)", border: curr ? "2px solid var(--accent)" : done ? "2px solid rgba(16,185,129,.5)" : "1px solid var(--border2)", color: curr ? "#fff" : done ? "#10b981" : "var(--text5)" }}>
                               {done ? "OK" : ""}
                             </div>
-                            <div style={{ fontSize: 10, color: curr ? "var(--accent)" : done ? "#10b981" : "var(--text5)", fontWeight: done ? 800 : 500 }}>{label}</div>
+                            <div style={{ fontSize: 12, color: curr ? "var(--accent)" : done ? "#10b981" : "var(--text5)", fontWeight: done ? 800 : 500 }}>{label}</div>
                           </div>
                           {i < TIMELINE.length - 1 && <div style={{ flex: 1, height: 2, background: i < stIdx ? "rgba(16,185,129,.45)" : "var(--border2)", margin: "0 4px 14px" }} />}
                         </div>
@@ -1065,28 +987,28 @@ export default function PortalClientes() {
                       </button>
                     )}
                     {dcd?.status && (
-                      <span style={{ fontSize: 11, color: dcd.status.ready ? "#10b981" : "#f59e0b", fontWeight: 800 }}>
+                      <span style={{ fontSize: 13, color: dcd.status.ready ? "#10b981" : "#f59e0b", fontWeight: 800 }}>
                         {dcd.status.ready ? "DCD listo" : "DCD pendiente"}
                       </span>
                     )}
                     {dcd?.remision?.etiqueta && (
-                      <span style={{ fontSize: 11, color: "var(--text4)" }}>
+                      <span style={{ fontSize: 13, color: "var(--text4)" }}>
                         {dcd.remision.etiqueta}
                       </span>
                     )}
                   </div>
                   {Array.isArray(dcd?.status?.faltantes) && dcd.status.faltantes.length > 0 && (
-                    <div style={{ marginTop:10, fontSize:11, color:"#f59e0b", background:"rgba(245,158,11,.08)", border:"1px solid rgba(245,158,11,.2)", borderRadius:8, padding:"8px 10px" }}>
+                    <div style={{ marginTop:10, fontSize:13, color:"#f59e0b", background:"rgba(245,158,11,.08)", border:"1px solid rgba(245,158,11,.2)", borderRadius:8, padding:"8px 10px" }}>
                       Faltan datos para dejar el documento completo: {dcd.status.faltantes.slice(0, 3).join(" - ")}{dcd.status.faltantes.length > 3 ? "..." : ""}
                     </div>
                   )}
                   {pedidoEventosAbierto === p.id && (
                     <div style={{ marginTop: 12, background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, padding: "10px 12px" }}>
                       {(pedidoEventos[p.id] || []).length === 0 ? (
-                        <div style={{ fontSize: 12, color: "var(--text5)" }}>Todavia no hay actividad trazada para este viaje.</div>
+                        <div style={{ fontSize: 12, color: "var(--text5)" }}>Todavía no hay actividad trazada para este viaje.</div>
                       ) : (pedidoEventos[p.id] || []).map(ev => (
                         <div key={ev.id} style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: 10, padding: "7px 0", borderBottom: "1px solid var(--border2)" }}>
-                          <div style={{ fontSize: 11, color: "var(--text5)" }}>{ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : "-"}</div>
+                          <div style={{ fontSize: 13, color: "var(--text5)" }}>{ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : "-"}</div>
                           <div>
                             <div style={{ fontSize: 12, fontWeight: 900, color: "var(--text)" }}>{ev.etiqueta || ev.tipo || "Evento"}</div>
                             {ev.resumen && <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 2 }}>{ev.resumen}</div>}
@@ -1098,13 +1020,13 @@ export default function PortalClientes() {
                 </div>
               );
             })}
-          </div>
+          </PortalTracking>
         )}
 
         {!loading && tab === "nuevo" && <SolicitudServicio onDone={cargar} setTab={setTab} />}
 
         {!loading && tab === "albaranes" && (
-          <div style={S.card}>
+          <div className="portal-card" style={S.card}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"flex-start", flexWrap:"wrap", marginBottom:12, paddingBottom:12, borderBottom:"1px solid var(--border2)" }}>
               <div>
                 <div style={{ fontWeight:900, color:"var(--text)" }}>Resumen documental</div>
@@ -1115,17 +1037,17 @@ export default function PortalClientes() {
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:8, marginBottom:12, paddingBottom:12, borderBottom:"1px solid var(--border2)" }}>
               {[
                 ["Viajes", documentosResumen.total || 0, "var(--accent)"],
-                ["Con albaran", documentosResumen.con_albaran || 0, "#10b981"],
+                ["Con albarán", documentosResumen.con_albaran || 0, "#10b981"],
                 ["Pendientes", documentosResumen.sin_albaran || 0, (documentosResumen.sin_albaran || 0) ? "#f97316" : "#10b981"],
                 ["Documentos", documentosResumen.documentos_total || 0, "#3b82f6"],
               ].map(([label,value,color]) => (
                 <div key={label} style={{ background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:8, padding:"9px 10px" }}>
                   <div style={{ fontFamily:"'JetBrains Mono',monospace", fontWeight:900, color, fontSize:18 }}>{value}</div>
-                  <div style={{ fontSize:10, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em", fontWeight:800 }}>{label}</div>
+                  <div style={{ fontSize:12, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em", fontWeight:800 }}>{label}</div>
                 </div>
               ))}
             </div>
-            {pedidosFiltrados.length === 0 ? <Empty text={q ? "No hay documentos que coincidan con la busqueda." : "No hay viajes con documentacion."} /> : pedidosFiltrados.map(p => {
+            {pedidosFiltrados.length === 0 ? <Empty text={q ? "No hay documentos que coincidan con la búsqueda." : "No hay viajes con documentación."} /> : pedidosFiltrados.map(p => {
               const albs = docs[p.id] || [];
               const resumen = docsByPedido[p.id] || {};
               return (
@@ -1135,11 +1057,11 @@ export default function PortalClientes() {
                       <div style={{ fontWeight: 900, color: "var(--text)" }}>{p.numero} - {p.origen || "-"} -> {p.destino || "-"}</div>
                       <div style={{ fontSize: 12, color: "var(--text4)" }}>{dateEs(p.fecha_carga)}</div>
                       <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:5 }}>
-                        <span style={{ padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:800, color:Number(resumen.albaranes_count || 0) > 0 ? "#10b981" : "#f97316", background:Number(resumen.albaranes_count || 0) > 0 ? "rgba(16,185,129,.12)" : "rgba(249,115,22,.12)" }}>
-                          {Number(resumen.albaranes_count || 0) > 0 ? `${resumen.albaranes_count} albaran(es)` : "Albaran pendiente"}
+                        <span style={{ padding:"2px 8px", borderRadius:20, fontSize:13, fontWeight:800, color:Number(resumen.albaranes_count || 0) > 0 ? "#10b981" : "#f97316", background:Number(resumen.albaranes_count || 0) > 0 ? "rgba(16,185,129,.12)" : "rgba(249,115,22,.12)" }}>
+                          {Number(resumen.albaranes_count || 0) > 0 ? `${resumen.albaranes_count} albaran(es)` : "Albarán pendiente"}
                         </span>
                         {Number(resumen.documentos_factura_count || 0) > 0 && (
-                          <span style={{ padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:800, color:"#3b82f6", background:"rgba(59,130,246,.12)" }}>
+                          <span style={{ padding:"2px 8px", borderRadius:20, fontSize:13, fontWeight:800, color:"#3b82f6", background:"rgba(59,130,246,.12)" }}>
                             {resumen.documentos_factura_count} doc. factura
                           </span>
                         )}
@@ -1151,7 +1073,7 @@ export default function PortalClientes() {
                   </div>
                   {pedSel === p.id && (
                     <div style={{ marginTop: 10, background: "var(--bg3)", borderRadius: 8, padding: 10 }}>
-                      {albs.length === 0 ? <div style={{ color: "var(--text5)", fontSize: 12 }}>Sin albaranes adjuntos todavia.</div> : albs.map(d => (
+                      {albs.length === 0 ? <div style={{ color: "var(--text5)", fontSize: 12 }}>Sin albaranes adjuntos todavía.</div> : albs.map(d => (
                         <button key={d.id} onClick={() => downloadDoc(d)} style={{ ...S.btn, marginRight: 8, marginBottom: 8 }}>
                           Descargar {d.nombre || "albaran"}
                         </button>
@@ -1165,8 +1087,8 @@ export default function PortalClientes() {
         )}
 
         {!loading && tab === "facturas" && (
-          <div style={S.card}>
-            {facturasFiltradas.length === 0 ? <Empty text={q ? "No hay facturas que coincidan con la busqueda." : "No hay facturas emitidas."} /> : (
+          <div className="portal-card" style={S.card}>
+            {facturasFiltradas.length === 0 ? <Empty text={q ? "No hay facturas que coincidan con la búsqueda." : "No hay facturas emitidas."} /> : (
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead><tr>{["Factura", "Fecha", "Vencimiento", "Base", "IVA", "Total", "Estado", "Acciones"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
                 <tbody>{facturasFiltradas.map(f => {
@@ -1179,7 +1101,7 @@ export default function PortalClientes() {
                       <td style={{ ...S.td, textAlign: "right" }}>{fmt2(f.base_imponible)} EUR</td>
                       <td style={{ ...S.td, textAlign: "right" }}>{fmt2(f.cuota_iva)} EUR</td>
                       <td style={{ ...S.td, textAlign: "right", fontWeight: 900, color: "#10b981" }}>{fmt2(f.total)} EUR</td>
-                      <td style={S.td}><span style={{ padding: "3px 9px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 11, fontWeight: 800 }}>{e.l}</span></td>
+                      <td style={S.td}><span style={{ padding: "3px 9px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 13, fontWeight: 800 }}>{e.l}</span></td>
                       <td style={S.td}>
                         <button style={S.btn} onClick={() => verFactura(f.id)} disabled={loadingFactura === f.id}>
                           {loadingFactura === f.id ? "Abriendo..." : "Ver factura"}
@@ -1194,7 +1116,7 @@ export default function PortalClientes() {
         )}
 
         {!loading && tab === "cuenta" && (
-          <div style={S.card}>
+          <div className="portal-card" style={S.card}>
             <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"flex-start", flexWrap:"wrap", marginBottom:14, paddingBottom:12, borderBottom:"1px solid var(--border2)" }}>
               <div>
                 <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:900, color:"var(--text)", fontSize:18 }}>Estado de cuenta</div>
@@ -1210,16 +1132,16 @@ export default function PortalClientes() {
               ].map(([label, value, color]) => (
                 <div key={label} style={{ background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:8, padding:"10px 12px" }}>
                   <div style={{ fontFamily:"'JetBrains Mono',monospace", fontWeight:900, fontSize:18, color }}>{value}</div>
-                  <div style={{ fontSize:10, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em", fontWeight:800 }}>{label}</div>
+                  <div style={{ fontSize:12, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em", fontWeight:800 }}>{label}</div>
                 </div>
               ))}
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:8, marginBottom:14 }}>
               {estadoCuenta.buckets.map(b => (
                 <div key={b.key} style={{ border:"1px solid var(--border2)", borderRadius:8, padding:"9px 10px", background:b.total > 0 ? "rgba(245,158,11,.08)" : "var(--bg3)" }}>
-                  <div style={{ fontSize:10, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em", fontWeight:800 }}>{b.label}</div>
+                  <div style={{ fontSize:12, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em", fontWeight:800 }}>{b.label}</div>
                   <div style={{ marginTop:5, fontFamily:"'JetBrains Mono',monospace", fontWeight:900, color:b.key === "corriente" ? "#10b981" : "#f97316" }}>{fmt2(b.total)} EUR</div>
-                  <div style={{ fontSize:11, color:"var(--text4)", marginTop:2 }}>{b.count} factura(s)</div>
+                  <div style={{ fontSize:13, color:"var(--text4)", marginTop:2 }}>{b.count} factura(s)</div>
                 </div>
               ))}
             </div>
@@ -1227,7 +1149,7 @@ export default function PortalClientes() {
               <Empty text="No hay facturas pendientes de pago." />
             ) : (
               <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                <thead><tr>{["Factura", "Fecha", "Vencimiento", "Estado", "Antiguedad", "Total", "Acciones"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                <thead><tr>{["Factura", "Fecha", "Vencimiento", "Estado", "Antigüedad", "Total", "Acciones"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
                 <tbody>{estadoCuenta.pendientes.map(f => {
                   const dias = diasVencida(f.fecha_vencimiento);
                   const e = ESTADOS[f.estado] || { l:f.estado || "-", c:"var(--text4)" };
@@ -1236,7 +1158,7 @@ export default function PortalClientes() {
                       <td style={{ ...S.td, fontFamily:"'JetBrains Mono',monospace", fontWeight:800, color:"var(--accent)" }}>{f.numero}</td>
                       <td style={S.td}>{dateEs(f.fecha)}</td>
                       <td style={S.td}>{dateEs(f.fecha_vencimiento)}</td>
-                      <td style={S.td}><span style={{ padding:"3px 9px", borderRadius:20, color:e.c, background:`${e.c}18`, fontSize:11, fontWeight:800 }}>{e.l}</span></td>
+                      <td style={S.td}><span style={{ padding:"3px 9px", borderRadius:20, color:e.c, background:`${e.c}18`, fontSize:13, fontWeight:800 }}>{e.l}</span></td>
                       <td style={{ ...S.td, color:dias > 0 ? "#ef4444" : "var(--text4)", fontWeight:dias > 0 ? 800 : 600 }}>{dias > 0 ? `${dias} dia(s)` : "No vencida"}</td>
                       <td style={{ ...S.td, textAlign:"right", fontWeight:900, color:"#f97316" }}>{fmt2(f.total)} EUR</td>
                       <td style={S.td}><button style={S.btn} onClick={() => verFactura(f.id)} disabled={loadingFactura === f.id}>{loadingFactura === f.id ? "Abriendo..." : "Ver factura"}</button></td>
@@ -1249,7 +1171,7 @@ export default function PortalClientes() {
         )}
 
         {!loading && tab === "solicitudes" && (
-          <div style={S.card}>
+          <div className="portal-card" style={S.card}>
             {solicitudesFiltradas.length > 0 && (
               <div style={{ marginBottom:12, paddingBottom:10, borderBottom:"1px solid var(--border2)" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", marginBottom:10 }}>
@@ -1268,7 +1190,7 @@ export default function PortalClientes() {
                   ].map(([label,value,color]) => (
                     <div key={label} style={{ background:"var(--bg3)", border:"1px solid var(--border2)", borderRadius:8, padding:"9px 11px" }}>
                       <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:17, fontWeight:900, color }}>{value}</div>
-                      <div style={{ fontSize:10, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em", fontWeight:800 }}>{label}</div>
+                      <div style={{ fontSize:12, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em", fontWeight:800 }}>{label}</div>
                     </div>
                   ))}
                 </div>
@@ -1279,7 +1201,7 @@ export default function PortalClientes() {
                 )}
               </div>
             )}
-            {solicitudesFiltradas.length === 0 ? <Empty text={q ? "No hay solicitudes que coincidan con la busqueda." : "No has enviado solicitudes."} /> : solicitudesFiltradas.map(s => {
+            {solicitudesFiltradas.length === 0 ? <Empty text={q ? "No hay solicitudes que coincidan con la búsqueda." : "No has enviado solicitudes."} /> : solicitudesFiltradas.map(s => {
               const e = ESTADOS[s.estado] || ESTADOS.pendiente;
               const pedidoEstado = s.pedido_estado ? (ESTADOS[s.pedido_estado] || { l:s.pedido_estado, c:"#64748b" }) : null;
               const surface = estadoClienteSurface(s.pedido_estado || s.estado);
@@ -1297,14 +1219,14 @@ export default function PortalClientes() {
                       <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>
                         Carga: {dateEs(s.fecha_carga)} - Ref: {s.referencia_cliente || "-"} {s.pedido_numero ? `- Pedido ${s.pedido_numero}` : ""}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--text5)", marginTop: 3 }}>
+                      <div style={{ fontSize: 13, color: "var(--text5)", marginTop: 3 }}>
                         Movimientos: {Number(s.eventos_count || 0)}{s.ultimo_evento_at ? ` - ultimo ${new Date(s.ultimo_evento_at).toLocaleString("es-ES")}` : ""}
                       </div>
                     </div>
                     <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
-                      <span style={{ alignSelf: "flex-start", padding: "3px 10px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 11, fontWeight: 800 }}>{e.l}</span>
+                      <span style={{ alignSelf: "flex-start", padding: "3px 10px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 13, fontWeight: 800 }}>{e.l}</span>
                       {pedidoEstado && (
-                        <span style={{ alignSelf:"flex-start", padding:"3px 10px", borderRadius:20, color:pedidoEstado.c, background:`${pedidoEstado.c}18`, border:`1px solid ${pedidoEstado.c}30`, fontSize:11, fontWeight:800 }}>
+                        <span style={{ alignSelf:"flex-start", padding:"3px 10px", borderRadius:20, color:pedidoEstado.c, background:`${pedidoEstado.c}18`, border:`1px solid ${pedidoEstado.c}30`, fontSize:13, fontWeight:800 }}>
                           Viaje: {pedidoEstado.l}
                         </span>
                       )}
@@ -1320,12 +1242,12 @@ export default function PortalClientes() {
                   {s.importe_contraoferta !== null && s.importe_contraoferta !== undefined && (
                     <div style={{ marginTop:10, padding:"10px 12px", borderRadius:8, background:"rgba(245,158,11,.08)", border:"1px solid rgba(245,158,11,.25)" }}>
                       <div style={{ fontSize:12, fontWeight:900, color:"var(--text)" }}>
-                        Precio propuesto por trafico: {Number(s.importe_contraoferta).toLocaleString("es-ES", { minimumFractionDigits:2, maximumFractionDigits:2 })} EUR
+                        Precio propuesto por tráfico: {Number(s.importe_contraoferta).toLocaleString("es-ES", { minimumFractionDigits:2, maximumFractionDigits:2 })} EUR
                       </div>
                       <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>
                         {s.decision_precio === "aceptada" && "Has aceptado este precio."}
-                        {s.decision_precio === "rechazada" && "Has rechazado este precio. Trafico revisara la solicitud."}
-                        {(!s.decision_precio || s.decision_precio === "pendiente") && "Revisa la contraoferta antes de que trafico convierta la solicitud en pedido."}
+                        {s.decision_precio === "rechazada" && "Has rechazado este precio. Tráfico revisara la solicitud."}
+                        {(!s.decision_precio || s.decision_precio === "pendiente") && "Revisa la contraoferta antes de que tráfico convierta la solicitud en pedido."}
                       </div>
                       {(!s.decision_precio || s.decision_precio === "pendiente") && (
                         <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:9 }}>
@@ -1346,9 +1268,9 @@ export default function PortalClientes() {
                   )}
                   {(s.chofer_nombre || s.chofer_dni || s.chofer_telefono) && (
                     <div style={{ marginTop:8, padding:"10px 12px", borderRadius:8, background:"rgba(59,130,246,.07)", border:"1px solid rgba(59,130,246,.18)", fontSize:12, color:"var(--text3)", display:"flex", gap:12, flexWrap:"wrap" }}>
-                      <span>Chofer: <strong style={{ color:"var(--text)" }}>{s.chofer_nombre || "Asignado"}</strong></span>
+                      <span>Chófer: <strong style={{ color:"var(--text)" }}>{s.chofer_nombre || "Asignado"}</strong></span>
                       {s.chofer_dni && <span>DNI: <strong style={{ color:"var(--text)" }}>{s.chofer_dni}</strong></span>}
-                      {s.chofer_telefono && <span>Telefono: <strong style={{ color:"var(--text)" }}>{s.chofer_telefono}</strong></span>}
+                      {s.chofer_telefono && <span>Teléfono: <strong style={{ color:"var(--text)" }}>{s.chofer_telefono}</strong></span>}
                     </div>
                   )}
                   {s.respuesta && <div style={{ marginTop: 8, fontSize: 12, color: "var(--text3)" }}>{s.respuesta}</div>}
@@ -1360,7 +1282,7 @@ export default function PortalClientes() {
                       <div style={{ marginTop: 4, fontSize: 12, color: "var(--text4)" }}>
                         {s.decision_cliente === "aceptada" && "Ya has aceptado esta propuesta."}
                         {s.decision_cliente === "rechazada" && "Has rechazado esta propuesta. La solicitud vuelve a quedar pendiente."}
-                        {(!s.decision_cliente || s.decision_cliente === "pendiente") && "Trafico ha propuesto una nueva fecha. Acepta o rechaza para que puedan planificar el viaje."}
+                        {(!s.decision_cliente || s.decision_cliente === "pendiente") && "Tráfico ha propuesto una nueva fecha. Acepta o rechaza para que puedan planificar el viaje."}
                       </div>
                       {(!s.decision_cliente || s.decision_cliente === "pendiente") && (
                         <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
@@ -1433,11 +1355,11 @@ export default function PortalClientes() {
                           return (
                             <div key={ev.id} style={{ display: "flex", justifyContent: mio ? "flex-end" : "flex-start", padding: "5px 0" }}>
                               <div style={{ maxWidth: "80%", padding: "8px 11px", borderRadius: 10, background: mio ? "var(--accent-a12)" : "var(--bg2)", border: `1px solid ${mio ? "var(--accent-a30)" : "var(--border2)"}` }}>
-                                <div style={{ fontSize: 10, fontWeight: 900, color: mio ? "var(--accent)" : "var(--text4)", marginBottom: 2 }}>
-                                  {mio ? "Tu" : "Trafico"}
+                                <div style={{ fontSize: 12, fontWeight: 900, color: mio ? "var(--accent)" : "var(--text4)", marginBottom: 2 }}>
+                                  {mio ? "Tu" : "Tráfico"}
                                 </div>
                                 <div style={{ fontSize: 12.5, color: "var(--text)", whiteSpace: "pre-wrap" }}>{ev.detalle?.mensaje || ""}</div>
-                                <div style={{ fontSize: 10, color: "var(--text5)", marginTop: 3, textAlign: "right" }}>
+                                <div style={{ fontSize: 12, color: "var(--text5)", marginTop: 3, textAlign: "right" }}>
                                   {ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : ""}
                                 </div>
                               </div>
@@ -1446,7 +1368,7 @@ export default function PortalClientes() {
                         }
                         return (
                           <div key={ev.id} style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, padding: "7px 0", borderBottom: "1px solid var(--border2)" }}>
-                            <div style={{ fontSize: 11, color: "var(--text5)" }}>{ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : "-"}</div>
+                            <div style={{ fontSize: 13, color: "var(--text5)" }}>{ev.created_at ? new Date(ev.created_at).toLocaleString("es-ES") : "-"}</div>
                             <div>
                               <div style={{ fontSize: 12, fontWeight: 900, color: "var(--text)" }}>{solicitudEventoLabel(ev.tipo)}</div>
                               {solicitudEventoResumen(ev) && <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 2 }}>{solicitudEventoResumen(ev)}</div>}
@@ -1455,11 +1377,11 @@ export default function PortalClientes() {
                         );
                       })}
                       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                        <input
+                        <input aria-label="Escribe un mensaje para tráfico..."
                           value={msgInput[s.id] || ""}
                           onChange={e => setMsgInput(prev => ({ ...prev, [s.id]: e.target.value }))}
                           onKeyDown={e => { if (e.key === "Enter") enviarMensajeCliente(s); }}
-                          placeholder="Escribe un mensaje para trafico..."
+                          placeholder="Escribe un mensaje para tráfico..."
                           style={{ flex: 1, minWidth: 0, background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", borderRadius: 8, padding: "9px 12px", outline: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}
                         />
                         <button onClick={() => enviarMensajeCliente(s)} disabled={enviandoMsg === s.id} style={{ ...S.btn, background: "var(--accent)", color: "#fff", borderColor: "var(--accent)", opacity: enviandoMsg === s.id ? .55 : 1 }}>
@@ -1473,7 +1395,8 @@ export default function PortalClientes() {
             })}
           </div>
         )}
-      </div>
+        {tab === "ayuda" && <PortalHelp empresa={empresa}/>}
+      </main>
       {facturaSel && <FacturaPortalModal factura={facturaSel} onClose={() => setFacturaSel(null)} empresa={empresa} />}
       {solicitudEditando && (
         <PortalSolicitudEditModal
@@ -1493,7 +1416,7 @@ export default function PortalClientes() {
 function Mini({ label, value }) {
   return (
     <div style={{ background: "var(--bg3)", border: "1px solid var(--border2)", borderRadius: 8, padding: "8px 10px" }}>
-      <div style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", fontWeight: 800 }}>{label}</div>
+      <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", fontWeight: 800 }}>{label}</div>
       <div style={{ marginTop: 2, color: "var(--text)", fontSize: 12, fontWeight: 700 }}>{value || "-"}</div>
     </div>
   );
@@ -1545,11 +1468,11 @@ function FacturaPortalModal({ factura, onClose, empresa }) {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+    <div role="dialog" aria-modal="true" aria-label="Detalle de factura" className="portal-overlay" style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
       <div style={{ width: "min(880px,96vw)", maxHeight: "92vh", overflow: "auto", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 20px 60px rgba(0,0,0,.28)" }}>
         <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
           <div>
-            <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 900, color: "var(--text)", fontSize: 18 }}>Factura {factura.numero}</div>
+            <div style={{ fontFamily: "'DM Sans',sans-serif", fontWeight: 900, color: "var(--text)", fontSize: 18 }}>Factura {factura.numero}</div>
             <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>{dateEs(factura.fecha)} - Vence {dateEs(factura.fecha_vencimiento)}</div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -1564,7 +1487,7 @@ function FacturaPortalModal({ factura, onClose, empresa }) {
             </div>
           )}
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Concepto", "Cantidad", "Precio", "Importe"].map(h => <th key={h} style={{ textAlign: h === "Concepto" ? "left" : "right", padding: "8px 10px", color: "var(--text5)", fontSize: 10, textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Concepto", "Cantidad", "Precio", "Importe"].map(h => <th key={h} style={{ textAlign: h === "Concepto" ? "left" : "right", padding: "8px 10px", color: "var(--text5)", fontSize: 12, textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>{h}</th>)}</tr></thead>
             <tbody>
               {lineas.map(l => (
                 <tr key={l.id || l.concepto}>
@@ -1594,7 +1517,7 @@ function FacturaPortalModal({ factura, onClose, empresa }) {
           {factura.forma_pago && <div style={{ marginTop: 14, fontSize: 12, color: "var(--text4)" }}>Forma de pago: <strong>{factura.forma_pago}</strong></div>}
           {documentos.length > 0 && (
             <div style={{ marginTop: 18, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 900, textTransform: "uppercase", color: "var(--text5)", marginBottom: 8 }}>Documentos vinculados</div>
+              <div style={{ fontSize: 13, fontWeight: 900, textTransform: "uppercase", color: "var(--text5)", marginBottom: 8 }}>Documentos vinculados</div>
               {documentos.map(doc => (
                 <button key={doc.id} onClick={() => downloadDoc(doc)} style={{ marginRight: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 7, border: "1px solid var(--border2)", background: "var(--bg3)", color: "var(--text)", fontWeight: 800, cursor: "pointer" }}>
                   Descargar {doc.nombre || "documento"}
@@ -1604,7 +1527,7 @@ function FacturaPortalModal({ factura, onClose, empresa }) {
           )}
           {albaranes.length > 0 && (
             <div style={{ marginTop: 18, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 900, textTransform: "uppercase", color: "var(--text5)", marginBottom: 8 }}>Albaranes de viajes incluidos</div>
+              <div style={{ fontSize: 13, fontWeight: 900, textTransform: "uppercase", color: "var(--text5)", marginBottom: 8 }}>Albaranes de viajes incluidos</div>
               {albaranes.map(doc => (
                 <button key={`${doc.pedido_id}-${doc.id}`} onClick={() => downloadDoc(doc)} style={{ marginRight: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 7, border: "1px solid rgba(16,185,129,.25)", background: "rgba(16,185,129,.10)", color: "#10b981", fontWeight: 800, cursor: "pointer" }}>
                   {doc.pedido_numero ? `${doc.pedido_numero}: ` : ""}{doc.nombre || "albaran"}
@@ -1647,16 +1570,16 @@ function solicitudToPortalForm(s = {}) {
 function PortalSolicitudEditModal({ solicitud, onClose, onDone }) {
   const limitada = !!solicitud?.pedido_id;
   return (
-    <div style={{ position:"fixed", inset:0, background:"rgba(15,23,42,.45)", zIndex:3000, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"24px 14px", overflow:"auto" }}>
+    <div role="dialog" aria-modal="true" aria-label="Editar solicitud" className="portal-overlay" style={{ position:"fixed", inset:0, background:"rgba(15,23,42,.45)", zIndex:3000, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"24px 14px", overflow:"auto" }}>
       <div style={{ width:"min(980px,100%)", background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, boxShadow:"0 24px 70px rgba(0,0,0,.28)", padding:16 }}>
         <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"center", marginBottom:10 }}>
           <div>
             <div style={{ fontSize:18, fontWeight:900, color:"var(--text)" }}>Editar solicitud</div>
             <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>
-              {limitada ? "El pedido ya esta creado: solo puedes corregir referencia, mercancia, peso, bultos y notas." : "Puedes corregir los datos mientras la solicitud no se haya convertido en pedido."}
+              {limitada ? "El pedido ya esta creado: solo puedes corregir referencia, mercancía, peso, bultos y notas." : "Puedes corregir los datos mientras la solicitud no se haya convertido en pedido."}
             </div>
           </div>
-          <button type="button" onClick={onClose} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text)", fontWeight:900, cursor:"pointer" }}>X</button>
+          <button type="button" onClick={onClose} aria-label="Cerrar edición" style={{ padding:"8px 12px", borderRadius:8, border:"1px solid var(--border2)", background:"var(--bg3)", color:"var(--text)", fontWeight:900, cursor:"pointer" }}>X</button>
         </div>
         <SolicitudServicio initial={solicitud} onDone={onDone} setTab={() => {}} onCancel={onClose} limitedEdit={limitada} />
       </div>
@@ -1674,7 +1597,7 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
   const [form, setForm] = useState(() => solicitudToPortalForm(initial || {}));
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
   const inp = { background: "var(--bg4)", border: "1px solid var(--border2)", color: "var(--text)", padding: "9px 12px", borderRadius: 8, fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
-  const lbl = { display: "block", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", margin: "12px 0 4px" };
+  const lbl = { display: "block", fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text5)", margin: "12px 0 4px" };
 
   const cargarPuntos = useCallback(async () => {
     setPuntosLoading(true);
@@ -1770,13 +1693,13 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
         if (subidos) notify(`${subidos} orden(es) de carga adjuntada(s).`, "success");
       }
       if (isEditing) {
-        notify("Solicitud actualizada. Trafico vera los cambios.", "success");
+        notify("Solicitud actualizada. Tráfico vera los cambios.", "success");
       } else if (res?.duplicada) {
         notify("Ya existe una solicitud pendiente similar. La hemos abierto como referencia.", "warning");
       } else if (res?.pedido_confirmado_existente) {
         notify(`Ya hay un pedido confirmado${res?.pedido_numero ? ` (${res.pedido_numero})` : ""}. Trafico revisara la nueva orden o cambios enviados.`, "warning", 7000);
       } else {
-        notify("Solicitud enviada. Trafico la revisara y la convertira en pedido.", "success");
+        notify("Solicitud enviada. Tráfico la revisara y la convertira en pedido.", "success");
       }
       if (!isEditing) setForm(solicitudToPortalForm({}));
       setOrdenesCarga([]);
@@ -1790,9 +1713,9 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
   }
 
   return (
-    <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 18 }}>
+    <div className="portal-form portal-panel" style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 18 }}>
       <div style={{ fontWeight: 900, color: "var(--text)", fontSize: 16 }}>{isEditing ? "Actualizar solicitud" : "Solicitar nuevo servicio"}</div>
-      <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 4 }}>{limitedEdit ? "Solo se actualizan datos informativos. La ruta, fechas, precio y estado del pedido no cambian." : isEditing ? "Los cambios quedaran registrados y visibles para trafico." : "La solicitud queda vinculada solo a tu empresa transportista y a tu ficha de cliente."}</div>
+      <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 4 }}>{limitedEdit ? "Solo se actualizan datos informativos. La ruta, fechas, precio y estado del pedido no cambian." : isEditing ? "Los cambios quedarán registrados y visibles para tráfico." : "La solicitud queda vinculada solo a tu empresa transportista y a tu ficha de cliente."}</div>
       {puntosLoading && <div style={{ marginTop:10, fontSize:12, color:"var(--text4)" }}>Cargando puntos guardados...</div>}
       {puntosError && (
         <div style={{ marginTop:10, display:"flex", gap:10, alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", padding:"9px 11px", border:"1px solid rgba(239,68,68,.28)", borderRadius:8, background:"rgba(239,68,68,.07)", color:"#ef4444", fontSize:12 }}>
@@ -1801,63 +1724,63 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
         </div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: "0 14px", marginTop: 8 }}>
-        <div><label style={lbl}>Referencia cliente</label><input style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Pedido, OC, referencia interna..." /></div>
-        <div><label style={lbl}>Mercancia</label><input style={inp} value={form.mercancia} onChange={f("mercancia")} placeholder="Tipo de mercancia" /></div>
+        <div><label style={lbl}>Referencia cliente</label><input aria-label="Referencia cliente" style={inp} value={form.referencia_cliente} onChange={f("referencia_cliente")} placeholder="Pedido, OC, referencia interna..." /></div>
+        <div><label style={lbl}>Mercancía</label><input aria-label="Mercancía" style={inp} value={form.mercancia} onChange={f("mercancia")} placeholder="Tipo de mercancía" /></div>
         {!limitedEdit && <div>
           <label style={lbl}>Origen *</label>
-          <input style={inp} value={form.origen} onChange={event=>setForm(prev=>({...prev,origen:event.target.value,origen_punto_id:""}))} placeholder="Poblacion o direccion de carga" />
+          <input aria-label="Origen *" style={inp} value={form.origen} onChange={event=>setForm(prev=>({...prev,origen:event.target.value,origen_punto_id:""}))} placeholder="Población o dirección de carga" />
           <PortalPointPicker tipo="carga" points={puntos} selectedId={form.origen_punto_id} onSelect={point=>selectPoint("carga", point)} onCreated={addPoint} />
         </div>}
         {!limitedEdit && <div>
           <label style={lbl}>Destino *</label>
-          <input style={inp} value={form.destino} onChange={event=>setForm(prev=>({...prev,destino:event.target.value,destino_punto_id:""}))} placeholder="Poblacion de descarga" />
+          <input aria-label="Destino *" style={inp} value={form.destino} onChange={event=>setForm(prev=>({...prev,destino:event.target.value,destino_punto_id:""}))} placeholder="Población de descarga" />
           <PortalPointPicker tipo="descarga" points={puntos} selectedId={form.destino_punto_id} onSelect={point=>selectPoint("descarga", point)} onCreated={addPoint} />
         </div>}
-        {!limitedEdit && <div><label style={lbl}>Fecha carga</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_carga} onChange={f("fecha_carga")} /></div>}
-        {!limitedEdit && <div><label style={lbl}>Hora carga</label><input style={inp} value={form.hora_carga} onChange={f("hora_carga")} placeholder="08:00 / Manana / Cita previa" /></div>}
-        {!limitedEdit && <div><label style={lbl}>Fecha descarga</label><input type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")} /></div>}
-        {!limitedEdit && <div><label style={lbl}>Hora descarga</label><input style={inp} value={form.hora_descarga} onChange={f("hora_descarga")} placeholder="16:00 / Tarde / Cita previa" /></div>}
-        <div><label style={lbl}>Peso kg</label><input type="number" style={inp} value={form.peso_kg} onChange={f("peso_kg")} /></div>
-        <div><label style={lbl}>Bultos / palets</label><input type="number" min="0" step="1" style={inp} value={form.bultos} onChange={e=>setForm(p=>({...p,bultos:Number(e.target.value) < 0 ? "" : e.target.value}))} /></div>
-        {!limitedEdit && <div><label style={lbl}>Numero de viajes</label><input type="number" min="1" max="20" step="1" style={inp} value={form.viajes} onChange={e=>setForm(p=>({...p, viajes: Math.max(1, Math.min(20, Number(e.target.value)||1))}))} /><div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>Cuantos viajes/camiones necesitas. Al aceptarse se crearan ese numero de pedidos.</div></div>}
+        {!limitedEdit && <div><label style={lbl}>Fecha carga</label><input aria-label="Fecha carga" type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_carga} onChange={f("fecha_carga")} /></div>}
+        {!limitedEdit && <div><label style={lbl}>Hora carga</label><input aria-label="Hora carga" style={inp} value={form.hora_carga} onChange={f("hora_carga")} placeholder="08:00 / Mañana / Cita previa" /></div>}
+        {!limitedEdit && <div><label style={lbl}>Fecha descarga</label><input aria-label="Fecha descarga" type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")} /></div>}
+        {!limitedEdit && <div><label style={lbl}>Hora descarga</label><input aria-label="Hora descarga" style={inp} value={form.hora_descarga} onChange={f("hora_descarga")} placeholder="16:00 / Tarde / Cita previa" /></div>}
+        <div><label style={lbl}>Peso kg</label><input aria-label="Peso kg" type="number" style={inp} value={form.peso_kg} onChange={f("peso_kg")} /></div>
+        <div><label style={lbl}>Bultos / palets</label><input aria-label="Bultos / palets" type="number" min="0" step="1" style={inp} value={form.bultos} onChange={e=>setForm(p=>({...p,bultos:Number(e.target.value) < 0 ? "" : e.target.value}))} /></div>
+        {!limitedEdit && <div><label style={lbl}>Número de viajes</label><input aria-label="Número de viajes" type="number" min="1" max="20" step="1" style={inp} value={form.viajes} onChange={e=>setForm(p=>({...p, viajes: Math.max(1, Math.min(20, Number(e.target.value)||1))}))} /><div style={{fontSize:13,color:"var(--text5)",marginTop:2}}>Cuántos viajes/camiones necesitas. Al aceptarse se crearán ese número de pedidos.</div></div>}
         {!limitedEdit && <div>
           <label style={lbl}>Tipo de precio</label>
-          <select style={inp} value={form.tipo_precio} onChange={e=>setForm(p=>({...p,tipo_precio:e.target.value,precio_unitario:"",cantidad:"",importe:"",importe_minimo:"",minimo_unidades:""}))}>
+          <select aria-label="Tipo de precio" style={inp} value={form.tipo_precio} onChange={e=>setForm(p=>({...p,tipo_precio:e.target.value,precio_unitario:"",cantidad:"",importe:"",importe_minimo:"",minimo_unidades:""}))}>
             {TIPOS_PRECIO.map(tipo => <option key={tipo.v} value={tipo.v}>{tipo.l}</option>)}
           </select>
         </div>}
         {!limitedEdit && <div>
           <label style={lbl}>{form.tipo_precio === "viaje" ? "Precio viaje si lo conoces (EUR)" : form.tipo_precio === "kg" ? "Precio unitario (EUR/100kg)" : form.tipo_precio === "tonelada" ? "Precio unitario (EUR/tn)" : form.tipo_precio === "km" ? "Precio unitario (EUR/km)" : form.tipo_precio === "palet" ? "Precio unitario (EUR/palet)" : "Precio unitario (EUR/h)"}</label>
-          <input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.precio_unitario} onChange={e=>setForm(p=>({...p,precio_unitario:e.target.value,importe:p.tipo_precio === "viaje" ? e.target.value : p.importe}))} placeholder="Opcional" />
+          <input aria-label={form.tipo_precio === "viaje" ? "Precio viaje si lo conoces (EUR)" : form.tipo_precio === "kg" ? "Precio unitario (EUR/100kg)" : form.tipo_precio === "tonelada" ? "Precio unitario (EUR/tn)" : form.tipo_precio === "km" ? "Precio unitario (EUR/km)" : form.tipo_precio === "palet" ? "Precio unitario (EUR/palet)" : "Precio unitario (EUR/h)"} type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.precio_unitario} onChange={e=>setForm(p=>({...p,precio_unitario:e.target.value,importe:p.tipo_precio === "viaje" ? e.target.value : p.importe}))} placeholder="Opcional" />
         </div>}
         {!limitedEdit && form.tipo_precio !== "viaje" && (
           <div>
-            <label style={lbl}>{form.tipo_precio === "kg" ? "Peso facturable (kg)" : form.tipo_precio === "tonelada" ? "Toneladas" : form.tipo_precio === "km" ? "Kilometros" : form.tipo_precio === "palet" ? "Palets" : "Horas"}</label>
-            <input type="number" min="0" step="0.001" inputMode="decimal" style={inp} value={form.cantidad} onChange={f("cantidad")} placeholder="Opcional" />
+            <label style={lbl}>{form.tipo_precio === "kg" ? "Peso facturable (kg)" : form.tipo_precio === "tonelada" ? "Toneladas" : form.tipo_precio === "km" ? "Kilómetros" : form.tipo_precio === "palet" ? "Palets" : "Horas"}</label>
+            <input aria-label={form.tipo_precio === "kg" ? "Peso facturable (kg)" : form.tipo_precio === "tonelada" ? "Toneladas" : form.tipo_precio === "km" ? "Kilometros" : form.tipo_precio === "palet" ? "Palets" : "Horas"} type="number" min="0" step="0.001" inputMode="decimal" style={inp} value={form.cantidad} onChange={f("cantidad")} placeholder="Opcional" />
           </div>
         )}
         {!limitedEdit && <div>
-          <label style={lbl}>{form.tipo_precio === "viaje" ? "Minimo EUR" : "Minimo facturable"}</label>
-          <input type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.tipo_precio === "viaje" ? form.importe_minimo : form.minimo_unidades} onChange={e=>setForm(p=>({...p,[p.tipo_precio === "viaje" ? "importe_minimo" : "minimo_unidades"]:e.target.value}))} placeholder="Opcional" />
+          <label style={lbl}>{form.tipo_precio === "viaje" ? "Mínimo EUR" : "Mínimo facturable"}</label>
+          <input aria-label={form.tipo_precio === "viaje" ? "Minimo EUR" : "Minimo facturable"} type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.tipo_precio === "viaje" ? form.importe_minimo : form.minimo_unidades} onChange={e=>setForm(p=>({...p,[p.tipo_precio === "viaje" ? "importe_minimo" : "minimo_unidades"]:e.target.value}))} placeholder="Opcional" />
         </div>}
-        {!limitedEdit && <div><label style={lbl}>Km ruta estimados</label><input type="number" min="0" step="0.1" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Opcional" /></div>}
-        <div style={{ gridColumn: "1/-1" }}><label style={lbl}>Notas</label><textarea style={{ ...inp, minHeight: 86, resize: "vertical" }} value={form.notas} onChange={f("notas")} placeholder="Instrucciones de carga, contacto, horarios, observaciones..." /></div>
+        {!limitedEdit && <div><label style={lbl}>Km ruta estimados</label><input aria-label="Km ruta estimados" type="number" min="0" step="0.1" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Opcional" /></div>}
+        <div style={{ gridColumn: "1/-1" }}><label style={lbl}>Notas</label><textarea aria-label="Notas" style={{ ...inp, minHeight: 86, resize: "vertical" }} value={form.notas} onChange={f("notas")} placeholder="Instrucciones de carga, contacto, horarios, observaciones..." /></div>
         {!limitedEdit && <div style={{ gridColumn: "1/-1" }}>
-          <label style={lbl}>Ordenes de carga</label>
-          <input
+          <label style={lbl}>Órdenes de carga</label>
+          <input aria-label="Órdenes de carga"
             type="file"
             multiple
             accept=".pdf,image/*,.doc,.docx"
             style={inp}
             onChange={event => setOrdenesCarga(Array.from(event.target.files || []))}
           />
-          <div style={{ fontSize: 11, color: "var(--text5)", marginTop: 5 }}>
-            Puedes adjuntar PDF, imagen o documento. Se enviaran junto con la solicitud y quedaran en el pedido cuando trafico la acepte.
+          <div style={{ fontSize: 13, color: "var(--text5)", marginTop: 5 }}>
+            Puedes adjuntar PDF, imagen o documento. Se enviarán junto con la solicitud y quedarán en el pedido cuando tráfico la acepte.
           </div>
           {ordenesCarga.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
               {ordenesCarga.map((file, index) => (
-                <span key={`${file.name}-${index}`} style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid var(--border2)", color: "var(--text3)", fontSize: 11 }}>
+                <span key={`${file.name}-${index}`} style={{ padding: "4px 8px", borderRadius: 999, border: "1px solid var(--border2)", color: "var(--text3)", fontSize: 13 }}>
                   {file.name}
                 </span>
               ))}

@@ -179,18 +179,9 @@ function currentWeekRangeLocal(now = new Date()) {
   };
 }
 
-// Vista por defecto de Trafico: desde el inicio del mes actual (para conservar el
-// contexto del mes en curso) y SIN cortar en fin de mes, para que los viajes
-// proximos SIEMPRE se muestren aunque caigan en meses siguientes. Ventana rodante
-// de ~12 meses hacia delante (suficiente para cualquier planificacion real).
+// Sin filtros, la agenda empieza hoy y no limita las fechas futuras.
 function defaultTraficoRangeLocal(now = new Date()) {
-  const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  const hasta = new Date(now.getFullYear() + 1, now.getMonth() + 1, 0);
-  return {
-    desde: formatDateInputLocal(first),
-    hasta: formatDateInputLocal(hasta),
-    label: first.toLocaleDateString("es-ES", { month: "long", year: "numeric" }),
-  };
+  return { desde: formatDateInputLocal(now), label: "Hoy" };
 }
 
 function addDaysLocal(dateIso, days) {
@@ -10278,7 +10269,8 @@ export default function Pedidos() {
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
   const _rangoMesActual = defaultTraficoRangeLocal();
   const filtroPeriodoActivo = filtroFechasCustom || Boolean(filtroMes);
-  const vistaMesActualPorDefecto = !filtroPeriodoActivo && !mostrarHistorico;
+  const hayFiltrosPedidos = Boolean(debouncedQ.trim() || filtroEst !== "todos" || filtroCliente || filtroSinAsignacion || filtroPendienteCompletar || filtroColaborador || soloCriticos);
+  const vistaMesActualPorDefecto = !filtroPeriodoActivo && !mostrarHistorico && !hayFiltrosPedidos;
 
   useEffect(() => {
     savePedidosCollapsedGroups(collapsedClientes);
@@ -10451,7 +10443,7 @@ export default function Pedidos() {
     await cargar();
   }
   // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, filtroSinAsignacion, filtroPendienteCompletar, filtroColaborador]);
+  useEffect(() => { setPage(1); }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, filtroSinAsignacion, filtroPendienteCompletar, filtroColaborador, soloCriticos, mostrarHistorico]);
   useEffect(() => { setSelectedPedidoIds([]); }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, filtroSinAsignacion, filtroPendienteCompletar, filtroColaborador, soloCriticos, groupByCliente]);
   useEffect(() => {
     if (groupByClienteLoadedKeyRef.current === groupByClienteKey) return;
@@ -10517,11 +10509,8 @@ export default function Pedidos() {
       const rangoDefectoCarga = defaultTraficoRangeLocal();
       if (aplicarRangoFechas && filtroDesde) params.desde = filtroDesde;
       if (aplicarRangoFechas && filtroHasta) params.hasta = filtroHasta;
-      if (!aplicarRangoFechas && !mostrarHistorico) {
-        // Mes actual como contexto + todos los viajes siguientes (no se corta en
-        // fin de mes, para que "los proximos" salgan siempre).
+      if (!aplicarRangoFechas && !mostrarHistorico && !hayFiltrosPedidos) {
         params.desde = rangoDefectoCarga.desde;
-        params.hasta = rangoDefectoCarga.hasta;
       }
       const cargarPeriodoCompleto = !debouncedQ || groupByCliente || !filtroFechasCustom || Boolean(filtroMes);
       const effectivePage = cargarPeriodoCompleto ? 1 : page;
@@ -10590,7 +10579,7 @@ export default function Pedidos() {
         if (!silent) setLoadError(e.message || "No se pudieron cargar los viajes.");
       }
     finally { if (!listadoCargado && !silent) setLoading(false); }
-  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente, mostrarHistorico]);
+  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente, mostrarHistorico, hayFiltrosPedidos]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {

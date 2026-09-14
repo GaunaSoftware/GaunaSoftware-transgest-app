@@ -40,9 +40,18 @@ function isSuperadminOnlyRequest(req) {
 function isSupportOrSuperadminRequest(req) {
   const method = String(req.method || "GET").toUpperCase();
   const path = String(req.path || "/");
-  if (method === "POST" && /^\/password-reset-requests\/[^/]+\/(?:reset|descartar)\/?$/.test(path)) return true;
+
+  // Seguridad, soporte tecnico e informacion operativa transversal no forman
+  // parte del rol de facturacion. Las operaciones superadmin-only se filtran
+  // antes, por lo que soporte tampoco hereda secretos/configuracion global.
+  if (path === "/password-reset-requests" || path.startsWith("/password-reset-requests/")) return true;
   if (method === "POST" && /^\/empresas\/[^/]+\/(?:reset-password|reinvitar|impersonar)\/?$/.test(path)) return true;
   if (path === "/backups" || path.startsWith("/backups/")) return true;
+  if (path === "/correo/status" || path === "/correo/test") return true;
+  if (path === "/auditoria" || path.startsWith("/auditoria/")) return true;
+  if (path === "/salud" || path.startsWith("/salud/")) return true;
+  if (path === "/integraciones" || path.startsWith("/integraciones/")) return true;
+  if (path === "/config/ia-key") return true;
   return false;
 }
 

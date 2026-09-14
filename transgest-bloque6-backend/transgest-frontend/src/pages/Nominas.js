@@ -1,3 +1,4 @@
+import { PersonnelHeader, PersonnelMetrics } from "./personnel/PersonnelWorkspace";
 import { useState, useEffect } from "react";
 import { getChoferes, getVehiculos, getPedidos, getFacturas, getNominasEmitidas, crearNominaEmitida, getNochesVehiculo, getChoferJornadas } from "../services/api";
 import { getEmpresaPerfilSync } from "../hooks/useEmpresaPerfil";
@@ -344,16 +345,16 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
   }
 
   const inp = {background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 9px",borderRadius:6,fontFamily:"'DM Sans',sans-serif",fontSize:12,outline:"none",width:"100%",boxSizing:"border-box",textAlign:"right"};
-  const lbl = {display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2};
+  const lbl = {display:"block",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2};
 
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="personnel-overlay personnel-responsive-flex" role="dialog" aria-modal="true" aria-label="Detalle y edición" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:12}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:22,width:"min(700px,96vw)",maxHeight:"95vh",overflowY:"auto"}}>
 
         {/* Header */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+        <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
           <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"var(--text)"}}>
+            <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:900,fontSize:16,color:"var(--text)"}}>
               Nómina — {chofer.nombre} {chofer.apellidos||""}
             </div>
             <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
@@ -366,28 +367,28 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
         </div>
 
         <div style={{background:avisosJornada.length?"rgba(245,158,11,.10)":"rgba(16,185,129,.08)",border:`1px solid ${avisosJornada.length?"rgba(245,158,11,.28)":"rgba(16,185,129,.22)"}`,borderRadius:8,padding:"10px 12px",marginBottom:14}}>
-          <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+          <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}>
             <div style={{fontSize:12,fontWeight:800,color:"var(--text)"}}>App chofer / hoja de ruta</div>
-            <div style={{fontSize:11,color:"var(--text4)"}}>
+            <div style={{fontSize:12,color:"var(--text4)"}}>
               {jornadasPeriodo.length} jornadas · {jornadasCerradas.length} cerradas · {fmt2(kmJornadas)} km · {nochesApp.length} noches app · {nochesLista.length} noches liquidables
             </div>
           </div>
-          <div style={{fontSize:11,color:"var(--text4)",marginTop:6,lineHeight:1.45}}>
+          <div style={{fontSize:12,color:"var(--text4)",marginTop:6,lineHeight:1.45}}>
             Se cruza con los viajes del periodo. Si faltan datos de la app, revisa la hoja de ruta y completa manualmente las noches, kilometros u horas antes de emitir.
           </div>
           {avisosJornada.length>0&&(
             <div style={{marginTop:8,display:"grid",gap:5}}>
               {avisosJornada.map((a,i)=>(
-                <div key={i} style={{fontSize:11,fontWeight:700,color:"#f59e0b"}}>{a}</div>
+                <div key={i} style={{fontSize:12,fontWeight:700,color:"#f59e0b"}}>{a}</div>
               ))}
             </div>
           )}
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+        <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
           {/* Devengos */}
           <div>
-            <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#10b981",marginBottom:8,borderBottom:"1px solid rgba(16,185,129,.2)",paddingBottom:4}}>
+            <div className="personnel-subtabs" style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#10b981",marginBottom:8,borderBottom:"1px solid rgba(16,185,129,.2)",paddingBottom:4}}>
               DEVENGOS
             </div>
             {[
@@ -407,19 +408,19 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
             {/* Pagas extra */}
             <div style={{marginBottom:8,padding:"8px 10px",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7}}>
               <label style={lbl}>Pagas extra (importe anual, €)</label>
-              <input type="number" step="0.01" style={inp} value={form.pagas_extra} onChange={f("pagas_extra")} onFocus={e=>e.target.select()} placeholder="p. ej. dos pagas: total del año"/>
+              <input aria-label="Pagas extra (importe anual, €)" type="number" step="0.01" style={inp} value={form.pagas_extra} onChange={f("pagas_extra")} onFocus={e=>e.target.select()} placeholder="p. ej. dos pagas: total del año"/>
               <label style={{display:"flex",alignItems:"center",gap:7,marginTop:8,cursor:"pointer",fontSize:12,fontWeight:600,color:"var(--text4)"}}>
                 <input type="checkbox" checked={!!form.pagas_extra_prorratear} onChange={e=>setForm(p=>({...p,pagas_extra_prorratear:e.target.checked}))} style={{width:16,height:16,cursor:"pointer"}}/>
                 Prorratear en las 12 mensualidades
               </label>
               {form.pagas_extra_prorratear && (
-                <div style={{fontSize:10,color:"var(--text5)",marginTop:4,textAlign:"right"}}>
+                <div style={{fontSize:12,color:"var(--text5)",marginTop:4,textAlign:"right"}}>
                   +{fmt2(pagaExtraProrrateo)} € / mes se suman a devengos
                 </div>
               )}
             </div>
 
-            <div style={{background:"rgba(16,185,129,.1)",border:"1px solid rgba(16,185,129,.2)",borderRadius:7,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
+            <div className="personnel-responsive-flex" style={{background:"rgba(16,185,129,.1)",border:"1px solid rgba(16,185,129,.2)",borderRadius:7,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
               <span style={{fontSize:12,fontWeight:700,color:"var(--text4)"}}>Total devengos</span>
               <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:"#10b981"}}>{fmt2(devengos)} €</span>
             </div>
@@ -427,17 +428,17 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
 
           {/* Deducciones + resultado */}
           <div>
-            <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#ef4444",marginBottom:8,borderBottom:"1px solid rgba(239,68,68,.2)",paddingBottom:4}}>
+            <div className="personnel-subtabs" style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#ef4444",marginBottom:8,borderBottom:"1px solid rgba(239,68,68,.2)",paddingBottom:4}}>
               DEDUCCIONES
             </div>
             <div style={{marginBottom:8}}>
               <label style={lbl}>SS Trabajador ({SS_PCG}% — automático)</label>
-              <div style={{...inp,background:"var(--bg3)",color:"var(--text4)",display:"flex",alignItems:"center",justifyContent:"flex-end"}}>{fmt2(ss_trabajador)} €</div>
+              <div className="personnel-responsive-flex" style={{...inp,background:"var(--bg3)",color:"var(--text4)",display:"flex",alignItems:"center",justifyContent:"flex-end"}}>{fmt2(ss_trabajador)} €</div>
             </div>
             <div style={{marginBottom:8}}>
               <label style={lbl}>IRPF retención (%)</label>
-              <input type="number" step="0.5" min="0" max="47" style={inp} value={form.irpf_pct} onChange={f("irpf_pct")} onFocus={e=>e.target.select()}/>
-              <div style={{fontSize:10,color:"var(--text5)",marginTop:1,textAlign:"right"}}>{fmt2(irpf)} € de retención</div>
+              <input aria-label="IRPF retención (%)" type="number" step="0.5" min="0" max="47" style={inp} value={form.irpf_pct} onChange={f("irpf_pct")} onFocus={e=>e.target.select()}/>
+              <div style={{fontSize:12,color:"var(--text5)",marginTop:1,textAlign:"right"}}>{fmt2(irpf)} € de retención</div>
             </div>
             {[
               ["anticipos",       "Anticipos (€)", f],
@@ -457,7 +458,7 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
                 ["Coste SS empresa ("+SS_EMP+"%)", fmt2(ss_empresa)+" €", "#f97316", false],
                 ["Coste total empresa", fmt2(coste_empresa)+" €", "#ef4444", true],
               ].map(([l,v,c,b])=>(
-                <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderBottom:b?"1px solid rgba(59,130,246,.15)":"none",marginBottom:b?4:0}}>
+                <div className="personnel-responsive-flex personnel-subtabs" key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderBottom:b?"1px solid rgba(59,130,246,.15)":"none",marginBottom:b?4:0}}>
                   <span style={{fontSize:b?13:11,fontWeight:b?700:400,color:"var(--text4)"}}>{l}</span>
                   <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:b?800:600,fontSize:b?16:12,color:c}}>{v}</span>
                 </div>
@@ -466,13 +467,13 @@ function ModalNomina({ chofer, vehiculo, periodo, pedidos, facturas, nochesVehic
 
             <div style={{marginTop:10}}>
               <label style={lbl}>Notas internas</label>
-              <input style={{...inp,textAlign:"left"}} value={form.notas} onChange={fn("notas")}/>
+              <input aria-label="Notas internas" style={{...inp,textAlign:"left"}} value={form.notas} onChange={fn("notas")}/>
             </div>
           </div>
         </div>
 
         {/* Acciones */}
-        <div style={{display:"flex",gap:10,marginTop:16,justifyContent:"flex-end",flexWrap:"wrap"}}>
+        <div className="personnel-responsive-flex" style={{display:"flex",gap:10,marginTop:16,justifyContent:"flex-end",flexWrap:"wrap"}}>
           <button onClick={()=>imprimirNomina(null)} style={{padding:"7px 14px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}}>
             Vista previa PDF
           </button>
@@ -673,21 +674,23 @@ export default function Nominas(){
   const S={
     card:{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"16px 18px",marginBottom:14},
     btn:{padding:"7px 14px",borderRadius:7,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:5},
-    th:{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"},
+    th:{textAlign:"left",padding:"8px 12px",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"},
     td:{padding:"9px 12px",borderBottom:"1px solid var(--border2)",fontSize:12,color:"var(--text2)",verticalAlign:"middle"},
   };
 
   return(
-    <div style={{flex:1, padding:"22px 26px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:900,color:"var(--text)"}}>Nóminas</div>
-        <input type="month" value={periodo} onChange={e=>setPeriodo(e.target.value)}
+    <div className="personnel-page" style={{flex:1, padding:"22px 26px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh"}}>
+      <PersonnelHeader active="nominas"/>
+      <div className="personnel-toolbar" style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:22,fontWeight:900,color:"var(--text)"}}>Nóminas</div>
+        <input aria-label="Período de nóminas" type="month" value={periodo} onChange={e=>setPeriodo(e.target.value)}
           style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none"}}/>
-        <span style={{fontSize:11,color:"var(--text5)"}}>{desde} → {hasta}</span>
+        <span style={{fontSize:12,color:"var(--text5)"}}>{desde} → {hasta}</span>
       </div>
 
+      <PersonnelMetrics items={[["Conductores",loading?"—":resumen.length,"En el período seleccionado"],["Nóminas emitidas",loading?"—":resumen.filter(r=>r.yaEmitida).length,"Registro de emisión"],["Pendientes",loading?"—":resumen.filter(r=>!r.yaEmitida).length,"Por preparar"],["Revisar jornadas",loading?"—":resumen.filter(r=>r.faltanJornadas).length,"Conductores con datos pendientes"]]}/>
       {/* Tabs */}
-      <div style={{display:"flex",gap:2,borderBottom:"1px solid var(--border)",marginBottom:16}}>
+      <div className="personnel-responsive-flex personnel-subtabs" style={{display:"flex",gap:2,borderBottom:"1px solid var(--border)",marginBottom:16}}>
         {[["calcular","Generar nóminas"],["historial","Historial emitidas"],["transparencia","Transparencia salarial"]].map(([id,l])=>(
           <button key={id} onClick={()=>setTab(id)} style={{...S.btn,border:"none",borderRadius:"6px 6px 0 0",borderBottom:`2px solid ${tab===id?"var(--accent)":"transparent"}`,color:tab===id?"var(--accent)":"var(--text4)",background:"transparent",padding:"8px 16px",fontSize:12}}>
             {l}
@@ -696,7 +699,7 @@ export default function Nominas(){
       </div>
 
       {tab==="calcular"&&(
-        <div style={S.card}>
+        <div className="personnel-card" style={S.card}>
           {loading?(
             <div style={{padding:30,textAlign:"center",color:"var(--text5)"}}>Cargando...</div>
           ):resumen.length===0?(
@@ -704,7 +707,7 @@ export default function Nominas(){
               Sin chóferes con configuración de nómina. Ve a Flota → Chóferes → ficha → Salario / Incentivo para configurarlos.
             </div>
           ):(
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead><tr>
                 <th style={S.th}>Chófer</th>
                 <th style={S.th}>Vehículo</th>
@@ -715,7 +718,7 @@ export default function Nominas(){
                 <th style={S.th}>Noches</th>
                 <th style={S.th}>Devengos est.</th>
                 <th style={S.th}>IRPF est.</th>
-                <th style={S.th}>Liquido est.</th>
+                <th style={S.th}>Líquido est.</th>
                 <th style={S.th}>Estado</th>
                 <th style={S.th}></th>
               </tr></thead>
@@ -723,7 +726,7 @@ export default function Nominas(){
                 {resumen.map(r=>(
                   <tr key={r.chofer.id} style={{background:r.yaEmitida?"rgba(16,185,129,.03)":"transparent"}}>
                     <td style={{...S.td,fontWeight:700,color:"var(--text)"}}>{r.chofer.nombre} {r.chofer.apellidos||""}</td>
-                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--accent)"}}>{r.vehiculo?.matricula||"—"}</td>
+                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent)"}}>{r.vehiculo?.matricula||"—"}</td>
                     <td style={{...S.td,textAlign:"right"}}>{r.pedidos}</td>
                     <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:600,color:"#10b981",textAlign:"right"}}>{fmt2(r.ingresos)} €</td>
                     <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",textAlign:"right"}}>{fmt2(r.ext.salario_base||0)} €</td>
@@ -737,36 +740,36 @@ export default function Nominas(){
                       {fmt2(r.liquidoEst)} €
                     </td>
                     <td style={S.td}>
-                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                      <div className="personnel-responsive-flex" style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                         {r.yaEmitida?(
-                          <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.25)"}}>Emitida</span>
+                          <span style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.25)"}}>Emitida</span>
                         ):(
-                          <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:"rgba(251,191,36,.1)",color:"#fbbf24",border:"1px solid rgba(251,191,36,.25)"}}>Pendiente</span>
+                          <span style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"rgba(251,191,36,.1)",color:"#fbbf24",border:"1px solid rgba(251,191,36,.25)"}}>Pendiente</span>
                         )}
                         {r.faltanJornadas&&(
-                          <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:800,background:"rgba(245,158,11,.12)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)"}}>Falta app</span>
+                          <span style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:800,background:"rgba(245,158,11,.12)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)"}}>Falta app</span>
                         )}
                       </div>
                     </td>
                     <td style={S.td}>
                       <button onClick={()=>setModal({chofer:r.chofer,vehiculo:r.vehiculo||null,ultimaNomina:r.ultimaNomina})}
-                        style={{...S.btn,background:r.yaEmitida?"var(--bg4)":"var(--accent)",color:r.yaEmitida?"var(--text3)":"#fff",border:r.yaEmitida?"1px solid var(--border2)":"none",padding:"4px 10px",fontSize:11}}>
+                        style={{...S.btn,background:r.yaEmitida?"var(--bg4)":"var(--accent)",color:r.yaEmitida?"var(--text3)":"#fff",border:r.yaEmitida?"1px solid var(--border2)":"none",padding:"4px 10px",fontSize:12}}>
                         {r.yaEmitida?"Ver / Reimprimir":"Preparar nómina"}
                       </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       )}
 
       {tab==="transparencia"&&(
-        <div style={S.card}>
-          <div style={{display:"flex",justifyContent:"space-between",gap:14,alignItems:"flex-start",marginBottom:14,flexWrap:"wrap"}}>
+        <div className="personnel-card" style={S.card}>
+          <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",gap:14,alignItems:"flex-start",marginBottom:14,flexWrap:"wrap"}}>
             <div>
-              <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)"}}>Diagnostico preparatorio de transparencia retributiva</div>
+              <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:17,fontWeight:900,color:"var(--text)"}}>Diagnostico preparatorio de transparencia retributiva</div>
               <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.5,maxWidth:760,marginTop:5}}>
                 Panel interno para revisar criterios objetivos, detectar diferencias retributivas por categoria comparable y preparar evidencias antes de la transposicion espanola definitiva.
               </div>
@@ -776,14 +779,14 @@ export default function Nominas(){
             </button>
           </div>
 
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:14}}>
+          <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:14}}>
             {[
               ["Categorias analizadas", transparenciaRows.length, "var(--accent)"],
               ["Brechas a revisar", transparenciaAlertas.length, transparenciaAlertas.length?"#f97316":"#10b981"],
               ["Fichas incompletas", transparenciaPendientes.length, transparenciaPendientes.length?"#f59e0b":"#10b981"],
             ].map(([l,v,c])=>(
               <div key={l} style={{background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"12px 14px"}}>
-                <div style={{fontSize:10,textTransform:"uppercase",letterSpacing:".07em",fontWeight:800,color:"var(--text5)"}}>{l}</div>
+                <div style={{fontSize:12,textTransform:"uppercase",letterSpacing:".07em",fontWeight:800,color:"var(--text5)"}}>{l}</div>
                 <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:24,fontWeight:900,color:c,marginTop:4}}>{v}</div>
               </div>
             ))}
@@ -796,7 +799,7 @@ export default function Nominas(){
           {transparenciaRows.length===0?(
             <div style={{padding:28,textAlign:"center",color:"var(--text5)"}}>Sin datos retributivos suficientes para analizar el periodo.</div>
           ):(
-            <table style={{width:"100%",borderCollapse:"collapse",marginBottom:16}}>
+            <div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse",marginBottom:16}}>
               <thead><tr>
                 <th style={S.th}>Categoria</th>
                 <th style={S.th}>Choferes</th>
@@ -824,25 +827,25 @@ export default function Nominas(){
                       {r.brechaGeneroPct===null ? "Sin muestra" : `${fmtPct(r.brechaGeneroPct)}%`}
                     </td>
                     <td style={S.td}>
-                      <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:800,background:r.alerta?"rgba(249,115,22,.12)":"rgba(16,185,129,.12)",color:r.alerta?"#f97316":"#10b981",border:`1px solid ${r.alerta?"rgba(249,115,22,.25)":"rgba(16,185,129,.25)"}`}}>
+                      <span style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:800,background:r.alerta?"rgba(249,115,22,.12)":"rgba(16,185,129,.12)",color:r.alerta?"#f97316":"#10b981",border:`1px solid ${r.alerta?"rgba(249,115,22,.25)":"rgba(16,185,129,.25)"}`}}>
                         {r.alerta?"Revisar":"OK"}
                       </span>
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
 
           <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:8}}>Datos laborales pendientes</div>
           {transparenciaPendientes.length===0?(
             <div style={{fontSize:12,color:"#10b981"}}>Todas las fichas tienen los campos basicos necesarios para este diagnostico.</div>
           ):(
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:8}}>
+            <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:8}}>
               {transparenciaPendientes.slice(0,12).map(x=>(
                 <div key={x.chofer.id} style={{background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.22)",borderRadius:8,padding:"9px 11px"}}>
                   <div style={{fontSize:12,fontWeight:800,color:"var(--text)"}}>{x.chofer.nombre} {x.chofer.apellidos||""}</div>
-                  <div style={{fontSize:11,color:"var(--text4)",marginTop:3}}>{x.missing.join(", ")}</div>
+                  <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>{x.missing.join(", ")}</div>
                 </div>
               ))}
             </div>
@@ -851,17 +854,17 @@ export default function Nominas(){
       )}
 
       {tab==="historial"&&(
-        <div style={S.card}>
+        <div className="personnel-card" style={S.card}>
           {choferes.map(c=>{
             const hist=nominasEmitidas.filter(n=>n.chofer_id===c.id && n.periodo?.startsWith(periodo.slice(0,4)));
             if(hist.length===0) return null;
             return(
               <div key={c.id} style={{marginBottom:16}}>
-                <div style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:8,paddingBottom:6,borderBottom:"1px solid var(--border)"}}>
+                <div className="personnel-subtabs" style={{fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:8,paddingBottom:6,borderBottom:"1px solid var(--border)"}}>
                   {c.nombre} {c.apellidos||""}
                 </div>
                 {hist.map(n=>(
-                  <div key={n.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid var(--border2)"}}>
+                  <div className="personnel-responsive-flex personnel-subtabs" key={n.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid var(--border2)"}}>
                     <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:12,color:"var(--accent)",minWidth:80}}>{n.periodo}</span>
                     <span style={{fontSize:12,color:"var(--text4)"}}>Devengos: <strong>{fmt2(n.devengos)} €</strong></span>
                     <span style={{fontSize:12,color:"#10b981"}}>Líquido: <strong>{fmt2(n.liquido)} €</strong></span>

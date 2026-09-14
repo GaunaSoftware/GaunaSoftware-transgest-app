@@ -1,3 +1,4 @@
+import { PersonnelHeader, RouteSheetsOverview } from "./personnel/PersonnelWorkspace";
 import { getLogoDataUrl } from "../services/logoHelper";
 import { useState, useEffect, useCallback } from "react";
 import { borrarNoche, borrarRepostaje, crearNoche, crearRepostaje, getNominasEmitidas, getChoferes, getChoferConfig, getGasoilConfig, getNochesVehiculo, getPedidosTodos, getRepostajes, getVehiculos, getTallerEstado, setChoferConfig, setGasoilConfig } from "../services/api";
@@ -24,11 +25,11 @@ function precioCombDia(fecha,cfg){ if(!cfg||!cfg.tipo||cfg.tipo==="fijo") return
 const S={
   page:{flex:1,padding:"30px 36px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh",background:"linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%)"},
   card:{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:12,padding:"18px 22px",marginBottom:16,boxShadow:"0 10px 30px rgba(15,23,42,.04)"},
-  th:{textAlign:"left",padding:"13px 16px",fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap",background:"rgba(248,250,252,.86)"},
+  th:{textAlign:"left",padding:"13px 16px",fontSize:12,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap",background:"rgba(248,250,252,.86)"},
   td:{padding:"11px 16px",borderBottom:"1px solid var(--border)",fontSize:12,color:"var(--text2)",verticalAlign:"middle"},
   btn:{padding:"10px 14px",borderRadius:8,border:"1px solid var(--border2)",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:7,background:"var(--bg3)",color:"var(--text3)"},
   inp:{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"11px 13px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"},
-  lbl:{display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10},
+  lbl:{display:"block",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3,marginTop:10},
 };
 
 function RouteSheetIcon({ icon = "truck" }) {
@@ -45,13 +46,13 @@ function RouteKpi({ label, value, unit, color, icon }) {
   const cleanLabel = String(label || "").replace(/â‚¬/g, "EUR").replace(/€/g, "EUR");
   const cleanUnit = String(unit || "").replace(/â‚¬/g, "EUR").replace(/€/g, "EUR");
   return (
-    <div style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,padding:"18px 18px",minHeight:76,display:"flex",alignItems:"center",gap:14,boxShadow:"0 8px 24px rgba(15,23,42,.04)"}}>
+    <div className="personnel-responsive-flex" style={{background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:8,padding:"18px 18px",minHeight:76,display:"flex",alignItems:"center",gap:14,boxShadow:"0 8px 24px rgba(15,23,42,.04)"}}>
       <div style={{color,display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
         <RouteSheetIcon icon={icon} />
       </div>
       <div style={{minWidth:0}}>
-        <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:18,color,lineHeight:1}}>{value} <span style={{fontSize:11}}>{cleanUnit}</span></div>
-        <div style={{fontSize:10,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em",marginTop:8,fontWeight:900}}>{cleanLabel}</div>
+        <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:18,color,lineHeight:1}}>{value} <span style={{fontSize:12}}>{cleanUnit}</span></div>
+        <div style={{fontSize:12,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em",marginTop:8,fontWeight:900}}>{cleanLabel}</div>
       </div>
     </div>
   );
@@ -71,18 +72,18 @@ function ModalGasoil({vehiculo,onClose}){
   function guardar(){
     setGasoilConfig(vehiculo.id,cfg)
       .then(()=>{ onClose(); })
-      .catch(()=>{ onClose(); });
+      .catch(e=>{ notify(e.message || "No se pudo guardar la configuración", "error"); });
   }
   function addP(){if(!np.desde||!np.hasta||!np.precio){notify("Completa todos los campos", "warning");return;}setCfg(p=>({...p,periodos:[...(p.periodos||[]),{...np,id:"gp_"+Date.now()}]}));setNp({desde:"",hasta:"",precio:""});}
   function delP(id){setCfg(p=>({...p,periodos:(p.periodos||[]).filter(x=>x.id!==id)}));}
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="personnel-overlay personnel-responsive-flex" role="dialog" aria-modal="true" aria-label="Detalle y edición" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(520px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>&#9981; Gasoil — {vehiculo.matricula}</div>
+        <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>&#9981; Gasoil — {vehiculo.matricula}</div>
           <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",fontSize:18,cursor:"pointer"}}>&#x2715;</button>
         </div>
-        <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <div className="personnel-responsive-flex" style={{display:"flex",gap:8,marginBottom:14}}>
           {["fijo","periodos"].map(t=>(
             <button key={t} onClick={()=>setCfg(p=>({...p,tipo:t}))}
               style={{padding:"6px 16px",borderRadius:20,border:"1.5px solid "+(cfg.tipo===t?"var(--accent)":"var(--border)"),background:cfg.tipo===t?"rgba(59,130,246,.1)":"transparent",color:cfg.tipo===t?"var(--accent)":"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:700,cursor:"pointer"}}>
@@ -90,28 +91,28 @@ function ModalGasoil({vehiculo,onClose}){
             </button>
           ))}
         </div>
-        {cfg.tipo==="fijo"&&(<div><label style={S.lbl}>Precio por litro (EUR)</label><input type="number" step="0.001" style={{...S.inp,maxWidth:160}} value={cfg.precio_fijo||""} onChange={e=>setCfg(p=>({...p,precio_fijo:e.target.value}))}/></div>)}
+        {cfg.tipo==="fijo"&&(<div><label style={S.lbl}>Precio por litro (EUR)</label><input aria-label="Precio por litro (EUR)" type="number" step="0.001" style={{...S.inp,maxWidth:160}} value={cfg.precio_fijo||""} onChange={e=>setCfg(p=>({...p,precio_fijo:e.target.value}))}/></div>)}
         {cfg.tipo==="periodos"&&(
           <div>
             <label style={S.lbl}>Precio base (fuera de periodos)</label>
-            <input type="number" step="0.001" style={{...S.inp,maxWidth:160}} value={cfg.precio_base||""} onChange={e=>setCfg(p=>({...p,precio_base:e.target.value}))}/>
-            <div style={{marginTop:12,fontWeight:700,fontSize:11,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>Periodos de precio</div>
+            <input aria-label="Precio base (fuera de periodos)" type="number" step="0.001" style={{...S.inp,maxWidth:160}} value={cfg.precio_base||""} onChange={e=>setCfg(p=>({...p,precio_base:e.target.value}))}/>
+            <div style={{marginTop:12,fontWeight:700,fontSize:12,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>Periodos de precio</div>
             {(cfg.periodos||[]).map(p=>(
-              <div key={p.id} style={{display:"flex",gap:6,alignItems:"center",marginBottom:5,background:"var(--bg3)",padding:"6px 10px",borderRadius:7}}>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text)"}}>{p.desde} a {p.hasta}</span>
+              <div className="personnel-responsive-flex" key={p.id} style={{display:"flex",gap:6,alignItems:"center",marginBottom:5,background:"var(--bg3)",padding:"6px 10px",borderRadius:7}}>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--text)"}}>{p.desde} a {p.hasta}</span>
                 <span style={{marginLeft:"auto",fontWeight:700,color:"var(--green)",fontFamily:"'JetBrains Mono',monospace",fontSize:12}}>{fmt2(p.precio)} EUR/L</span>
-                <button onClick={()=>delP(p.id)} style={{...S.btn,padding:"2px 7px",background:"rgba(239,68,68,.1)",color:"var(--red)",border:"none",fontSize:11}}>X</button>
+                <button onClick={()=>delP(p.id)} style={{...S.btn,padding:"2px 7px",background:"rgba(239,68,68,.1)",color:"var(--red)",border:"none",fontSize:12}}>X</button>
               </div>
             ))}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 100px auto",gap:6,marginTop:8,alignItems:"end"}}>
-              <div><label style={{...S.lbl,marginTop:0}}>Desde</label><input type="date" style={S.inp} value={np.desde} onChange={e=>setNp(p=>({...p,desde:e.target.value}))}/></div>
-              <div><label style={{...S.lbl,marginTop:0}}>Hasta</label><input type="date" style={S.inp} value={np.hasta} onChange={e=>setNp(p=>({...p,hasta:e.target.value}))}/></div>
-              <div><label style={{...S.lbl,marginTop:0}}>EUR/L</label><input type="number" step="0.001" style={S.inp} value={np.precio} onChange={e=>setNp(p=>({...p,precio:e.target.value}))}/></div>
+            <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 100px auto",gap:6,marginTop:8,alignItems:"end"}}>
+              <div><label style={{...S.lbl,marginTop:0}}>Desde</label><input aria-label="Desde" type="date" style={S.inp} value={np.desde} onChange={e=>setNp(p=>({...p,desde:e.target.value}))}/></div>
+              <div><label style={{...S.lbl,marginTop:0}}>Hasta</label><input aria-label="Hasta" type="date" style={S.inp} value={np.hasta} onChange={e=>setNp(p=>({...p,hasta:e.target.value}))}/></div>
+              <div><label style={{...S.lbl,marginTop:0}}>EUR/L</label><input aria-label="EUR/L" type="number" step="0.001" style={S.inp} value={np.precio} onChange={e=>setNp(p=>({...p,precio:e.target.value}))}/></div>
               <button onClick={addP} style={{...S.btn,background:"var(--accent)",color:"#fff",marginTop:14}}>+ Añadir</button>
             </div>
           </div>
         )}
-        <button onClick={guardar} style={{...S.btn,background:"var(--accent)",color:"#fff",marginTop:18,width:"100%",justifyContent:"center",fontSize:13,fontWeight:700}}>Guardar configuracion</button>
+        <button onClick={guardar} style={{...S.btn,background:"var(--accent)",color:"#fff",marginTop:18,width:"100%",justifyContent:"center",fontSize:13,fontWeight:700}}>Guardar configuración</button>
       </div>
     </div>
   );
@@ -155,24 +156,24 @@ function ModalLitros({vehiculo,fechaDesde,fechaHasta,onClose}){
   function del(id){borrarRepostaje(id).then(()=>setLista(p=>p.filter(x=>x.id!==id))).catch(e=>notify("Error: "+e.message, "error"));}
   const total=lista.reduce((s,x)=>s+Number(x.litros||0),0);
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose(total)}>
+    <div className="personnel-overlay personnel-responsive-flex" role="dialog" aria-modal="true" aria-label="Detalle y edición" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose(total)}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(480px,96vw)",maxHeight:"88vh",overflowY:"auto"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Litros repostados — {vehiculo.matricula}</div>
+        <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Litros repostados — {vehiculo.matricula}</div>
           <button onClick={()=>onClose(total)} style={{background:"none",border:"none",color:"var(--text4)",fontSize:18,cursor:"pointer"}}>X</button>
         </div>
-        <div style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div className="personnel-responsive-flex" style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:12,color:"var(--text4)"}}>Total periodo {fechaDesde} a {fechaHasta}</span>
           <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:18,color:"var(--accent)"}}>{fmtN(total)} L</span>
         </div>
         {loading ? <div style={{textAlign:"center",color:"var(--text4)",padding:20}}>⏳ Cargando repostajes...</div>
-        : lista.length>0 ? (<table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Litros</th><th style={S.th}>Nota</th><th style={S.th}></th></tr></thead><tbody>{lista.map(x=>(<tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{fmtN(x.litros)} L</td><td style={{...S.td,color:"var(--text4)"}}>{x.nota||"—"}</td><td style={S.td}><button onClick={()=>del(x.id)} style={{...S.btn,padding:"2px 7px",background:"rgba(239,68,68,.1)",color:"var(--red)",border:"none",fontSize:11}}>✕</button></td></tr>))}</tbody></table>)
+        : lista.length>0 ? (<div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Litros</th><th style={S.th}>Nota</th><th style={S.th}></th></tr></thead><tbody>{lista.map(x=>(<tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{fmtN(x.litros)} L</td><td style={{...S.td,color:"var(--text4)"}}>{x.nota||"—"}</td><td style={S.td}><button onClick={()=>del(x.id)} style={{...S.btn,padding:"2px 7px",background:"rgba(239,68,68,.1)",color:"var(--red)",border:"none",fontSize:12}}>✕</button></td></tr>))}</tbody></table></div>)
         : <div style={{textAlign:"center",color:"var(--text5)",padding:"16px 0",fontSize:12}}>Sin repostajes registrados en este periodo</div>}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 100px 100px 1fr auto",gap:6,alignItems:"end",marginTop:8}}>
-          <div><label style={S.lbl}>Fecha repostaje</label><input type="date" style={S.inp} value={form.fecha} onChange={e=>setForm(p=>({...p,fecha:e.target.value}))}/></div>
-          <div><label style={S.lbl}>Litros *</label><input type="number" step="0.1" min="0.1" style={{...S.inp,borderColor:!form.litros?"rgba(239,68,68,.5)":"var(--border2)"}} value={form.litros} onChange={e=>setForm(p=>({...p,litros:e.target.value}))}/></div>
-          <div><label style={S.lbl}>€/L</label><input type="number" step="0.001" style={S.inp} value={form.precio_litro||""} onChange={e=>setForm(p=>({...p,precio_litro:e.target.value}))}/></div>
-          <div><label style={S.lbl}>Nota</label><input style={S.inp} value={form.nota} onChange={e=>setForm(p=>({...p,nota:e.target.value}))}/></div>
+        <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"1fr 100px 100px 1fr auto",gap:6,alignItems:"end",marginTop:8}}>
+          <div><label style={S.lbl}>Fecha repostaje</label><input aria-label="Fecha repostaje" type="date" style={S.inp} value={form.fecha} onChange={e=>setForm(p=>({...p,fecha:e.target.value}))}/></div>
+          <div><label style={S.lbl}>Litros *</label><input aria-label="Litros *" type="number" step="0.1" min="0.1" style={{...S.inp,borderColor:!form.litros?"rgba(239,68,68,.5)":"var(--border2)"}} value={form.litros} onChange={e=>setForm(p=>({...p,litros:e.target.value}))}/></div>
+          <div><label style={S.lbl}>€/L</label><input aria-label="€/L" type="number" step="0.001" style={S.inp} value={form.precio_litro||""} onChange={e=>setForm(p=>({...p,precio_litro:e.target.value}))}/></div>
+          <div><label style={S.lbl}>Nota</label><input aria-label="Nota" style={S.inp} value={form.nota} onChange={e=>setForm(p=>({...p,nota:e.target.value}))}/></div>
           <button onClick={add} disabled={adding} style={{...S.btn,background:adding?"#666":"var(--accent)",color:"#fff",marginTop:14}}>{adding?"...":"+"}</button>
         </div>
         <button onClick={()=>onClose(total)} style={{...S.btn,background:"var(--accent)",color:"#fff",marginTop:16,width:"100%",justifyContent:"center",fontWeight:700,fontSize:13}}>Aceptar</button>
@@ -218,24 +219,24 @@ function ModalNoches({vehiculo,choferConfig={},fechaDesde,fechaHasta,onClose}){
   function del(id){borrarNoche(id).then(()=>setLista(p=>p.filter(x=>x.id!==id))).catch(e=>notify("Error: "+e.message, "error"));}
   const total=lista.reduce((s,x)=>s+Number(x.importe||0),0);
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose(total)}>
+    <div className="personnel-overlay personnel-responsive-flex" role="dialog" aria-modal="true" aria-label="Detalle y edición" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose(total)}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(480px,96vw)",maxHeight:"88vh",overflowY:"auto"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Noches — {vehiculo.matricula}</div>
+        <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Noches — {vehiculo.matricula}</div>
           <button onClick={()=>onClose(total)} style={{background:"none",border:"none",color:"var(--text4)",fontSize:18,cursor:"pointer"}}>X</button>
         </div>
-        <div style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between"}}>
+        <div className="personnel-responsive-flex" style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between"}}>
           <span style={{fontSize:12,color:"var(--text4)"}}>Total periodo</span>
           <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:"#a78bfa"}}>{fmt2(total)} EUR</span>
         </div>
         {loading ? <div style={{textAlign:"center",color:"var(--text4)",padding:20}}>⏳ Cargando repostajes...</div>
-        : lista.length>0 ? (<table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Tipo</th><th style={S.th}>Ciudad</th><th style={S.th}>Importe</th><th style={S.th}></th></tr></thead><tbody>{lista.map(x=>(<tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,textTransform:"capitalize"}}>{x.tipo_dieta||"nacional"}</td><td style={{...S.td,color:"var(--text4)"}}>{x.ciudad||"—"}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{fmt2(x.importe)} EUR</td><td style={S.td}><button onClick={()=>del(x.id)} style={{...S.btn,padding:"2px 7px",background:"rgba(239,68,68,.1)",color:"var(--red)",border:"none",fontSize:11}}>✕</button></td></tr>))}</tbody></table>)
+        : lista.length>0 ? (<div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Tipo</th><th style={S.th}>Ciudad</th><th style={S.th}>Importe</th><th style={S.th}></th></tr></thead><tbody>{lista.map(x=>(<tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,textTransform:"capitalize"}}>{x.tipo_dieta||"nacional"}</td><td style={{...S.td,color:"var(--text4)"}}>{x.ciudad||"—"}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{fmt2(x.importe)} EUR</td><td style={S.td}><button onClick={()=>del(x.id)} style={{...S.btn,padding:"2px 7px",background:"rgba(239,68,68,.1)",color:"var(--red)",border:"none",fontSize:12}}>✕</button></td></tr>))}</tbody></table></div>)
         : <div style={{textAlign:"center",color:"var(--text5)",padding:"16px 0",fontSize:12}}>Sin noches registradas en este periodo</div>}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 130px 100px auto",gap:6,alignItems:"end"}}>
-          <div><label style={S.lbl}>Fecha</label><input type="date" style={S.inp} value={form.fecha} onChange={e=>setForm(p=>({...p,fecha:e.target.value}))}/></div>
-          <div><label style={S.lbl}>Ciudad</label><input style={S.inp} value={form.ciudad} onChange={e=>setForm(p=>({...p,ciudad:e.target.value}))}/></div>
-          <div><label style={S.lbl}>Tipo dieta</label><select style={S.inp} value={form.tipo_dieta} onChange={e=>setForm(p=>({...p,tipo_dieta:e.target.value,importe:p.importe||importeDietaPorTipo(choferConfig,e.target.value)}))}><option value="local">Local</option><option value="nacional">Nacional</option><option value="internacional">Internacional</option></select></div>
-          <div><label style={S.lbl}>Importe EUR</label><input type="number" step="0.01" style={S.inp} value={form.importe} onChange={e=>setForm(p=>({...p,importe:e.target.value}))}/></div>
+        <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 130px 100px auto",gap:6,alignItems:"end"}}>
+          <div><label style={S.lbl}>Fecha</label><input aria-label="Fecha" type="date" style={S.inp} value={form.fecha} onChange={e=>setForm(p=>({...p,fecha:e.target.value}))}/></div>
+          <div><label style={S.lbl}>Ciudad</label><input aria-label="Ciudad" style={S.inp} value={form.ciudad} onChange={e=>setForm(p=>({...p,ciudad:e.target.value}))}/></div>
+          <div><label style={S.lbl}>Tipo dieta</label><select aria-label="Tipo dieta" style={S.inp} value={form.tipo_dieta} onChange={e=>setForm(p=>({...p,tipo_dieta:e.target.value,importe:p.importe||importeDietaPorTipo(choferConfig,e.target.value)}))}><option value="local">Local</option><option value="nacional">Nacional</option><option value="internacional">Internacional</option></select></div>
+          <div><label style={S.lbl}>Importe EUR</label><input aria-label="Importe EUR" type="number" step="0.01" style={S.inp} value={form.importe} onChange={e=>setForm(p=>({...p,importe:e.target.value}))}/></div>
           <button onClick={add} disabled={adding} style={{...S.btn,background:adding?"#666":"var(--accent)",color:"#fff",marginTop:14}}>{adding?"...":"+"}</button>
         </div>
         <button onClick={()=>onClose(total)} style={{...S.btn,background:"var(--accent)",color:"#fff",marginTop:16,width:"100%",justifyContent:"center",fontWeight:700,fontSize:13}}>Aceptar</button>
@@ -298,50 +299,50 @@ function ModalChoferExt({chofer,onClose}){
     }
   }
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="personnel-overlay personnel-responsive-flex" role="dialog" aria-modal="true" aria-label="Detalle y edición" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:13,padding:22,width:"min(680px,96vw)",maxHeight:"90vh",overflowY:"auto"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Config. {chofer.nombre} {chofer.apellidos||""}</div>
+        <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)"}}>Config. {chofer.nombre} {chofer.apellidos||""}</div>
           <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",fontSize:18,cursor:"pointer"}}>X</button>
         </div>
         <label style={S.lbl}>Salario base (EUR/mes)</label>
-        <input type="number" step="0.01" style={S.inp} value={form.salario_base} onChange={e=>setForm(p=>({...p,salario_base:Number(e.target.value)}))}/>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
-          <div><label style={S.lbl}>Incentivo sobre ingresos (%)</label><input type="number" step="0.1" min="0" max="100" style={S.inp} value={form.incentivo_pct} onChange={e=>setForm(p=>({...p,incentivo_pct:Number(e.target.value)}))}/></div>
-          <div><label style={S.lbl}>Precio por km (EUR/km)</label><input type="number" step="0.0001" min="0" style={S.inp} value={form.precio_km||""} onChange={e=>setForm(p=>({...p,precio_km:Number(e.target.value)}))}/></div>
-          <div><label style={S.lbl}>Km que se pagan</label><select style={S.inp} value={form.km_pago_tipo||"todos"} onChange={e=>setForm(p=>({...p,km_pago_tipo:e.target.value}))}><option value="todos">Km totales</option><option value="cargado">Solo km cargado</option><option value="vacio">Solo km vacio</option></select></div>
-          <div><label style={S.lbl}>Convenio / pacto</label><input style={S.inp} value={form.convenio||""} onChange={e=>setForm(p=>({...p,convenio:e.target.value}))} placeholder="Ej: convenio provincial / acuerdo interno"/></div>
+        <input aria-label="Salario base (EUR/mes)" type="number" step="0.01" style={S.inp} value={form.salario_base} onChange={e=>setForm(p=>({...p,salario_base:Number(e.target.value)}))}/>
+        <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
+          <div><label style={S.lbl}>Incentivo sobre ingresos (%)</label><input aria-label="Incentivo sobre ingresos (%)" type="number" step="0.1" min="0" max="100" style={S.inp} value={form.incentivo_pct} onChange={e=>setForm(p=>({...p,incentivo_pct:Number(e.target.value)}))}/></div>
+          <div><label style={S.lbl}>Precio por km (EUR/km)</label><input aria-label="Precio por km (EUR/km)" type="number" step="0.0001" min="0" style={S.inp} value={form.precio_km||""} onChange={e=>setForm(p=>({...p,precio_km:Number(e.target.value)}))}/></div>
+          <div><label style={S.lbl}>Km que se pagan</label><select aria-label="Km que se pagan" style={S.inp} value={form.km_pago_tipo||"todos"} onChange={e=>setForm(p=>({...p,km_pago_tipo:e.target.value}))}><option value="todos">Km totales</option><option value="cargado">Solo km cargado</option><option value="vacio">Solo km vacio</option></select></div>
+          <div><label style={S.lbl}>Convenio / pacto</label><input aria-label="Convenio / pacto" style={S.inp} value={form.convenio||""} onChange={e=>setForm(p=>({...p,convenio:e.target.value}))} placeholder="Ej: convenio provincial / acuerdo interno"/></div>
         </div>
 
         <div style={{marginTop:14,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:10,padding:12}}>
-          <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text4)",marginBottom:8}}>Dietas segun convenio</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8}}>
-            <div><label style={{...S.lbl,marginTop:0}}>Dieta local</label><input type="number" step="0.01" min="0" style={S.inp} value={form.dieta_local||""} onChange={e=>setForm(p=>({...p,dieta_local:Number(e.target.value)}))}/></div>
-            <div><label style={{...S.lbl,marginTop:0}}>Dieta nacional</label><input type="number" step="0.01" min="0" style={S.inp} value={form.dieta_nacional||form.precio_noche||""} onChange={e=>setForm(p=>({...p,dieta_nacional:Number(e.target.value),precio_noche:Number(e.target.value)}))}/></div>
-            <div><label style={{...S.lbl,marginTop:0}}>Dieta internacional</label><input type="number" step="0.01" min="0" style={S.inp} value={form.dieta_internacional||""} onChange={e=>setForm(p=>({...p,dieta_internacional:Number(e.target.value)}))}/></div>
+          <div style={{fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text4)",marginBottom:8}}>Dietas segun convenio</div>
+          <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8}}>
+            <div><label style={{...S.lbl,marginTop:0}}>Dieta local</label><input aria-label="Dieta local" type="number" step="0.01" min="0" style={S.inp} value={form.dieta_local||""} onChange={e=>setForm(p=>({...p,dieta_local:Number(e.target.value)}))}/></div>
+            <div><label style={{...S.lbl,marginTop:0}}>Dieta nacional</label><input aria-label="Dieta nacional" type="number" step="0.01" min="0" style={S.inp} value={form.dieta_nacional||form.precio_noche||""} onChange={e=>setForm(p=>({...p,dieta_nacional:Number(e.target.value),precio_noche:Number(e.target.value)}))}/></div>
+            <div><label style={{...S.lbl,marginTop:0}}>Dieta internacional</label><input aria-label="Dieta internacional" type="number" step="0.01" min="0" style={S.inp} value={form.dieta_internacional||""} onChange={e=>setForm(p=>({...p,dieta_internacional:Number(e.target.value)}))}/></div>
           </div>
-          <div style={{fontSize:10,color:"var(--text5)",lineHeight:1.5,marginTop:8}}>Se usan para pre-rellenar dietas en Hojas de Ruta. El importe final queda guardado por registro para justificarlo.</div>
+          <div style={{fontSize:12,color:"var(--text5)",lineHeight:1.5,marginTop:8}}>Se usan para pre-rellenar dietas en Hojas de Ruta. El importe final queda guardado por registro para justificarlo.</div>
         </div>
 
         <div style={{marginTop:12,background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.18)",borderRadius:10,padding:12}}>
-          <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text4)",marginBottom:8}}>Disponibilidad pactada</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8}}>
-            <div><label style={{...S.lbl,marginTop:0}}>Disponibilidad diaria</label><input type="number" step="0.01" min="0" style={S.inp} value={form.disponibilidad_diaria||""} onChange={e=>setForm(p=>({...p,disponibilidad_diaria:Number(e.target.value)}))}/></div>
-            <div><label style={{...S.lbl,marginTop:0}}>Disponibilidad mensual</label><input type="number" step="0.01" min="0" style={S.inp} value={form.disponibilidad_mensual||""} onChange={e=>setForm(p=>({...p,disponibilidad_mensual:Number(e.target.value)}))}/></div>
+          <div style={{fontSize:12,fontWeight:800,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text4)",marginBottom:8}}>Disponibilidad pactada</div>
+          <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8}}>
+            <div><label style={{...S.lbl,marginTop:0}}>Disponibilidad diaria</label><input aria-label="Disponibilidad diaria" type="number" step="0.01" min="0" style={S.inp} value={form.disponibilidad_diaria||""} onChange={e=>setForm(p=>({...p,disponibilidad_diaria:Number(e.target.value)}))}/></div>
+            <div><label style={{...S.lbl,marginTop:0}}>Disponibilidad mensual</label><input aria-label="Disponibilidad mensual" type="number" step="0.01" min="0" style={S.inp} value={form.disponibilidad_mensual||""} onChange={e=>setForm(p=>({...p,disponibilidad_mensual:Number(e.target.value)}))}/></div>
           </div>
-          <div style={{fontSize:10,color:"var(--text5)",lineHeight:1.5,marginTop:8}}>Concepto separado para pactos de disponibilidad. No sustituye horas extra ni descansos; revisar convenio antes de cerrar nomina.</div>
+          <div style={{fontSize:12,color:"var(--text5)",lineHeight:1.5,marginTop:8}}>Concepto separado para pactos de disponibilidad. No sustituye horas extra ni descansos; revisar convenio antes de cerrar nomina.</div>
         </div>
 
         <label style={S.lbl}>Notas del convenio</label>
-        <textarea style={{...S.inp,minHeight:64,resize:"vertical"}} value={form.convenio_notas||""} onChange={e=>setForm(p=>({...p,convenio_notas:e.target.value}))} placeholder="Importes, vigencia, provincia, condiciones o enlaces al convenio"/>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginTop:10,flexWrap:"wrap"}}>
+        <textarea aria-label="Notas del convenio" style={{...S.inp,minHeight:64,resize:"vertical"}} value={form.convenio_notas||""} onChange={e=>setForm(p=>({...p,convenio_notas:e.target.value}))} placeholder="Importes, vigencia, provincia, condiciones o enlaces al convenio"/>
+        <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginTop:10,flexWrap:"wrap"}}>
           <label style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text3)"}}>
             Subir convenio CSV/JSON
             <input type="file" accept=".csv,.txt,.json" onChange={importarConvenio} style={{display:"none"}}/>
           </label>
-          {form.convenio_importado_nombre&&<div style={{fontSize:11,color:"var(--text5)"}}>Cargado: {form.convenio_importado_nombre}</div>}
+          {form.convenio_importado_nombre&&<div style={{fontSize:12,color:"var(--text5)"}}>Cargado: {form.convenio_importado_nombre}</div>}
         </div>
-        <div style={{fontSize:11,color:"var(--text5)",marginTop:8}}>CSV simple aceptado: concepto;importe. Ejemplos: dieta nacional;45 | precio km;0,08 | disponibilidad diaria;12.</div>
+        <div style={{fontSize:12,color:"var(--text5)",marginTop:8}}>CSV simple aceptado: concepto;importe. Ejemplos: dieta nacional;45 | precio km;0,08 | disponibilidad diaria;12.</div>
         <button onClick={guardar} disabled={loading} style={{...S.btn,background:loading?"#666":"var(--accent)",color:"#fff",marginTop:18,width:"100%",justifyContent:"center",fontWeight:700,fontSize:13}}>{loading?"Cargando...":"Guardar"}</button>
       </div>
     </div>
@@ -352,6 +353,7 @@ export default function HojasRuta(){
   const empresaPerfil = useEmpresaPerfil();
   const hoy=new Date().toISOString().slice(0,10);
   const [tab,setTab]=useState("hoja");
+  const [detalleAbierto,setDetalleAbierto]=useState(false);
   const [fechaDesde,setFechaDesde]=useState(primerDiaMes(hoy));
   const [fechaHasta,setFechaHasta]=useState(ultimoDiaMes(hoy));
   const [vehiculoSel,setVehiculoSel]=useState("");
@@ -506,13 +508,14 @@ export default function HojasRuta(){
     w.document.close();w.focus();setTimeout(function(){w.print();},400);
   }
 
-  const TABS=[["hoja","Hoja de ruta"],["gasoil","Gasoil"],["noches","Noches"],["chofer_cfg","Chofer / Nomina"]];
+  const TABS=[["hoja","Hoja de ruta"],["gasoil","Gasoil"],["noches","Noches"],["chofer_cfg","Conductor / Nómina"]];
 
   return(
-    <div className="tg-responsive-page" style={S.page}>
-      <div style={{display:"flex",alignItems:"center",gap:18,marginBottom:24,flexWrap:"wrap"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:34,fontWeight:900,color:"var(--text)",marginRight:8}}>Hojas de Ruta</div>
-        <select value={vehiculoSel} onChange={e=>setVehiculoSel(e.target.value)} style={{...S.inp,width:"auto",minWidth:290,fontWeight:800}}>
+    <div className="tg-responsive-page personnel-page" style={S.page}>
+      <PersonnelHeader active="hojas_ruta"/>
+      <div className="personnel-responsive-flex" style={{display:"flex",alignItems:"center",gap:18,marginBottom:24,flexWrap:"wrap"}}>
+        {detalleAbierto&&<button onClick={()=>setDetalleAbierto(false)}>← Todas las hojas</button>}
+        <select aria-label="Vehículo" value={vehiculoSel} onChange={e=>{setVehiculoSel(e.target.value);setDetalleAbierto(true);}} style={{...S.inp,width:"auto",minWidth:290,fontWeight:800}}>
           {(()=>{
             const remIds = new Set(vehiculos.map(v=>v.remolque_id).filter(Boolean));
             return vehiculos
@@ -528,23 +531,24 @@ export default function HojasRuta(){
               });
           })()}
         </select>
-        <input type="date" style={{...S.inp,width:170}} value={fechaDesde} onChange={e=>setFechaDesde(e.target.value)}/>
+        <input aria-label="Desde" type="date" style={{...S.inp,width:170}} value={fechaDesde} onChange={e=>setFechaDesde(e.target.value)}/>
         <span style={{color:"var(--text5)",fontSize:12}}>a</span>
-        <input type="date" style={{...S.inp,width:170}} value={fechaHasta} onChange={e=>setFechaHasta(e.target.value)}/>
-        <button onClick={imprimir} style={{...S.btn,background:"var(--accent)",color:"#fff",border:"1px solid var(--accent)",marginLeft:"auto",padding:"12px 22px",fontSize:14}}>Imprimir / PDF</button>
+        <input aria-label="Hasta" type="date" style={{...S.inp,width:170}} value={fechaHasta} onChange={e=>setFechaHasta(e.target.value)}/>
+        <button disabled={!vehiculo} onClick={imprimir} style={{...S.btn,background:"var(--accent)",color:"#fff",border:"1px solid var(--accent)",marginLeft:"auto",padding:"12px 22px",fontSize:14}}>Imprimir / PDF</button>
       </div>
 
+      {!detalleAbierto&&<RouteSheetsOverview vehiculos={vehiculos} choferes={choferes} pedidos={pedidos} desde={fechaDesde} hasta={fechaHasta} loading={loading} onOpen={id=>{setVehiculoSel(id);setDetalleAbierto(true);setTab("hoja");}}/>}
       {loading&&<div style={{color:"var(--text5)",padding:40,textAlign:"center"}}>Cargando datos...</div>}
 
-      {!loading&&vehiculo&&(
+      {!loading&&vehiculo&&detalleAbierto&&(
         <>
-          <div style={{...S.card,display:"flex",gap:28,flexWrap:"wrap",alignItems:"center",marginBottom:10,minHeight:70}}>
+          <div className="personnel-card personnel-responsive-flex" style={{...S.card,display:"flex",gap:28,flexWrap:"wrap",alignItems:"center",marginBottom:10,minHeight:70}}>
             <div style={{paddingRight:28,borderRight:"1px solid var(--border)"}}>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:22,color:"var(--text)"}}>{vehiculo.matricula}</div>
               <div style={{fontSize:13,color:"var(--text4)",marginTop:4}}>{vehiculo.clase || vehiculo.marca || "Tractora"}</div>
             </div>
             {chofer&&(
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div className="personnel-responsive-flex" style={{display:"flex",alignItems:"center",gap:10}}>
                 <div>
                   <div style={{fontSize:15,fontWeight:900,color:"var(--accent-xl)"}}>{chofer.nombre} {chofer.apellidos||""}</div>
                   <div style={{fontSize:13,color:"var(--text5)",marginTop:3}}>{choferExt.salario_base?"Salario: "+fmt2(choferExt.salario_base)+" EUR":"Sin salario base"}{choferExt.incentivo_pct?" - Incentivo: "+choferExt.incentivo_pct+"%":""}</div>
@@ -554,7 +558,7 @@ export default function HojasRuta(){
             )}
           </div>
 
-          <div style={{display:"flex",gap:20,borderBottom:"1px solid var(--border)",marginBottom:22,paddingLeft:2}}>
+          <div className="personnel-responsive-flex personnel-subtabs" style={{display:"flex",gap:20,borderBottom:"1px solid var(--border)",marginBottom:22,paddingLeft:2}}>
             {TABS.map(([id,l])=>(
               <button key={id} onClick={()=>setTab(id)} style={{...S.btn,borderRadius:0,border:"none",borderBottom:"3px solid "+(tab===id?"var(--accent)":"transparent"),color:tab===id?"var(--accent-xl)":"var(--text4)",background:"transparent",padding:"12px 0",fontSize:14,fontWeight:900}}>{l}</button>
             ))}
@@ -562,68 +566,68 @@ export default function HojasRuta(){
 
           {tab==="hoja"&&hoja&&(
             <>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(165px,1fr))",gap:14,marginBottom:18}}>
+              <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(165px,1fr))",gap:14,marginBottom:18}}>
                 {[["Viajes",hoja.viajes,"","var(--accent)"],["Km cargado",fmtN(hoja.kmCargado),"km","#10b981"],["Km vacío",fmtN(hoja.kmVacio),"km","#f59e0b"],["Km pagados",fmtN(hoja.kmRetribuidos),"km","#0ea5e9"],["Gasoil",fmtN(litrosSel),"L","#f97316"],["Dietas",nochesCount,"reg.","#a78bfa"],["Disponibilidad",fmt2(hoja.disponibilidad),"€","#6366f1"],["Ingresos",fmt2(hoja.ingresos),"€","#10b981"],["Costes totales",fmt2(hoja.totalCostes),"€","#ef4444"],["Margen bruto",fmt2(hoja.margen),"€",hoja.margen>=0?"#10b981":"#ef4444"],["€/km (ing.)",fmt2(hoja.eurosKmIngresos),"€/km","#8b5cf6"],["€/km (margen)",fmt2(hoja.eurosKmMargen),"€/km",hoja.eurosKmMargen>=0?"#10b981":"#ef4444"],["€/km (coste)",fmt2(hoja.eurosKmCostes),"€/km","#f97316"]].map(([l,v,u,c])=>(
                   <RouteKpi key={l} label={l} value={v} unit={u} color={c} icon={l==="Gasoil"?"fuel":l==="Ingresos"||l==="Disponibilidad"?"money":String(l).includes("Margen")||String(l).includes("km")?"trend":l==="Viajes"?"truck":"doc"} />
                 ))}
               </div>
-              <div style={{...S.card,padding:"20px 24px"}}>
+              <div className="personnel-card" style={{...S.card,padding:"20px 24px"}}>
                 <div style={{fontWeight:900,fontSize:13,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".04em",marginBottom:14}}>Desglose de costes</div>
-                <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>
-                  {[["Gasoil",repostajesPeriodo.some(r=>Number(r.importe||0)>0||Number(r.precio_litro||0)>0)?fmtN(litrosSel)+"L con precio real":fmtN(litrosSel)+"L x "+fmt2(hoja.precioLitro)+" EUR/L",fmt2(hoja.costeGasoil)],["Taller / Mantenimiento","",fmt2(hoja.costeTaller)],["Dietas / manutencion",nochesCount+" registro(s)",fmt2(hoja.costeNoches)],["Km retribuidos",fmtN(hoja.kmRetribuidos)+" km x "+fmt2(choferExt.precio_km||0)+" EUR/km",fmt2(hoja.pagoKm)],["Disponibilidad pactada",hoja.diasActivos+" dia(s) + mensual",fmt2(hoja.disponibilidad)],["Salario base chofer","",fmt2(hoja.salarioBase)],["SS empresa","",fmt2(hoja.ssEmpresa)],...(hoja.incentivo>0?[["Incentivo",hoja.incentivoPct+"% x "+fmt2(hoja.ingresos)+" EUR",fmt2(hoja.incentivo)]]:[] )].map(([l,d,v])=>(
-                    <tr key={l}><td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{l}</td><td style={{...S.td,color:"var(--text5)",fontSize:11}}>{d}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{v} EUR</td></tr>
+                <div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse"}}><tbody>
+                  {[["Gasoil",repostajesPeriodo.some(r=>Number(r.importe||0)>0||Number(r.precio_litro||0)>0)?fmtN(litrosSel)+"L con precio real":fmtN(litrosSel)+"L x "+fmt2(hoja.precioLitro)+" EUR/L",fmt2(hoja.costeGasoil)],["Taller / Mantenimiento","",fmt2(hoja.costeTaller)],["Dietas / manutención",nochesCount+" registro(s)",fmt2(hoja.costeNoches)],["Km retribuidos",fmtN(hoja.kmRetribuidos)+" km x "+fmt2(choferExt.precio_km||0)+" EUR/km",fmt2(hoja.pagoKm)],["Disponibilidad pactada",hoja.diasActivos+" dia(s) + mensual",fmt2(hoja.disponibilidad)],["Salario base chofer","",fmt2(hoja.salarioBase)],["SS empresa","",fmt2(hoja.ssEmpresa)],...(hoja.incentivo>0?[["Incentivo",hoja.incentivoPct+"% x "+fmt2(hoja.ingresos)+" EUR",fmt2(hoja.incentivo)]]:[] )].map(([l,d,v])=>(
+                    <tr key={l}><td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{l}</td><td style={{...S.td,color:"var(--text5)",fontSize:12}}>{d}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{v} EUR</td></tr>
                   ))}
                   <tr style={{background:"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"#ef4444"}} colSpan={2}>TOTAL COSTES</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:15,color:"#ef4444"}}>{fmt2(hoja.totalCostes)} EUR</td></tr>
                   <tr style={{background:hoja.margen>=0?"linear-gradient(90deg, var(--accent-a12), var(--accent-a05))":"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"var(--accent-xl)"}} colSpan={2}>MARGEN BRUTO</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:16,color:hoja.margen>=0?"var(--accent-xl)":"#ef4444"}}>{fmt2(hoja.margen)} EUR</td></tr>
-                </tbody></table>
+                </tbody></table></div>
               </div>
-              <div style={{...S.card,padding:"20px 24px"}}>
+              <div className="personnel-card" style={{...S.card,padding:"20px 24px"}}>
                 <div style={{fontWeight:900,fontSize:13,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".04em",marginBottom:14}}>Viajes del periodo ({hoja.viajes})</div>
-                {hoja.pedVeh.length===0?(<div style={{padding:"32px 20px",textAlign:"center",color:"var(--text5)",display:"flex",alignItems:"center",justifyContent:"center",gap:20}}>
+                {hoja.pedVeh.length===0?(<div className="personnel-responsive-flex" style={{padding:"32px 20px",textAlign:"center",color:"var(--text5)",display:"flex",alignItems:"center",justifyContent:"center",gap:20}}>
                   <div style={{width:58,height:58,borderRadius:"50%",background:"var(--accent-a10)",color:"var(--accent-xl)",display:"inline-flex",alignItems:"center",justifyContent:"center"}}><RouteSheetIcon icon="doc" /></div>
-                  <div style={{textAlign:"left"}}><div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>Sin viajes en este periodo</div><div style={{fontSize:11,marginTop:4}}>Aun no se han registrado viajes en el rango de fechas seleccionado.</div></div>
+                  <div style={{textAlign:"left"}}><div style={{fontWeight:900,fontSize:14,color:"var(--text)"}}>Sin viajes en este periodo</div><div style={{fontSize:12,marginTop:4}}>Aun no se han registrado viajes en el rango de fechas seleccionado.</div></div>
                 </div>):(
-                  <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>N</th><th style={S.th}>Fecha</th><th style={S.th}>Origen / Destino</th><th style={S.th}>Cliente</th><th style={S.th}>Km</th><th style={S.th}>Km vacio</th><th style={S.th}>Importe</th></tr></thead><tbody>
+                  <div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>N</th><th style={S.th}>Fecha</th><th style={S.th}>Origen / Destino</th><th style={S.th}>Cliente</th><th style={S.th}>Km</th><th style={S.th}>Km vacio</th><th style={S.th}>Importe</th></tr></thead><tbody>
                     {hoja.pedVeh.map(p=>(<tr key={p.id}><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--accent)"}}>{p.numero}</td><td style={S.td}>{p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):""}</td><td style={S.td}>{p.origen||""}{p.destino?" a "+p.destino:""}</td><td style={{...S.td,color:"var(--text4)"}}>{p.cliente_nombre||"—"}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace"}}>{fmtN(p.km_ruta||p.km||0)}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#f59e0b"}}>{fmtN(p.km_vacio||0)}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)"}}>{fmt2(p.importe||0)} EUR</td></tr>))}
-                  </tbody></table>
+                  </tbody></table></div>
                 )}
               </div>
             </>
           )}
 
           {tab==="gasoil"&&(
-            <div style={S.card}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+            <div className="personnel-card" style={S.card}>
+              <div className="personnel-responsive-flex" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
                 <div>
                   <div style={{fontWeight:800,fontSize:14,color:"var(--text)"}}>Gasoil — {vehiculo.matricula}</div>
-                  <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>Tipo: <strong>{gasoilCfg.tipo==="fijo"?"Precio fijo":"Por periodos"}</strong> - Precio aplicado: <strong style={{color:"var(--green)",fontFamily:"'JetBrains Mono',monospace"}}>{fmt2(precioCombDia(hoy,gasoilCfg))} EUR/L</strong></div>
+                  <div style={{fontSize:12,color:"var(--text5)",marginTop:2}}>Tipo: <strong>{gasoilCfg.tipo==="fijo"?"Precio fijo":"Por periodos"}</strong> - Precio aplicado: <strong style={{color:"var(--green)",fontFamily:"'JetBrains Mono',monospace"}}>{fmt2(precioCombDia(hoy,gasoilCfg))} EUR/L</strong></div>
                 </div>
-                <div style={{display:"flex",gap:8}}>
+                <div className="personnel-responsive-flex" style={{display:"flex",gap:8}}>
                   <button onClick={()=>setModalLitros(true)} style={{...S.btn,background:"rgba(249,115,22,.1)",color:"#f97316",border:"1px solid rgba(249,115,22,.25)"}}>Registrar litros</button>
                   <button onClick={()=>setModalGasoil(true)} style={{...S.btn,background:"var(--accent)",color:"#fff"}}>Configurar precios</button>
                 </div>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+              <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
                 {[["Litros periodo",fmtN(litrosSel)+" L","#f97316"],["Precio aplicado",fmt2(precioCombDia(fechaDesde,gasoilCfg))+" EUR/L","var(--green)"],["Coste total gasoil",fmt2(hoja?.costeGasoil||0)+" EUR","var(--red)"]].map(([l,v,c])=>(
                   <div key={l} style={{background:"var(--bg3)",borderRadius:8,padding:"12px 16px",textAlign:"center"}}>
                     <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:18,color:c}}>{v}</div>
-                    <div style={{fontSize:10,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>{l}</div>
+                    <div style={{fontSize:12,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>{l}</div>
                   </div>
                 ))}
               </div>
               {repostajesPeriodo.length>0&&(
-                <table style={{width:"100%",borderCollapse:"collapse",marginBottom:16}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Litros</th><th style={S.th}>EUR/L</th><th style={S.th}>Importe</th><th style={S.th}>Nota</th></tr></thead><tbody>
+                <div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse",marginBottom:16}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Litros</th><th style={S.th}>EUR/L</th><th style={S.th}>Importe</th><th style={S.th}>Nota</th></tr></thead><tbody>
                   {repostajesPeriodo.map(x=>{
                     const precio=Number(x.precio_litro||0);
                     const importe=Number(x.importe||0) || (precio>0?Number(x.litros||0)*precio:0);
                     return <tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{fmtN(x.litros)} L</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace"}}>{precio>0?fmt2(precio):"-"}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"#f97316"}}>{importe>0?fmt2(importe)+" EUR":"-"}</td><td style={{...S.td,color:"var(--text4)"}}>{x.notas||x.nota||"-"}</td></tr>;
                   })}
-                </tbody></table>
+                </tbody></table></div>
               )}
               {gasoilCfg.tipo==="periodos"&&(gasoilCfg.periodos||[]).length>0&&(
-                <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>Desde</th><th style={S.th}>Hasta</th><th style={S.th}>EUR/Litro</th></tr></thead><tbody>
+                <div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>Desde</th><th style={S.th}>Hasta</th><th style={S.th}>EUR/Litro</th></tr></thead><tbody>
                   {gasoilCfg.periodos.map((p,i)=>(<tr key={i}><td style={S.td}>{p.desde}</td><td style={S.td}>{p.hasta}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)"}}>{fmt2(p.precio)} EUR/L</td></tr>))}
-                </tbody></table>
+                </tbody></table></div>
               )}
             </div>
           )}
@@ -633,39 +637,39 @@ export default function HojasRuta(){
             const total=nochesSel;
             const lista=nochesPeriodo;
             return(
-              <div style={S.card}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+              <div className="personnel-card" style={S.card}>
+                <div className="personnel-responsive-flex" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
                   <div>
                     <div style={{fontWeight:800,fontSize:14,color:"var(--text)"}}>Noches / Dietas — {vehiculo.matricula}</div>
-                    <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>Noches registradas para este camion en el periodo seleccionado</div>
+                    <div style={{fontSize:12,color:"var(--text5)",marginTop:2}}>Noches registradas para este camión en el periodo seleccionado</div>
                   </div>
-                  <button onClick={()=>setModalNoches(true)} style={{...S.btn,background:"rgba(167,139,250,.15)",color:"#a78bfa",border:"1px solid rgba(167,139,250,.25)"}}>+ Anadir noches</button>
+                  <button onClick={()=>setModalNoches(true)} style={{...S.btn,background:"rgba(167,139,250,.15)",color:"#a78bfa",border:"1px solid rgba(167,139,250,.25)"}}>+ Añadir noches</button>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14}}>
-                  <div style={{background:"var(--bg3)",borderRadius:8,padding:"12px 16px",textAlign:"center"}}><div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:22,color:"#a78bfa"}}>{lista.length}</div><div style={{fontSize:10,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Noches registradas</div></div>
-                  <div style={{background:"var(--bg3)",borderRadius:8,padding:"12px 16px",textAlign:"center"}}><div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:22,color:"#a78bfa"}}>{fmt2(total)} EUR</div><div style={{fontSize:10,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Importe total</div></div>
+                <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:14}}>
+                  <div style={{background:"var(--bg3)",borderRadius:8,padding:"12px 16px",textAlign:"center"}}><div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:22,color:"#a78bfa"}}>{lista.length}</div><div style={{fontSize:12,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Noches registradas</div></div>
+                  <div style={{background:"var(--bg3)",borderRadius:8,padding:"12px 16px",textAlign:"center"}}><div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:22,color:"#a78bfa"}}>{fmt2(total)} EUR</div><div style={{fontSize:12,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Importe total</div></div>
                 </div>
                 {lista.length===0?(<div style={{padding:20,textAlign:"center",color:"var(--text5)"}}>Sin noches registradas en este periodo para {vehiculo.matricula}</div>):(
-                  <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Tipo</th><th style={S.th}>Ciudad</th><th style={S.th}>Importe</th></tr></thead><tbody>
+                  <div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Tipo</th><th style={S.th}>Ciudad</th><th style={S.th}>Importe</th></tr></thead><tbody>
                     {lista.map(x=>(<tr key={x.id}><td style={S.td}>{fmtFecha(x.fecha)}</td><td style={{...S.td,textTransform:"capitalize"}}>{x.tipo_dieta||"nacional"}</td><td style={{...S.td,color:"var(--text4)"}}>{x.ciudad||"—"}</td><td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"#a78bfa"}}>{fmt2(x.importe)} EUR</td></tr>))}
-                  </tbody></table>
+                  </tbody></table></div>
                 )}
               </div>
             );
           })()}
 
           {tab==="chofer_cfg"&&(
-            <div style={S.card}>
+            <div className="personnel-card" style={S.card}>
               <div style={{fontWeight:800,fontSize:14,color:"var(--text)",marginBottom:14}}>💶 Nómina y coste del trabajador</div>
               {!chofer?(<div style={{color:"var(--text5)",padding:20,textAlign:"center"}}>Vehículo sin chófer asignado.</div>):(
                 <>
                   {nominaEmitida?(
                     <div style={{background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.3)",borderRadius:10,padding:"14px 16px",marginBottom:12}}>
                       <div style={{fontWeight:700,fontSize:12,color:"#10b981",marginBottom:10}}>✅ Nómina emitida — {nominaEmitida.periodo}</div>
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                      <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
                         {[["Salario bruto",hoja?.salarioBase||0,"var(--text)"],["SS trabajador (-)",hoja?.ssTrabajador||0,"#ef4444"],["IRPF ret. (-)",hoja?.retencionIRPF||0,"#f97316"],["💰 Líquido a cobrar",hoja?.liquidoNeto||0,"#10b981"],["SS empresa (+)",hoja?.ssEmpresa||0,"#6366f1"],["Coste empresa total",hoja?.costeEmpresaTotal||0,"#1d4ed8"]].map(([k,v,c])=>(
                           <div key={k} style={{background:"var(--bg3)",borderRadius:8,padding:"10px 12px"}}>
-                            <div style={{fontSize:10,fontWeight:700,color:"var(--text5)",marginBottom:2}}>{k}</div>
+                            <div style={{fontSize:12,fontWeight:700,color:"var(--text5)",marginBottom:2}}>{k}</div>
                             <div style={{fontSize:14,fontWeight:800,color:c,fontFamily:"'JetBrains Mono',monospace"}}>{Number(v).toLocaleString("es-ES",{minimumFractionDigits:2})} €</div>
                           </div>
                         ))}
@@ -681,13 +685,13 @@ export default function HojasRuta(){
                   {hoja&&(
                     <div style={{background:"var(--bg3)",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
                       <div style={{fontWeight:700,fontSize:12,color:"var(--text)",marginBottom:10}}>🏭 Desglose coste empresa</div>
-                      {[["Salario bruto",hoja.salarioBase],["+ Incentivo",hoja.incentivo],["+ Dietas / manutencion",hoja.costeNoches],["+ Km retribuidos",hoja.pagoKm],["+ Disponibilidad pactada",hoja.disponibilidad],["+ SS empresa (29,40%)",hoja.ssEmpresa]].filter(([,v])=>v>0).map(([k,v])=>(
-                        <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid var(--border2)"}}>
+                      {[["Salario bruto",hoja.salarioBase],["+ Incentivo",hoja.incentivo],["+ Dietas / manutención",hoja.costeNoches],["+ Km retribuidos",hoja.pagoKm],["+ Disponibilidad pactada",hoja.disponibilidad],["+ SS empresa (29,40%)",hoja.ssEmpresa]].filter(([,v])=>v>0).map(([k,v])=>(
+                        <div className="personnel-responsive-flex personnel-subtabs" key={k} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid var(--border2)"}}>
                           <span style={{color:"var(--text3)"}}>{k}</span>
                           <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:600}}>{Number(v).toLocaleString("es-ES",{minimumFractionDigits:2})} €</span>
                         </div>
                       ))}
-                      <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800,marginTop:6,color:"#1d4ed8"}}>
+                      <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800,marginTop:6,color:"#1d4ed8"}}>
                         <span>COSTE EMPRESA TOTAL</span>
                         <span style={{fontFamily:"'JetBrains Mono',monospace"}}>{Number(hoja.costeEmpresaTotal||hoja.totalChofer).toLocaleString("es-ES",{minimumFractionDigits:2})} €</span>
                       </div>
@@ -700,16 +704,16 @@ export default function HojasRuta(){
                       const diaS=sb/30;
                       return(
                         <div>
-                          <div style={{fontSize:11,color:"var(--text4)",marginBottom:10,lineHeight:1.6}}>Conceptos del finiquito conforme al ET España. Los importes se calculan sobre el salario base configurado (<b>{sb.toLocaleString("es-ES",{minimumFractionDigits:2})} €/mes</b>):</div>
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                          <div style={{fontSize:12,color:"var(--text4)",marginBottom:10,lineHeight:1.6}}>Conceptos del finiquito conforme al ET España. Los importes se calculan sobre el salario base configurado (<b>{sb.toLocaleString("es-ES",{minimumFractionDigits:2})} €/mes</b>):</div>
+                          <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                             {[["Salario/día (base)",diaS.toFixed(2)+" €"],["Vacaciones/mes (2.5 días)",((diaS*2.5).toFixed(2))+" €"],["Paga extra/mes (prorrateada)",((sb/6).toFixed(2))+" €"],["Indemn. despido objetivo\n20 días/año (art. 52 ET)","20 × "+diaS.toFixed(2)+" × años"],["Indemn. despido improcedente\n33 días/año (art. 56 ET)","33 × "+diaS.toFixed(2)+" × años"],["SS trabajador sobre finiquito","6.55% s/base cotiz."]].map(([k,v])=>(
                               <div key={k} style={{background:"var(--bg3)",borderRadius:7,padding:"8px 12px"}}>
-                                <div style={{fontSize:9,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",lineHeight:1.4,marginBottom:3}}>{k}</div>
+                                <div style={{fontSize:12,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",lineHeight:1.4,marginBottom:3}}>{k}</div>
                                 <div style={{fontSize:12,fontWeight:800,fontFamily:"'JetBrains Mono',monospace",color:"var(--text)"}}>{v}</div>
                               </div>
                             ))}
                           </div>
-                          <div style={{marginTop:10,fontSize:10,color:"var(--text5)",lineHeight:1.6}}>⚖️ Art. 49 ET: el finiquito incluye salario pendiente + vacaciones no disfrutadas + pagas extra pendientes ± liquidaciones. La indemnización depende del tipo de extinción. Consultar convenio colectivo aplicable.</div>
+                          <div style={{marginTop:10,fontSize:12,color:"var(--text5)",lineHeight:1.6}}>⚖️ Art. 49 ET: el finiquito incluye salario pendiente + vacaciones no disfrutadas + pagas extra pendientes ± liquidaciones. La indemnización depende del tipo de extinción. Consultar convenio colectivo aplicable.</div>
                         </div>
                       );
                     })()}

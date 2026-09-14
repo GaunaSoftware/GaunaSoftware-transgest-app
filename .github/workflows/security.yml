@@ -1,7 +1,7 @@
 name: Seguridad y CI
 
-# Auditoria de dependencias (SCA) y verificacion de sintaxis. Parte del proceso
-# de gestion de vulnerabilidades (ISO 27001 A.8.8 / OWASP ASVS V1.1, V14.2).
+# Auditoria de dependencias (SCA), compilacion y verificaciones de seguridad.
+# Parte del proceso de gestion de vulnerabilidades (ISO 27001 A.8.8 / OWASP ASVS V1.1, V14.2).
 
 on:
   push:
@@ -21,16 +21,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project:
-          - transgest-bloque6-backend/transgest-backend
-          - transgest-bloque6-backend/transgest-accounting-api
-          - transgest-bloque6-backend/transgest-frontend
-          - transgest-bloque6-backend/transgest-accounting-frontend
+        include:
+          - project: transgest-bloque6-backend/transgest-backend
+            node_version: 20
+          - project: transgest-bloque6-backend/transgest-accounting-api
+            node_version: 20
+          - project: transgest-bloque6-backend/transgest-frontend
+            node_version: 24
+          - project: transgest-bloque6-backend/transgest-accounting-frontend
+            node_version: 24
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node_version }}
       - name: Instalar dependencias
         working-directory: ${{ matrix.project }}
         run: npm ci --ignore-scripts || npm install --ignore-scripts --no-audit --no-fund
@@ -56,8 +60,38 @@ jobs:
           node-version: 20
       - name: node --check de todo src y scripts
         working-directory: ${{ matrix.project }}
+        shell: bash
         run: |
-          set -e
-          for f in $(find src scripts -name '*.js'); do
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
             node --check "$f"
-          done
+          done < <(find src scripts -type f \( -name '*.js' -o -name '*.cjs' \) -print0)
+      - name: Verificar hardening de TransGestAdmin
+        if: matrix.project == 'transgest-bloque6-backend/transgest-backend'
+        working-directory: ${{ matrix.project }}
+        run: node scripts/superadmin_security_check.cjs
+
+  frontend-regression:
+    name: Build y tests frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: transgest-bloque6-backend/transgest-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: transgest-bloque6-backend/transgest-frontend/package-lock.json
+      - name: Instalar dependencias sin scripts nativos
+        run: npm ci --ignore-scripts
+      - name: Tests unitarios
+        env:
+          CI: true
+        run: npm test -- --watchAll=false --runInBand
+      - name: Build de produccion
+        env:
+          CI: true
+          GENERATE_SOURCEMAP: false
+        run: npm run build

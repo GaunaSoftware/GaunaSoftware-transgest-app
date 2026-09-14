@@ -3,7 +3,7 @@ const path = require("path");
 
 const routesDir = path.resolve(__dirname, "../src/routes");
 const wrapperPath = path.join(routesDir, "superadmin.js");
-const legacyPath = path.join(routesDir, "superadmin_original.js");
+const legacyPath = path.join(routesDir, "superadminCore.js");
 
 function fail(message) {
   console.error(`FAIL: ${message}`);
@@ -15,7 +15,7 @@ function expect(source, pattern, message) {
 }
 
 if (!fs.existsSync(wrapperPath)) fail("Falta src/routes/superadmin.js");
-if (!fs.existsSync(legacyPath)) fail("Falta src/routes/superadmin_original.js");
+if (!fs.existsSync(legacyPath)) fail("Falta src/routes/superadminCore.js");
 if (process.exitCode) process.exit(process.exitCode);
 
 const wrapper = fs.readFileSync(wrapperPath, "utf8");
@@ -28,8 +28,8 @@ expect(wrapper, /isSuperadminOnlyRequest/, "Debe existir control explicito para 
 expect(wrapper, /\["superadmin", "soporte"\]\.includes\(req\.superadmin\.rol\)/, "Debe separarse soporte de facturacion en operaciones sensibles");
 expect(wrapper, /password_changed_at=NOW\(\)/, "Los resets deben invalidar sesiones de usuario anteriores");
 expect(wrapper, /router\.use\(legacyRouter\)/, "El router original debe conservarse detras del wrapper");
-expect(legacy, /router\.post\("\/login"/, "El router original debe conservar el login de SuperAdmin");
-expect(legacy, /module\.exports\s*=\s*router/, "El router original debe seguir exportandose correctamente");
+expect(legacy, /router\.post\("\/login"/, "El router principal debe conservar el login de SuperAdmin");
+expect(legacy, /module\.exports\s*=\s*router/, "El router principal debe seguir exportandose correctamente");
 
 if (!process.exitCode) {
   console.log("OK: hardening SuperAdmin verificado estaticamente");

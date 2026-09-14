@@ -3,7 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const db = require("../services/db");
 const { superadminJwtSecret } = require("../services/jwtSecrets");
-const legacyRouter = require("./superadmin_original");
+const legacyRouter = require("./superadminCore");
 
 const router = express.Router();
 

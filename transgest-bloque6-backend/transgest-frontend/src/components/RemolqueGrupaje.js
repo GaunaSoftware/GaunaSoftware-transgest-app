@@ -1,3 +1,4 @@
+import { palletLayout, cargoCount, cargoLength } from "../utils/cargoDimensions";
 import { useMemo } from "react";
 
 // Vista de un remolque desde arriba con las cargas de un grupaje colocadas por
@@ -24,47 +25,9 @@ export const REMOLQUE_DEFECTO = { metros: 13.6, peso: 24000, palets: 33 };
 //   (3 x 1,00 = 3,00 > 2,45), por eso aprovecha peor el remolque.
 //
 // MEDIO PALET 800x600 -> 3 por fila (3 x 0,80 = 2,40), fila de 0,60.
-const PALET_CFG = {
-  europeo:   { anchoFila: [2, 3], fondos: [0.80, 1.20] }, // admite fila girada
-  americano: { anchoFila: [2],    fondos: [1.00] },
-  medio:     { anchoFila: [3],    fondos: [0.60] },
-};
-
-// Metros de fondo que ocupan n palets de un tipo, eligiendo la combinacion de
-// filas que menos ocupe (es lo que hace el mozo al cargar).
-export function mlPalets(n, tipo = "europeo", apilables = false) {
-  const cantidad = Math.max(0, Math.floor(Number(n) || 0));
-  if (!cantidad) return 0;
-  const cfg = PALET_CFG[String(tipo)] || PALET_CFG.europeo;
-  // Apilables: van a dos alturas, asi que en el suelo ocupan la mitad de sitios.
-  const enSuelo = apilables ? Math.ceil(cantidad / 2) : cantidad;
-
-  // Programacion dinamica sobre el numero de palets: para cada cantidad se
-  // prueba cerrar la ultima fila con cada anchura posible y se guarda el minimo.
-  const mejor = new Array(enSuelo + 1).fill(Infinity);
-  mejor[0] = 0;
-  for (let i = 1; i <= enSuelo; i += 1) {
-    cfg.anchoFila.forEach((porFila, idx) => {
-      const restantes = Math.max(0, i - porFila); // una fila a medias tambien ocupa entera
-      const coste = mejor[restantes] + cfg.fondos[idx];
-      if (coste < mejor[i]) mejor[i] = coste;
-    });
-  }
-  return Number(mejor[enSuelo].toFixed(2));
-}
-
-export function mlDeCarga(p) {
-  const ml = Number(p?.metros_lineales || 0);
-  if (ml > 0) return ml;
-  const n = Number(p?.palets_cantidad || 0);
-  if (n > 0) return mlPalets(n, p?.palets_tipo || "europeo", !!p?.palets_apilables);
-  // Mercancia sin paletizar: se usa el largo declarado.
-  return Number(p?.carga_largo_m || 0);
-}
-
-export function paletsDeCarga(p) {
-  return Number(p?.palets_cantidad || 0) || Number(p?.bultos || 0) || 0;
-}
+export const mlPalets = (n,tipo="europeo",apilables=false) => palletLayout(n,tipo,apilables).length;
+export const mlDeCarga = cargoLength;
+export const paletsDeCarga = p => p.palets_tipo === 'granel' ? 0 : cargoCount(p);
 
 // Capacidad del remolque a partir del vehiculo asignado. Si le faltan datos cae
 // al trailer estandar y lo indica, para no confundir un valor por defecto con

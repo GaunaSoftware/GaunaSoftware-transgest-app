@@ -1,3 +1,4 @@
+import { PALLET_SIZES, cargoCount, cargoLength, cargoPayload, updateCargo } from "../utils/cargoDimensions";
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
@@ -548,7 +549,7 @@ function buildPedidoCopyPayload(basePedido = {}, overrides = {}) {
     merged.destino = "";
   }
   const {
-    remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
+    _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
     chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
     factura_numero, facturado, cliente_email, cliente_telefono,
     chofer2_nombre, remolque_id, mantener_asignacion, mantener_cargas, mantener_descargas, ...formClean
@@ -615,10 +616,10 @@ function mergePrimaryStopSchedule(stops, { fecha, hora, ventana } = {}) {
 
 function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   if (Object.keys(overrides).length) return sanitizePedidoPayload(buildPedidoUpdatePatch(overrides));
-  const merged = normalizePedidoTarifaDraft({ ...basePedido, ...overrides });
+  const merged = normalizePedidoTarifaDraft(cargoPayload({ ...basePedido, ...overrides }));
   const geoMerged = withPedidoGeoDefaults(merged);
   const {
-    remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
+    _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
     colaborador_nombre, chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
     factura_numero, factura_estado, factura_id,
     facturado, cliente_email, cliente_telefono,
@@ -1129,7 +1130,7 @@ function groupRutasByOrigen(rutas = []) {
 }
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
-  "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
+  "palets_cantidad", "carga_largo_m", "carga_ancho_m", "carga_alto_m", "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
   "cantidad", "precio_unitario", "extracostes_importe",
   "tipo_iva",
   "precio_base_sin_combustible", "recargo_combustible_pct", "importe_revision_combustible",
@@ -6619,7 +6620,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [form,       setForm]       = useState(
     editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""}))
-      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", metros_lineales:"13.65", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje",  fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
   );
   const [mapPedidoDraft, setMapPedidoDraft] = useState(() => form);
   const [saving,     setSaving]     = useState(false);
@@ -6658,7 +6659,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     if (hydratedPedidoKeyRef.current === editandoKey) return;
     const nextForm = editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({ ...editando, remolque_id_manual: editando.remolque_id || "" }))
-      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", metros_lineales:"13.65", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, carga_techo:false, intercambio_palets:false, requiere_cinchas:true });
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje",  fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, carga_techo:false, intercambio_palets:false, requiere_cinchas:true });
     hydratedPedidoKeyRef.current = editandoKey;
     setForm(nextForm);
     setColaboradorBusqueda("");
@@ -8664,33 +8665,34 @@ useEffect(() => {
                   vehiculos={vehiculosLocal}
                 />
               </div>
-              <div><label style={S.label}>Bultos / Palets</label><input type="text" inputMode="decimal" style={S.input} value={form.bultos||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,bultos:e.target.value})))}/></div>
+              <div><label style={S.label}>{form.palets_tipo === "granel" ? "Número de bultos" : "Número de palets / bultos"}</label><input aria-label="Cantidad de carga" type="number" min="0" step="1" style={S.input} value={cargoCount(form)||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia(updateCargo(p,"palets_cantidad",e.target.value))))}/></div>
               {/* Detalle de la carga: con esto el grupaje calcula la ocupacion
                   real del remolque (metros lineales, peso y palets). */}
-              {form.tipo_carga === "grupaje" && <>
+              {<>
               <div><label style={S.label}>Tipo de palet</label>
-                <select style={S.sel} value={form.palets_tipo||""} onChange={f("palets_tipo")}>
+                <select style={S.sel} value={form.palets_tipo||""} onChange={e=>setForm(p=>updateCargo(p,"palets_tipo",e.target.value))}>
                   <option value="">Sin especificar</option>
                   <option value="europeo">Europeo (120x80)</option>
                   <option value="americano">Americano (120x100)</option>
                   <option value="medio">Medio palet (80x60)</option>
                   <option value="granel">Sin paletizar / granel</option>
                 </select>
+                {PALLET_SIZES[form.palets_tipo] && <small>Medidas del palet: {PALLET_SIZES[form.palets_tipo].map(v=>v*100).join(" × ")} cm. La ocupación se calcula al indicar la cantidad.</small>}
               </div>
-              <div><label style={S.label}>N. de palets</label><input type="text" inputMode="numeric" style={S.input} value={form.palets_cantidad||""} onChange={f("palets_cantidad")} placeholder="Ej: 12"/></div>
+
               <div style={{display:"flex",alignItems:"flex-end",paddingBottom:6}}>
                 <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"var(--text3)",cursor:"pointer"}}>
-                  <input type="checkbox" checked={!!form.palets_apilables} onChange={e=>setForm(p=>({...p,palets_apilables:e.target.checked}))}/>
+                  <input type="checkbox" checked={!!form.palets_apilables} onChange={e=>setForm(p=>updateCargo(p,"palets_apilables",e.target.checked))}/>
                   Se pueden apilar
                 </label>
               </div>
-              <div><label style={S.label}>Largo carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_largo_m||""} onChange={f("carga_largo_m")} placeholder="Solo si no va paletizada"/></div>
-              <div><label style={S.label}>Ancho carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_ancho_m||""} onChange={f("carga_ancho_m")}/></div>
+              <div><label style={S.label}>Longitud ocupada / ML (m)</label><input type="text" inputMode="decimal" style={S.input} aria-label="Longitud ocupada" value={form.carga_largo_m ?? (cargoLength(form)||"")} onChange={e=>setForm(p=>updateCargo(p,"carga_largo_m",e.target.value))} placeholder="Calculada según los palets"/></div>
+              <div><label style={S.label}>Ancho carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_ancho_m||""} aria-label="Ancho de carga" onChange={e=>setForm(p=>updateCargo(p,"carga_ancho_m",e.target.value))}/></div>
               <div><label style={S.label}>Alto carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_alto_m||""} onChange={f("carga_alto_m")}/></div>
               </>}
               <div><label style={S.label}>Temperatura (C)</label><input type="text" inputMode="decimal" style={S.input} value={form.temperatura_c??""} onChange={f("temperatura_c")} placeholder="Ej: -18 (vacio = sin frio)"/></div>
               <div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>
-              <div><label style={S.label}>ML</label><input type="text" inputMode="decimal" style={S.input} value={form.metros_lineales||""} onChange={f("metros_lineales")} placeholder="Metros lineales"/></div>
+
             </div>
 
             <AdrPanel

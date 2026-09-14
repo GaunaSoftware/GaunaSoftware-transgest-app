@@ -26,8 +26,11 @@ expect(wrapper, /SELECT id,nombre,email,rol,activo FROM superadmins WHERE id=\$1
 expect(wrapper, /account\.activo !== true/, "El wrapper debe rechazar cuentas administrativas desactivadas");
 expect(wrapper, /isSuperadminOnlyRequest/, "Debe existir control explicito para operaciones exclusivas de superadmin");
 expect(wrapper, /\["superadmin", "soporte"\]\.includes\(req\.superadmin\.rol\)/, "Debe separarse soporte de facturacion en operaciones sensibles");
+expect(wrapper, /path === "\/exportar" \|\| path\.startsWith\("\/exportar\/"\)/, "Las exportaciones SaaS deben quedar reservadas a superadmin");
+expect(wrapper, /\/backups\\\/download/, "La descarga de backups debe tener una regla de acceso explicita");
+expect(wrapper, /path === "\/backups" \|\| path\.startsWith\("\/backups\/"\)/, "La gestion de backups debe quedar limitada a soporte o superadmin");
 expect(wrapper, /password_changed_at=NOW\(\)/, "Los resets deben invalidar sesiones de usuario anteriores");
-expect(wrapper, /router\.use\(legacyRouter\)/, "El router original debe conservarse detras del wrapper");
+expect(wrapper, /router\.use\(legacyRouter\)/, "El router principal debe conservarse detras del wrapper");
 expect(legacy, /router\.post\("\/login"/, "El router principal debe conservar el login de SuperAdmin");
 expect(legacy, /module\.exports\s*=\s*router/, "El router principal debe seguir exportandose correctamente");
 

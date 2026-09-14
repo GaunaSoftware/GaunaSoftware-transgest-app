@@ -1,3 +1,4 @@
+import TrafficMobileBoard from "./traffic/TrafficMobileBoard";
 import { PageHeader } from "../ui";
 import "./operations/operations.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
@@ -932,7 +933,7 @@ function TripCard({
       onMouseLeave={e2 => e2.currentTarget.style.filter = "brightness(1)"}
     >
       {/* Header: numero + icono estado */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:3, marginBottom:2 }}>
+      <div className="traffic-responsive-flex" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:3, marginBottom:2 }}>
         <span style={{
           fontFamily:"'JetBrains Mono',monospace", fontSize:10, fontWeight:800, color:e.color,
           letterSpacing:".02em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
@@ -949,7 +950,7 @@ function TripCard({
       )}
       {pedido.pendiente_completar && (
         <div title={pedido.aviso_completar || "Pendiente de completar"} style={{display:"inline-flex",marginBottom:3,padding:"1px 5px",borderRadius:3,background:"rgba(251,191,36,.16)",border:"1px solid rgba(251,191,36,.32)",color:"#fbbf24",fontSize:9,fontWeight:800}}>
-          Completar despues
+          Completar después
         </div>
       )}
       {String(pedido.tipo_viaje || "normal") !== "normal" && (
@@ -1067,7 +1068,7 @@ function TripCard({
         </div>
       )}
       {(quickAction && onQuickState) || onCopyNextWeek || onDelayRequest ? (
-        <div style={{marginTop:4,display:"flex",justifyContent:"flex-end",gap:6,flexWrap:"wrap"}}>
+        <div className="traffic-responsive-flex" style={{marginTop:4,display:"flex",justifyContent:"flex-end",gap:6,flexWrap:"wrap"}}>
           {onDelayRequest && (
             <button
               onClick={(e2) => {
@@ -1544,7 +1545,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
   const bloquear = !desvinculado && pedidoTieneFacturaFinal(pedido);
 
   return (
-    <div
+    <div className="traffic-modal traffic-responsive-flex" role="dialog" aria-modal="true" aria-label="Detalle de tráfico"
       style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.82)", zIndex:300,
                display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
       onMouseDown={e => e.target === e.currentTarget && onClose()}
@@ -1554,7 +1555,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
         {/* Aviso operacional vehiculo */}
         {avisoVehiculo && (
           <div style={{background:"rgba(245,158,11,.12)",border:"2px solid rgba(245,158,11,.5)",borderRadius:10,padding:"12px 14px",marginBottom:14}}>
-            <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+            <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"flex-start",gap:10}}>
               <span style={{fontSize:11,flexShrink:0,fontWeight:800,color:"#f59e0b"}}>AVISO</span>
               <div style={{flex:1}}>
                 <div style={{fontWeight:800,fontSize:13,color:"#f59e0b",marginBottom:4}}>Aviso - {avisoVehiculo.matricula}</div>
@@ -1569,7 +1570,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
         )}
         {focusContext?.pedido_id && String(focusContext.pedido_id) === String(pedido?.id) && (
           <div style={{background:"rgba(59,130,246,.10)",border:"1px solid rgba(59,130,246,.28)",borderRadius:10,padding:"10px 12px",marginBottom:14}}>
-            <div style={{display:"flex",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
+            <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"flex-start",gap:8,flexWrap:"wrap"}}>
               <span style={{fontSize:11,fontWeight:900,color:"#60a5fa",textTransform:"uppercase",letterSpacing:".06em"}}>En foco</span>
               <div style={{flex:"1 1 260px"}}>
                 <div style={{fontSize:12,color:"var(--text)",fontWeight:800}}>
@@ -1596,7 +1597,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
               )}
             </div>
             {isControlTowerFocus && (
-              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+              <div className="traffic-responsive-flex" style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
                 {(["sin_asignar","retraso"].includes(String(focusContext.type || "")) || ["asignar_recurso","reasignar","actualizar_eta"].includes(focusActionKey)) && (
                   <button onClick={() => focusModalField(vehiculoRef)} style={{padding:"5px 10px",borderRadius:7,border:"1px solid rgba(16,185,129,.30)",background:"rgba(16,185,129,.12)",color:"#34d399",fontWeight:800,fontSize:11,cursor:"pointer"}}>
                     Reasignar
@@ -1620,13 +1621,13 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
           </div>
         )}
         {/* Header */}
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <div className="traffic-responsive-flex" style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
           <div>
-            <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:16, color:"var(--text)" }}>
+            <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:800, fontSize:16, color:"var(--text)" }}>
               {pedido.numero}
             </div>
             {bloquear && (
-              <div style={{ fontSize:11, color:"var(--green)", marginTop:2, display:"flex", alignItems:"center", gap:8 }}>
+              <div className="traffic-responsive-flex" style={{ fontSize:11, color:"var(--green)", marginTop:2, display:"flex", alignItems:"center", gap:8 }}>
                 <span>Facturado (Factura {pedido.factura_numero||"emitida"}) - solo lectura</span>
                 <button
                   onClick={async()=>{
@@ -1669,7 +1670,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
         {!finanzasModal.sinPrecio && (
           <div style={{background:finanzasModal.margen < 0 ? "rgba(239,68,68,.08)" : "var(--accent-a08)",border:`1px solid ${finanzasModal.margen < 0 ? "rgba(239,68,68,.28)" : "var(--accent-a24)"}`,borderRadius:10,padding:"10px 12px",marginBottom:14}}>
             <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:finanzasModal.margen < 0 ? "#ef4444" : "var(--accent-xl)",marginBottom:8}}>Rentabilidad</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
+            <div className="traffic-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
               {[
                 ["Ingreso", fmtEur(finanzasModal.ingreso)],
                 ["Costes", fmtEur(finanzasModal.costes)],
@@ -1758,7 +1759,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
             padding:"10px 12px",
             marginBottom:12
           }}>
-            <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
+            <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
               <div>
                 <div style={{color:"#60a5fa",fontSize:12,fontWeight:800,marginBottom:4}}>
                   Sugerencia operativa
@@ -1785,7 +1786,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
             padding:"10px 12px",
             marginBottom:12
           }}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+            <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
               <div>
                 <div style={{color:"#34d399",fontSize:12,fontWeight:800,marginBottom:4}}>
                   Tarifa encontrada
@@ -1816,11 +1817,11 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
           padding:"10px 12px",
           marginBottom:12
         }}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:8}}>
+          <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:8}}>
             <div>
               <div style={{color:"var(--accent-xl)",fontSize:12,fontWeight:900,marginBottom:3}}>Ida y retorno</div>
               <div style={{fontSize:11,color:"var(--text4)"}}>
-                Enlaza una salida con su retorno para calcular km en vacio, km cargados y precio total.
+                Enlaza una salida con su retorno para calcular km en vacío, km cargados y precio total.
               </div>
             </div>
             <span style={{fontSize:10,fontWeight:900,color:"var(--accent-xl)",border:"1px solid var(--accent-a30)",borderRadius:20,padding:"3px 8px"}}>
@@ -1831,7 +1832,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
             <div style={{fontSize:11,color:"var(--text5)"}}>Calculando enlace...</div>
           ) : idaRetorno?.enlazado && idaRetorno?.resumen ? (
             <div style={{display:"grid",gap:8}}>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+              <div className="traffic-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
                 {[
                   ["Precio total", fmtEur(idaRetorno.resumen.ingresos?.total || 0)],
                   ["Km cargados", `${Number(idaRetorno.resumen.km?.cargado_total || 0).toLocaleString("es-ES")} km`],
@@ -1859,7 +1860,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
               </button>
             </div>
           ) : (
-            <div style={{display:"grid",gridTemplateColumns:"1.5fr .7fr auto",gap:8,alignItems:"end"}}>
+            <div className="traffic-responsive-grid" style={{display:"grid",gridTemplateColumns:"1.5fr .7fr auto",gap:8,alignItems:"end"}}>
               <div>
                 <label style={{...lbl, marginTop:0}}>Retorno asociado</label>
                 <select style={inp} value={linkRetornoId} onChange={e => seleccionarRetornoYSugerirKmVacio(e.target.value)} disabled={bloquear || enlazandoRetorno || calculandoKmVacio}>
@@ -1872,9 +1873,9 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
                 </select>
               </div>
               <div>
-                <label style={{...lbl, marginTop:0}}>Km vacio</label>
+                <label style={{...lbl, marginTop:0}}>Km vacío</label>
                 <input style={inp} type="number" min="0" step="0.1" value={linkKmVacio} onChange={e => setLinkKmVacio(e.target.value)} disabled={bloquear || enlazandoRetorno}/>
-                {calculandoKmVacio && <div style={{fontSize:10,color:"var(--text4)",marginTop:3}}>Calculando km en vacio...</div>}
+                {calculandoKmVacio && <div style={{fontSize:10,color:"var(--text4)",marginTop:3}}>Calculando km en vacío...</div>}
               </div>
               <button type="button" onClick={enlazarRetornoSeleccionado} disabled={bloquear || enlazandoRetorno || !linkRetornoId}
                 style={{padding:"8px 12px",borderRadius:7,border:"1px solid var(--accent-a30)",background:"var(--accent-a14)",color:"var(--accent-xl)",fontWeight:900,fontSize:11,cursor:bloquear||enlazandoRetorno||!linkRetornoId?"not-allowed":"pointer",opacity:(bloquear || enlazandoRetorno || !linkRetornoId) ? .55 : 1}}>
@@ -1884,7 +1885,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
           )}
         </div>
 
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 12px" }}>
+        <div className="traffic-responsive-grid" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 12px" }}>
           <div><label style={lbl}>Origen</label><input ref={origenRef} style={inp} value={form.origen||""} onChange={f("origen")} disabled={bloquear}/></div>
           <div><label style={lbl}>Destino</label><input ref={destinoRef} style={inp} value={form.destino||""} onChange={f("destino")} disabled={bloquear}/></div>
           <div><label style={lbl}>Tipo de viaje</label>
@@ -1904,7 +1905,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
           <div><label style={lbl}>Hora carga</label><input type="time" style={inp} value={form.hora_carga||""} onChange={f("hora_carga")} disabled={bloquear}/></div>
           <div><label style={lbl}>Fecha descarga</label><input ref={fechaDescargaRef} type="date" style={inp} value={form.fecha_descarga||""} onChange={f("fecha_descarga")} disabled={bloquear}/></div>
           <div><label style={lbl}>Hora descarga</label><input type="time" style={inp} value={form.hora_descarga||""} onChange={f("hora_descarga")} disabled={bloquear}/></div>
-          <div><label style={lbl}>Vehiculo</label>
+          <div><label style={lbl}>Vehículo</label>
             <select ref={vehiculoRef} style={inp} value={form.vehiculo_id||""} onChange={e=>{
               const vid = e.target.value;
               setForm(p=>({...p,vehiculo_id:vid}));
@@ -1929,8 +1930,8 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
             </select>
           </div>
           <div><label style={lbl}>KM ruta (cargado)</label>
-            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-              <input type="number" style={{...inp,flex:1}} value={form.km_ruta||form.km||""} onChange={e => setForm(p=>({...p, km_ruta:e.target.value, km:e.target.value}))} placeholder="0"/>
+            <div className="traffic-responsive-flex" style={{display:"flex",gap:6,alignItems:"center"}}>
+              <input aria-label="0" type="number" style={{...inp,flex:1}} value={form.km_ruta||form.km||""} onChange={e => setForm(p=>({...p, km_ruta:e.target.value, km:e.target.value}))} placeholder="0"/>
               {form.origen && form.destino && (
                 <button type="button" onClick={async()=>{
                   const km = await calcKmRutaCentralizada(form.origen, form.destino);
@@ -1942,8 +1943,8 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
               )}
             </div>
           </div>
-          <div><label style={lbl}>KM en vacio</label>
-            <input type="number" style={inp} value={form.km_vacio||""} onChange={f("km_vacio")} placeholder="0" onFocus={e=>e.target.select()}/>
+          <div><label style={lbl}>KM en vacío</label>
+            <input aria-label="0" type="number" style={inp} value={form.km_vacio||""} onChange={f("km_vacio")} placeholder="0" onFocus={e=>e.target.select()}/>
           </div>
           <div><label style={lbl}>Importe (EUR)</label>
             <input type="number" step="0.01" style={inp} value={form.importe||""} onChange={f("importe")} disabled={bloquear} onFocus={e=>e.target.select()}/>
@@ -1956,7 +1957,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
             const t = calcTiempoTransito(Number(form.km_ruta||form.km||0), cfg);
             if (!t) return null;
             return (
-              <div style={{ gridColumn:"1/-1", background:"rgba(16,185,129,.07)", border:"1px solid rgba(16,185,129,.2)", borderRadius:8, padding:"10px 14px", display:"flex", alignItems:"center", gap:10 }}>
+              <div className="traffic-responsive-flex" style={{ gridColumn:"1/-1", background:"rgba(16,185,129,.07)", border:"1px solid rgba(16,185,129,.2)", borderRadius:8, padding:"10px 14px", display:"flex", alignItems:"center", gap:10 }}>
                 <span style={{fontSize:10,fontWeight:800,color:"#34d399",padding:"4px 7px",borderRadius:999,border:"1px solid rgba(52,211,153,.35)",background:"rgba(52,211,153,.10)"}}>ETA</span>
                 <div>
                   <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:14,color:"#34d399"}}>Tiempo estimado de transito: {t.label}</div>
@@ -1983,7 +1984,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
             <div style={{display:"grid",gap:8}}>
               {eventos.slice(0,8).map(ev=>(
                 <div key={ev.id} style={{paddingTop:8,borderTop:"1px solid var(--border)"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11}}>
+                  <div className="traffic-responsive-flex" style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:11}}>
                     <span style={{color:"var(--text)",fontWeight:800}}>{pedidoEventoLabel(ev)}</span>
                     <span style={{color:"var(--text5)"}}>{new Date(ev.created_at).toLocaleString("es-ES")}</span>
                   </div>
@@ -1999,7 +2000,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
         </div>
 
         {!bloquear && (
-          <div style={{ display:"flex", gap:8, marginTop:16, justifyContent:"flex-end" }}>
+          <div className="traffic-responsive-flex" style={{ display:"flex", gap:8, marginTop:16, justifyContent:"flex-end" }}>
             <button onClick={onClose} style={{ padding:"7px 14px", borderRadius:7, border:"1px solid var(--border2)", background:"transparent", color:"var(--text3)", fontFamily:"'DM Sans',sans-serif", fontSize:12, fontWeight:600, cursor:"pointer" }}>
               Cancelar
             </button>
@@ -2169,17 +2170,17 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
   }
 
   return (
-    <div style={{flex:1,overflowY:"auto",padding:"16px 20px",display:"grid",gridTemplateColumns:"minmax(280px,390px) 1fr",gap:16}}>
-      <div style={{display:"flex",flexDirection:"column",gap:12,minWidth:0}}>
+    <div className="traffic-responsive-grid" style={{flex:1,overflowY:"auto",padding:"16px 20px",display:"grid",gridTemplateColumns:"minmax(280px,390px) 1fr",gap:16}}>
+      <div className="traffic-responsive-flex" style={{display:"flex",flexDirection:"column",gap:12,minWidth:0}}>
         <div style={card}>
-          <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"var(--text)",marginBottom:6}}>{soloLecturaChofer ? "Mi ruta recomendada" : "Optimizacion de rutas"}</div>
+          <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:900,fontSize:18,color:"var(--text)",marginBottom:6}}>{soloLecturaChofer ? "Mi ruta recomendada" : "Optimizacion de rutas"}</div>
           <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.5,marginBottom:12}}>
             {soloLecturaChofer
               ? "Consulta tus viajes de la semana seleccionada y abre la ruta recomendada con referencia para camion."
               : "Recomienda rutas usando las direcciones completas de cargas y descargas. El enlace es navegacion orientativa y se debe validar como ruta apta para camion."}
           </div>
           <div style={{background:activeProvider==="local"?"rgba(245,158,11,.10)":"rgba(16,185,129,.08)",border:`1px solid ${activeProvider==="local"?"rgba(245,158,11,.30)":"rgba(16,185,129,.25)"}`,borderRadius:8,padding:"9px 10px",marginBottom:12}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+            <div className="traffic-responsive-flex" style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
               <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Proveedor activo</div>
               <div style={{fontSize:10,fontWeight:900,color:activeProvider==="local"?"#f59e0b":"#10b981",textTransform:"uppercase"}}>{activeProvider}</div>
             </div>
@@ -2200,17 +2201,17 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
             <option value="eficiente">Mas eficiente</option>
             <option value="segura">Mas segura</option>
           </select>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar pedido, cliente, camion..."
+          <input aria-label="Buscar pedido, cliente, camion..." value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar pedido, cliente, camion..."
             style={{width:"100%",boxSizing:"border-box",padding:"9px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",fontSize:13}}/>
         </div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        <div className="traffic-responsive-flex" style={{display:"flex",flexDirection:"column",gap:8}}>
           {candidatos.map(p => {
             const active = selected?.id === p.id;
             const stops = pedidoRouteStops(p);
             return (
               <button key={p.id} onClick={()=>setSelectedId(p.id)}
                 style={{...card,textAlign:"left",cursor:"pointer",borderColor:active?"var(--accent)":"var(--border)",background:active?"var(--accent-a08)":"var(--bg2)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+                <div className="traffic-responsive-flex" style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
                   <div style={{fontWeight:900,color:"var(--text)",fontSize:13}}>{p.numero || "Pedido"}</div>
                   <div style={{fontSize:11,color:"var(--text5)"}}>{Number(p.km_ruta||p.km||0) ? `${Number(p.km_ruta||p.km).toLocaleString("es-ES")} km` : "km pendiente"}</div>
                 </div>
@@ -2227,16 +2228,16 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
 
       <div style={{...card,minWidth:0}}>
         {!plan ? (
-          <div style={{height:"100%",minHeight:300,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text5)",fontWeight:700}}>Selecciona un pedido para optimizar la ruta.</div>
+          <div className="traffic-responsive-flex" style={{height:"100%",minHeight:300,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text5)",fontWeight:700}}>Selecciona un pedido para optimizar la ruta.</div>
         ) : (
           <>
-            <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:14}}>
+            <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:14}}>
               <div>
                 <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".08em"}}>Plan recomendado</div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:900,color:"var(--text)",marginTop:3}}>{plan.pedido.numero || "Pedido"}</div>
+                <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:22,fontWeight:900,color:"var(--text)",marginTop:3}}>{plan.pedido.numero || "Pedido"}</div>
                 <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>{plan.modoLabel} - {plan.pedido.cliente_nombre || plan.pedido.colaborador_nombre || "sin cliente"}</div>
               </div>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+              <div className="traffic-responsive-flex" style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                 <button style={btn} onClick={calcularConApi} disabled={apiLoading}>{apiLoading ? "Calculando..." : "Calcular"}</button>
                 <button style={btn} onClick={()=>planUrl && window.open(planUrl,"_blank","noopener,noreferrer")}>Abrir enlace</button>
                 <button style={btn} onClick={copiar}>Copiar enlace</button>
@@ -2263,7 +2264,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
               }}
             />
 
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(120px,1fr))",gap:10,marginBottom:14}}>
+            <div className="traffic-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(120px,1fr))",gap:10,marginBottom:14}}>
               {[
                 ["Km", planKm ? `${Number(planKm).toLocaleString("es-ES")} km` : "Pendiente"],
                 ["Tiempo", planDuration || "Pendiente"],
@@ -2277,13 +2278,13 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
               ))}
             </div>
 
-            <div style={{display:"grid",gridTemplateColumns:"1.1fr .9fr",gap:14}}>
+            <div className="traffic-responsive-grid" style={{display:"grid",gridTemplateColumns:"1.1fr .9fr",gap:14}}>
               <div>
                 <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>Paradas</div>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div className="traffic-responsive-flex" style={{display:"flex",flexDirection:"column",gap:8}}>
                   {plan.stops.map((s, idx)=>(
-                    <div key={`${s.address}-${idx}`} style={{display:"grid",gridTemplateColumns:"34px 1fr",gap:10,alignItems:"start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:10}}>
-                      <div style={{height:28,width:28,borderRadius:6,background:idx===0?"var(--accent)":idx===plan.stops.length-1?"#f97316":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>{idx+1}</div>
+                    <div className="traffic-responsive-grid" key={`${s.address}-${idx}`} style={{display:"grid",gridTemplateColumns:"34px 1fr",gap:10,alignItems:"start",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:10}}>
+                      <div className="traffic-responsive-flex" style={{height:28,width:28,borderRadius:6,background:idx===0?"var(--accent)":idx===plan.stops.length-1?"#f97316":"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>{idx+1}</div>
                       <div>
                         <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase"}}>{s.type}</div>
                         <div style={{fontSize:13,color:"var(--text)",fontWeight:900,marginTop:2}}>{s.name || s.address}</div>
@@ -2304,7 +2305,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                     : 'Para recomendarla al colaborador, selecciona un pedido asignado a colaborador, calcula la ruta y pulsa "Enviar al colaborador". Le llega un enlace para abrir la ruta y marcarla como aceptada.'}
                 </div>
                 {puedeEnviarRuta && (
-                  <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>
+                  <div className="traffic-responsive-flex" style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>
                     <button style={{...btn,borderColor:"var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-l)"}} onClick={()=>enviarRuta("chofer_app")} disabled={sendLoading==="chofer_app" || !selected?.chofer_id}>
                       {sendLoading==="chofer_app" ? "Enviando..." : selected?.chofer_id ? "Enviar a app del chofer" : "Asigna chofer para enviar a app"}
                     </button>
@@ -2315,7 +2316,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                 <div style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:12,marginBottom:10}}>
                   <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",marginBottom:8}}>Trazabilidad de ruta</div>
                   {dispatches.length ? dispatches.slice(0,4).map(d => (
-                    <div key={d.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",padding:"7px 0",borderTop:"1px solid var(--border)"}}>
+                    <div className="traffic-responsive-grid" key={d.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",padding:"7px 0",borderTop:"1px solid var(--border)"}}>
                       <div style={{minWidth:0}}>
                         <div style={{fontSize:12,color:"var(--text)",fontWeight:900,textTransform:"capitalize"}}>{d.recipient_type} - {d.recipient_name || d.recipient_email}</div>
                         <div style={{fontSize:11,color:"var(--text5)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.recipient_email}</div>
@@ -2425,20 +2426,20 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
 
   return (
     <div style={{background:"linear-gradient(180deg,var(--bg3),var(--bg2))",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:14}}>
-      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
+      <div className="traffic-responsive-flex" style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
         <div>
           <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".08em"}}>Mapa operativo</div>
           <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>
             {hasCoords ? "Trazado con la ruta calculada." : "Vista esquematica hasta calcular la ruta."}
           </div>
         </div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+        <div className="traffic-responsive-flex" style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
           <button onClick={()=>onPreferencia("rapida")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa rapida</button>
           <button onClick={()=>onPreferencia("eficiente")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa eficiente</button>
           <button disabled={!hasCoords} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-l)",fontSize:11,fontWeight:900,cursor:hasCoords?"default":"not-allowed",opacity:hasCoords?1:.55}}>Mapa real</button>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
+      <div className="traffic-responsive-grid" style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
         {!embeddedMap && (
         <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"radial-gradient(circle at 20% 20%, var(--accent-a14), transparent 26%), linear-gradient(135deg, rgba(15,23,42,.88), rgba(30,41,59,.64))"}}>
           <svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",height:"100%",display:"block",minHeight:310}}>
@@ -2479,9 +2480,9 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
           </div>
         )}
       </div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+      <div className="traffic-responsive-flex" style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
         {stops.map((s, idx)=>(
-          <div key={`${s.address}-${idx}`} style={{display:"flex",alignItems:"center",gap:6,border:"1px solid var(--border)",borderRadius:7,padding:"5px 8px",fontSize:11,color:"var(--text4)",background:"var(--bg4)",maxWidth:260}}>
+          <div className="traffic-responsive-flex" key={`${s.address}-${idx}`} style={{display:"flex",alignItems:"center",gap:6,border:"1px solid var(--border)",borderRadius:7,padding:"5px 8px",fontSize:11,color:"var(--text4)",background:"var(--bg4)",maxWidth:260}}>
             <span style={{width:18,height:18,borderRadius:5,background:idx===0?"var(--accent)":idx===stops.length-1?"#f97316":"#3b82f6",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",flexShrink:0}}>{idx+1}</span>
             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.address}</span>
           </div>
@@ -2541,10 +2542,14 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   const [agruparPorCliente, setAgruparPorCliente] = useState(false);
   const [resumenSemanaVisible, setResumenSemanaVisible] = useState(true);
   const [collapsedClienteGroups, setCollapsedClienteGroups] = useState({});
+  const [vistaDia, setVistaDia] = useState(false);
+  const [fechaDia,setFechaDia] = useState(new Date().toISOString().slice(0,10));
+  const [filtroVehiculo,setFiltroVehiculo] = useState("");
   const [vistaMain, setVistaMain] = useState(esModoChoferOptimizacion ? "optimizacion" : initialVista);
   const autoAnchorAppliedRef = useRef(false);
 
   const dias = getWeekDays(anchor);
+  const diasVisibles = vistaDia ? dias.filter(d=>d.toISOString().slice(0,10)===fechaDia) : dias;
   const today = new Date().toISOString().slice(0,10);
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -3685,6 +3690,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
            !mat.startsWith("R-") && !mat.endsWith("-R");
   }), [vehiculos]);
 
+  const vehiculosVisibles = tractores.filter(v=>!filtroVehiculo||String(v.id)===filtroVehiculo);
   const viajesSinAsignacion = pedidosSemana
     .filter(p => pasaFiltrosOperativos(p) && !p.vehiculo_id && !p.colaborador_id && !p.colaborador_nombre);
 
@@ -4186,15 +4192,15 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   }, []);
 
   return (
-    <div className="tg-traffic-page operations-workspace operations-traffic" style={{ fontFamily:"'DM Sans',sans-serif", height:"100%", display:"flex", flexDirection:"column", overflow:"hidden", background:"var(--bg)" }}>
+    <div className="tg-traffic-page operations-workspace operations-traffic traffic-redesign" style={{ fontFamily:"'DM Sans',sans-serif", height:"100%", display:"flex", flexDirection:"column", overflow:"hidden", background:"var(--bg)" }}>
 
-      {!esModoChoferOptimizacion && <PageHeader title="Mesa de tráfico" description="Planifica cargas, vehículos y conductores. Supervisa la semana y organiza tus rutas."/>}
+      {!esModoChoferOptimizacion && !hideInternalTabs && <div className="traffic-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><div className="traffic-heading-actions"><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button><button onClick={()=>{setVistaMain("cuadrante");setSoloSinAsignar(true);}}>Revisar sin asignar</button></div></div>}
       {/* â”€â”€ Vista tabs â”€â”€ */}
       {!esModoChoferOptimizacion && !hideInternalTabs && <div className="tg-traffic-tabs" style={{padding:"6px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
-        {[["cuadrante","Cuadrante semanal"],["grupajes","Grupajes"],["optimizacion","Optimizacion de rutas"]].map(([v,lbl])=>(
-          <button key={v} onClick={()=>setVistaMain(v)}
+        {[["cuadrante","Cuadrante semanal"],["diario","Plan diario"],["grupajes","Agrupaciones"],["optimizacion","Optimización de rutas"]].map(([v,lbl])=>(
+          <button key={v} aria-pressed={v==="diario"?vistaMain==="cuadrante"&&vistaDia:vistaMain===v&&!vistaDia} onClick={()=>{setVistaMain(v==="diario"?"cuadrante":v);setVistaDia(v==="diario");if(v==="diario"){setFechaDia(new Date().toISOString().slice(0,10));setAnchor(new Date());}}}
             style={{padding:"5px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",
-              background:vistaMain===v?"var(--accent)":"var(--bg4)",color:vistaMain===v?"#fff":"var(--text4)"}}>
+              background:(v==="diario"?vistaDia:vistaMain===v&&!vistaDia)?"var(--accent)":"var(--bg4)",color:(v==="diario"?vistaDia:vistaMain===v&&!vistaDia)?"#fff":"var(--text4)"}}>
             {lbl}
             {v === "grupajes" && pedidosGrupaje.length > 0 ? (
               <span style={{
@@ -4220,88 +4226,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       </div>}
 
       {/* â”€â”€ Leyenda de estados â”€â”€ */}
-      {!esModoChoferOptimizacion && <div className="tg-traffic-legend" style={{
-        padding:"8px 16px", borderBottom:"1px solid var(--border)",
-        background:"var(--bg2)", flexShrink:0,
-        display:"flex", alignItems:"center", gap:6, flexWrap:"wrap",
-      }}>
-        {LEGEND.map(({ k, l }) => {
-          const e = EC[k];
-          const active = filtroEst === k;
-          return (
-            <button key={k} onClick={() => setFiltroEst(active ? "todos" : k)}
-              style={{
-                display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
-                cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:active?700:500,
-                background: active ? e.bg : "transparent",
-                border: `1.5px solid ${active ? e.color : "var(--border)"}`,
-                transition:"all .12s",
-              }}>
-              <span style={{ width:9, height:9, borderRadius:"50%", background:e.color, flexShrink:0, display:"inline-block" }}/>
-              <span style={{ color: active ? e.color : "var(--text4)" }}>{l}</span>
-            </button>
-          );
-        })}
-        <button onClick={() => setSoloCompletar(v => !v)}
-          style={{
-            display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
-            cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:soloCompletar?800:600,
-            background: soloCompletar ? "rgba(251,191,36,.16)" : "transparent",
-            border: `1.5px solid ${soloCompletar ? "#fbbf24" : "var(--border)"}`,
-            color: soloCompletar ? "#fbbf24" : "var(--text4)",
-          }}>
-          Pendientes de completar
-          {pendientesCompletarSemana > 0 && (
-            <span style={{minWidth:18,height:18,padding:"0 5px",borderRadius:9,display:"inline-flex",alignItems:"center",justifyContent:"center",background:soloCompletar?"rgba(255,255,255,.18)":"#f59e0b",color:"#fff",fontSize:10,fontWeight:900}}>
-              {pendientesCompletarSemana}
-            </span>
-          )}
-        </button>
-        <button onClick={() => setSoloCriticos(v => !v)}
-          style={{
-            display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
-            cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:soloCriticos?800:600,
-            background: soloCriticos ? "rgba(239,68,68,.14)" : "transparent",
-            border: `1.5px solid ${soloCriticos ? "rgba(239,68,68,.42)" : "var(--border)"}`,
-            color: soloCriticos ? "#f87171" : "var(--text4)",
-          }}>
-          Solo criticos
-          {(urgentesSinAsignarSemana > 0 || Object.keys(conflictosOperativosSemana).length > 0) && (
-            <span style={{minWidth:18,height:18,padding:"0 5px",borderRadius:9,display:"inline-flex",alignItems:"center",justifyContent:"center",background:soloCriticos?"rgba(255,255,255,.18)":"#ef4444",color:"#fff",fontSize:10,fontWeight:900}}>
-              {urgentesSinAsignarSemana + Object.keys(conflictosOperativosSemana).length}
-            </span>
-          )}
-        </button>
-        {Object.keys(conflictosOperativosSemana).length > 0 && (
-          <div style={{
-            display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
-            border:"1.5px solid rgba(239,68,68,.28)", background:"rgba(239,68,68,.08)",
-            color:"#f87171", fontSize:11, fontWeight:800
-          }}>
-            Conflictos semanales
-            <span style={{minWidth:18,height:18,padding:"0 5px",borderRadius:9,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"rgba(239,68,68,.18)",color:"#fff",fontSize:10,fontWeight:900}}>
-              {Object.keys(conflictosOperativosSemana).length}
-            </span>
-          </div>
-        )}
-        {urgentesSinAsignarSemana > 0 && (
-          <div style={{
-            display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
-            border:"1.5px solid rgba(245,158,11,.28)", background:"rgba(245,158,11,.10)",
-            color:"#f59e0b", fontSize:11, fontWeight:800
-          }}>
-            Cargas urgentes sin asignar
-            <span style={{minWidth:18,height:18,padding:"0 5px",borderRadius:9,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"rgba(245,158,11,.18)",color:"#fff",fontSize:10,fontWeight:900}}>
-              {urgentesSinAsignarSemana}
-            </span>
-          </div>
-        )}
-        <span style={{ marginLeft:"auto", fontSize:11, color:"var(--text5)", fontStyle:"italic" }}>
-          Clic en vehiculo para expandir - clic en viaje para editar
-        </span>
-      </div>}
       {!esModoChoferOptimizacion && vistaMain==="cuadrante" && (
-        <div className="tg-traffic-summary" style={{
+        <div className="tg-traffic-summary" data-advanced={showAdvancedFilters} style={{
           padding:"8px 16px",
           borderBottom:"1px solid var(--border)",
           background:"var(--bg2)",
@@ -4311,10 +4237,10 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
           flexShrink:0
         }}>
           {!resumenSemanaVisible && (
-            <div style={{display:"flex",alignItems:"center",gap:10,minHeight:30}}>
+            <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"center",gap:10,minHeight:30}}>
               <div style={{fontSize:11,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)"}}>Resumen semanal oculto</div>
               <div style={{fontSize:12,color:"var(--text4)"}}>
-                {resumenOperativoSemana.total} viaje(s), {resumenOperativoSemana.sinAsignacionParcial} sin asignacion, {resumenOperativoSemana.conflictos} conflicto(s)
+                {resumenOperativoSemana.total} viaje(s), {resumenOperativoSemana.sinAsignacionParcial} sin asignación, {resumenOperativoSemana.conflictos} conflicto(s)
               </div>
             </div>
           )}
@@ -4328,9 +4254,9 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
             ["sin_precio", "Sin precio", resumenOperativoSemana.sinPrecio, resumenOperativoSemana.sinPrecio ? "#f87171" : "#10b981", "Viajes sin precio de venta"],
             ["margen_negativo", "Margen", fmtEur(resumenOperativoSemana.margen), resumenOperativoSemana.margen < 0 ? "#fb7185" : "#10b981", `${resumenOperativoSemana.margenNegativo} viaje(s) con margen negativo`],
             ["colaborador", "Colaborador", resumenOperativoSemana.colaboradores, resumenOperativoSemana.colaboradores ? "#38bdf8" : "var(--text5)", "Viajes cargados a colaborador"],
-          ].map(([key, label, value, color, hint]) => (
-            <div key={label} role="button" tabIndex={0} onClick={() => aplicarFiltroResumen(key)} onKeyDown={e => { if (e.key === "Enter") aplicarFiltroResumen(key); }} title={`${hint}. Clic para filtrar.`} style={{border:"1px solid var(--border2)",borderRadius:8,background:"var(--bg3)",padding:"7px 9px",cursor:"pointer"}}>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:15,color}}>{value}</div>
+          ].filter(([key])=>showAdvancedFilters||!["sin_km","sin_precio","colaborador"].includes(key)).map(([key, label, value, color, hint]) => (
+            <div data-metric={key} key={label} role="button" tabIndex={0} onClick={() => aplicarFiltroResumen(key)} onKeyDown={e => { if (e.key === "Enter") aplicarFiltroResumen(key); }} title={`${hint}. Clic para filtrar.`} style={{border:"1px solid var(--border2)",borderRadius:8,background:"var(--bg3)",padding:"7px 9px",cursor:"pointer"}}>
+              <span className="traffic-kpi-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d={key==="total"?"M3 6h11v11H3z M14 10h4l3 4v3h-7 M5 20h3 M16 20h3":key==="conflictos"?"M12 3 2 21h20z M12 9v6 M12 17v1":"M6 3h8l4 4v14H6z M9 12h6 M9 16h6"}/></svg></span><div className="traffic-kpi-value" style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:22,color:"var(--text)"}}>{value}</div>
               <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",marginTop:2}}>{label}</div>
             </div>
           ))}
@@ -4346,7 +4272,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       {/* â”€â”€ Nav semana â”€â”€ */}
       {!esModoChoferOptimizacion && vistaMain==="cuadrante" && incidenciasViaje.length > 0 && (
         <div style={{padding:"10px 16px",borderBottom:"1px solid rgba(239,68,68,.20)",background:"rgba(239,68,68,.07)",display:"grid",gap:8}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+          <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
             <div>
               <div style={{fontSize:12,fontWeight:900,color:"#f87171"}}>Incidencias de viaje</div>
               <div style={{fontSize:11,color:"var(--text5)"}}>Paralizaciones, descansos incorrectos o avisos generados desde la app del chofer.</div>
@@ -4361,7 +4287,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
               const pedidoId = data.pedido_id || data.pedidoId || "";
               const pedido = pedidoId ? pedidos.find(p => String(p.id) === String(pedidoId)) : null;
               return (
-                <div key={n.id} style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",background:"var(--bg2)",border:"1px solid rgba(239,68,68,.22)",borderRadius:8,padding:"8px 10px"}}>
+                <div className="traffic-responsive-flex" key={n.id} style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between",background:"var(--bg2)",border:"1px solid rgba(239,68,68,.22)",borderRadius:8,padding:"8px 10px"}}>
                   <div style={{minWidth:0}}>
                     <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>
                       {n.titulo || "Incidencia operativa"}{pedido?.numero ? <span style={{color:"#f87171"}}> - {pedido.numero}</span> : null}
@@ -4370,7 +4296,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                       {n.mensaje || data.ruta || "Revisar incidencia del viaje."}{data.minutos ? ` - ${data.minutos} min` : ""}
                     </div>
                   </div>
-                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <div className="traffic-responsive-flex" style={{display:"flex",gap:6,flexShrink:0}}>
                     {pedido && (
                       <button onClick={()=>abrirViaje(pedido)} style={{padding:"5px 9px",borderRadius:7,border:"1px solid rgba(59,130,246,.24)",background:"rgba(59,130,246,.10)",color:"#60a5fa",fontSize:11,fontWeight:800,cursor:"pointer"}}>
                         Abrir viaje
@@ -4395,16 +4321,16 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
           display:"grid",
           gap:8
         }}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
             <div>
-              <div style={{fontSize:12,fontWeight:900,color:"#f59e0b"}}>Pedidos criticos proximos a carga</div>
+              <div style={{fontSize:12,fontWeight:900,color:"#f59e0b"}}>Pedidos críticos proximos a carga</div>
               <div style={{fontSize:11,color:"var(--text5)"}}>
                 {pedidosCriticosMetaActivos.length
                   ? `${pedidosCriticosMetaActivos.length} aviso(s) pendiente(s) de ${pedidosCriticosMetaVisibles.length} visible(s).`
                   : `No quedan avisos pendientes. ${pedidosCriticosMetaVisibles.length} ya fueron revisados.`}
               </div>
             </div>
-            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <div className="traffic-responsive-flex" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <div style={{fontSize:11,color:"var(--text4)"}}>
                 {pedidosCriticosMetaActivos.length} pendiente(s) / {pedidosCriticosMetaVisibles.length} total
               </div>
@@ -4426,7 +4352,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
           </div>
           {criticalPanelOpen && (
             <>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <div className="traffic-responsive-flex" style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <div style={{fontSize:11,fontWeight:800,color:"#f87171",background:"rgba(239,68,68,.10)",border:"1px solid rgba(239,68,68,.24)",borderRadius:999,padding:"4px 10px"}}>
               Sin hueco {pedidosCriticosMetaActivos.filter(item => !item.availability?.hayHueco).length}
             </div>
@@ -4449,7 +4375,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
             </label>
           </div>
           {selectedCriticalIds.length > 0 && (
-            <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",padding:"8px 10px",borderRadius:8,border:"1px solid rgba(59,130,246,.18)",background:"rgba(59,130,246,.08)"}}>
+            <div className="traffic-responsive-flex" style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",padding:"8px 10px",borderRadius:8,border:"1px solid rgba(59,130,246,.18)",background:"rgba(59,130,246,.08)"}}>
               <span style={{fontSize:11,fontWeight:900,color:"#60a5fa"}}>
                 {selectedCriticalIds.length} critico{selectedCriticalIds.length !== 1 ? "s" : ""} seleccionado{selectedCriticalIds.length !== 1 ? "s" : ""}
               </span>
@@ -4524,7 +4450,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                     ? `${availability.choferesLibres} chofer${availability.choferesLibres !== 1 ? "es" : ""} libre${availability.choferesLibres !== 1 ? "s" : ""}`
                     : "Sin recurso libre";
               return (
-                <div key={`crit-${p.id}`} style={{
+                <div className="traffic-responsive-flex" key={`crit-${p.id}`} style={{
                   display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",
                   padding:"8px 10px",borderRadius:8,border:"1px solid rgba(245,158,11,.22)",background:"var(--bg2)"
                 }}>
@@ -4605,7 +4531,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                       Falta: {quick.issues[0].replace(/^Falta\s+/i, "")}
                     </span>
                   )}
-                  <div style={{display:"flex",gap:6,marginLeft:"auto",flexWrap:"wrap"}}>
+                  <div className="traffic-responsive-flex" style={{display:"flex",gap:6,marginLeft:"auto",flexWrap:"wrap"}}>
                     {suggestion && (
                       <button
                         onClick={() => aplicarAsignacionSugerida(p)}
@@ -4716,11 +4642,11 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
             <input
               value={searchTrafico}
               onChange={e => setSearchTrafico(e.target.value)}
-              placeholder="Buscar pedido, cliente, origen, destino..."
+              aria-label="Buscar viajes" placeholder="Buscar pedido, cliente, origen, destino..."
               style={{minWidth:240,flex:"1 1 280px",padding:"7px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",fontSize:12,fontFamily:"'DM Sans',sans-serif"}}
             />
             <select
-              value={filtroCliente}
+              aria-label="Cliente" value={filtroCliente}
               onChange={e => setFiltroCliente(e.target.value)}
               style={{minWidth:190,padding:"7px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text)",fontSize:12,fontFamily:"'DM Sans',sans-serif"}}
             >
@@ -4729,6 +4655,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                 <option key={opt.key} value={opt.key}>{opt.label}</option>
               ))}
             </select>
+<select aria-label="Vehículo del cuadrante" value={filtroVehiculo} onChange={e=>setFiltroVehiculo(e.target.value)}><option value="">Todos los vehículos</option>{tractores.map(v=><option key={v.id} value={v.id}>{v.matricula}</option>)}</select>
             <button
               onClick={() => setShowAdvancedFilters(v => !v)}
               style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${showAdvancedFilters ? "rgba(59,130,246,.25)" : "var(--border2)"}`,background:showAdvancedFilters ? "rgba(59,130,246,.12)" : "rgba(148,163,184,.10)",color:showAdvancedFilters ? "#60a5fa" : "var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
@@ -4751,7 +4678,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
             )}
           </div>
           {showAdvancedFilters && (
-            <div style={{padding:"8px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg2)",display:"flex",gap:8,flexWrap:"wrap"}}>
+            <div className="traffic-responsive-flex" style={{padding:"8px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg2)",display:"flex",gap:8,flexWrap:"wrap"}}>
               <button
                 onClick={() => setSoloSinAsignar(v => !v)}
                 style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${soloSinAsignar ? "rgba(139,92,246,.28)" : "var(--border2)"}`,background:soloSinAsignar ? "rgba(139,92,246,.12)" : "var(--bg3)",color:soloSinAsignar ? "#a78bfa" : "var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
@@ -4768,7 +4695,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                 onClick={() => setSoloKmVacio(v => !v)}
                 style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${soloKmVacio ? "rgba(245,158,11,.28)" : "var(--border2)"}`,background:soloKmVacio ? "rgba(245,158,11,.12)" : "var(--bg3)",color:soloKmVacio ? "#f59e0b" : "var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}
               >
-                Km vacio
+                Km vacío
               </button>
               <button
                 onClick={() => setSoloSinKmRuta(v => !v)}
@@ -4811,29 +4738,30 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         background:"var(--bg3)", flexShrink:0,
         display:"flex", alignItems:"center", gap:8,
       }}>
-        <button onClick={() => { const d=new Date(anchor); d.setDate(d.getDate()-7); setAnchor(d); }}
+        <button onClick={() => { const d=new Date(anchor); d.setDate(d.getDate()-(vistaDia?1:7)); setAnchor(d);if(vistaDia)setFechaDia(d.toISOString().slice(0,10)); }}
           style={{ padding:"4px 12px", borderRadius:6, border:"1px solid var(--border)", background:"var(--bg4)", color:"var(--text3)", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
           Anterior
         </button>
-        <button onClick={() => setAnchor(new Date())}
+        <button onClick={() => {setAnchor(new Date());setFechaDia(new Date().toISOString().slice(0,10));}}
           style={{ padding:"4px 12px", borderRadius:6, border:"none", background:"var(--accent)", color:"#fff", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
           Hoy
         </button>
-        <button onClick={() => { const d=new Date(anchor); d.setDate(d.getDate()+7); setAnchor(d); }}
+        <button onClick={() => { const d=new Date(anchor); d.setDate(d.getDate()+(vistaDia?1:7)); setAnchor(d);if(vistaDia)setFechaDia(d.toISOString().slice(0,10)); }}
           style={{ padding:"4px 12px", borderRadius:6, border:"1px solid var(--border)", background:"var(--bg4)", color:"var(--text3)", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
           Siguiente
         </button>
-        <span style={{ fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:13, color:"var(--text)", marginLeft:6 }}>
+        <span style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:13, color:"var(--text)", marginLeft:6 }}>
           {weekLabel}
         </span>
+        <button aria-pressed={vistaDia} onClick={()=>{setVistaDia(v=>!v);setFechaDia(anchor.toISOString().slice(0,10));}}>{vistaDia?"Vista semana":"Vista día"}</button>
         {loading && <span style={{ fontSize:11, color:"var(--text5)", marginLeft:8 }}>Actualizando...</span>}
       </div>
 
       {loadError && (
-        <div style={{margin:"10px 16px 0",border:"1px solid rgba(239,68,68,.28)",background:"rgba(239,68,68,.08)",borderRadius:9,padding:"10px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+        <div className="traffic-responsive-flex" style={{margin:"10px 16px 0",border:"1px solid rgba(239,68,68,.28)",background:"rgba(239,68,68,.08)",borderRadius:9,padding:"10px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
           <div>
             <div style={{fontSize:13,fontWeight:900,color:"#ef4444"}}>No se pudieron cargar los viajes.</div>
-            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>La vista de trafico puede estar incompleta. Reintenta antes de asumir que no hay pedidos.</div>
+            <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>La vista de tráfico puede estar incompleta. Reintenta antes de asumir que no hay pedidos.</div>
           </div>
           <button onClick={cargar} style={{padding:"7px 12px",borderRadius:7,border:"1px solid rgba(239,68,68,.25)",background:"rgba(239,68,68,.10)",color:"#ef4444",fontSize:12,fontWeight:900,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
             Reintentar
@@ -4842,11 +4770,93 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       )}
 
       {/* â”€â”€ Grid principal â”€â”€ */}
+      {!esModoChoferOptimizacion && <div className="tg-traffic-legend" style={{
+        padding:"8px 16px", borderBottom:"1px solid var(--border)",
+        background:"var(--bg2)", flexShrink:0,
+        display:"flex", alignItems:"center", gap:6, flexWrap:"wrap",
+      }}>
+        {LEGEND.map(({ k, l }) => {
+          const e = EC[k];
+          const active = filtroEst === k;
+          return (
+            <button key={k} onClick={() => setFiltroEst(active ? "todos" : k)}
+              style={{
+                display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
+                cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:active?700:500,
+                background: active ? e.bg : "transparent",
+                border: `1.5px solid ${active ? e.color : "var(--border)"}`,
+                transition:"all .12s",
+              }}>
+              <span style={{ width:9, height:9, borderRadius:"50%", background:e.color, flexShrink:0, display:"inline-block" }}/>
+              <span style={{ color: active ? e.color : "var(--text4)" }}>{l}</span>
+            </button>
+          );
+        })}
+        <button onClick={() => setSoloCompletar(v => !v)}
+          style={{
+            display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
+            cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:soloCompletar?800:600,
+            background: soloCompletar ? "rgba(251,191,36,.16)" : "transparent",
+            border: `1.5px solid ${soloCompletar ? "#fbbf24" : "var(--border)"}`,
+            color: soloCompletar ? "#fbbf24" : "var(--text4)",
+          }}>
+          Pendientes de completar
+          {pendientesCompletarSemana > 0 && (
+            <span style={{minWidth:18,height:18,padding:"0 5px",borderRadius:9,display:"inline-flex",alignItems:"center",justifyContent:"center",background:soloCompletar?"rgba(255,255,255,.18)":"#f59e0b",color:"#fff",fontSize:10,fontWeight:900}}>
+              {pendientesCompletarSemana}
+            </span>
+          )}
+        </button>
+        <button onClick={() => setSoloCriticos(v => !v)}
+          style={{
+            display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
+            cursor:"pointer", fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:soloCriticos?800:600,
+            background: soloCriticos ? "rgba(239,68,68,.14)" : "transparent",
+            border: `1.5px solid ${soloCriticos ? "rgba(239,68,68,.42)" : "var(--border)"}`,
+            color: soloCriticos ? "#f87171" : "var(--text4)",
+          }}>
+          Solo críticos
+          {(urgentesSinAsignarSemana > 0 || Object.keys(conflictosOperativosSemana).length > 0) && (
+            <span style={{minWidth:18,height:18,padding:"0 5px",borderRadius:9,display:"inline-flex",alignItems:"center",justifyContent:"center",background:soloCriticos?"rgba(255,255,255,.18)":"#ef4444",color:"#fff",fontSize:10,fontWeight:900}}>
+              {urgentesSinAsignarSemana + Object.keys(conflictosOperativosSemana).length}
+            </span>
+          )}
+        </button>
+        {Object.keys(conflictosOperativosSemana).length > 0 && (
+          <div className="traffic-responsive-flex" style={{
+            display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
+            border:"1.5px solid rgba(239,68,68,.28)", background:"rgba(239,68,68,.08)",
+            color:"#f87171", fontSize:11, fontWeight:800
+          }}>
+            Conflictos semanales
+            <span style={{minWidth:18,height:18,padding:"0 5px",borderRadius:9,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"rgba(239,68,68,.18)",color:"#fff",fontSize:10,fontWeight:900}}>
+              {Object.keys(conflictosOperativosSemana).length}
+            </span>
+          </div>
+        )}
+        {urgentesSinAsignarSemana > 0 && (
+          <div className="traffic-responsive-flex" style={{
+            display:"flex", alignItems:"center", gap:6, padding:"3px 11px", borderRadius:20,
+            border:"1.5px solid rgba(245,158,11,.28)", background:"rgba(245,158,11,.10)",
+            color:"#f59e0b", fontSize:11, fontWeight:800
+          }}>
+            Cargas urgentes sin asignar
+            <span style={{minWidth:18,height:18,padding:"0 5px",borderRadius:9,display:"inline-flex",alignItems:"center",justifyContent:"center",background:"rgba(245,158,11,.18)",color:"#fff",fontSize:10,fontWeight:900}}>
+              {urgentesSinAsignarSemana}
+            </span>
+          </div>
+        )}
+        <span style={{ marginLeft:"auto", fontSize:11, color:"var(--text5)", fontStyle:"italic" }}>
+          Clic en vehículo para expandir - clic en viaje para editar
+        </span>
+      </div>}
+      {vistaMain==="cuadrante"&&vistaDia&&<label className="traffic-day-picker">Día del plan<input aria-label="Día del plan" type="date" value={fechaDia} onChange={e=>{setFechaDia(e.target.value);if(e.target.value)setAnchor(new Date(`${e.target.value}T12:00:00`));}}/></label>}
+      {vistaMain==="cuadrante"&&diasVisibles.length>0&&<TrafficMobileBoard key={diasVisibles.map(d=>d.toISOString()).join(",")} vehicles={vehiculosVisibles} drivers={choferes} days={diasVisibles} getTrips={getTrips} unassigned={viajesSinAsignacion.filter(p=>diasVisibles.some(d=>d.toISOString().slice(0,10)===fechaPedido(p)))} collaborators={colaboradoresSemana} onOpen={abrirViaje} onAdd={abrirAnadirViaje} states={EC}/>}
       <div className="tg-traffic-board" style={{ flex:1, overflowY:"auto", overflowX:"auto", maxHeight:"calc(100dvh - 210px)", minHeight:340, display:vistaMain==="cuadrante"?"block":"none" }}>
-        <table style={{ borderCollapse:"collapse", tableLayout:"fixed", minWidth: COL_VEH + COL_DAY*7 }}>
+        <table style={{ borderCollapse:"collapse", tableLayout:"fixed", minWidth: COL_VEH + COL_DAY*diasVisibles.length }}>
           <colgroup>
             <col style={{ width:COL_VEH }}/>
-            {dias.map((_, i) => <col key={i} style={{ width:COL_DAY }}/>)}
+            {diasVisibles.map((_, i) => <col key={i} style={{ width:COL_DAY }}/>)}
           </colgroup>
 
           {/* â”€â”€ Header dÃ­as â”€â”€ */}
@@ -4861,7 +4871,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
               }}>
                 VEHICULO
               </th>
-              {dias.map((d, i) => {
+              {diasVisibles.map((d, i) => {
                 const dStr = d.toISOString().slice(0,10);
                 const isToday = dStr === today;
                 const n = countDia(d);
@@ -4875,8 +4885,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                     top:0,
                     zIndex:30,
                   }}>
-                    <div style={{ fontSize:10, fontWeight:600, color:"var(--text5)", letterSpacing:".07em" }}>{DIA_NAMES[i]}</div>
-                    <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:22, color: isToday ? "var(--accent-xl)" : "var(--text)", lineHeight:1.1 }}>{d.getDate()}</div>
+                    <div style={{ fontSize:10, fontWeight:600, color:"var(--text5)", letterSpacing:".07em" }}>{DIA_NAMES[(d.getDay()+6)%7]}</div>
+                    <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:800, fontSize:22, color: isToday ? "var(--accent-xl)" : "var(--text)", lineHeight:1.1 }}>{d.getDate()}</div>
                     <div style={{ fontSize:10, color:"var(--text5)", marginTop:1 }}>
                       {n > 0 ? `${n} viaje${n !== 1 ? "s" : ""}` : ""}
                     </div>
@@ -4891,7 +4901,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
             {tractores.length === 0 && viajesSinAsignacion.length === 0 && Object.keys(colaboradoresSemana).length === 0 && !loading && (
               <tr>
                 <td colSpan={8} style={{ padding:60, textAlign:"center", color:"var(--text5)", fontSize:13 }}>
-                  Sin vehiculos. Anade vehiculos en el modulo Flota -> Vehiculos.
+                  Sin vehículos. Anade vehículos en el modulo Flota -> Vehiculos.
                 </td>
               </tr>
             )}
@@ -4904,14 +4914,14 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                   position:"sticky", left:0, zIndex:5,
                   minWidth:COL_VEH, maxWidth:COL_VEH,
                 }}>
-                  <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:15, color:"#f59e0b", marginBottom:4 }}>
-                    Sin asignacion
+                  <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:800, fontSize:15, color:"#f59e0b", marginBottom:4 }}>
+                    Sin asignación
                   </div>
                   <div style={{ fontSize:11, color:"var(--text4)", lineHeight:1.35 }}>
-                    Pedidos pendientes de vehiculo, chofer o colaborador
+                    Pedidos pendientes de vehículo, chofer o colaborador
                   </div>
                 </td>
-                {dias.map((d, i) => {
+                {diasVisibles.map((d, i) => {
                   const dStr = d.toISOString().slice(0,10);
                   const isToday = dStr === today;
                   const trips = sortTripsByOperationalPriority(viajesSinAsignacion.filter(p => fechaPedido(p) === dStr));
@@ -4929,7 +4939,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
               </tr>
             )}
 
-            {vehiculos
+            {vehiculosVisibles
               .filter(v => {
                 // Only tractoras - exclude remolques by clase, matricula pattern, or conjunto assignment
                 const clase = (v.clase || v.tipo || "").toLowerCase();
@@ -4957,11 +4967,11 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                     minWidth:COL_VEH, maxWidth:COL_VEH,
                   }}>
                     {/* MatrÃ­cula + estado */}
-                    <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:6, marginBottom:4 }}>
+                    <div className="traffic-responsive-flex" style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:6, marginBottom:4 }}>
                       <div style={{ fontFamily:"'JetBrains Mono',monospace", fontWeight:800, fontSize:15, color:"var(--text)", letterSpacing:".03em" }}>
                         {v.matricula}
                       </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
+                      <div className="traffic-responsive-flex" style={{ display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
                         <span style={{
                           padding:"2px 9px", borderRadius:20, fontSize:10, fontWeight:700, whiteSpace:"nowrap",
                           background:`${ev.color}1a`, color:ev.color, border:`1px solid ${ev.color}35`,
@@ -4982,7 +4992,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
 
                     {/* Chofer */}
                     {chofer && (
-                      <div
+                      <div className="traffic-responsive-flex"
                         title="Clic derecho o boton para copiar matriculas, chofer, telefono y DNI"
                         onContextMenu={async (e) => {
                           e.preventDefault();
@@ -5010,7 +5020,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
 
                     {/* Conjunto (remolque asignado) */}
                     {v.remolque_matricula && (
-                      <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#a78bfa", marginBottom:3 }}>
+                      <div className="traffic-responsive-flex" style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#a78bfa", marginBottom:3 }}>
                         <span>ENLACE</span>
                         <span style={{ fontFamily:"'JetBrains Mono',monospace", fontWeight:700 }}>
                           {v.matricula} + {v.remolque_matricula}
@@ -5020,7 +5030,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
 
                     {/* Posicion */}
                     {posicion && (
-                      <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#f97316", marginBottom:3 }}>
+                      <div className="traffic-responsive-flex" style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#f97316", marginBottom:3 }}>
                         <span>PUNTO</span>
                         <span>{posicion}</span>
                       </div>
@@ -5028,7 +5038,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
 
                     {/* ITV proxima */}
                     {itv && itvDias !== null && itvDias <= 30 && (
-                      <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:11,
+                      <div className="traffic-responsive-flex" style={{ display:"flex", alignItems:"center", gap:5, fontSize:11,
                                     color: itvDias <= 0 ? "var(--red)" : "#f59e0b", marginBottom:3 }}>
                         <span>FECHA</span>
                         <span style={{ fontWeight:700 }}>{new Date(itv).toLocaleDateString("es-ES")}</span>
@@ -5040,7 +5050,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                   </td>
 
                   {/* â”€â”€ Celdas de dÃ­as â”€â”€ */}
-                  {dias.map((d, i) => {
+                  {diasVisibles.map((d, i) => {
                     const dStr = d.toISOString().slice(0,10);
                     const isToday = dStr === today;
                     const trips = getTrips(v.id, d);
@@ -5133,7 +5143,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                   position:"sticky", left:0, zIndex:5,
                   minWidth:COL_VEH, maxWidth:COL_VEH,
                 }}>
-                  <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:800, fontSize:15, color:"#38bdf8", marginBottom:4 }}>
+                  <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:800, fontSize:15, color:"#38bdf8", marginBottom:4 }}>
                     {g.nombre}
                   </div>
                   <div style={{ fontSize:11, color:"var(--text4)", lineHeight:1.35 }}>
@@ -5145,7 +5155,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                     </div>
                   )}
                 </td>
-                {dias.map((d, i) => {
+                {diasVisibles.map((d, i) => {
                   const dStr = d.toISOString().slice(0,10);
                   const isToday = dStr === today;
                   const trips = g.viajes.filter(p => pasaFiltrosOperativos(p) && fechaPedido(p) === dStr);
@@ -5168,14 +5178,14 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
 
       {/* â”€â”€ Modal ediciÃ³n â”€â”€ */}
       {addTripCell && (
-        <div
+        <div className="traffic-modal traffic-responsive-flex" role="dialog" aria-modal="true" aria-label="Detalle de tráfico"
           style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.78)", zIndex:280, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}
           onMouseDown={e => e.target === e.currentTarget && !addTripSaving && setAddTripCell(null)}
         >
           <div style={{ background:"var(--bg2)", border:"1px solid var(--border2)", borderRadius:12, padding:18, width:"min(520px,96vw)", boxShadow:"0 24px 60px rgba(0,0,0,.35)" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"flex-start", marginBottom:12 }}>
+            <div className="traffic-responsive-flex" style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"flex-start", marginBottom:12 }}>
               <div>
-                <div style={{ fontFamily:"'Syne',sans-serif", fontSize:17, fontWeight:900, color:"var(--text)" }}>Anadir viaje</div>
+                <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:17, fontWeight:900, color:"var(--text)" }}>Anadir viaje</div>
                 <div style={{ fontSize:12, color:"var(--text4)", marginTop:3 }}>
                   {addTripCell.matricula || "Vehiculo"} - {new Date(`${addTripCell.fecha}T12:00:00`).toLocaleDateString("es-ES", { weekday:"long", day:"2-digit", month:"2-digit" })}
                 </div>
@@ -5258,7 +5268,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
               </div>
             )}
 
-            <div style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:16, flexWrap:"wrap" }}>
+            <div className="traffic-responsive-flex" style={{ display:"flex", gap:8, justifyContent:"flex-end", marginTop:16, flexWrap:"wrap" }}>
               <button type="button" onClick={irACrearViajeDesdeCelda} style={{ padding:"8px 12px", borderRadius:8, border:"1px solid rgba(59,130,246,.30)", background:"rgba(59,130,246,.12)", color:"#60a5fa", fontWeight:900, fontSize:12, cursor:"pointer", fontFamily:"'DM Sans',sans-serif" }}>
                 Crear viaje nuevo
               </button>
@@ -5604,7 +5614,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
 
   if (Object.keys(byGrupaje).length === 0) {
     return (
-      <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,color:"var(--text5)"}}>
+      <div className="traffic-responsive-flex" style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,color:"var(--text5)"}}>
         <div style={{width:22,height:22,borderRadius:6,background:"rgba(16,185,129,.12)",border:"1px solid rgba(16,185,129,.24)"}} />
         <div style={{fontWeight:700,fontSize:15,color:"var(--text)"}}>Sin grupajes activos en el cuadrante</div>
         <div style={{fontSize:12}}>Crea pedidos de tipo grupaje y aqui apareceran ordenados aunque sean de otra semana o sigan pendientes de agrupar.</div>
@@ -5617,12 +5627,12 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
       <datalist id="tg-grupaje-tractoras">
         {tractorasGrupaje.map(v => <option key={v.id} value={v.matricula} />)}
       </datalist>
-      <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+      <div className="traffic-responsive-flex" style={{marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{fontSize:12,color:"var(--text5)"}}>
           Marca los grupos con la casilla y pulsa "Combinar" para juntarlos en un viaje. Dentro de cada grupaje, arrastra las paradas para ordenarlas.
         </div>
         {selGids.length >= 2 && (
-          <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
+          <div className="traffic-responsive-flex" style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
             <button type="button" onClick={()=>combinarSeleccionados(true)} disabled={trabajandoGrupaje}
               title="Queda agrupado y guardado, pero marcado como no definitivo hasta que lo confirmes"
               style={{padding:"6px 12px",borderRadius:7,border:"1px dashed rgba(245,158,11,.55)",background:"rgba(245,158,11,.12)",color:"#b45309",fontWeight:900,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
@@ -5655,7 +5665,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
         </div>
       )}
 
-      <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <div className="traffic-responsive-flex" style={{display:"flex",flexDirection:"column",gap:20}}>
         {Object.entries(byGrupaje).map(([gid, peds]) => {
           const paradas = paradasMap[gid] || sortParadasByProximity(peds);
           // Find vehicle for this grupaje
@@ -5672,7 +5682,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
           return (
             <div key={gid} style={{background:"var(--bg2)",border:selGids.includes(gid)?"1px solid rgba(16,185,129,.5)":(esBorradorGrupaje?"1px dashed rgba(245,158,11,.6)":"1px solid var(--border2)"),borderRadius:12,overflow:"hidden"}}>
               {/* Header */}
-              <div style={{background:"var(--bg3)",padding:"10px 16px",borderBottom:"1px solid var(--border2)",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+              <div className="traffic-responsive-flex" style={{background:"var(--bg3)",padding:"10px 16px",borderBottom:"1px solid var(--border2)",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                 <input type="checkbox" checked={selGids.includes(gid)} onChange={()=>toggleSelGid(gid)}
                   title="Marca para combinar con otros grupos" style={{width:16,height:16,accentColor:"#10b981",cursor:"pointer"}}/>
                 <span style={{fontWeight:800,fontSize:14,color:"var(--text)"}}>
@@ -5692,7 +5702,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                   </>
                 )}
                 <span style={{fontSize:11,color:"var(--text5)",marginLeft:4}}>{peds.length} pedido{peds.length!==1?"s":""} - {Number(kgTotal).toLocaleString("es-ES")} kg - {Number(impTotal).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span>
-                <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
+                <div className="traffic-responsive-flex" style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
                   <button onClick={()=>{ setAsignaGid(asignaGid===gid?"":gid); setAsignaMat(veh?.matricula||primerPed?.matricula_manual||""); setAsignaChofer(primerPed?.chofer_id||""); }} disabled={trabajandoGrupaje}
                     style={{padding:"3px 10px",borderRadius:5,border:"1px solid var(--accent-a35)",background:"var(--accent-a12)",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer"}}>
                     Asignar matricula
@@ -5710,18 +5720,18 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                 </div>
               </div>
               {asignaGid===gid && (
-                <div style={{background:"var(--bg3)",borderBottom:"1px solid var(--border2)",padding:"10px 16px",display:"flex",flexDirection:"column",gap:8}}>
-                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <div className="traffic-responsive-flex" style={{background:"var(--bg3)",borderBottom:"1px solid var(--border2)",padding:"10px 16px",display:"flex",flexDirection:"column",gap:8}}>
+                  <div className="traffic-responsive-flex" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                     <span style={{fontSize:11,color:"var(--text5)",minWidth:70}}>Flota / a mano:</span>
                     <input list="tg-grupaje-tractoras" value={asignaMat} onChange={e=>setAsignaMat(e.target.value.toUpperCase())} placeholder={asignaColab ? "Matricula del colaborador (opcional)" : "Ej: 1234-ABC"}
                       style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,width:200,outline:"none"}}/>
                     <select value={asignaChofer} onChange={e=>setAsignaChofer(e.target.value)} disabled={!!asignaColab}
                       style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,outline:"none",opacity:asignaColab?.5:1}}>
-                      <option value="">Chofer (auto del vehiculo)</option>
+                      <option value="">Chofer (auto del vehículo)</option>
                       {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
                     </select>
                   </div>
-                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <div className="traffic-responsive-flex" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                     <span style={{fontSize:11,color:"var(--text5)",minWidth:70}}>o Colaborador:</span>
                     <select value={asignaColab} onChange={e=>setAsignaColab(e.target.value)}
                       style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,outline:"none",minWidth:200}}>
@@ -5735,7 +5745,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                       </button>
                     ) : (
                       <>
-                        <input value={nuevoColabNombre} onChange={e=>setNuevoColabNombre(e.target.value)} placeholder="Nombre del colaborador"
+                        <input aria-label="Nombre del colaborador" value={nuevoColabNombre} onChange={e=>setNuevoColabNombre(e.target.value)} placeholder="Nombre del colaborador"
                           style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,width:200,outline:"none"}}/>
                         <button type="button" onClick={crearColaboradorGrupaje} disabled={trabajandoGrupaje}
                           style={{padding:"6px 10px",borderRadius:7,border:"1px solid rgba(16,185,129,.35)",background:"rgba(16,185,129,.14)",color:"#10b981",fontSize:11,fontWeight:800,cursor:"pointer"}}>Crear</button>
@@ -5744,7 +5754,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                       </>
                     )}
                   </div>
-                  <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                  <div className="traffic-responsive-flex" style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                     <button onClick={()=>asignarMatriculaGrupaje(gid)} disabled={trabajandoGrupaje}
                       style={{padding:"6px 12px",borderRadius:7,border:"1px solid var(--accent-a35)",background:"var(--accent-a14)",color:"var(--accent)",fontWeight:800,fontSize:12,cursor:trabajandoGrupaje?"wait":"pointer",opacity:trabajandoGrupaje?.6:1}}>
                       {trabajandoGrupaje ? "Asignando..." : `Asignar a ${peds.length} pedido/s`}
@@ -5772,7 +5782,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                   const coords = getCityCoords(parada.ciudad);
 
                   return (
-                    <div key={parada.key}
+                    <div className="traffic-responsive-flex" key={parada.key}
                       draggable
                       onDragStart={()=>onDragStart(gid,idx)}
                       onDragOver={e=>onDragOver(e,gid,idx)}

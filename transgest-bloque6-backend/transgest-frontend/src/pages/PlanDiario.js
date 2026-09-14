@@ -7,7 +7,7 @@ import { setRuntimeFocus } from "../services/runtimeFocus";
 
 const S = {
   page: { flex:1, padding:"24px 30px", fontFamily:"'DM Sans',sans-serif", background:"linear-gradient(180deg, rgba(248,250,252,.92), rgba(255,255,255,.98))" },
-  title: { fontFamily:"'Syne',sans-serif", fontSize:30, fontWeight:900, color:"var(--text)", marginBottom:4 },
+  title: { fontFamily:"'DM Sans',sans-serif", fontSize:30, fontWeight:900, color:"var(--text)", marginBottom:4 },
   sub: { fontSize:12, color:"var(--text4)", marginBottom:16 },
   bar: { display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom:22 },
   btn: { padding:"10px 14px", borderRadius:8, border:"1px solid var(--border2)", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", background:"var(--bg3)", color:"var(--text3)" },
@@ -469,7 +469,7 @@ export default function PlanDiario() {
   const tomorrow = addDays(today, 1);
 
   return (
-    <div className="tg-responsive-page" style={S.page}>
+    <div className="tg-responsive-page traffic-daily" style={S.page}>
       <div style={{ display:"flex", justifyContent:"space-between", gap:12, alignItems:"flex-start", marginBottom:10 }}>
         <div>
           <div style={S.title}>Plan diario</div>

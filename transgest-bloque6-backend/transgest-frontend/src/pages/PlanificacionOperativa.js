@@ -1,12 +1,15 @@
+import { PageHeader } from "../ui";
+import { setRuntimeFocus } from "../services/runtimeFocus";
+import "./traffic/traffic.css";
 import { useEffect, useState } from "react";
 import PlanDiario from "./PlanDiario";
 import GestionTrafico from "./GestionTrafico";
 
 const TABS = [
-  { id: "plan_diario", label: "Plan diario" },
   { id: "cuadrante", label: "Cuadrante semanal" },
-  { id: "grupajes", label: "Grupajes" },
-  { id: "optimizacion", label: "Optimizacion de rutas" },
+  { id: "plan_diario", label: "Plan diario" },
+  { id: "grupajes", label: "Agrupaciones" },
+  { id: "optimizacion", label: "Optimización de rutas" },
 ];
 
 function normalizarTab(value) {
@@ -23,7 +26,7 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
   }, [initialTab]);
 
   return (
-    <div className="tg-planificacion-operativa tg-responsive-page" style={{
+    <div className="tg-planificacion-operativa tg-responsive-page traffic-shell" style={{
       flex: 1,
       minHeight: "100%",
       display: "flex",
@@ -32,6 +35,7 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
       color: "var(--text)",
       fontFamily: "'DM Sans',sans-serif",
     }}>
+      <header className="traffic-shell-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button></header>
       <div className="tg-planificacion-tabs" style={{
         display: "flex",
         alignItems: "center",
@@ -46,6 +50,7 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
           <button
             key={item.id}
             type="button"
+            aria-pressed={tab===item.id}
             onClick={() => setTab(item.id)}
             style={{
               flex: "0 0 auto",

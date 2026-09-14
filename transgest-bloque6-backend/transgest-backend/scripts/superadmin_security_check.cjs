@@ -29,6 +29,9 @@ expect(wrapper, /\["superadmin", "soporte"\]\.includes\(req\.superadmin\.rol\)/,
 expect(wrapper, /path === "\/exportar" \|\| path\.startsWith\("\/exportar\/"\)/, "Las exportaciones SaaS deben quedar reservadas a superadmin");
 expect(wrapper, /\/backups\\\/download/, "La descarga de backups debe tener una regla de acceso explicita");
 expect(wrapper, /path === "\/backups" \|\| path\.startsWith\("\/backups\/"\)/, "La gestion de backups debe quedar limitada a soporte o superadmin");
+expect(wrapper, /path === "\/integraciones" \|\| path\.startsWith\("\/integraciones\/"\)/, "Las integraciones tecnicas deben quedar fuera del rol facturacion");
+expect(wrapper, /path === "\/auditoria" \|\| path\.startsWith\("\/auditoria\/"\)/, "La auditoria SaaS debe quedar fuera del rol facturacion");
+expect(wrapper, /path === "\/password-reset-requests" \|\| path\.startsWith\("\/password-reset-requests\/"\)/, "Las solicitudes de reset deben quedar fuera del rol facturacion");
 expect(wrapper, /password_changed_at=NOW\(\)/, "Los resets deben invalidar sesiones de usuario anteriores");
 expect(wrapper, /router\.use\(legacyRouter\)/, "El router principal debe conservarse detras del wrapper");
 expect(legacy, /router\.post\("\/login"/, "El router principal debe conservar el login de SuperAdmin");

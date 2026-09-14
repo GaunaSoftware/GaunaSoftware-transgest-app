@@ -1,3 +1,4 @@
+import "./workspace/unified-tools.css";
 import {PageHeader,Button,KpiCard} from "../ui";
 import WorkshopOrders from "./workshop/WorkshopOrders";
 import "./workshop/workshop.css";
@@ -2353,7 +2354,6 @@ function readTallerFocus() {
 }
 
 export default function Taller() {
-  const [advancedOrders,setAdvancedOrders]=useState(false);
   const [focusTaller] = useState(() => readTallerFocus());
   const [tab,       setTab]       = useState(() => {
     const focus = readTallerFocus();
@@ -2369,8 +2369,8 @@ export default function Taller() {
   const [editRep,   setEditRep]   = useState(null);
   const [editPieza, setEditPieza] = useState(null);
   const [unidadesPieza, setUnidadesPieza] = useState(null);
-  const [filtroVh,  setFiltroVh]  = useState("");
-  const [q,         setQ]         = useState("");
+
+
   const [stockQ,    setStockQ]    = useState("");
   const [stockTipo, setStockTipo] = useState("todos");
   const [proveedores, setProveedores] = useState([]);
@@ -2564,11 +2564,7 @@ export default function Taller() {
     }
   }
 
-  const reps = useMemo(() => taller.reparaciones.filter(r=>{
-    if (filtroVh && r.vehiculo_id!==filtroVh) return false;
-    if (q && !`${r.tipo} ${r.descripcion} ${r.vehiculo_matricula}`.toLowerCase().includes(q.toLowerCase())) return false;
-    return true;
-  }).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)), [taller.reparaciones, filtroVh, q]);
+
 
   const stockBajo  = useMemo(() => taller.stock.filter(s=>(s.stock_actual||0)<=(s.stock_minimo||0)), [taller.stock]);
   const stockTotalUnidades = useMemo(() => (taller.stock || []).reduce((s,p)=>s+Number(p.stock_actual || 0),0), [taller.stock]);
@@ -2582,7 +2578,7 @@ export default function Taller() {
   }, [taller.stock, stockQ, stockTipo]);
   const gastoTaller = useMemo(() => resumenGastoTaller(taller.reparaciones || []), [taller.reparaciones]);
   const costoMes   = gastoTaller.mes;
-  const costoTotal = gastoTaller.total;
+
 
   useEffect(() => {
     if (!focusTaller?.pieza_id || tab !== "stock" || !taller.stock.length) return;
@@ -2657,75 +2653,10 @@ export default function Taller() {
       </div>
 
       {/*  Intervenciones  */}
-      {tab==="reparaciones"&&<><Button onClick={()=>setAdvancedOrders(v=>!v)}>{advancedOrders?'Volver a órdenes de taller':'Historial y gestión avanzada'}</Button>{!advancedOrders&&<WorkshopOrders orders={taller.reparaciones} vehicles={vehiculos} onVehicles={setVehiculos} onNew={()=>{setEditRep(null);setModalRep(true);}} onEdit={r=>{setEditRep(r);setModalRep(true);}} onClose={cerrarIntervencion} showTyres={()=>setTab('neumaticos')} showHistory={()=>setTab('trazabilidad')}/>}</>}
-      {tab==="reparaciones" && advancedOrders && <>
-        {vehiculosEnTaller.length>0&&<LucroCesanteBanner vehiculos={vehiculosEnTaller} lucroData={lucroData} lucroTotal={lucroTotal} onUpdate={(d)=>{
+      {tab==="reparaciones"&&<><div className="unified-tools">        {vehiculosEnTaller.length>0&&<LucroCesanteBanner vehiculos={vehiculosEnTaller} lucroData={lucroData} lucroTotal={lucroTotal} onUpdate={(d)=>{
           updateLucro(d);
         }}/>}
-        <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
-          <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={()=>{setEditRep(null);setModalRep(true);}}>+ Nueva intervención</button>
-          <select value={filtroVh} onChange={e=>setFiltroVh(e.target.value)} style={{...S.sel,width:200}}>
-            <option value="">Todos los vehículos</option>
-            {vehiculos.map(v=><option key={v.id} value={v.id}>{v.matricula} - {v.marca} {v.modelo}</option>)}
-          </select>
-          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar..." style={{...S.inp,width:180}}/>
-          <span style={{marginLeft:"auto",fontSize:12,color:"var(--text5)"}}>Coste total: <strong style={{color:"var(--green)",fontFamily:"'JetBrains Mono',monospace"}}>{fmt2(costoTotal)} EUR</strong></span>
-        </div>
-        <div style={S.card}>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr>{["Fecha","Vehículo","Tipo","Descripción","Km","Piezas","Coste",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
-            <tbody>
-              {reps.length===0 ? <tr><td colSpan={8} style={{...S.td,textAlign:"center",color:"var(--text5)"}}>Sin intervenciones registradas</td></tr>
-              : reps.map(r=>(
-                <tr key={r.id}>
-                  <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text4)"}}>{new Date(r.fecha).toLocaleDateString("es-ES")}</td>
-                  <td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{r.vehiculo_matricula||"-"}</td>
-                  <td style={S.td}><span style={{fontSize:11,padding:"2px 8px",borderRadius:4,background:"rgba(59,130,246,.12)",color:"var(--accent-xl)",fontWeight:600}}>{r.tipo}</span></td>
-                  <td style={{...S.td,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12}}>{r.descripcion}</td>
-                  <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text4)"}}>{r.km_en_intervencion?`${Number(r.km_en_intervencion).toLocaleString("es-ES")}km`:"-"}</td>
-                  <td style={{...S.td,fontSize:11,color:"var(--text3)",minWidth:120}}>
-                    <div style={{fontWeight:800,color:"var(--text)"}}>{r.piezas_usadas?.length||0} uds</div>
-                    {(r.piezas_usadas || []).slice(0,2).map((p,i)=>(
-                      <div key={`${p.unidad_id || p.codigo_unidad || p.codigo_barras || i}`} style={{fontFamily:"'JetBrains Mono',monospace",fontSize:10,color:"var(--text5)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:150}}>
-                        {p.codigo_unidad || p.codigo_barras || p.referencia || p.pieza_id}
-                      </div>
-                    ))}
-                    {(r.piezas_usadas || []).length > 2 && <div style={{fontSize:10,color:"var(--text5)"}}>+{(r.piezas_usadas || []).length - 2} mas</div>}
-                  </td>
-                  <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--green)"}}>{fmt2(r.coste_total)} EUR</td>
-                  <td style={{...S.td,fontSize:11}}>
-                    {r.factura_proveedor_num
-                      ? <div>
-                          <div style={{fontWeight:700,color:"var(--accent-xl)",fontFamily:"monospace"}}>{r.factura_proveedor_num}</div>
-                          <div style={{color:"var(--text5)"}}>{r.factura_proveedor_nombre}</div>
-                          {r.factura_proveedor_importe&&<div style={{color:"var(--green)",fontWeight:700}}>{fmt2(r.factura_proveedor_importe)} EUR</div>}
-                          {r.factura_proveedor_file_base64&&(
-                            <button
-                              type="button"
-                              style={{...S.btn,background:"transparent",color:"var(--accent-xl)",border:"none",padding:"3px 0",fontSize:10}}
-                              onClick={()=>{
-                                const a = document.createElement("a");
-                                a.href = `data:${r.factura_proveedor_file_mime || "application/octet-stream"};base64,${r.factura_proveedor_file_base64}`;
-                                a.download = r.factura_proveedor_file_name || `factura-${r.factura_proveedor_num || r.id}.pdf`;
-                                a.click();
-                              }}
-                            >
-                              Descargar factura
-                            </button>
-                          )}
-                        </div>
-                      : <span style={{color:"var(--text5)"}}>-</span>}
-                  </td>
-                  <td style={S.td}>
-                    <div style={{display:"flex",gap:5}}>
-                      {r.estado !== "cerrada" && (
-                        <button style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",padding:"3px 8px",fontSize:11,border:"1px solid rgba(16,185,129,.25)"}} onClick={()=>cerrarIntervencion(r)}>Cerrar</button>
-                      )}
-                      <button style={{...S.btn,background:"var(--bg3)",color:"var(--text2)",padding:"3px 8px",fontSize:11,border:"1px solid #1e2d45"}} onClick={()=>{setEditRep(r);setModalRep(true);}}>Editar</button>
-                      <button
-                        style={{...S.btn,background:"transparent",color:"#ef4444",border:"none",padding:"3px 8px",fontSize:11}}
-                        onClick={async()=>{
-                          if (!(await confirmDialog({title:"Eliminar reparacion",message:"Eliminar esta reparacion?",confirmText:"Eliminar",tone:"danger"}))) return;
+</div><WorkshopOrders orders={taller.reparaciones} vehicles={vehiculos} onVehicles={setVehiculos} onNew={()=>{setEditRep(null);setModalRep(true);}} onEdit={r=>{setEditRep(r);setModalRep(true);}} onClose={cerrarIntervencion} onDelete={async r=>{                          if (!(await confirmDialog({title:"Eliminar reparacion",message:"Eliminar esta reparacion?",confirmText:"Eliminar",tone:"danger"}))) return;
                           const d = tallerLoad();
                           d.reparaciones = d.reparaciones.filter(x => x.id !== r.id);
                           tallerSave(d);
@@ -2741,18 +2672,7 @@ export default function Taller() {
                           } finally {
                             recargar();
                           }
-                        }}
-                      >
-                        Eliminar
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </>}
+}} showTyres={()=>setTab('neumaticos')} showHistory={()=>setTab('trazabilidad')}/></>}
 
       {/*  Stock  */}
       {tab==="stock" && <>

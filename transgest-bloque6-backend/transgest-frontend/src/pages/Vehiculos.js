@@ -1,3 +1,4 @@
+import "./workspace/unified-tools.css";
 import FleetWorkspace from "./fleet/FleetWorkspace";
 import VehiclePhotoEditor from "./fleet/VehiclePhotoEditor";
 import "./fleet/fleet.css";
@@ -1784,7 +1785,6 @@ function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, 
 }
 
 export default function Vehiculos({ initialTipo = "todos" }) {
-  const [advancedFleet,setAdvancedFleet]=useState(false);
   const [loadError,setLoadError]=useState("");
   const { puedeEditar, puedeVer, user } = useAuth();
   const canEdit  = puedeEditar("vehiculos");
@@ -1869,10 +1869,10 @@ export default function Vehiculos({ initialTipo = "todos" }) {
     const found = vehiculos.find(v => String(v.id) === String(focusVehiculo.vehiculo_id));
     if (!found) return;
     const t = window.setTimeout(() => {
-      document.getElementById(`vehiculo-card-${focusVehiculo.vehiculo_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
+      setEditando(found); setModal(true);
       clearRuntimeFocus("tms_vehiculos_focus");
     }, 180);
-    return () => window.clearTimeout(t);
+  return () => window.clearTimeout(t);
   }, [focusVehiculo, loading, vehiculos]);
   useEffect(() => { recargarResumenGps(); }, [recargarResumenGps]);
 
@@ -1935,12 +1935,12 @@ export default function Vehiculos({ initialTipo = "todos" }) {
   }), [vehiculos, filtroTipo, filtroEstado]);
 
   // Clase legible corta
-  const claseCorta = c => c?.replace("Remolque - ","").replace("Semirremolque","Semi") || "-";
+
   const vehiculosActivos = vehiculos.filter(v => v.activo !== false && v.estado !== "baja");
   const tractorasActivas = vehiculosActivos.filter(v => !esRemolqueVehiculo(v, vehiculos));
   const remolquesActivos = vehiculosActivos.filter(v => esRemolqueVehiculo(v, vehiculos));
   const tractorasSinChofer = tractorasActivas.filter(v => !v.chofer_id && !choferes.some(ch => String(ch.vehiculo_id || "") === String(v.id)));
-  const remolquesSinTractora = remolquesActivos.filter(v => !v.tractora_id && !vehiculosActivos.some(t => String(t.remolque_id || "") === String(v.id)));
+
   const inmovilizadas = tractorasActivas.filter(v => ["taller","inactivo"].includes(String(v.estado || "")));
   const tallerActual = tractorasActivas.filter(v => String(v.estado || "") === "taller");
   const impactoDiaReal = (lista = []) => lista.reduce((acc, v) => {
@@ -1954,23 +1954,12 @@ export default function Vehiculos({ initialTipo = "todos" }) {
     const dias = diasDesde(v.taller_entrada_at || v.estado_aux_updated_at);
     return { total: acc.total + (media * dias), conDatos: acc.conDatos + 1 };
   }, { total: 0, conDatos: 0 });
-  const impactoSinChofer = impactoDiaReal(tractorasSinChofer);
-  const impactoTaller = impactoAcumuladoReal(tallerActual);
-  const impactoParadas = impactoDiaReal(inmovilizadas);
-  const detalleDiaReal = (impacto) => impacto.conDatos
-    ? `${fmt2(impacto.total)} EUR/dia segun historico real`
-    : "Sin historico real con importe";
-  const detalleAcumuladoReal = (impacto) => impacto.conDatos
-    ? `${fmt2(impacto.total)} EUR acumulado segun historico real`
-    : "Sin historico real con importe";
-  const kpisFlota = [
-    ["Tractoras", tractorasActivas.length, "Cabezas tractoras activas", "var(--accent)"],
-    ["Remolques", remolquesActivos.length, "Semis/remolques activos", "#8b5cf6"],
-    ["Tractoras sin chofer", tractorasSinChofer.length, detalleDiaReal(impactoSinChofer), tractorasSinChofer.length ? "#ef4444" : "#10b981"],
-    ["Remolques libres", remolquesSinTractora.length, "A espera de conjunto", remolquesSinTractora.length ? "#f59e0b" : "#10b981"],
-    ["En taller", tallerActual.length, detalleAcumuladoReal(impactoTaller), tallerActual.length ? "#f97316" : "#10b981"],
-    ["Paradas", inmovilizadas.length, detalleDiaReal(impactoParadas), inmovilizadas.length ? "#ef4444" : "#10b981"],
-  ];
+
+
+
+
+
+
   const claseNuevaSegunFiltro = filtroTipo === "remolques" ? "Remolque - Tautliner (lona)" : "Tractora";
   const abrirNuevoVehiculo = (clase = claseNuevaSegunFiltro) => {
     setEditando(null);
@@ -1978,111 +1967,21 @@ export default function Vehiculos({ initialTipo = "todos" }) {
     setModal(true);
   };
 
+    async function archivarVehiculo(v) {
+    if (!canBaja || !(await confirmDialog({title:"Dar de baja vehículo",message:`¿Dar de baja ${v.matricula}? Se conservará en el filtro Dados de baja.`,confirmText:"Dar de baja",tone:"warning"}))) return;
+    try { await eliminarVehiculo(v.id); await cargar(); } catch(e){notify(e.message,"error");}
+  }
+  async function restaurarVehiculo(v) {
+    if (!canBaja || !(await confirmDialog({title:"Reactivar vehículo",message:`¿Reactivar ${v.matricula}?`,confirmText:"Reactivar"}))) return;
+    try {await reactivarVehiculo(v.id);await cargar();} catch(e){notify(e.message,"error");}
+  }
+  async function eliminarVehiculoDefinitivo(v) {
+    if (!canEliminar || !(v.activo===false||v.estado==="baja") || !(await confirmDialog({title:"Eliminar definitivamente",message:`¿Eliminar definitivamente ${v.matricula}? Esta acción no se puede deshacer.`,confirmText:"Eliminar definitivo",tone:"danger"}))) return;
+    try {await eliminarVehiculo(v.id,{forzar:true});await cargar();} catch(e){notify(e.message,"error");}
+  }
   return (
     <div className="tg-responsive-page fleet-page" style={S.page}>
-      {!advancedFleet&&<FleetWorkspace vehicles={vehiculos} items={filtrados} loading={loading} error={loadError} reload={()=>cargar()} type={filtroTipo} setType={v=>{setFiltroTipo(v);setFiltroEstado('todos');}} state={filtroEstado} setState={setFiltroEstado} canEdit={canEdit} canDrivers={puedeVer('choferes')} onNew={abrirNuevoVehiculo} onOpen={v=>{setEditando(v);setModal(true);}} advanced={()=>setAdvancedFleet(true)} isTrailer={v=>esRemolqueVehiculo(v,vehiculos)}/>}
-      {advancedFleet&&<><button className="tgui-button" onClick={()=>setAdvancedFleet(false)}>Volver al resumen de vehículos</button>
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18, flexWrap:"wrap" }}>
-        <div style={S.title}>Vehículos</div>
-
-        {/* Filtros tipo - separador visual */}
-        <div style={{ display:"flex", gap:4, marginLeft:8, background:"var(--card-bg)", padding:"4px", borderRadius:9, border:"1px solid var(--border)", boxShadow:"0 8px 18px rgba(15,23,42,.04)" }}>
-          {[
-            ["todos",     "Todos"],
-            ["tractoras", "Tractoras"],
-            ["remolques", "Remolques"],
-            ["baja",      "Bajas"],
-          ].map(([id, label]) => (
-            <button key={id}
-              onClick={() => {
-                setFiltroEstado("todos");
-                // Tractoras/Remolques tienen entrada propia en el menu lateral: se
-                // navega para que el lateral tambien cambie de resaltado. Todos/Bajas
-                // no tienen equivalente, se filtran en local.
-                if (id === "tractoras" || id === "remolques") {
-                  window.dispatchEvent(new CustomEvent("tms:navegar", { detail: `vehiculos_${id}` }));
-                } else {
-                  setFiltroTipo(id);
-                }
-              }}
-              style={{ ...S.btn,
-                background: filtroTipo===id ? "linear-gradient(135deg,var(--accent),#0d9488)" : "transparent",
-                color:      filtroTipo===id ? "#fff" : "var(--text3)",
-                border:     "none",
-                padding: "7px 13px", fontSize:12, borderRadius:7, boxShadow:"none",
-              }}>
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <button
-          onClick={() => { const v = !ocultarGps; setOcultarGps(v); try { localStorage.setItem("tms_ocultar_gps", v ? "1" : "0"); } catch {} }}
-          title="Mostrar u ocultar todo lo relativo a GPS (panel y pestana del vehículo)"
-          style={{ ...S.btn, marginLeft:"auto", background: ocultarGps ? "var(--bg3)" : "var(--accent-a10)", color: ocultarGps ? "var(--text4)" : "var(--accent-xl)", border:`1px solid ${ocultarGps ? "var(--border2)" : "var(--accent-a30)"}`, fontSize:12, padding:"7px 12px" }}>
-          {ocultarGps ? "Mostrar GPS" : "Ocultar GPS"}
-        </button>
-
-        {/* Subfiltro estado - separador visual, solo si no es "baja" */}
-        {filtroTipo !== "baja" && (
-          <div style={{ display:"flex", gap:4, background:"var(--card-bg)", padding:"4px", borderRadius:9, border:"1px solid var(--border)", boxShadow:"0 8px 18px rgba(15,23,42,.04)" }}>
-            {[
-              ["todos",      "Todos"],
-              ["disponible", "Disponible"],
-              ["en_ruta",    "En ruta"],
-              ["taller",     "Taller"],
-            ].map(([id, label]) => (
-              <button key={id}
-                onClick={() => setFiltroEstado(id)}
-                style={{ ...S.btn,
-                  background: filtroEstado===id ? "var(--bg2)" : "transparent",
-                  color:      filtroEstado===id ? "var(--text)" : "var(--text4)",
-                  border:     "none",
-                  padding: "7px 12px", fontSize:12, borderRadius:7, boxShadow:"none",
-                  display:"flex", alignItems:"center", gap:5,
-                }}>
-                {id !== "todos" && (
-                  <span style={{ width:6, height:6, borderRadius:"50%", flexShrink:0,
-                    background: id==="disponible"?"var(--green)":id==="en_ruta"?"var(--accent-l)":"#f97316",
-                    display:"inline-block",
-                  }}/>
-                )}
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Boton nuevo - al final */}
-        {canEdit && (
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginLeft:"auto"}}>
-            {filtroTipo !== "remolques" && (
-              <button style={{ ...S.btn, background:"linear-gradient(135deg,var(--accent),#0d9488)", color:"#fff", border:"1px solid var(--accent)" }}
-                onClick={() => abrirNuevoVehiculo("Tractora")}>
-                + Nueva tractora
-              </button>
-            )}
-            {filtroTipo !== "tractoras" && (
-              <button style={{ ...S.btn, background:"rgba(139,92,246,.12)", color:"#7c3aed", border:"1px solid rgba(139,92,246,.28)" }}
-                onClick={() => abrirNuevoVehiculo("Remolque - Tautliner (lona)")}>
-                + Nuevo remolque
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="tg-vehiculos-kpis" style={{display:"grid",gridTemplateColumns:"repeat(6,minmax(0,1fr))",gap:10,marginBottom:14}}>
-        {kpisFlota.map(([label, value, detail, color]) => (
-          <div key={label} style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:10,padding:"12px 14px",minHeight:78}}>
-            <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)"}}>{label}</div>
-            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:22,fontWeight:900,color,marginTop:7}}>{value}</div>
-            <div style={{fontSize:11,color:"var(--text4)",marginTop:3,lineHeight:1.3}}>{detail}</div>
-          </div>
-        ))}
-      </div>
-
-        <GpsMappingPanel
+      {<FleetWorkspace vehicles={vehiculos} items={filtrados} loading={loading} error={loadError} reload={()=>cargar()} type={filtroTipo} setType={v=>{setFiltroTipo(v);setFiltroEstado('todos');}} state={filtroEstado} setState={setFiltroEstado} canEdit={canEdit} canDrivers={puedeVer('choferes')} onNew={abrirNuevoVehiculo} onOpen={v=>{setEditando(v);setModal(true);}} management={<div className="unified-tools"><button className="tgui-button" onClick={()=>{const next=!ocultarGps;setOcultarGps(next);localStorage.setItem("tms_ocultar_gps",next?"1":"0");}}>{ocultarGps?"Mostrar GPS":"Ocultar GPS"}</button>        <GpsMappingPanel
           hidden={ocultarGps}
           vehiculos={vehiculosActivos}
           providers={gpsProviders}
@@ -2105,243 +2004,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
               setGpsSyncing(false);
             }
           }}
-      />
-
-      {loading
-        ? <div style={{ color:"var(--text4)", padding:20 }}>Cargando...</div>
-        : filtrados.length === 0
-        ? <div style={{ color:"var(--text4)", padding:20 }}>Sin vehiculos en este filtro.</div>
-        : (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(286px,1fr))", gap:14 }}>
-            {filtrados.map(v => {
-              const esRemolque = esRemolqueVehiculo(v, vehiculos);
-              return (
-                <div key={v.id} id={`vehiculo-card-${v.id}`} style={{
-                                          background:String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "var(--accent-a10)" : "rgba(255,255,255,.96)",
-                                          border:`1px solid ${String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "var(--accent-a65)" : "#dbe5ec"}`,
-                                          borderRadius:12, padding:16,
-                                          cursor:"pointer", transition:"border-color .15s, box-shadow .15s", boxShadow:"0 12px 26px rgba(15,23,42,.05)" }}
-                  onClick={() => { setEditando(v); setModal(true); }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor="var(--accent-l)"}
-                  onMouseLeave={e => e.currentTarget.style.borderColor=String(focusVehiculo?.vehiculo_id || "") === String(v.id) ? "var(--accent-a65)" : "#dbe5ec"}>
-
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
-                    <div>
-                      <div style={{ fontFamily:"'JetBrains Mono',monospace", fontWeight:900, fontSize:18, color:"#134e4a" }}>{v.matricula}</div>
-                      <div style={{ fontSize:12, color:"var(--text2)", marginTop:2 }}>
-                        {v.marca||""} {v.modelo||""} {v.anio?`(${v.anio})`:""}
-                      </div>
-                    </div>
-                    <span style={{ ...S.badge, background:"transparent", color:EC[v.estado]||"var(--text4)", padding:0, gap:6 }}>
-                      <span style={{width:7,height:7,borderRadius:"50%",background:EC[v.estado]||"var(--text4)",display:"inline-block"}} />
-                      {v.estado?.replace("_"," ")||"-"}
-                    </span>
-                  </div>
-
-                  {/* Clase */}
-                  <div style={{ fontSize:11, color:"var(--text4)", marginBottom:8, display:"flex", gap:8, flexWrap:"wrap" }}>
-                    <span style={{ background:"#f1f5f9", padding:"3px 9px", borderRadius:10, border:"1px solid #e2e8f0" }}>
-                      {claseCorta(v.clase)}
-                    </span>
-                    <span style={{ background:esRemolque?"rgba(139,92,246,.10)":"var(--accent-a10)", color:esRemolque?"#8b5cf6":"var(--accent)", padding:"3px 9px", borderRadius:10, border:`1px solid ${esRemolque?"rgba(139,92,246,.25)":"var(--accent-a25)"}`, fontWeight:800 }}>
-                      {esRemolque ? "Remolque" : "Tractora"}
-                    </span>
-                    {!esRemolque && v.combustible && <span style={{ color:"var(--text5)" }}>{v.combustible}</span>}
-                    {!esRemolque && v.potencia_cv && <span style={{ color:"var(--text5)" }}>{v.potencia_cv} CV</span>}
-                    {esRemolque && v.tipo_carroceria && <span style={{ color:"var(--text5)" }}>{v.tipo_carroceria}</span>}
-                    {esRemolque && v.capacidad_palets && <span style={{ color:"var(--text5)" }}>{v.capacidad_palets} palets</span>}
-                  </div>
-
-                  <div style={{marginBottom:8,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    {!esRemolque ? (
-                      <>
-                        <div style={{background:v.chofer_id || v.chofer_nombre ? "rgba(16,185,129,.08)" : "rgba(239,68,68,.08)",border:`1px solid ${v.chofer_id || v.chofer_nombre ? "rgba(16,185,129,.22)" : "rgba(239,68,68,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
-                          <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Chofer</div>
-                          <div style={{fontSize:12,fontWeight:800,color:v.chofer_id || v.chofer_nombre ? "var(--text)" : "#ef4444"}}>{v.chofer_nombre || "Sin asignar"}</div>
-                        </div>
-                        <div style={{background:v.remolque_id ? "rgba(139,92,246,.08)" : "rgba(245,158,11,.08)",border:`1px solid ${v.remolque_id ? "rgba(139,92,246,.22)" : "rgba(245,158,11,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
-                          <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Remolque</div>
-                          <div style={{fontSize:12,fontWeight:800,color:v.remolque_id ? "var(--text)" : "#f59e0b"}}>{v.remolque_matricula || "Sin remolque"}</div>
-                        </div>
-                      </>
-                    ) : (
-                      <div style={{gridColumn:"1/-1",background:v.tractora_id ? "var(--accent-a08)" : "rgba(245,158,11,.08)",border:`1px solid ${v.tractora_id ? "var(--accent-a22)" : "rgba(245,158,11,.22)"}`,borderRadius:7,padding:"7px 9px"}}>
-                        <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Asignación del remolque</div>
-                        <div style={{fontSize:12,fontWeight:800,color:v.tractora_id ? "var(--text)" : "#f59e0b"}}>
-                          {v.tractora_matricula ? `${v.tractora_matricula}${v.tractora_chofer_nombre ? ` · ${v.tractora_chofer_nombre}` : ""}` : "Libre / a espera de tractora"}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{marginBottom:8,background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:7,padding:"8px 10px"}}>
-                    <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>Ubicación</div>
-                    <div style={{fontSize:12,fontWeight:700,color:v.ubicacion_actual?"var(--text)":"var(--text5)"}}>
-                      {v.ubicacion_actual || "Sin datos GPS"}
-                    </div>
-                    <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>
-                      {GPS_PROVIDER_LABELS[v.ubicacion_fuente] || GPS_PROVIDER_LABELS[v.gps_provider] || v.ubicacion_fuente || v.gps_provider || "Sin fuente"}
-                      {v.ubicacion_ts ? ` - ${new Date(v.ubicacion_ts).toLocaleString("es-ES")}` : ""}
-                    </div>
-                    {(v.gps_lat || v.gps_lng) && (
-                      <div style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace",marginTop:2}}>
-                        {v.gps_lat}, {v.gps_lng}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Masa/KM */}
-                  <div style={{ display:"flex", gap:0, marginBottom:10 }}>
-                    {(v.tara_kg||v.masa_total_kg) && (
-                      <div style={{ flex:1, background:"#f8fafc", borderRadius:"7px 0 0 7px", padding:"8px 10px", borderRight:"1px solid #e2e8f0" }}>
-                        <div style={{ fontSize:9, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em" }}>TARA / MMA</div>
-                        <div style={{ fontSize:13, fontWeight:700, color:"var(--text)", fontFamily:"'JetBrains Mono',monospace" }}>
-                          {v.tara_kg?.toLocaleString("es-ES")||"-"} / {v.masa_total_kg?.toLocaleString("es-ES")||"-"} kg
-                        </div>
-                      </div>
-                    )}
-                    {!esRemolque && (
-                      <div style={{ flex:1, background:"#f8fafc", borderRadius: (v.tara_kg||v.masa_total_kg)?"0 7px 7px 0":"7px", padding:"8px 10px" }}>
-                        <div style={{ fontSize:9, color:"var(--text5)", textTransform:"uppercase", letterSpacing:".06em" }}>KILOMETROS</div>
-                        <div style={{ fontSize:13, fontWeight:700, color:"var(--text)", fontFamily:"'JetBrains Mono',monospace" }}>
-                          {v.km_actuales?.toLocaleString("es-ES")||"-"} km
-                        </div>
-                      </div>
-                    )}
-                  {v.estado==="taller" && (()=>{
-                    const entrada = v.taller_entrada_at || null;
-                    if (!entrada) return null;
-                    const dias = Math.ceil((new Date()-new Date(entrada))/86400000);
-                    const media = mediaFacturacionDiariaReal(v.id,pedidos||[]);
-                    const impacto = media == null ? null : dias*media;
-                    return (
-                      <div style={{ gridColumn:"1/-1", marginTop:6, padding:"6px 10px", background:"rgba(239,68,68,.08)", border:"1px solid rgba(239,68,68,.2)", borderRadius:6 }}>
-                        <div style={{ fontSize:10, fontWeight:700, color:"var(--red)" }}>
-                          EN TALLER - {dias} dia{dias!==1?"s":""}
-                          {impacto != null ? ` - Impacto segun historico real: ${Number(impacto).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR` : " - Sin historico real con importe"}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  {/* Aviso Aviso operacional */}
-                  {v.notas_operacion?.trim() && (
-                    <div style={{gridColumn:"1/-1",marginTop:6,padding:"5px 10px",
-                      background:"rgba(245,158,11,.1)",border:"1px solid rgba(245,158,11,.3)",
-                      borderRadius:6,display:"flex",gap:6,alignItems:"flex-start"}}>
-                      <span style={{fontSize:14,flexShrink:0}}>Aviso</span>
-                      <div style={{fontSize:11,color:"#f59e0b",fontWeight:700,lineHeight:1.5}}>
-                        {(v.notas_operacion||"").split("\n").map((l,i)=><div key={i}>{l}</div>)}
-                      </div>
-                    </div>
-                  )}
-                  </div>
-                  {/* Documentacion semaforo */}
-                  {(v.fecha_itv||v.fecha_seguro||v.fecha_matriculacion) && (
-                    <div style={{ marginBottom:10 }}>
-                      {[
-                        { label:"ITV",      fecha:v.fecha_itv },
-                        { label:"Seguro",   fecha:v.fecha_seguro },
-                      ].filter(d=>d.fecha).map(d => {
-                        const dias = Math.ceil((new Date(d.fecha) - new Date()) / 86400000);
-                        const color = dias > 30 ? "var(--green)" : dias > 7 ? "#f59e0b" : dias > 0 ? "var(--orange)" : "var(--red)";
-                        const label = dias > 0 ? `Vence en ${dias}d ${dias<=30?"Aviso":"OK"}` : `VENCIDO hace ${Math.abs(dias)}d`;
-                        return (
-                          <div key={d.label} style={{ display:"flex", justifyContent:"space-between", padding:"3px 0", borderBottom:"1px solid var(--border)", fontSize:12 }}>
-                            <span style={{ color:"var(--text3)" }}>{d.label}</span>
-                            <span style={{ color, fontWeight:600 }}>{label}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Valor compra/venta */}
-                  {(v.valor_compra || v.fecha_compra) && (
-                    <div style={{ fontSize:11, color:"var(--text5)", marginBottom: canEdit?10:0 }}>
-                      {v.fecha_compra ? `Alta: ${new Date(v.fecha_compra).toLocaleDateString("es-ES")}` : ""}
-                      {v.valor_compra ? ` - ${fmt2(v.valor_compra)} EUR` : ""}
-                      {v.fecha_venta  ? ` - Vendido: ${new Date(v.fecha_venta).toLocaleDateString("es-ES")}` : ""}
-                    </div>
-                  )}
-
-                  <div style={{ display:"flex", gap:5, flexWrap:"wrap" }} onClick={e=>e.stopPropagation()}>
-                    {(!v.activo || v.estado === "baja") ? (
-                                            <>
-                        {canBaja && (
-                          <button
-                            style={{ ...S.btn, background:"rgba(16,185,129,.1)", color:"#10b981", border:"1px solid rgba(16,185,129,.3)", padding:"3px 8px", fontSize:11 }}
-                            onClick={async()=>{
-                              if(await confirmDialog({title:"Reactivar vehiculo",message:`Reactivar ${v.matricula}? Volvera a aparecer en el sistema como disponible.`,confirmText:"Reactivar"})){
-                                await reactivarVehiculo(v.id); cargar();
-                              }
-                            }}>
-                            Reactivar
-                          </button>
-                        )}
-                        {canEliminar && (
-                          <button
-                            style={{ ...S.btn, background:"rgba(239,68,68,.1)", color:"#ef4444", border:"1px solid rgba(239,68,68,.3)", padding:"3px 8px", fontSize:11, fontWeight:700 }}
-                            onClick={async(e)=>{
-                              e.stopPropagation();
-                              const confirmar = await confirmDialog({
-                                title: "Eliminar definitivamente",
-                                message: `ELIMINAR DEFINITIVAMENTE "${v.matricula}"\n\nEsta accion eliminara el vehiculo del sistema de forma permanente.\nNO SE PUEDE DESHACER.\n\nEstas seguro?`,
-                                confirmText: "Eliminar definitivo",
-                                tone: "danger",
-                              });
-                              if (!confirmar) return;
-                              try {
-                                await eliminarVehiculo(v.id, { forzar: true });
-                                cargar();
-                              } catch(err){ notify("Error: " + err.message, "error"); }
-                            }}>
-                            Eliminar definitivo
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                                            <>
-                        {canEdit && ["disponible","en_ruta","taller"].filter(e=>e!==v.estado).map(e=>(
-                          <button key={e}
-                            style={{ ...S.btn, background:"transparent", color:EC[e], border:`1px solid ${EC[e]}40`, padding:"3px 8px", fontSize:11 }}
-                            onClick={e2=>{
-                              e2.stopPropagation();
-                              // "en ruta" asks for chofer, others change directly
-                              if(e==="en_ruta") setChoferPicker({vehiculoId:v.id, estado:e, matricula:v.matricula});
-                              else cambiarEst(v.id, e);
-                            }}>
-                            {e.replace("_"," ")}
-                          </button>
-                        ))}
-                        {canBaja && (
-                          <button
-                            style={{ ...S.btn, background:"rgba(245,158,11,.08)", color:"#f59e0b", border:"1px solid rgba(245,158,11,.3)", padding:"3px 8px", fontSize:11, fontWeight:700 }}
-                            onClick={async(e)=>{
-                              e.stopPropagation();
-                              const ok = await confirmDialog({
-                                title: "Dar de baja vehiculo",
-                                message: `Dar de baja ${v.matricula}?\n\nEl vehiculo quedara archivado. Podras verlo en el filtro "Dados de baja" y reactivarlo cuando quieras.`,
-                                confirmText: "Dar de baja",
-                                tone: "warning",
-                              });
-                              if(!ok) return;
-                              try { await eliminarVehiculo(v.id); cargar(); }
-                              catch(err){ notify(err.message, "error"); }
-                            }}>
-                            Dar de baja
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )
-      }
-
-      </>}
+      /></div>} canBaja={canBaja} canEliminar={canEliminar} onStatus={(v,state)=>{if(state==="en_ruta")setChoferPicker({vehiculoId:v.id,estado:state,matricula:v.matricula});else cambiarEst(v.id,state);}} onArchive={archivarVehiculo} onRestore={restaurarVehiculo} onRemove={eliminarVehiculoDefinitivo} isTrailer={v=>esRemolqueVehiculo(v,vehiculos)}/>}
       {/*  Picker chofer al cambiar a En Ruta  */}
       {choferPicker && (
         <ModalChoferPicker

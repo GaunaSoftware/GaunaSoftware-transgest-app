@@ -1,3 +1,4 @@
+import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
 import { orderTown } from '../utils/orderTown';
@@ -732,10 +733,7 @@ const LABEL_ESTADO = {
   pendiente:"Pendiente", confirmado:"Confirmado", espera_carga:"Espera carga", cargando:"Cargando", en_curso:"En curso", espera_descarga:"Espera descarga",
   descarga:"En descarga", entregado:"Entregado", cancelado:"Cancelado", incidencia:"Incidencia"
 };
-const COLOR_ESTADO = {
-  pendiente:"#fb8c3a", confirmado:"#3b6ef5", espera_carga:"#eab308", cargando:"var(--accent-l)", en_curso:"#22d3ee", espera_descarga:"#d946ef",
-  descarga:"#a78bfa", entregado:"var(--green)", cancelado:"#ef4444", incidencia:"#fbbf24"
-};
+
 const INCIDENCIA_TIPOS_PEDIDO = [
   { v:"cancelado_cliente", l:"Cancelado por el cliente" },
   { v:"duplicado", l:"Pedido duplicado" },
@@ -790,10 +788,7 @@ const S = {
   sec:{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent)",marginTop:20,marginBottom:8,paddingBottom:6,borderBottom:"1px solid var(--border)"},
 };
 
-function Badge({ estado }) {
-  const c = COLOR_ESTADO[estado] || "var(--text2)";
-  return <span style={{display:"inline-flex",alignItems:"center",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:`${c}1a`,color:c}}>{LABEL_ESTADO[estado]||estado}</span>;
-}
+
 
 function toDateInputValue(value) {
   if (!value) return "";
@@ -1162,14 +1157,7 @@ function mergeEtiquetas(prev, add){
   (Array.isArray(add)?add:[]).forEach(e=>{const n=String(e||"").trim(); if(n) set.add(n);});
   return [...set];
 }
-function etiquetaColorFromCatalog(nombre){
-  try {
-    const cat = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && window.__TMS_EMPRESA_CONFIG.cfg_trafico && window.__TMS_EMPRESA_CONFIG.cfg_trafico.etiquetas_catalogo) || [];
-    const key = String(nombre || "").trim().toLowerCase();
-    const hit = Array.isArray(cat) ? cat.find(e => String((e && e.nombre) || "").trim().toLowerCase() === key) : null;
-    return (hit && hit.color) || "#14b8a6";
-  } catch { return "var(--accent-l)"; }
-}
+
 
 function normalizeStrictDateInput(value) {
   if (value === "" || value === null || value === undefined) return null;
@@ -1340,18 +1328,9 @@ function parseStops(value) {
   } catch { return []; }
 }
 
-function formatPedidoListDate(value) {
-  if (!value) return "";
-  const raw = String(value).slice(0, 10);
-  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00`) : new Date(value);
-  return Number.isNaN(parsed.getTime()) ? raw : parsed.toLocaleDateString("es-ES");
-}
 
-function formatPedidoListTime(value) {
-  const raw = String(value || "").trim();
-  const match = raw.match(/^(\d{1,2}):(\d{2})/);
-  return match ? `${match[1].padStart(2, "0")}:${match[2]}` : raw;
-}
+
+
 
 function pedidoStopsForList(pedido = {}, tipo = "carga") {
   const isCarga = tipo === "carga";
@@ -1372,12 +1351,7 @@ function pedidoStopsForList(pedido = {}, tipo = "carga") {
   }));
 }
 
-function pedidoStopMeta(stop = {}) {
-  const fecha = formatPedidoListDate(stop.fecha);
-  const hora = formatPedidoListTime(stop.hora);
-  const ventana = String(stop.ventana || "").trim();
-  return [fecha, hora, ventana ? `Ventana ${ventana}` : ""].filter(Boolean).join(" | ");
-}
+
 
 function normalizeStopsForCopy(stops, fallbackAddress = "", tipo = "carga") {
   const parsed = parseStops(stops)
@@ -2032,12 +2006,7 @@ function stopDisplayParts(stop = {}, fallback = "", clienteId = "", tipo = "ambo
 
 
 
-function pedidoRouteDisplayForList(pedido = {}, cargaPrincipal = {}, descargaPrincipal = {}) {
-  const clienteId = pedido.cliente_id || "";
-  const origenTown = pedidoStopListLabel(cargaPrincipal, pedido.origen, clienteId, 'carga');
-  const destinoTown = pedidoStopListLabel(descargaPrincipal, pedido.destino, clienteId, 'descarga');
-  return { main:`${origenTown} -> ${destinoTown}`, detail:'' };
-}
+
 
 function pedidoStopListLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
   const saved = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
@@ -10152,16 +10121,14 @@ function openPedidoInTrafico(pedido) {
 // Estados que marca el chofer haciendo los pasos del viaje. Mientras el pedido
 // esta en uno de estos, el estado no se puede cambiar desde trafico/pedidos:
 // solo el propio chofer (desde su app) o gerencia. Asi no se pisa su progreso.
-const ESTADOS_EN_CURSO_CHOFER = ["cargando", "en_curso", "espera_carga", "espera_descarga", "descarga"];
-function pedidoEnCursoPorChofer(pedido) {
-  return ESTADOS_EN_CURSO_CHOFER.includes(String(pedido?.estado || "").toLowerCase());
-}
+
+
 
 export default function Pedidos() {
   useEmpresaPerfil();
   const { puedeEditar, user } = useAuth();
   const canEdit = puedeEditar("pedidos");
-  const esGerente = String(user?.rol || "").toLowerCase() === "gerente";
+
   const canFacturarPedidos = ["gerente","contable","contabilidad","administrativo","administracion","admin","superadmin"]
     .includes(String(user?.rol || "").toLowerCase());
   const empresaPlan = getEmpresaPlanLocal();
@@ -10178,7 +10145,6 @@ export default function Pedidos() {
     const focus = readGuidedPedidoTutorial();
     return focus ? { active:true, modalOpened:false, saved:false, progress:buildGuidedPedidoProgress({}, { modalOpened:false, saved:false }) } : null;
   });
-  const [trafficAdvanced, setTrafficAdvanced] = useState(false);
   const [pedidos,    setPedidos]    = useState([]);
   const [clientes,   setClientes]   = useState([]);
   const [vehiculos,  setVehiculos]  = useState([]);
@@ -10196,7 +10162,7 @@ export default function Pedidos() {
   const [filtroCliente,setFiltroCliente]=useState("");
   const [q,          setQ]          = useState(() => focusPedido?.pedido_id ? (focusPedido?.numero || "") : "");
   const [soloCriticos, setSoloCriticos] = useState(false);
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
   const [filtroSinAsignacion, setFiltroSinAsignacion] = useState(false);
   const [filtroPendienteCompletar, setFiltroPendienteCompletar] = useState(false);
   const [filtroColaborador, setFiltroColaborador] = useState(false);
@@ -10204,9 +10170,9 @@ export default function Pedidos() {
   const groupByClienteKey = pedidosGroupByClientKey(user);
   const groupByClienteLoadedKeyRef = useRef(groupByClienteKey);
   const groupByClienteSkipSaveRef = useRef(false);
-  const [vistaPedidos, setVistaPedidos] = useState("lista");
-  const [collapsedClientes, setCollapsedClientes] = useState(() => loadPedidosCollapsedGroups());
-  const [criticalPanelOpen, setCriticalPanelOpen] = useState(false);
+  const [, setVistaPedidos] = useState("lista");
+  const [collapsedClientes, ] = useState(() => loadPedidosCollapsedGroups());
+
   const [readCriticalAlerts, setReadCriticalAlerts] = useState(() => loadReadPedidoAlerts());
   const [selectedPedidoIds, setSelectedPedidoIds] = useState([]);
   const [bulkEstado, setBulkEstado] = useState("confirmado");
@@ -10227,7 +10193,7 @@ export default function Pedidos() {
   const [copyReviewQueue, setCopyReviewQueue] = useState([]);
   const [copySaving, setCopySaving] = useState(false);
   const [bulkCopying, setBulkCopying] = useState(false);
-  const [reprogrammingPedidoId, setReprogrammingPedidoId] = useState("");
+  const [, setReprogrammingPedidoId] = useState("");
   const [bulkRescheduling, setBulkRescheduling] = useState(false);
   const [bulkClearing, setBulkClearing] = useState(false);
   const [bulkVehiculo, setBulkVehiculo] = useState("");
@@ -10236,28 +10202,11 @@ export default function Pedidos() {
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [openActionMenuPedidoId, setOpenActionMenuPedidoId] = useState("");
   const [quickAssignPedido, setQuickAssignPedido] = useState(null);
-  const [actionMenuPos, setActionMenuPos] = useState(null);
-  function abrirMenuAcciones(pedidoId, btn) {
-    try {
-      const r = btn.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - r.bottom - 12;
-      // Se abre SIEMPRE hacia abajo (misma posicion para todos los pedidos, sin
-      // "rebote"). Solo si abajo casi no hay hueco se abre hacia arriba. La altura
-      // se limita al hueco disponible y el menu hace scroll interno.
-      const openUp = spaceBelow < 180 && r.top > spaceBelow;
-      const maxHeight = Math.min(320, Math.max(160, openUp ? Math.round(r.top - 12) : Math.round(spaceBelow)));
-      setActionMenuPos({
-        right: Math.max(8, Math.round(window.innerWidth - r.right)),
-        top: openUp ? undefined : Math.round(r.bottom + 6),
-        bottom: openUp ? Math.round(window.innerHeight - r.top + 6) : undefined,
-        maxHeight,
-      });
-    } catch { setActionMenuPos(null); }
-    setOpenActionMenuPedidoId(pedidoId);
-  }
+  const [, ] = useState(null);
+
   const [whatsappSending, setWhatsappSending] = useState("");
   // Pedido cuyo submenu de "Avisar" esta desplegado.
-  const [avisarAbiertoPedidoId, setAvisarAbiertoPedidoId] = useState("");
+
   // Viajes del grupaje al que pertenece la orden de carga abierta.
   const [ordenCargaGrupaje, setOrdenCargaGrupaje] = useState([]);
   const [incidenciaSelector, setIncidenciaSelector] = useState(null);
@@ -10267,10 +10216,10 @@ export default function Pedidos() {
   const [autoAsignando, setAutoAsignando] = useState(null);  // pedido para autoasignacion IA
   const [colaboradores,setColaboradores]=useState([]);
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
-  const _rangoMesActual = defaultTraficoRangeLocal();
-  const filtroPeriodoActivo = filtroFechasCustom || Boolean(filtroMes);
+
+
   const hayFiltrosPedidos = Boolean(debouncedQ.trim() || filtroEst !== "todos" || filtroCliente || filtroSinAsignacion || filtroPendienteCompletar || filtroColaborador || soloCriticos);
-  const vistaMesActualPorDefecto = !filtroPeriodoActivo && !mostrarHistorico && !hayFiltrosPedidos;
+
 
   useEffect(() => {
     savePedidosCollapsedGroups(collapsedClientes);
@@ -10324,22 +10273,7 @@ export default function Pedidos() {
     return () => window.removeEventListener("tms:guided-tutorial-start", onStart);
   }, [guidedPedidoActive, startGuidedPedido]);
 
-  function aplicarSemanaActual() {
-    if (filtroSemanaActualActivo) {
-      setFiltroMes("");
-      setFiltroFechasCustom(false);
-      setFiltroDesde("");
-      setFiltroHasta("");
-      setPage(1);
-      return;
-    }
-    const range = currentWeekRangeLocal();
-    setFiltroMes(range.week);
-    setFiltroFechasCustom(false);
-    setFiltroDesde(range.desde);
-    setFiltroHasta(range.hasta);
-    setPage(1);
-  }
+
 
   async function enviarWhatsappPedidoAccion(pedido, target = "cliente") {
     if (!pedido?.id || whatsappSending) return;
@@ -10868,19 +10802,7 @@ export default function Pedidos() {
     setOrdenCarga(normalizePedidoTarifaDraft(pedidoCompleto));
   }
 
-  async function duplicarPedidoExistente(p) {
-    try {
-      let pedidoBase = p;
-      if (p?.id) {
-        const fetched = await getPedido(p.id);
-        if (fetched?.id) pedidoBase = fetched;
-      }
-      setEditando(buildPedidoDuplicado(pedidoBase));
-      setModal(true);
-    } catch (e) {
-      notify("No se pudo preparar el duplicado del pedido.", "error");
-    }
-  }
+
 
   async function abrirCopiarPedido(p) {
     try {
@@ -11197,19 +11119,7 @@ export default function Pedidos() {
     await reprogramarSeleccionadosDias(days);
   }
 
-  async function marcarPedidoAvisoLeido(item) {
-    const pedido = item?.pedido;
-    if (!pedido?.id) return;
-    const ok = await confirmDialog({
-      title: "Marcar aviso como leido",
-      message: `El aviso de ${pedido.numero || "este pedido"} se ocultara de la bandeja de avisos hasta que cambie su situacion operativa.`,
-      confirmText: "Marcar como leido",
-    });
-    if (!ok) return;
-    const key = buildPedidoCriticalAlertKey(item);
-    setReadCriticalAlerts(prev => Array.from(new Set([...prev, key])));
-    notify(`Aviso de ${pedido.numero || "pedido"} marcado como leido.`, "success");
-  }
+
 
   async function marcarPedidosAvisosVisiblesLeidos(lista = []) {
     const visibles = (lista || []).filter(Boolean);
@@ -11509,14 +11419,7 @@ export default function Pedidos() {
     priorityMeta.flags.overdueAssignment ||
     priorityMeta.flags.urgentAssignment
   );
-  const resumenCriticos = pedidosFiltrados.reduce((acc, item) => {
-    const { flags, validationIssues } = item.priorityMeta;
-    if (flags.overdueAssignment) acc.vencidos += 1;
-    if (!flags.overdueAssignment && flags.urgentAssignment) acc.urgentes += 1;
-    if (validationIssues.length > 0) acc.datos += 1;
-    if (flags.missingAssignment) acc.sinAsignacion += 1;
-    return acc;
-  }, { vencidos: 0, urgentes: 0, datos: 0, sinAsignacion: 0 });
+
   // Avisos criticos = SOLO lo muy urgente: sin asignar con la carga ya pasada
   // (vencido) o inminente (menos de 12 h). Lo demas (urgente 12-24h, datos
   // pendientes) sigue marcado en la fila pero no genera aviso, para no saturar.
@@ -11528,7 +11431,7 @@ export default function Pedidos() {
   const alertasCriticasPendientes = alertasCriticasPedidos.filter(
     item => !readCriticalAlerts.includes(buildPedidoCriticalAlertKey(item))
   );
-  const totalAlertasCriticas = alertasCriticasPedidos.length;
+
   const totalAlertasCriticasPendientes = alertasCriticasPendientes.length;
   const pedidosVisibles = soloCriticos
     ? pedidosCriticosOperativos
@@ -11550,60 +11453,16 @@ export default function Pedidos() {
     if (ha !== hb) return ha.localeCompare(hb);
     return String(a?.pedido?.numero || "").localeCompare(String(b?.pedido?.numero || ""));
   };
-  const pedidosAgrupados = groupByCliente
-    ? Object.entries(
-        pedidosVisibles.reduce((acc, item) => {
-          const key = item.pedido.cliente_id || item.pedido.cliente_nombre || "sin-cliente";
-          if (!acc[key]) acc[key] = { label: item.pedido.cliente_nombre || "Sin cliente", items: [] };
-          acc[key].items.push(item);
-          return acc;
-        }, {})
-      )
-        .map(([key, group]) => ({ key, ...group, items: [...group.items].sort(ordenarItemsPedidoPorFecha) }))
-        .sort((a, b) => {
-          const label = String(a.label || "").localeCompare(String(b.label || ""), "es", { sensitivity: "base" });
-          if (label !== 0) return label;
-          const da = pedidoFechaOperativaKey(a.items[0]?.pedido);
-          const db = pedidoFechaOperativaKey(b.items[0]?.pedido);
-          return String(da).localeCompare(String(db));
-        })
-    : usarAgrupadoCalendario ? buildPedidoCalendarGroups(pedidosVisibles, {
-        desde: filtroDesde || undefined,
-        hasta: filtroHasta || undefined,
-          currentWeek: filtroSemanaActualActivo,
-      }) : [];
-  const pedidosRenderList = groupByCliente
-    ? pedidosAgrupados.flatMap(group => {
-        const collapsed = !!collapsedClientes[group.key];
-        return [
-          { _group: true, type: "cliente", key: group.key, label: group.label, count: group.items.length, collapsed },
-          ...(collapsed ? [] : group.items),
-        ];
-      })
-    : usarAgrupadoCalendario ? pedidosAgrupados.flatMap(month => {
-        const monthCollapsed = !!collapsedClientes[month.key];
-        const entries = [{ _group: true, type: "month", key: month.key, label: month.label, count: month.count, collapsed: monthCollapsed }];
-        if (monthCollapsed) return entries;
-        month.weeks.forEach(week => {
-          const weekCollapsed = !!collapsedClientes[week.key];
-          entries.push({ _group: true, type: "week", key: week.key, label: week.label, count: week.count, collapsed: weekCollapsed });
-          if (weekCollapsed) return;
-          week.days.forEach(day => {
-            const dayCollapsed = !!collapsedClientes[day.key];
-            entries.push({ _group: true, type: "day", key: day.key, label: day.label, count: day.count, collapsed: dayCollapsed });
-            if (!dayCollapsed) entries.push(...day.items);
-          });
-        });
-        return entries;
-      }) : pedidosVisibles;
+
+
   const pedidosVisiblesAccionables = pedidosVisibles
     .map(item => item.pedido)
     .filter(Boolean);
   const selectedPedidos = pedidosVisiblesAccionables.filter(p => selectedPedidoIds.includes(String(p.id)));
   const selectedPedidosOperables = selectedPedidos.filter(p => !pedidoTieneFacturaFinal(p));
   const allVisibleSelected = pedidosVisiblesAccionables.length > 0 && pedidosVisiblesAccionables.every(p => selectedPedidoIds.includes(String(p.id)));
-  const searchActive = q.trim().length > 0;
-  const searchHasMatches = searchActive && pedidosVisiblesAccionables.length > 0;
+
+
   const noHayViajesParaPlanificar = !loading && !soloCriticos && pedidosVisiblesAccionables.length === 0;
 
   function togglePedidoSelected(pedidoId) {
@@ -11621,235 +11480,21 @@ export default function Pedidos() {
   }
 
 
+  async function eliminarPedidoDesdeListado(p) {
+    if (!canEdit || p.estado !== "cancelado" || pedidoTieneFacturaFinal(p) || pedidoTieneFacturaBorrador(p)) return;
+    const ok = await confirmDialog({title:"Eliminar pedido",message:`¿Eliminar el pedido ${p.numero}? Esta acción no se puede deshacer.`,confirmText:"Eliminar",tone:"danger"});
+    if (!ok) return;
+    try { await eliminarPedido(p.id); setSelectedPedidoIds(ids=>ids.filter(id=>id!==String(p.id))); await cargar(); }
+    catch(e) { notify("No se pudo eliminar el pedido: "+e.message,"error"); }
+  }
+
   return (
-    <div className={trafficAdvanced ? "tg-responsive-page" : "orders-page"} style={trafficAdvanced ? S.page : undefined}>
-      {!trafficAdvanced ? <OrdersWorkspace
+    <div className="orders-page">
+      <OrdersWorkspace
         items={pedidosVisibles} allItems={pedidosConMeta} loading={loading} error={loadError} reload={() => cargar()}
         clients={clientes} drivers={choferes} labels={LABEL_ESTADO}
         serverPage={page} serverPages={totalPages} totalCount={totalCount} setServerPage={setPage}
-        selectedIds={selectedPedidoIds} toggleSelected={togglePedidoSelected} advanced={() => setTrafficAdvanced(true)}
-        permissions={{edit:canEdit, invoice:canFacturarPedidos, finalInvoice:pedidoTieneFacturaFinal, draftInvoice:pedidoTieneFacturaBorrador, supplierOrder:p => canIssueSupplierOrder(p,vehiculos)}}
-        actions={{new:abrirNuevo, quick:() => setQuickCreando(true), open:abrirEditar, assign:setQuickAssignPedido, copy:abrirCopiarPedido, order:abrirOrdenCarga, send:p => enviarWhatsappPedidoAccion(p,"cliente"), invoice:setFacturando, clearSelection:() => setSelectedPedidoIds([])}}
-        describe={p => {
-          const loads = pedidoStopsForList(p,"carga"), unloads = pedidoStopsForList(p,"descarga");
-          return {origin:pedidoStopListLabel(loads[0] || {},p.origen,p.cliente_id || "","carga"), destination:pedidoStopListLabel(unloads[0] || {},p.destino,p.cliente_id || "","descarga"), loads:loads.length, unloads:unloads.length};
-        }}
-        filters={{q,setQ,state:filtroEst,setState:setFiltroEst,client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
-          setFrom:value => {setFiltroFechasCustom(true);setFiltroDesde(value);},setTo:value => {setFiltroFechasCustom(true);setFiltroHasta(value);},
-          history:mostrarHistorico,setHistory:value => {setMostrarHistorico(value);setFiltroFechasCustom(false);setFiltroMes("");setFiltroDesde("");setFiltroHasta("");setPage(1);setSelectedPedidoIds([]);},
-          unassigned:filtroSinAsignacion,setUnassigned:setFiltroSinAsignacion,critical:soloCriticos,setCritical:setSoloCriticos,
-          reset:() => {setMostrarHistorico(false);setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);setSoloCriticos(false);}
-        }}
-      /> : <>
-      <button className="orders-back" onClick={() => setTrafficAdvanced(false)}>Volver al resumen de tráfico</button>
-      <div style={S.title}>Pedidos / Tráfico</div>
-      <div style={{display:"flex",gap:8,margin:"-4px 0 24px",flexWrap:"wrap"}}>
-        {[
-          ["lista", "Listado"],
-          ["ia", "Bandeja IA"],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            onClick={()=>setVistaPedidos(key)}
-            style={{...S.btn,padding:"10px 16px",background:vistaPedidos===key?"#fff":"#fff",color:vistaPedidos===key?"#006f68":"#64748b",border:vistaPedidos===key?"1px solid #008b82":"1px solid #dbe5ec",boxShadow:vistaPedidos===key?"0 8px 18px rgba(0,111,104,.10)":"none"}}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      {totalAlertasCriticasPendientes > 0 ? (
-        <div style={{margin:"0 0 26px",padding:"18px 22px",background:"rgba(239,68,68,.05)",border:"1px solid rgba(239,68,68,.22)",borderRadius:12,display:"flex",flexDirection:"column",gap:10,boxShadow:"0 10px 24px rgba(239,68,68,.06)"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
-            <div style={{display:"flex",flexDirection:"column",gap:2}}>
-              <div style={{fontSize:16,fontWeight:900,color:"#ef4444"}}>
-                Atencion: {totalAlertasCriticasPendientes} aviso{totalAlertasCriticasPendientes !== 1 ? "s" : ""} pendiente{totalAlertasCriticasPendientes !== 1 ? "s" : ""}
-              </div>
-              <div style={{fontSize:14,color:"#64748b",marginTop:3}}>
-                {totalAlertasCriticas} pedido{totalAlertasCriticas !== 1 ? "s" : ""} critico{totalAlertasCriticas !== 1 ? "s" : ""} en total
-              </div>
-            </div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              <button
-                onClick={() => setCriticalPanelOpen(v => !v)}
-                style={{...S.btn,padding:"10px 16px",fontSize:14,background:"#fff",color:"#475569",border:"1px solid #dbe5ec"}}
-              >
-                {criticalPanelOpen ? "Ocultar avisos" : "Mostrar avisos"}
-              </button>
-              <button
-                onClick={() => marcarPedidosAvisosVisiblesLeidos(alertasCriticasPendientes)}
-                disabled={!totalAlertasCriticasPendientes}
-                style={{...S.btn,padding:"10px 16px",fontSize:14,background:"rgba(16,185,129,.10)",color:"#008b82",border:"1px solid rgba(16,185,129,.24)",opacity:totalAlertasCriticasPendientes?1:0.5,cursor:totalAlertasCriticasPendientes?"pointer":"not-allowed"}}
-              >
-                Marcar visibles leidos
-              </button>
-              {canEdit && totalAlertasCriticasPendientes > 0 && (
-                <>
-                  <button
-                    onClick={copiarCriticosSemanaSiguiente}
-                    disabled={bulkCopying}
-                    style={{...S.btn,padding:"10px 16px",fontSize:14,background:"rgba(79,70,229,.09)",color:"#4f46e5",border:"1px solid rgba(79,70,229,.20)",opacity:bulkCopying?0.6:1,cursor:bulkCopying?"not-allowed":"pointer"}}
-                  >
-                    {bulkCopying ? "Copiando..." : "Copiar criticos"}
-                  </button>
-                  <button
-                    onClick={solicitarRetrasoCriticos}
-                    disabled={bulkRescheduling}
-                    style={{...S.btn,padding:"10px 16px",fontSize:14,background:"rgba(245,158,11,.10)",color:"#f97316",border:"1px solid rgba(245,158,11,.24)",opacity:bulkRescheduling?0.6:1,cursor:bulkRescheduling?"not-allowed":"pointer"}}
-                  >
-                    {bulkRescheduling ? "Reprogramando..." : "Retrasar"}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-          {criticalPanelOpen && (
-            totalAlertasCriticasPendientes > 0 ? alertasCriticasPendientes.slice(0,3).map(({ pedido: p, meta })=>{
-              const diffH = typeof meta.flags.diffHours === "number" ? Math.round(meta.flags.diffHours) : null;
-              const needsAssignment = meta.flags.missingVehiculo || meta.flags.missingChofer;
-              return (
-                <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 10px",background:"rgba(239,68,68,.06)",borderRadius:7}}>
-                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,color:"var(--text)"}}>{p.numero}</span>
-                  <span style={{fontSize:12,color:"var(--text3)"}}>{p.origen} -> {p.destino}</span>
-                  {meta.flags.overdueAssignment ? (
-                    <span style={{fontSize:11,color:"#fca5a5"}}>{diffH !== null ? `${Math.abs(diffH)}h vencido` : "Vencido"}</span>
-                  ) : diffH !== null ? (
-                    <span style={{fontSize:11,color:"#fca5a5"}}>en {diffH}h</span>
-                  ) : null}
-                  {meta.flags.missingVehiculo && <span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:"rgba(239,68,68,.15)",color:"#f87171"}}>Sin vehiculo</span>}
-                  {meta.flags.missingChofer && <span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:"rgba(245,158,11,.15)",color:"#fbbf24"}}>Sin chofer</span>}
-                  {meta.validationIssues.length > 0 && <span style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:"rgba(251,191,36,.12)",color:"#fbbf24"}}>{meta.validationIssues.length} dato{meta.validationIssues.length !== 1 ? "s" : ""} pendiente{meta.validationIssues.length !== 1 ? "s" : ""}</span>}
-                  {canEdit && (
-                    <div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                      {meta.validationIssues.length > 0 && (
-                        <button onClick={e=>{e.stopPropagation();abrirEditar(p, {_focus_asignacion: needsAssignment});}}
-                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(251,191,36,.35)",background:"rgba(251,191,36,.08)",color:"#fbbf24",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                          Completar datos
-                        </button>
-                      )}
-                      <button onClick={e=>{e.stopPropagation();openPedidoInTrafico(p);}}
-                        style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(59,130,246,.30)",background:"rgba(59,130,246,.10)",color:"#60a5fa",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                        Ver en trafico
-                      </button>
-                      {needsAssignment && (
-                      <button onClick={e=>{e.stopPropagation();setQuickAssignPedido(p);}}
-                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid var(--accent-a40)",background:"var(--accent-a12)",color:"var(--accent)",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                          Asignar
-                        </button>
-                      )}
-                      {needsAssignment && (
-                      <button onClick={e=>{e.stopPropagation();setAutoAsignando(p);}}
-                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(139,92,246,.4)",background:"rgba(139,92,246,.1)",color:"#a78bfa",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                          Autoasignar IA
-                        </button>
-                      )}
-                      <button onClick={e=>{e.stopPropagation();solicitarRetrasoPedido(p, p.numero || "este pedido");}}
-                        disabled={reprogrammingPedidoId === String(p.id)}
-                        style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(245,158,11,.35)",background:"rgba(245,158,11,.08)",color:"#f59e0b",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer",opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1}}>
-                        {reprogrammingPedidoId === String(p.id) ? "Moviendo..." : "Retrasar"}
-                      </button>
-                      {(p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual) && (
-                        <button onClick={e=>{e.stopPropagation();limpiarAsignacionPedido(p);}}
-                          disabled={reprogrammingPedidoId === String(p.id)}
-                          style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(239,68,68,.35)",background:"rgba(239,68,68,.08)",color:"#f87171",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer",opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1}}>
-                          {reprogrammingPedidoId === String(p.id) ? "Limpiando..." : "Limpiar asignacion"}
-                        </button>
-                      )}
-                      <button onClick={e=>{e.stopPropagation();abrirCopiarPedido(p);}}
-                        style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(59,130,246,.30)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                        Copiar
-                      </button>
-                      <button onClick={e=>{e.stopPropagation();marcarPedidoAvisoLeido({ pedido: p, meta });}}
-                        style={{padding:"3px 10px",borderRadius:6,border:"1px solid rgba(16,185,129,.30)",background:"rgba(16,185,129,.08)",color:"#10b981",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                        Leido
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            }) : (
-              <div style={{padding:"8px 10px",borderRadius:7,background:"rgba(16,185,129,.06)",border:"1px solid rgba(16,185,129,.16)",fontSize:12,color:"var(--text3)"}}>
-                No quedan avisos pendientes. Los visibles ya se marcaron como revisados.
-              </div>
-            )
-          )}
-        </div>
-      ) : null}
-
-      <div style={S.bar}>
-        {canEdit && <button style={{...S.btn,background:"linear-gradient(180deg,#008b82,#006f68)",color:"#fff",border:"1px solid #007f78",boxShadow:"0 12px 22px rgba(0,111,104,.18)"}} onClick={abrirNuevo}>+ Nuevo pedido</button>}
-        {canEdit && <button style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#008b82",border:"1px solid rgba(16,185,129,.24)"}} onClick={()=>setQuickCreando(true)}>+ Pedido rapido</button>}
-        {canEdit && aiDisponible && <button style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#6d5dfc",border:"1px solid rgba(139,92,246,.22)"}} onClick={()=>setVistaPedidos("ia")}>IA: email / PDF</button>}
-        <button onClick={aplicarSemanaActual}
-          title={filtroSemanaActualActivo ? "Quitar el filtro de semana" : "Mostrar solo la semana actual"}
-          style={{...S.btn,background:filtroSemanaActualActivo?"rgba(245,158,11,.12)":"#fff",color:filtroSemanaActualActivo?"#f59e0b":"#475569",border:filtroSemanaActualActivo?"1px solid rgba(245,158,11,.26)":"1px solid #dbe5ec"}}>
-          {filtroSemanaActualActivo ? "Quitar semana" : "Semana actual"}
-        </button>
-        <input type="date" min="2000-01-01" max="2100-12-31" value={filtroDesde} onChange={e=>{setFiltroFechasCustom(true);setFiltroDesde(e.target.value);}}
-          style={{...S.input,width:132}} title="Desde"/>
-        <input type="date" min="2000-01-01" max="2100-12-31" value={filtroHasta} onChange={e=>{setFiltroFechasCustom(true);setFiltroHasta(e.target.value);}}
-          style={{...S.input,width:132}} title="Hasta"/>
-        <select value={filtroEst} onChange={e=>setFiltroEst(e.target.value)} style={{...S.input,width:150}}>
-          <option value="activos">Activos</option>
-          <option value="todos">Todos los estados</option>
-          {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
-        </select>
-        <select value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)} style={{...S.input,width:150}}>
-          <option value="">Todos los clientes</option>
-          {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
-        </select>
-        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar..." style={{...S.input,width:160}}/>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--text)"}}>
-          <input type="checkbox" checked={mostrarHistorico} onChange={e=>{setMostrarHistorico(e.target.checked);setFiltroFechasCustom(false);setFiltroMes("");setFiltroDesde("");setFiltroHasta("");setPage(1);setSelectedPedidoIds([]);}} />
-          Incluir meses anteriores
-        </label>
-        <button onClick={()=>setShowAdvancedFilters(v=>!v)}
-          style={{...S.btn,background:showAdvancedFilters?"#2563eb":"#fff",color:showAdvancedFilters?"#fff":"#475569",border:showAdvancedFilters?"1px solid #2563eb":"1px solid #dbe5ec"}}>
-          Filtros avanzados
-        </button>
-        <button onClick={()=>setGroupByCliente(v=>!v)}
-          title={groupByCliente ? "Volver a agrupar por fechas" : "Agrupar por cliente"}
-          style={{...S.btn,background:groupByCliente?"#008b82":"#fff",color:groupByCliente?"#fff":"#475569",border:groupByCliente?"1px solid #008b82":"1px solid #dbe5ec"}}>
-          {groupByCliente ? "Agrupado por cliente" : "Agrupado por fecha"}
-        </button>
-        <button onClick={()=>setSoloCriticos(v=>!v)}
-          style={{...S.btn,background:soloCriticos?"#dc2626":"#fff",color:soloCriticos?"#fff":"#475569",border:soloCriticos?"1px solid #dc2626":"1px solid #dbe5ec"}}>
-          {soloCriticos ? "Solo criticos" : "Ver criticos"}
-        </button>
-        {(mostrarHistorico||filtroEst!=="todos"||filtroDesde||filtroHasta||filtroMes||filtroCliente||q||filtroSinAsignacion||filtroPendienteCompletar||filtroColaborador)&&(
-          <button onClick={()=>{setMostrarHistorico(false);setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);}}
-            style={{...S.btn,background:"rgba(239,68,68,.12)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",fontSize:11,padding:"4px 10px"}}>Reset</button>
-        )}
-        {vistaMesActualPorDefecto && (
-          <span style={{
-            fontSize:11,
-            fontWeight:900,
-            color:"var(--accent)",
-            background:"rgba(16,185,129,.10)",
-            border:"1px solid rgba(16,185,129,.24)",
-            borderRadius:999,
-            padding:"5px 10px",
-          }}>
-            {_rangoMesActual.label} y siguientes
-          </span>
-        )}
-        <span style={{
-          fontSize:12,
-          color:searchHasMatches ? "#60a5fa" : "var(--text4)",
-          marginLeft:"auto",
-          padding:searchActive ? "4px 9px" : undefined,
-          borderRadius:999,
-          background:searchHasMatches ? "rgba(59,130,246,.12)" : searchActive ? "rgba(148,163,184,.08)" : undefined,
-          border:searchHasMatches ? "1px solid rgba(59,130,246,.28)" : searchActive ? "1px solid var(--border2)" : undefined,
-          fontWeight:searchHasMatches ? 900 : 500,
-        }}>
-          {searchActive
-            ? `${pedidosVisiblesAccionables.length} coincidencia${pedidosVisiblesAccionables.length!==1?"s":""}`
-            : soloCriticos ? `${pedidosVisibles.length} critico${pedidosVisibles.length!==1?"s":""}` : (totalCount>0?`${totalCount} pedido${totalCount!==1?"s":""}`:`${pedidos.length} pedido${pedidos.length!==1?"s":""}`)}
-          {totalPages>1&&<span style={{marginLeft:6,color:"var(--text5)"}}>· pag {page}/{totalPages}</span>}
-        </span>
-      </div>
-
-      {aiDisponible && vistaPedidos === "ia" && (
+        selectedIds={selectedPedidoIds} toggleSelected={togglePedidoSelected} tools={<div className="orders-tools"><h2>Planificación y seguimiento</h2><div className="orders-tool-controls"><button onClick={()=>window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"gestion_trafico"}))}>Abrir mesa de tráfico</button><button onClick={()=>setSoloCriticos(v=>!v)}>Filtrar pedidos críticos</button>{canEdit&&<><button disabled={bulkCopying} onClick={copiarCriticosSemanaSiguiente}>Copiar críticos a la próxima semana</button><button disabled={bulkRescheduling} onClick={solicitarRetrasoCriticos}>Retrasar críticos</button></>}<button onClick={()=>marcarPedidosAvisosVisiblesLeidos(alertasCriticasPendientes)}>Marcar avisos visibles como leídos</button></div><p>{totalAlertasCriticasPendientes} avisos críticos pendientes en el listado.</p><h2>Bandeja IA</h2>      {aiDisponible && (
         <div style={{margin:"0 0 16px"}}>
           {noHayViajesParaPlanificar && (
             <div style={{background:"rgba(245,158,11,.10)",border:"1px solid rgba(245,158,11,.26)",borderRadius:9,padding:"12px 14px",color:"var(--text3)",fontSize:12,marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
@@ -11884,39 +11529,7 @@ export default function Pedidos() {
         </div>
       )}
 
-      {showAdvancedFilters && (
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"-6px 0 12px"}}>
-          <button onClick={()=>setFiltroSinAsignacion(v=>!v)}
-            style={{...S.btn,padding:"6px 12px",background:filtroSinAsignacion?"#7c3aed":"var(--bg3)",color:filtroSinAsignacion?"#fff":"var(--text3)",border:filtroSinAsignacion?"1px solid #7c3aed":"1px solid var(--border2)"}}>
-            Sin asignacion completa
-          </button>
-          <button onClick={()=>setFiltroPendienteCompletar(v=>!v)}
-            style={{...S.btn,padding:"6px 12px",background:filtroPendienteCompletar?"#b45309":"var(--bg3)",color:filtroPendienteCompletar?"#fff":"var(--text3)",border:filtroPendienteCompletar?"1px solid #b45309":"1px solid var(--border2)"}}>
-            Pendientes de completar
-          </button>
-          <button onClick={()=>setFiltroColaborador(v=>!v)}
-            style={{...S.btn,padding:"6px 12px",background:filtroColaborador?"#059669":"var(--bg3)",color:filtroColaborador?"#fff":"var(--text3)",border:filtroColaborador?"1px solid #059669":"1px solid var(--border2)"}}>
-            Solo colaborador
-          </button>
-        </div>
-      )}
-
-      {(resumenCriticos.vencidos || resumenCriticos.urgentes || resumenCriticos.datos || resumenCriticos.sinAsignacion) ? (
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",margin:"0 0 12px"}}>
-          {resumenCriticos.vencidos > 0 && <span style={{display:"inline-flex",alignItems:"center",padding:"5px 10px",borderRadius:999,border:"1px solid rgba(239,68,68,.24)",background:"rgba(239,68,68,.10)",color:"#f87171",fontSize:11,fontWeight:800}}>{resumenCriticos.vencidos} vencido{resumenCriticos.vencidos !== 1 ? "s" : ""}</span>}
-          {resumenCriticos.urgentes > 0 && <span style={{display:"inline-flex",alignItems:"center",padding:"5px 10px",borderRadius:999,border:"1px solid rgba(245,158,11,.22)",background:"rgba(245,158,11,.10)",color:"#fbbf24",fontSize:11,fontWeight:800}}>{resumenCriticos.urgentes} urgente{resumenCriticos.urgentes !== 1 ? "s" : ""}</span>}
-          {resumenCriticos.datos > 0 && <span style={{display:"inline-flex",alignItems:"center",padding:"5px 10px",borderRadius:999,border:"1px solid rgba(59,130,246,.22)",background:"rgba(59,130,246,.10)",color:"#60a5fa",fontSize:11,fontWeight:800}}>{resumenCriticos.datos} con datos pendientes</span>}
-          {resumenCriticos.sinAsignacion > 0 && <span style={{display:"inline-flex",alignItems:"center",padding:"5px 10px",borderRadius:999,border:"1px solid rgba(139,92,246,.22)",background:"rgba(139,92,246,.10)",color:"#a78bfa",fontSize:11,fontWeight:800}}>{resumenCriticos.sinAsignacion} sin asignacion completa</span>}
-          <button
-            onClick={() => setCriticalPanelOpen(v => !v)}
-            style={{...S.btn,padding:"5px 12px",fontSize:11,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)"}}
-          >
-            {criticalPanelOpen ? "Ocultar avisos" : "Mostrar avisos"}
-          </button>
-        </div>
-      ) : null}
-
-      {canEdit && selectedPedidoIds.length > 0 && (
+{!aiDisponible&&<p>La bandeja IA no está disponible para este usuario.</p>}</div>} bulkTools={<div className="orders-tools">      {canEdit && selectedPedidoIds.length > 0 && (
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",margin:"0 0 12px",padding:"10px 12px",borderRadius:9,background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)"}}>
           <span style={{fontSize:12,fontWeight:800,color:"#60a5fa"}}>
             {selectedPedidoIds.length} seleccionado{selectedPedidoIds.length !== 1 ? "s" : ""}
@@ -11976,538 +11589,24 @@ export default function Pedidos() {
         </div>
       )}
 
-      <div style={{...S.card, overflow:"hidden",width:"100%",maxWidth:"100%",boxSizing:"border-box"}}>
-        <div className="tg-responsive-scroll" style={{overflowX:"auto",width:"100%",maxWidth:"100%"}}>
-        <table className="tg-pedidos-table" style={{width:"100%",minWidth:1060,borderCollapse:"collapse"}}>
-          <thead><tr>
-            <th style={{...S.th,width:42}}>
-              <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
-            </th>
-            {["N. Pedido","Cliente","Origen -> Destino","Carga","Descarga","Vehiculo","Estado","Importe","Acciones"].map(h=><th key={h} style={h==="Acciones" ? {...S.th, position:"sticky", right:0, zIndex:3, boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"} : S.th}>{h}</th>)}
-          </tr></thead>
-          <tbody>
-            {loading ? <tr><td colSpan={12} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
-            : loadError ? <tr><td colSpan={12} style={{...S.td,textAlign:"center",padding:26}}>
-              <div style={{display:"grid",justifyItems:"center",gap:9}}>
-                <div style={{fontSize:13,fontWeight:900,color:"#ef4444"}}>No se pudieron cargar los viajes.</div>
-                <div style={{fontSize:12,color:"var(--text4)",maxWidth:520,lineHeight:1.45}}>
-                  La lista no esta vacia necesariamente: la API no ha respondido correctamente. Reintenta y, si se repite, revisa el estado del servidor.
-                </div>
-                <button
-                  type="button"
-                  onClick={cargar}
-                  style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.25)",padding:"7px 12px",fontSize:12}}
-                >
-                  Reintentar
-                </button>
-              </div>
-            </td></tr>
-            : pedidosVisibles.length===0 ? <tr><td colSpan={12} style={{...S.td,textAlign:"center",color:"var(--text4)",padding:26}}>
-              {soloCriticos ? "No hay pedidos criticos con los filtros actuales." : (
-                <div style={{display:"grid",justifyItems:"center",gap:8}}>
-                  <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>No hay viajes disponibles con los filtros actuales.</div>
-                  <div style={{fontSize:12,color:"var(--text4)"}}>Quieres crear un nuevo viaje?</div>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={()=>setQuickCreando(true)}
-                      style={{...S.btn,background:"var(--accent)",color:"#fff",border:"none",padding:"7px 12px",fontSize:12}}
-                    >
-                      Crear nuevo viaje
-                    </button>
-                  )}
-                </div>
-              )}
-            </td></tr>
-            : pedidosRenderList.map((entry)=>{
-              if (entry?._group) {
-                const isMonth = entry.type === "month";
-                const isWeek = entry.type === "week";
-                return (
-                  <tr key={`group-${entry.key}`} style={{background:isMonth ? "var(--bg4)" : isWeek ? "var(--bg3)" : "var(--bg2)"}}>
-                    <td colSpan={12} style={{...S.td,padding:isMonth ? "16px 18px" : isWeek ? "19px 22px" : "12px 18px 12px 56px",borderTop:(isMonth || isWeek) ? "1px solid var(--border)" : S.td.borderTop}}>
-                      <button
-                        onClick={() => setCollapsedClientes(prev => ({ ...prev, [entry.key]: !prev[entry.key] }))}
-                        style={{display:"flex",alignItems:"center",gap:16,width:"100%",background:"transparent",border:"none",color:"var(--text)",cursor:"pointer",padding:0,fontFamily:"'DM Sans',sans-serif"}}
-                      >
-                        <span style={{fontSize:16,color:"#008b82",fontWeight:900,width:16}}>{entry.collapsed ? "+" : "−"}</span>
-                        {isWeek && <span style={{width:48,height:48,borderRadius:10,background:"rgba(16,185,129,.10)",border:"1px solid rgba(16,185,129,.18)",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#008b82",fontSize:24}}>▣</span>}
-                        <span style={{fontWeight:isMonth ? 950 : isWeek ? 900 : 850,fontSize:isMonth ? 14 : isWeek ? 17 : 13,textTransform:(isMonth || isWeek) ? "uppercase" : "none",letterSpacing:(isMonth || isWeek) ? ".04em" : 0}}>{entry.label}</span>
-                        <span style={{fontSize:13,color:"#64748b",paddingLeft:10,borderLeft:"1px solid #dbe5ec"}}>{entry.count} pedido{entry.count !== 1 ? "s" : ""}</span>
-                      </button>
-                    </td>
-                  </tr>
-                );
-              }
-              const { pedido: p, priorityMeta } = entry;
-              const cargasPedido = pedidoStopsForList(p, "carga");
-              const descargasPedido = pedidoStopsForList(p, "descarga");
-              const cargaPrincipal = cargasPedido[0] || {};
-              const descargaPrincipal = descargasPedido[0] || {};
-              const cargasAdicionales = cargasPedido.slice(1);
-              const descargasAdicionales = descargasPedido.slice(1);
-              const routeDisplay = pedidoRouteDisplayForList(p, cargaPrincipal, descargaPrincipal);
-              const estadoRow = String(p.estado || "").toLowerCase();
-              const estadoBackground =
-                estadoRow === "en_curso" ? "rgba(34,211,238,.12)" :
-                estadoRow === "descarga" ? "rgba(167,139,250,.10)" :
-                estadoRow === "incidencia" ? "rgba(251,191,36,.12)" :
-                undefined;
-              const pendingCompleteBackground = p.pendiente_completar ? "rgba(251,191,36,.18)" : undefined;
-              const rowBackground =
-                String(focusPedido?.pedido_id || "") === String(p.id)
-                  ? "rgba(34,211,160,.10)"
-                  : pendingCompleteBackground
-                    ? pendingCompleteBackground
-                    : priorityMeta.flags.overdueAssignment
-                    ? "rgba(239,68,68,.08)"
-                    : priorityMeta.flags.urgentAssignment
-                      ? "rgba(245,158,11,.07)"
-                      : estadoBackground;
-              const rowShadow =
-                String(focusPedido?.pedido_id || "") === String(p.id)
-                  ? "inset 3px 0 0 var(--green)"
-                    : p.pendiente_completar
-                    ? "inset 3px 0 0 rgba(245,158,11,.8)"
-                    : priorityMeta.flags.overdueAssignment
-                    ? "inset 3px 0 0 rgba(239,68,68,.85)"
-                    : priorityMeta.flags.urgentAssignment
-                      ? "inset 3px 0 0 rgba(245,158,11,.8)"
-                      : estadoRow === "en_curso"
-                        ? "inset 3px 0 0 rgba(34,211,238,.65)"
-                        : estadoRow === "descarga"
-                          ? "inset 3px 0 0 rgba(167,139,250,.55)"
-                          : estadoRow === "incidencia"
-                            ? "inset 3px 0 0 rgba(251,191,36,.55)"
-                            : undefined;
-              const actionMenuOpen = openActionMenuPedidoId === String(p.id);
-              return (
-              <tr key={p.id} id={`pedido-row-${p.id}`} className="tg-pedidos-row" style={{
-                cursor:"pointer",
-                opacity:pedidoTieneFacturaFinal(p)?0.85:1,
-                background: rowBackground,
-                boxShadow: rowShadow,
-              }} onClick={()=>{
-  if (pedidoTieneFacturaFinal(p)) abrirEditar(p);
-  else abrirEditar(p);
-}}>
-                <td className="tg-td-check" style={S.td} onClick={e=>e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={selectedPedidoIds.includes(String(p.id))}
-                    onChange={() => togglePedidoSelected(p.id)}
-                  />
-                </td>
-                <td className="tg-td-num" style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--accent-xl)",whiteSpace:"nowrap",minWidth:104}}>
-                  <div>{p.numero}</div>
-                  {p.nota_visible && p.notas ? (
-                    <div title={p.notas} onClick={e=>e.stopPropagation()}
-                      style={{display:"inline-flex",alignItems:"center",gap:4,marginTop:4,maxWidth:120,padding:"2px 7px",borderRadius:5,background:"rgba(251,191,36,.12)",border:"1px solid rgba(251,191,36,.3)",color:"#d97706",fontSize:9,fontFamily:"'DM Sans',sans-serif",fontWeight:800,cursor:"help"}}>
-                      <span>NOTA</span>
-                      <span style={{fontWeight:600,opacity:.85,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.notas}</span>
-                    </div>
-                  ) : null}
-                  {(() => {
-                    // Sin repetir: si ya se muestra "Completar" (pendiente_completar),
-                    // no repetimos "Datos pendientes". Y solo "Vencido" va en color de
-                    // alarma; el resto (urgente, datos, completar) en gris discreto.
-                    const visibles = priorityMeta.reasons.filter(r => !(r.key === "data" && p.pendiente_completar));
-                    if (!visibles.length) return null;
-                    return (
-                    <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:4}}>
-                      {visibles.map(reason => {
-                        const danger = reason.tone === "danger";
-                        return (
-                        <span key={reason.key} style={{
-                          display:"inline-flex",
-                          padding:"2px 6px",
-                          borderRadius:5,
-                          background: danger ? "rgba(239,68,68,.10)" : "var(--bg4)",
-                          border: danger ? "1px solid rgba(239,68,68,.22)" : "1px solid var(--border2)",
-                          color: danger ? "#ef4444" : "var(--text5)",
-                          fontSize:9,
-                          fontFamily:"'DM Sans',sans-serif",
-                          fontWeight:800
-                        }}>
-                          {reason.label}
-                        </span>
-                        );
-                      })}
-                    </div>
-                    );
-                  })()}
-                  {p.pendiente_completar && (
-                    <div title={p.aviso_completar || "Pendiente de completar"} style={{marginTop:4,display:"inline-flex",padding:"2px 6px",borderRadius:5,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text5)",fontSize:9,fontFamily:"'DM Sans',sans-serif",fontWeight:800}}>
-                      Completar
-                    </div>
-                  )}
-                </td>
-                <td data-label="Cliente" style={{...S.td,fontWeight:600,fontSize:12}}>
-                  <div>{p.cliente_nombre||"-"}</div>
-                  {Array.isArray(p.etiquetas) && p.etiquetas.length > 0 && (
-                    <div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:4}}>
-                      {p.etiquetas.map(et => {
-                        const color = etiquetaColorFromCatalog(et);
-                        return (
-                          <span key={et} title={et} style={{display:"inline-flex",alignItems:"center",gap:4,padding:"1px 7px",borderRadius:20,background:`${color}1f`,border:`1px solid ${color}66`,color:"var(--text2)",fontSize:9,fontWeight:800,fontFamily:"'DM Sans',sans-serif"}}>
-                            <span style={{width:6,height:6,borderRadius:"50%",background:color,display:"inline-block"}}/>
-                            {et}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </td>
-                <td data-label="Ruta" style={{...S.td,fontSize:12,color:"var(--text2)",minWidth:190}}>
-                  <div style={{fontWeight:800,color:"var(--text)"}}>{routeDisplay.main}</div>
-                  {routeDisplay.detail && (
-                    <div style={{fontSize:10,lineHeight:1.35,color:"var(--text4)",marginTop:3}}>{routeDisplay.detail}</div>
-                  )}
-                  {(cargasAdicionales.length > 0 || descargasAdicionales.length > 0) && (
-                    <div style={{display:"grid",gap:3,marginTop:6,paddingTop:6,borderTop:"1px solid var(--border)"}}>
-                      {cargasAdicionales.map((stop, index) => (
-                        <div key={`carga-${index}-${stop.direccion || "parada"}`} style={{fontSize:10,lineHeight:1.35,color:"var(--text4)"}}>
-                          <strong style={{color:"#0f9f95"}}>Carga {index + 2}:</strong> {pedidoStopListLabel(stop, p.origen, p.cliente_id || "", "carga")}
-                          {pedidoStopMeta(stop) && <div style={{color:"var(--text5)"}}>{pedidoStopMeta(stop)}</div>}
-                        </div>
-                      ))}
-                      {descargasAdicionales.map((stop, index) => (
-                        <div key={`descarga-${index}-${stop.direccion || "parada"}`} style={{fontSize:10,lineHeight:1.35,color:"var(--text4)"}}>
-                          <strong style={{color:"#f59e0b"}}>Descarga {index + 2}:</strong> {pedidoStopListLabel(stop, p.destino, p.cliente_id || "", "descarga")}
-                          {pedidoStopMeta(stop) && <div style={{color:"var(--text5)"}}>{pedidoStopMeta(stop)}</div>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </td>
-                <td data-label="Carga" style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
-                  <div>{formatPedidoListDate(cargaPrincipal.fecha)||"-"}</div>
-                  {formatPedidoListTime(cargaPrincipal.hora) && <div style={{fontSize:10}}>{formatPedidoListTime(cargaPrincipal.hora)}</div>}
-                  {cargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:2,fontFamily:"'DM Sans',sans-serif"}}>{cargaPrincipal.ventana}</div>}
-                </td>
-                <td data-label="Descarga" style={{...S.td,fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
-                  <div>{formatPedidoListDate(descargaPrincipal.fecha)||"-"}</div>
-                  {formatPedidoListTime(descargaPrincipal.hora) && <div style={{fontSize:10}}>{formatPedidoListTime(descargaPrincipal.hora)}</div>}
-                  {descargaPrincipal.ventana && <div style={{fontSize:9,color:"var(--text5)",marginTop:2,fontFamily:"'DM Sans',sans-serif"}}>{descargaPrincipal.ventana}</div>}
-                </td>
-                <td data-label="Vehiculo" style={{...S.td,fontSize:12,color:"var(--text2)"}}>
-                  {p.colaborador_id ? (
-                    <div>
-                      <div style={{fontSize:10,fontWeight:700,color:"#a78bfa",marginBottom:2}}>COLABORADOR</div>
-                      <div style={{fontSize:11,color:"var(--text3)"}}>{p.colaborador_nombre||"Externo"}</div>
-                    </div>
-                  ) : (
-                    <>
-                      <div style={{fontFamily:"'JetBrains Mono',monospace"}}>{p.vehiculo_matricula||p.matricula_manual||"-"}</div>
-                      {!p.vehiculo_matricula && p.matricula_manual && (
-                        <div style={{fontSize:9,color:"var(--text5)",marginTop:1}}>a mano</div>
-                      )}
-                      {(p.remolque_matricula||(!p.vehiculo_matricula&&p.remolque_matricula_manual)) && (
-                        <div style={{fontSize:10,color:"#a78bfa",marginTop:1}}>REM {p.remolque_matricula||p.remolque_matricula_manual}</div>
-                      )}
-                    </>
-                  )}
-                </td>
-                <td data-label="Estado" style={S.td}>
-                  <div style={{display:"flex",flexDirection:"column",gap:4,alignItems:"flex-start"}}>
-                    <Badge estado={p.estado}/>
-                    {priorityMeta.validationIssues.length > 0 && (
-                      <span title={priorityMeta.validationIssues.join(" · ")} style={{fontSize:10,color:"#fbbf24",fontWeight:700}}>
-                        {priorityMeta.validationIssues.length} pendiente{priorityMeta.validationIssues.length !== 1 ? "s" : ""}
-                      </span>
-                    )}
-                  </div>
-                </td>
-                <td data-label="Importe" style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{Number(p.importe||0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</td>
-                <td className="tg-td-actions" style={{...S.td, position:"sticky", right:0, zIndex: actionMenuOpen ? 40 : 2, background: rowBackground ? `linear-gradient(${rowBackground}, ${rowBackground}), var(--card-bg, #ffffff)` : "var(--card-bg, #ffffff)", boxShadow:"-6px 0 10px -6px rgba(15,23,42,.15)"}} onClick={e=>e.stopPropagation()}>
-                  {pedidoTieneFacturaFinal(p)
-                    ? <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>FACTURADO</span>
-                        <span style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{p.factura_numero||""}</span>
-                      </div>
-                    : pedidoTieneFacturaBorrador(p)
-                    ? <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                        <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)"}}>BORRADOR</span>
-                        <span style={{fontSize:10,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{p.factura_numero||""}</span>
-                        {canEdit && canIssueSupplierOrder(p, vehiculos) && <button style={{...S.btn,padding:"5px 8px",fontSize:11}} onClick={()=>abrirOrdenCarga(p)}>Orden de carga</button>}
-                      </div>
-                    : <div style={{display:"flex",gap:5,flexWrap:"wrap",position:"relative"}}>
-                        {canEdit && priorityMeta.validationIssues.length > 0 && (
-                          <button onClick={e=>{e.stopPropagation();abrirEditar(p, {_focus_asignacion: priorityMeta.flags.missingVehiculo || priorityMeta.flags.missingChofer});}}
-                            title={priorityMeta.validationIssues.join(" · ")}
-                            style={{...S.btn,background:"rgba(251,191,36,.10)",color:"#fbbf24",border:"1px solid rgba(251,191,36,.25)",padding:"3px 8px",fontSize:11}}>
-                            Completar datos
-                          </button>
-                        )}
-                        {(priorityMeta.flags.overdueAssignment || priorityMeta.flags.urgentAssignment || priorityMeta.validationIssues.length > 0) && (
-                          <button onClick={e=>{e.stopPropagation();openPedidoInTrafico(p);}}
-                            style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)",padding:"3px 8px",fontSize:11}}>
-                            Ver trafico
-                          </button>
-                        )}
-                        {canEdit && (
-                          <button onClick={e=>{e.stopPropagation();solicitarRetrasoPedido(p, p.numero || "este pedido");}}
-                            disabled={reprogrammingPedidoId === String(p.id)}
-                            title="Mover carga y descarga los dias que necesites"
-                            style={{...S.btn,background:"rgba(245,158,11,.10)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",padding:"3px 8px",fontSize:11,opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer"}}>
-                            {reprogrammingPedidoId === String(p.id) ? "Moviendo..." : "Retrasar"}
-                          </button>
-                        )}
-                        {false && canEdit && (
-                          <button onClick={e=>{e.stopPropagation();abrirCopiarPedido(p);}}
-                            title="Copiar viaje"
-                            style={{...S.btn,background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"3px 8px",fontSize:11}}>
-                            Copiar
-                          </button>
-                        )}
-                        {false && canEdit && (
-                          <button onClick={e=>{e.stopPropagation();duplicarPedidoExistente(p);}}
-                            title="Duplicar pedido"
-                            style={{...S.btn,background:"rgba(16,185,129,.10)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)",padding:"3px 8px",fontSize:11}}>
-                            Duplicar
-                          </button>
-                        )}
-                        {/* Eliminar pedido cancelado */}
-                        {false && canEdit && p.estado === "cancelado" && (
-                          <button onClick={async e=>{
-                            e.stopPropagation();
-                            const ok = await confirmDialog({
-                              title: "Eliminar pedido",
-                              message: `Eliminar el pedido ${p.numero}?\n\nEsta accion no se puede deshacer.`,
-                              confirmText: "Eliminar",
-                              tone: "danger",
-                            });
-                            if(!ok) return;
-                            try { await eliminarPedido(p.id); cargar(); }
-                            catch(err){ notify("Error al eliminar: "+err.message, "error"); }
-                          }}
-                            title="Eliminar pedido cancelado"
-                            style={{...S.btn,background:"rgba(239,68,68,.1)",color:"#ef4444",border:"1px solid rgba(239,68,68,.3)",padding:"3px 9px",fontSize:11}}>
-                            Eliminar
-                          </button>
-                        )}
-                        {false && canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
-                          <button onClick={e=>{e.stopPropagation();abrirEditar(p, {_focus_asignacion:true});}}
-                            title="Cambiar vehículo o chófer"
-                            style={{...S.btn,background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)",padding:"3px 8px",fontSize:11}}>
-                            Cambio veh.
-                          </button>
-                        )}
-                        {false && canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual) && (
-                          <button onClick={e=>{e.stopPropagation();limpiarAsignacionPedido(p);}}
-                            title="Quitar asignacion para volver a planificar"
-                            disabled={reprogrammingPedidoId === String(p.id)}
-                            style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#f87171",border:"1px solid rgba(239,68,68,.25)",padding:"3px 8px",fontSize:11,opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer"}}>
-                            {reprogrammingPedidoId === String(p.id) ? "Limpiando..." : "Limpiar asignacion"}
-                          </button>
-                        )}
-                        {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (priorityMeta.flags.missingVehiculo || priorityMeta.flags.missingChofer) && (
-                          <button onClick={e=>{e.stopPropagation();setQuickAssignPedido(p);}}
-                            title="Asignar vehiculo y chofer"
-                            style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#a78bfa",border:"1px solid rgba(139,92,246,.25)",padding:"3px 7px",fontSize:11}}>
-                            Asignar
-                          </button>
-                        )}
-                        {canEdit&&(pedidoEnCursoPorChofer(p) && !esGerente ? (
-                          <span title="El chofer esta realizando el viaje. El estado en curso solo lo cambia el chofer (desde su app) o gerencia." style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 9px",borderRadius:7,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text4)",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>
-                            En curso (chofer)
-                          </span>
-                        ) : (
-                          <select value={p.estado} onChange={e=>cambiarEstado(p.id,e.target.value)} style={{...S.sel,width:130,padding:"4px 8px",fontSize:11}}>
-                            {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
-                          </select>
-                        ))}
-                        {canFacturarPedidos&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&p.estado==="entregado"&&(
-                          <button style={{...S.btn,background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.2)",padding:"4px 10px",fontSize:11}} onClick={()=>setFacturando(p)}>Facturar</button>
-                        )}
-                        <button
-                          onClick={e=>{e.stopPropagation();if(actionMenuOpen){setOpenActionMenuPedidoId("");}else{abrirMenuAcciones(String(p.id), e.currentTarget);}}}
-                          style={{...S.btn,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid var(--border2)",padding:"4px 8px",fontSize:11}}
-                        >
-                          {actionMenuOpen ? "Cerrar" : "Mas"}
-                        </button>
-                        {actionMenuOpen && (
-                          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:actionMenuPos?.top,bottom:actionMenuPos?.bottom,right:actionMenuPos?.right ?? 12,zIndex:3000,width:184,maxHeight:actionMenuPos?.maxHeight ?? 320,overflowY:"auto",padding:5,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border2)",boxShadow:"0 18px 36px rgba(0,0,0,.28)",display:"flex",flexDirection:"column",gap:3}}>
-                            {canEdit && (
-                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirCopiarPedido(p);}}
-                                style={{...S.btn,textAlign:"left",background:"rgba(59,130,246,.10)",color:"#3b82f6",border:"1px solid rgba(59,130,246,.22)",padding:"6px 10px",fontSize:11}}>
-                                Copiar viaje
-                              </button>
-                            )}
-                            {canEdit && pedidoTieneFacturaFinal(p) && (
-                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirEditar(p);}}
-                                style={{...S.btn,textAlign:"left",background:"rgba(245,158,11,.10)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",padding:"6px 10px",fontSize:11}}>
-                                Corregir pedido
-                              </button>
-                            )}
-                            {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
-                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");setQuickAssignPedido(p);}}
-                                style={{...S.btn,textAlign:"left",background:"rgba(59,110,245,.12)",color:"#60a5fa",border:"1px solid rgba(59,110,245,.25)",padding:"6px 10px",fontSize:11}}>
-                                Asignar vehiculo/chofer
-                              </button>
-                            )}
-                            {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
-                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");setAutoAsignando(p);}}
-                                style={{...S.btn,textAlign:"left",background:"rgba(139,92,246,.12)",color:"#a78bfa",border:"1px solid rgba(139,92,246,.25)",padding:"6px 10px",fontSize:11}}>
-                                Autoasignacion IA
-                              </button>
-                            )}
-                            {canEdit && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual) && (
-                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");limpiarAsignacionPedido(p);}}
-                                disabled={reprogrammingPedidoId === String(p.id)}
-                                style={{...S.btn,textAlign:"left",background:"rgba(239,68,68,.10)",color:"#f87171",border:"1px solid rgba(239,68,68,.25)",padding:"6px 10px",fontSize:11,opacity:reprogrammingPedidoId === String(p.id) ? 0.6 : 1,cursor:reprogrammingPedidoId === String(p.id) ? "not-allowed" : "pointer"}}>
-                                {reprogrammingPedidoId === String(p.id) ? "Limpiando..." : "Limpiar asignacion"}
-                              </button>
-                            )}
-                            {/* Un solo boton "Avisar": al pulsarlo despliega los
-                                destinatarios disponibles, en vez de ocupar 4 lineas. */}
-                            {(p.cliente_telefono || p.chofer_id || p.colaborador_telefono)&&(
-                              <>
-                                <button
-                                  style={{...S.btn,textAlign:"left",background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"6px 10px",fontSize:11}}
-                                  disabled={String(whatsappSending || "").startsWith(`${p.id}:`)}
-                                  onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId(v => v === String(p.id) ? "" : String(p.id));}}>
-                                  {String(whatsappSending || "").startsWith(`${p.id}:`)
-                                    ? "Enviando..."
-                                    : `Avisar ${avisarAbiertoPedidoId === String(p.id) ? "^" : "v"}`}
-                                </button>
-                                {avisarAbiertoPedidoId === String(p.id) && (
-                                  <div style={{display:"flex",flexDirection:"column",gap:4,paddingLeft:10,borderLeft:"2px solid rgba(37,211,102,.3)",marginLeft:4}}>
-                                    {p.cliente_telefono&&(
-                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"5px 9px",fontSize:11}}
-                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "cliente");}}>
-                                        WhatsApp al cliente (estado)
-                                      </button>
-                                    )}
-                                    {p.chofer_id&&(
-                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"5px 9px",fontSize:11}}
-                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "chofer");}}>
-                                        WhatsApp al chofer
-                                      </button>
-                                    )}
-                                    {p.chofer_id&&(
-                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#60a5fa",border:"1px solid rgba(59,130,246,.25)",padding:"5px 9px",fontSize:11}}
-                                        title="Aviso dentro de la aplicacion movil del chofer (no es WhatsApp)"
-                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");notificarChoferAppAccion(p);}}>
-                                        Aviso en la app del chofer
-                                      </button>
-                                    )}
-                                    {p.colaborador_telefono&&(
-                                      <button style={{...S.btn,textAlign:"left",background:"transparent",color:"#22c55e",border:"1px solid rgba(34,197,94,.25)",padding:"5px 9px",fontSize:11}}
-                                        onClick={e=>{e.stopPropagation();setAvisarAbiertoPedidoId("");setOpenActionMenuPedidoId("");enviarWhatsappPedidoAccion(p, "colaborador");}}>
-                                        WhatsApp al proveedor
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </>
-                            )}
-                            {canEdit&&canIssueSupplierOrder(p, vehiculos)&&!pedidoTieneFacturaFinal(p)&&(
-                              <button style={{...S.btn,textAlign:"left",background:"rgba(99,102,241,.1)",color:"#818cf8",border:"1px solid rgba(99,102,241,.2)",padding:"6px 10px",fontSize:11}}
-                                onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");abrirOrdenCarga(p);}}>
-                                Orden de carga
-                              </button>
-                            )}
-                            <button
-                              style={{...S.btn,textAlign:"left",background:"rgba(245,158,11,.1)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",padding:"6px 10px",fontSize:11}}
-                              onClick={async e=>{
-                                e.stopPropagation();
-                                setOpenActionMenuPedidoId("");
-                                try {
-                                  const data = await getCartaPorte(p.id);
-                                  setCartaPorte(data);
-                                } catch(err) { notify("Error al cargar datos: "+err.message, "error"); }
-                              }}>
-                              Carta de porte / CMR
-                            </button>
-                            {canEdit && p.estado !== "cancelado" && !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p) && (
-                              <button onClick={e=>{e.stopPropagation();setOpenActionMenuPedidoId("");solicitarCancelacionPedido(p);}}
-                                style={{...S.btn,textAlign:"left",background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.28)",padding:"6px 10px",fontSize:11}}>
-                                Cancelar pedido
-                              </button>
-                            )}
-                            {canEdit && p.estado === "cancelado" && (
-                              <button onClick={async e=>{
-                                e.stopPropagation();
-                                setOpenActionMenuPedidoId("");
-                                const ok = await confirmDialog({
-                                  title: "Eliminar pedido",
-                                  message: `Eliminar el pedido ${p.numero}?\n\nEsta accion no se puede deshacer.`,
-                                  confirmText: "Eliminar",
-                                  tone: "danger",
-                                });
-                                if(!ok) return;
-                                try { await eliminarPedido(p.id); cargar(); }
-                                catch(err){ notify("Error al eliminar: "+err.message, "error"); }
-                              }}
-                                style={{...S.btn,textAlign:"left",background:"rgba(239,68,68,.1)",color:"#ef4444",border:"1px solid rgba(239,68,68,.3)",padding:"6px 10px",fontSize:11}}>
-                                Eliminar pedido
-                              </button>
-                            )}
-                          </div>
-                        )}
-                        {false && p.cliente_telefono&&(
-                          <a href={`https://wa.me/${(p.cliente_telefono||"").replace(/[^0-9]/g,"")}?text=${encodeURIComponent("Estimado/a "+p.cliente_nombre+", le confirmamos el pedido "+p.numero+" de "+p.origen+" a "+p.destino+". Fecha de carga: "+(p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"pendiente")+". Atentamente, TransGest TMS")}`}
-                            target="_blank" rel="noopener noreferrer"
-                            style={{...S.btn,background:"rgba(37,211,102,.1)",color:"#25d366",border:"1px solid rgba(37,211,102,.25)",padding:"4px 8px",fontSize:11,textDecoration:"none"}}
-                            onClick={e=>e.stopPropagation()}>
-                            WhatsApp
-                          </a>
-                        )}
-                        {false && canEdit&&!pedidoTieneFacturaFinal(p)&&!pedidoTieneFacturaBorrador(p)&&(
-                          <button style={{...S.btn,background:"rgba(99,102,241,.1)",color:"#818cf8",border:"1px solid rgba(99,102,241,.2)",padding:"4px 8px",fontSize:11}}
-                            onClick={e=>{e.stopPropagation();abrirOrdenCarga(p);}}>
-                            O. carga
-                          </button>
-                        )}
-                        {false && <button
-                          title="Generar Carta de Porte / CMR / Albaran"
-                          style={{...S.btn,background:"rgba(245,158,11,.1)",color:"#f59e0b",border:"1px solid rgba(245,158,11,.25)",padding:"4px 8px",fontSize:11}}
-                          onClick={async e=>{
-                            e.stopPropagation();
-                            try {
-                              const data = await getCartaPorte(p.id);
-                              setCartaPorte(data);
-                            } catch(err) { notify("Error al cargar datos: "+err.message, "error"); }
-                          }}>
-                          CMR
-                        </button>}
-                      </div>
-                  }
-                </td>
-              </tr>
-            )})}
-          </tbody>
-        </table>
-        </div>
-      </div>
-
-      {/* Paginacion */}
-      {totalPages>1&&(
-        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"12px 0",marginTop:4,flexWrap:"wrap"}}>
-          <button onClick={()=>setPage(1)} disabled={page===1}
-            style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===1?"not-allowed":"pointer",opacity:page===1?.5:1}}>
-            {"<<"}
-          </button>
-          <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}
-            style={{padding:"5px 12px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===1?"not-allowed":"pointer",opacity:page===1?.5:1}}>
-            Anterior
-          </button>
-          <span style={{fontSize:13,color:"var(--text3)",fontWeight:600,padding:"0 8px"}}>
-            Pagina {page} de {totalPages} - {totalCount} pedidos
-          </span>
-          <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages}
-            style={{padding:"5px 12px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===totalPages?"not-allowed":"pointer",opacity:page===totalPages?.5:1}}>
-            Siguiente
-          </button>
-          <button onClick={()=>setPage(totalPages)} disabled={page===totalPages}
-            style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text4)",fontSize:12,cursor:page===totalPages?"not-allowed":"pointer",opacity:page===totalPages?.5:1}}>
-            {">>"}
-          </button>
-        </div>
-      )}
-
-      </>}
+</div>}
+        permissions={{edit:canEdit, invoice:canFacturarPedidos, finalInvoice:pedidoTieneFacturaFinal, draftInvoice:pedidoTieneFacturaBorrador, supplierOrder:p => canIssueSupplierOrder(p,vehiculos)}}
+        actions={{new:abrirNuevo, quick:() => setQuickCreando(true), open:abrirEditar, assign:setQuickAssignPedido, copy:abrirCopiarPedido, order:abrirOrdenCarga, send:p => enviarWhatsappPedidoAccion(p,"cliente"), invoice:setFacturando, clearSelection:() => setSelectedPedidoIds([]), selectAll:toggleSelectAllVisible,
+          cancel:solicitarCancelacionPedido, remove:eliminarPedidoDesdeListado, autoAssign:setAutoAsignando, clearAssignment:limpiarAsignacionPedido,
+          delay:p=>solicitarRetrasoPedido(p,p.numero), changeState:(p,state)=>cambiarEstado(p.id,state), traffic:openPedidoInTrafico,
+          letter:async p=>{try{setCartaPorte(await getCartaPorte(p.id));}catch(e){notify(e.message,"error");}},
+          notifyDriver:notificarChoferAppAccion, sendTo:(p,target)=>enviarWhatsappPedidoAccion(p,target)}}
+        describe={p => {
+          const loads = pedidoStopsForList(p,"carga"), unloads = pedidoStopsForList(p,"descarga");
+          return {origin:pedidoStopListLabel(loads[0] || {},p.origen,p.cliente_id || "","carga"), destination:pedidoStopListLabel(unloads[0] || {},p.destino,p.cliente_id || "","descarga"), loads:loads.length, unloads:unloads.length};
+        }}
+        filters={{q,setQ,state:filtroEst,setState:setFiltroEst,client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
+          setFrom:value => {setFiltroFechasCustom(true);setFiltroDesde(value);},setTo:value => {setFiltroFechasCustom(true);setFiltroHasta(value);},
+          history:mostrarHistorico,setHistory:value => {setMostrarHistorico(value);setFiltroFechasCustom(false);setFiltroMes("");setFiltroDesde("");setFiltroHasta("");setPage(1);setSelectedPedidoIds([]);},
+          incomplete:filtroPendienteCompletar,setIncomplete:setFiltroPendienteCompletar,external:filtroColaborador,setExternal:setFiltroColaborador,unassigned:filtroSinAsignacion,setUnassigned:setFiltroSinAsignacion,critical:soloCriticos,setCritical:setSoloCriticos,
+          reset:() => {setMostrarHistorico(false);setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);setSoloCriticos(false);}
+        }}
+      />
 
       {copyPlan && (
         <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget && !copySaving && setCopyPlan(null)}>

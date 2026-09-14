@@ -1,3 +1,4 @@
+import "./workspace/unified-tools.css";
 import WarehouseWorkspace from "./warehouse/WarehouseWorkspace";
 import { buildWarehouseDelivery, openWarehouseDocument } from "./warehouse/documents";
 import { useState, useEffect, useCallback } from "react";
@@ -586,7 +587,6 @@ ${rows || `<div class="muted">Sin movimientos de cliente registrados.</div>`}
 
 export default function Palets(){
     const [movimientos,setMovimientos]=useState([]);
-    const [warehouseDetailed,setWarehouseDetailed]=useState(false);
     const [warehouseLoading,setWarehouseLoading]=useState(true);
     const [warehouseError,setWarehouseError]=useState("");
     const [clientes,setClientes]=useState([]);
@@ -963,8 +963,8 @@ export default function Palets(){
   }).filter(c=>c.entregas>0||c.devoluciones>0||c.stock!==0||c.pendientesSalida>0);
 
   const totalPendiente=clientesConPalets.reduce((s,c)=>s+Math.max(0,c.entregas-c.devoluciones),0);
-  const totalDevuelto=clientesConPalets.reduce((s,c)=>s+Number(c.devoluciones||0),0);
-  const totalSalidasPreparadas=clientesConPalets.reduce((s,c)=>s+Number(c.pendientesSalida||0),0);
+
+
   const alertasAntiguedad = buildAlertasAntiguedadPalets(movimientos, clientes, cfgPalets);
   const alertasConEstado = alertasAntiguedad.map(a => ({ ...a, estado_usuario:alertaEstados[a.alerta_key] || "activa" }));
   const alertasOcultas = alertasConEstado.filter(a => a.estado_usuario === "oculta");
@@ -1087,56 +1087,11 @@ export default function Palets(){
   };
 
   return(
-    <div className={warehouseDetailed ? "tg-palets-page tg-responsive-page" : "warehouse-root"} style={warehouseDetailed ? {flex:1,padding:24,fontFamily:"'DM Sans',sans-serif",background:"var(--bg)",color:"var(--text)"} : undefined}>
-      {!warehouseDetailed ? <WarehouseWorkspace movements={movimientos} loading={warehouseLoading} error={warehouseError} reload={cargarMovimientos} stock={stockEmpresa} alerts={alertasNoLeidas} empresa={empresa} sign={signoPaletsMovimiento}
+    <div className="warehouse-root">
+      <WarehouseWorkspace movements={movimientos} loading={warehouseLoading} error={warehouseError} reload={cargarMovimientos} stock={stockEmpresa} alerts={alertasNoLeidas} empresa={empresa} sign={signoPaletsMovimiento}
         create={tipo=>{setMovimientoEditando(tipo ? {tipo,estado_salida:"pendiente"}:null);setModal(true)}} edit={m=>{setMovimientoEditando(m);setModal(true)}} confirm={confirmarSalida} rectify={rectificarDevolucion}
         albaran={m=>{try{openWarehouseDocument(generarHtmlAlbaran(m,clientes.find(c=>c.id===(m.propietario_cliente_id||m.cliente_id)),empresa,clientes.find(c=>c.id===m.cliente_movimiento_id)));}catch(e){notify(e.message,"warning")}}}
-        advanced={value=>{setTab(value);setWarehouseDetailed(true)}} setAlert={cambiarEstadoAlerta}/> : <>
-      <button onClick={()=>setWarehouseDetailed(false)} className="tgui-button">Volver al resumen de almacén</button>
-      {/* Header */}
-      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:26,flexWrap:"wrap"}}>
-        <div style={{width:44,height:44,borderRadius:10,border:"1px solid #dbe5ec",background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>⌂</div>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:34,fontWeight:900,color:"#0f172a"}}>Gestion de almacen</div>
-        <button onClick={()=>{setMovimientoEditando(null);setModal(true);}} style={{...S.btn,background:"linear-gradient(180deg,#008b82,#006f68)",color:"#fff",fontSize:15,fontWeight:800,marginLeft:"auto",border:"1px solid #007f78",padding:"13px 22px",boxShadow:"0 12px 22px rgba(0,111,104,.18)"}}>
-          + Registrar movimiento
-        </button>
-      </div>
-
-      {/* KPIs */}
-      <div className="tg-palets-kpis" style={{display:"grid",gridTemplateColumns:"repeat(7,minmax(0,1fr))",gap:14,marginBottom:24}}>
-        {[
-          ["Stock empresa",stockEmpresa,"palets",stockEmpresa>0?"#10b981":"#f59e0b","□"],
-          ["Pendientes devolucion",totalPendiente,"palets",totalPendiente>0?"#f97316":"#10b981","↶"],
-          ["Salidas preparadas",totalSalidasPreparadas,"palets",totalSalidasPreparadas>0?"#f59e0b":"#10b981","↑"],
-          ["Alertas antiguedad",alertasNoLeidas.length,"lotes",alertasCriticas.length>0?"#ef4444":alertasNoLeidas.length>0?"#f59e0b":"#10b981","!"],
-          ["Devueltos registrados",totalDevuelto,"palets","#10b981","▣"],
-          ["Clientes con palets",clientesConPalets.filter(c=>c.stock>0).length,"clientes","#3b82f6","☷"],
-          ["Total movimientos",movimientos.length,"registros","#64748b","⌁"],
-        ].map(([l,v,u,c,icon])=>(
-          <div key={l} style={{...S.card,padding:"18px 16px",marginBottom:0,display:"flex",alignItems:"center",gap:13,minHeight:92}}>
-            <div style={{width:50,height:50,borderRadius:"50%",background:`${c}18`,color:c,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:900,flex:"0 0 auto"}}>
-              {icon}
-            </div>
-            <div style={{minWidth:0}}>
-              <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:24,color:c,lineHeight:1}}>{fmtN(v)}</div>
-              <div style={{fontSize:11,color:"#334155",textTransform:"uppercase",letterSpacing:".05em",fontWeight:900,marginTop:6}}>{l}</div>
-              <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{u}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Tabs */}
-      <div style={{display:"flex",gap:22,borderBottom:"1px solid #dbe5ec",marginBottom:18}}>
-        {[["stock","Palets de clientes"],["almacen_propio","Mercancia propia"],["almacen_cliente","Almacen cliente"],["historial","Historial"]].map(([id,l])=>(
-          <button key={id} onClick={()=>setTab(id)} style={{...S.btn,border:"none",borderRadius:0,borderBottom:`2px solid ${tab===id?"#008b82":"transparent"}`,color:tab===id?"#006f68":"#64748b",background:"transparent",padding:"0 0 13px",fontSize:14,fontWeight:800,boxShadow:"none"}}>
-            {l}
-          </button>
-        ))}
-      </div>
-
-      {/* Stock empresa */}
-      {tab==="stock"&&(
+        onSection={setTab} details={<div className="unified-tools warehouse-detail">      {tab==="stock"&&(
         <div style={S.card}>
           <div style={{fontWeight:900,fontSize:18,color:"#0f172a",marginBottom:16}}>Estado actual del almacen de palets</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:18}}>
@@ -1633,7 +1588,8 @@ export default function Palets(){
       {/* Almacen propio / cliente */}
       {tab==="almacen_propio"&&<AlmacenPropio/>}
       {tab==="almacen_cliente"&&<AlmacenCliente/>}
-      </>}
+</div>} setAlert={cambiarEstadoAlerta}/>
+
         {modal&&<ModalMovimiento
           clientes={clientes}
           movimientos={movimientos}

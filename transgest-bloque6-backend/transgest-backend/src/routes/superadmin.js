@@ -32,6 +32,8 @@ function isSuperadminOnlyRequest(req) {
   if (["PUT", "DELETE"].includes(method) && path === "/config/ia-key") return true;
   if (method === "PUT" && path === "/config/app-meta") return true;
   if (method === "DELETE" && /^\/empresas\/[^/]+\/?$/.test(path)) return true;
+  if (method === "GET" && (path === "/exportar" || path.startsWith("/exportar/"))) return true;
+  if (method === "GET" && /^\/backups\/download\/[^/]+\/?$/.test(path)) return true;
   return false;
 }
 
@@ -40,6 +42,7 @@ function isSupportOrSuperadminRequest(req) {
   const path = String(req.path || "/");
   if (method === "POST" && /^\/password-reset-requests\/[^/]+\/(?:reset|descartar)\/?$/.test(path)) return true;
   if (method === "POST" && /^\/empresas\/[^/]+\/(?:reset-password|reinvitar|impersonar)\/?$/.test(path)) return true;
+  if (path === "/backups" || path.startsWith("/backups/")) return true;
   return false;
 }
 

@@ -1,6 +1,7 @@
+import "./refinements.css";
 import { orderByDate, groupOrderDates } from "./dateGroups";
 import { useEffect, useState } from "react";
-import { Page, PageHeader, Button, Card, KpiCard, Badge, Icon, FilterBar, SearchInput, Select, DataTable, MobileDataCard, DropdownMenu } from "../../ui";
+import { Page, PageHeader, Button, Card, KpiCard, Badge, Icon, FilterBar, SearchInput, Select, DataTable, MobileDataCard, DropdownMenu, Modal } from "../../ui";
 import "./orders.css";
 
 const dayKey = value => String(value || "").slice(0,10);
@@ -10,6 +11,7 @@ const dateLabel = value => { const key=dayKey(value); return /^\d{4}-\d{2}-\d{2}
 const incidentLabel = p => p.incidencia_tipo?.replace(/_/g," ") || (p.estado === "incidencia" ? "Incidencia operativa" : "");
 
 export default function OrdersWorkspace({ items, allItems, loading, error, reload, clients, drivers, labels, filters, actions, permissions, selectedIds, toggleSelected, tools, bulkTools, serverPage, serverPages, totalCount, setServerPage, describe }) {
+  const [actionPanel,setActionPanel]=useState(null);
   const [showTools,setShowTools]=useState(false);
   const [size,setSize]=useState(10), [localPage,setLocalPage]=useState(1);
   useEffect(()=>setLocalPage(1),[items.length,filters.q,filters.state,filters.client,filters.from,filters.to,filters.unassigned,filters.critical,serverPage,size]);
@@ -30,26 +32,28 @@ export default function OrdersWorkspace({ items, allItems, loading, error, reloa
   const isLocked=p=>permissions.finalInvoice(p);
   const canAssign=p=>permissions.edit && !isLocked(p) && !permissions.draftInvoice(p);
   const canOrder=p=>permissions.edit && permissions.supplierOrder(p);
-  const driver=p=>p.chofer_nombre || drivers.find(d=>String(d.id)===String(p.chofer_id))?.nombre || p.chofer_nombre_manual || "Sin asignar";
+  const driver=p=>p.chofer_nombre || drivers.find(d=>String(d.id)===String(p.chofer_id))?.nombre || p.chofer_nombre_manual || (p.colaborador_id ? "Gestionado por el colaborador" : "Sin asignar");
   function exportList(){
     const quote=v=>`"${String(v??"").replace(/^[=+@\-\t\r]/,"'$&").replace(/"/g,'""')}"`;
     const data=[["Pedido","Cliente","Origen","Destino","Carga","Matrícula","Conductor","Estado","Incidencia"],...items.map(({pedido:p})=>{const route=describe(p);return [p.numero,p.cliente_nombre,route.origin,route.destination,p.fecha_carga,p.vehiculo_matricula||p.matricula_manual,driver(p),labels[p.estado]||p.estado,incidentLabel(p)];})];
     const url=URL.createObjectURL(new Blob(["\ufeff",data.map(row=>row.map(quote).join(";")).join("\r\n")],{type:"text/csv;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download="pedidos-listado.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
+  function panel(p,kind){
+    const groups={
+      'Cambiar estado':Object.entries(labels).filter(([state])=>state!==p.estado&&state!=="cancelado").map(([state,label])=>({label,onClick:()=>actions.changeState(p,state)})),
+      'Asignación':[{label:'Asignar camión, conductor o colaborador',onClick:()=>actions.assign(p)},{label:'Autoasignación IA',onClick:()=>actions.autoAssign(p)},{label:'Limpiar asignación',onClick:()=>actions.clearAssignment(p)},{label:'Retrasar pedido',onClick:()=>actions.delay(p)},{label:'Ver en mesa de tráfico',onClick:()=>actions.traffic(p)}],
+      'Documentos':[{label:'Carta de porte / CMR',onClick:()=>actions.letter(p)},...(canOrder(p)?[{label:'Orden de carga',onClick:()=>actions.order(p)}]:[]),...(permissions.invoice&&p.estado==='entregado'&&!isLocked(p)&&!permissions.draftInvoice(p)?[{label:'Facturar',onClick:()=>actions.invoice(p)}]:[])],
+      'Avisos':[{label:'WhatsApp al cliente',onClick:()=>actions.send(p)},...(p.chofer_id?[{label:'Avisar en la app del conductor',onClick:()=>actions.notifyDriver(p)},{label:'WhatsApp al conductor',onClick:()=>actions.sendTo(p,'chofer')}]:[]),...(p.colaborador_telefono?[{label:'WhatsApp al colaborador',onClick:()=>actions.sendTo(p,'colaborador')}]:[])],
+    };
+    setActionPanel({title:`${kind} · ${p.numero||''}`,items:groups[kind]});
+  }
   const rowActions=p=><div className="orders-row-actions"><Button aria-label={`Ver pedido ${p.numero}`} onClick={()=>actions.open(p)}>Ver</Button><DropdownMenu label={`Acciones de ${p.numero}`} items={[
-    {label:"Ver ficha completa",onClick:()=>actions.open(p)},
-    ...(canAssign(p)?[{label:"Asignar camión y conductor",onClick:()=>actions.assign(p)}]:[]),
-    ...(permissions.edit?[{label:"Copiar pedido",onClick:()=>actions.copy(p)}]:[]),
-    ...(canOrder(p)?[{label:"Ver / imprimir orden de carga",onClick:()=>actions.order(p)}]:[]),
-    ...(permissions.edit && !isLocked(p)?[{label:"Avisar al cliente por WhatsApp",onClick:()=>actions.send(p)}]:[]),
-    ...(permissions.invoice && p.estado==="entregado" && !isLocked(p) && !permissions.draftInvoice(p)?[{label:"Facturar",onClick:()=>actions.invoice(p)}]:[]),
-    ...(canAssign(p)?[{label:"Autoasignación IA",onClick:()=>actions.autoAssign(p)},{label:"Limpiar asignación",onClick:()=>actions.clearAssignment(p)},{label:"Retrasar pedido",onClick:()=>actions.delay(p)},...Object.entries(labels).filter(([state])=>state!==p.estado&&state!=="cancelado").map(([state,label])=>({label:`Cambiar estado: ${label}`,onClick:()=>actions.changeState(p,state)}))]:[]),
-    {label:"Carta de porte / CMR",onClick:()=>actions.letter(p)},
-    {label:"Ver en mesa de tráfico",onClick:()=>actions.traffic(p)},
-    ...(permissions.edit&&p.chofer_id?[{label:"Avisar en la app del conductor",onClick:()=>actions.notifyDriver(p)},{label:"WhatsApp al conductor",onClick:()=>actions.sendTo(p,"chofer")}]:[]),
-    ...(permissions.edit&&p.colaborador_telefono?[{label:"WhatsApp al proveedor",onClick:()=>actions.sendTo(p,"colaborador")}]:[]),
-    ...(canAssign(p)&&p.estado!=="cancelado"?[{label:"Cancelar pedido",onClick:()=>actions.cancel(p)}]:[]),
-    ...(canAssign(p)&&p.estado==="cancelado"?[{label:"Eliminar pedido",onClick:()=>actions.remove(p)}]:[]),
+    ...(canAssign(p)?[{label:'Cambiar estado',onClick:()=>panel(p,'Cambiar estado')},{label:'Asignación',onClick:()=>panel(p,'Asignación')}]:[]),
+    {label:'Documentos',onClick:()=>panel(p,'Documentos')},
+    ...(permissions.edit&&!isLocked(p)?[{label:'Avisos',onClick:()=>panel(p,'Avisos')}]:[]),
+    ...(permissions.edit?[{label:'Copiar pedido',onClick:()=>actions.copy(p)}]:[]),
+    ...(canAssign(p)&&p.estado!=='cancelado'?[{label:'Cancelar pedido',onClick:()=>actions.cancel(p)}]:[]),
+    ...(canAssign(p)&&p.estado==='cancelado'?[{label:'Eliminar pedido',onClick:()=>actions.remove(p)}]:[]),
   ]}/></div>;
   const check=p=><input type="checkbox" aria-label={`Seleccionar ${p.numero}`} checked={selectedIds.includes(String(p.id))} onChange={()=>toggleSelected(p.id)} />;
   const columns=[{key:"selection",label:<span className="orders-sr">Selección</span>,render:({pedido:p})=>check(p)},
@@ -58,12 +62,12 @@ export default function OrdersWorkspace({ items, allItems, loading, error, reloa
     {key:"origin",label:"Origen",render:({pedido:p})=>{const r=describe(p);return <><span>{r.origin}</span>{r.loads>1&&<small>+{r.loads-1} cargas</small>}</>;}},
     {key:"destination",label:"Destino",render:({pedido:p})=>{const r=describe(p);return <><span>{r.destination}</span>{r.unloads>1&&<small>+{r.unloads-1} descargas</small>}</>;}},
     {key:"date",label:"Fecha carga",render:({pedido:p})=><span className="orders-date">{dateLabel(p.fecha_carga)}<small>{String(p.hora_carga||"").slice(0,5)}</small></span>},
-    {key:"vehicle",label:"Matrícula",render:({pedido:p})=><>{p.vehiculo_matricula || p.matricula_manual || p.matricula_colaborador || "Sin asignar"}{p.colaborador_id&&<small>{p.colaborador_nombre || "Colaborador"}</small>}</>},
+    {key:"vehicle",label:"Matrícula",render:({pedido:p})=><>{p.vehiculo_matricula || p.matricula_manual || p.matricula_colaborador || (p.colaborador_id ? "Asignado a colaborador" : "Sin asignar")}{p.colaborador_id&&<small>{p.colaborador_nombre || "Colaborador"}</small>}</>},
     {key:"driver",label:"Conductor",render:({pedido:p})=>driver(p)},
-    {key:"state",label:"Estado",render:({pedido:p})=><><Badge tone={stateTone(p.estado)}>{labels[p.estado] || p.estado || "Sin estado"}</Badge>{isLocked(p)&&<small>Facturado</small>}</>},
+    {key:"state",label:"Estado",render:({pedido:p})=><><Badge tone={stateTone(p.estado)}>{labels[p.estado] || p.estado || "Sin estado"}</Badge>{isLocked(p)&&<small>Facturado</small>}{p.estado==="cancelado"&&p.motivo_cancelacion&&<small>{p.motivo_cancelacion}</small>}</>},
     {key:"incident",label:"Incidencia",render:({pedido:p,priorityMeta:m})=>incidentLabel(p)?<span className="orders-incident"><Icon name="alert" size={14}/>{incidentLabel(p)}</span>:m.validationIssues.length?<span title={m.validationIssues.join(" · ")} className="orders-warning">Datos pendientes ({m.validationIssues.length})</span>:"—"},
     {key:"actions",label:"Acciones",render:({pedido:p})=>rowActions(p)}];
-  return <Page className="orders-workspace"><PageHeader title="Pedidos / Tráfico" description="Control y seguimiento de tus pedidos de transporte." actions={<><span className="orders-today">{new Date().toLocaleDateString("es-ES",{day:"numeric",month:"long",year:"numeric"})}</span>{permissions.edit&&<Button variant="primary" onClick={actions.new}>+ Nuevo pedido</Button>}<DropdownMenu label="Opciones de pedidos" items={[...(permissions.edit?[{label:"Pedido rápido",onClick:actions.quick}]:[]),{label:"Planificación y bandeja IA",onClick:()=>setShowTools(v=>!v)}]}/></>}/>
+  return <Page className="orders-workspace">{actionPanel&&<Modal title={actionPanel.title} onClose={()=>setActionPanel(null)}><div className="order-action-choices">{actionPanel.items.map(item=><Button key={item.label} onClick={()=>{setActionPanel(null);item.onClick();}}>{item.label}</Button>)}</div></Modal>}<PageHeader title="Pedidos / Tráfico" description="Control y seguimiento de tus pedidos de transporte." actions={<><span className="orders-today">{new Date().toLocaleDateString("es-ES",{day:"numeric",month:"long",year:"numeric"})}</span>{permissions.edit&&<Button variant="primary" onClick={actions.new}>+ Nuevo pedido</Button>}<DropdownMenu label="Opciones de pedidos" items={[...(permissions.edit?[{label:"Pedido rápido",onClick:actions.quick}]:[]),{label:"Planificación y bandeja IA",onClick:()=>setShowTools(v=>!v)}]}/></>}/>
     {showTools&&<Card className="orders-tools-panel"><Button onClick={()=>setShowTools(false)}>Cerrar herramientas</Button>{tools}</Card>}
     <div className="orders-layout"><div className="orders-main"><div className="orders-kpis">{kpis.map(k=><KpiCard key={k.label} {...k} value={loading||error?"—":k.value} detail="En el listado cargado"/>)}</div>
       <Card className="orders-list-card"><FilterBar search={<SearchInput label="Buscar pedidos" value={filters.q} onChange={e=>filters.setQ(e.target.value)} placeholder="Buscar por pedido, cliente, origen, destino…"/>} advanced={<>

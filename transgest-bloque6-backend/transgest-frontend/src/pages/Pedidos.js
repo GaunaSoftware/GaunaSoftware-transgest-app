@@ -1,3 +1,6 @@
+import CancelOrderDialog from "./orders/CancelOrderDialog";
+import { Modal as WorkspaceModal } from "../ui";
+import "./orders/refinements.css";
 import { PALLET_SIZES, cargoCount, cargoLength, cargoPayload, updateCargo } from "../utils/cargoDimensions";
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
@@ -5145,19 +5148,17 @@ ${bloqueCombustible}
   }
 
   return (
-    <div style={S2.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={S2.box}>
-        <div style={{height:7,background:esColaborador?"linear-gradient(90deg,#7c3aed,#10b981,#f59e0b)":"linear-gradient(90deg,var(--accent),#10b981,#f59e0b)"}}/>
-        <div style={S2.body}>
+    <WorkspaceModal title={`Orden de carga · ${pedido.numero}`} onClose={onClose} width={1000}>
+        <div className="load-document">
         {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,marginBottom:16,padding:"14px 16px",background:"linear-gradient(180deg,var(--bg3),transparent)",border:"1px solid var(--border)",borderRadius:12}}>
           <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--text)"}}>Orden de carga - {pedido.numero}</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--text)"}}>{pedido.cliente_nombre || "Datos del transporte"}</div>
             <div style={{display:"flex",gap:8,marginTop:4,alignItems:"center"}}>
               <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:"var(--orange)",background:"rgba(249,115,22,.1)",border:"1px solid rgba(249,115,22,.25)",borderRadius:5,padding:"2px 8px"}}>
                 N. OC: {numOCDisplay}
               </span>
-              <span style={{fontSize:11,color:"var(--text5)"}}>Este numero se indica en la factura al cliente</span>
+              <span style={{fontSize:11,color:"var(--text5)"}}>Número de referencia de la orden</span>
             </div>
             <div style={{marginTop:5,display:"inline-flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:20,
               background:esColaborador?"rgba(139,92,246,.15)":"rgba(59,130,246,.12)",
@@ -5171,7 +5172,7 @@ ${bloqueCombustible}
                   ? "Comprobando ruta optimizada..."
                   : rutaOptimizada
                     ? `Se adjuntara ruta optimizada: ${rutaOptimizada.provider_label || rutaOptimizada.provider || "API"}${rutaOptimizada.distance_km ? ` | ${rutaOptimizada.distance_km} km` : ""}`
-                    : "Se adjuntara ruta orientativa. Para incluir HERE, calcula la ruta en Gestion de Trafico > Optimizacion."}
+                    : "Se adjuntará la ruta orientativa del viaje."}
               </div>
             )}
             <div style={{marginTop:10,fontSize:11,fontWeight:700,color:docControl?.status?.ready?"#10b981":docControl?.status?.level==="warning"?"#f59e0b":"var(--text5)"}}>
@@ -5189,12 +5190,12 @@ ${bloqueCombustible}
           </div>
         </div>
 
-        <div style={{marginBottom:14,padding:"12px 14px",borderRadius:12,background:"linear-gradient(180deg,var(--bg3),transparent)",border:"1px solid var(--border)"}}>
+        <details className="document-control"><summary>Documento de control digital · Documentos, firma y seguimiento</summary>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:10,flexWrap:"wrap"}}>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"var(--text)"}}>Documento de Control Digital</div>
               <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
-                Base preparada segun la normativa del documento de control electronico: codigo numerico o QR con URL HTTPS.
+                Consulta los documentos, las firmas y el estado de tramitación.
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -5447,7 +5448,7 @@ ${bloqueCombustible}
               )}
             </>
           )}
-        </div>
+        </details>
 
         {/* Datos del viaje */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
@@ -5555,8 +5556,7 @@ ${bloqueCombustible}
           </div>
         )}
         </div>
-      </div>
-    </div>
+    </WorkspaceModal>
   );
 }
 
@@ -10127,6 +10127,7 @@ function openPedidoInTrafico(pedido) {
 
 
 export default function Pedidos() {
+  const [cancelOrder,setCancelOrder]=useState(null);
   useEmpresaPerfil();
   const { puedeEditar, user } = useAuth();
   const canEdit = puedeEditar("pedidos");
@@ -10642,60 +10643,33 @@ export default function Pedidos() {
     return () => window.removeEventListener("tms:pedidos-focus", handle);
   }, [vehiculos, choferes, pedidos]);
 
-  function empresaRequiereMotivoCancelacion() {
-    const cfg = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && typeof window.__TMS_EMPRESA_CONFIG === "object")
-      ? window.__TMS_EMPRESA_CONFIG
-      : {};
-    const trafico = cfg?.cfg_trafico || {};
-    return trafico.requerir_motivo_cancelacion !== false && trafico.requiere_motivo_cancelacion !== false;
-  }
-
   async function solicitarCancelacionPedido(p) {
-    if (!p?.id) return;
-    let motivo = "";
-    if (empresaRequiereMotivoCancelacion()) {
-      const input = window.prompt(`Motivo de cancelacion para ${p.numero || "este pedido"}:`, p.motivo_cancelacion || "");
-      if (input === null) return;
-      motivo = String(input || "").trim();
-      if (!motivo) {
-        notify("Indica un motivo para cancelar el pedido.", "warning");
-        return;
-      }
-    } else {
-      const ok = await confirmDialog({
-        title: "Cancelar pedido",
-        message: `Cancelar el pedido ${p.numero || ""}?`,
-        confirmText: "Cancelar pedido",
-        tone: "warning",
-      });
-      if (!ok) return;
-    }
-    await cambiarEstado(p.id, "cancelado", { motivo_cancelacion: motivo, __fromCancelFlow: true });
+    if(p?.id)setCancelOrder(p);
   }
 
   async function cambiarEstado(id, estado, extra = {}) {
     const p = pedidos.find(x => x.id === id);
     if (estado === "cancelado" && !extra.__fromCancelFlow) {
       await solicitarCancelacionPedido(p);
-      return;
+      return false;
     }
     if (pedidoTieneFacturaFinal(p)) {
       notify("No se puede cambiar el estado de un pedido facturado.", "warning");
-      return;
+      return false;
     }
     if (String(p?.estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && user?.rol !== "gerente") {
       notify("Solo gerencia puede cambiar el estado de un pedido entregado.", "warning");
-      return;
+      return false;
     }
     const validationIssues = getPedidoStateValidationIssues(p, estado);
     if (validationIssues.length) {
       notify(`No se puede pasar a "${LABEL_ESTADO[estado] || estado}" hasta completar: ${validationIssues.join(", ")}.`, "warning");
-      return;
+      return false;
     }
     const incidenciaTexto = String(extra.incidencia || "").trim();
     if (estado === "incidencia" && !incidenciaTexto) {
       setIncidenciaSelector({ pedidoId:id, tipo:"", detalle:"" });
-      return;
+      return false;
     }
     // Entrega fuera de su mes (p. ej. cerrado tarde por incidencia): preguntar si
     // se conserva su mes original, se factura este mes o se lleva al siguiente.
@@ -10705,7 +10679,7 @@ export default function Pedidos() {
       const mesActual = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`;
       if (mesRef && mesRef < mesActual) {
         setFacturacionMesSelector({ pedidoId: id, mesRef, mesActual });
-        return;
+        return false;
       }
     }
     // Optimistic update - UI responds instantly
@@ -10726,11 +10700,12 @@ export default function Pedidos() {
       delete payloadExtra.__facturacionResuelta;
       await cambiarEstadoPedido(id, estado, payloadExtra);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: id, estado, source: "pedidos-estado" } }));
-      // No need to full reload - optimistic update is correct
+      return true;
     } catch(e) {
       // Revert on error
       setPedidos(prev => prev.map(x => x.id===id ? {...x, estado: p?.estado, facturacion_mes: p?.facturacion_mes} : x));
       notify(e.message, "error");
+      return false;
     }
   }
 
@@ -11827,6 +11802,7 @@ export default function Pedidos() {
         />
       )}
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Orden de carga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+      {cancelOrder&&<CancelOrderDialog pedido={cancelOrder} onClose={()=>setCancelOrder(null)} onConfirm={motivo=>cambiarEstado(cancelOrder.id,"cancelado",{motivo_cancelacion:motivo,__fromCancelFlow:true})}/>}
       {ordenCarga && <OrdenCargaModal pedido={ordenCarga} grupajePedidos={ordenCargaGrupaje} onClose={()=>{setOrdenCarga(null);setOrdenCargaGrupaje([]);}}/>}
 
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Autoasignacion IA ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}

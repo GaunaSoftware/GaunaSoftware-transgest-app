@@ -1,3 +1,5 @@
+import {AGENDA_TYPES,agendaType,agendaStyle} from "./workspace/agendaTypes";
+import "./orders/refinements.css";
 import AgendaTimeline from "./workspace/AgendaTimeline";
 import "./workspace/workspace.css";
 import { useEffect, useMemo, useState } from "react";
@@ -275,6 +277,7 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
       notify("Indica un título para la tarea o evento.", "warning");
       return;
     }
+    if (form.fecha_fin && form.fecha_inicio && new Date(form.fecha_fin)<new Date(form.fecha_inicio)) { notify("La fecha de fin debe ser posterior al inicio.", "warning"); return; }
     if (!form.fecha_inicio) {
       notify("Indica la fecha de inicio.", "warning");
       return;
@@ -283,7 +286,7 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
       ...form,
       fecha_inicio: fromDateTimeLocal(form.fecha_inicio, form.todo_dia),
       fecha_fin: form.fecha_fin ? fromDateTimeLocal(form.fecha_fin, form.todo_dia) : null,
-      asignado_a: form.asignado_a || null,
+      asignado_a: form.asignado_a || user?.id || null,
     };
     if (!esGerente && payload.asignado_a && String(payload.asignado_a) !== String(user?.id || "")) {
       payload.visibilidad = "equipo";
@@ -295,7 +298,7 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
 
   return (
     <div className="modern-modal" role="dialog" aria-modal="true" aria-label="Tarea de agenda" style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.76)", zIndex:250, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, width:"min(620px,96vw)", padding:20, maxHeight:"92vh", overflowY:"auto" }}>
+      <div className="agenda-form-panel" style={{...agendaStyle(form.tipo), background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, width:"min(760px,96vw)", padding:24, maxHeight:"92vh", overflowY:"auto" }}>
         <div style={{ fontFamily:"'Syne',sans-serif", fontSize:18, fontWeight:800, color:"var(--text)", marginBottom:16 }}>
           {evento ? "Editar tarea / evento" : "Nueva tarea / evento"}
         </div>
@@ -304,21 +307,12 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
             <label style={S.label}>Título</label>
             <input style={S.input} value={form.titulo} onChange={f("titulo")} placeholder="Ej: Confirmar entregas de mañana" />
           </div>
-          <div>
-            <label style={S.label}>Tipo</label>
-            <select style={S.input} value={form.tipo} onChange={f("tipo")}>
-              <option value="tarea">Tarea</option>
-              <option value="reunion">Reunión</option>
-              <option value="seguimiento">Seguimiento</option>
-              <option value="recordatorio">Recordatorio</option>
-              <option value="operativa">Operativa</option>
-            </select>
-          </div>
+          <div style={{gridColumn:'1/-1'}}><label style={S.label}>Tipo de evento</label><div className="agenda-type-picker">{Object.entries(AGENDA_TYPES).map(([value,type])=><button type="button" style={agendaStyle(value)} key={value} aria-pressed={form.tipo===value} onClick={()=>setForm(p=>({...p,tipo:value}))}>{type.label}</button>)}</div></div>
           {esGerente && (
             <div>
-              <label style={S.label}>Asignado a</label>
+              <label style={S.label}>Agenda de / responsable</label>
               <select style={S.input} value={form.asignado_a} onChange={f("asignado_a")}>
-                <option value="">Yo / sin asignar</option>
+                <option value="">Mi agenda</option>
                 {usuarios
                   .filter(u => String(u.rol || "").toLowerCase() !== "chofer")
                   .map(u => <option key={u.id} value={u.id}>{u.nombre || u.username || u.email} · {u.rol}</option>)}
@@ -352,7 +346,7 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
             <label htmlFor="todo-dia" style={{ fontSize:13, color:"var(--text3)", cursor:"pointer" }}>Todo el día</label>
             <div style={{ marginLeft:16 }}>
               <select style={{ ...S.input, width:180 }} value={form.visibilidad} onChange={f("visibilidad")}>
-                <option value="personal">Solo yo / personal</option>
+                <option value="personal">Agenda personal</option>
                 <option value="equipo">Visible para el equipo</option>
               </select>
             </div>
@@ -363,7 +357,7 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
           </div>
         </div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, marginTop:18 }}>
-          <div style={{ fontSize:11, color:"var(--text5)" }}>Creado {now.toLocaleDateString("es-ES")} · pensado para tareas operativas y agenda interna.</div>
+          <div style={{ fontSize:11, color:"var(--text5)" }}>{form.visibilidad === "equipo" ? "Visible para el equipo." : "Visible para quien crea la tarea y su responsable."}</div>
           <div style={{ display:"flex", gap:8 }}>
             <button style={{ ...S.btn, background:"transparent", color:"var(--text4)", border:"1px solid var(--border2)" }} onClick={onClose}>Cancelar</button>
             <button style={{ ...S.btn, background:"var(--accent)", color:"#fff" }} onClick={guardar} disabled={!canEdit}>Guardar</button>
@@ -384,7 +378,7 @@ export default function Agenda() {
   const [mes, setMes] = useState(() => monthKey(new Date()));
   const [usuarios, setUsuarios] = useState([]);
   const [eventos, setEventos] = useState([]);
-  const [soloMias, setSoloMias] = useState(false);
+  const [soloMias, setSoloMias] = useState(true);
   const [estado, setEstado] = useState("todas");
   const [tipo, setTipo] = useState("todos");
   const [selectedDay, setSelectedDay] = useState(() => toDateInput(new Date()));
@@ -533,11 +527,7 @@ export default function Agenda() {
         </select>
         <select value={tipo} onChange={e=>setTipo(e.target.value)} style={{ ...S.input, width:170 }}>
           <option value="todos">Todos los tipos</option>
-          <option value="tarea">Tarea</option>
-          <option value="reunion">Reunión</option>
-          <option value="seguimiento">Seguimiento</option>
-          <option value="recordatorio">Recordatorio</option>
-          <option value="operativa">Operativa</option>
+          {Object.entries(AGENDA_TYPES).map(([value,t])=><option key={value} value={value}>{t.label}</option>)}
         </select>
         <label style={{ display:"inline-flex", alignItems:"center", gap:8, fontSize:13, color:"var(--text3)" }}>
           <input type="checkbox" checked={soloMias} onChange={e=>setSoloMias(e.target.checked)} style={{ width:16, height:16, accentColor:"var(--accent)" }} />
@@ -548,6 +538,7 @@ export default function Agenda() {
         </button>
       </div>
 
+      <div className="agenda-type-legend" aria-label="Colores de los eventos">{Object.entries(AGENDA_TYPES).map(([value,t])=><span key={value} className="agenda-type-key" style={agendaStyle(value)}>{t.label}</span>)}</div>
       <div className="tg-agenda-shell" style={{ display:"grid", gridTemplateColumns:"minmax(0,1.4fr) minmax(320px,.9fr)", gap:16 }}>
         {vista !== "mes" ? <AgendaTimeline day={selectedDay} view={vista} events={eventosPorDia} selectDay={setSelectedDay} openEvent={ev=>canEdit&&setModal(ev)}/> : <div style={S.card}>
           <div style={{ fontFamily:"'Syne',sans-serif", fontSize:17, fontWeight:800, color:"var(--text)", marginBottom:12 }}>
@@ -585,7 +576,7 @@ export default function Agenda() {
                   </div>
                   <div className="tg-agenda-day-events" style={{ display:"grid", gap:4 }}>
                     {items.slice(0, 3).map(ev => (
-                      <div key={ev.id} style={{ fontSize:10, lineHeight:1.35, padding:"4px 6px", borderRadius:6, background: PRIORITY[ev.prioridad || "media"]?.bg, color: PRIORITY[ev.prioridad || "media"]?.color, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      <div key={ev.id} style={{ fontSize:10, lineHeight:1.35, padding:"4px 6px", borderRadius:6, background: agendaType(ev.tipo).bg, color: agendaType(ev.tipo).color, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                         {ev.titulo}
                       </div>
                     ))}
@@ -612,12 +603,12 @@ export default function Agenda() {
             ) : (
               <div style={{ display:"grid", gap:10 }}>
                 {eventosDia.map(ev => (
-                  <div key={ev.id} style={{ border:"1px solid var(--border)", borderRadius:10, padding:12, background:"var(--bg3)" }}>
+                  <div key={ev.id} className="agenda-event-chip" style={{...agendaStyle(ev.tipo), border:"1px solid var(--border)", borderRadius:10, padding:12 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", gap:10, alignItems:"flex-start" }}>
                       <div>
                         <div style={{ fontSize:14, fontWeight:800, color:"var(--text)" }}>{ev.titulo}</div>
                         <div style={{ fontSize:11, color:"var(--text5)", marginTop:3 }}>
-                          {fmtRange(ev)} · {ev.tipo} · {STATE_LABEL[ev.estado] || ev.estado}
+                          {fmtRange(ev)} · {agendaType(ev.tipo).label} · {STATE_LABEL[ev.estado] || ev.estado}
                         </div>
                       </div>
                       <span style={{ fontSize:10, padding:"3px 8px", borderRadius:999, background: PRIORITY[ev.prioridad || "media"]?.bg, color: PRIORITY[ev.prioridad || "media"]?.color, fontWeight:800 }}>

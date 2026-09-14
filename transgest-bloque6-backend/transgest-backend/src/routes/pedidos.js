@@ -6462,7 +6462,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.hora_carga, p.hora_descarga, p.ventana_carga, p.ventana_descarga,
              p.puntos_carga, p.puntos_descarga, p.origen, p.destino, p.referencia_cliente,
              p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
-             p.metros_lineales, p.palets_cantidad, p.palets_tipo, p.palets_apilables,
+             p.motivo_cancelacion, p.metros_lineales, p.palets_cantidad, p.palets_tipo, p.palets_apilables,
              p.carga_largo_m, p.carga_ancho_m, p.carga_alto_m,
              p.tipo_precio, p.precio_unitario, p.cantidad, p.importe_minimo, p.minimo_unidades, p.extracostes_importe, p.precio_cliente_col,
              p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,

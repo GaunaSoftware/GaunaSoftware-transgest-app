@@ -11,13 +11,15 @@ const PUBLIC_ROUTES = new Set([
   "POST /login",
   "GET /public/app-meta",
 ]);
+const ADMIN_ROLES = new Set(["superadmin", "soporte", "facturacion"]);
 
 function requestKey(req) {
   return `${String(req.method || "GET").toUpperCase()} ${req.path || "/"}`;
 }
 
 function currentAdminRole(value) {
-  return String(value || "superadmin").trim().toLowerCase() || "superadmin";
+  const role = String(value || "").trim().toLowerCase();
+  return ADMIN_ROLES.has(role) ? role : null;
 }
 
 function isSuperadminOnlyRequest(req) {
@@ -102,13 +104,17 @@ router.use(async (req, res, next) => {
     if (!account || account.activo !== true) {
       return res.status(401).json({ error: "Sesion administrativa no valida" });
     }
+    const role = currentAdminRole(account.rol);
+    if (!role) {
+      return res.status(403).json({ error: "Rol administrativo no valido" });
+    }
 
     req.superadmin = {
       ...payload,
       id: account.id,
       nombre: account.nombre,
       email: account.email,
-      rol: currentAdminRole(account.rol),
+      rol: role,
     };
 
     if (isSuperadminOnlyRequest(req) && req.superadmin.rol !== "superadmin") {

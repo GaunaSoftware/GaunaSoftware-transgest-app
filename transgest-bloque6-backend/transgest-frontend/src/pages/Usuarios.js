@@ -139,8 +139,8 @@ function normalizarPermisosUI(permisos, rol) {
   const base = presetRol(rol);
   const modulos = parsed.modulos && typeof parsed.modulos === "object" ? parsed.modulos : parsed;
   for (const m of MODULOS_PERM) {
-    const actual = modulos[m.id] || {};
-    if (typeof actual === "object") {
+    const actual = modulos[m.id];
+    if (actual && typeof actual === "object" && !Array.isArray(actual)) {
       base.modulos[m.id] = {
         ver: Boolean(actual.ver),
         editar: Boolean(actual.editar),
@@ -330,6 +330,10 @@ export default function Usuarios() {
         chofer_id: form.rol === "chofer" ? (form.chofer_id || null) : null,
         cliente_id: form.rol === "cliente" ? (form.cliente_id || null) : null,
       };
+      if (editando && form.rol === editando.rol &&
+          JSON.stringify(permisosJson()) === JSON.stringify(normalizarPermisosUI(editando.permisos, editando.rol))) {
+        delete body.permisos;
+      }
       if(!editando) {
         body.modo_alta = form.modo_alta || "invitacion";
         if(body.modo_alta === "temporal" && form.password) body.password = form.password;

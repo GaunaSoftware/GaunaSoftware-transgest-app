@@ -491,6 +491,13 @@ async function applyMigrations() {
       await client.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_facturas_empresa_numero_unique ON facturas(empresa_id, numero)");
       await client.query("ALTER TABLE facturas DROP CONSTRAINT IF EXISTS facturas_numero_key");
     }).catch(captureStartupMigrationError);
+    await db.query(`UPDATE usuarios SET permisos='{}'::jsonb
+WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
+  AND jsonb_typeof(permisos->'modulos')='object'
+  AND permisos->'modulos' <> '{}'::jsonb
+  AND NOT EXISTS (SELECT 1 FROM jsonb_each(permisos->'modulos') AS p
+                  WHERE p.value->>'ver'='true' OR p.value->>'editar'='true');
+`).catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos DROP CONSTRAINT IF EXISTS pedidos_numero_key").catch(captureStartupMigrationError);
     await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_pedidos_empresa_numero_unique ON pedidos(empresa_id, numero)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(captureStartupMigrationError);

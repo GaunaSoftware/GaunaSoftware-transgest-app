@@ -488,6 +488,15 @@ async function authenticate(req, res, next) {
 
     const payload = jwt.verify(token, userJwtSecret(), { algorithms: ["HS256"] });
 
+    if (payload.superadmin_impersonation === true && payload.empresa_id && payload.impersonado_por) {
+      const { rows: companies } = await db.query("SELECT id,nombre,plan FROM empresas WHERE id=$1", [payload.empresa_id]);
+      if (!companies[0]) return res.status(401).json({ error: "Empresa no encontrada" });
+      req.user = require("../services/supportSession").supportUser(companies[0], payload.impersonado_por);
+      req.user.permisos = presetPermisosRol("gerente");
+      req.empresaId = companies[0].id;
+      req.suscripcion = { plan: "enterprise", estado: "activo" };
+      return next();
+    }
     const { rows } = await db.query(
       `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id, u.colaborador_id,
               u.perfil, u.permisos, u.trafico_config, u.password_changed_at,

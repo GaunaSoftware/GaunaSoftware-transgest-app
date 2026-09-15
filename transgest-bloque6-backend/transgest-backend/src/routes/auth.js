@@ -362,6 +362,7 @@ router.post("/login",
 
 // ── GET /api/v1/auth/me ───────────────────────────────
 router.get("/me", authenticate, async (req, res) => {
+  if (req.user.superadmin_impersonation) return res.json({ ...authUserPayload(req.user), superadmin_impersonation: true, impersonado_por: req.user.impersonado_por });
   const { rows } = await db.query(
     `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.empresa_id, u.cliente_id, u.chofer_id, u.colaborador_id,
             u.perfil, u.permisos, u.trafico_config, u.debe_cambiar_password, u.password_changed_at,

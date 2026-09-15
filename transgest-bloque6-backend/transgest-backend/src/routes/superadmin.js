@@ -1816,61 +1816,19 @@ router.delete("/empresas/:id/purgar", superAuth, async (req, res) => {
 
 // ── POST /superadmin/facturas-suscripcion — Emitir factura a empresa ─────
 router.post("/empresas/:id/impersonar", superAuth, async (req, res) => {
-  let { rows } = await db.query(
-    `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.empresa_id, e.plan, e.nombre AS empresa
-     FROM usuarios u
-     JOIN empresas e ON e.id=u.empresa_id
-     WHERE u.empresa_id=$1
-     ORDER BY CASE WHEN u.rol='gerente' THEN 0 ELSE 1 END, u.activo DESC, u.created_at ASC
-     LIMIT 1`,
-    [req.params.id]
-  );
-  let user = rows[0];
-  if (!user) {
-    const empresaRes = await db.query("SELECT id,nombre,plan,email_admin FROM empresas WHERE id=$1", [req.params.id]);
-    const empresa = empresaRes.rows[0];
-    if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
-    const email = String(empresa.email_admin || `soporte.${empresa.id}@transgest.local`).trim().toLowerCase();
-    const hash = await bcrypt.hash(crypto.randomBytes(24).toString("hex"), 12);
-    const created = await db.query(
-      `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,debe_cambiar_password)
-       VALUES ('Soporte TransGest', $1, $1, $2, 'gerente', $3, true, true)
-       RETURNING id,nombre,email,username,rol,empresa_id`,
-      [email, hash, empresa.id]
-    );
-    user = {
-      ...created.rows[0],
-      plan: empresa.plan,
-      empresa: empresa.nombre,
-    };
-  }
-
-  const token = jwt.sign(
-    {
-      sub: user.id,
-      rol: user.rol,
-      empresa_id: user.empresa_id,
-      plan: user.plan,
-      superadmin_impersonation: true,
-      impersonado_por: req.superadmin.email,
-    },
-    userJwtSecret(),
-    { expiresIn: "2h" }
-  );
-
-  await audit(req, "empresa.impersonar", { usuario_id: user.id, rol: user.rol }, user.empresa_id);
-  res.json({
-    token,
-    user: {
-      id: user.id,
-      nombre: `${user.nombre} (soporte)`,
-      email: user.email,
-      username: user.username,
-      rol: user.rol,
-      empresa: user.empresa,
-      impersonado_por: req.superadmin.email,
-    },
-  });
+  const { rows } = await db.query("SELECT id,nombre,plan FROM empresas WHERE id=$1", [req.params.id]);
+  const empresa = rows[0];
+  if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
+  const token = jwt.sign({
+    sub: req.superadmin.id || req.superadmin.email,
+    empresa_id: empresa.id,
+    plan: "enterprise",
+    superadmin_impersonation: true,
+    impersonado_por: req.superadmin.email,
+  }, userJwtSecret(), { expiresIn: "2h" });
+  const user = require("../services/supportSession").supportUser(empresa, req.superadmin.email);
+  await audit(req, "empresa.impersonar", { perfil: "superadmin", sesion_temporal: true }, empresa.id);
+  res.json({ token, user });
 });
 
 router.post("/facturas-suscripcion", superAuth, async (req, res) => {

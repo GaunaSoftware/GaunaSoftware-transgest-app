@@ -5148,7 +5148,7 @@ ${bloqueCombustible}
   }
 
   return (
-    <WorkspaceModal title={`Orden de carga · ${pedido.numero}`} onClose={onClose} width={1000}>
+    <WorkspaceModal title={`${esColaborador ? "Orden de carga" : "Documento de control digital (DCD)"} · ${pedido.numero}`} onClose={onClose} width={1000}>
         <div className="load-document">
         {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,marginBottom:16,padding:"14px 16px",background:"linear-gradient(180deg,var(--bg3),transparent)",border:"1px solid var(--border)",borderRadius:12}}>
@@ -5156,9 +5156,9 @@ ${bloqueCombustible}
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--text)"}}>{pedido.cliente_nombre || "Datos del transporte"}</div>
             <div style={{display:"flex",gap:8,marginTop:4,alignItems:"center"}}>
               <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:"var(--orange)",background:"rgba(249,115,22,.1)",border:"1px solid rgba(249,115,22,.25)",borderRadius:5,padding:"2px 8px"}}>
-                N. OC: {numOCDisplay}
+                {esColaborador ? "N. OC:" : "Pedido:"} {esColaborador ? numOCDisplay : pedido.numero}
               </span>
-              <span style={{fontSize:11,color:"var(--text5)"}}>Número de referencia de la orden</span>
+              <span style={{fontSize:11,color:"var(--text5)"}}>{esColaborador ? "Número de referencia de la orden" : "Documento de transporte propio"}</span>
             </div>
             <div style={{marginTop:5,display:"inline-flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:20,
               background:esColaborador?"rgba(139,92,246,.15)":"rgba(59,130,246,.12)",
@@ -5190,7 +5190,7 @@ ${bloqueCombustible}
           </div>
         </div>
 
-        <details className="document-control"><summary>Documento de control digital · Documentos, firma y seguimiento</summary>
+        <details className="document-control" open={!esColaborador}><summary>Documento de control digital · Documentos, firma y seguimiento</summary>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:10,flexWrap:"wrap"}}>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"var(--text)"}}>Documento de Control Digital</div>
@@ -10758,6 +10758,16 @@ export default function Pedidos() {
     setModal(true);
   }
 
+  async function abrirDocumentoControl(p) {
+    if (!p?.id) return;
+    try {
+      const completo = await getPedido(p.id);
+      if (!completo?.id) throw new Error("No se ha podido cargar el pedido para abrir su DCD.");
+      setOrdenCargaGrupaje([]);
+      setOrdenCarga(normalizePedidoTarifaDraft(completo));
+    } catch (e) { notify(e.message || "No se pudo abrir el DCD.", "error"); }
+  }
+
   async function abrirOrdenCarga(p) {
     let pedidoCompleto = p;
     if (p?.id) {
@@ -11587,7 +11597,7 @@ export default function Pedidos() {
         actions={{new:abrirNuevo, quick:() => setQuickCreando(true), open:abrirEditar, assign:setQuickAssignPedido, copy:abrirCopiarPedido, order:abrirOrdenCarga, send:p => enviarWhatsappPedidoAccion(p,"cliente"), invoice:setFacturando, clearSelection:() => setSelectedPedidoIds([]), selectAll:toggleSelectAllVisible,
           cancel:solicitarCancelacionPedido, remove:eliminarPedidoDesdeListado, autoAssign:setAutoAsignando, clearAssignment:limpiarAsignacionPedido,
           delay:p=>solicitarRetrasoPedido(p,p.numero), changeState:(p,state)=>cambiarEstado(p.id,state), traffic:openPedidoInTrafico,
-          letter:async p=>{try{setCartaPorte(await getCartaPorte(p.id));}catch(e){notify(e.message,"error");}},
+          dcd:abrirDocumentoControl, letter:async p=>{try{setCartaPorte(await getCartaPorte(p.id));}catch(e){notify(e.message,"error");}},
           notifyDriver:notificarChoferAppAccion, sendTo:(p,target)=>enviarWhatsappPedidoAccion(p,target)}}
         describe={p => {
           const loads = pedidoStopsForList(p,"carga"), unloads = pedidoStopsForList(p,"descarga");

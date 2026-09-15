@@ -22,3 +22,12 @@ export function incidentDescription(order = {}) {
   return clean(order.incidencia_descripcion || order.motivo_incidencia) ||
     (order.estado === 'incidencia' ? 'Pedido marcado con incidencia, sin descripción registrada. Abre el pedido para consultar o completar el motivo.' : '');
 }
+
+export function dashboardAssignment(order = {}) {
+  if (order.colaborador_id || clean(order.colaborador_nombre)) {
+    const assigned = `Asignado a ${clean(order.colaborador_nombre) || 'colaborador'}`;
+    const plate = order.vehiculo_matricula || order.matricula_manual || order.matricula_colaborador;
+    return plate ? `${assigned} · ${orderRig(order)}` : assigned;
+  }
+  return `${orderRig(order)} · ${driverName({}, order)}`;
+}

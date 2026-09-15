@@ -1,3 +1,4 @@
+import { driverOption } from "./orders/quickInfo";
 import TrafficMobileBoard from "./traffic/TrafficMobileBoard";
 import { PageHeader } from "../ui";
 import "./operations/operations.css";
@@ -1922,7 +1923,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
           <div><label style={lbl}>Chofer</label>
             <select ref={choferRef} style={inp} value={form.chofer_id||""} onChange={f("chofer_id")} disabled={bloquear}>
               <option value="">Sin asignar</option>
-              {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre} {c.apellidos||""}</option>)}
+              {choferes.map(c => <option key={c.id} value={c.id}>{driverOption(c)}</option>)}
             </select>
           </div>
           <div><label style={lbl}>Estado</label>
@@ -5731,7 +5732,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                     <select value={asignaChofer} onChange={e=>setAsignaChofer(e.target.value)} disabled={!!asignaColab}
                       style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,outline:"none",opacity:asignaColab?.5:1}}>
                       <option value="">Chofer (auto del vehículo)</option>
-                      {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
+                      {choferes.map(c => <option key={c.id} value={c.id}>{driverOption(c)}</option>)}
                     </select>
                   </div>
                   <div className="traffic-responsive-flex" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>

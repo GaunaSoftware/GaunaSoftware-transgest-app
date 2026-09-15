@@ -6022,7 +6022,7 @@ router.get("/", async (req, res) => {
            co.cif AS colaborador_cif,
            co.telefono AS colaborador_telefono,
            co.email AS colaborador_email,
-           ch.nombre AS chofer_nombre,
+           ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
            v.matricula AS vehiculo_matricula,
            r.matricula AS remolque_matricula,
            f.estado AS factura_estado,
@@ -6063,7 +6063,7 @@ router.get("/", async (req, res) => {
            NULL AS colaborador_cif,
            NULL AS colaborador_telefono,
            NULL AS colaborador_email,
-           ch.nombre AS chofer_nombre,
+           ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
            v.matricula AS vehiculo_matricula,
            r.matricula AS remolque_matricula,
            f.estado AS factura_estado,
@@ -6473,7 +6473,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.tipo_carga, p.tipo_viaje, p.factura_id,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              co.nombre AS colaborador_nombre, co.telefono AS colaborador_telefono, co.email AS colaborador_email,
-             ch.nombre AS chofer_nombre,
+             ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
              v.matricula AS vehiculo_matricula,
              r.matricula AS remolque_matricula,
              f.estado AS factura_estado,
@@ -6505,7 +6505,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.tipo_carga, p.tipo_viaje, p.factura_id,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              NULL AS colaborador_nombre, NULL AS colaborador_telefono, NULL AS colaborador_email,
-             ch.nombre AS chofer_nombre,
+             ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
              v.matricula AS vehiculo_matricula,
              r.matricula AS remolque_matricula,
              f.estado AS factura_estado,
@@ -7737,7 +7737,7 @@ router.get("/:id", async (req, res) => {
            c.emails_albaranes AS cliente_emails_albaranes,
            co.nombre AS colaborador_nombre, co.cif AS colaborador_cif,
            co.telefono AS colaborador_telefono, co.email AS colaborador_email,
-           ch.nombre AS chofer_nombre, v.matricula,
+           ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos, v.matricula,
            f.estado AS factura_estado, f.numero AS factura_numero
     FROM pedidos p
     LEFT JOIN clientes c ON c.id=p.cliente_id
@@ -7753,7 +7753,7 @@ router.get("/:id", async (req, res) => {
            c.emails_albaranes AS cliente_emails_albaranes,
            NULL AS colaborador_nombre, NULL AS colaborador_cif,
            NULL AS colaborador_telefono, NULL AS colaborador_email,
-           ch.nombre AS chofer_nombre, v.matricula,
+           ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos, v.matricula,
            f.estado AS factura_estado, f.numero AS factura_numero
     FROM pedidos p
     LEFT JOIN clientes c ON c.id=p.cliente_id

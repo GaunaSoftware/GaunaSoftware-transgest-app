@@ -2880,9 +2880,6 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         const lista = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
         const cargas = lista.filter(isCargaPoint);
         setPuntosCargaCliente(cargas);
-        if (cargas.length === 1) {
-          setForm(p => String(p.origen || "").trim() ? p : applyPuntoCargaToDraft(p, cargas[0]));
-        }
       })
       .catch(() => {
         if (alive) setPuntosCargaCliente(getPuntosCargaCliente(clienteSeleccionadoRapido.id));
@@ -3183,7 +3180,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                 <div style={{display:"flex",gap:6}}>
                   {puntosCargaCliente.length > 0 ? (
                     <PuntoInteresPicker
-                      placeholder={puntosCargaCliente.length === 1 ? "Punto de carga cargado" : "Elegir punto de carga del cliente"}
+                      placeholder="Elegir punto de carga del cliente"
                       puntos={puntosCargaCliente}
                       clienteId={form.cliente_id}
                       tipo="carga"
@@ -3201,7 +3198,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                   </button>
                 </div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
-                  {puntosCargaCliente.length > 1 ? "Este cliente tiene varios puntos de carga: elige el origen correcto." : puntosCargaCliente.length === 1 ? "Origen cargado desde el punto habitual del cliente." : "Sin puntos propios: crea uno nuevo para este cliente."}
+                  {puntosCargaCliente.length > 1 ? "Este cliente tiene varios puntos de carga: elige el origen correcto." : puntosCargaCliente.length === 1 ? "Selecciona el punto del cliente para utilizarlo como origen." : "Sin puntos propios: crea uno nuevo para este cliente."}
                 </div>
               </div>
             </div>
@@ -6741,9 +6738,6 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
         const lista = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
         const cargas = lista.filter(isCargaPoint);
         setPuntosCargaClienteModal(cargas);
-        if (cargas.length === 1) {
-          setForm(p => String(p.origen || "").trim() ? p : applyPuntoCargaToDraft(p, cargas[0]));
-        }
       })
       .catch(() => {
         if (alive) setPuntosCargaClienteModal(getPuntosCargaCliente(form.cliente_id));
@@ -8392,7 +8386,7 @@ useEffect(() => {
                   <div style={{marginTop:6}}>
                     {puntosCargaClienteModal.length > 0 ? (
                       <PuntoInteresPicker
-                        placeholder={puntosCargaClienteModal.length === 1 ? "Punto de carga del cliente" : "Elegir punto de carga del cliente"}
+                        placeholder="Elegir punto de carga del cliente"
                         puntos={puntosCargaClienteModal}
                         clienteId={form.cliente_id}
                         tipo="carga"

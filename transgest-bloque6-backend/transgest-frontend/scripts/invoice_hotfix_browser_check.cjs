@@ -1,0 +1,30 @@
+const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');const root=path.resolve(__dirname,'../build');
+const clients=[{id:'client-a',nombre:'Cliente facturable',activo:true},{id:'client-b',nombre:'Cliente sin viajes',activo:true}];const point={id:'point-a',cliente_id:'client-a',nombre:'Almacén único QA',direccion:'Calle QA 12',ciudad:'Madrid',tipo:'carga'};const today='2026-09-15';let points=[],writes=[];const orders=[{id:'order-a',numero:'QA-A',estado:'pendiente',fecha_carga:today,origen:'Madrid',destino:'Valencia'},{id:'order-b',numero:'QA-B',estado:'pendiente',fecha_carga:today,origen:'Madrid',destino:'Valencia'},{id:'old',numero:'QA-VENCIDO',estado:'en_curso',fecha_carga:'2026-08-10',fecha_descarga:'2026-08-11',origen:'Madrid',destino:'Sevilla'},{id:'future',numero:'QA-EN-RUTA',estado:'en_curso',fecha_carga:today,fecha_descarga:'2026-09-16',origen:'Madrid',destino:'Sevilla'}];
+async function main(){const server=http.createServer((req,res)=>{let f=path.resolve(root,'.'+new URL(req.url,'http://localhost').pathname);if(!f.startsWith(root+path.sep)||!fs.existsSync(f)||fs.statSync(f).isDirectory())f=path.join(root,'index.html');res.setHeader('Content-Type',({'.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml'}[path.extname(f)]||'text/html'));fs.createReadStream(f).pipe(res);});await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;const errors=[];
+try{browser=await chromium.launch({headless:true,channel:'msedge'});const origin=`http://127.0.0.1:${server.address().port}`;
+async function makePage(role){const page=await browser.newPage({viewport:{width:1500,height:1000}}),user={id:'qa',empresa_id:'qa-company',rol:role,nombre:'QA',plan:'enterprise',...(role==='cliente'?{cliente_id:'client'}:{})};page.on('pageerror',e=>errors.push(e.message));await page.clock.setFixedTime(new Date(today+'T10:00:00Z'));await page.addInitScript(u=>{localStorage.setItem('tms_token','qa');localStorage.setItem('tms_user',JSON.stringify(u));localStorage.setItem(`tms_onboarding_done:${u.empresa_id}:${u.rol}:${u.id}`,'1');},user);
+await page.route('**/api/v1/**',async route=>{const req=route.request(),p=new URL(req.url()).pathname.replace('/api/v1',''),body=req.method()==='GET'?null:req.postDataJSON();let data=[];if(body||req.method()==='DELETE')writes.push({p,body,method:req.method()});
+if(p==='/auth/me')data=user;else if(p.includes('notificaciones'))data={data:[],no_leidas:0};else if(p==='/pedidos'||p==='/pedidos/resumen-lista')data=[{id:'invoice-order',numero:'QA-FACTURABLE',cliente_id:'client-a',cliente_nombre:'Cliente facturable',estado:'entregado',fecha_carga:today,importe:100}];else if(p==='/clientes')data=clients;else if(p==='/puntos-interes')data=[point];else if(p==='/portal-cliente/puntos'){if(body){const point={...body,id:'point-'+points.length};points.push(point);data=point;}else data=points;}else if(p==='/portal-cliente/calcular-ruta')data={km:350,warning:'Estimación QA'};else if(p==='/portal-cliente/solicitudes'&&body)data={id:'request-qa'};else if(p.includes('resumen'))data={};else if(p.includes('empresa'))data={plan:'enterprise'};
+await route.fulfill({status:200,json:data});});await page.goto(origin,{waitUntil:'networkidle'});return page;}
+const page=await makePage('gerente');
+await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'facturacion'})));
+await page.getByRole('button',{name:'+ Nueva factura',exact:true}).click();
+const dialog=page.getByRole('dialog',{name:'Facturar pedidos de cliente'});
+await dialog.locator('option[value="client-a"]').waitFor({state:'attached'});
+assert.equal(await dialog.locator('option[value="client-b"]').count(),0);
+await dialog.getByRole('button',{name:'Cerrar',exact:true}).first().click();
+await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'})));
+await page.getByRole('button',{name:'+ Nuevo pedido',exact:true}).click();
+await page.getByPlaceholder('Escribe el nombre del cliente...').fill('Cliente facturable');
+await page.getByText('Cliente facturable',{exact:true}).last().click();
+const picker=page.locator('select').filter({has:page.locator('option[value="point-a"]')}).filter({has:page.locator('option',{hasText:'Elegir punto de carga del cliente'})});
+await picker.waitFor();
+const originInput=page.getByPlaceholder('Escribe o elige un punto de carga');
+assert.equal(await originInput.inputValue(),'');
+await picker.selectOption('point-a');
+assert.notEqual(await originInput.inputValue(),'');
+assert.deepEqual(errors,[]);
+console.log('PASS browser: only billable customers; single loading point remains empty until explicitly selected');
+}finally{if(browser)await browser.close();await new Promise(r=>server.close(r));}}
+main().catch(e=>{console.error(e);process.exitCode=1;});

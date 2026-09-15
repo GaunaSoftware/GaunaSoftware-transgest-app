@@ -179,15 +179,7 @@ async function generarFacturaBorradorDevolucion({ empresa, movimientoId, usuario
     const fecha = String(movimiento.fecha || new Date().toISOString().slice(0, 10)).slice(0, 10);
     const year = Number(fecha.slice(0, 4)) || new Date().getFullYear();
     const serie = "A";
-    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`facturas:${empresa}:${serie}:${year}`]);
-    const { rows: last } = await client.query(
-      `SELECT numero FROM facturas
-        WHERE serie=$1 AND EXTRACT(year FROM fecha)=$2 AND empresa_id=$3
-        ORDER BY numero DESC LIMIT 1 FOR UPDATE`,
-      [serie, year, empresa]
-    );
-    const lastNumber = last[0] ? parseInt(String(last[0].numero || "").split("-").pop(), 10) || 0 : 0;
-    const numero = `${serie}-${year}-${String(lastNumber + 1).padStart(4, "0")}`;
+    const numero = await require("../services/invoiceNumber").nextInvoiceNumber(client, empresa, serie, year);
     const tipoIva = Number.isFinite(Number(movimiento.tipo_iva)) ? Number(movimiento.tipo_iva) : 21;
     const ivaRegimen = movimiento.iva_regimen || (tipoIva === 0 ? "cero" : tipoIva === 10 ? "reducido" : tipoIva === 4 ? "superreducido" : "general");
     const tipoIrpf = Number(movimiento.tipo_irpf || 0);

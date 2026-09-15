@@ -1,4 +1,4 @@
-import { driverName, driverOption, orderRig, incidentDescription } from './quickInfo';
+import { driverName, driverOption, orderRig, incidentDescription, incidentLabel } from './quickInfo';
 
 test('driver alias is optional; full name and the assigned rig remain available', () => {
   const vehicles=[{id:'t',matricula:'1234 ABC',remolque_id:'r'},{id:'r',matricula:'R-1234'},{id:'other',matricula:'R-9999'}];
@@ -14,4 +14,10 @@ test('incidents display the actual reason or explicitly identify missing details
   expect(incidentDescription({estado:'incidencia',incidencia_descripcion:'Retraso en muelle'})).toBe('Retraso en muelle');
   expect(incidentDescription({estado:'incidencia'})).toContain('sin descripción registrada');
   expect(incidentDescription({estado:'entregado'})).toBe('');
+  expect(incidentDescription({estado:'confirmado',incidencia_tipo:'operativa'})).toContain('ejecución del transporte');
+  expect(incidentDescription({estado:'confirmado',incidencia_tipo:'operativa'})).toContain('No hay un motivo concreto registrado');
+  expect(incidentDescription({estado:'confirmado',incidencia_tipo:'operativa',motivo_incidencia:'Muelle ocupado'})).toBe('Muelle ocupado');
+  expect(incidentLabel({estado:'confirmado',incidencia_tipo:'operativa'})).toBe('Operativa');
+  expect(incidentDescription({incidencia_tipo:'documentacion'})).toContain('albarán');
+  expect(incidentDescription({incidencia_tipo:'otra_categoria'})).toContain('otra categoria');
 });

@@ -10147,6 +10147,7 @@ export default function Pedidos() {
   // incidencias del Dashboard) aunque lo hayas quitado con Reset.
   useEffect(() => { clearRuntimeFocus("tms_pedidos_focus"); }, []);
   const focusNuevoAplicadoRef = useRef(false);
+  const focusPedidoAplicadoRef = useRef(false);
   const [guidedPedido, setGuidedPedido] = useState(() => {
     const focus = readGuidedPedidoTutorial();
     return focus ? { active:true, modalOpened:false, saved:false, progress:buildGuidedPedidoProgress({}, { modalOpened:false, saved:false }) } : null;
@@ -10555,7 +10556,7 @@ export default function Pedidos() {
   }, [focusPedido, loading, vehiculos, choferes]);
 
   useEffect(() => {
-    if (!focusPedido?.pedido_id || loading) return;
+    if (focusPedidoAplicadoRef.current || !focusPedido?.pedido_id || loading) return;
     // El pedido puede NO estar en la lista cargada (otro rango de fechas u otra
     // pagina): venir de Control Tower a una incidencia antigua es el caso tipico.
     // Antes se salia sin hacer nada y quedaba Pedidos abierto SIN abrir el viaje;
@@ -10563,18 +10564,22 @@ export default function Pedidos() {
     const found = pedidos.find(p => String(p.id) === String(focusPedido.pedido_id));
     let alive = true;
     const t = window.setTimeout(() => {
-      document.getElementById(`pedido-row-${focusPedido.pedido_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
+      document.getElementById(`order-compact-${focusPedido.pedido_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
       const focusText = `${focusPedido.type || ""} ${focusPedido.title || ""} ${focusPedido.action || ""} ${focusPedido.action_key || ""}`.toLowerCase();
       const focusIncidencia = focusText.includes("incidencia") || String(found?.estado || focusPedido.estado || "").toLowerCase() === "incidencia";
       getPedido(focusPedido.pedido_id)
         .then(full => {
-          if (!alive) return;
+          // Consumir el destino antes de abrir: guardar/recargar no debe volver a abrirlo.
+          if (!alive || focusPedidoAplicadoRef.current) return;
+          focusPedidoAplicadoRef.current = true;
           setEditando({ ...(full || found || { id: focusPedido.pedido_id, numero: focusPedido.numero || "" }), _focus_incidencia: focusIncidencia });
           setModal(true);
           clearRuntimeFocus("tms_pedidos_focus");
         })
         .catch(() => {
-          if (!alive) return;
+          // Consumir el destino antes de abrir: guardar/recargar no debe volver a abrirlo.
+          if (!alive || focusPedidoAplicadoRef.current) return;
+          focusPedidoAplicadoRef.current = true;
           clearRuntimeFocus("tms_pedidos_focus");
           if (!found) { notify("No se pudo abrir el pedido indicado.", "error"); return; }
           setEditando({ ...found, _focus_incidencia: focusIncidencia });
@@ -10603,6 +10608,9 @@ export default function Pedidos() {
     };
     const openFocusedPedido = (focus) => {
       if (!focus) return;
+      // Una navegación explícita sustituye al destino inicial, incluso si sigue cargando.
+      focusPedidoAplicadoRef.current = true;
+      focusNuevoAplicadoRef.current = true;
       if (focus.action === "nuevo") {
         const draft = buildPedidoDraftFromTrafficFocus(focus, vehiculos, choferes);
         resetFocusFilters();
@@ -10733,6 +10741,8 @@ export default function Pedidos() {
 
 
   function abrirNuevo() {
+    focusPedidoAplicadoRef.current = true;
+    focusNuevoAplicadoRef.current = true;
     setEditando(null);
     setModal(true);
     if (guidedPedidoActive) {
@@ -10744,6 +10754,8 @@ export default function Pedidos() {
     }
   }
   async function abrirEditar(p, options = {}) {
+    focusPedidoAplicadoRef.current = true;
+    focusNuevoAplicadoRef.current = true;
     let pedidoCompleto = p;
     if (p?.id) {
       try {

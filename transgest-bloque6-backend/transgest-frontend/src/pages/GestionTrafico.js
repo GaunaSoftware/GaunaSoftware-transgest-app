@@ -590,7 +590,7 @@ function buildTrafficAssignment(pedido, vehiculo, fechaCarga, choferes = []) {
   const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
   const choferId = hasCollaborator
     ? (pedido?.chofer_id || null)
-    : (linkedChofer?.id || vehiculo?.chofer_id || pedido?.chofer_id || null);
+    : (linkedChofer?.id || vehiculo?.chofer_id || null);
   const remolqueId = vehiculo?.remolque_id || pedido?.remolque_id || null;
   const estadoActual = String(pedido?.estado || "pendiente").toLowerCase();
 
@@ -598,6 +598,7 @@ function buildTrafficAssignment(pedido, vehiculo, fechaCarga, choferes = []) {
     linkedChofer,
     payload: {
       vehiculo_id: vehiculo?.id || null,
+      asignar_solo_si_libre: true,
       chofer_id: choferId,
       remolque_id: remolqueId,
       fecha_carga: fechaCarga,
@@ -2255,6 +2256,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
               </div>
             ) : null}
             <RutaMapaVisual
+              estado={selected?.estado}
               plan={plan}
               remotePlan={remotePlan}
               planUrl={planUrl}
@@ -2396,7 +2398,8 @@ function buildEmbeddedRouteMap(points, width = 720, height = 310) {
   return { tiles, projected, width, height };
 }
 
-function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
+function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia, estado }) {
+  const stateColor=({pendiente:'#f59e0b',confirmado:'#3b82f6',espera_carga:'#eab308',cargando:'#8b5cf6',en_curso:'#06b6d4',espera_descarga:'#f97316',descarga:'#f97316',entregado:'#10b981',facturado:'#10b981',incidencia:'#ef4444',cancelado:'#64748b'})[estado]||'#64748b';
   const stops = remotePlan?.stops?.length ? remotePlan.stops : plan?.stops || [];
   const coords = Array.isArray(remotePlan?.waypoint_coordinates) ? remotePlan.waypoint_coordinates : [];
   const hasCoords = coords.length >= 2;
@@ -2428,7 +2431,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
     <div style={{background:"linear-gradient(180deg,var(--bg3),var(--bg2))",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:14}}>
       <div className="traffic-responsive-flex" style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
         <div>
-          <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".08em"}}>Mapa operativo</div>
+          <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".08em"}}>Mapa operativo · {String(estado||"sin estado").replace(/_/g," ")}</div>
           <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>
             {hasCoords ? "Trazado con la ruta calculada." : "Vista esquematica hasta calcular la ruta."}
           </div>
@@ -2449,7 +2452,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
             <path d={path} fill="none" stroke="#14b8a6" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
             {svgPts.map((p, idx) => (
               <g key={idx}>
-                <circle cx={p.x} cy={p.y} r="14" fill={idx===0?"#0f766e":idx===svgPts.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
+                <circle cx={p.x} cy={p.y} r="14" fill={stateColor} stroke="#fff" strokeWidth="2"/>
                 <text x={p.x} y={p.y+4} textAnchor="middle" fontSize="11" fontWeight="900" fill="#fff">{idx+1}</text>
               </g>
             ))}
@@ -2469,7 +2472,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
               <path d={embeddedPath} fill="none" stroke="#0f766e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
               {embeddedMap.projected.map((p, idx) => (
                 <g key={idx}>
-                  <circle cx={p.x} cy={p.y} r="13" fill={idx===0?"#0f766e":idx===embeddedMap.projected.length-1?"#f97316":"#3b82f6"} stroke="#fff" strokeWidth="2"/>
+                  <circle cx={p.x} cy={p.y} r="13" fill={stateColor} stroke="#fff" strokeWidth="2"/>
                   <text x={p.x} y={p.y+4} textAnchor="middle" fontSize="11" fontWeight="900" fill="#fff">{idx+1}</text>
                 </g>
               ))}
@@ -2483,7 +2486,7 @@ function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia }) {
       <div className="traffic-responsive-flex" style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
         {stops.map((s, idx)=>(
           <div className="traffic-responsive-flex" key={`${s.address}-${idx}`} style={{display:"flex",alignItems:"center",gap:6,border:"1px solid var(--border)",borderRadius:7,padding:"5px 8px",fontSize:11,color:"var(--text4)",background:"var(--bg4)",maxWidth:260}}>
-            <span style={{width:18,height:18,borderRadius:5,background:idx===0?"var(--accent)":idx===stops.length-1?"#f97316":"#3b82f6",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",flexShrink:0}}>{idx+1}</span>
+            <span style={{width:18,height:18,borderRadius:5,background:stateColor,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",flexShrink:0}}>{idx+1}</span>
             <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.address}</span>
           </div>
         ))}
@@ -3948,6 +3951,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     const pedido_id = e.dataTransfer.getData("pedido_id");
     const p = pedidos.find(x => String(x.id) === String(pedido_id));
     if (!p || pedidoTieneFacturaFinal(p)) return;
+    if (p.colaborador_id || (p.vehiculo_id && String(p.vehiculo_id)!==String(vehiculo_id))) { notify("El pedido ya tiene una asignación. Revísala desde Asignación en el pedido antes de moverlo.", "warning"); return; }
     const vehiculo = vehiculos.find(v => String(v.id) === String(vehiculo_id));
     if (!vehiculo) return;
     const { payload: assignmentPayload, linkedChofer } = buildTrafficAssignment(
@@ -4042,10 +4046,9 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       if (p.colaborador_id || p.colaborador_nombre) return false;
       const sameCell = String(p.vehiculo_id || "") === String(addTripCell.vehiculo_id || "") && fechaPedido(p) === fecha;
       if (sameCell) return false;
-      const f = fechaPedido(p);
-      return !p.vehiculo_id || !f || f === fecha || (f >= semanaInicio && f <= semanaFin);
+      return !p.vehiculo_id;
     })).slice(0, 80);
-  }, [addTripCell, pedidos, semanaInicio, semanaFin]);
+  }, [addTripCell, pedidos]);
 
   const viajesYaCargadosEnCelda = useMemo(() => {
     if (!addTripCell) return [];

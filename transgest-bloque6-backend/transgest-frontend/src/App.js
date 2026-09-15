@@ -44,6 +44,7 @@ const ControlHorario      = lazy(() => import("./pages/ControlHorario"));
 const GestionTrafico      = lazy(() => import("./pages/GestionTrafico"));
 const PlanificacionOperativa = lazy(() => import("./pages/PlanificacionOperativa"));
 const Nominas             = lazy(() => import("./pages/Nominas"));
+const SupplierApp = lazy(()=>import("./pages/SupplierApp"));
 const AppChofer           = lazy(() => import("./pages/AppChofer"));
 const AppMecanico         = lazy(() => import("./pages/AppMecanico"));
 const PortalClientes      = lazy(() => import("./pages/PortalClientes"));
@@ -1880,6 +1881,8 @@ function AppInner() {
       toast("Recordatorio pospuesto.", "success");
     }
   }
+
+  if (user?.rol === "colaborador" || (user?.rol === "chofer" && user?.colaborador_id)) return <Suspense fallback={<p>Cargando…</p>}><SupplierApp/></Suspense>;
 
   return (
     <>

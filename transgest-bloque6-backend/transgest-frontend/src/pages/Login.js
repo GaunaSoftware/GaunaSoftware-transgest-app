@@ -240,7 +240,7 @@ export default function Login() {
           <label style={S.label} htmlFor="login-identifier">Usuario o correo electrónico</label>
           <input id="login-identifier" autoComplete="username" autoCapitalize="none" spellCheck={false} style={S.input} type="text" value={email}
             onChange={e=>setEmail(e.target.value)}
-            placeholder="usuario o tu@empresa.com" autoFocus />
+            placeholder="Tu usuario o tu email" autoFocus />
         </div>
         <div style={{ marginBottom:20 }}>
           <label style={S.label} htmlFor="login-password">Contraseña</label>
@@ -327,7 +327,7 @@ export default function Login() {
               type="text"
               id="forgot-identifier" value={forgotIdentifier}
               onChange={e=>setForgotIdentifier(e.target.value)}
-              placeholder="usuario o tu@empresa.com"
+              placeholder="Tu usuario o tu email"
             />
             {forgotMessage && (
               <div style={{marginTop:12,fontSize:12,color:forgotMessage.includes("Solicitud") || forgotMessage.includes("recibida") ? "var(--green)" : "#fbbf24",lineHeight:1.45}}>

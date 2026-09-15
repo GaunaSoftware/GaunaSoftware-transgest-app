@@ -1,3 +1,4 @@
+import SupportInbox from "../components/SupportInbox";
 import { getBrandDisplayName } from "../branding";
 import { useState, useEffect, useCallback } from "react";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
@@ -227,6 +228,8 @@ function ModalNuevaEmpresa({ onClose, onCreada }){
 }
 
 // Section
+const supportRequest = (path, options) => saFetch(`/soporte${path}`,options);
+
 function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
   const [form,setForm]=useState({
     plan:empresa.plan,
@@ -240,7 +243,8 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
     proxima_tarea_fecha:empresa.proxima_tarea_fecha?.slice(0,10)||"",
     ia_limite_mensual: empresa.ia_limite_mensual ?? (empresa.plan==="enterprise"?1000:0),
     metodo_pago: empresa.metodo_pago || "pendiente",
-    email_facturacion: empresa.email_facturacion || empresa.email_admin || "",
+    email_admin: empresa.email_admin || "",
+    email_facturacion: empresa.email_facturacion || "",
     iban_facturacion: empresa.iban_facturacion || "",
   });
   const [loading,setLoading]=useState(false); const [err,setErr]=useState("");
@@ -384,7 +388,8 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
               <option value="transferencia">Transferencia</option>
             </select></div>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Vencimiento</label><input type="date" style={inp} value={form.fecha_vencimiento} onChange={f("fecha_vencimiento")}/></div>
-          <div><label style={lbl}>Email facturacion</label><input type="email" style={inp} value={form.email_facturacion} onChange={f("email_facturacion")}/></div>
+          <div><label style={lbl}>Email del administrador</label><input type="email" required style={inp} value={form.email_admin} onChange={f("email_admin")}/><small>Actualiza el acceso del administrador asociado. Los demás usuarios conservan sus cuentas.</small></div>
+          <div><label style={lbl}>Email de facturación</label><input type="email" style={inp} value={form.email_facturacion} onChange={f("email_facturacion")}/><small>Solo para comunicaciones de facturación; no cambia el acceso.</small></div>
           <div><label style={lbl}>IBAN domiciliacion</label><input style={inp} value={form.iban_facturacion} onChange={f("iban_facturacion")} placeholder="ES00..."/></div>
           <div><label style={lbl}>Bloqueo manual</label>
             <select style={inp} value={form.bloqueo_manual?"true":"false"} onChange={e=>setForm(p=>({...p,bloqueo_manual:e.target.value==="true"}))}>
@@ -3092,6 +3097,7 @@ export default function SuperAdmin(){
   const navItems = [
     ["dashboard","Dashboard","DB"],
     ["empresas","Empresas","EM"],
+    ["soporte","Soporte","SP"],
     ["salud","Salud","SL"],
     ["integraciones","Integraciones","IN"],
     ["calendario","Calendario laboral","CA"],
@@ -3102,6 +3108,7 @@ export default function SuperAdmin(){
   const pageMeta = {
     dashboard:["Dashboard","Resumen general del entorno TransGest"],
     empresas:["Empresas","Gestion centralizada de clientes y suscripciones"],
+    soporte:["Soporte","Solicitudes y conversaciones de las empresas"],
     salud:["Salud del sistema","Estado tecnico y operativo de los servicios"],
     integraciones:["Integraciones","APIs generales y configuraciones privadas por empresa"],
     calendario:["Calendario laboral","Festivos y calendario operativo por empresa"],
@@ -3255,6 +3262,7 @@ export default function SuperAdmin(){
           </>
         )}
 
+        {tab==="soporte"&&<SupportInbox admin request={supportRequest}/>}
         {tab==="salud"&&(
           <SaludSaaS
             saFetchFn={saFetch}

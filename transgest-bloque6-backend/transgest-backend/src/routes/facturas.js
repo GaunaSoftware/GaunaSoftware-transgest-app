@@ -1109,6 +1109,10 @@ router.post("/", GERENTE_O_CONTABLE,
             lineas, extracostes = [], pedidos_ids = [], observaciones, notas_internas,
             referencia_cliente } = req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
+    if (estado && estado !== 'borrador') {
+      const issue=await require('../services/billingData').billingProblem(db,cliente_id,empresaId);
+      if(issue)return res.status(422).json({error:issue,code:'DATOS_FISCALES_INCOMPLETOS'});
+    }
     const pedidosIdsUnicos = [...new Set((pedidos_ids || []).filter(Boolean))];
     const borradoresPrevios = new Set();
 
@@ -1322,6 +1326,10 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
 
     const factura      = rows[0];
     const estadoAntes  = factura.estado;
+    if (estadoAntes === 'borrador' && estado !== 'borrador') {
+      const issue=await require('../services/billingData').billingProblem(db,factura.cliente_id,empresaId);
+      if(issue)return res.status(422).json({error:issue,code:'DATOS_FISCALES_INCOMPLETOS'});
+    }
 
     if (estado === "enviada") {
       const sinSoporte = await getFacturaPedidosSinSoporte(factura.id, empresaId);

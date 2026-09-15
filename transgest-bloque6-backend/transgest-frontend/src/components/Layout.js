@@ -6,10 +6,10 @@ import { getPublicAppMeta } from "../services/api";
 import { getEmpresaPlanLocal } from "../utils/planFeatures";
 import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
 import { Icon } from "../ui";
-import { setRuntimeFocus } from "../services/runtimeFocus";
 import { FINANCE_TABS, selectFinanceTab, useFinanceTab } from "../services/financeNavigation";
 import { flattenNavigation, organizeSidebar } from "../utils/sidebarNavigation";
 import "./sidebar.css";
+import SupportInbox from "./SupportInbox";
 
 const ROL_LABEL = { gerente:"Gerente", contable:"Contable", trafico:"Tráfico", visualizador:"Visualizador", chofer:"Chófer", cliente:"Cliente" };
 const ROL_COLOR = { gerente:"var(--accent)", contable:"#10b981", trafico:"#f97316", visualizador:"#64746f", chofer:"#f97316", cliente:"var(--accent-l)" };
@@ -604,6 +604,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
   const activeNavId = vistaActiva === "facturacion" ? `finance-${financeTab}` : vistaActiva;
   const brandDisplayName = getBrandDisplayName(getEmpresaPlanLocal());
   const [appMeta, setAppMeta] = useState(null);
+  const [supportOpen,setSupportOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem("tg_sidebar_collapsed") === "1"; } catch { return false; }
@@ -691,6 +692,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
   return (
     <>
       <style>{CSS}</style>
+      {supportOpen && <SupportInbox onClose={()=>setSupportOpen(false)}/>}
       <div style={{ height:"100vh", overflow:"hidden" }}>
 
         {/* ══════════ SIDEBAR ══════════ */}
@@ -788,9 +790,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
           <div className="tg-sidebar-footer">
             {sidebarItems.some(item => item.id === "mi_cuenta") && (
               <button className="tg-sidebar-footer-action tg-sidebar-support" type="button" title="Contactar soporte" aria-label="Contactar soporte" onClick={() => {
-                setRuntimeFocus("tms_cuenta_tab", "soporte");
-                handleSetVista("mi_cuenta");
-                window.dispatchEvent(new CustomEvent("tms:cuenta-soporte"));
+                setSupportOpen(true);
               }}>
                 <Icon name="headset" />
                 <span className="tg-sidebar-footer-copy"><strong>Soporte</strong><small>¿Necesitas ayuda?</small></span>

@@ -34,6 +34,7 @@ import { formatMatricula, formatDni, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
+import BulkOrderReasonDialog from "./orders/BulkOrderReasonDialog";
 import EndpointAutocomplete from "../components/EndpointAutocomplete";
 import { pedidoOriginalMonth } from "../utils/pedidoBillingMonth";
 
@@ -824,6 +825,7 @@ function getPedidoOperationalFlags(pedido, now = new Date()) {
 function getPedidoStateValidationIssues(pedido, targetEstado = "") {
   const estado = String(targetEstado || pedido?.estado || "").toLowerCase();
   const issues = [];
+  if (["cancelado","incidencia"].includes(estado)) return issues;
   const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
   const hasManualMatricula = Boolean(String(pedido?.matricula_manual || "").trim());
   const needsOperationalData = ["confirmado", "en_curso", "descarga", "entregado"].includes(estado);
@@ -8941,11 +8943,17 @@ useEffect(() => {
             </div>
             {showCostes && (
               <div style={{background:"rgba(239,68,68,.04)",border:"1px solid rgba(239,68,68,.15)",borderRadius:8,padding:"14px",marginBottom:14}}>
+                {!form.colaborador_id&&<button type="button" style={{...S.btn,marginBottom:10}} onClick={async()=>{
+                  if(parseLocaleNumber(form.km_ruta,0)<=0){notify("Calcula o indica los kilómetros de la ruta antes de estimar el gasoil.","warning");return;}
+                  const estimate=calcularCosteGasoil(form);
+                  if(parseLocaleNumber(form.coste_gasoil,0)>0&&!await confirmDialog({title:"Recalcular gasoil",message:`Sustituir el gasoil registrado por la estimación de ${estimate.toLocaleString("es-ES")} EUR. Peajes, dietas y otros costes se conservan.`,confirmText:"Recalcular"}))return;
+                  setForm(p=>({...p,coste_gasoil:estimate}));
+                }}>Calcular gasoil estimado</button>}
                 {parseLocaleNumber(form.km_ruta, 0) > 0 && (
                   <div style={{fontSize:11,color:"var(--text4)",marginBottom:10}}>
                     {form.colaborador_id
-                      ? "Viaje cargado por colaborador: el coste de gasoil se mantiene a 0."
-                      : `Gasoil calculado con ${consumoLitros100PorPeso(form.peso_kg)} L/100 km segun peso (${parseLocaleNumber(form.peso_kg,0).toLocaleString("es-ES")} kg) y ${parseLocaleNumber(form.km_ruta,0).toLocaleString("es-ES")} km.`}
+                      ? "Viaje realizado por colaborador: el coste es su precio acordado, sin gasoil propio."
+                      : `Estimación de gasoil con ${consumoLitros100PorPeso(form.peso_kg)} L/100 km segun peso (${parseLocaleNumber(form.peso_kg,0).toLocaleString("es-ES")} kg) y ${parseLocaleNumber(form.km_ruta,0).toLocaleString("es-ES")} km y ${precioGasoilDefault().toLocaleString("es-ES")} EUR/litro.`}
                   </div>
                 )}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
@@ -9400,7 +9408,7 @@ useEffect(() => {
                   <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>CMR, albaranes, fotos, pesajes o instrucciones. Se adjuntan al pedido y a la factura.</div>
                 </div>
                 {!editando?.id && (
-                  <label style={{marginLeft:"auto",padding:"6px 12px",borderRadius:7,background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  <label className="tg-attachment-trigger" style={{marginLeft:"auto",padding:"6px 12px",borderRadius:7,background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                     Adjuntar antes de crear
                     <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" style={{display:"none"}} onChange={seleccionarDocsPendientes}/>
                   </label>
@@ -10179,6 +10187,7 @@ export default function Pedidos() {
   const [readCriticalAlerts, setReadCriticalAlerts] = useState(() => loadReadPedidoAlerts());
   const [selectedPedidoIds, setSelectedPedidoIds] = useState([]);
   const [bulkEstado, setBulkEstado] = useState("confirmado");
+  const [bulkReason,setBulkReason]=useState(null);
   const debouncedQ   = useDebounce(q, 350); // debounce search input 350ms
   const [page,       setPage]       = useState(1);
   const [cartaPorte, setCartaPorte] = useState(null); // pedido data for CMR modal
@@ -11326,15 +11335,26 @@ export default function Pedidos() {
     }
   }
 
-  async function cambiarEstadoSeleccionados() {
+  async function eliminarSeleccionadosConMotivo(reasons){
+    const completed=[];const failed=[];
+    for(const p of selectedPedidosOperables){
+      if(pedidoTieneFacturaFinal(p)||pedidoTieneFacturaBorrador(p)){failed.push(`${p.numero}: tiene factura vinculada`);continue;}
+      try{await cambiarEstadoPedido(p.id,'cancelado',{motivo_cancelacion:reasons[p.id]});await eliminarPedido(p.id);completed.push(String(p.id));}catch(e){failed.push(`${p.numero}: ${e.message}`);}
+    }
+    setSelectedPedidoIds(ids=>ids.filter(id=>!completed.includes(String(id))));await cargar({silent:true});
+    notify(`${completed.length} pedidos eliminados.${failed.length?' No se han eliminado: '+failed.join(' | '):''}`,failed.length?'warning':'success');
+  }
+  async function cambiarEstadoSeleccionados(reasons=null) {
     const lista = selectedPedidosOperables;
     if (!lista.length) {
       notify("Selecciona pedidos editables para cambiarles el estado.", "info");
       return;
     }
+    if(['cancelado','incidencia'].includes(bulkEstado)&&(!reasons||reasons.nativeEvent)){setBulkReason({mode:'estado',orders:lista});return;}
+    const extra=p=>bulkEstado==='cancelado'?{motivo_cancelacion:reasons?.[p.id]}:bulkEstado==='incidencia'?{incidencia_descripcion:reasons?.[p.id],incidencia_tipo:'otra'}:{};
     const evaluados = lista.map(pedido => ({
       pedido,
-      issues: getPedidoStateValidationIssues(pedido, bulkEstado),
+      issues: getPedidoStateValidationIssues({...pedido,...extra(pedido)}, bulkEstado),
     }));
     const validos = evaluados.filter(item => item.issues.length === 0).map(item => item.pedido);
     const invalidos = evaluados.filter(item => item.issues.length > 0);
@@ -11354,11 +11374,11 @@ export default function Pedidos() {
     if (!ok) return;
     setBulkRescheduling(true);
     try {
-      let okCount = 0; const fallos = [];
+      let okCount = 0; const fallos = [];const completed=[];
       for (const pedido of validos) {
         try {
-          await cambiarEstadoPedido(pedido.id, bulkEstado);
-          okCount++;
+          await cambiarEstadoPedido(pedido.id, bulkEstado,extra(pedido));
+          completed.push(String(pedido.id));okCount++;
         } catch (err) {
           fallos.push(`${pedido.numero || pedido.id}: ${err.message || "error"}`);
         }
@@ -11369,7 +11389,7 @@ export default function Pedidos() {
           : `Estado actualizado en ${okCount} pedido(s).`,
         fallos.length ? "warning" : "success"
       );
-      setSelectedPedidoIds(prev => prev.filter(id => invalidos.some(item => item.pedido.id === id)));
+      setSelectedPedidoIds(prev => prev.filter(id => !completed.includes(String(id))));
       cargar({ silent: true });
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-state", estado: bulkEstado } }));
@@ -11539,6 +11559,7 @@ export default function Pedidos() {
           >
             Aplicar estado
           </button>
+          <button disabled={bulkRescheduling||!selectedPedidosOperables.length} onClick={()=>setBulkReason({mode:"eliminar",orders:selectedPedidosOperables})} style={S.btn}>Eliminar seleccionados</button>
           <select value={bulkVehiculo} onChange={e => setBulkVehiculo(e.target.value)} style={{...S.sel,width:150,padding:"5px 10px",fontSize:11}}>
             <option value="">Vehiculo...</option>
             {vehiculos.map(v => <option key={v.id} value={v.id}>{v.matricula}</option>)}
@@ -11802,6 +11823,7 @@ export default function Pedidos() {
         />
       )}
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Orden de carga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+      {bulkReason&&<BulkOrderReasonDialog orders={bulkReason.orders} title={bulkReason.mode==="eliminar"?"Eliminar pedidos seleccionados":"Cambiar estado de pedidos"} onClose={()=>setBulkReason(null)} onConfirm={reasons=>bulkReason.mode==="eliminar"?eliminarSeleccionadosConMotivo(reasons):cambiarEstadoSeleccionados(reasons)}/>}
       {cancelOrder&&<CancelOrderDialog pedido={cancelOrder} onClose={()=>setCancelOrder(null)} onConfirm={motivo=>cambiarEstado(cancelOrder.id,"cancelado",{motivo_cancelacion:motivo,__fromCancelFlow:true})}/>}
       {ordenCarga && <OrdenCargaModal pedido={ordenCarga} grupajePedidos={ordenCargaGrupaje} onClose={()=>{setOrdenCarga(null);setOrdenCargaGrupaje([]);}}/>}
 

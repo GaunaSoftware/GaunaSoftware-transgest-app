@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),crypto=require('node:crypto');
+const {PGlite}=require('@electric-sql/pglite');
+async function main(){const pg=new PGlite(),company='11111111-1111-4111-8111-111111111111',supplier='22222222-2222-4222-8222-222222222222';let simulated=false,sent=[];
+const db={query:(s,a)=>pg.query(s,a),transaction:async fn=>{await pg.exec('BEGIN');try{const value=await fn(db);await pg.exec('COMMIT');return value;}catch(e){await pg.exec('ROLLBACK');throw e;}}};
+try{await pg.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY,nombre text);CREATE TABLE colaboradores(id uuid PRIMARY KEY,empresa_id uuid,activo boolean);CREATE TABLE usuarios(id uuid DEFAULT gen_random_uuid() PRIMARY KEY,nombre text,email text UNIQUE,username text UNIQUE,password_hash text,rol text,empresa_id uuid,colaborador_id uuid,activo boolean,debe_cambiar_password boolean,perfil text);CREATE TABLE invitaciones_usuario(id uuid DEFAULT gen_random_uuid(),empresa_id uuid,usuario_id uuid,email text,token_hash text,expires_at timestamptz,usado_at timestamptz,created_by text);INSERT INTO empresas VALUES('${company}','Empresa QA');INSERT INTO colaboradores VALUES('${supplier}','${company}',true);`);
+const sandbox={module:{exports:{}},process:{env:{APP_URL:'https://app.example.invalid'}},require(n){if(n==='crypto')return crypto;if(n==='bcryptjs')return require('bcryptjs');if(n==='./db')return db;if(n==='./email')return{enviarEmail:async data=>{sent.push(data);return simulated?{simulado:true}:{messageId:'qa'};}};throw Error(n);}};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/services/supplierInvitations.js'),'utf8'),sandbox);
+const invite=sandbox.module.exports.inviteSupplier,args={empresaId:company,colaboradorId:supplier,nombre:'Proveedor QA',email:'qa@example.invalid',actor:'gerente@example.invalid'};
+let r=await invite(args);assert.equal(r.invitacion_enviada,true);const u=(await pg.query('SELECT * FROM usuarios')).rows[0];assert.equal(u.rol,'colaborador');assert.equal(u.activo,false);assert.equal(u.colaborador_id,supplier);const token=sent[0].datos.url.split('/').at(-1);assert.equal((await pg.query('SELECT token_hash FROM invitaciones_usuario')).rows[0].token_hash,crypto.createHash('sha256').update(token).digest('hex'));assert.equal(Object.hasOwn(r,'password'),false);
+simulated=true;await assert.rejects(()=>invite(args),e=>e.status===503);assert.equal((await pg.query('SELECT count(*)::int n FROM invitaciones_usuario WHERE usado_at IS NULL')).rows[0].n,1);
+simulated=false;r=await invite({...args,email:'driver@example.invalid',driver:true});assert.equal((await pg.query('SELECT rol FROM usuarios WHERE id=$1',[r.usuario_id])).rows[0].rol,'chofer');
+await assert.rejects(()=>invite({...args,colaboradorId:company}),e=>e.status===404);await assert.rejects(()=>invite({...args,driver:true}),e=>e.status===409);
+console.log('PASS supplier invitations: isolated accounts, driver role, hashed expiring links, no temporary password and SMTP simulation reported as failure');
+}finally{await pg.close();}}
+main().catch(e=>{console.error(e);process.exitCode=1;});

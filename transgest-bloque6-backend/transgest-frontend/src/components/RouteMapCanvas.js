@@ -46,8 +46,8 @@ export default function RouteMapCanvas({ points, geometry, vehicle, stableFrame 
     const route = line.length >= 2 ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: line } } : empty;
     const markers = { type: "FeatureCollection", features: points.map((point, index) => ({
       type: "Feature", properties: {
-        number: String(point.stopNumber || index + 1), label: point.label || "Parada",
-        color: /descarga|destino/.test(point.role || point.tipo || "") ? "#c25616" : "#0f766e",
+        number: String(point.stopNumber || index + 1), label: `${point.label || "Parada"}${point.tone?.label ? ` · ${point.tone.label}` : ""}`,
+        color: point.tone?.color || (/descarga|destino/.test(point.role || point.tipo || "") ? "#c25616" : "#0f766e"),
       }, geometry: { type: "Point", coordinates: [point.lng, point.lat] },
     })) };
     if (vehicle) markers.features.push({ type: "Feature", properties: { number: "V", label: "Vehiculo", color: "#2563eb" }, geometry: { type: "Point", coordinates: [vehicle.lng, vehicle.lat] } });

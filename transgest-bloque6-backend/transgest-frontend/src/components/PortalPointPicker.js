@@ -25,7 +25,7 @@ export default function PortalPointPicker({ tipo, points = [], selectedId = "", 
   const isLoad = tipo === "carga";
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ nombre:"", direccion:"", ciudad:"", provincia:"", pais:"Espa\u00f1a" });
+  const [form, setForm] = useState({ nombre:"", direccion:"", codigo_postal:"", google_maps_url:"", ciudad:"", provincia:"", pais:"Espa\u00f1a" });
   const available = useMemo(
     () => points.filter(point => point.tipo === "ambos" || point.tipo === tipo),
     [points, tipo]
@@ -44,7 +44,7 @@ export default function PortalPointPicker({ tipo, points = [], selectedId = "", 
       const created = await crearPortalClientePunto({ ...form, nombre, direccion, tipo });
       onCreated?.(created);
       onSelect?.(created);
-      setForm({ nombre:"", direccion:"", ciudad:"", provincia:"", pais:"Espa\u00f1a" });
+      setForm({ nombre:"", direccion:"", codigo_postal:"", google_maps_url:"", ciudad:"", provincia:"", pais:"Espa\u00f1a" });
       setOpen(false);
       notify(`${isLoad ? "Punto de carga" : "Punto de descarga"} guardado`, "success");
     } catch (error) {
@@ -88,6 +88,8 @@ export default function PortalPointPicker({ tipo, points = [], selectedId = "", 
           <input aria-label={isLoad ? "Direccion de carga" : "Direccion o poblacion"} style={inputStyle} value={form.direccion} onChange={update("direccion")} placeholder={isLoad ? "Dirección de carga" : "Dirección o población"} />
           <input aria-label="Población" style={inputStyle} value={form.ciudad} onChange={update("ciudad")} placeholder="Población" />
           <input aria-label="Provincia / región" style={inputStyle} value={form.provincia} onChange={update("provincia")} placeholder="Provincia / región" />
+          <input aria-label="Código postal" style={inputStyle} value={form.codigo_postal} onChange={update("codigo_postal")} placeholder="Código postal" />
+          <input aria-label="Enlace del mapa" type="url" style={inputStyle} value={form.google_maps_url} onChange={update("google_maps_url")} placeholder="https://maps.google.com/…" />
           <input aria-label="País" style={inputStyle} value={form.pais} onChange={update("pais")} placeholder="País" />
           <button
             type="button"

@@ -28,12 +28,31 @@ function toolsFor(user) {
   if (canRead(user, 'pedidos')) tools.push(definition('buscar_pedidos', 'Consultar hasta 20 pedidos por numero, referencia, cliente o ruta; fechas operativas inclusivas. Usa texto vacio para todos. No es un total global.', { texto: string, desde: string, hasta: string }));
   if (canRead(user, 'informes') && canRead(user, 'facturacion')) tools.push(definition('resumen_mes', 'KPIs de viajes realizados por mes economico YYYY-MM. Importes netos sin IVA; costes registrados, no margen contable definitivo.', { mes: string }));
   if (canRead(user, 'vehiculos') && canRead(user, 'pedidos')) tools.push(definition('disponibilidad_flota', 'Hasta 30 vehiculos con ocupacion registrada para una fecha; no garantiza disponibilidad fisica ni GPS en directo. Filtra matricula con texto.', { fecha: string, texto: string }));
+  if(canRead(user,'palets')) tools.push(definition('stock_almacen','Consultar hasta 30 referencias de stock por nombre o SKU. Devuelve existencias y mínimos por almacén, sin precios.',{texto:string}));
+  if(canRead(user,'pedidos')) tools.push(definition('reservas_muelles','Consultar reservas de muelles para una fecha YYYY-MM-DD; no crear ni modificar reservas.',{fecha:string}));
   return tools;
 }
 
 async function executeTool(db, user, name, args) {
   if (!user.empresa_id || !toolsFor(user).some(t => t.name === name)) throw fail('Consulta no permitida para este perfil.', 403);
   const eid = user.empresa_id;
+  if(name==='stock_almacen'){
+    const {rows}=await db.query(`SELECT m.nombre,m.sku,m.unidad,m.stock_actual,m.stock_minimo,a.nombre AS almacen
+      FROM almacen_mercancias m LEFT JOIN almacenes a ON a.id=m.almacen_id AND a.empresa_id=m.empresa_id
+      WHERE m.empresa_id=$1 AND m.activo=true AND ($2='' OR concat_ws(' ',m.nombre,m.sku) ILIKE '%'||$2||'%')
+      ORDER BY m.nombre LIMIT 31`,[eid,text(args.texto)]);
+    return {fuente:'Almacén / existencias registradas',limitado:rows.length>30,referencias:rows.slice(0,30)};
+  }
+  if(name==='reservas_muelles'){
+    const fecha=date(args.fecha);
+    const available=await db.query("SELECT to_regclass('public.planner_reservas') AS tabla");
+    if(!available.rows[0]?.tabla)return {fuente:'Planner / muelles',configurado:false,reservas:[]};
+    const {rows}=await db.query(`SELECT r.inicio,r.fin,r.tipo,m.nombre AS muelle,m.almacen,p.numero
+      FROM planner_reservas r JOIN planner_muelles m ON m.id=r.muelle_id AND m.empresa_id=r.empresa_id
+      LEFT JOIN pedidos p ON p.id=r.pedido_id AND p.empresa_id=r.empresa_id
+      WHERE r.empresa_id=$1 AND r.inicio < ($2::date+INTERVAL '1 day') AND r.fin>$2::date ORDER BY r.inicio LIMIT 51`,[eid,fecha]);
+    return {fuente:'Planner / reservas de muelles',fecha,limitado:rows.length>50,reservas:rows.slice(0,50)};
+  }
   if (name === 'buscar_pedidos') {
     const desde = date(args.desde), hasta = date(args.hasta);
     if (desde > hasta) throw fail('Rango de fechas invertido.');

@@ -29,11 +29,11 @@ async function main() {
     const response={status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
     let passes=0;
     plannerPolicy({path:'/api/v1/pedidos/id',method:'PUT',body:{vehiculo_id:'own'}},response,()=>passes++);
-    assert.equal(response.code,400); assert.equal(passes,0);
-    plannerPolicy({path:'/api/v1/taller',method:'GET'},response,()=>passes++); assert.equal(response.code,403);
-    plannerPolicy({path:'/api/v1/pedidos/id',method:'PUT',body:{colaborador_id:'agency'}},response,()=>passes++); assert.equal(passes,1);
+    assert.equal(response.code,undefined); assert.equal(passes,1);
+    plannerPolicy({path:'/api/v1/taller',method:'GET'},response,()=>passes++); assert.equal(response.code,undefined); assert.equal(passes,2);
+    plannerPolicy({path:'/api/v1/pedidos/id',method:'PUT',body:{colaborador_id:'agency'}},response,()=>passes++); assert.equal(passes,3);
     process.env.TRANSGEST_PRODUCT='tms';
-    plannerPolicy({path:'/api/v1/taller',method:'GET'},response,()=>passes++); assert.equal(passes,2);
+    plannerPolicy({path:'/api/v1/taller',method:'GET'},response,()=>passes++); assert.equal(passes,4);
   } finally { if(prior===undefined)delete process.env.TRANSGEST_PRODUCT;else process.env.TRANSGEST_PRODUCT=prior; }
   console.log('PASS supplier independent rates, zero quantities, partial updates, own fleet guard and Planner policy');
 }

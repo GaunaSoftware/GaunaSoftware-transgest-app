@@ -812,6 +812,8 @@ function superAuth(req, res, next) {
   } catch { return res.status(401).json({ error: "Token inválido" }); }
 }
 
+router.use("/soporte", superAuth, require("./soporte").createSupportRouter(true));
+
 // ── POST /superadmin/login ────────────────────────────────────────────────
 async function ensurePasswordResetRequestsSchema() {
   await db.query(`
@@ -1409,9 +1411,30 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
     if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: "Limite IA no valido" });
     updates.push(`ia_limite_mensual=$${i++}`); params.push(n);
   }
+  if (!updates.length && "email_admin" in req.body) updates.push("email_admin=email_admin");
   if (!updates.length) return res.status(400).json({ error: "Nada que actualizar" });
   params.push(req.params.id);
-  await db.query(`UPDATE empresas SET ${updates.join(",")} WHERE id=$${i}`, params);
+  try {
+    await db.transaction(async client => {
+      const previous = await client.query("SELECT email_admin FROM empresas WHERE id=$1 FOR UPDATE", [req.params.id]);
+      if (!previous.rows.length) throw Object.assign(new Error("Empresa no encontrada"), { status:404 });
+      if ("email_admin" in req.body) {
+        const email = String(req.body.email_admin || "").trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error("Introduce un email válido del administrador"), {status:400});
+        const oldEmail = previous.rows[0].email_admin;
+        if (email !== String(oldEmail || "").toLowerCase()) {
+          const managers = await client.query("SELECT id FROM usuarios WHERE empresa_id=$1 AND rol='gerente' AND LOWER(email)=LOWER($2) FOR UPDATE", [req.params.id,oldEmail]);
+          if (managers.rows.length !== 1) throw Object.assign(new Error("No se puede identificar un único administrador. Revisa su cuenta en Usuarios y roles antes de cambiar el correo."), {status:409});
+          const conflict = await client.query("SELECT id FROM usuarios WHERE id<>$1 AND (LOWER(email)=$2 OR LOWER(username)=$2) LIMIT 1", [managers.rows[0].id,email]);
+          if (conflict.rows.length) throw Object.assign(new Error("Ese email ya pertenece a otra cuenta"),{status:409});
+          await client.query("UPDATE usuarios SET email=$1, username=CASE WHEN LOWER(username)=LOWER($2) THEN $1 ELSE username END WHERE id=$3", [email,oldEmail,managers.rows[0].id]);
+          await client.query("UPDATE invitaciones_usuario SET usado_at=NOW() WHERE usuario_id=$1 AND usado_at IS NULL", [managers.rows[0].id]);
+          await client.query("UPDATE empresas SET email_admin=$1 WHERE id=$2", [email,req.params.id]);
+        }
+      }
+      await client.query(`UPDATE empresas SET ${updates.join(",")} WHERE id=$${i}`, params);
+    });
+  } catch (error) { return res.status(error.status || (error.code === '23505' ? 409 : 500)).json({error:error.status ? error.message : 'No se pudo actualizar la empresa. Revisa si el email ya está registrado.'}); }
   await audit(req, "empresa.actualizada", req.body, req.params.id);
   res.json({ ok: true });
 });

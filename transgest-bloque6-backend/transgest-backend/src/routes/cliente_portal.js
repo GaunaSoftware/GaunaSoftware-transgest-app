@@ -457,6 +457,8 @@ function portalPointStop(point, fallback, tipo, fecha, hora) {
     punto_id: point?.id || null,
     nombre: point?.nombre || String(fallback || "").trim(),
     direccion: point?.direccion || String(fallback || "").trim(),
+    codigo_postal: point?.codigo_postal || "",
+    google_maps_url: point?.metadata?.google_maps_url || point?.google_maps_url || "",
     poblacion: point?.ciudad || "",
     provincia: point?.provincia || "",
     pais: point?.pais || "Espa\u00f1a",
@@ -472,10 +474,11 @@ function portalPointStop(point, fallback, tipo, fecha, hora) {
 async function getPortalPoint(client, req, pointId, tipo, clienteId = req.user?.cliente_id) {
   if (!pointId) return null;
   const { rows } = await client.query(
-    `SELECT id,nombre,direccion,ciudad,provincia,pais,lat,lng,tipo,ventana,cliente_id
+    `SELECT id,nombre,direccion,codigo_postal,metadata,ciudad,provincia,pais,lat,lng,tipo,ventana,cliente_id
        FROM puntos_interes
       WHERE id=$1 AND empresa_id=$2 AND activo=true
-        AND cliente_id=$3
+        AND (cliente_id=$3 OR $3=ANY(clientes_ids) OR cliente_id IS NULL)
+        AND $3::uuid IS NOT NULL
         AND (tipo=$4 OR tipo='ambos')
       LIMIT 1`,
     [pointId, empresaId(req), clienteId || null, tipo]
@@ -1578,10 +1581,16 @@ router.get("/pedidos/:id/documento-control", requireCliente, async (req, res) =>
   })));
 });
 
+router.post("/calcular-ruta", requireCliente, (req,res,next)=>{
+  const points=req.body?.points;
+  if(!Array.isArray(points)||points.length!==2)return res.status(400).json({error:'Indica origen y destino.'});
+  return require('./geocoding').handleRoute(req,res,next);
+});
+
 router.get("/puntos", requireCliente, asyncRoute(async (req, res) => {
   const { rows } = await db.query(
     `SELECT id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
-            contacto_nombre,contacto_telefono,email,notas,cliente_id
+            contacto_nombre,contacto_telefono,email,notas,metadata,cliente_id
        FROM puntos_interes
       WHERE empresa_id=$1 AND activo=true
         AND (cliente_id=$2 OR $2=ANY(clientes_ids) OR cliente_id IS NULL)
@@ -1595,6 +1604,8 @@ router.get("/puntos", requireCliente, asyncRoute(async (req, res) => {
 
 router.post("/puntos", requireCliente, asyncRoute(async (req, res) => {
   const body = req.body || {};
+  const mapsUrl = String(body.google_maps_url || '').trim();
+  if (mapsUrl) { try { const url = new URL(mapsUrl); if (!['http:','https:'].includes(url.protocol)) throw new Error(); } catch { return res.status(400).json({error:'El enlace del mapa debe ser una dirección HTTP o HTTPS válida.'}); } }
   const tipo = ["carga", "descarga", "ambos"].includes(String(body.tipo || "").toLowerCase())
     ? String(body.tipo).toLowerCase()
     : "ambos";
@@ -1608,10 +1619,10 @@ router.post("/puntos", requireCliente, asyncRoute(async (req, res) => {
     `INSERT INTO puntos_interes
       (empresa_id,cliente_id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
        contacto_nombre,contacto_telefono,email,notas,metadata)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'{}'::jsonb)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)
      ON CONFLICT DO NOTHING
      RETURNING id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
-               contacto_nombre,contacto_telefono,email,notas,cliente_id`,
+               contacto_nombre,contacto_telefono,email,notas,metadata,cliente_id`,
     [
       empresaId(req),
       req.user.cliente_id,
@@ -1629,12 +1640,13 @@ router.post("/puntos", requireCliente, asyncRoute(async (req, res) => {
       body.contacto_telefono || null,
       body.email || null,
       body.notas || null,
+      JSON.stringify({google_maps_url:mapsUrl}),
     ]
   );
   if (rows[0]) return res.status(201).json({ ...rows[0], es_general: false });
   const existing = await db.query(
     `SELECT id,nombre,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
-            contacto_nombre,contacto_telefono,email,notas,cliente_id
+            contacto_nombre,contacto_telefono,email,notas,metadata,cliente_id
        FROM puntos_interes
       WHERE empresa_id=$1 AND cliente_id=$2 AND activo=true
         AND tg_point_text(direccion)=tg_point_text($3)

@@ -3346,7 +3346,7 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
       ready: !!docControl.status?.ready,
     });
   }
-  await enviarEmail({
+  const emailResult = await enviarEmail({
     trigger: `colaborador_${accion}`,
     destinatario: pedido.colaborador_email,
     plantilla,
@@ -3369,6 +3369,7 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
       dcd_instrucciones: docControl?.remision?.instrucciones || "",
     },
   });
+  if (emailResult?.simulado || emailResult?.error) throw Object.assign(new Error("El correo al colaborador no se ha enviado. Revisa la configuración SMTP y utiliza la prueba de envío antes de reenviar la carga."),{status:503});
 }
 
 router.get("/colaborador/confirmar/:token", async (req, res) => {
@@ -8668,6 +8669,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
             remolque_id_manual, remolque_id } = req.body; // remolque_id_manual si se especifica uno distinto al del conjunto
 
     const empresaId = req.empresaId||req.user.empresa_id;
+    await require("../services/orderFuelCost").fillMissingFuelCost(db,req.body,{},empresaId);
     try {
       assertPedidoDateInputs(req.body, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga"]));
     } catch (dateErr) {
@@ -9270,6 +9272,7 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     [req.params.id, empresaId]
   );
   if (!pedidoActualRows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+  await require("../services/orderFuelCost").fillMissingFuelCost(db,body,pedidoActualRows[0],empresaId);
   try {
     assertPedidoDateInputs(body || {}, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga", "firma_fecha"]));
   } catch (dateErr) {
@@ -9544,6 +9547,9 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     const { rows } = await db.transaction(async tx => {
       const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id,empresaId]);
       if (!current.rows[0]) return {rows:[]};
+      if (body.asignar_solo_si_libre === true && (current.rows[0].colaborador_id || (current.rows[0].vehiculo_id && String(current.rows[0].vehiculo_id) !== String(body.vehiculo_id)))) {
+        throw Object.assign(new Error("El pedido ya está asignado a otro vehículo o colaborador. Actualiza la mesa y revisa su asignación."), {status:409});
+      }
       await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
       return tx.query(`UPDATE pedidos SET ${setClauses} WHERE id=$${values.length-1} AND empresa_id=$${values.length} RETURNING *`, values);
     });
@@ -9614,10 +9620,12 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     asociarPuntosInteresUsados(empresaId, pedidoActualizado.cliente_id, pedidoActualizado.puntos_carga, pedidoActualizado.puntos_descarga);
     res.json(pedidoActualizado);
   } catch(e) {
+    if (e.status) return res.status(e.status).json({error:e.message,code:e.code,requiere_confirmacion:e.requiere_confirmacion||e.code==='VEHICULO_EN_TALLER',vehiculos:e.vehiculos});
     if (e.code === '42703') {
       let updatedPedido = await db.transaction(async tx => {
         const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id,empresaId]);
         if (!current.rows[0]) return null;
+        if (body.asignar_solo_si_libre === true && (current.rows[0].colaborador_id || (current.rows[0].vehiculo_id && String(current.rows[0].vehiculo_id)!==String(body.vehiculo_id)))) throw Object.assign(new Error("El pedido ya tiene una asignación. Actualiza la mesa."),{status:409});
         await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
         return updateExistingPedidoFields(tx, fields, req.params.id, empresaId);
       });

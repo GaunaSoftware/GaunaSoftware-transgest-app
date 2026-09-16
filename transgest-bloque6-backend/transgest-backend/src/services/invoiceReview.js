@@ -2,16 +2,22 @@ const crypto = require('crypto');
 const db = require('./db');
 let schema;
 function ensureSchema() {
-  if (!schema) schema=db.query(`ALTER TABLE facturas ADD COLUMN IF NOT EXISTS factura_original_id UUID REFERENCES facturas(id);
-    ALTER TABLE facturas ADD COLUMN IF NOT EXISTS factura_original_numero TEXT;
-    ALTER TABLE facturas ADD COLUMN IF NOT EXISTS motivo_rectificacion TEXT;
-    ALTER TABLE facturas ADD COLUMN IF NOT EXISTS tipo_rectificacion TEXT;
-    CREATE TABLE IF NOT EXISTS factura_revisiones (
-    factura_id UUID PRIMARY KEY REFERENCES facturas(id) ON DELETE CASCADE,
-    empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
-    usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
-    huella TEXT NOT NULL, motivo_sin_referencia TEXT NOT NULL DEFAULT '',
-    revisada_at TIMESTAMPTZ NOT NULL DEFAULT now())`).catch(e=>{schema=null;throw e;});
+  if (!schema) schema=(async()=>{
+    // Separate statements also work with prepared-query database adapters.
+    const statements=[
+      'ALTER TABLE facturas ADD COLUMN IF NOT EXISTS factura_original_id UUID REFERENCES facturas(id)',
+      'ALTER TABLE facturas ADD COLUMN IF NOT EXISTS factura_original_numero TEXT',
+      'ALTER TABLE facturas ADD COLUMN IF NOT EXISTS motivo_rectificacion TEXT',
+      'ALTER TABLE facturas ADD COLUMN IF NOT EXISTS tipo_rectificacion TEXT',
+      `CREATE TABLE IF NOT EXISTS factura_revisiones (
+        factura_id UUID PRIMARY KEY REFERENCES facturas(id) ON DELETE CASCADE,
+        empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+        usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+        huella TEXT NOT NULL, motivo_sin_referencia TEXT NOT NULL DEFAULT '',
+        revisada_at TIMESTAMPTZ NOT NULL DEFAULT now())`,
+    ];
+    for(const statement of statements)await db.query(statement);
+  })().catch(e=>{schema=null;throw e;});
   return schema;
 }
 async function snapshot(client,id,empresaId) {

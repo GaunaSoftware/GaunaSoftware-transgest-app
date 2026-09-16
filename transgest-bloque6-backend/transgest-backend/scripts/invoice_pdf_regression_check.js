@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
-const parsePdf = require('pdf-parse');
+// PDF.js expects a byte array; copy Buffer slices to avoid pooled backing-array offsets.
+const parsePdf = buffer => require('pdf-parse')(new Uint8Array(buffer));
 const { buildFacturaPdfBuffer } = require('../src/services/invoicePdf');
 
 async function main() {

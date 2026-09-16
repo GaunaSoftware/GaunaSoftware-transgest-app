@@ -3,7 +3,8 @@ const { randomUUID } = require('node:crypto');
 const { PGlite } = require('@electric-sql/pglite');
 const db = require('../src/services/db');
 const email = require('../src/services/email');
-const parsePdf = require('pdf-parse');
+// PDF.js expects a byte array; copy Buffer slices to avoid pooled backing-array offsets.
+const parsePdf = buffer => require('pdf-parse')(new Uint8Array(buffer));
 
 async function main() {
   const pg = new PGlite();

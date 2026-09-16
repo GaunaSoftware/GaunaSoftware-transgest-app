@@ -3,6 +3,7 @@
 // secreto para firmar el cuerpo con HMAC-SHA256 (cabecera X-TransGest-Signature),
 // de modo que el receptor pueda verificar la autenticidad. Entrega best-effort.
 const crypto = require("crypto");
+const { normalizeWebhookUrl, resolveDestination, postWebhook } = require("./webhookTransport");
 const db = require("./db");
 const logger = require("./logger");
 const { encryptSecret, decryptSecret } = require("./apiKeys");
@@ -34,18 +35,8 @@ async function ensureSchema() {
       failure_count INTEGER NOT NULL DEFAULT 0
     )
   `);
-  await db.query("CREATE INDEX IF NOT EXISTS idx_empresa_webhooks_empresa ON empresa_webhooks(empresa_id, activo)").catch(() => {});
+  await db.query("CREATE INDEX IF NOT EXISTS idx_empresa_webhooks_empresa ON empresa_webhooks(empresa_id, activo)");
   schemaReady = true;
-}
-
-function normalizeUrl(value) {
-  const url = String(value || "").trim();
-  if (!/^https:\/\/[^\s]+$/i.test(url)) {
-    const err = new Error("La URL del webhook debe ser https://");
-    err.status = 400;
-    throw err;
-  }
-  return url.slice(0, 500);
 }
 
 function normalizeEvents(input) {
@@ -61,7 +52,8 @@ function normalizeEvents(input) {
 
 async function createWebhook(empresaId, { url, events } = {}, actorId = null) {
   await ensureSchema();
-  const cleanUrl = normalizeUrl(url);
+  const cleanUrl = normalizeWebhookUrl(url).href;
+  await resolveDestination(cleanUrl, undefined, AbortSignal.timeout(8000));
   const eventList = normalizeEvents(events);
   const secret = `whsec_${crypto.randomBytes(24).toString("base64url")}`;
   const mask = `${secret.slice(0, 12)}...`;
@@ -95,12 +87,12 @@ async function revokeWebhook(empresaId, id) {
 
 async function deliverOne(sub, body) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number(process.env.WEBHOOK_TIMEOUT_MS || 8000));
+  const timer = setTimeout(() => controller.abort(), Math.max(1000, Math.min(30000, Number(process.env.WEBHOOK_TIMEOUT_MS) || 8000)));
   let status = 0;
   try {
     const secret = decryptSecret(sub.secret_encrypted);
     const signature = crypto.createHmac("sha256", secret).update(body).digest("hex");
-    const res = await fetch(sub.url, {
+    const res = await postWebhook(sub.url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -112,7 +104,7 @@ async function deliverOne(sub, body) {
     });
     status = res.status;
   } catch (e) {
-    logger.debug(`webhook ${sub.id} fallo: ${e.message}`);
+    logger.debug(`webhook ${sub.id} fallo: ${e.code || "DELIVERY_FAILED"}`);
   } finally {
     clearTimeout(timer);
   }

@@ -20,16 +20,7 @@ function safeEqual(a, b) {
 }
 
 function pickWebhookSecret(req) {
-  const bearer = String(req.headers.authorization || "").startsWith("Bearer ")
-    ? String(req.headers.authorization || "").slice(7)
-    : "";
-  return String(
-    req.headers["x-verifacti-secret"]
-    || req.headers["x-transgest-fiscal-secret"]
-    || req.query.secret
-    || bearer
-    || ""
-  ).trim();
+  return require("../services/integrationSecrets").integrationSecret(req, ["x-verifacti-secret", "x-transgest-fiscal-secret"], "secret");
 }
 
 router.post("/webhook/verifacti/:empresaId", async (req, res) => {

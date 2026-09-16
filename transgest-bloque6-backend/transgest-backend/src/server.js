@@ -117,7 +117,8 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true, limit: process.env.REQUEST_BODY_LIMIT || "12mb" }));
 if (process.env.NODE_ENV !== "test") {
-  app.use(morgan("combined", { stream: { write: msg => logger.info(msg.trim()) } }));
+  morgan.token("safe-path", req => require("./services/integrationSecrets").logRequestPath(req));
+  app.use(morgan(':remote-addr :method :safe-path :status :res[content-length] :response-time ms', { stream: { write: msg => logger.info(msg.trim()) } }));
 }
 
 const AUDIT_REDACT_PATTERNS = [

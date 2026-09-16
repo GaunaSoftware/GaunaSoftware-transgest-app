@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import maplibrePackage from "maplibre-gl/package.json";
+
+// The module worker imports a sibling shared module. Ship both, versioned,
+// through prepare_map_workers.cjs instead of emitting the worker as a lone asset.
+const publicRoot = (process.env.PUBLIC_URL || "").replace(/^\.$/, "").replace(/\/$/, "");
+maplibregl.setWorkerUrl(`${publicRoot}/vendor/maplibre/${maplibrePackage.version}/maplibre-gl-worker.mjs`);
 
 const key = process.env.REACT_APP_MAPTILER_KEY || "";
 const style = key
@@ -27,7 +33,8 @@ export default function RouteMapCanvas({ points, geometry, vehicle, stableFrame 
       map = new maplibregl.Map({ container: container.current, style, center: [-3.7, 40.2], zoom: 5, attributionControl: { compact: true }, cooperativeGestures: true });
       mapRef.current = map;
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-      map.on("load", () => { setLoaded(true); setError(""); });
+      // Route overlays need the style, not every remote basemap tile to finish.
+      map.on("style.load", () => { setLoaded(true); setError(""); });
       map.on("idle", () => { if (container.current) container.current.dataset.mapIdle = "true"; });
       map.on("movestart", () => { if (container.current) container.current.dataset.mapIdle = "false"; });
       map.on("error", () => setError("No se ha podido cargar parte del mapa. Comprueba la conexion."));

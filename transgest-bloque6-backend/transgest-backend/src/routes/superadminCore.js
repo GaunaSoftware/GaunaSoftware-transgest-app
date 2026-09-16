@@ -1063,7 +1063,7 @@ router.patch("/usuarios-admin/:id", superAuth, async (req, res) => {
     params
   );
   if (!rows[0]) return res.status(404).json({ error: "Usuario no encontrado" });
-  await audit(req, "superadmin.actualizado", { id: req.params.id, ...req.body });
+  await audit(req, "superadmin.actualizado", { id: req.params.id, ...require("../services/integrationSecrets").redactSecrets(req.body) });
   res.json(rows[0]);
 });
 

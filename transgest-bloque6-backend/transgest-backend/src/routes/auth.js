@@ -1,3 +1,4 @@
+const { assertStrongPassword } = require("../services/passwordPolicy");
 const express  = require("express");
 const bcrypt   = require("bcryptjs");
 const jwt      = require("jsonwebtoken");
@@ -576,7 +577,7 @@ router.get("/invitacion/:token", async (req, res) => {
 });
 
 router.post("/invitacion/:token",
-  body("password").isLength({ min: 8 }).withMessage("Mínimo 8 caracteres"),
+  body("password").custom(assertStrongPassword),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -618,7 +619,7 @@ router.post("/invitacion/:token",
 // ── POST /api/v1/auth/cambiar-password ────────────────
 router.post("/cambiar-password", authenticate,
   body("password_actual").notEmpty(),
-  body("password_nuevo").isLength({ min: 8 }).withMessage("Mínimo 8 caracteres"),
+  body("password_nuevo").custom(assertStrongPassword),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });

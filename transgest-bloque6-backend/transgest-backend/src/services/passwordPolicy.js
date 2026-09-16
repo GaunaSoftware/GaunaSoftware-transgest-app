@@ -1,8 +1,22 @@
 const bcrypt = require("bcryptjs");
+const crypto = require("node:crypto");
 
 const HISTORY_LIMIT = Math.max(1, Number(process.env.PASSWORD_HISTORY_LIMIT || 5));
 
 let schemaReady = false;
+
+const PASSWORD_MESSAGE = 'Usa al menos 12 caracteres con mayúsculas, minúsculas y números, y un máximo de 72 bytes.';
+function assertStrongPassword(value) {
+  if (typeof value !== 'string' || value.trim().length < 12 || Buffer.byteLength(value,'utf8') > 72 ||
+      !/[A-Z]/.test(value) || !/[a-z]/.test(value) || !/[0-9]/.test(value)) {
+    throw Object.assign(new Error(PASSWORD_MESSAGE), {status:400,code:'PASSWORD_POLICY'});
+  }
+  return true;
+}
+
+function generateTemporaryPassword() {
+  return `${crypto.randomBytes(18).toString('base64url')}aA1!`;
+}
 
 async function ensurePasswordPolicySchema(queryClient) {
   if (schemaReady) return;
@@ -26,7 +40,7 @@ async function ensurePasswordPolicySchema(queryClient) {
       )
     `);
   });
-  await client.query("CREATE INDEX IF NOT EXISTS idx_password_history_usuario ON password_history(usuario_id, created_at DESC)").catch(() => {});
+  await client.query("CREATE INDEX IF NOT EXISTS idx_password_history_usuario ON password_history(usuario_id, created_at DESC)");
   schemaReady = true;
 }
 
@@ -67,6 +81,9 @@ async function rememberPasswordHash({ usuarioId, empresaId, passwordHash, queryC
 }
 
 module.exports = {
+  generateTemporaryPassword,
+  assertStrongPassword,
+  PASSWORD_MESSAGE,
   ensurePasswordPolicySchema,
   assertPasswordNotReused,
   rememberPasswordHash,

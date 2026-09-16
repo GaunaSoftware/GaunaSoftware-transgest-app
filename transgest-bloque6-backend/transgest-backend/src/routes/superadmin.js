@@ -1,3 +1,4 @@
+const { assertStrongPassword, assertPasswordNotReused, rememberPasswordHash } = require("../services/passwordPolicy");
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
@@ -6,6 +7,12 @@ const { superadminJwtSecret } = require("../services/jwtSecrets");
 const legacyRouter = require("./superadminCore");
 
 const router = express.Router();
+// Company detail/list endpoints must not expose legacy or encrypted fiscal keys.
+router.use((req,res,next)=>{
+  const json=res.json;
+  res.json=function(value){return json.call(this,require("../services/fiscalSecrets").sanitizeNestedFiscal(value));};
+  next();
+});
 
 const PUBLIC_ROUTES = new Set([
   "POST /login",
@@ -133,16 +140,27 @@ router.use(async (req, res, next) => {
   }
 });
 
+router.use((req, res, next) => {
+  if (req.path === "/login" || !["POST","PATCH","PUT"].includes(req.method)) return next();
+  if (req.method === 'POST' && req.path === '/empresas/demo' && !req.body?.password) {
+    req.body = {...req.body, password: require('../services/passwordPolicy').generateTemporaryPassword()};
+  }
+  if (req.body?.password) {
+    try { assertStrongPassword(req.body.password); } catch(error) { return res.status(400).json({error:error.message}); }
+  }
+  return next();
+});
+
 // Correccion acotada: un reset administrativo debe invalidar cualquier JWT de usuario
 // emitido antes del cambio de contrasena. Se conserva el resto del comportamiento.
 router.post("/password-reset-requests/:id/reset", async (req, res, next) => {
   try {
     await ensurePasswordResetRequestsSchema();
     const password = String(req.body?.password || "").trim();
-    if (password.length < 8) return res.status(400).json({ error: "La contrasena debe tener al menos 8 caracteres" });
+    try { assertStrongPassword(password); } catch(error) { return res.status(400).json({error:error.message}); }
 
     const { rows } = await db.query(
-      `SELECT r.*, u.email AS usuario_email, u.username AS usuario_username, u.empresa_id AS usuario_empresa_id
+      `SELECT r.*, u.email AS usuario_email, u.username AS usuario_username, u.password_hash AS current_password_hash, u.empresa_id AS usuario_empresa_id
          FROM password_reset_requests r
          LEFT JOIN usuarios u ON u.id=r.usuario_id
         WHERE r.id=$1
@@ -153,6 +171,8 @@ router.post("/password-reset-requests/:id/reset", async (req, res, next) => {
     if (!solicitud) return res.status(404).json({ error: "Solicitud no encontrada" });
     if (!solicitud.usuario_id) return res.status(400).json({ error: "No hay un usuario asociado a esta solicitud" });
 
+    await assertPasswordNotReused({usuarioId:solicitud.usuario_id,empresaId:solicitud.usuario_empresa_id,passwordNuevo:password,currentHash:solicitud.current_password_hash});
+    await rememberPasswordHash({usuarioId:solicitud.usuario_id,empresaId:solicitud.usuario_empresa_id,passwordHash:solicitud.current_password_hash});
     const hash = await bcrypt.hash(password, 12);
     const updated = await db.query(
       `UPDATE usuarios
@@ -186,7 +206,7 @@ router.post("/password-reset-requests/:id/reset", async (req, res, next) => {
 router.post("/empresas/:id/reset-password", async (req, res, next) => {
   try {
     const password = String(req.body?.password || "").trim();
-    if (password.length < 8) return res.status(400).json({ error: "La contrasena debe tener al menos 8 caracteres" });
+    try { assertStrongPassword(password); } catch(error) { return res.status(400).json({error:error.message}); }
 
     const empresaRes = await db.query("SELECT id,nombre,email_admin FROM empresas WHERE id=$1", [req.params.id]);
     const empresa = empresaRes.rows[0];
@@ -194,7 +214,7 @@ router.post("/empresas/:id/reset-password", async (req, res, next) => {
 
     const hash = await bcrypt.hash(password, 12);
     const userRes = await db.query(
-      `SELECT id,nombre,email,username,rol
+      `SELECT id,nombre,email,username,rol,password_hash
        FROM usuarios
        WHERE empresa_id=$1
        ORDER BY CASE WHEN rol='gerente' THEN 0 ELSE 1 END, activo DESC, created_at ASC
@@ -204,6 +224,8 @@ router.post("/empresas/:id/reset-password", async (req, res, next) => {
     let usuario = userRes.rows[0];
 
     if (usuario) {
+      await assertPasswordNotReused({usuarioId:usuario.id,empresaId:empresa.id,passwordNuevo:password,currentHash:usuario.password_hash});
+      await rememberPasswordHash({usuarioId:usuario.id,empresaId:empresa.id,passwordHash:usuario.password_hash});
       const updated = await db.query(
         `UPDATE usuarios
          SET password_hash=$1, activo=true, debe_cambiar_password=true, password_changed_at=NOW(),

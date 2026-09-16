@@ -1,3 +1,4 @@
+const { assertStrongPassword } = require("../services/passwordPolicy");
 const express  = require("express");
 const bcrypt   = require("bcryptjs");
 const crypto   = require("crypto");
@@ -43,7 +44,7 @@ function appUrl() {
 }
 
 function generarPasswordTemporal() {
-  return `${crypto.randomBytes(12).toString("base64url")}A1!`;
+  return require('../services/passwordPolicy').generateTemporaryPassword();
 }
 
 const TIPOS_VIAJE_TRAFFIC = new Set(["normal", "salida", "retorno"]);
@@ -171,7 +172,7 @@ router.post("/",
   body("username").isString().trim().isLength({ min: 3 }).withMessage("Usuario minimo 3 caracteres"),
   body("email").optional({ nullable: true, checkFalsy: true }).isEmail().normalizeEmail(),
   body("modo_alta").optional().isIn(["invitacion", "temporal"]),
-  body("password").optional({ nullable: true, checkFalsy: true }).isLength({ min: 8 }).withMessage("Minimo 8 caracteres"),
+  body("password").optional({ nullable: true, checkFalsy: true }).custom(assertStrongPassword),
   body("rol").isIn(ROLES_PERMITIDOS),
   async (req, res) => {
     await ensureUsuariosChoferSchema();
@@ -327,7 +328,7 @@ router.patch("/:id", async (req, res) => {
 });
 
 router.post("/:id/reset-password",
-  body("password_nuevo").isLength({ min: 8 }).withMessage("Minimo 8 caracteres"),
+  body("password_nuevo").custom(assertStrongPassword),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });

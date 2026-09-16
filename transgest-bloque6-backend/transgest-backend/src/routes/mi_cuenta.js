@@ -1,3 +1,4 @@
+const { assertStrongPassword } = require("../services/passwordPolicy");
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const db = require("../services/db");
@@ -166,9 +167,8 @@ router.patch("/datos", async (req, res) => {
 router.post("/cambiar-password", async (req, res) => {
   const passwordActual = String(req.body?.password_actual || "");
   const passwordNuevo = String(req.body?.password_nuevo || "");
-  if (!passwordActual || passwordNuevo.length < 8) {
-    return res.status(400).json({ error: "La nueva contrasena debe tener al menos 8 caracteres" });
-  }
+  if (!passwordActual) return res.status(400).json({error:"Indica la contraseña actual"});
+  try { assertStrongPassword(passwordNuevo); } catch(error) { return res.status(400).json({error:error.message}); }
 
   try {
     const { rows } = await db.query(

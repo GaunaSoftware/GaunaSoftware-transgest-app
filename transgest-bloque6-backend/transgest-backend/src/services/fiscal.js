@@ -1,3 +1,5 @@
+const {decryptSecret}=require("./apiKeys");
+const {encryptFiscalSecrets}=require("./fiscalSecrets");
 const crypto = require("crypto");
 const db = require("./db");
 const { probeVerifactiConnection } = require("./fiscalProviderVerifacti");
@@ -158,7 +160,7 @@ function normalizeFiscalConfig(raw = {}) {
         ? String(cfg?.factura_b2b?.canal).toLowerCase()
         : "plataforma_privada",
       endpoint_url: String(cfg?.factura_b2b?.endpoint_url || "").trim(),
-      api_key: String(cfg?.factura_b2b?.api_key || "").trim(),
+      api_key: String(decryptSecret(cfg?.factura_b2b?.api_key) || "").trim(),
       formatos: Array.isArray(cfg?.factura_b2b?.formatos)
         ? cfg.factura_b2b.formatos.map(x => String(x || "").trim()).filter(Boolean)
         : FISCAL_DEFAULTS.factura_b2b.formatos,
@@ -175,8 +177,8 @@ function normalizeFiscalConfig(raw = {}) {
       endpoint_url: String(cfg?.verifactu?.endpoint_url || "").trim(),
       certificado_alias: String(cfg?.verifactu?.certificado_alias || "").trim(),
       provider_base_url: String(cfg?.verifactu?.provider_base_url || "").trim().replace(/\/+$/, ""),
-      provider_api_key: String(cfg?.verifactu?.provider_api_key || "").trim(),
-      provider_webhook_secret: String(cfg?.verifactu?.provider_webhook_secret || "").trim(),
+      provider_api_key: String(decryptSecret(cfg?.verifactu?.provider_api_key) || "").trim(),
+      provider_webhook_secret: String(decryptSecret(cfg?.verifactu?.provider_webhook_secret) || "").trim(),
       software_nombre: String(cfg?.verifactu?.software_nombre || FISCAL_DEFAULTS.verifactu.software_nombre).trim(),
       software_id: String(cfg?.verifactu?.software_id || FISCAL_DEFAULTS.verifactu.software_id).trim(),
       software_version: String(cfg?.verifactu?.software_version || FISCAL_DEFAULTS.verifactu.software_version).trim(),
@@ -482,7 +484,7 @@ async function saveEmpresaFiscalConfig(empresaId, input, client = db) {
         SET configuracion = jsonb_set(COALESCE(configuracion,'{}'::jsonb), '{facturacion_fiscal}', $1::jsonb, true)
       WHERE id=$2
       RETURNING configuracion->'facturacion_fiscal' AS facturacion_fiscal`,
-    [JSON.stringify(config), empresaId]
+    [JSON.stringify(encryptFiscalSecrets(config)), empresaId]
   );
   return normalizeFiscalConfig(rows[0]?.facturacion_fiscal || config);
 }

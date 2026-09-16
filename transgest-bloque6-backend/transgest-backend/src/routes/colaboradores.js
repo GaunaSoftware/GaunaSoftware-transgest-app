@@ -515,7 +515,7 @@ async function logPedidoEventoPortal(pedidoId, empresaId, tipo, detalle = {}) {
 // contrasena que ve TODOS sus viajes (y solo los suyos: el filtro por
 // colaborador_id esta en el listado y en el detalle de pedidos).
 function passwordTemporalProveedor() {
-  return `Proveedor${Math.random().toString(36).slice(2, 8)}${Math.floor(10 + Math.random() * 89)}`;
+  return require('../services/passwordPolicy').generateTemporaryPassword();
 }
 
 function usernameProveedor(colaborador) {

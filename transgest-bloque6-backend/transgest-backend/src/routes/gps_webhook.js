@@ -18,10 +18,7 @@ function safeEqual(a, b) {
 }
 
 function pickToken(req) {
-  const bearer = String(req.headers.authorization || "").startsWith("Bearer ")
-    ? String(req.headers.authorization || "").slice(7)
-    : "";
-  return String(req.headers["x-transgest-gps-token"] || req.query.token || bearer || "").trim();
+  return require("../services/integrationSecrets").integrationSecret(req, ["x-transgest-gps-token"], "token");
 }
 
 function normalizePositions(body) {

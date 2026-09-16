@@ -39,8 +39,12 @@ function createSupportRouter(admin = false) {
     const {rows} = await db.query(`SELECT s.* FROM soporte_solicitudes s WHERE s.id=$1${condition}`,[req.params.id,...scope(req)]);
     if (!rows.length) return res.status(404).json({error:'Solicitud no encontrada'});
     const messages = await db.query('SELECT * FROM soporte_mensajes WHERE solicitud_id=$1 ORDER BY created_at,id',[req.params.id]);
-    const last = messages.rows.at(-1)?.created_at;
-    if (last) await db.query(`UPDATE soporte_solicitudes SET ${admin ? 'soporte_leido_at' : 'usuario_leido_at'}=$2 WHERE id=$1`,[req.params.id,last]);
+    const last = messages.rows.at(-1)?.id;
+    // Keep PostgreSQL's microsecond precision and only acknowledge messages returned above.
+    // GREATEST prevents a slower concurrent read from moving the receipt backwards.
+    const readColumn = admin ? 'soporte_leido_at' : 'usuario_leido_at';
+    if (last) await db.query(`UPDATE soporte_solicitudes s SET ${readColumn}=GREATEST(s.${readColumn},m.created_at)
+      FROM soporte_mensajes m WHERE s.id=$1 AND m.solicitud_id=s.id AND m.id=$2`,[req.params.id,last]);
     res.json({...rows[0],mensajes:messages.rows});
   }));
   router.post('/:id/mensajes',wrap(async(req,res) => {

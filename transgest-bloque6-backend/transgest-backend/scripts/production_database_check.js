@@ -10,6 +10,27 @@ async function main(){const pg=new PGlite();const a='11111111-1111-4111-8111-111
  r=res();await support.h['post /:id/mensajes']({...req,user:{id:v},params:{id},body:{mensaje:'No autorizado'}},r,next);assert.equal(r.code,404);
  const admin=route('soporte.js',db);admin.exported.createSupportRouter(true);r=res();await admin.h['post /:id/mensajes']({...req,superadmin:{id:'admin'},params:{id},body:{mensaje:'Respuesta de soporte'}},r,next);assert.equal(r.code,200);
  r=res();await support.h['get /:id']({...req,params:{id}},r,next);assert.equal(r.data.mensajes.length,2);assert.equal(r.data.estado,'respondida');
+ // Read receipts retain SQL microseconds for both actors, and never consume later messages.
+ await pg.query("UPDATE soporte_mensajes SET created_at='2026-09-16T20:00:00.123456Z' WHERE solicitud_id=$1",[id]);
+ await pg.query('UPDATE soporte_solicitudes SET usuario_leido_at=NULL,soporte_leido_at=NULL WHERE id=$1',[id]);
+ for(const [router,request] of [[support,req],[admin,{...req,superadmin:{id:'admin'}}]]){
+   r=res();await router.h['get /'](request,r,next);assert.equal(r.data[0].sin_leer,1);
+   await router.h['get /:id']({...request,params:{id}},res(),next);
+   r=res();await router.h['get /'](request,r,next);assert.equal(r.data[0].sin_leer,0,'Reading must clear a microsecond timestamp');
+ }
+ await pg.query("INSERT INTO soporte_mensajes(id,solicitud_id,autor_id,autor_nombre,desde_soporte,mensaje,created_at) VALUES(gen_random_uuid(),$1,'admin','Soporte',true,'Nueva respuesta','2026-09-16T20:00:00.123789Z')",[id]);
+ r=res();await support.h['get /'](req,r,next);assert.equal(r.data[0].sin_leer,1,'A later response remains unread');
+ const query=db.query;
+ let delayedRead;
+ db.query=async(sql,args)=>{if(sql.startsWith('UPDATE soporte_solicitudes s SET usuario_leido_at')){delayedRead=[sql,args];return {rows:[]};}return query(sql,args);};
+ await support.h['get /:id']({...req,params:{id}},res(),next);
+ db.query=query;
+ await pg.query("INSERT INTO soporte_mensajes(id,solicitud_id,autor_id,autor_nombre,desde_soporte,mensaje,created_at) VALUES(gen_random_uuid(),$1,'admin','Soporte',true,'Durante lectura','2026-09-16T20:00:00.124789Z')",[id]);
+ await query(...delayedRead);
+ r=res();await support.h['get /'](req,r,next);assert.equal(r.data[0].sin_leer,1,'Do not mark an unseen concurrent reply as read');
+ await support.h['get /:id']({...req,params:{id}},res(),next);
+ await query(...delayedRead);
+ r=res();await support.h['get /'](req,r,next);assert.equal(r.data[0].sin_leer,0,'An older concurrent read must not rewind the receipt');
  const planner=route('planner.js',db);await planner.uses.at(-1)(req,res(),next);r=res();await planner.h['post /muelles']({...req,body:{nombre:'M1',almacen:'Principal'}},r,next);assert.equal(r.code,201);const dock=r.data.id;
  const booking={...req,body:{muelle_id:dock,tipo:'carga',inicio:'2026-09-15T08:00:00Z',fin:'2026-09-15T09:00:00Z'}};r=res();await planner.h['post /reservas'](booking,r,next);assert.equal(r.code,201);
  r=res();await planner.h['post /reservas'](booking,r,next);assert.equal(r.code,409);

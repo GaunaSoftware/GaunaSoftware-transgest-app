@@ -55,3 +55,8 @@ La prueba nativa `scripts/audit_workflows_regression_check.cjs` usa PostgreSQL l
 7. Continúan los límites de seguridad anteriores ajenos a los 31 hallazgos: inventario real de planes antes de cambiar su fallback, migración de secretos fiscales históricos y pruebas de dispositivos/proveedores reales. No se ha generado un instalador EXE ni certificado producción.
 
 Los avisos ESLint previos se mantienen; el build no presenta errores de compilación. La ausencia de errores en estas pruebas no garantiza ausencia absoluta de defectos.
+# Validación previa con la base de producción
+
+El 16/09 se creó una exportación de Render (19:30 UTC) y se restauró una copia aislada en PostgreSQL 18. La copia contiene 461 pedidos, 73 facturas y 43 clientes. No hay tarifas duplicadas. El ensayo de los esquemas nuevos y de las migraciones de arranque terminó correctamente.
+
+El comando de migraciones detectó que `003_operational_normalization.sql` había sido editado tras publicarse. Se recupera el contenido original del commit `dec65b46`, cuyo SHA-256 coincide exactamente con el registrado en producción. Los cambios de identidad de puntos se trasladan a `018_puntos_identity_forward.sql`, que bloquea los duplicados ambiguos sin borrar ni desactivar datos. Las cuatro variantes históricas publicadas se reconocen por su hash exacto; no se reescribe el historial ni se aceptan otros hashes. Las migraciones SQL usan LF también en Windows para conservar sus checksums.

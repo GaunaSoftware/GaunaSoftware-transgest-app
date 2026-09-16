@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const db = require("../src/services/db");
+const { isPublishedHistoricalVariant } = require("./migrationHistory");
 
 const migrationsDir = path.join(__dirname, "migrations");
 
@@ -49,6 +50,10 @@ async function run() {
       continue;
     }
     if (rows[0] && rows[0].checksum !== hash) {
+      if (isPublishedHistoricalVariant(id, rows[0].checksum, hash)) {
+        console.log(`OK ${id}: variante histórica publicada; se conserva su registro y se completa mediante 018`);
+        continue;
+      }
       throw new Error(`La migracion ${id} ya fue aplicada con otro checksum. Crea una nueva migracion en vez de editarla.`);
     }
 

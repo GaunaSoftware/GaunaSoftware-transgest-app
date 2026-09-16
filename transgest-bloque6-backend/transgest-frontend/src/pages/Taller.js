@@ -67,8 +67,15 @@ function tallerLoad()  {
 function provLoad()    { return Array.isArray(tallerSharedCache.proveedores) ? tallerSharedCache.proveedores : []; }
 function avisosCfgLoad(){ return Array.isArray(tallerSharedCache.avisos_mant) ? tallerSharedCache.avisos_mant : []; }
 
+let tallerVersion = '0';
+async function persistTallerSnapshot(data) {
+  const result = await guardarTallerEstado({ ...data, _version: data._version ?? tallerVersion });
+  tallerVersion = result._version;
+  return result;
+}
 function tallerSnapshot(tallerData=tallerLoad()) {
   return {
+    _version: tallerVersion,
     stock: Array.isArray(tallerData.stock) ? tallerData.stock : [],
     reparaciones: Array.isArray(tallerData.reparaciones) ? tallerData.reparaciones : [],
     historial_vh: tallerData.historial_vh && typeof tallerData.historial_vh === "object" ? tallerData.historial_vh : {},
@@ -88,16 +95,17 @@ let tallerSaveTimer = null;
 function pushTallerEstado(tallerData=tallerLoad()) {
   clearTimeout(tallerSaveTimer);
   tallerSaveTimer = setTimeout(() => {
-    guardarTallerEstado(tallerSnapshot(tallerData))
+    persistTallerSnapshot(tallerSnapshot(tallerData))
       .then(() => {
         clearLegacyTallerStorage();
       })
-      .catch(() => {});
+      .catch(error => notify('No se ha guardado el cambio: ' + error.message, 'error'));
   }, 250);
 }
 
 function applyTallerEstado(data) {
   if (!data || typeof data !== "object") return;
+  if (data._version !== undefined) tallerVersion = data._version;
   setTallerLegacyMirror({ stock:data.stock||[], reparaciones:data.reparaciones||[], historial_vh:data.historial_vh||{} });
   clearLegacyTallerStorage();
   setTallerSharedCache({
@@ -2410,8 +2418,16 @@ export default function Taller() {
     };
     const next = {
       ...current,
+      _version: tallerVersion,
       ...(typeof patch === "function" ? patch(current) : (patch || {})),
     };
+    try {
+      await persistTallerSnapshot(next);
+      next._version = tallerVersion;
+    } catch (error) {
+      notify('No se ha guardado el cambio: ' + error.message, 'error');
+      throw error;
+    }
     applyTallerEstado(next);
     setTaller(tallerLoad());
     setProveedores(Array.isArray(next.proveedores) ? next.proveedores : []);
@@ -2422,12 +2438,7 @@ export default function Taller() {
     setLucroData(next.lucro_cesante || {});
     setLucroArchivo(Array.isArray(next.lucro_cesante_archivo) ? next.lucro_cesante_archivo : []);
     sincronizarSolicitudesTaller(next.solicitudes_mecanico || []);
-    try {
-      await guardarTallerEstado(next);
-      clearLegacyTallerStorage();
-    } catch (e) {
-      notify("Se ha guardado localmente, pero no se pudo sincronizar con la base de datos: " + e.message, "warning");
-    }
+    clearLegacyTallerStorage();
     return next;
   }, [taller, proveedores, avisosMant, tareasMecanicos, neumaticosStockShared, neumaticosVehiculosShared, lucroData, lucroArchivo, solicitudesTaller, sincronizarSolicitudesTaller]);
   const cargarNormalizadoTaller = useCallback(async function cargarNormalizadoTaller() {
@@ -3157,4 +3168,3 @@ function TareasMecanicos({ vehiculos, tareas = [], onChange }) {
     </div>
   );
 }
-

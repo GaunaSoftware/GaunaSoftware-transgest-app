@@ -198,7 +198,17 @@ async function main(){
   await page.getByRole('dialog').getByLabel('Estado de factura').selectOption('todos');
   await page.getByRole('button',{name:'Ver resultados',exact:true}).click();
   await page.getByRole('button',{name:'Acciones de A-2026-0059',exact:true}).filter({visible:true}).click();
-  assert.deepEqual(await page.getByRole('menuitem').allTextContents(),['Emitir','Cambiar estado…','Rectificar','Eliminar borrador']);
+  assert.deepEqual(await page.getByRole('menuitem').allTextContents(),['Revisar y emitir','Eliminar borrador']);
+  await page.getByRole('menuitem',{name:'Revisar y emitir',exact:true}).click();
+  const review=page.getByRole('region',{name:'Revisión antes de emitir'});
+  await review.waitFor();assert.equal(await review.getByRole('button',{name:'Emitir factura',exact:true}).isDisabled(),true);
+  assert.equal(await review.getByRole('button',{name:'Registrar revisión',exact:true}).isDisabled(),true);
+  await review.getByRole('checkbox').check();await review.getByRole('button',{name:'Registrar revisión',exact:true}).click();
+  await review.getByRole('button',{name:'Emitir factura',exact:true}).waitFor({state:'visible'});
+  assert.ok(mutations.some(m=>m.pathname==='/facturas/factura-0/revision'&&JSON.parse(m.body).confirmado===true));
+  const printPromise=page.waitForEvent('popup');await page.getByRole('button',{name:'Imprimir / PDF',exact:true}).click();const printed=await printPromise;
+  await printed.waitForLoadState('domcontentloaded');assert.doesNotMatch(await printed.locator('body').innerText(),/SIN IA|ANALIZAR IA|CORREGIR PEDIDO|Registrar revisión|Emitir factura/i);await printed.close();
+  await page.getByRole('button',{name:'Cerrar',exact:true}).last().click();checks.push('Draft review required, revision endpoint called, printed invoice excludes internal controls');
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('menu').count(),0);
   for(const [numero,required,forbidden] of [
@@ -233,11 +243,13 @@ async function main(){
    assert.ok(await button.isVisible());assert.ok((await button.boundingBox()).height>=44);
   }
   await page.getByRole('button',{name:'Contactar soporte',exact:true}).click();
-  await page.getByPlaceholder('Describe tu consulta, incidencia o solicitud de cambio de plan...').waitFor();
-  await page.getByRole('button',{name:/Mi plan/}).click();
+  await page.getByRole('dialog',{name:'Soporte',exact:true}).waitFor();
+  await page.getByLabel('Asunto',{exact:true}).waitFor();
+  await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'Contactar soporte',exact:true}).click();
-  await page.getByPlaceholder('Describe tu consulta, incidencia o solicitud de cambio de plan...').waitFor();
-  assert.ok(!mutations.some(m=>m.pathname==='/mi-cuenta/soporte'),'Opening support must not send a message');
+  await page.getByRole('dialog',{name:'Soporte',exact:true}).waitFor();
+  assert.ok(!mutations.some(m=>m.pathname==='/mi-cuenta/soporte'||m.pathname==='/soporte'),'Opening support must not send a message');
+  await page.keyboard.press('Escape');
   checks.push('single-profile','footer-actions-collapsed','support-navigation-and-reopen');
   await sidebar.locator('[data-tour="module-nav_finanzas"]').click();
   assert.ok(!(await sidebar.getAttribute('class')).includes('collapsed'),'Opening a collapsed group exposes its children');

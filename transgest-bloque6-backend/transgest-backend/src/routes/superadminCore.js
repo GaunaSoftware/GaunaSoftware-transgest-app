@@ -168,6 +168,22 @@ async function requestMovildataAdmin(path, apiKey, params = {}, options = {}) {
 
 async function testGpsProviderConnection(provider, apiKey, empresaId = null) {
   if (!apiKey) return { ok: false, message: "Falta clave API." };
+  if (['here','ors','openrouteservice'].includes(provider)) {
+    const controller = new AbortController();
+    const timeout = setTimeout(()=>controller.abort(),15000);
+    try {
+      const url = provider === 'here'
+        ? `https://router.hereapi.com/v8/routes?transportMode=truck&origin=40.4168,-3.7038&destination=40.423,-3.710&return=summary&apiKey=${encodeURIComponent(apiKey)}`
+        : 'https://api.openrouteservice.org/v2/directions/driving-hgv?start=-3.7038,40.4168&end=-3.710,40.423';
+      const response = await fetch(url,{signal:controller.signal,headers:provider==='here'?{}:{Authorization:apiKey}});
+      const data = await response.json().catch(()=>({}));
+      const valid = response.ok && (provider==='here' ? !!data.routes?.[0]?.sections?.[0]?.summary : !!data.features?.[0]?.properties?.summary);
+      return {ok:valid,provider,http_status:response.status,tested_at:new Date().toISOString(),
+        message:valid?'Conexión verificada: el proveedor ha calculado una ruta de prueba.':`El proveedor no ha calculado la ruta (HTTP ${response.status}). Revisa la clave, permisos y cuota.`};
+    } catch(error) {
+      return {ok:false,provider,message:error.name==='AbortError'?'El proveedor no respondió en 15 segundos.':'No se pudo contactar con el proveedor de rutas.'};
+    } finally {clearTimeout(timeout);}
+  }
   if (provider === "movildata") {
     const linkedStats = await getGpsLinkedStats(empresaId, provider).catch(() => null);
     let vehiclesResult = null;
@@ -244,17 +260,19 @@ async function testGpsProviderConnection(provider, apiKey, empresaId = null) {
   if (GPS_PROVIDERS.includes(provider)) {
     const linkedStats = await getGpsLinkedStats(empresaId, provider).catch(() => null);
     return {
-      ok: true,
+      ok: Number(linkedStats?.con_senal_reciente || 0) > 0,
+      configured: true,
+      verification: Number(linkedStats?.con_senal_reciente || 0) > 0 ? 'recent_signal' : 'pending_signal',
       provider,
       pull_supported: false,
       remote_vehicles: null,
       linked_vehicles: Number(linkedStats?.enlazados || 0),
       active_vehicles: Number(linkedStats?.vehiculos_activos || 0),
       recent_signal_vehicles: Number(linkedStats?.con_senal_reciente || 0),
-      message: "Clave configurada. Este proveedor queda listo por webhook o por mapeo de endpoint especifico.",
+      message: Number(linkedStats?.con_senal_reciente || 0) > 0 ? "Se han recibido posiciones recientes. No se ha realizado una consulta remota de prueba." : "Configurado, sin conexión verificada. Envía una posición desde el proveedor al webhook y comprueba que llega a un vehículo enlazado.",
     };
   }
-  return { ok: true, provider, message: "Clave configurada." };
+  return { ok: false, configured: true, provider, message: "Configurado, pero este conector no dispone de prueba remota. No se ha verificado la conexión." };
 }
 
 function integrationCheck({ key, area, label, ok = false, required = true, warnings = [], detail = "", action = "" }) {
@@ -851,8 +869,11 @@ router.post("/login", async (req, res) => {
     }
     const valid = await bcrypt.compare(password, rows[0].password_hash);
     if (!valid) return res.status(401).json({ error: "Credenciales incorrectas" });
-    const token = jwt.sign({ superadmin: true, id: rows[0].id, email, rol: rows[0].rol || "superadmin" }, superadminJwtSecret(), { expiresIn: "4h" });
-    res.json({ token, nombre: rows[0].nombre, rol: rows[0].rol || "superadmin" });
+    let passwordResetRequired=rows[0].password_reset_required===true;
+    try {require('../services/passwordPolicy').assertStrongPassword(password);}catch {passwordResetRequired=true;}
+    if(passwordResetRequired) await db.query('UPDATE superadmins SET password_reset_required=true WHERE id=$1',[rows[0].id]);
+    const token = jwt.sign({ superadmin: true, id: rows[0].id, email:rows[0].email, rol: rows[0].rol || "superadmin",password_reset_required:passwordResetRequired,password_version:crypto.createHash('sha256').update(rows[0].password_hash).digest('hex') }, superadminJwtSecret(), { expiresIn: passwordResetRequired ? '15m' : '4h' });
+    res.json({ token, nombre: rows[0].nombre, rol: rows[0].rol || "superadmin",password_reset_required:passwordResetRequired });
   } catch(err) { logger.error("superadmin error: " + err.message); res.status(500).json({ error: "Error interno del servidor" }); }
 });
 
@@ -871,9 +892,10 @@ router.get("/correo/status", superAuth, async (_req, res) => {
   const envHost = String(fallback("GAUNA_SMTP_HOST") || "").trim().toLowerCase();
   const envLooksPlaceholder = ["smtp.tuproveedor.com", "smtp.example.com", "example.com"].some(token => envHost.includes(token));
   const envConfigured = Boolean(!envLooksPlaceholder && fallback("GAUNA_SMTP_HOST") && fallback("GAUNA_SMTP_USER") && fallback("GAUNA_SMTP_PASS") && fallback("GAUNA_SMTP_FROM"));
-  const dbConfigured = Boolean(cfg.smtp_host && cfg.smtp_user && (cfg.smtp_pass_masked || cfg.smtp_pass) && cfg.smtp_from);
+  const dbConfigured = Boolean(cfg.activo !== false && cfg.smtp_host && cfg.smtp_user && (cfg.smtp_pass_masked || cfg.smtp_pass) && cfg.smtp_from);
   res.json({
     ok: dbConfigured || envConfigured,
+    verified: dbConfigured && cfg.last_test_ok === true,
     provider: dbConfigured ? "gauna_db" : envConfigured ? "gauna_env" : "simulado",
     config: {
       ...cfg,
@@ -915,9 +937,11 @@ router.post("/correo/test", superAuth, async (req, res) => {
       force_platform: true,
       meta: { test: true, superadmin: req.superadmin?.email || "" },
     });
+    await db.query('UPDATE platform_smtp_config SET last_test_at=NOW(),last_test_ok=$1,last_error=$2 WHERE id=true',[!mail.simulado,mail.simulado?'No se ha realizado un envio real':null]);
     await audit(req, "correo_gauna.test", { destinatario, simulado: !!mail.simulado });
     res.json({ ok: true, email: mail });
   } catch (err) {
+    await db.query('UPDATE platform_smtp_config SET last_test_at=NOW(),last_test_ok=false,last_error=$1 WHERE id=true',[String(err.message).slice(0,500)]).catch(()=>{});
     res.status(500).json({ error: err.message });
   }
 });
@@ -1055,7 +1079,7 @@ router.patch("/usuarios-admin/:id", superAuth, async (req, res) => {
   if (activo !== undefined) { updates.push(`activo=$${i++}`); params.push(Boolean(activo)); }
   if (password) {
     if (password.length < 8) return res.status(400).json({ error: "La contrasena debe tener al menos 8 caracteres" });
-    updates.push(`password_hash=$${i++}`); params.push(await bcrypt.hash(password, 12));
+    updates.push(`password_hash=$${i++}`, "password_changed_at=NOW()", "password_reset_required=false"); params.push(await bcrypt.hash(password, 12));
   }
   if (!updates.length) return res.status(400).json({ error: "Nada que actualizar" });
   params.push(req.params.id);

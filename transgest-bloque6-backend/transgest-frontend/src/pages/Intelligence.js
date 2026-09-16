@@ -10,6 +10,7 @@ export default function Intelligence() {
   const [error, setError] = useState('');
   const last = useRef(null);
   const generation = useRef(0);
+  const available = Boolean(status?.configured) && status?.available !== false;
   useEffect(() => {
     const currentGeneration = generation;
     let active = true;
@@ -19,7 +20,7 @@ export default function Intelligence() {
   useEffect(() => { last.current?.scrollIntoView({ block: 'nearest' }); }, [messages,busy]);
   async function send(event) {
     event.preventDefault();
-    if (!draft.trim() || busy || !status?.configured) return;
+    if (!draft.trim() || busy || !available) return;
     const content = draft.trim();
     const history = [...messages.map(({role,content}) => ({role,content})), {role:'user',content}];
     if (history.length > 16) { setError('Inicia una nueva consulta para continuar.'); return; }
@@ -45,7 +46,7 @@ export default function Intelligence() {
       <div><h1>TransGest Intelligence</h1><span>Consulta de empresa · Solo lectura</span></div>
       <button type="button" disabled={busy || !messages.length} onClick={() => {setMessages([]);setError('');setDraft('');}}>Nueva consulta</button>
     </header>
-    <div className="intelligence-status" role="status">{status ? (status.configured ? `OpenAI · ${status.model} · ${status.source === 'company' ? 'Clave de empresa' : 'Clave general'}` : 'OpenAI pendiente de configurar en Superadmin > Integraciones') : 'Comprobando integracion...'}</div>
+    <div className="intelligence-status" role="status">{status ? (status.message || (available ? 'TransGest Intelligence · Consultas sobre los datos de tu empresa' : 'Intelligence pendiente de configuración. Contacta con administración.')) : 'Comprobando disponibilidad…'}</div>
     {!messages.length && <div className="intelligence-start">
       <h2>Que necesitas revisar?</h2>
       <div className="intelligence-suggestions">{suggestions.map(s => <button type="button" key={s} onClick={() => setDraft(s)}>{s}</button>)}</div>
@@ -64,7 +65,7 @@ export default function Intelligence() {
     <form className="intelligence-compose" onSubmit={send}>
       <label htmlFor="intelligence-question">Consulta</label>
       <textarea id="intelligence-question" value={draft} maxLength={4000} rows={3} disabled={busy} onChange={e=>setDraft(e.target.value)} placeholder="Pedido, matricula, periodo o pregunta..."/>
-      <div><small>{draft.length}/4000 · Las respuestas pueden contener errores. Verifica antes de actuar.</small><button type="submit" disabled={busy || !draft.trim() || !status?.configured}>{busy ? 'Consultando...' : 'Consultar'}</button></div>
+      <div><small>{draft.length}/4000 · Las respuestas pueden contener errores. Verifica antes de actuar.</small><button type="submit" disabled={busy || !draft.trim() || !available}>{busy ? 'Consultando...' : 'Consultar'}</button></div>
     </form>
   </section>;
 }

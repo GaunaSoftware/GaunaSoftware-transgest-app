@@ -22,7 +22,7 @@ const wrapper = fs.readFileSync(wrapperPath, "utf8");
 const legacy = fs.readFileSync(legacyPath, "utf8");
 
 expect(wrapper, /jwt\.verify\([\s\S]*algorithms:\s*\["HS256"\]/, "El wrapper debe fijar HS256 al verificar JWT administrativos");
-expect(wrapper, /SELECT id,nombre,email,rol,activo FROM superadmins WHERE id=\$1 LIMIT 1/, "El wrapper debe revalidar la cuenta administrativa contra BD");
+expect(wrapper, /SELECT id,nombre,email,rol,activo,password_hash,[^\n]+ FROM superadmins WHERE id=\$1 LIMIT 1/, "El wrapper debe revalidar la cuenta administrativa y su contraseña contra BD");
 expect(wrapper, /account\.activo !== true/, "El wrapper debe rechazar cuentas administrativas desactivadas");
 expect(wrapper, /const ADMIN_ROLES = new Set\(\["superadmin", "soporte", "facturacion"\]\)/, "Los roles administrativos validos deben estar enumerados explicitamente");
 expect(wrapper, /return ADMIN_ROLES\.has\(role\) \? role : null/, "Un rol administrativo desconocido debe fallar de forma cerrada");

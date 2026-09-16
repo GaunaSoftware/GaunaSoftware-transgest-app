@@ -5,7 +5,7 @@ const logger  = require("../services/logger");
 const { authenticate, GERENTE_O_CONTABLE, SOLO_GERENTE, PUEDE_CAMBIAR_ESTADO_FACTURA } = require("../middleware/auth");
 const { pushFacturaToAccounting } = require("../services/accountingSync");
 const webhooks = require("../services/webhooks");
-const { enviarEmail } = require("../services/email");
+const invoiceReview = require('../services/invoiceReview');
 const { ensureFacturaFiscalRecord, getEmpresaFiscalConfig, buildFiscalStatus, sanitizeFiscalConfigForClient, buildFiscalXml } = require("../services/fiscal");
 const { processPendingFiscalQueue } = require("../services/fiscalProcessor");
 const { getVerifactiRecordStatus } = require("../services/fiscalProviderVerifacti");
@@ -13,9 +13,11 @@ const { markQueueAccepted, markQueuePending, markQueueError, logFiscalEvent } = 
 const fiscalScheduler = require("../services/fiscalScheduler");
 const contabilidadExport = require("../services/contabilidadExport");
 const { ensureAccountingIntegrationSettingsTable } = require("../services/accountingIntegrationsCatalog");
+const { unbilledOptions, readUnbilledTrips } = require("../services/unbilledTrips");
 
 const router = express.Router();
 router.use(authenticate);
+const collections = require('../services/collectionScheduler');
 
 // Redondeo a 2 decimales para importes de factura. Elimina restos de coma
 // flotante (178.4999999997 -> 178.50) y redondea al alza en el medio-céntimo
@@ -43,42 +45,14 @@ function isFacturaBorradorAgrupable(factura) {
   return factura?.factura_id && factura?.factura_estado === "borrador";
 }
 
-const COBROS_DEFAULT_CONFIG = {
-  dias_revision_post_vencimiento: 1,
-  dias_entre_reclamaciones: 7,
-  max_envios_reclamacion: 6,
-  dias_hasta_juridico: 45,
-  envio_email_auto: true,
-};
-
-function clampInt(value, def, min, max) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return def;
-  return Math.min(Math.max(Math.trunc(n), min), max);
-}
-
-function normalizeCobrosConfig(raw = {}) {
-  return {
-    dias_revision_post_vencimiento: clampInt(raw.dias_revision_post_vencimiento, COBROS_DEFAULT_CONFIG.dias_revision_post_vencimiento, 0, 30),
-    dias_entre_reclamaciones: clampInt(raw.dias_entre_reclamaciones, COBROS_DEFAULT_CONFIG.dias_entre_reclamaciones, 3, 30),
-    max_envios_reclamacion: clampInt(raw.max_envios_reclamacion, COBROS_DEFAULT_CONFIG.max_envios_reclamacion, 1, 20),
-    dias_hasta_juridico: clampInt(raw.dias_hasta_juridico, COBROS_DEFAULT_CONFIG.dias_hasta_juridico, 7, 180),
-    envio_email_auto: raw.envio_email_auto !== false,
-  };
-}
+function normalizeCobrosConfig(raw = {}) { return collections.normalize(raw); }
 
 async function getCobrosConfig(empresaId, client = db) {
   const { rows } = await client.query("SELECT configuracion FROM empresas WHERE id=$1", [empresaId]);
   return normalizeCobrosConfig(rows[0]?.configuracion?.facturacion_cobros || {});
 }
 
-function splitEmails(...values) {
-  return [...new Set(values
-    .flatMap(v => String(v || "").split(/[;,]/))
-    .map(v => v.trim())
-    .filter(v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.toLowerCase()))
-  )];
-}
+
 
 function extractProviderUuid(response = {}) {
   return response?.provider_uuid
@@ -149,6 +123,28 @@ async function getEmpresaPerfil(empresaId, client = db) {
     iban: perfil?.iban || "",
   };
 }
+
+async function pendientesPorCliente(req, res) {
+  let options;
+  try { options = unbilledOptions(req.query, req.params.clienteId); }
+  catch (error) { return res.status(400).json({ error: error.message }); }
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  if (!empresaId) return res.status(401).json({ error: 'Empresa no disponible' });
+  try {
+    const result = await db.transaction(async client => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+      return readUnbilledTrips(client, empresaId, options);
+    });
+    if (!result) return res.status(404).json({ error: 'Cliente no encontrado' });
+    res.json(result);
+  } catch (error) {
+    logger.warn('No se pudieron consultar los viajes pendientes de facturar', { code: error.code });
+    res.status(['57014', '55P03'].includes(error.code) ? 503 : 500)
+      .json({ error: 'No se pudieron consultar los viajes pendientes de facturar' });
+  }
+}
+router.get('/pendientes-por-cliente', GERENTE_O_CONTABLE, pendientesPorCliente);
+router.get('/pendientes-por-cliente/:clienteId/pedidos', GERENTE_O_CONTABLE, pendientesPorCliente);
 
 // ── GET /facturas ─────────────────────────────────────
 router.get("/", GERENTE_O_CONTABLE, async (req, res) => {
@@ -228,7 +224,8 @@ router.get("/", GERENTE_O_CONTABLE, async (req, res) => {
   params.push(limit, offset);
 
   const countSql = `
-    SELECT COUNT(*)
+    SELECT COUNT(*), COALESCE(SUM(f.base_imponible) FILTER (WHERE f.estado::text NOT IN ('borrador','anulada','cancelada')),0) AS base_emitida,
+      COALESCE(SUM(f.total) FILTER (WHERE f.estado='cobrada'),0) AS total_cobrado
       FROM facturas f
       JOIN clientes c ON c.id = f.cliente_id AND c.empresa_id = f.empresa_id
       LEFT JOIN factura_registros_fiscales ff ON ff.factura_id = f.id
@@ -244,6 +241,7 @@ router.get("/", GERENTE_O_CONTABLE, async (req, res) => {
   const pageN = +page; const limitN = +limit;
   res.json({
     data: rows,
+    resumen: {base_emitida:Number(countRows[0].base_emitida),total_cobrado:Number(countRows[0].total_cobrado)},
     pagination: { total, page: pageN, limit: limitN,
       totalPages: Math.ceil(total/limitN), hasNext: pageN*limitN<total, hasPrev: pageN>1 }
   });
@@ -1107,12 +1105,12 @@ router.post("/", GERENTE_O_CONTABLE,
     try {
     const { cliente_id, serie, fecha, fecha_vencimiento, estado, forma_pago, vencimiento,
             lineas, extracostes = [], pedidos_ids = [], observaciones, notas_internas,
-            referencia_cliente } = req.body;
+            referencia_cliente, factura_original_id, motivo_rectificacion, tipo_rectificacion } = req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
-    if (estado && estado !== 'borrador') {
-      const issue=await require('../services/billingData').billingProblem(db,cliente_id,empresaId);
-      if(issue)return res.status(422).json({error:issue,code:'DATOS_FISCALES_INCOMPLETOS'});
-    }
+    if (estado && estado !== 'borrador') return res.status(409).json({error:'Crea primero el borrador y confirma su revisión antes de emitir.',code:'REVISION_FACTURA_PENDIENTE'});
+    await invoiceReview.ensureSchema();
+    if(factura_original_id && (!/^[0-9a-f-]{36}$/i.test(String(factura_original_id)) || !String(motivo_rectificacion || '').trim() || !['diferencia','sustitucion'].includes(tipo_rectificacion)))return res.status(400).json({error:'Indica la factura original, el motivo y el tipo de rectificación.'});
+    if(factura_original_id && pedidos_ids.length)return res.status(400).json({error:'Los pedidos conservan su factura original. No los vincules de nuevo a la rectificativa.'});
     const pedidosIdsUnicos = [...new Set((pedidos_ids || []).filter(Boolean))];
     const borradoresPrevios = new Set();
 
@@ -1150,7 +1148,12 @@ router.post("/", GERENTE_O_CONTABLE,
       }
     }
 
-    await db.transaction(async (client) => {
+    const created = await db.transaction(async (client) => {
+      let original=null;
+      if(factura_original_id){
+        original=(await client.query('SELECT * FROM facturas WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[factura_original_id,empresaId])).rows[0];
+        if(!original || String(original.cliente_id)!==String(cliente_id) || ['borrador','rectificada'].includes(original.estado))throw Object.assign(new Error('La factura original no pertenece al cliente o no puede rectificarse.'),{status:409});
+      }
       const cobrosConfig = await getCobrosConfig(empresaId, client);
       const borradoresPreviosArr = [...borradoresPrevios];
       if (borradoresPreviosArr.length) {
@@ -1180,9 +1183,9 @@ router.post("/", GERENTE_O_CONTABLE,
         [cliente_id, empresaId]
       );
       if (!cliRows[0]) throw new Error("Cliente no encontrado");
-      const tipoIva  = cliRows[0]?.tipo_iva !== undefined && cliRows[0]?.tipo_iva !== null ? Number(cliRows[0].tipo_iva) : 21;
-      const ivaRegimen = ivaRegimenFromPct(tipoIva, cliRows[0]?.iva_regimen);
-      const tipoIrpf = cliRows[0]?.tipo_irpf || 0;
+      const tipoIva  = original ? Number(original.tipo_iva) : cliRows[0]?.tipo_iva !== undefined && cliRows[0]?.tipo_iva !== null ? Number(cliRows[0].tipo_iva) : 21;
+      const ivaRegimen = ivaRegimenFromPct(tipoIva, original?.iva_regimen || cliRows[0]?.iva_regimen);
+      const tipoIrpf = original ? Number(original.tipo_irpf || 0) : cliRows[0]?.tipo_irpf || 0;
       const cuotaIva  = round2(base * tipoIva  / 100);
       const cuotaIrpf = round2(base * tipoIrpf / 100);
       const total     = round2(base + cuotaIva - cuotaIrpf);
@@ -1211,6 +1214,11 @@ router.post("/", GERENTE_O_CONTABLE,
          ivaRegimen, observaciones, notas_internas, req.user.id, empresaId, revisionCobroAt,
          cobrosConfig.dias_entre_reclamaciones, String(referencia_cliente || "").trim() || null]
       );
+
+      if(original){
+        await client.query('UPDATE facturas SET factura_original_id=$1,factura_original_numero=$2,motivo_rectificacion=$3,tipo_rectificacion=$4 WHERE id=$5 AND empresa_id=$6',[original.id,original.numero,String(motivo_rectificacion).trim(),tipo_rectificacion,fac.id,empresaId]);
+        Object.assign(fac,{factura_original_id:original.id,factura_original_numero:original.numero,motivo_rectificacion:String(motivo_rectificacion).trim(),tipo_rectificacion});
+      }
 
       // Insertar líneas. Se rellena tambien "importe" (columna legacy NOT NULL):
       // importe de la linea = cantidad * precio unitario.
@@ -1281,31 +1289,33 @@ router.post("/", GERENTE_O_CONTABLE,
         );
       }
 
-      if ((fac.estado || "").toLowerCase() !== "borrador") {
-        await ensureFacturaFiscalRecord({
-          facturaId: fac.id,
-          empresaId,
-          actorUserId: req.user.id,
-          client,
-        });
-      }
-
-      res.status(201).json(fac);
-      logger.info(`Factura creada: ${numero} por ${req.user.email}`);
-      // Sincroniza con contabilidad (libro de IVA por factura), best-effort.
-      if ((fac.estado || "").toLowerCase() !== "borrador") {
-        pushFacturaToAccounting({ empresaId, factura: fac, clienteId: cliente_id }).catch(() => {});
-        webhooks.dispatch(empresaId, "factura.emitida", { factura_id: fac.id, numero: fac.numero, estado: fac.estado, total: fac.total, cliente_id }).catch(() => {});
-      }
+      return fac;
     });
+    res.status(201).json(created);
+    logger.info(`Borrador creado: ${created.numero} por ${req.user.email}`);
     } catch (e) {
       logger.error("Error creando factura: " + (e && (e.stack || e.message) ? (e.stack || e.message) : e));
-      if (!res.headersSent) res.status(500).json({ error: e.message || "No se pudo crear la factura" });
+      if (!res.headersSent) res.status(e.status || 500).json({ error: e.message || "No se pudo crear la factura" });
     }
   }
 );
 
 // ── PATCH /facturas/:id/estado ────────────────────────
+router.post('/:id/revision', GERENTE_O_CONTABLE, async (req,res,next) => {
+  try {
+    if(req.body?.confirmado!==true)return res.status(400).json({error:'Confirma que has revisado referencias, documentos e importes.'});
+    const empresaId=req.empresaId || req.user.empresa_id;
+    const waiver=String(req.body?.motivo_sin_referencia || '').trim().slice(0,1000);
+    await invoiceReview.ensureSchema();
+    await db.transaction(async client=>{
+      const {rows}=await client.query('SELECT estado FROM facturas WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[req.params.id,empresaId]);
+      if(!rows[0])throw Object.assign(new Error('Factura no encontrada'),{status:404});
+      if(rows[0].estado!=='borrador')throw Object.assign(new Error('Solo se revisan borradores pendientes de emisión'),{status:409});
+      await invoiceReview.review(client,req.params.id,empresaId,req.user.id,waiver);
+    });
+    res.json({ok:true,mensaje:'Revisión registrada. Los cambios posteriores requieren una nueva revisión.'});
+  }catch(error){if(error.status)return res.status(error.status).json({error:error.message,code:error.code});next(error);}
+});
 // Solo gerente/contable. Con audit log.
 router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
   body("estado").isIn(["borrador","emitida","enviada","cobrada","vencida","reclamada","sin_cobrar","rectificada"]),
@@ -1321,6 +1331,10 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
 
     const factura      = rows[0];
     const estadoAntes  = factura.estado;
+    if (estadoAntes===estado)return res.json({ok:true,estado_anterior:estado,estado_nuevo:estado,pedido_ids_afectados:[]});
+    const transitions={borrador:['emitida'],emitida:['enviada','cobrada','vencida','reclamada','rectificada'],enviada:['cobrada','vencida','reclamada','rectificada'],vencida:['enviada','cobrada','reclamada','sin_cobrar','rectificada'],reclamada:['enviada','cobrada','sin_cobrar','rectificada'],sin_cobrar:['cobrada','rectificada'],cobrada:['rectificada'],rectificada:[]};
+    if(!transitions[estadoAntes]?.includes(estado))return res.status(409).json({error:`No se permite pasar de ${estadoAntes} a ${estado}. Una factura emitida no puede volver a borrador.`});
+    await invoiceReview.ensureSchema();
     if (estadoAntes === 'borrador' && estado !== 'borrador') {
       const issue=await require('../services/billingData').billingProblem(db,factura.cliente_id,empresaId);
       if(issue)return res.status(422).json({error:issue,code:'DATOS_FISCALES_INCOMPLETOS'});
@@ -1337,8 +1351,16 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
     }
 
     let pedidosAfectados = [];
-    await db.transaction(async (client) => {
+    try { await db.transaction(async (client) => {
+      const current=await client.query('SELECT estado FROM facturas WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[factura.id,empresaId]);
+      if(current.rows[0]?.estado!==estadoAntes)throw Object.assign(new Error('La factura ha cambiado. Actualiza el listado.'),{status:409});
+      if(estadoAntes==='borrador')await invoiceReview.assertReviewed(client,factura.id,empresaId);
       await client.query("UPDATE facturas SET estado=$1, updated_by=$2 WHERE id=$3 AND empresa_id=$4", [estado, req.user.id, factura.id, empresaId]);
+      if(estadoAntes==='borrador' && factura.factura_original_id){
+        await client.query("UPDATE facturas SET estado='rectificada',updated_by=$1 WHERE id=$2 AND empresa_id=$3",[req.user.id,factura.factura_original_id,empresaId]);
+        await client.query("INSERT INTO audit_log(tabla,registro_id,campo,valor_nuevo,usuario_id,empresa_id) VALUES('facturas',$1,'rectificada_por',$2,$3,$4)",[factura.factura_original_id,factura.numero,req.user.id,empresaId]);
+      }
+
 
       const { rows: linkedPedidos } = await client.query(
         `SELECT id
@@ -1367,10 +1389,11 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
       }
     });
 
+    }catch(error){if(error.status)return res.status(error.status).json({error:error.message,code:error.code});throw error;}
     logger.info(`Estado factura ${factura.numero}: ${estadoAntes} → ${estado} por ${req.user.email}`);
     if ((estado || "").toLowerCase() !== "borrador") {
-      pushFacturaToAccounting({ empresaId, factura, clienteId: factura.cliente_id }).catch(() => {});
-      webhooks.dispatch(empresaId, "factura.emitida", { factura_id: factura.id, numero: factura.numero, estado, total: factura.total, cliente_id: factura.cliente_id }).catch(() => {});
+      pushFacturaToAccounting({ empresaId, factura:{...factura,estado}, clienteId: factura.cliente_id }).catch(() => {});
+      webhooks.dispatch(empresaId, estadoAntes==='borrador' ? 'factura.emitida' : 'factura.estado_cambiado', { factura_id: factura.id, numero: factura.numero, estado_anterior:estadoAntes, estado, total: factura.total, cliente_id: factura.cliente_id, idempotency_key:`${factura.id}:${estadoAntes}:${estado}` }).catch(() => {});
     }
     res.json({
       ok: true,
@@ -1382,84 +1405,17 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
   }
 );
 
-// ── DELETE /facturas/:id ──────────────────────────────
-// Solo borradores pueden eliminarse
-router.post("/reclamaciones/procesar", GERENTE_O_CONTABLE, async (req, res) => {
-  const empresaId = req.empresaId || req.user.empresa_id;
-  const cobrosConfig = await getCobrosConfig(empresaId);
-  const maxEnvios = clampInt(req.body?.max_envios, cobrosConfig.max_envios_reclamacion, 1, 20);
-  const { rows } = await db.query(
-    `SELECT f.*, c.nombre AS cliente_nombre, c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion
-       FROM facturas f
-       JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id
-      WHERE f.empresa_id=$1
-        AND f.estado <> 'cobrada'
-        AND f.revision_cobro_at IS NOT NULL
-        AND f.revision_cobro_at <= CURRENT_DATE
-      ORDER BY f.fecha_vencimiento NULLS LAST, f.fecha ASC
-      LIMIT 100`,
-    [empresaId]
-  );
-
-  let reclamadas = 0;
-  let sinCobrar = 0;
-  let emails = 0;
-
-  for (const f of rows) {
-    const envios = Number(f.reclamacion_envios || 0);
-    const fechaLimite = f.reclamacion_hasta ? new Date(f.reclamacion_hasta) : null;
-    if (fechaLimite && fechaLimite < new Date() && f.estado !== "sin_cobrar") {
-      await db.query(
-        "UPDATE facturas SET estado='sin_cobrar', reclamacion_estado='juridico_recomendado' WHERE id=$1 AND empresa_id=$2",
-        [f.id, empresaId]
-      );
-      sinCobrar++;
-      continue;
-    }
-
-    if (!["reclamada","sin_cobrar"].includes(f.estado)) {
-      await db.query(
-        `UPDATE facturas
-            SET estado='reclamada',
-                reclamacion_estado='reclamada',
-                reclamacion_hasta=COALESCE(reclamacion_hasta, CURRENT_DATE + ($3::int * INTERVAL '1 day'))
-          WHERE id=$1 AND empresa_id=$2`,
-        [f.id, empresaId, cobrosConfig.dias_hasta_juridico]
-      );
-      reclamadas++;
-    }
-
-    const ultimo = f.reclamacion_ultimo_envio_at ? new Date(f.reclamacion_ultimo_envio_at) : null;
-    const diasEspacio = Math.max(Number(f.aviso_cobro_dias || cobrosConfig.dias_entre_reclamaciones), 3);
-    const puedeEnviar = !ultimo || (Date.now() - ultimo.getTime()) >= diasEspacio * 86400000;
-    const destinatarios = splitEmails(f.cliente_email_facturacion, f.cliente_email);
-    if (cobrosConfig.envio_email_auto && destinatarios.length && puedeEnviar && envios < maxEnvios) {
-      for (const destinatario of destinatarios) {
-        await enviarEmail({
-          trigger: "factura_reclamacion",
-          destinatario,
-          plantilla: "factura_reclamacion",
-          empresa_id: empresaId,
-          datos: {
-            empresa: f.cliente_nombre,
-            numero: f.numero,
-            total: f.total,
-            fecha_vencimiento: f.fecha_vencimiento,
-          },
-        }).catch(err => logger.error("Email reclamacion factura:", err.message));
-        emails++;
-      }
-      await db.query(
-        `UPDATE facturas
-            SET reclamacion_envios=COALESCE(reclamacion_envios,0)+1,
-                reclamacion_ultimo_envio_at=NOW()
-          WHERE id=$1 AND empresa_id=$2`,
-        [f.id, empresaId]
-      );
-    }
-  }
-
-  res.json({ ok: true, revisadas: rows.length, reclamadas, sin_cobrar: sinCobrar, emails });
+router.post("/reclamaciones/procesar", GERENTE_O_CONTABLE, async (req,res,next) => {
+  try {res.json(await collections.processCompany(req.empresaId || req.user.empresa_id, req.body || {}));}
+  catch(error){next(error);}
+});
+router.get('/reclamaciones/envios', GERENTE_O_CONTABLE, async(req,res,next)=>{
+  try {
+    await collections.ensureSchema();
+    const {rows}=await db.query(`SELECT e.*,f.numero FROM cobros_envios e JOIN facturas f ON f.id=e.factura_id
+      WHERE e.empresa_id=$1 ORDER BY e.updated_at DESC LIMIT 100`,[req.empresaId || req.user.empresa_id]);
+    res.json(rows);
+  }catch(error){next(error);}
 });
 
 router.delete("/:id", GERENTE_O_CONTABLE, async (req, res) => {

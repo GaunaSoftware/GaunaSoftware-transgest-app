@@ -227,8 +227,9 @@ app.get("/", (_req, res) => {
 app.get("/health", async (req, res) => {
   try {
     await db.query("SELECT 1");
-    res.json({
-      status: "ok",
+    res.status(startupMigrationFailures ? 503 : 200).json({
+      status: startupMigrationFailures ? "degraded" : "ok",
+      schema: startupMigrationFailures ? "migration_failed" : "ready",
       db: "connected",
       release: RELEASE,
       audit: auditQueue.stats(),
@@ -367,7 +368,9 @@ app.use((err, req, res, next) => {
 });
 
 // ── DB migrations on startup ──────────────────────────
+let startupMigrationFailures = 0;
 function captureStartupMigrationError(error) {
+  startupMigrationFailures += 1;
   // NO abortar el arranque por una migracion fallida: un solo ALTER que falle no
   // debe tumbar toda la API (crash-loop). Se registra y se continua; los handlers
   // ya devuelven errores controlados si faltara una columna.
@@ -376,6 +379,7 @@ function captureStartupMigrationError(error) {
 
 async function applyMigrations() {
   try {
+    await db.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS fecha_descarga DATE").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS fecha_matriculacion DATE").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS fecha_itv DATE").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS fecha_seguro DATE").catch(captureStartupMigrationError);
@@ -419,6 +423,7 @@ async function applyMigrations() {
     await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS recargo_combustible_pct NUMERIC DEFAULT 0").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS iva_pct NUMERIC DEFAULT 21").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE ruta_precios_cliente ADD COLUMN IF NOT EXISTS notas TEXT").catch(captureStartupMigrationError);
+    await db.query("CREATE UNIQUE INDEX IF NOT EXISTS ruta_precios_cliente_route_customer_unique ON ruta_precios_cliente(ruta_id,cliente_id)").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_ruta_precios_cliente_cliente ON ruta_precios_cliente(cliente_id)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL").catch(captureStartupMigrationError);
     // Clientes que han adoptado un punto (ademas del dueno/general): un punto puede
@@ -859,6 +864,8 @@ WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `).catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS password_reset_required BOOLEAN NOT NULL DEFAULT false").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS rol VARCHAR(40) NOT NULL DEFAULT 'superadmin'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT true").catch(captureStartupMigrationError);
     await db.query(`
@@ -1215,6 +1222,12 @@ WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
     `).catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_colaborador_tokens_hash ON colaborador_pedido_tokens(token_hash)").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_colaborador_tokens_pedido ON colaborador_pedido_tokens(pedido_id)").catch(captureStartupMigrationError);
+    await db.query(`CREATE TABLE IF NOT EXISTS colaborador_liquidacion_tokens (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      colaborador_id UUID NOT NULL REFERENCES colaboradores(id) ON DELETE CASCADE,
+      pedido_id UUID REFERENCES pedidos(id) ON DELETE CASCADE,token_hash VARCHAR(80) NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,opened_at TIMESTAMPTZ,created_by UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`).catch(captureStartupMigrationError);
     await db.query("ALTER TABLE colaborador_liquidacion_tokens ADD COLUMN IF NOT EXISTS pedido_id UUID REFERENCES pedidos(id) ON DELETE CASCADE").catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_colaborador_liq_tokens_pedido ON colaborador_liquidacion_tokens(pedido_id) WHERE pedido_id IS NOT NULL").catch(captureStartupMigrationError);
     // nominas_emitidas table
@@ -1375,7 +1388,8 @@ WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
       logger.error("[startup] bootstrap superadmin fallo (se continua): " + e.message);
     }
 
-    logger.info("✅ DB indexes + schema ready");
+    if (startupMigrationFailures) logger.error(`[startup] ${startupMigrationFailures} migraciones fallidas; health permanece degradado.`);
+    else logger.info("DB indexes + schema ready");
   } catch (e) {
     logger.error("[startup] migration failure: " + e.message);
     throw e;
@@ -1439,6 +1453,8 @@ async function startServer() {
   await authRoutes.initializeSchema?.();
   await choferesRoutes.initializeSchema?.();
   await geocodingRoutes.initializeSchema?.();
+  await require("./services/supportSchema").ensureSupportSchema();
+  await require("./services/invoiceReview").ensureSchema();
   httpServer = app.listen(PORT, () => {
     logger.info("TransGest API lista en puerto " + PORT + " - " + process.env.NODE_ENV);
     if (process.env.ALLOW_DEMO_SEED === "true") setTimeout(autoSeedIfEmpty, 5000);
@@ -1447,6 +1463,7 @@ async function startServer() {
     try { fiscalScheduler.startScheduler(); } catch (e) { logger.warn("Fiscal: " + e.message); }
     try { pedidosRoutes.startAlbaranesReminderScheduler?.(); } catch (e) { logger.warn("Albaranes: " + e.message); }
     try { pedidosRoutes.startPedidosVencidosScheduler?.(); } catch (e) { logger.warn("Auto-incidencias: " + e.message); }
+    try { require("./services/collectionScheduler").startScheduler(); } catch(e) {logger.error("Cobros: " + e.message);}
     try { billingReminders.startScheduler(); } catch (e) { logger.warn("Billing: " + e.message); }
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
   });

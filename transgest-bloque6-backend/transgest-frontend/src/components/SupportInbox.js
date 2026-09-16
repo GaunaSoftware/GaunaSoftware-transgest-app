@@ -12,13 +12,15 @@ const labels={abierta:'Pendiente de soporte',respondida:'Respondida',resuelta:'R
 export default function SupportInbox({admin=false,request=userRequest,onClose}) {
   const [items,setItems]=useState([]),[selected,setSelected]=useState(''),[thread,setThread]=useState(null);
   const [subject,setSubject]=useState(''),[message,setMessage]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[resolve,setResolve]=useState(false);
+  const [loading,setLoading]=useState(true),[lastSync,setLastSync]=useState(null);
   const revision=useRef(0);
   const reload=useCallback(async()=>{
     const current=++revision.current;const rows=await request('');
     if(current!==revision.current)return;setItems(rows);
     if(selected){const detail=await request(`/${selected}`);if(current===revision.current)setThread(detail);}
+    if(current===revision.current){setError('');setLoading(false);setLastSync(new Date());}
   },[request,selected]);
-  useEffect(()=>{let alive=true;const update=()=>reload().catch(e=>alive&&setError(e.message));update();const timer=setInterval(update,15000);return()=>{alive=false;clearInterval(timer);};},[reload]);
+  useEffect(()=>{let alive=true;const update=()=>{if(document.visibilityState==='hidden')return;reload().catch(e=>{if(alive){setError(e.message);setLoading(false);}});};update();const timer=setInterval(update,5000);return()=>{alive=false;clearInterval(timer);};},[reload]);
   async function send(event){
     event.preventDefault();setBusy(true);setError('');
     try{
@@ -30,11 +32,12 @@ export default function SupportInbox({admin=false,request=userRequest,onClose}) 
   function select(id){revision.current++;setSelected(id);setThread(null);setMessage('');setError('');setResolve(false);}
   const content=<div className="tg-support">
     <p>Describe tu consulta. Quedará registrada y podrás leer aquí la respuesta del equipo de soporte.</p>
-    {error&&<p role="alert">{error}</p>}
+    {error&&<p role="alert">{error} <Button onClick={()=>reload().catch(e=>setError(e.message))}>Reintentar</Button></p>}
+    <small role="status">{loading?'Cargando solicitudes…':error?'Sin conexión con soporte. Los mensajes pendientes no se han enviado.':`Actualización automática · última sincronización ${lastSync?.toLocaleTimeString('es-ES') || '—'}`}</small>
     <div className="tg-support-columns"><aside aria-label="Solicitudes">
       {!admin&&<Button onClick={()=>select('')}>Nueva solicitud</Button>}
-      {!items.length&&<p>No hay solicitudes.</p>}
-      {items.map(item=><button type="button" key={item.id} aria-pressed={selected===item.id} onClick={()=>select(item.id)}><strong>{item.asunto}</strong><small>{admin?`${item.empresa_nombre} · ${item.usuario_nombre} · `:''}{labels[item.estado] || item.estado}</small><small>{new Date(item.updated_at).toLocaleString('es-ES')}</small></button>)}
+      {!loading&&!error&&!items.length&&<p>No hay solicitudes.</p>}
+      {items.map(item=><button type="button" key={item.id} aria-pressed={selected===item.id} onClick={()=>select(item.id)}><strong>{item.asunto} {item.sin_leer>0&&<span aria-label="Mensajes sin leer">· {item.sin_leer} nuevos</span>}</strong><small>{admin?`${item.empresa_nombre} · ${item.usuario_nombre} · `:''}{labels[item.estado] || item.estado}</small><small>{new Date(item.updated_at).toLocaleString('es-ES')}</small></button>)}
     </aside><section aria-label="Conversación">
       {selected&&<><h3>{thread?.asunto || 'Cargando conversación…'}</h3><div className="tg-support-messages" aria-live="polite">{thread?.mensajes?.map(m=><article className={m.desde_soporte?'from-support':''} key={m.id}><strong>{m.autor_nombre}</strong><small>{new Date(m.created_at).toLocaleString('es-ES')}</small><p>{m.mensaje}</p></article>)}</div></>}
       {(!admin||selected)&&<form onSubmit={send}>

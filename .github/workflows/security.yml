@@ -92,6 +92,8 @@ jobs:
         run: npm run daily-plan:regression
       - name: SSRF, aislamiento SQL, secretos y SMTP local
         run: npm run security:regression
+      - name: Auditoría funcional, facturación, cobros e integraciones
+        run: npm run audit:regression
 
   frontend-regression:
     name: Build y tests frontend

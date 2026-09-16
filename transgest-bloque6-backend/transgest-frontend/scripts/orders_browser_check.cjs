@@ -65,8 +65,8 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   await page.getByLabel('Buscar pedidos').fill('');await page.locator('.orders-list-card tbody tr').first().waitFor();
   const download=page.waitForEvent('download');await page.getByRole('button',{name:'Exportar',exact:true}).click();assert.equal((await download).suggestedFilename(),'pedidos-listado.csv');
   await page.getByRole('button',{name:'Planificación y bandeja IA',exact:true}).click();
-  await page.locator('.tg-pedidos-table').waitFor();
-  await page.getByRole('button',{name:'Volver al resumen de tráfico'}).click();
+  await page.locator('.orders-list-card').waitFor();assert.equal(await page.locator('.tg-pedidos-table').count(),0,'No legacy order table');
+  await page.getByRole('heading',{name:'Planificación y seguimiento',exact:true}).waitFor();await page.getByRole('button',{name:'Planificación y bandeja IA',exact:true}).click();
   checks.push('State/search/empty filters, CSV export and advanced view retains operational table');
   for(const theme of ['light','dark']){
     if(await page.locator('html').getAttribute('data-theme')!==theme)await page.locator('.tg-topbar').getByRole('button',{name:/tema|claro|oscuro/i}).click();

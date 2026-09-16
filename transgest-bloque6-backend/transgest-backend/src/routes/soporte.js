@@ -1,23 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const db = require('../services/db');
-let schema;
-function ensureSchema() {
-  if (!schema) schema = db.query(`
-    CREATE TABLE IF NOT EXISTS soporte_solicitudes (
-      id UUID PRIMARY KEY, empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
-      usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-      asunto VARCHAR(160) NOT NULL, estado VARCHAR(24) NOT NULL DEFAULT 'abierta',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
-    CREATE TABLE IF NOT EXISTS soporte_mensajes (
-      id UUID PRIMARY KEY, solicitud_id UUID NOT NULL REFERENCES soporte_solicitudes(id) ON DELETE CASCADE,
-      autor_id TEXT NOT NULL, autor_nombre TEXT NOT NULL, desde_soporte BOOLEAN NOT NULL,
-      mensaje TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
-    CREATE INDEX IF NOT EXISTS soporte_usuario_idx ON soporte_solicitudes(empresa_id,usuario_id,updated_at);
-    CREATE INDEX IF NOT EXISTS soporte_mensajes_idx ON soporte_mensajes(solicitud_id,created_at);
-  `).catch(error => { schema = null; throw error; });
-  return schema;
-}
+const { ensureSupportSchema: ensureSchema } = require('../services/supportSchema');
 const validId = value => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value || '');
 function createSupportRouter(admin = false) {
   const router = express.Router();
@@ -31,8 +15,11 @@ function createSupportRouter(admin = false) {
   const condition = admin ? '' : ' AND s.empresa_id=$2 AND s.usuario_id=$3';
   const wrap = fn => async (req,res,next) => { try { await fn(req,res); } catch(error) { next(error); } };
   router.get('/',wrap(async(req,res) => {
-    const {rows} = await db.query(`SELECT s.*, e.nombre AS empresa_nombre, u.nombre AS usuario_nombre
-      FROM soporte_solicitudes s JOIN empresas e ON e.id=s.empresa_id JOIN usuarios u ON u.id=s.usuario_id
+    const {rows} = await db.query(`SELECT s.*, e.nombre AS empresa_nombre, u.nombre AS usuario_nombre,
+      (SELECT COUNT(*)::int FROM soporte_mensajes m WHERE m.solicitud_id=s.id
+        AND m.desde_soporte=${admin ? 'false' : 'true'}
+        AND m.created_at > COALESCE(s.${admin ? 'soporte_leido_at' : 'usuario_leido_at'}, 'epoch'::timestamptz)) AS sin_leer
+      FROM soporte_solicitudes s JOIN empresas e ON e.id=s.empresa_id LEFT JOIN usuarios u ON u.id=s.usuario_id
       ${admin ? '' : 'WHERE s.empresa_id=$1 AND s.usuario_id=$2'} ORDER BY s.updated_at DESC LIMIT 200`,scope(req));
     res.json(rows);
   }));
@@ -52,6 +39,8 @@ function createSupportRouter(admin = false) {
     const {rows} = await db.query(`SELECT s.* FROM soporte_solicitudes s WHERE s.id=$1${condition}`,[req.params.id,...scope(req)]);
     if (!rows.length) return res.status(404).json({error:'Solicitud no encontrada'});
     const messages = await db.query('SELECT * FROM soporte_mensajes WHERE solicitud_id=$1 ORDER BY created_at,id',[req.params.id]);
+    const last = messages.rows.at(-1)?.created_at;
+    if (last) await db.query(`UPDATE soporte_solicitudes SET ${admin ? 'soporte_leido_at' : 'usuario_leido_at'}=$2 WHERE id=$1`,[req.params.id,last]);
     res.json({...rows[0],mensajes:messages.rows});
   }));
   router.post('/:id/mensajes',wrap(async(req,res) => {

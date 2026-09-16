@@ -14,7 +14,9 @@ function getTransporter(config = null, cacheKey = "global") {
         platformTransporter = nodemailer.createTransport({
           host: config.smtp_host,
           port: parseInt(config.smtp_port || "587"),
-          secure: !!config.smtp_secure || String(config.smtp_port) === "465",
+          secure: String(config.smtp_port || "587") === "587" ? false : (!!config.smtp_secure || String(config.smtp_port) === "465"),
+          requireTLS: String(config.smtp_port || "587") === "587",
+          connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 30000,
           auth: config.smtp_user || config.smtp_pass ? {
             user: config.smtp_user || "",
             pass: config.smtp_pass || "",
@@ -27,7 +29,9 @@ function getTransporter(config = null, cacheKey = "global") {
     return nodemailer.createTransport({
       host: config.smtp_host,
       port: parseInt(config.smtp_port || "587"),
-      secure: !!config.smtp_secure || String(config.smtp_port) === "465",
+      secure: String(config.smtp_port || "587") === "587" ? false : (!!config.smtp_secure || String(config.smtp_port) === "465"),
+          requireTLS: String(config.smtp_port || "587") === "587",
+          connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 30000,
       auth: config.smtp_user || config.smtp_pass ? {
         user: config.smtp_user || "",
         pass: config.smtp_pass || "",
@@ -40,6 +44,8 @@ function getTransporter(config = null, cacheKey = "global") {
       host:   process.env.SMTP_HOST,
       port:   parseInt(process.env.SMTP_PORT || "587"),
       secure: process.env.SMTP_PORT === "465",
+      requireTLS: (process.env.SMTP_PORT || "587") === "587",
+      connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 30000,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
@@ -177,14 +183,14 @@ async function savePlatformEmailConfig(data = {}, userId = null) {
   const newPass = String(data.smtp_pass || "").trim();
   const encryptedPass = newPass ? encryptSecret(newPass) : current.rows[0]?.smtp_pass_encrypted || null;
   const port = Number(data.smtp_port || 587);
-  const secure = data.smtp_secure !== undefined ? !!data.smtp_secure : String(data.smtp_port) === "465";
+  const secure = String(data.smtp_port || "587") === "587" ? false : (String(data.smtp_port) === "465" || !!data.smtp_secure);
   await db.query(`
     INSERT INTO platform_smtp_config
       (id,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_encrypted,smtp_from,smtp_from_nombre,reply_to,reset_notify_email,activo,updated_by,updated_at)
     VALUES (true,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
     ON CONFLICT (id) DO UPDATE SET
       smtp_host=$1,smtp_port=$2,smtp_secure=$3,smtp_user=$4,smtp_pass_encrypted=$5,smtp_from=$6,smtp_from_nombre=$7,reply_to=$8,
-      reset_notify_email=$9,activo=$10,updated_by=$11,updated_at=NOW()
+      reset_notify_email=$9,activo=$10,updated_by=$11,updated_at=NOW(),last_test_at=NULL,last_test_ok=NULL,last_error=NULL
   `, [
     String(data.smtp_host || "").trim(),
     Number.isFinite(port) ? port : 587,
@@ -246,7 +252,7 @@ async function saveEmpresaEmailConfig(empresaId, data = {}, userId = null) {
   const newPass = String(data.smtp_pass || "").trim();
   const encryptedPass = newPass ? encryptSecret(newPass) : current.rows[0]?.smtp_pass_encrypted || null;
   const port = Number(data.smtp_port || 587);
-  const secure = data.smtp_secure !== undefined ? !!data.smtp_secure : String(data.smtp_port) === "465";
+  const secure = String(data.smtp_port || "587") === "587" ? false : (String(data.smtp_port) === "465" || !!data.smtp_secure);
   await db.query(`
     INSERT INTO empresa_smtp_config
       (empresa_id,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_encrypted,smtp_from,smtp_from_nombre,reply_to,
@@ -377,7 +383,33 @@ function htmlEscape(value) {
     .replace(/'/g, "&#039;");
 }
 
+function htmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 const PLANTILLAS = {
+  factura_reclamacion: (data = {}) => ({
+    asunto: `Recordatorio de pago - Factura ${String(data.numero || "").replace(/[\r\n]/g, " ")}`,
+    html: `<div style="${BASE_STYLE}">
+      ${HEADER("Recordatorio de pago")}
+      <div style="background:#fff;padding:24px 28px;">
+        <p>Estimado cliente ${htmlEscape(data.cliente || "")}:</p>
+        <p>Según nuestros registros, la factura <strong>${htmlEscape(data.numero || "")}</strong>
+        de ${htmlEscape(data.empresa || "TransGest")} continúa pendiente de pago.</p>
+        <p>Importe: <strong>${htmlEscape(Number(data.total || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }))} EUR</strong></p>
+        <p>Vencimiento: ${htmlEscape(data.fecha_vencimiento ? new Date(data.fecha_vencimiento).toLocaleDateString("es-ES") : "-")}</p>
+        <p>Si ya ha realizado el pago, contacte con nuestro departamento de administración
+        para que podamos comprobarlo y actualizar el estado de la factura.</p>
+      </div>
+      ${FOOTER}
+    </div>`,
+  }),
+
   solicitud_reset_password: (data) => ({
     asunto: `Solicitud de restablecer contraseña — ${data.identifier || ""}`,
     html: `<div style="${BASE_STYLE}">

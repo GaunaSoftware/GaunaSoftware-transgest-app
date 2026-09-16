@@ -52,6 +52,7 @@ async function main() {
     assert.ok(await page.locator('.intelligence').evaluate(e=>e.scrollWidth<=e.clientWidth+1));
     await page.screenshot({path:path.join(out,'intelligence-mobile.png')});
     assert.deepEqual(errors,[]);
+    if (process.env.TRANSGEST_WEB_ONLY==='1') { console.log('PASS: Intelligence web responsive and sources. Electron deliberately not run in web-only mode.');return; }
     const exe=process.env.TRANSGEST_TEST_EXE;
     desktop=await _electron.launch({executablePath:exe || require('electron'),args:[...(exe ? [] : [path.resolve(__dirname,'../electron/main.js')]),'--user-data-dir='+path.join(out,'electron-profile')],env:{...process.env,TRANSGEST_DESKTOP_TEST:'1'},timeout:60000});
     const win=await desktop.firstWindow();

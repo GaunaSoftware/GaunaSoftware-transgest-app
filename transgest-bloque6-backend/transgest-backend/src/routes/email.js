@@ -3,77 +3,13 @@ const express = require("express");
 const db      = require("../services/db");
 const { authenticate, SOLO_GERENTE } = require("../middleware/auth");
 const { enviarEmail, getEmpresaEmailConfig, saveEmpresaEmailConfig, markEmailConfigTest } = require("../services/email");
+const { CUSTOMER_INVOICE_DOCUMENT_SCOPE } = require("../services/invoiceCustomerDocuments");
+const { buildFacturaPdfBuffer } = require("../services/invoicePdf");
 const router  = express.Router();
 router.use(authenticate);
 const EID = req => req.empresaId || req.user?.empresa_id;
 
-function safePdfText(value) {
-  return String(value ?? "")
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)")
-    .replace(/[\r\n]+/g, " ")
-    .slice(0, 120);
-}
-
-function formatClienteDireccion(factura = {}) {
-  const lineaLocalidad = [factura.cliente_cp, factura.cliente_ciudad].filter(Boolean).join(" ");
-  return [factura.cliente_direccion, lineaLocalidad, factura.cliente_pais].filter(Boolean).join(", ");
-}
-
-function buildSimpleFacturaPdfBuffer(factura = {}, lineas = [], empresa = {}) {
-  const clienteDireccion = formatClienteDireccion(factura);
-  const clienteEmail = factura.cliente_email_facturacion || factura.cliente_email || "";
-  const lines = [
-    `${empresa.razon_social || empresa.nombre || "TransGest"}`,
-    `FACTURA ${factura.numero || ""}`,
-    factura.referencia_cliente ? `Referencia: ${factura.referencia_cliente}` : "",
-    `Cliente: ${factura.cliente_nombre || ""}`,
-    factura.cliente_cif ? `CIF/NIF: ${factura.cliente_cif}` : "",
-    clienteDireccion ? `Direccion: ${clienteDireccion}` : "",
-    factura.cliente_contacto ? `Contacto: ${factura.cliente_contacto}` : "",
-    factura.cliente_telefono ? `Telefono: ${factura.cliente_telefono}` : "",
-    clienteEmail ? `Email: ${clienteEmail}` : "",
-    `Fecha: ${factura.fecha ? new Date(factura.fecha).toLocaleDateString("es-ES") : ""}`,
-    `Vencimiento: ${factura.fecha_vencimiento ? new Date(factura.fecha_vencimiento).toLocaleDateString("es-ES") : ""}`,
-    "",
-    "Conceptos:",
-    ...lineas.slice(0, 18).map((l) => `${l.concepto || "Servicio"}  ${Number(l.cantidad || 1)} x ${Number(l.precio_unit || 0).toFixed(2)} EUR`),
-    "",
-    `Base imponible: ${Number(factura.base_imponible || 0).toFixed(2)} EUR`,
-    `IVA: ${Number(factura.cuota_iva || 0).toFixed(2)} EUR`,
-    `TOTAL: ${Number(factura.total || 0).toFixed(2)} EUR`,
-    empresa.iban ? `IBAN: ${empresa.iban}` : "",
-  ].filter((line) => line !== null && line !== undefined);
-  const content = [
-    "BT",
-    "/F1 11 Tf",
-    "50 790 Td",
-    "14 TL",
-    ...lines.map((line, idx) => `${idx === 0 ? "" : "T*"}(${safePdfText(line)}) Tj`),
-    "ET",
-  ].join("\n");
-  const objects = [
-    "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
-    "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
-    "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
-    "4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
-    `5 0 obj << /Length ${Buffer.byteLength(content, "utf8")} >> stream\n${content}\nendstream endobj`,
-  ];
-  let pdf = "%PDF-1.4\n";
-  const offsets = [0];
-  for (const obj of objects) {
-    offsets.push(Buffer.byteLength(pdf, "utf8"));
-    pdf += obj + "\n";
-  }
-  const xrefAt = Buffer.byteLength(pdf, "utf8");
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  for (let i = 1; i < offsets.length; i += 1) {
-    pdf += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
-  }
-  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF`;
-  return Buffer.from(pdf, "utf8");
-}
+const ESTADOS_ENVIO_FACTURA = ['emitida', 'enviada', 'cobrada', 'vencida', 'reclamada', 'sin_cobrar'];
 
 async function getEmpresaPerfilEmail(empresaId) {
   const { rows } = await db.query("SELECT nombre, cfg_precios FROM empresas WHERE id=$1", [empresaId]);
@@ -84,7 +20,7 @@ async function getEmpresaPerfilEmail(empresaId) {
 
 async function cargarFacturaEmailContext(facturaId, empresaId) {
   const { rows } = await db.query(
-    `SELECT f.*, c.nombre AS cliente_nombre, c.cif AS cliente_cif,
+    `SELECT f.*, f.updated_at::text AS envio_version, c.nombre AS cliente_nombre, c.cif AS cliente_cif,
             c.direccion AS cliente_direccion, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, c.pais AS cliente_pais,
             c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion,
             c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
@@ -98,7 +34,10 @@ async function cargarFacturaEmailContext(facturaId, empresaId) {
   if (!factura) return null;
   const [lineas, facturaDocs, pedidos, pedidoDocs, empresa] = await Promise.all([
     db.query("SELECT concepto,cantidad,precio_unit FROM factura_lineas WHERE factura_id=$1 ORDER BY orden,id", [factura.id]),
-    db.query("SELECT pedido_doc_id,pedido_id,nombre,file_base64,file_mime FROM factura_docs WHERE factura_id=$1 AND empresa_id=$2 ORDER BY created_at DESC", [factura.id, empresaId]).catch(() => ({ rows: [] })),
+    db.query(`SELECT fd.pedido_doc_id,fd.pedido_id,fd.nombre,fd.file_base64,fd.file_mime
+      FROM factura_docs fd WHERE fd.factura_id=$1 AND fd.empresa_id=$2
+        AND ${CUSTOMER_INVOICE_DOCUMENT_SCOPE}
+      ORDER BY fd.created_at DESC,fd.id`, [factura.id, empresaId]),
     db.query(
       `SELECT p.id, p.numero, p.referencia_cliente, p.origen, p.destino,
               COUNT(pd.id) FILTER (
@@ -110,17 +49,18 @@ async function cargarFacturaEmailContext(facturaId, empresaId) {
                    OR LOWER(COALESCE(pd.nombre,'')) LIKE '%cmr%'
               )::int AS albaranes_count
          FROM factura_pedidos fp
-         JOIN pedidos p ON p.id=fp.pedido_id AND p.empresa_id=$2
+         JOIN pedidos p ON p.id=fp.pedido_id AND p.empresa_id=$2 AND p.cliente_id=$3
          LEFT JOIN pedido_docs pd ON pd.pedido_id=p.id AND pd.empresa_id=p.empresa_id
         WHERE fp.factura_id=$1
         GROUP BY p.id,p.numero,p.referencia_cliente,p.origen,p.destino
         ORDER BY p.numero`,
-      [factura.id, empresaId]
-    ).catch(() => ({ rows: [] })),
+      [factura.id, empresaId, factura.cliente_id]
+    ),
     db.query(
       `SELECT d.id AS pedido_doc_id, d.pedido_id, d.nombre, d.file_base64, d.file_mime
          FROM factura_pedidos fp
-         JOIN pedido_docs d ON d.pedido_id=fp.pedido_id AND d.empresa_id=$2
+         JOIN pedidos p ON p.id=fp.pedido_id AND p.empresa_id=$2 AND p.cliente_id=$3
+         JOIN pedido_docs d ON d.pedido_id=p.id AND d.empresa_id=p.empresa_id
         WHERE fp.factura_id=$1
           AND (
             LOWER(COALESCE(d.tipo,'')) LIKE '%albar%'
@@ -131,8 +71,8 @@ async function cargarFacturaEmailContext(facturaId, empresaId) {
             OR LOWER(COALESCE(d.nombre,'')) LIKE '%cmr%'
           )
         ORDER BY d.created_at DESC`,
-      [factura.id, empresaId]
-    ).catch(() => ({ rows: [] })),
+      [factura.id, empresaId, factura.cliente_id]
+    ),
     getEmpresaPerfilEmail(empresaId),
   ]);
   const seen = new Set();
@@ -152,6 +92,7 @@ function buildFacturaEmailPreflight(ctx, destinatario = "") {
   const pedidos = Array.isArray(ctx?.pedidos) ? ctx.pedidos : [];
   const issues = [];
   const warnings = [];
+  if (!ESTADOS_ENVIO_FACTURA.includes(factura.estado)) issues.push('El estado de la factura no permite enviarla.');
   if (!String(destinatario || "").trim()) issues.push("El cliente no tiene email de facturacion configurado.");
   if (!String(factura.numero || "").trim()) issues.push("La factura no tiene numero.");
   if (!lineas.length) issues.push("La factura no tiene lineas.");
@@ -250,7 +191,7 @@ router.post("/factura/:id", async (req, res) => {
     if (!destinatario) return res.status(400).json({ error: "El cliente no tiene email de facturacion configurado" });
     const attachments = [{
       filename: `Factura-${String(factura.numero || factura.id).replace(/[^\w.-]+/g, "_")}.pdf`,
-      content: buildSimpleFacturaPdfBuffer(factura, lineas, empresa),
+      content: await buildFacturaPdfBuffer(factura, lineas, empresa),
       contentType: "application/pdf",
     }];
     for (const doc of docs.slice(0, 12)) {
@@ -262,6 +203,11 @@ router.post("/factura/:id", async (req, res) => {
         contentType: doc.file_mime || "application/octet-stream",
       });
     }
+    const vigente = await db.query(`SELECT id FROM facturas
+      WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3
+        AND estado::text=ANY($4::text[]) AND updated_at::text IS NOT DISTINCT FROM $5`,
+      [factura.id, empresaId, factura.cliente_id, ESTADOS_ENVIO_FACTURA, factura.envio_version]);
+    if (!vigente.rows[0]) return res.status(409).json({error:'La factura ha cambiado. Revisala antes de enviarla.'});
     const result = await enviarEmail({
       trigger: "factura_manual",
       destinatario,
@@ -284,11 +230,16 @@ router.post("/factura/:id", async (req, res) => {
         adjuntos: attachments.map(a => ({ filename: a.filename, contentType: a.contentType })).slice(0, 20),
       },
     });
-    const nextEstado = ["cobrada", "rectificada"].includes(factura.estado) ? factura.estado : "enviada";
-    if (nextEstado !== factura.estado) {
-      await db.query("UPDATE facturas SET estado=$3, updated_at=NOW() WHERE id=$1 AND empresa_id=$2", [factura.id, empresaId, nextEstado]);
+    if (!result?.simulado && !result?.messageId) {
+      return res.status(502).json({error:'No se pudo confirmar el envio. Revisa el historial antes de reintentar.'});
     }
-    res.json({ ok: true, estado: nextEstado, adjuntos: attachments.length, simulado: !!result?.simulado });
+    if (!result.simulado) {
+      await db.query(`UPDATE facturas SET estado='enviada', updated_at=NOW()
+        WHERE id=$1 AND empresa_id=$2 AND estado='emitida'
+          AND updated_at::text IS NOT DISTINCT FROM $3`, [factura.id, empresaId, factura.envio_version]);
+    }
+    const actual = await db.query('SELECT estado FROM facturas WHERE id=$1 AND empresa_id=$2', [factura.id, empresaId]);
+    res.json({ ok: true, estado: actual.rows[0]?.estado || factura.estado, adjuntos: attachments.length, simulado: !!result.simulado });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }

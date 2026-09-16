@@ -171,7 +171,7 @@ function TabEquipos({ chofer, tallerState, onPersistTallerState }) {
     }));
   }
 
-  function registrarEntrega() {
+  async function registrarEntrega() {
     if (selItems.length === 0) { notify("Selecciona al menos un articulo", "warning"); return; }
     if (!String(firmaNombre || "").trim()) { notify("Indica quien recibe el material", "warning"); return; }
     if (!firmaAceptada) { notify("Confirma la entrega para generar el documento", "warning"); return; }
@@ -213,11 +213,12 @@ function TabEquipos({ chofer, tallerState, onPersistTallerState }) {
       ...(tallerState?.entregas_equipos_choferes || {}),
       [chofer.id]: upd,
     };
-    onPersistTallerState?.({
+    const saved = await onPersistTallerState?.({
       ...(tallerState || {}),
       stock: actualizado,
       entregas_equipos_choferes: entregasMap,
     });
+    if (!saved) return;
     setEntregas(upd);
     setSelItems([]); setObs(""); setFirmaAceptada(false); setFormando(false);
   }
@@ -980,15 +981,13 @@ export default function Choferes() {
   }, []);
 
   const persistTallerState = useCallback(async (nextState) => {
-    setTallerState({
-      ...(nextState || {}),
-      stock: Array.isArray(nextState?.stock) ? nextState.stock : [],
-      entregas_equipos_choferes: nextState?.entregas_equipos_choferes || {},
-    });
     try {
-      await guardarTallerEstado(nextState);
+      const saved = await guardarTallerEstado(nextState);
+      setTallerState(saved);
+      return true;
     } catch (e) {
-      notify("La entrega se ha actualizado en pantalla, pero no se pudo sincronizar con la base de datos: " + e.message, "warning");
+      notify("No se ha guardado la entrega. " + e.message, "error");
+      return false;
     }
   }, []);
 

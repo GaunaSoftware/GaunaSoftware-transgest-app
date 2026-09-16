@@ -536,8 +536,10 @@ router.post("/importar", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes")
     let creadas = 0;
     let actualizadas = 0;
     const detalles = [];
+    await db.transaction(async client => {
+      await client.query('SELECT id FROM clientes WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [clienteId,empresaId]);
     for (const r of parsed.slice(0, 500)) {
-      const existing = await db.query(
+      const existing = await client.query(
         `SELECT id FROM rutas
           WHERE UPPER(TRIM(origen))=UPPER(TRIM($1))
             AND UPPER(TRIM(destino))=UPPER(TRIM($2))
@@ -551,13 +553,13 @@ router.post("/importar", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes")
       let rutaId = existing.rows[0]?.id;
       if (rutaId) {
         actualizadas += 1;
-        await db.query(
+        await client.query(
           `UPDATE rutas SET km=$1, tipo_vehiculo=$2, tarifa_tipo=$3, precio_base=$4, minimo_facturable=$5, minimo_unidades=$6, recargo_combustible_pct=$7, empresa_id=$8, cliente_id=$9
             WHERE id=$10`,
           [r.km, r.tipo_vehiculo, r.tarifa_tipo, r.precio_base, r.minimo_facturable, r.minimo_unidades, r.recargo_combustible_pct, empresaId, clienteId, rutaId]
         );
       } else {
-        const inserted = await db.query(
+        const inserted = await client.query(
           `INSERT INTO rutas (origen,destino,km,empresa_id,cliente_id,tipo_vehiculo,tarifa_tipo,precio_base,minimo_facturable,minimo_unidades,recargo_combustible_pct)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
           [r.origen, r.destino, r.km, empresaId, clienteId, r.tipo_vehiculo, r.tarifa_tipo, r.precio_base, r.minimo_facturable, r.minimo_unidades, r.recargo_combustible_pct]
@@ -565,7 +567,7 @@ router.post("/importar", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes")
         rutaId = inserted.rows[0].id;
         creadas += 1;
       }
-      await db.query(
+      await client.query(
         `INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct)
          VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (ruta_id,cliente_id) DO UPDATE SET precio=EXCLUDED.precio, tarifa_tipo=EXCLUDED.tarifa_tipo, minimo_facturable=EXCLUDED.minimo_facturable, minimo_unidades=EXCLUDED.minimo_unidades, recargo_combustible_pct=EXCLUDED.recargo_combustible_pct`,
@@ -573,6 +575,7 @@ router.post("/importar", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes")
       );
       detalles.push({ ...r, ruta_id: rutaId });
     }
+    });
     res.json({ ok: true, creadas, actualizadas, total: detalles.length, rutas: detalles });
   } catch (e) {
     res.status(500).json({ error: e.message });

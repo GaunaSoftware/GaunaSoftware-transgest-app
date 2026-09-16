@@ -56,6 +56,10 @@ function saTokenRem(){
   try { sessionStorage.removeItem("tms_sa_token"); } catch {}
   try { localStorage.removeItem("tms_sa_token"); } catch {}
 }
+function saNeedsPasswordChange(){
+  try { return JSON.parse(atob(saToken().split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).password_reset_required === true; }
+  catch { return false; }
+}
 
 async function saFetch(path, opts={}){
   const res = await fetch(`${BASE}/api/v1/superadmin${path}`,{
@@ -69,6 +73,7 @@ async function saFetch(path, opts={}){
     throw new Error("Sesion de superadmin caducada. Vuelve a iniciar sesion.");
   }
   if (res.status === 403) {
+    if(data.code==='PASSWORD_CHANGE_REQUIRED'){saTokenRem();throw new Error('Sesion de superadmin pendiente de renovar. Inicia sesión y actualiza tu contraseña.');}
     throw new Error(data.error || "No tienes permisos para realizar esta accion de superadmin.");
   }
   if(!res.ok) throw new Error(data.error||"Error");
@@ -120,16 +125,24 @@ function buildEmpresaImplantacion(e = {}) {
 
 // Section
 function LoginSA({ onLogin }){
+  const [resetRequired,setResetRequired]=useState(false),[newPassword,setNewPassword]=useState(''),[repeatPassword,setRepeatPassword]=useState('');
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
   async function login(){
     setLoading(true); setErr("");
     try{
+      if(resetRequired){
+        if(newPassword!==repeatPassword){setErr('Las contraseñas no coinciden.');return;}
+        await saFetch('/mi-password',{method:'POST',body:{password_actual:pass,password_nueva:newPassword}});
+        saTokenRem();setResetRequired(false);setPass('');setNewPassword('');setRepeatPassword('');setErr('Contraseña actualizada. Inicia sesión con la nueva contraseña.');return;
+      }
       const res=await fetch(`${BASE}/api/v1/superadmin/login`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password:pass})});
       const data=await res.json();
       if(!res.ok){setErr(data.error);return;}
-      saTokenSet(data.token); onLogin(data.nombre);
-    }catch{setErr("Error de conexion");}
+      saTokenSet(data.token);
+      if(data.password_reset_required){setResetRequired(true);setErr('Debes sustituir la contraseña inicial antes de acceder al panel. Usa 12 caracteres o más con mayúsculas, minúsculas y números.');return;}
+      onLogin(data.nombre);
+    }catch(e){setErr(e.message || "No se ha podido conectar. Inténtalo de nuevo.");}
     finally{setLoading(false);}
   }
   const inp={width:"100%",background:"#1a2035",border:"1px solid #28344f",color:"#e2e8f0",padding:"11px 14px",borderRadius:9,fontFamily:"'DM Sans',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box"};
@@ -147,13 +160,14 @@ function LoginSA({ onLogin }){
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:22,color:"#e2e8f0",textAlign:"center",marginBottom:6}}>TransGestAdmin</div>
         <div style={{textAlign:"center",fontSize:13,color:"#64748b",marginBottom:24}}>Panel de administracion</div>
         {err&&<div style={{background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,padding:"9px 12px",color:"#fca5a5",fontSize:13,marginBottom:14}}>{err}</div>}
+        {resetRequired&&<><label style={lbl}>Nueva contraseña</label><input aria-label="Nueva contraseña administrativa" type="password" autoComplete="new-password" style={inp} value={newPassword} onChange={e=>setNewPassword(e.target.value)}/><label style={lbl}>Repetir nueva contraseña</label><input aria-label="Repetir nueva contraseña administrativa" type="password" autoComplete="new-password" style={inp} value={repeatPassword} onChange={e=>setRepeatPassword(e.target.value)}/></>}
         <label style={lbl}>Email</label>
         <input style={inp} type="email" value={email} onChange={e=>setEmail(e.target.value)} autoFocus/>
         <label style={lbl}>Contrasena</label>
         <input style={inp} type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()}/>
         <button onClick={login} disabled={loading}
           style={{width:"100%",padding:"12px",borderRadius:9,border:"none",background:"#3b6ef5",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",marginTop:20}}>
-          {loading?"Entrando...":"Entrar"}
+          {loading?"Comprobando…":resetRequired?"Actualizar contraseña":"Entrar"}
         </button>
       </div>
     </div>
@@ -639,14 +653,14 @@ function CorreoGaunaAdmin({ saFetchFn }) {
         Correo Gauna
       </div>
       <div style={{ fontSize:12, color:"#94a3b8", marginBottom:14 }}>
-        Se usa para invitaciones, avisos de pago y comunicaciones de plataforma. Las claves se configuran en Render con variables GAUNA_SMTP_*.
+        Se usa para invitaciones, avisos de pago y comunicaciones de plataforma. Guarda aqui el servidor de correo y comprueba el envio. Las variables del servidor se usan como respaldo si no hay una configuracion activa.
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:12}}>
         {[
-          ["Estado", status?.ok ? "Configurado" : "Simulado", status?.ok ? "#34d399" : "#fbbf24"],
+          ["Estado", status?.verified ? "Envio verificado" : status?.ok ? "Configurado, sin verificar" : "Sin configurar", status?.ok ? "#34d399" : "#fbbf24"],
           ["Origen", status?.provider || "-", "#94a3b8"],
           ["Remitente", status?.config?.smtp_from || "-", "#94a3b8"],
-          ["Host", status?.config?.smtp_host ? "OK" : "Falta", status?.config?.smtp_host ? "#34d399" : "#f87171"],
+          ["Servidor", status?.config?.smtp_host || "Falta", status?.config?.smtp_host ? "#34d399" : "#f87171"],
         ].map(([label,value,color])=>(
           <div key={label} style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:8,padding:"10px 12px"}}>
             <div style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase",letterSpacing:".06em"}}>{label}</div>
@@ -654,11 +668,11 @@ function CorreoGaunaAdmin({ saFetchFn }) {
           </div>
         ))}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1.2fr .45fr .55fr 1fr",gap:"0 10px",alignItems:"end",marginBottom:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:"0 10px",alignItems:"end",marginBottom:12}}>
         <div><label style={label}>SMTP host</label><input style={input} value={form.smtp_host} onChange={f("smtp_host")} placeholder="smtp.tudominio.com"/></div>
         <div><label style={label}>Puerto</label><input style={input} value={form.smtp_port} onChange={f("smtp_port")} placeholder="587"/></div>
         <label style={{...label,display:"flex",alignItems:"center",gap:8,marginTop:28}}>
-          <input type="checkbox" checked={form.smtp_secure} onChange={f("smtp_secure")} /> SSL
+          <select aria-label="Cifrado SMTP" style={input} value={String(form.smtp_port)==="465"?"tls":"starttls"} onChange={e=>setForm(p=>({...p,smtp_port:e.target.value==="tls"?"465":"587",smtp_secure:e.target.value==="tls"}))}><option value="starttls">STARTTLS (587)</option><option value="tls">TLS (465)</option></select>
         </label>
         <div><label style={label}>Usuario</label><input style={input} value={form.smtp_user} onChange={f("smtp_user")} placeholder="correo@gauna..."/></div>
         <div><label style={label}>Contrasena SMTP</label><input type="password" style={input} value={form.smtp_pass} onChange={f("smtp_pass")} placeholder={status?.config?.smtp_pass_masked ? "Guardada. Rellena solo si cambia" : "Password SMTP"}/></div>
@@ -1799,7 +1813,7 @@ function IntegracionesAdmin({ saFetchFn }) {
                 <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,marginBottom:10}}>Selecciona un proveedor global, configura su clave cifrada y verifica la conexion real.</div>
                 <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor general</label>
                 <select style={input} value={provider} onChange={e=>setProvider(e.target.value)}>
-                  {companyProviderOptions.map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
+                  <optgroup label="Mapas y cálculo de rutas">{companyProviderOptions.filter(p=>!['openai','anthropic','ai_generic'].includes(p)).map(p=><option key={p} value={p}>{labels[p] || p}</option>)}</optgroup><optgroup label="Inteligencia artificial">{companyProviderOptions.filter(p=>['openai','anthropic','ai_generic'].includes(p)).map(p=><option key={p} value={p}>{labels[p] || p}{p==='openai'?' · Intelligence':''}</option>)}</optgroup>
                 </select>
                 <div style={{...integrationButtonRow,marginTop:10}}>
                   <button onClick={()=>guardarGlobal(provider)} style={{...SaaS.btnOk,height:36}}>{providerGlobalOk ? "Sustituir clave" : "Configurar clave"}</button>
@@ -1855,8 +1869,8 @@ function IntegracionesAdmin({ saFetchFn }) {
           <div style={integrationSubcard}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
               <div>
-                <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Mapas, rutas e IA</div>
-                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>Proveedor operativo de esta empresa.</div>
+                <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>{['openai','anthropic','ai_generic'].includes(provider)?'Inteligencia artificial':'Mapas y rutas'}</div>
+                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>{provider==='openai'?'Esta clave se utiliza en Intelligence. Su cuota de empresa también debe ser mayor que cero.':['anthropic','ai_generic'].includes(provider)?'Este conector corresponde al motor de IA general; no cambia el proveedor de Intelligence.':'Esta clave corresponde al cálculo de rutas y distancias.'}</div>
               </div>
               <span style={integrationStatusChip(providerReady, !providerReady)}>{providerEffectiveSource}</span>
             </div>
@@ -1864,7 +1878,7 @@ function IntegracionesAdmin({ saFetchFn }) {
               <div>
                 <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor</label>
                 <select style={input} value={provider} onChange={e=>setProvider(e.target.value)}>
-                  {companyProviderOptions.map(p => <option key={p} value={p}>{labels[p] || p}</option>)}
+                  <optgroup label="Mapas y cálculo de rutas">{companyProviderOptions.filter(p=>!['openai','anthropic','ai_generic'].includes(p)).map(p=><option key={p} value={p}>{labels[p] || p}</option>)}</optgroup><optgroup label="Inteligencia artificial">{companyProviderOptions.filter(p=>['openai','anthropic','ai_generic'].includes(p)).map(p=><option key={p} value={p}>{labels[p] || p}{p==='openai'?' · Intelligence':''}</option>)}</optgroup>
                 </select>
               </div>
               <div>
@@ -2458,9 +2472,11 @@ function IntegracionesAdmin({ saFetchFn }) {
 function SaludSaaS({ saFetchFn, onGestionar, onEntrar }) {
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [technical,setTechnical]=useState(null);
   const [loading, setLoading] = useState(true);
   const cargar = useCallback(() => {
     setLoading(true);
+    saFetchFn("/salud/tecnica").then(setTechnical).catch(()=>setTechnical({error:"No se pudo consultar el estado técnico."}));
     Promise.all([
       saFetchFn("/salud"),
       saFetchFn("/salud/resumen").catch(() => null),
@@ -2511,8 +2527,21 @@ function SaludSaaS({ saFetchFn, onGestionar, onEntrar }) {
   }
   return (
     <div style={SaaS.card}>
+      <section aria-label="Estado técnico" style={{marginBottom:24}}>
+        <div style={{...SaaS.title,marginBottom:8}}>Estado técnico</div>
+        <p style={{fontSize:12,color:"#94a3b8"}}>Pruebas registradas y comprobaciones de esta instancia. Sin pruebas recientes no se certifica el servicio como operativo.</p>
+        <button style={SaaS.btn} onClick={cargar} disabled={loading}>Actualizar comprobaciones</button>
+        {technical?.error&&<p role="alert">{technical.error}</p>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,260px),1fr))",gap:10,marginTop:12}}>
+          {(technical?.checks||[]).map(check=><article key={check.key} style={{padding:12,border:"1px solid #334155",borderRadius:10}}>
+            <strong>{check.label}</strong><span style={{display:"block",marginTop:6,color:check.state==='error'?'#fca5a5':check.state==='ok'?'#6ee7b7':'#fcd34d'}}>{({ok:'Comprobado',error:'Requiere atención',recorded:'Prueba registrada',pending:'Pendiente de verificar'})[check.state]}</span>
+            <p style={{fontSize:12,lineHeight:1.5}}>{check.detail}</p><small>{check.checked_at?new Date(check.checked_at).toLocaleString('es-ES'):'Sin fecha de prueba'}</small>
+          </article>)}
+        </div>
+      </section>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
-        <div style={{...SaaS.title,marginBottom:0}}>Salud de empresas</div>
+        <div style={{...SaaS.title,marginBottom:0}}>Implantación de empresas</div>
+        <p>El porcentaje mide configuración y actividad comercial. No certifica las API, el envío de correo ni la restauración de copias. Verifica cada conexión en Integraciones.</p>
         <button onClick={descargarInforme} style={{...SaaS.btn,background:"rgba(59,130,246,.14)",color:"#93c5fd",border:"1px solid rgba(59,130,246,.25)"}}>Informe HTML</button>
       </div>
       {loading ? <div style={SaaS.empty}>Cargando...</div> : (
@@ -2577,7 +2606,7 @@ function SaludSaaS({ saFetchFn, onGestionar, onEntrar }) {
                   <td style={SaaS.td}>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                       <button onClick={()=>onEntrar(e)} style={SaaS.btnOk}>Entrar</button>
-                      <button onClick={()=>onGestionar(e)} style={SaaS.btn}>Gestionar</button>
+                      <button onClick={()=>onGestionar(e)} style={SaaS.btn}>Gestionar / Planner</button>
                       <button onClick={()=>gracia(e)} style={SaaS.btnWarn}>Gracia</button>
                     </div>
                   </td>
@@ -2899,7 +2928,7 @@ function PasswordResetRequestsPanel({ items = [], onReset, onDismiss, onRefresh 
 }
 
 export default function SuperAdmin(){
-  const [loggedIn,setLoggedIn]=useState(!!saToken());
+  const [loggedIn,setLoggedIn]=useState(!!saToken()&&!saNeedsPasswordChange());
   const [tab,setTab]=useState("dashboard"); // dashboard | empresas
   const [menuOpen,setMenuOpen]=useState(false);
   const [theme,setTheme]=useState(()=>{
@@ -3100,7 +3129,7 @@ export default function SuperAdmin(){
     ["dashboard","Dashboard","DB"],
     ["empresas","Empresas","EM"],
     ["soporte","Soporte","SP"],
-    ["salud","Salud","SL"],
+    ["salud","Implantación","SL"],
     ["integraciones","Integraciones","IN"],
     ["calendario","Calendario laboral","CA"],
     ["auditoria","Auditoria","AU"],
@@ -3111,7 +3140,7 @@ export default function SuperAdmin(){
     dashboard:["Dashboard","Resumen general del entorno TransGest"],
     empresas:["Empresas","Gestion centralizada de clientes y suscripciones"],
     soporte:["Soporte","Solicitudes y conversaciones de las empresas"],
-    salud:["Salud del sistema","Estado tecnico y operativo de los servicios"],
+    salud:["Implantación y seguimiento","Configuración, actividad y avisos de empresas"],
     integraciones:["Integraciones","APIs generales y configuraciones privadas por empresa"],
     calendario:["Calendario laboral","Festivos y calendario operativo por empresa"],
     auditoria:["Auditoria","Trazabilidad y actividad relevante del sistema"],
@@ -3360,7 +3389,7 @@ export default function SuperAdmin(){
                               <button onClick={()=>toggleBloqueoEmpresa(e)} style={{...S.btn, ...(e.bloqueo_manual
                                 ? {background:"rgba(16,185,129,.14)",color:"#34d399",border:"1px solid rgba(16,185,129,.3)"}
                                 : {background:"rgba(239,68,68,.12)",color:"#f87171",border:"1px solid rgba(239,68,68,.3)"})}}>{e.bloqueo_manual ? "Desbloquear" : "Bloquear"}</button>
-                              <button onClick={()=>setEditando(e)} style={{...S.btn,background:"#1e2d45",color:"#94a3b8",border:"1px solid #1c2740"}}>Gestionar</button>
+                              <button onClick={()=>setEditando(e)} style={{...S.btn,background:"#1e2d45",color:"#94a3b8",border:"1px solid #1c2740"}}>Gestionar / Planner</button>
                             </div>
                           </td>
                         </tr>

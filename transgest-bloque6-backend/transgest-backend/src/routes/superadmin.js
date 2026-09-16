@@ -104,12 +104,18 @@ router.use(async (req, res, next) => {
     if (!payload?.superadmin || !payload?.id) return res.status(403).json({ error: "Acceso denegado" });
 
     const { rows } = await db.query(
-      "SELECT id,nombre,email,rol,activo FROM superadmins WHERE id=$1 LIMIT 1",
+      "SELECT id,nombre,email,rol,activo,password_hash,to_jsonb(superadmins)->>'password_changed_at' AS password_changed_at,to_jsonb(superadmins)->>'password_reset_required' AS password_reset_required FROM superadmins WHERE id=$1 LIMIT 1",
       [payload.id]
     );
     const account = rows[0];
     if (!account || account.activo !== true) {
       return res.status(401).json({ error: "Sesion administrativa no valida" });
+    }
+    if (account.password_changed_at && payload.password_version !== require('node:crypto').createHash('sha256').update(account.password_hash).digest('hex')) {
+      return res.status(401).json({error:'La contraseña administrativa ha cambiado. Inicia sesión de nuevo.'});
+    }
+    if ((payload.password_reset_required || account.password_reset_required === 'true') && req.path !== '/mi-password') {
+      return res.status(403).json({error:'Actualiza tu contraseña administrativa antes de continuar.',code:'PASSWORD_CHANGE_REQUIRED'});
     }
     const role = currentAdminRole(account.rol);
     if (!role) {
@@ -138,6 +144,22 @@ router.use(async (req, res, next) => {
     }
     return next(err);
   }
+});
+
+router.post('/mi-password', async(req,res,next)=>{
+  try {
+    const password=String(req.body?.password_nueva || '');
+    assertStrongPassword(password);
+    const {rows}=await db.query('SELECT password_hash FROM superadmins WHERE id=$1',[req.superadmin.id]);
+    if (!rows[0] || !await bcrypt.compare(String(req.body?.password_actual || ''),rows[0].password_hash)) return res.status(400).json({error:'La contraseña actual no es correcta.'});
+    if (await bcrypt.compare(password,rows[0].password_hash)) return res.status(400).json({error:'Elige una contraseña distinta a la anterior.'});
+    const hash=await bcrypt.hash(password,12);
+    const updated=await db.query(`UPDATE superadmins SET password_hash=$1,password_reset_required=false,
+      password_changed_at=date_trunc('second',now()) WHERE id=$2 AND password_hash=$3 RETURNING id`,[hash,req.superadmin.id,rows[0].password_hash]);
+    if(!updated.rows.length)return res.status(409).json({error:'La cuenta ha cambiado. Inicia sesión de nuevo.'});
+    await audit(req,'superadmin.password_changed');
+    res.json({ok:true,message:'Contraseña actualizada. Inicia sesión de nuevo.'});
+  }catch(error){next(error);}
 });
 
 router.use((req, res, next) => {
@@ -253,6 +275,9 @@ router.post("/empresas/:id/reset-password", async (req, res, next) => {
   }
 });
 
+router.get('/salud/tecnica',async(req,res,next)=>{
+  try{res.json(await require('../services/technicalHealth').readTechnicalHealth());}catch(error){next(error);}
+});
 router.use(legacyRouter);
 
 module.exports = router;

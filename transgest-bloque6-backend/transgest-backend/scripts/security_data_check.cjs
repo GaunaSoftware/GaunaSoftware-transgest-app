@@ -152,6 +152,7 @@ async function main() {
     // Full HTTP middleware chain, current SQL role vs stale privileged JWT.
     process.env.SUPERADMIN_JWT_SECRET='isolated-superadmin-signing-secret-for-test';
     await pg.exec("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS rol VARCHAR(40) DEFAULT 'superadmin'; ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT true");
+    await pg.exec("ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ; ALTER TABLE superadmins ADD COLUMN IF NOT EXISTS password_reset_required BOOLEAN NOT NULL DEFAULT false");
     const adminId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     await pg.query("INSERT INTO superadmins(id,nombre,email,password_hash,rol,activo) VALUES($1,'Test admin','admin@example.test',$2,'soporte',true)",[adminId,oldHash]);
     const token=jwt.sign({id:adminId,superadmin:true,rol:'superadmin'},process.env.SUPERADMIN_JWT_SECRET,{expiresIn:'5m'});
@@ -169,6 +170,18 @@ async function main() {
       const weak=await fetch(endpoint,{method:'POST',headers:{...options.headers,'content-type':'application/json'},body:JSON.stringify({nombre:'New',email:'new@example.test',password:'weak'})});
       assert.equal(weak.status,400);
       assert.match((await weak.json()).error,/12 caracteres/);
+      const base=endpoint.replace('/usuarios-admin','');
+      await pg.query('UPDATE superadmins SET password_hash=$1 WHERE id=$2',[await bcrypt.hash('weak-test',4),adminId]);
+      const post=(url,body,auth)=>fetch(base+url,{method:'POST',headers:{'content-type':'application/json',...(auth?{authorization:'Bearer '+auth}:{})},body:JSON.stringify(body)});
+      const restricted=await (await post('/login',{email:'admin@example.test',password:'weak-test'})).json();
+      assert.equal(restricted.password_reset_required,true);
+      assert.equal((await fetch(endpoint,{headers:{authorization:'Bearer '+restricted.token}})).status,403);
+      assert.equal((await post('/mi-password',{password_actual:'wrong',password_nueva:'New-Audit-Only-9432!'},restricted.token)).status,400);
+      assert.equal((await post('/mi-password',{password_actual:'weak-test',password_nueva:'New-Audit-Only-9432!'},restricted.token)).status,200);
+      assert.equal((await fetch(endpoint,options)).status,401,'Old administrator tokens must be invalidated');
+      const renewed=await (await post('/login',{email:'admin@example.test',password:'New-Audit-Only-9432!'})).json();
+      assert.equal(renewed.password_reset_required,false);
+      assert.equal((await fetch(endpoint,{headers:{authorization:'Bearer '+renewed.token}})).status,200);
     } finally {server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 
     assert.equal(integrationSecret({headers:{authorization:'Bearer header'},query:{token:'query'}},['x-token'],'token'),'header');

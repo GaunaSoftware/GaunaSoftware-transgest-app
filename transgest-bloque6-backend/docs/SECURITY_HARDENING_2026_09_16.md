@@ -2,6 +2,8 @@
 
 Rama: `security/hardening-2026-09-14`. PR #1 en borrador. No autoriza merge ni despliegue. La instalación mediante EXE y sus actualizaciones quedan fuera de este trabajo.
 
+Resultado remoto verificado: los ocho jobs de [Seguridad y CI, ejecución 35113662476](https://github.com/GaunaSoftware/GaunaSoftware-transgest-app/actions/runs/35113662476) finalizaron correctamente para `ad958ecb38dc111ecfcc7e601c0d9bec58aa77f4`. Después se activó y releyó la protección de `main`: PR obligatorio, ocho checks obligatorios vinculados a GitHub Actions y rama actualizada, aplicada también a administradores, sin force-push ni borrado. No se exige una segunda persona aprobadora; sí pasar por un PR. No se modificó código de main ni se fusionó el PR.
+
 ## Implementado
 
 - MapLibre 6.10.0, importación ESM y distribución local del worker **y de su módulo compartido**. El build y el arranque de desarrollo preparan ambos ficheros versionados. Nginx sirve `.mjs` como JavaScript. La ruta se añade cuando está disponible el estilo; no espera a todas las teselas remotas. Se conservan los colores de estado incorporados en main y los popups usan texto.

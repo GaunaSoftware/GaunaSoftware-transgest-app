@@ -112,7 +112,7 @@ async function ensureDemoForLogin(identifier, password) {
   await demoLoginSeedPromise;
 }
 
-function authUserPayload(user = {}, extra = {}) {
+async function authUserPayload(user = {}, extra = {}) {
   const permisos = normalizePermissionsForRole(user.permisos, user.rol);
   return {
     id: user.id,
@@ -123,6 +123,7 @@ function authUserPayload(user = {}, extra = {}) {
     empresa_id: user.empresa_id,
     empresa_nombre: user.empresa_nombre || extra.empresa_nombre || "",
     plan: user.plan,
+    productos: user.productos || (await require("../services/companyProducts").get(user.empresa_id)).productos,
     demo_mode: Boolean(user.demo_mode ?? extra.demo_mode),
     cliente_id: user.cliente_id,
     chofer_id: user.chofer_id,
@@ -339,6 +340,7 @@ router.post("/login",
       } : null);
 
       user.demo_mode = isDemoEmpresa(user);
+      user.productos = (await require("../services/companyProducts").get(user.empresa_id)).productos;
       const token = signUserToken(user);
 
       logger.info(`Login exitoso: ${identifier} (${user.rol})`);
@@ -346,7 +348,7 @@ router.post("/login",
 
       res.json({
         token,
-        user: authUserPayload(user),
+        user: await authUserPayload(user),
         suscripcion: subState.suscripcion,
         bloqueado: subState.blocked ? {
           motivo: subState.motivo,
@@ -362,7 +364,7 @@ router.post("/login",
 
 // ── GET /api/v1/auth/me ───────────────────────────────
 router.get("/me", authenticate, async (req, res) => {
-  if (req.user.superadmin_impersonation) return res.json({ ...authUserPayload(req.user), superadmin_impersonation: true, impersonado_por: req.user.impersonado_por });
+  if (req.user.superadmin_impersonation) return res.json({ ...await authUserPayload(req.user), superadmin_impersonation: true, impersonado_por: req.user.impersonado_por });
   const { rows } = await db.query(
     `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.empresa_id, u.cliente_id, u.chofer_id, u.colaborador_id,
             u.perfil, u.permisos, u.trafico_config, u.debe_cambiar_password, u.password_changed_at,
@@ -374,8 +376,9 @@ router.get("/me", authenticate, async (req, res) => {
     [req.user.id]
   ).catch(() => ({ rows: [] }));
   const user = rows[0] || req.user;
+  user.productos = req.user.productos;
   user.demo_mode = isDemoEmpresa(user);
-  res.json(authUserPayload(user));
+  res.json(await authUserPayload(user));
 });
 
 async function assertDemoSession(req, res) {
@@ -452,7 +455,7 @@ router.post("/demo/switch-plan", authenticate, async (req, res) => {
   );
   const user = rows[0];
   user.demo_mode = true;
-  res.json({ token: signUserToken(user), user: authUserPayload(user), plan });
+  res.json({ token: signUserToken(user), user: await authUserPayload(user), plan });
 });
 
 router.post("/demo/switch-user", authenticate, async (req, res) => {
@@ -485,7 +488,7 @@ router.post("/demo/switch-user", authenticate, async (req, res) => {
   const user = rows[0];
   if (!user) return res.status(404).json({ error: "Usuario demo no encontrado" });
   user.demo_mode = true;
-  res.json({ token: signUserToken(user), user: authUserPayload(user) });
+  res.json({ token: signUserToken(user), user: await authUserPayload(user) });
 });
 
 router.post("/billing/checkout", async (req, res) => {

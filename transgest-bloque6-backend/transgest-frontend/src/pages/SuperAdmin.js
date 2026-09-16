@@ -1,4 +1,5 @@
 import SupportInbox from "../components/SupportInbox";
+import CompanyProducts from "../planner/CompanyProducts";
 import { getBrandDisplayName } from "../branding";
 import { useState, useEffect, useCallback } from "react";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
@@ -363,6 +364,7 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
       <div style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:14,padding:24,width:"min(500px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"#e2e8f0",marginBottom:2}}>Editar {empresa.nombre}</div>
         <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>{empresa.email_admin}</div>
+        <CompanyProducts empresaId={empresa.id} request={saFetch} />
 
         {err&&<div style={{background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,padding:"9px 12px",color:"#fca5a5",fontSize:12,marginBottom:12}}>{err}</div>}
 

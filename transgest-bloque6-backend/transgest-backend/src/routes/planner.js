@@ -3,6 +3,10 @@ const crypto = require('crypto');
 const db = require('../services/db');
 const {requireRole} = require('../middleware/auth');
 const router = express.Router();
+router.use((req,res,next)=>{
+  if (!require('../services/companyProducts').moduleAvailable(req.user?.productos,'planner')) return res.status(403).json({error:'Planner no está habilitado para tu empresa. Contacta con el administrador.',code:'PRODUCT_NOT_ENABLED'});
+  next();
+});
 let schema;
 router.use(requireRole('gerente','trafico','administrativo','visualizador'));
 router.use(async(req,res,next)=>{

@@ -4,6 +4,7 @@ const db     = require("../services/db");
 const logger = require("../services/logger");
 const { userJwtSecret } = require("../services/jwtSecrets");
 const empresaApiKeys = require("../services/empresaApiKeys");
+const companyProducts = require("../services/companyProducts");
 
 const GRACE_DAYS = 7;
 
@@ -388,6 +389,7 @@ async function authenticate(req, res, next) {
         api_key_scopes: resolved.scopes,
       };
       req.empresaId = resolved.empresa_id;
+      req.user.productos = (await companyProducts.get(req.empresaId)).productos;
       res.setHeader("X-RateLimit-Remaining", String(resolved.rate_limit_remaining));
       return next();
     }
@@ -472,6 +474,7 @@ async function authenticate(req, res, next) {
         cliente_nombre: row.cliente_nombre || "",
       };
       req.empresaId = row.empresa_id;
+      req.user.productos = (await companyProducts.get(req.empresaId)).productos;
       await db.query(
         `UPDATE cliente_integracion_tokens
             SET last_used_at=NOW(),
@@ -494,6 +497,7 @@ async function authenticate(req, res, next) {
       req.user = require("../services/supportSession").supportUser(companies[0], payload.impersonado_por);
       req.user.permisos = presetPermisosRol("gerente");
       req.empresaId = companies[0].id;
+      req.user.productos = (await companyProducts.get(req.empresaId)).productos;
       req.suscripcion = { plan: "enterprise", estado: "activo" };
       return next();
     }
@@ -525,6 +529,7 @@ async function authenticate(req, res, next) {
     }
 
     req.user = rows[0];
+    req.user.productos = (await companyProducts.get(rows[0].empresa_id)).productos;
     req.user.permisos = normalizePermissionsForRole(rows[0].permisos, rows[0].rol);
     req.user.trafico_config = rows[0].trafico_config && typeof rows[0].trafico_config === "object" && !Array.isArray(rows[0].trafico_config)
       ? rows[0].trafico_config
@@ -578,6 +583,9 @@ function requireRole(...roles) {
 function requireModulePermission(modulo) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "No autenticado" });
+    if (!companyProducts.moduleAvailable(req.user.productos, modulo)) {
+      return res.status(403).json({error:"Este módulo no está incluido en los productos habilitados para tu empresa.",modulo,code:"PRODUCT_NOT_ENABLED"});
+    }
     const plan = normalizePlan(req.user?.plan || req.suscripcion?.plan);
     if (PLAN_DISABLED_MODULES[plan]?.has(modulo)) {
       return res.status(403).json({

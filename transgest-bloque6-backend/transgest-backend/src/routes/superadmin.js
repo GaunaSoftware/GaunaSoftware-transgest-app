@@ -1069,6 +1069,21 @@ router.patch("/usuarios-admin/:id", superAuth, async (req, res) => {
   res.json(rows[0]);
 });
 
+router.get("/empresas/:id/productos", superAuth, async (req,res,next)=>{
+  try {
+    const {rows}=await db.query('SELECT id FROM empresas WHERE id=$1',[req.params.id]);
+    if(!rows.length)return res.status(404).json({error:'Empresa no encontrada'});
+    res.json(await require('../services/companyProducts').get(req.params.id));
+  } catch(error){next(error);}
+});
+router.put("/empresas/:id/productos", superAuth, async (req,res,next)=>{
+  try {
+    const result=await require('../services/companyProducts').set(req.params.id,req.body?.modalidad);
+    await audit(req,'empresa.productos_actualizados',result,req.params.id);
+    res.json(result);
+  } catch(error){if(error.status)return res.status(error.status).json({error:error.message});next(error);}
+});
+
 router.get("/empresas", superAuth, async (req, res) => {
   const { rows } = await db.query(`
     SELECT e.*,

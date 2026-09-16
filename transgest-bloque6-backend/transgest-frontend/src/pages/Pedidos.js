@@ -11,6 +11,7 @@ import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from
 import { verificarOrdenColaborador } from '../services/api';
 import AdrPanel from "../components/AdrPanel";
 import QuickAssignModal from "../components/QuickAssignModal";
+import { clearAssignmentPatch, hasAssignment } from "../utils/quickAssignment";
 import { buildPedidoUpdatePatch } from "../utils/pedidoUpdatePatch";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
 import { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } from "../utils/number";
@@ -10959,7 +10960,7 @@ export default function Pedidos() {
     }
     const ok = await confirmDialog({
       title: "Limpiar asignacion",
-      message: `Se quitara la asignacion operativa de ${pedido.numero || "este pedido"} para volver a planificarlo.\n\nSe eliminaran vehiculo, chofer y conjunto, pero el resto del viaje seguira intacto.`,
+      message: `Se quitara la asignacion operativa de ${pedido.numero || "este pedido"} para volver a planificarlo.\n\nSe quitarán el vehículo, los conductores, el remolque, el colaborador y las matrículas manuales. Se conservarán los importes y el resto del pedido.`,
       confirmText: "Limpiar asignacion",
       tone: "warning",
     });
@@ -10967,10 +10968,7 @@ export default function Pedidos() {
     setReprogrammingPedidoId(String(pedido.id));
     try {
       await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, {
-        vehiculo_id: "",
-        chofer_id: "",
-        remolque_id: "",
-        remolque_id_manual: "",
+        ...clearAssignmentPatch(),
         pendiente_completar: true,
         aviso_completar: "Asignacion limpiada desde pedidos: volver a planificar recurso y horario operativo.",
       }));
@@ -11145,7 +11143,7 @@ export default function Pedidos() {
 
   async function limpiarAsignacionesSeleccionadas() {
     const lista = selectedPedidosOperables.filter(
-      p => !pedidoTieneFacturaBorrador(p) && (p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual)
+      p => !pedidoTieneFacturaBorrador(p) && hasAssignment(p)
     );
     if (!lista.length) {
       notify("No hay asignaciones seleccionadas para limpiar.", "info");
@@ -11162,10 +11160,7 @@ export default function Pedidos() {
     try {
       for (const pedido of lista) {
         await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, {
-          vehiculo_id: "",
-          chofer_id: "",
-          remolque_id: "",
-          remolque_id_manual: "",
+          ...clearAssignmentPatch(),
           pendiente_completar: true,
           aviso_completar: "Asignacion limpiada desde seleccion multiple: volver a planificar recurso y horario operativo.",
         }));
@@ -11308,6 +11303,15 @@ export default function Pedidos() {
       notify(`Añadidos ${kmFinal.toLocaleString("es-ES")} km en vacío.`, "success");
       cargar({ silent: true });
     } catch { /* no bloquea la asignacion */ }
+  }
+
+  async function abrirAsignacionRapida(pedido) {
+    try {
+      const completo = await getPedido(pedido.id);
+      setQuickAssignPedido({ ...pedido, ...completo });
+    } catch (error) {
+      notify(error.message || "No se pudieron cargar los datos de asignación.", "error");
+    }
   }
 
   async function aplicarQuickAssign(patch) {
@@ -11606,7 +11610,7 @@ export default function Pedidos() {
 
 </div>}
         permissions={{edit:canEdit, invoice:canFacturarPedidos, finalInvoice:pedidoTieneFacturaFinal, draftInvoice:pedidoTieneFacturaBorrador, supplierOrder:p => canIssueSupplierOrder(p,vehiculos)}}
-        actions={{new:abrirNuevo, quick:() => setQuickCreando(true), open:abrirEditar, assign:setQuickAssignPedido, copy:abrirCopiarPedido, order:abrirOrdenCarga, send:p => enviarWhatsappPedidoAccion(p,"cliente"), invoice:setFacturando, clearSelection:() => setSelectedPedidoIds([]), selectAll:toggleSelectAllVisible,
+        actions={{new:abrirNuevo, quick:() => setQuickCreando(true), open:abrirEditar, assign:abrirAsignacionRapida, copy:abrirCopiarPedido, order:abrirOrdenCarga, send:p => enviarWhatsappPedidoAccion(p,"cliente"), invoice:setFacturando, clearSelection:() => setSelectedPedidoIds([]), selectAll:toggleSelectAllVisible,
           cancel:solicitarCancelacionPedido, remove:eliminarPedidoDesdeListado, autoAssign:setAutoAsignando, clearAssignment:limpiarAsignacionPedido,
           delay:p=>solicitarRetrasoPedido(p,p.numero), changeState:(p,state)=>cambiarEstado(p.id,state), traffic:openPedidoInTrafico,
           dcd:abrirDocumentoControl, letter:async p=>{try{setCartaPorte(await getCartaPorte(p.id));}catch(e){notify(e.message,"error");}},

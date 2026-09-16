@@ -68,11 +68,9 @@ app.on("second-instance", () => {
 
 app.whenReady().then(() => {
   protocol.handle('transgest', request => {
-    const url = new URL(request.url);
     const root = path.resolve(__dirname,'..','build');
-    const pathname = decodeURIComponent(url.pathname);
-    const file = path.resolve(root, pathname === '/' ? 'index.html' : '.' + pathname);
-    if (url.hostname !== 'app' || !file.startsWith(root + path.sep)) return new Response('Forbidden',{status:403});
+    const file = require('./app-file').appFile(root, request.url);
+    if (!file) return new Response('Forbidden',{status:403});
     return net.fetch(pathToFileURL(file).toString());
   });
   app.on('web-contents-created', (_event, contents) => {

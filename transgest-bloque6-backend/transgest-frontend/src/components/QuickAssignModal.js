@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { clearAssignmentPatch, quickSaleTotal, recordedCosts } from "../utils/quickAssignment";
+import { parseLocaleNumber } from "../utils/number";
 import ResourcePicker from "./ResourcePicker";
 import { formatMatricula } from "../utils/formatos";
 import { getDisponibilidadRecursos } from "../services/api";
@@ -18,6 +20,12 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
   const [remolque, setRemolque] = useState(
     pedido?.remolque_matricula || pedido?.remolque_matricula_manual || ""
   );
+  const [externalPlate, setExternalPlate] = useState(pedido?.matricula_colaborador || "");
+  const [externalTrailer, setExternalTrailer] = useState(pedido?.remolque_matricula_colaborador || "");
+  const [salePrice, setSalePrice] = useState(String(pedido?.precio_unitario ?? ""));
+  const [supplierPrice, setSupplierPrice] = useState(String(pedido?.precio_colaborador ?? ""));
+  const [saleChanged, setSaleChanged] = useState(false);
+  const [supplierChanged, setSupplierChanged] = useState(false);
   const [trabajando, setTrabajando] = useState(false);
   const [activePicker, setActivePicker] = useState("");
   const [availabilityError, setAvailabilityError] = useState(false);
@@ -109,7 +117,23 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
     }
   }
 
+  const validMoney = value => String(value).trim() !== "" && Number.isFinite(parseLocaleNumber(value, NaN)) && parseLocaleNumber(value) >= 0;
+  const moneyValid = (!saleChanged || validMoney(salePrice)) && (!supplierChanged || validMoney(supplierPrice));
+  const sale = saleChanged ? quickSaleTotal(pedido, salePrice) : parseLocaleNumber(pedido?.importe);
+  const cost = recordedCosts(pedido, modo === "proveedor", supplierPrice);
+  const margin = sale - cost;
+  const euros = value => value.toLocaleString("es-ES", { style: "currency", currency: "EUR" });
+  const priceUnit = {viaje:"viaje",tonelada:"tonelada",kg:"100 kg",km:"km",palet:"palet",bulto:"bulto"}[pedido?.tipo_precio] || pedido?.tipo_precio || "viaje";
+
   async function asignar() {
+    if (!moneyValid) return;
+    const prices = {
+      ...(saleChanged ? { precio_unitario: parseLocaleNumber(salePrice) } : {}),
+      ...(modo === "proveedor" && supplierChanged ? {
+        precio_colaborador: parseLocaleNumber(supplierPrice),
+        tipo_precio_colaborador: "viaje", precio_colaborador_unitario: null, minimo_colaborador_unidades: null,
+      } : {}),
+    };
     // Proveedor externo: excluyente con la flota propia, asi que se limpia todo
     // lo de transporte propio al asignarlo.
     if (modo === "proveedor") {
@@ -118,6 +142,14 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
       setTrabajando(true);
       try {
         await onAssign({
+          ...clearAssignmentPatch(),
+          ...prices,
+          ...(String(colaboradorId) === String(pedido?.colaborador_id) ? Object.fromEntries(
+            ['conductor_efectivo_nombre', 'conductor_efectivo_apellidos', 'conductor_efectivo_dni', 'conductor_efectivo_telefono']
+              .map(key => [key, pedido[key] ?? null])
+          ) : {}),
+          matricula_colaborador: formatMatricula(externalPlate).trim() || null,
+          remolque_matricula_colaborador: formatMatricula(externalTrailer).trim() || null,
           colaborador_id: colaboradorId,
           colaborador_nombre: col?.nombre || "",
           vehiculo_id: "", chofer_id: "", chofer2_id: "",
@@ -132,7 +164,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
     const rem = String(remolque || "").trim().toUpperCase();
     if (!mat && !choferId) { return; }
     const remVeh = rem ? vehiculos.find(v => String(v.matricula || "").toUpperCase() === rem) : null;
-    const patch = {};
+    const patch = { ...clearAssignmentPatch(), ...prices };
     if (vehMatch) {
       patch.vehiculo_id = vehMatch.id;
       patch.colaborador_id = "";
@@ -142,7 +174,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
       patch.vehiculo_id = "";
       patch.colaborador_id = "";
     }
-    if (mat || rem) {
+    {
       // Si el remolque es de la flota, se enlaza por id (conjunto); si no, a mano.
       if (remVeh) { patch.remolque_id_manual = remVeh.id; patch.remolque_matricula_manual = ""; }
       else { patch.remolque_id_manual = ""; patch.remolque_matricula_manual = rem; }
@@ -173,9 +205,9 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
 
   return (
     <div style={S.overlay} onClick={()=>{if(!trabajando) onClose();}}>
-      <div role="dialog" aria-label="Asignar recursos" style={S.box} onClick={e => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label="Asignar recursos" style={S.box} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 16, fontWeight: 900, color: "var(--text)" }}>
-          {esBulk ? `Asignar a ${bulkCount} pedidos` : (modo === "proveedor" ? "Asignar proveedor" : "Asignar vehiculo")}
+          {esBulk ? `Asignar a ${bulkCount} pedidos` : (modo === "proveedor" ? "Asignar proveedor" : "Asignar vehículo")}
         </div>
         <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>
           {esBulk
@@ -199,17 +231,19 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
         {modo === "proveedor" ? (
           <>
             <label style={S.label}>Proveedor / transportista externo</label>
-            <select style={S.input} value={colaboradorId} onChange={e => setColaboradorId(e.target.value)}>
+            <select aria-label="Colaborador" style={S.input} value={colaboradorId} onChange={e => {setColaboradorId(e.target.value);setSupplierPrice("");setSupplierChanged(!esBulk);}}>
               <option value="">Selecciona un proveedor</option>
               {colaboradores.map(c => (
                 <option key={c.id} value={c.id}>{c.nombre}{c.cif ? ` - ${c.cif}` : ""}</option>
               ))}
             </select>
             <div style={{ ...S.ayuda, marginTop: 8 }}>
-              Al asignarlo se quita el camion propio. Despues, desde el pedido, puedes generar
-              su enlace de acceso para que confirme, ponga su matricula y conductor, marque estados
-              y suba los albaranes.
+              Indica las matrículas conocidas. Si todavía no las tienes, el colaborador podrá completarlas después.
             </div>
+            <label style={S.label} htmlFor="quick-external-plate">Matrícula de la tractora</label>
+            <input id="quick-external-plate" style={S.input} value={externalPlate} maxLength={60} onChange={e => setExternalPlate(formatMatricula(e.target.value))} />
+            <label style={S.label} htmlFor="quick-external-trailer">Matrícula del remolque</label>
+            <input id="quick-external-trailer" style={S.input} value={externalTrailer} maxLength={60} onChange={e => setExternalTrailer(formatMatricula(e.target.value))} />
             {colaboradores.length === 0 && (
               <div style={S.avisoOcupado}>No hay proveedores dados de alta. Crealos en Colaboradores.</div>
             )}
@@ -226,7 +260,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
           <ResourcePicker label="Remolque" value={remolque} freeText availability
             options={remolques.map(v=>({value:v.matricula,label:v.matricula,available:estadoDe(dispVehiculo,v.id)?.disponible,reason:estadoDe(dispVehiculo,v.id)?.motivo}))}
             onChange={setRemolque} open={activePicker==="remolque"} onOpen={()=>setActivePicker("remolque")} onClose={()=>setActivePicker("")} />
-          <ResourcePicker label="Chofer" value={choferId} availability
+          <ResourcePicker label="Conductor" value={choferId} availability
             options={choferes.map(c=>({value:c.id,label:[c.nombre,c.apellidos].filter(Boolean).join(" "),available:estadoDe(dispChofer,c.id)?.disponible,reason:estadoDe(dispChofer,c.id)?.motivo}))}
             onChange={onChoferChange} open={activePicker==="chofer"} onOpen={()=>setActivePicker("chofer")} onClose={()=>setActivePicker("")} />
           {choferId && estadoDe(dispChofer,choferId)?.disponible===false && <div style={S.avisoOcupado}>{estadoDe(dispChofer,choferId).motivo}</div>}
@@ -234,11 +268,29 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
         </>
         )}
 
+        <section aria-label="Precio y margen" style={{marginTop:20,borderTop:"1px solid var(--border2)",paddingTop:8}}>
+          {esBulk ? <p style={S.ayuda}>En la asignación múltiple se conservan los precios de cada pedido. Para revisar precio y margen, asigna un pedido sin seleccionar otros.</p> : <>
+            <label style={S.label} htmlFor="quick-sale-price">Precio de venta (€ / {priceUnit})</label>
+            <input id="quick-sale-price" style={S.input} inputMode="decimal" value={salePrice} onChange={e => {setSalePrice(e.target.value);setSaleChanged(true);}} />
+            {modo === "proveedor" && <>
+              <label style={S.label} htmlFor="quick-supplier-price">Coste acordado con el colaborador (€ / viaje)</label>
+              <input id="quick-supplier-price" style={S.input} inputMode="decimal" value={supplierPrice} onChange={e => {setSupplierPrice(e.target.value);setSupplierChanged(true);}} />
+              {pedido?.tipo_precio_colaborador === "tonelada" && <p style={S.ayuda}>Acuerdo actual por tonelada. Si modificas el coste, se guardará el nuevo importe fijo por viaje.</p>}
+            </>}
+            {!moneyValid && <p role="alert" style={S.avisoOcupado}>Indica importes válidos, iguales o superiores a cero.</p>}
+            <dl style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,fontSize:13,color:"var(--text)"}}>
+              <dt>Venta total (sin IVA)</dt><dd style={{margin:0}}>{euros(sale)}</dd>
+              <dt>Costes registrados</dt><dd style={{margin:0}}>{euros(cost)}</dd>
+              <dt>Margen provisional</dt><dd style={{margin:0,fontWeight:800,color:margin < 0 ? "var(--danger,#dc2626)" : "var(--accent)"}}>{euros(margin)}{sale > 0 ? ` (${(margin / sale * 100).toFixed(1)} %)` : ""}</dd>
+            </dl>
+            <p style={S.ayuda}>Incluye los suplementos del pedido y los costes registrados. {cost === 0 ? "Sin costes registrados: el margen no representa todavía la rentabilidad del viaje." : "Los costes pendientes y los kilómetros en vacío pueden cambiar el margen."}</p>
+          </>}
+        </section>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
           <button style={S.btn} onClick={onClose} disabled={trabajando}>Cancelar</button>
           <button
-            style={{ ...S.btn, background: "var(--accent,var(--accent))", color: "#fff", borderColor: "var(--accent,var(--accent))", opacity: trabajando || !puedeAsignar ? .6 : 1 }}
-            onClick={asignar} disabled={trabajando || !puedeAsignar}>
+            style={{ ...S.btn, background: "var(--accent,var(--accent))", color: "#fff", borderColor: "var(--accent,var(--accent))", opacity: trabajando || !puedeAsignar || !moneyValid ? .6 : 1 }}
+            onClick={asignar} disabled={trabajando || !puedeAsignar || !moneyValid}>
             {trabajando ? "Asignando..." : (esBulk ? `Asignar a ${bulkCount}` : "Asignar")}
           </button>
         </div>

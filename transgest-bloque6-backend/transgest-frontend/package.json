@@ -29,7 +29,7 @@
     "mobile:open:android": "npx cap open android",
     "mobile:open:ios": "npx cap open ios",
     "mobile:icons": "npx @capacitor/assets generate --iconBackgroundColor '#0d1017' --splashBackgroundColor '#0d1017'",
-    "desktop:build": "cross-env PUBLIC_URL=./ react-scripts build",
+    "desktop:build": "cross-env PUBLIC_URL=/ react-scripts build",
     "desktop:run": "electron .",
     "desktop:portable": "npm run desktop:build && node scripts/pack-desktop.js",
     "desktop:dist": "npm run desktop:build && electron-builder --win --publish never",

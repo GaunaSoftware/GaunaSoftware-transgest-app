@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 import { Button, Card, Icon, KpiCard, DataTable, MobileDataCard, EmptyState, Badge } from "../../ui";
 import "./dashboard.css";
 import LiveOperations from "./LiveOperations";
+import {overdueOrder,incidentDescription} from "./operationalStatus";
 
 const money = n => Number(n || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" });
 const dayKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -44,18 +45,18 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
     facturas.filter(f => validInvoice(f) && !["cobrada","rectificada"].includes(f.estado)).forEach(f => addDue(f.id,`Factura ${f.numero || ""}`,f.fecha_vencimiento,"facturacion","tms_facturacion_focus",{factura_id:f.id}));
     return {
       agenda, week, ranking, due:due.sort((a,b) => datePart(a.date).localeCompare(datePart(b.date))),
-      active:current.filter(p => activeStates.includes(p.estado)).length,
+      active:current.filter(p => !overdueOrder(p) && activeStates.includes(p.estado)).length,
       today:current.filter(p => datePart(p.fecha_carga)===todayKey).length,
       billed:invoices.reduce((s,f) => s+Number(f.base_imponible||0),0),
       incidents:current.filter(p => p.estado === "incidencia").length,
       recent:[...pedidos].sort((a,b) => String(b.fecha_pedido||b.created_at||b.fecha_carga||"").localeCompare(String(a.fecha_pedido||a.created_at||a.fecha_carga||""))).slice(0,5),
-      route:current.filter(p => p.estado === "en_curso").length,
-      handling:current.filter(p => ["cargando","descarga"].includes(p.estado)).length,
+      route:current.filter(p => !overdueOrder(p) && p.estado === "en_curso").length,
+      handling:current.filter(p => !overdueOrder(p) && ["cargando","descarga"].includes(p.estado)).length,
       workshop:vehiculos.filter(v => v.estado === "taller").length,
     };
   }, [pedidos,facturas,vehiculos,choferes]);
   const link = (label,view) => puedeVer(view) ? <button className="dashboard-link" onClick={() => navigate(view)}>{label} <span aria-hidden="true">→</span></button> : null;
-  const status = p => <Badge tone={p.estado === "incidencia" ? "danger" : p.estado === "pendiente" ? "warning" : "success"}>{stateMeta(p.estado).label}</Badge>;
+  const status = p => <span title={incidentDescription(p)}><Badge tone={p.estado === "incidencia" ? "danger" : p.estado === "pendiente" ? "warning" : "success"}>{overdueOrder(p)?"Vencido":stateMeta(p.estado).label}</Badge></span>;
   const quick = [
     ["Nuevo pedido","invoice","pedidos",true,() => openOrder({action:"nuevo"})],
     ["Asignar vehículo","truck","pedidos",true,() => navigate("pedidos")],

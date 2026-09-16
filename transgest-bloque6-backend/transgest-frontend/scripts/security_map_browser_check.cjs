@@ -94,7 +94,7 @@ async function main() {
     await page.locator('.maplibregl-ctrl-zoom-in').click();
     await page.waitForFunction(before=>document.querySelector('.tg-route-stop-marker')?.style.transform!==before,beforeZoom);
     await page.getByRole('button',{name:'Centrar ruta',exact:true}).click();
-    await page.getByRole('button',{name:'2: Benissa',exact:true}).click();
+    await page.getByRole('button',{name:/^2: Benissa/}).click();
     await page.locator('.maplibregl-popup-content').waitFor();
     assert.match(await page.locator('.maplibregl-popup-content').innerText(),/Benissa/);
     await page.locator('.maplibregl-popup-close-button').click();

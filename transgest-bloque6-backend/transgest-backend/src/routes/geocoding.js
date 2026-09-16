@@ -398,7 +398,7 @@ function normalizeRoutePoint(raw, index, total) {
   const city = cleanText(point.city || point.ciudad || point.localidad || point.poblacion || point.municipio);
   const region = cleanText(point.region || point.provincia || point.state);
   const country = cleanText(point.country || point.pais);
-  const structuredQuery = [address, city, region, country].filter(Boolean).join(", ");
+  const structuredQuery = [address, point.codigo_postal || point.postcode, city, region, country].filter(Boolean).join(", ");
   const query = cleanText(hasExplicitQuery ? point.query : (structuredQuery || label));
   return {
     ...point,
@@ -606,6 +606,7 @@ router.get("/route", handleRoute);
 router.post("/route", handleRoute);
 router.get("/distance", handleRoute);
 router.initializeSchema = ensureSchema;
+router.handleRoute = handleRoute;
 router._test = { candidateCompatibleWithLocal, countryHintFromRaw, resolvePlace, normalizeRoutePoint };
 
 module.exports = router;

@@ -15,6 +15,7 @@ function failChoferSchema(error) {
 
 async function ensureChoferesTransparencySchema() {
   if (schemaReady) return;
+  await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS alias VARCHAR(100)");
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS sexo VARCHAR(30)").catch(failChoferSchema);
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS puesto_valor VARCHAR(120)").catch(failChoferSchema);
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS estado VARCHAR(40) NOT NULL DEFAULT 'disponible'").catch(failChoferSchema);
@@ -1255,13 +1256,13 @@ router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
       });
     }
     const {rows}=await db.query(
-      `INSERT INTO choferes (nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,tipo_contrato,salario,notas,empresa_id,sexo,puesto_valor,fecha_alta,historial_laboral,plataformas)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::date,CURRENT_DATE),$15::jsonb,$16::jsonb) RETURNING *`,
+      `INSERT INTO choferes (nombre,apellidos,dni,telefono,email,vehiculo_id,categoria_carnet,tipo_contrato,salario,notas,empresa_id,sexo,puesto_valor,fecha_alta,historial_laboral,plataformas,alias)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::date,CURRENT_DATE),$15::jsonb,$16::jsonb,$17) RETURNING *`,
       [
         nombre,apellidos||null,dni||null,telefono||null,email||null,vehiculo_id||null,categoria_carnet||"C+E",tipo_contrato||null,salario||null,notas||null,empresaId,sexo||null,puesto_valor||null,
         fecha_alta || null,
         JSON.stringify([{ tipo:"alta", fecha: fecha_alta || new Date().toISOString().slice(0,10), usuario_id: req.user?.id || null, created_at: new Date().toISOString() }]),
-        JSON.stringify(normalizePlataformas(plataformas))
+        JSON.stringify(normalizePlataformas(plataformas)), String(req.body.alias || "").trim().slice(0,100) || null
       ]
     );
     res.status(201).json(rows[0]);
@@ -1327,7 +1328,8 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
               carta_renuncia_mime=$22,
               carta_renuncia_base64=$23,
               historial_laboral=$24::jsonb,
-              plataformas=COALESCE($25::jsonb, plataformas)
+              plataformas=COALESCE($25::jsonb, plataformas),
+              alias=$26
         WHERE id=$16 AND empresa_id=$17
         RETURNING *`,
       [
@@ -1338,6 +1340,7 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
         req.params.id,empresaId,
         fecha_alta || null,nextFechaBaja,nextMotivoBaja,nextCartaNombre,nextCartaMime,nextCartaBase64,JSON.stringify(nextHistorial.slice(-120)),
         Array.isArray(plataformas) ? JSON.stringify(normalizePlataformas(plataformas)) : null,
+        req.body.alias === undefined ? previous.alias : (String(req.body.alias || "").trim().slice(0,100) || null),
       ]
     );
     if(!rows[0]) return res.status(404).json({error:"No encontrado"});

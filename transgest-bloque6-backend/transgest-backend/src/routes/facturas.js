@@ -1109,6 +1109,10 @@ router.post("/", GERENTE_O_CONTABLE,
             lineas, extracostes = [], pedidos_ids = [], observaciones, notas_internas,
             referencia_cliente } = req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
+    if (estado && estado !== 'borrador') {
+      const issue=await require('../services/billingData').billingProblem(db,cliente_id,empresaId);
+      if(issue)return res.status(422).json({error:issue,code:'DATOS_FISCALES_INCOMPLETOS'});
+    }
     const pedidosIdsUnicos = [...new Set((pedidos_ids || []).filter(Boolean))];
     const borradoresPrevios = new Set();
 
@@ -1164,12 +1168,7 @@ router.post("/", GERENTE_O_CONTABLE,
 
       // Generar número correlativo
       const año = new Date(fecha || Date.now()).getFullYear();
-      const { rows: last } = await client.query(
-        `SELECT numero FROM facturas WHERE serie=$1 AND EXTRACT(year FROM fecha)=$2 AND empresa_id=$3 ORDER BY numero DESC LIMIT 1 FOR UPDATE`,
-        [serie, año, empresaId]
-      );
-      const lastNum = last[0] ? parseInt(last[0].numero.split("-").pop()) : 0;
-      const numero  = `${serie}-${año}-${String(lastNum + 1).padStart(4, "0")}`;
+      const numero = await require("../services/invoiceNumber").nextInvoiceNumber(client, empresaId, serie, año);
 
       // Calcular totales
       const base = round2(
@@ -1322,6 +1321,10 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
 
     const factura      = rows[0];
     const estadoAntes  = factura.estado;
+    if (estadoAntes === 'borrador' && estado !== 'borrador') {
+      const issue=await require('../services/billingData').billingProblem(db,factura.cliente_id,empresaId);
+      if(issue)return res.status(422).json({error:issue,code:'DATOS_FISCALES_INCOMPLETOS'});
+    }
 
     if (estado === "enviada") {
       const sinSoporte = await getFacturaPedidosSinSoporte(factura.id, empresaId);

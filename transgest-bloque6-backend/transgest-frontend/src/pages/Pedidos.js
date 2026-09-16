@@ -1,3 +1,8 @@
+import { driverName, driverOption } from "./orders/quickInfo";
+import CancelOrderDialog from "./orders/CancelOrderDialog";
+import { Modal as WorkspaceModal } from "../ui";
+import "./orders/refinements.css";
+import { PALLET_SIZES, cargoCount, cargoLength, cargoPayload, updateCargo } from "../utils/cargoDimensions";
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
@@ -30,6 +35,7 @@ import { formatMatricula, formatDni, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
+import BulkOrderReasonDialog from "./orders/BulkOrderReasonDialog";
 import EndpointAutocomplete from "../components/EndpointAutocomplete";
 import { pedidoOriginalMonth } from "../utils/pedidoBillingMonth";
 
@@ -548,7 +554,7 @@ function buildPedidoCopyPayload(basePedido = {}, overrides = {}) {
     merged.destino = "";
   }
   const {
-    remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
+    _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
     chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
     factura_numero, facturado, cliente_email, cliente_telefono,
     chofer2_nombre, remolque_id, mantener_asignacion, mantener_cargas, mantener_descargas, ...formClean
@@ -615,10 +621,10 @@ function mergePrimaryStopSchedule(stops, { fecha, hora, ventana } = {}) {
 
 function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   if (Object.keys(overrides).length) return sanitizePedidoPayload(buildPedidoUpdatePatch(overrides));
-  const merged = normalizePedidoTarifaDraft({ ...basePedido, ...overrides });
+  const merged = normalizePedidoTarifaDraft(cargoPayload({ ...basePedido, ...overrides }));
   const geoMerged = withPedidoGeoDefaults(merged);
   const {
-    remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
+    _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
     colaborador_nombre, chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
     factura_numero, factura_estado, factura_id,
     facturado, cliente_email, cliente_telefono,
@@ -820,6 +826,7 @@ function getPedidoOperationalFlags(pedido, now = new Date()) {
 function getPedidoStateValidationIssues(pedido, targetEstado = "") {
   const estado = String(targetEstado || pedido?.estado || "").toLowerCase();
   const issues = [];
+  if (["cancelado","incidencia"].includes(estado)) return issues;
   const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
   const hasManualMatricula = Boolean(String(pedido?.matricula_manual || "").trim());
   const needsOperationalData = ["confirmado", "en_curso", "descarga", "entregado"].includes(estado);
@@ -1129,7 +1136,7 @@ function groupRutasByOrigen(rutas = []) {
 }
 
 const NUMERIC_PEDIDO_FIELDS = new Set([
-  "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
+  "palets_cantidad", "carga_largo_m", "carga_ancho_m", "carga_alto_m", "peso_kg", "bultos", "importe", "km_ruta", "km_vacio", "volumen", "metros_lineales",
   "cantidad", "precio_unitario", "extracostes_importe",
   "tipo_iva",
   "precio_base_sin_combustible", "recargo_combustible_pct", "importe_revision_combustible",
@@ -2874,9 +2881,6 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         const lista = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
         const cargas = lista.filter(isCargaPoint);
         setPuntosCargaCliente(cargas);
-        if (cargas.length === 1) {
-          setForm(p => String(p.origen || "").trim() ? p : applyPuntoCargaToDraft(p, cargas[0]));
-        }
       })
       .catch(() => {
         if (alive) setPuntosCargaCliente(getPuntosCargaCliente(clienteSeleccionadoRapido.id));
@@ -3177,7 +3181,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                 <div style={{display:"flex",gap:6}}>
                   {puntosCargaCliente.length > 0 ? (
                     <PuntoInteresPicker
-                      placeholder={puntosCargaCliente.length === 1 ? "Punto de carga cargado" : "Elegir punto de carga del cliente"}
+                      placeholder="Elegir punto de carga del cliente"
                       puntos={puntosCargaCliente}
                       clienteId={form.cliente_id}
                       tipo="carga"
@@ -3195,7 +3199,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
                   </button>
                 </div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
-                  {puntosCargaCliente.length > 1 ? "Este cliente tiene varios puntos de carga: elige el origen correcto." : puntosCargaCliente.length === 1 ? "Origen cargado desde el punto habitual del cliente." : "Sin puntos propios: crea uno nuevo para este cliente."}
+                  {puntosCargaCliente.length > 1 ? "Este cliente tiene varios puntos de carga: elige el origen correcto." : puntosCargaCliente.length === 1 ? "Selecciona el punto del cliente para utilizarlo como origen." : "Sin puntos propios: crea uno nuevo para este cliente."}
                 </div>
               </div>
             </div>
@@ -5144,19 +5148,17 @@ ${bloqueCombustible}
   }
 
   return (
-    <div style={S2.modal} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={S2.box}>
-        <div style={{height:7,background:esColaborador?"linear-gradient(90deg,#7c3aed,#10b981,#f59e0b)":"linear-gradient(90deg,var(--accent),#10b981,#f59e0b)"}}/>
-        <div style={S2.body}>
+    <WorkspaceModal title={`${esColaborador ? "Orden de carga" : "Documento de control digital (DCD)"} · ${pedido.numero}`} onClose={onClose} width={1000}>
+        <div className="load-document">
         {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,marginBottom:16,padding:"14px 16px",background:"linear-gradient(180deg,var(--bg3),transparent)",border:"1px solid var(--border)",borderRadius:12}}>
           <div>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--text)"}}>Orden de carga - {pedido.numero}</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--text)"}}>{pedido.cliente_nombre || "Datos del transporte"}</div>
             <div style={{display:"flex",gap:8,marginTop:4,alignItems:"center"}}>
               <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:"var(--orange)",background:"rgba(249,115,22,.1)",border:"1px solid rgba(249,115,22,.25)",borderRadius:5,padding:"2px 8px"}}>
-                N. OC: {numOCDisplay}
+                {esColaborador ? "N. OC:" : "Pedido:"} {esColaborador ? numOCDisplay : pedido.numero}
               </span>
-              <span style={{fontSize:11,color:"var(--text5)"}}>Este numero se indica en la factura al cliente</span>
+              <span style={{fontSize:11,color:"var(--text5)"}}>{esColaborador ? "Número de referencia de la orden" : "Documento de transporte propio"}</span>
             </div>
             <div style={{marginTop:5,display:"inline-flex",alignItems:"center",gap:6,padding:"3px 10px",borderRadius:20,
               background:esColaborador?"rgba(139,92,246,.15)":"rgba(59,130,246,.12)",
@@ -5170,7 +5172,7 @@ ${bloqueCombustible}
                   ? "Comprobando ruta optimizada..."
                   : rutaOptimizada
                     ? `Se adjuntara ruta optimizada: ${rutaOptimizada.provider_label || rutaOptimizada.provider || "API"}${rutaOptimizada.distance_km ? ` | ${rutaOptimizada.distance_km} km` : ""}`
-                    : "Se adjuntara ruta orientativa. Para incluir HERE, calcula la ruta en Gestion de Trafico > Optimizacion."}
+                    : "Se adjuntará la ruta orientativa del viaje."}
               </div>
             )}
             <div style={{marginTop:10,fontSize:11,fontWeight:700,color:docControl?.status?.ready?"#10b981":docControl?.status?.level==="warning"?"#f59e0b":"var(--text5)"}}>
@@ -5188,12 +5190,12 @@ ${bloqueCombustible}
           </div>
         </div>
 
-        <div style={{marginBottom:14,padding:"12px 14px",borderRadius:12,background:"linear-gradient(180deg,var(--bg3),transparent)",border:"1px solid var(--border)"}}>
+        <details className="document-control" open={!esColaborador}><summary>Documento de control digital · Documentos, firma y seguimiento</summary>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:10,flexWrap:"wrap"}}>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"var(--text)"}}>Documento de Control Digital</div>
               <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
-                Base preparada segun la normativa del documento de control electronico: codigo numerico o QR con URL HTTPS.
+                Consulta los documentos, las firmas y el estado de tramitación.
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -5446,7 +5448,7 @@ ${bloqueCombustible}
               )}
             </>
           )}
-        </div>
+        </details>
 
         {/* Datos del viaje */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
@@ -5554,8 +5556,7 @@ ${bloqueCombustible}
           </div>
         )}
         </div>
-      </div>
-    </div>
+    </WorkspaceModal>
   );
 }
 
@@ -6619,7 +6620,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [form,       setForm]       = useState(
     editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""}))
-      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", metros_lineales:"13.65", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje",  fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
   );
   const [mapPedidoDraft, setMapPedidoDraft] = useState(() => form);
   const [saving,     setSaving]     = useState(false);
@@ -6658,7 +6659,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     if (hydratedPedidoKeyRef.current === editandoKey) return;
     const nextForm = editando
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({ ...editando, remolque_id_manual: editando.remolque_id || "" }))
-      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje", metros_lineales:"13.65", fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, carga_techo:false, intercambio_palets:false, requiere_cinchas:true });
+      : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje",  fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general", carga_lateral:true, carga_trasera:false, carga_techo:false, intercambio_palets:false, requiere_cinchas:true });
     hydratedPedidoKeyRef.current = editandoKey;
     setForm(nextForm);
     setColaboradorBusqueda("");
@@ -6738,9 +6739,6 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
         const lista = Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
         const cargas = lista.filter(isCargaPoint);
         setPuntosCargaClienteModal(cargas);
-        if (cargas.length === 1) {
-          setForm(p => String(p.origen || "").trim() ? p : applyPuntoCargaToDraft(p, cargas[0]));
-        }
       })
       .catch(() => {
         if (alive) setPuntosCargaClienteModal(getPuntosCargaCliente(form.cliente_id));
@@ -8389,7 +8387,7 @@ useEffect(() => {
                   <div style={{marginTop:6}}>
                     {puntosCargaClienteModal.length > 0 ? (
                       <PuntoInteresPicker
-                        placeholder={puntosCargaClienteModal.length === 1 ? "Punto de carga del cliente" : "Elegir punto de carga del cliente"}
+                        placeholder="Elegir punto de carga del cliente"
                         puntos={puntosCargaClienteModal}
                         clienteId={form.cliente_id}
                         tipo="carga"
@@ -8664,33 +8662,34 @@ useEffect(() => {
                   vehiculos={vehiculosLocal}
                 />
               </div>
-              <div><label style={S.label}>Bultos / Palets</label><input type="text" inputMode="decimal" style={S.input} value={form.bultos||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,bultos:e.target.value})))}/></div>
+              <div><label style={S.label}>{form.palets_tipo === "granel" ? "Número de bultos" : "Número de palets / bultos"}</label><input aria-label="Cantidad de carga" type="number" min="0" step="1" style={S.input} value={cargoCount(form)||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia(updateCargo(p,"palets_cantidad",e.target.value))))}/></div>
               {/* Detalle de la carga: con esto el grupaje calcula la ocupacion
                   real del remolque (metros lineales, peso y palets). */}
-              {form.tipo_carga === "grupaje" && <>
+              {<>
               <div><label style={S.label}>Tipo de palet</label>
-                <select style={S.sel} value={form.palets_tipo||""} onChange={f("palets_tipo")}>
+                <select style={S.sel} value={form.palets_tipo||""} onChange={e=>setForm(p=>updateCargo(p,"palets_tipo",e.target.value))}>
                   <option value="">Sin especificar</option>
                   <option value="europeo">Europeo (120x80)</option>
                   <option value="americano">Americano (120x100)</option>
                   <option value="medio">Medio palet (80x60)</option>
                   <option value="granel">Sin paletizar / granel</option>
                 </select>
+                {PALLET_SIZES[form.palets_tipo] && <small>Medidas del palet: {PALLET_SIZES[form.palets_tipo].map(v=>v*100).join(" × ")} cm. La ocupación se calcula al indicar la cantidad.</small>}
               </div>
-              <div><label style={S.label}>N. de palets</label><input type="text" inputMode="numeric" style={S.input} value={form.palets_cantidad||""} onChange={f("palets_cantidad")} placeholder="Ej: 12"/></div>
+
               <div style={{display:"flex",alignItems:"flex-end",paddingBottom:6}}>
                 <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"var(--text3)",cursor:"pointer"}}>
-                  <input type="checkbox" checked={!!form.palets_apilables} onChange={e=>setForm(p=>({...p,palets_apilables:e.target.checked}))}/>
+                  <input type="checkbox" checked={!!form.palets_apilables} onChange={e=>setForm(p=>updateCargo(p,"palets_apilables",e.target.checked))}/>
                   Se pueden apilar
                 </label>
               </div>
-              <div><label style={S.label}>Largo carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_largo_m||""} onChange={f("carga_largo_m")} placeholder="Solo si no va paletizada"/></div>
-              <div><label style={S.label}>Ancho carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_ancho_m||""} onChange={f("carga_ancho_m")}/></div>
+              <div><label style={S.label}>Longitud ocupada / ML (m)</label><input type="text" inputMode="decimal" style={S.input} aria-label="Longitud ocupada" value={form.carga_largo_m ?? (cargoLength(form)||"")} onChange={e=>setForm(p=>updateCargo(p,"carga_largo_m",e.target.value))} placeholder="Calculada según los palets"/></div>
+              <div><label style={S.label}>Ancho carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_ancho_m||""} aria-label="Ancho de carga" onChange={e=>setForm(p=>updateCargo(p,"carga_ancho_m",e.target.value))}/></div>
               <div><label style={S.label}>Alto carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_alto_m||""} onChange={f("carga_alto_m")}/></div>
               </>}
               <div><label style={S.label}>Temperatura (C)</label><input type="text" inputMode="decimal" style={S.input} value={form.temperatura_c??""} onChange={f("temperatura_c")} placeholder="Ej: -18 (vacio = sin frio)"/></div>
               <div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>
-              <div><label style={S.label}>ML</label><input type="text" inputMode="decimal" style={S.input} value={form.metros_lineales||""} onChange={f("metros_lineales")} placeholder="Metros lineales"/></div>
+
             </div>
 
             <AdrPanel
@@ -8939,11 +8938,17 @@ useEffect(() => {
             </div>
             {showCostes && (
               <div style={{background:"rgba(239,68,68,.04)",border:"1px solid rgba(239,68,68,.15)",borderRadius:8,padding:"14px",marginBottom:14}}>
+                {!form.colaborador_id&&<button type="button" style={{...S.btn,marginBottom:10}} onClick={async()=>{
+                  if(parseLocaleNumber(form.km_ruta,0)<=0){notify("Calcula o indica los kilómetros de la ruta antes de estimar el gasoil.","warning");return;}
+                  const estimate=calcularCosteGasoil(form);
+                  if(parseLocaleNumber(form.coste_gasoil,0)>0&&!await confirmDialog({title:"Recalcular gasoil",message:`Sustituir el gasoil registrado por la estimación de ${estimate.toLocaleString("es-ES")} EUR. Peajes, dietas y otros costes se conservan.`,confirmText:"Recalcular"}))return;
+                  setForm(p=>({...p,coste_gasoil:estimate}));
+                }}>Calcular gasoil estimado</button>}
                 {parseLocaleNumber(form.km_ruta, 0) > 0 && (
                   <div style={{fontSize:11,color:"var(--text4)",marginBottom:10}}>
                     {form.colaborador_id
-                      ? "Viaje cargado por colaborador: el coste de gasoil se mantiene a 0."
-                      : `Gasoil calculado con ${consumoLitros100PorPeso(form.peso_kg)} L/100 km segun peso (${parseLocaleNumber(form.peso_kg,0).toLocaleString("es-ES")} kg) y ${parseLocaleNumber(form.km_ruta,0).toLocaleString("es-ES")} km.`}
+                      ? "Viaje realizado por colaborador: el coste es su precio acordado, sin gasoil propio."
+                      : `Estimación de gasoil con ${consumoLitros100PorPeso(form.peso_kg)} L/100 km segun peso (${parseLocaleNumber(form.peso_kg,0).toLocaleString("es-ES")} kg) y ${parseLocaleNumber(form.km_ruta,0).toLocaleString("es-ES")} km y ${precioGasoilDefault().toLocaleString("es-ES")} EUR/litro.`}
                   </div>
                 )}
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
@@ -9061,7 +9066,7 @@ useEffect(() => {
                 </label>
                 <select value={form.chofer_id||""} onChange={e=>{ const cid=e.target.value; setForm(p=>({ ...p, chofer_id:cid, ...(cid && p.colaborador_id ? { colaborador_id:"", colaborador_nombre:"", precio_cliente_col:"", precio_colaborador:"" } : {}) })); }} style={S.sel}>
                   <option value="">Sin asignar</option>
-                  {choferesLocal.map(c=><option key={c.id} value={c.id}>{c.nombre} {c.apellidos||""}</option>)}
+                  {choferesLocal.map(c=><option key={c.id} value={c.id}>{driverOption(c, vehiculosLocal)}</option>)}
                 </select>
               </div>
               {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Remolque del conjunto ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
@@ -9108,7 +9113,7 @@ useEffect(() => {
               <div><label style={S.label}>2o Chofer (opcional)</label>
                 <select value={form.chofer2_id||""} onChange={f("chofer2_id")} style={S.sel}>
                   <option value="">Sin segundo chofer</option>
-                  {choferesLocal.filter(c=>c.id!==form.chofer_id).map(c=><option key={c.id} value={c.id}>{c.nombre} {c.apellidos||""}</option>)}
+                  {choferesLocal.filter(c=>c.id!==form.chofer_id).map(c=><option key={c.id} value={c.id}>{driverOption(c, vehiculosLocal)}</option>)}
                 </select>
               </div>
               {!form.vehiculo_id && !form.colaborador_id && form.matricula_manual && (
@@ -9398,7 +9403,7 @@ useEffect(() => {
                   <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>CMR, albaranes, fotos, pesajes o instrucciones. Se adjuntan al pedido y a la factura.</div>
                 </div>
                 {!editando?.id && (
-                  <label style={{marginLeft:"auto",padding:"6px 12px",borderRadius:7,background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  <label className="tg-attachment-trigger" style={{marginLeft:"auto",padding:"6px 12px",borderRadius:7,background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                     Adjuntar antes de crear
                     <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" style={{display:"none"}} onChange={seleccionarDocsPendientes}/>
                   </label>
@@ -10125,6 +10130,7 @@ function openPedidoInTrafico(pedido) {
 
 
 export default function Pedidos() {
+  const [cancelOrder,setCancelOrder]=useState(null);
   useEmpresaPerfil();
   const { puedeEditar, user } = useAuth();
   const canEdit = puedeEditar("pedidos");
@@ -10141,6 +10147,7 @@ export default function Pedidos() {
   // incidencias del Dashboard) aunque lo hayas quitado con Reset.
   useEffect(() => { clearRuntimeFocus("tms_pedidos_focus"); }, []);
   const focusNuevoAplicadoRef = useRef(false);
+  const focusPedidoAplicadoRef = useRef(false);
   const [guidedPedido, setGuidedPedido] = useState(() => {
     const focus = readGuidedPedidoTutorial();
     return focus ? { active:true, modalOpened:false, saved:false, progress:buildGuidedPedidoProgress({}, { modalOpened:false, saved:false }) } : null;
@@ -10176,6 +10183,7 @@ export default function Pedidos() {
   const [readCriticalAlerts, setReadCriticalAlerts] = useState(() => loadReadPedidoAlerts());
   const [selectedPedidoIds, setSelectedPedidoIds] = useState([]);
   const [bulkEstado, setBulkEstado] = useState("confirmado");
+  const [bulkReason,setBulkReason]=useState(null);
   const debouncedQ   = useDebounce(q, 350); // debounce search input 350ms
   const [page,       setPage]       = useState(1);
   const [cartaPorte, setCartaPorte] = useState(null); // pedido data for CMR modal
@@ -10548,7 +10556,7 @@ export default function Pedidos() {
   }, [focusPedido, loading, vehiculos, choferes]);
 
   useEffect(() => {
-    if (!focusPedido?.pedido_id || loading) return;
+    if (focusPedidoAplicadoRef.current || !focusPedido?.pedido_id || loading) return;
     // El pedido puede NO estar en la lista cargada (otro rango de fechas u otra
     // pagina): venir de Control Tower a una incidencia antigua es el caso tipico.
     // Antes se salia sin hacer nada y quedaba Pedidos abierto SIN abrir el viaje;
@@ -10556,18 +10564,22 @@ export default function Pedidos() {
     const found = pedidos.find(p => String(p.id) === String(focusPedido.pedido_id));
     let alive = true;
     const t = window.setTimeout(() => {
-      document.getElementById(`pedido-row-${focusPedido.pedido_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
+      document.getElementById(`order-compact-${focusPedido.pedido_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
       const focusText = `${focusPedido.type || ""} ${focusPedido.title || ""} ${focusPedido.action || ""} ${focusPedido.action_key || ""}`.toLowerCase();
       const focusIncidencia = focusText.includes("incidencia") || String(found?.estado || focusPedido.estado || "").toLowerCase() === "incidencia";
       getPedido(focusPedido.pedido_id)
         .then(full => {
-          if (!alive) return;
+          // Consumir el destino antes de abrir: guardar/recargar no debe volver a abrirlo.
+          if (!alive || focusPedidoAplicadoRef.current) return;
+          focusPedidoAplicadoRef.current = true;
           setEditando({ ...(full || found || { id: focusPedido.pedido_id, numero: focusPedido.numero || "" }), _focus_incidencia: focusIncidencia });
           setModal(true);
           clearRuntimeFocus("tms_pedidos_focus");
         })
         .catch(() => {
-          if (!alive) return;
+          // Consumir el destino antes de abrir: guardar/recargar no debe volver a abrirlo.
+          if (!alive || focusPedidoAplicadoRef.current) return;
+          focusPedidoAplicadoRef.current = true;
           clearRuntimeFocus("tms_pedidos_focus");
           if (!found) { notify("No se pudo abrir el pedido indicado.", "error"); return; }
           setEditando({ ...found, _focus_incidencia: focusIncidencia });
@@ -10596,6 +10608,9 @@ export default function Pedidos() {
     };
     const openFocusedPedido = (focus) => {
       if (!focus) return;
+      // Una navegación explícita sustituye al destino inicial, incluso si sigue cargando.
+      focusPedidoAplicadoRef.current = true;
+      focusNuevoAplicadoRef.current = true;
       if (focus.action === "nuevo") {
         const draft = buildPedidoDraftFromTrafficFocus(focus, vehiculos, choferes);
         resetFocusFilters();
@@ -10640,60 +10655,33 @@ export default function Pedidos() {
     return () => window.removeEventListener("tms:pedidos-focus", handle);
   }, [vehiculos, choferes, pedidos]);
 
-  function empresaRequiereMotivoCancelacion() {
-    const cfg = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG && typeof window.__TMS_EMPRESA_CONFIG === "object")
-      ? window.__TMS_EMPRESA_CONFIG
-      : {};
-    const trafico = cfg?.cfg_trafico || {};
-    return trafico.requerir_motivo_cancelacion !== false && trafico.requiere_motivo_cancelacion !== false;
-  }
-
   async function solicitarCancelacionPedido(p) {
-    if (!p?.id) return;
-    let motivo = "";
-    if (empresaRequiereMotivoCancelacion()) {
-      const input = window.prompt(`Motivo de cancelacion para ${p.numero || "este pedido"}:`, p.motivo_cancelacion || "");
-      if (input === null) return;
-      motivo = String(input || "").trim();
-      if (!motivo) {
-        notify("Indica un motivo para cancelar el pedido.", "warning");
-        return;
-      }
-    } else {
-      const ok = await confirmDialog({
-        title: "Cancelar pedido",
-        message: `Cancelar el pedido ${p.numero || ""}?`,
-        confirmText: "Cancelar pedido",
-        tone: "warning",
-      });
-      if (!ok) return;
-    }
-    await cambiarEstado(p.id, "cancelado", { motivo_cancelacion: motivo, __fromCancelFlow: true });
+    if(p?.id)setCancelOrder(p);
   }
 
   async function cambiarEstado(id, estado, extra = {}) {
     const p = pedidos.find(x => x.id === id);
     if (estado === "cancelado" && !extra.__fromCancelFlow) {
       await solicitarCancelacionPedido(p);
-      return;
+      return false;
     }
     if (pedidoTieneFacturaFinal(p)) {
       notify("No se puede cambiar el estado de un pedido facturado.", "warning");
-      return;
+      return false;
     }
     if (String(p?.estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && user?.rol !== "gerente") {
       notify("Solo gerencia puede cambiar el estado de un pedido entregado.", "warning");
-      return;
+      return false;
     }
     const validationIssues = getPedidoStateValidationIssues(p, estado);
     if (validationIssues.length) {
       notify(`No se puede pasar a "${LABEL_ESTADO[estado] || estado}" hasta completar: ${validationIssues.join(", ")}.`, "warning");
-      return;
+      return false;
     }
     const incidenciaTexto = String(extra.incidencia || "").trim();
     if (estado === "incidencia" && !incidenciaTexto) {
       setIncidenciaSelector({ pedidoId:id, tipo:"", detalle:"" });
-      return;
+      return false;
     }
     // Entrega fuera de su mes (p. ej. cerrado tarde por incidencia): preguntar si
     // se conserva su mes original, se factura este mes o se lleva al siguiente.
@@ -10703,7 +10691,7 @@ export default function Pedidos() {
       const mesActual = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}`;
       if (mesRef && mesRef < mesActual) {
         setFacturacionMesSelector({ pedidoId: id, mesRef, mesActual });
-        return;
+        return false;
       }
     }
     // Optimistic update - UI responds instantly
@@ -10724,11 +10712,12 @@ export default function Pedidos() {
       delete payloadExtra.__facturacionResuelta;
       await cambiarEstadoPedido(id, estado, payloadExtra);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: id, estado, source: "pedidos-estado" } }));
-      // No need to full reload - optimistic update is correct
+      return true;
     } catch(e) {
       // Revert on error
       setPedidos(prev => prev.map(x => x.id===id ? {...x, estado: p?.estado, facturacion_mes: p?.facturacion_mes} : x));
       notify(e.message, "error");
+      return false;
     }
   }
 
@@ -10752,6 +10741,8 @@ export default function Pedidos() {
 
 
   function abrirNuevo() {
+    focusPedidoAplicadoRef.current = true;
+    focusNuevoAplicadoRef.current = true;
     setEditando(null);
     setModal(true);
     if (guidedPedidoActive) {
@@ -10763,6 +10754,8 @@ export default function Pedidos() {
     }
   }
   async function abrirEditar(p, options = {}) {
+    focusPedidoAplicadoRef.current = true;
+    focusNuevoAplicadoRef.current = true;
     let pedidoCompleto = p;
     if (p?.id) {
       try {
@@ -10775,6 +10768,16 @@ export default function Pedidos() {
     const estaFacturado = pedidoTieneFacturaFinal(pedidoCompleto);
     setEditando(estaFacturado ? { ...pedidoCompleto, ...options, _correccion_factura: true, _readonly: false } : { ...pedidoCompleto, ...options });
     setModal(true);
+  }
+
+  async function abrirDocumentoControl(p) {
+    if (!p?.id) return;
+    try {
+      const completo = await getPedido(p.id);
+      if (!completo?.id) throw new Error("No se ha podido cargar el pedido para abrir su DCD.");
+      setOrdenCargaGrupaje([]);
+      setOrdenCarga(normalizePedidoTarifaDraft(completo));
+    } catch (e) { notify(e.message || "No se pudo abrir el DCD.", "error"); }
   }
 
   async function abrirOrdenCarga(p) {
@@ -11349,15 +11352,26 @@ export default function Pedidos() {
     }
   }
 
-  async function cambiarEstadoSeleccionados() {
+  async function eliminarSeleccionadosConMotivo(reasons){
+    const completed=[];const failed=[];
+    for(const p of selectedPedidosOperables){
+      if(pedidoTieneFacturaFinal(p)||pedidoTieneFacturaBorrador(p)){failed.push(`${p.numero}: tiene factura vinculada`);continue;}
+      try{await cambiarEstadoPedido(p.id,'cancelado',{motivo_cancelacion:reasons[p.id]});await eliminarPedido(p.id);completed.push(String(p.id));}catch(e){failed.push(`${p.numero}: ${e.message}`);}
+    }
+    setSelectedPedidoIds(ids=>ids.filter(id=>!completed.includes(String(id))));await cargar({silent:true});
+    notify(`${completed.length} pedidos eliminados.${failed.length?' No se han eliminado: '+failed.join(' | '):''}`,failed.length?'warning':'success');
+  }
+  async function cambiarEstadoSeleccionados(reasons=null) {
     const lista = selectedPedidosOperables;
     if (!lista.length) {
       notify("Selecciona pedidos editables para cambiarles el estado.", "info");
       return;
     }
+    if(['cancelado','incidencia'].includes(bulkEstado)&&(!reasons||reasons.nativeEvent)){setBulkReason({mode:'estado',orders:lista});return;}
+    const extra=p=>bulkEstado==='cancelado'?{motivo_cancelacion:reasons?.[p.id]}:bulkEstado==='incidencia'?{incidencia_descripcion:reasons?.[p.id],incidencia_tipo:'otra'}:{};
     const evaluados = lista.map(pedido => ({
       pedido,
-      issues: getPedidoStateValidationIssues(pedido, bulkEstado),
+      issues: getPedidoStateValidationIssues({...pedido,...extra(pedido)}, bulkEstado),
     }));
     const validos = evaluados.filter(item => item.issues.length === 0).map(item => item.pedido);
     const invalidos = evaluados.filter(item => item.issues.length > 0);
@@ -11377,11 +11391,11 @@ export default function Pedidos() {
     if (!ok) return;
     setBulkRescheduling(true);
     try {
-      let okCount = 0; const fallos = [];
+      let okCount = 0; const fallos = [];const completed=[];
       for (const pedido of validos) {
         try {
-          await cambiarEstadoPedido(pedido.id, bulkEstado);
-          okCount++;
+          await cambiarEstadoPedido(pedido.id, bulkEstado,extra(pedido));
+          completed.push(String(pedido.id));okCount++;
         } catch (err) {
           fallos.push(`${pedido.numero || pedido.id}: ${err.message || "error"}`);
         }
@@ -11392,7 +11406,7 @@ export default function Pedidos() {
           : `Estado actualizado en ${okCount} pedido(s).`,
         fallos.length ? "warning" : "success"
       );
-      setSelectedPedidoIds(prev => prev.filter(id => invalidos.some(item => item.pedido.id === id)));
+      setSelectedPedidoIds(prev => prev.filter(id => !completed.includes(String(id))));
       cargar({ silent: true });
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-bulk-state", estado: bulkEstado } }));
@@ -11490,7 +11504,7 @@ export default function Pedidos() {
 
   return (
     <div className="orders-page">
-      <OrdersWorkspace
+      <OrdersWorkspace vehicles={vehiculos}
         items={pedidosVisibles} allItems={pedidosConMeta} loading={loading} error={loadError} reload={() => cargar()}
         clients={clientes} drivers={choferes} labels={LABEL_ESTADO}
         serverPage={page} serverPages={totalPages} totalCount={totalCount} setServerPage={setPage}
@@ -11562,13 +11576,14 @@ export default function Pedidos() {
           >
             Aplicar estado
           </button>
+          <button disabled={bulkRescheduling||!selectedPedidosOperables.length} onClick={()=>setBulkReason({mode:"eliminar",orders:selectedPedidosOperables})} style={S.btn}>Eliminar seleccionados</button>
           <select value={bulkVehiculo} onChange={e => setBulkVehiculo(e.target.value)} style={{...S.sel,width:150,padding:"5px 10px",fontSize:11}}>
             <option value="">Vehiculo...</option>
             {vehiculos.map(v => <option key={v.id} value={v.id}>{v.matricula}</option>)}
           </select>
           <select value={bulkChofer} onChange={e => setBulkChofer(e.target.value)} style={{...S.sel,width:150,padding:"5px 10px",fontSize:11}}>
             <option value="">Chofer (auto del vehiculo)...</option>
-            {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre || c.matricula || c.id}</option>)}
+            {choferes.map(c => <option key={c.id} value={c.id}>{driverName(c)}</option>)}
           </select>
           <button onClick={asignarSeleccionados} disabled={bulkAssigning || (!bulkVehiculo && !bulkChofer)} style={{...S.btn,padding:"5px 10px",fontSize:11,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a30)",opacity:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?0.6:1,cursor:(bulkAssigning||(!bulkVehiculo&&!bulkChofer))?"not-allowed":"pointer"}}>
             {bulkAssigning ? "Asignando..." : "Asignar"}
@@ -11594,11 +11609,11 @@ export default function Pedidos() {
         actions={{new:abrirNuevo, quick:() => setQuickCreando(true), open:abrirEditar, assign:setQuickAssignPedido, copy:abrirCopiarPedido, order:abrirOrdenCarga, send:p => enviarWhatsappPedidoAccion(p,"cliente"), invoice:setFacturando, clearSelection:() => setSelectedPedidoIds([]), selectAll:toggleSelectAllVisible,
           cancel:solicitarCancelacionPedido, remove:eliminarPedidoDesdeListado, autoAssign:setAutoAsignando, clearAssignment:limpiarAsignacionPedido,
           delay:p=>solicitarRetrasoPedido(p,p.numero), changeState:(p,state)=>cambiarEstado(p.id,state), traffic:openPedidoInTrafico,
-          letter:async p=>{try{setCartaPorte(await getCartaPorte(p.id));}catch(e){notify(e.message,"error");}},
+          dcd:abrirDocumentoControl, letter:async p=>{try{setCartaPorte(await getCartaPorte(p.id));}catch(e){notify(e.message,"error");}},
           notifyDriver:notificarChoferAppAccion, sendTo:(p,target)=>enviarWhatsappPedidoAccion(p,target)}}
         describe={p => {
           const loads = pedidoStopsForList(p,"carga"), unloads = pedidoStopsForList(p,"descarga");
-          return {origin:pedidoStopListLabel(loads[0] || {},p.origen,p.cliente_id || "","carga"), destination:pedidoStopListLabel(unloads[0] || {},p.destino,p.cliente_id || "","descarga"), loads:loads.length, unloads:unloads.length};
+          return {origin:pedidoStopListLabel(loads[0] || {},p.origen,p.cliente_id || "","carga"), destination:pedidoStopListLabel(unloads[0] || {},p.destino,p.cliente_id || "","descarga"), loads:loads.length, unloads:unloads.length, loadDetails:loads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.origen:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n"), unloadDetails:unloads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.destino:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n")};
         }}
         filters={{q,setQ,state:filtroEst,setState:setFiltroEst,client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
           setFrom:value => {setFiltroFechasCustom(true);setFiltroDesde(value);},setTo:value => {setFiltroFechasCustom(true);setFiltroHasta(value);},
@@ -11825,6 +11840,8 @@ export default function Pedidos() {
         />
       )}
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Orden de carga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
+      {bulkReason&&<BulkOrderReasonDialog orders={bulkReason.orders} title={bulkReason.mode==="eliminar"?"Eliminar pedidos seleccionados":"Cambiar estado de pedidos"} onClose={()=>setBulkReason(null)} onConfirm={reasons=>bulkReason.mode==="eliminar"?eliminarSeleccionadosConMotivo(reasons):cambiarEstadoSeleccionados(reasons)}/>}
+      {cancelOrder&&<CancelOrderDialog pedido={cancelOrder} onClose={()=>setCancelOrder(null)} onConfirm={motivo=>cambiarEstado(cancelOrder.id,"cancelado",{motivo_cancelacion:motivo,__fromCancelFlow:true})}/>}
       {ordenCarga && <OrdenCargaModal pedido={ordenCarga} grupajePedidos={ordenCargaGrupaje} onClose={()=>{setOrdenCarga(null);setOrdenCargaGrupaje([]);}}/>}
 
       {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Autoasignacion IA ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}

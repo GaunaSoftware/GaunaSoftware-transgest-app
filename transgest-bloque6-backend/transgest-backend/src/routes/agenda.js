@@ -43,7 +43,7 @@ function normalizeType(value) {
 
 async function ensureOwnerOrManager(req, eventoId) {
   const { rows } = await db.query(
-    `SELECT id, empresa_id, creado_por, asignado_a
+    `SELECT id, empresa_id, creado_por, asignado_a, visibilidad
        FROM agenda_eventos
       WHERE id=$1 AND empresa_id=$2`,
     [eventoId, empresaId(req)]
@@ -54,7 +54,7 @@ async function ensureOwnerOrManager(req, eventoId) {
     err.statusCode = 404;
     throw err;
   }
-  if (canManageAll(req)) return row;
+  if (canManageAll(req) && row.visibilidad === "equipo") return row;
   const uid = String(req.user?.id || "");
   if (String(row.creado_por || "") === uid || String(row.asignado_a || "") === uid) return row;
   const err = new Error("No puedes modificar este evento");
@@ -112,11 +112,11 @@ router.get("/", async (req, res) => {
     params.push(req.query.usuario_id);
     where.push(`e.asignado_a = ${qIdx()}::uuid`);
   }
-  if (req.query.modo === "mias" || !canManageAll(req)) {
-    params.push(req.user.id);
-    const idx = qIdx();
-    where.push(`(e.asignado_a = ${idx}::uuid OR e.creado_por = ${idx}::uuid OR e.visibilidad = 'equipo')`);
-  }
+  params.push(req.user.id);
+  const ownerIdx = qIdx();
+  const own = `(e.asignado_a = ${ownerIdx}::uuid OR e.creado_por = ${ownerIdx}::uuid)`;
+  where.push(req.query.modo === "mias" ? own : `(${own} OR e.visibilidad = 'equipo')`);
+
 
   const { rows } = await db.query(
     `SELECT e.*,

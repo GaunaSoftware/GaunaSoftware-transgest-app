@@ -572,7 +572,7 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
   const canEdit = puedeEditar("choferes");
   const [tab,    setTab]    = useState("datos");
   const [form,   setForm]   = useState(editando ? { ...editando, remolque_id: editando.remolque_id || editando.vehiculo_remolque_id || "" } : {
-    activo:true, nombre:"", apellidos:"", dni:"", telefono:"", email:"",
+    activo:true, nombre:"", apellidos:"", alias:"", dni:"", telefono:"", email:"",
     direccion:"", poblacion:"", cp:"", provincia:"", pais:"España",
     fecha_alta: new Date().toISOString().slice(0,10), fecha_baja:"", motivo_baja:"",
     carta_renuncia_nombre:"", carta_renuncia_mime:"", carta_renuncia_base64:"",
@@ -725,6 +725,8 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
                 <div>
                   <label style={S.lbl}>Apellidos</label>
                   <input style={S.inp} value={form.apellidos||""} onChange={f("apellidos")} placeholder="García Pérez"/>
+                  <label style={S.lbl}>Alias (opcional)</label>
+                  <input style={S.inp} value={form.alias||""} onChange={f("alias")} maxLength={100} placeholder="Nombre para mostrar en asignaciones"/>
                 </div>
                 <div>
                   <label style={S.lbl}>DNI / NIE</label>
@@ -1006,7 +1008,7 @@ export default function Choferes() {
 
   const vehicleFor = c => vehiculos.find(v => String(v.id) === String(c.vehiculo_id) || String(v.chofer_id) === String(c.id));
   const normalize = v => String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
-  const filtrados = choferes.filter(c => (filtro === "todos" || (filtro === "activos" ? c.activo !== false : c.activo === false)) && (!sinVehiculo || !vehicleFor(c)) && normalize([c.nombre,c.apellidos,c.dni,c.telefono,c.poblacion,vehicleFor(c)?.matricula].join(" ")).includes(normalize(query)));
+  const filtrados = choferes.filter(c => (filtro === "todos" || (filtro === "activos" ? c.activo !== false : c.activo === false)) && (!sinVehiculo || !vehicleFor(c)) && normalize([c.nombre,c.apellidos,c.alias,c.dni,c.telefono,c.poblacion,vehicleFor(c)?.matricula].join(" ")).includes(normalize(query)));
   const pages = Math.max(1, Math.ceil(filtrados.length/pageSize));
   const currentPage = Math.min(page,pages);
   const visible = filtrados.slice((currentPage-1)*pageSize,currentPage*pageSize);

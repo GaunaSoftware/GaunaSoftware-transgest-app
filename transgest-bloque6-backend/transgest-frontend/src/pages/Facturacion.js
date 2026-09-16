@@ -1396,7 +1396,7 @@ function ModalFacturarMultiple({ onClose }) {
     const tieneFacturaDefinitiva = p.factura_id && p.factura_estado !== "borrador";
     if (tieneFacturaDefinitiva) return false;
     if (p.estado !== "entregado") return false;
-    const f = p.fecha_carga || p.fecha_pedido || "";
+    const f = String(p.fecha_carga || p.fecha_pedido || "").slice(0, 10);
     return (!fechaDesde || f >= fechaDesde) && (!fechaHasta || f <= fechaHasta);
   }, [fechaDesde, fechaHasta]);
 
@@ -1631,7 +1631,7 @@ function ModalFacturarMultiple({ onClose }) {
             <label style={lbl}>Cliente *</label>
             <select value={clienteSel} onChange={e=>{ setClienteSel(e.target.value); setFechaVencimiento(""); }} style={inp}>
               <option value="">Seleccionar cliente...</option>
-              {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}{c.cif?" - "+c.cif:""}</option>)}
+              {resumenClientes.filter(c => c.cliente_id).map(c=><option key={c.cliente_id} value={c.cliente_id}>{c.cliente_nombre} · {c.pedidos.length} pedidos</option>)}
             </select>
           </div>
           <div>

@@ -2816,58 +2816,13 @@ router.get("/:id/portal-user", GERENTE_O_TRAFICO, async (req, res) => {
 // POST /colaboradores/:id/portal-user - invita al proveedor habitual: crea (o
 // resetea) una cuenta con contrasena temporal ligada a ese colaborador. Solo ve
 // sus propios viajes. Con reset_password=true se genera una clave nueva.
-router.post("/:id/portal-user", GERENTE_O_TRAFICO, async (req, res) => {
+router.post("/:id/portal-user", GERENTE_O_TRAFICO, async(req,res)=>{
   try {
-    const empresaId = req.empresaId || req.user?.empresa_id;
-    const col = await db.query(
-      "SELECT id, nombre, cif, email FROM colaboradores WHERE id=$1 AND empresa_id=$2 AND activo=true",
-      [req.params.id, empresaId]
-    );
-    const colaborador = col.rows[0];
-    if (!colaborador) return res.status(404).json({ error: "Proveedor no encontrado" });
-
-    const existente = await db.query(
-      `SELECT id, nombre, username, rol, activo
-         FROM usuarios
-        WHERE empresa_id=$1 AND colaborador_id=$2 AND rol::text='colaborador'
-        ORDER BY created_at ASC LIMIT 1`,
-      [empresaId, colaborador.id]
-    );
-    if (existente.rows[0] && !req.body?.reset_password) {
-      return res.json({ existe: true, usuario: existente.rows[0] });
-    }
-
-    const password = passwordTemporalProveedor();
-    const hash = await bcrypt.hash(password, 12);
-    if (existente.rows[0]) {
-      const { rows } = await db.query(
-        `UPDATE usuarios
-            SET password_hash=$1, debe_cambiar_password=true, activo=true
-          WHERE id=$2 AND empresa_id=$3
-          RETURNING id, nombre, username, rol, activo`,
-        [hash, existente.rows[0].id, empresaId]
-      );
-      return res.json({ existe: true, reset: true, password_temporal: password, usuario: rows[0] });
-    }
-    // Acceso minimo: sus viajes, sus documentos y su cuenta.
-    const permisos = { modulos: {
-      pedidos: { ver: true, editar: true },
-      documentos: { ver: true, editar: true },
-      mi_cuenta: { ver: true, editar: true },
-    } };
-    const { rows } = await db.query(
-      `INSERT INTO usuarios
-        (nombre,email,username,password_hash,rol,empresa_id,colaborador_id,perfil,permisos,debe_cambiar_password)
-       VALUES ($1,$2,$3,$4,'colaborador',$5,$6,'Portal proveedor',$7,true)
-       RETURNING id, nombre, username, rol, activo`,
-      [`${colaborador.nombre} (Proveedor)`, null, usernameProveedor(colaborador), hash,
-       empresaId, colaborador.id, permisos]
-    );
-    res.status(201).json({ creado: true, password_temporal: password, usuario: rows[0] });
-  } catch (e) {
-    if (e.code === "23505") return res.status(409).json({ error: "Ya existe un usuario con ese identificador." });
-    res.status(500).json({ error: e.message });
-  }
+    const empresaId=req.empresaId||req.user.empresa_id;
+    const col=(await db.query('SELECT id,nombre,email FROM colaboradores WHERE id=$1 AND empresa_id=$2 AND activo=true',[req.params.id,empresaId])).rows[0];
+    if(!col)return res.status(404).json({error:'Proveedor no encontrado'});
+    res.json(await require('../services/supplierInvitations').inviteSupplier({empresaId,colaboradorId:col.id,nombre:col.nombre,email:col.email,actor:req.user.email}));
+  }catch(e){res.status(e.status||500).json({error:e.code==='23505'?'Ese email ya está registrado':e.message});}
 });
 
 router.post("/:id/liquidacion-token", GERENTE_O_TRAFICO, async (req,res) => {
@@ -3219,6 +3174,8 @@ router.post("/:id/facturas", GERENTE_O_TRAFICO, async (req,res)=>{
       [req.params.id, empresaId]
     );
     if (!colaborador.rows[0]) return res.status(404).json({ error: "Colaborador no encontrado" });
+    const billingIssue=await require('../services/billingData').billingProblem(db,req.params.id,empresaId,true);
+    if(billingIssue)return res.status(422).json({error:billingIssue,code:'DATOS_FISCALES_INCOMPLETOS'});
     const defaultIva = normalizeIva(colaborador.rows[0].tipo_iva, colaborador.rows[0].iva_regimen);
     const invoiceIva = normalizeIva(
       iva_pct === undefined || iva_pct === null || iva_pct === "" ? defaultIva.tipo_iva : iva_pct,
@@ -3575,4 +3532,5 @@ router.delete("/:id/vehiculos/:vid", GERENTE_O_TRAFICO, async (req,res)=>{
   res.json({ok:true});
 });
 
+router.ensureColaboradorOpsSchema=ensureColaboradorOpsSchema;
 module.exports = router;

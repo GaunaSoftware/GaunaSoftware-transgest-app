@@ -3346,7 +3346,7 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
       ready: !!docControl.status?.ready,
     });
   }
-  await enviarEmail({
+  const emailResult = await enviarEmail({
     trigger: `colaborador_${accion}`,
     destinatario: pedido.colaborador_email,
     plantilla,
@@ -3369,6 +3369,7 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
       dcd_instrucciones: docControl?.remision?.instrucciones || "",
     },
   });
+  if (emailResult?.simulado || emailResult?.error) throw Object.assign(new Error("El correo al colaborador no se ha enviado. Revisa la configuración SMTP y utiliza la prueba de envío antes de reenviar la carga."),{status:503});
 }
 
 router.get("/colaborador/confirmar/:token", async (req, res) => {
@@ -6021,7 +6022,7 @@ router.get("/", async (req, res) => {
            co.cif AS colaborador_cif,
            co.telefono AS colaborador_telefono,
            co.email AS colaborador_email,
-           ch.nombre AS chofer_nombre,
+           ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
            v.matricula AS vehiculo_matricula,
            r.matricula AS remolque_matricula,
            f.estado AS factura_estado,
@@ -6062,7 +6063,7 @@ router.get("/", async (req, res) => {
            NULL AS colaborador_cif,
            NULL AS colaborador_telefono,
            NULL AS colaborador_email,
-           ch.nombre AS chofer_nombre,
+           ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
            v.matricula AS vehiculo_matricula,
            r.matricula AS remolque_matricula,
            f.estado AS factura_estado,
@@ -6462,6 +6463,8 @@ router.get("/resumen-lista", async (req, res) => {
              p.hora_carga, p.hora_descarga, p.ventana_carga, p.ventana_descarga,
              p.puntos_carga, p.puntos_descarga, p.origen, p.destino, p.referencia_cliente,
              p.mercancia, p.peso_kg, p.bultos, p.importe, p.precio_colaborador,
+             p.motivo_cancelacion, p.metros_lineales, p.palets_cantidad, p.palets_tipo, p.palets_apilables,
+             p.carga_largo_m, p.carga_ancho_m, p.carga_alto_m,
              p.tipo_precio, p.precio_unitario, p.cantidad, p.importe_minimo, p.minimo_unidades, p.extracostes_importe, p.precio_cliente_col,
              p.km_ruta, p.km_vacio, p.estado::text AS estado, p.pendiente_completar,
              p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
@@ -6470,7 +6473,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.tipo_carga, p.tipo_viaje, p.factura_id,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              co.nombre AS colaborador_nombre, co.telefono AS colaborador_telefono, co.email AS colaborador_email,
-             ch.nombre AS chofer_nombre,
+             ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
              v.matricula AS vehiculo_matricula,
              r.matricula AS remolque_matricula,
              f.estado AS factura_estado,
@@ -6502,7 +6505,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.tipo_carga, p.tipo_viaje, p.factura_id,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              NULL AS colaborador_nombre, NULL AS colaborador_telefono, NULL AS colaborador_email,
-             ch.nombre AS chofer_nombre,
+             ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
              v.matricula AS vehiculo_matricula,
              r.matricula AS remolque_matricula,
              f.estado AS factura_estado,
@@ -7734,7 +7737,7 @@ router.get("/:id", async (req, res) => {
            c.emails_albaranes AS cliente_emails_albaranes,
            co.nombre AS colaborador_nombre, co.cif AS colaborador_cif,
            co.telefono AS colaborador_telefono, co.email AS colaborador_email,
-           ch.nombre AS chofer_nombre, v.matricula,
+           ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos, v.matricula,
            f.estado AS factura_estado, f.numero AS factura_numero
     FROM pedidos p
     LEFT JOIN clientes c ON c.id=p.cliente_id
@@ -7750,7 +7753,7 @@ router.get("/:id", async (req, res) => {
            c.emails_albaranes AS cliente_emails_albaranes,
            NULL AS colaborador_nombre, NULL AS colaborador_cif,
            NULL AS colaborador_telefono, NULL AS colaborador_email,
-           ch.nombre AS chofer_nombre, v.matricula,
+           ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos, v.matricula,
            f.estado AS factura_estado, f.numero AS factura_numero
     FROM pedidos p
     LEFT JOIN clientes c ON c.id=p.cliente_id
@@ -8666,6 +8669,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
             remolque_id_manual, remolque_id } = req.body; // remolque_id_manual si se especifica uno distinto al del conjunto
 
     const empresaId = req.empresaId||req.user.empresa_id;
+    await require("../services/orderFuelCost").fillMissingFuelCost(db,req.body,{},empresaId);
     try {
       assertPedidoDateInputs(req.body, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga"]));
     } catch (dateErr) {
@@ -8832,6 +8836,12 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         km_vacio: req.body.km_vacio ?? null,
         volumen: req.body.volumen ?? null,
         metros_lineales: req.body.metros_lineales ?? null,
+        palets_tipo: req.body.palets_tipo ?? null,
+        palets_cantidad: req.body.palets_cantidad ?? null,
+        palets_apilables: req.body.palets_apilables ?? false,
+        carga_largo_m: req.body.carga_largo_m ?? null,
+        carga_ancho_m: req.body.carga_ancho_m ?? null,
+        carga_alto_m: req.body.carga_alto_m ?? null,
         tipo_precio: req.body.tipo_precio ?? "viaje",
         cantidad: req.body.cantidad !== undefined ? (req.body.cantidad ?? null) : undefined,
         precio_unitario: req.body.precio_unitario ?? null,
@@ -9262,6 +9272,7 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     [req.params.id, empresaId]
   );
   if (!pedidoActualRows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+  await require("../services/orderFuelCost").fillMissingFuelCost(db,body,pedidoActualRows[0],empresaId);
   try {
     assertPedidoDateInputs(body || {}, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga", "firma_fecha"]));
   } catch (dateErr) {
@@ -9536,6 +9547,9 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     const { rows } = await db.transaction(async tx => {
       const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id,empresaId]);
       if (!current.rows[0]) return {rows:[]};
+      if (body.asignar_solo_si_libre === true && (current.rows[0].colaborador_id || (current.rows[0].vehiculo_id && String(current.rows[0].vehiculo_id) !== String(body.vehiculo_id)))) {
+        throw Object.assign(new Error("El pedido ya está asignado a otro vehículo o colaborador. Actualiza la mesa y revisa su asignación."), {status:409});
+      }
       await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
       return tx.query(`UPDATE pedidos SET ${setClauses} WHERE id=$${values.length-1} AND empresa_id=$${values.length} RETURNING *`, values);
     });
@@ -9606,10 +9620,12 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     asociarPuntosInteresUsados(empresaId, pedidoActualizado.cliente_id, pedidoActualizado.puntos_carga, pedidoActualizado.puntos_descarga);
     res.json(pedidoActualizado);
   } catch(e) {
+    if (e.status) return res.status(e.status).json({error:e.message,code:e.code,requiere_confirmacion:e.requiere_confirmacion||e.code==='VEHICULO_EN_TALLER',vehiculos:e.vehiculos});
     if (e.code === '42703') {
       let updatedPedido = await db.transaction(async tx => {
         const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id,empresaId]);
         if (!current.rows[0]) return null;
+        if (body.asignar_solo_si_libre === true && (current.rows[0].colaborador_id || (current.rows[0].vehiculo_id && String(current.rows[0].vehiculo_id)!==String(body.vehiculo_id)))) throw Object.assign(new Error("El pedido ya tiene una asignación. Actualiza la mesa."),{status:409});
         await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
         return updateExistingPedidoFields(tx, fields, req.params.id, empresaId);
       });

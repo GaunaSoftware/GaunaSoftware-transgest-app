@@ -812,6 +812,8 @@ function superAuth(req, res, next) {
   } catch { return res.status(401).json({ error: "Token inválido" }); }
 }
 
+router.use("/soporte", superAuth, require("./soporte").createSupportRouter(true));
+
 // ── POST /superadmin/login ────────────────────────────────────────────────
 async function ensurePasswordResetRequestsSchema() {
   await db.query(`
@@ -1065,6 +1067,21 @@ router.patch("/usuarios-admin/:id", superAuth, async (req, res) => {
   if (!rows[0]) return res.status(404).json({ error: "Usuario no encontrado" });
   await audit(req, "superadmin.actualizado", { id: req.params.id, ...require("../services/integrationSecrets").redactSecrets(req.body) });
   res.json(rows[0]);
+});
+
+router.get("/empresas/:id/productos", superAuth, async (req,res,next)=>{
+  try {
+    const {rows}=await db.query('SELECT id FROM empresas WHERE id=$1',[req.params.id]);
+    if(!rows.length)return res.status(404).json({error:'Empresa no encontrada'});
+    res.json(await require('../services/companyProducts').get(req.params.id));
+  } catch(error){next(error);}
+});
+router.put("/empresas/:id/productos", superAuth, async (req,res,next)=>{
+  try {
+    const result=await require('../services/companyProducts').set(req.params.id,req.body?.modalidad);
+    await audit(req,'empresa.productos_actualizados',result,req.params.id);
+    res.json(result);
+  } catch(error){if(error.status)return res.status(error.status).json({error:error.message});next(error);}
 });
 
 router.get("/empresas", superAuth, async (req, res) => {
@@ -1409,9 +1426,30 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
     if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: "Limite IA no valido" });
     updates.push(`ia_limite_mensual=$${i++}`); params.push(n);
   }
+  if (!updates.length && "email_admin" in req.body) updates.push("email_admin=email_admin");
   if (!updates.length) return res.status(400).json({ error: "Nada que actualizar" });
   params.push(req.params.id);
-  await db.query(`UPDATE empresas SET ${updates.join(",")} WHERE id=$${i}`, params);
+  try {
+    await db.transaction(async client => {
+      const previous = await client.query("SELECT email_admin FROM empresas WHERE id=$1 FOR UPDATE", [req.params.id]);
+      if (!previous.rows.length) throw Object.assign(new Error("Empresa no encontrada"), { status:404 });
+      if ("email_admin" in req.body) {
+        const email = String(req.body.email_admin || "").trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error("Introduce un email válido del administrador"), {status:400});
+        const oldEmail = previous.rows[0].email_admin;
+        if (email !== String(oldEmail || "").toLowerCase()) {
+          const managers = await client.query("SELECT id FROM usuarios WHERE empresa_id=$1 AND rol='gerente' AND LOWER(email)=LOWER($2) FOR UPDATE", [req.params.id,oldEmail]);
+          if (managers.rows.length !== 1) throw Object.assign(new Error("No se puede identificar un único administrador. Revisa su cuenta en Usuarios y roles antes de cambiar el correo."), {status:409});
+          const conflict = await client.query("SELECT id FROM usuarios WHERE id<>$1 AND (LOWER(email)=$2 OR LOWER(username)=$2) LIMIT 1", [managers.rows[0].id,email]);
+          if (conflict.rows.length) throw Object.assign(new Error("Ese email ya pertenece a otra cuenta"),{status:409});
+          await client.query("UPDATE usuarios SET email=$1, username=CASE WHEN LOWER(username)=LOWER($2) THEN $1 ELSE username END WHERE id=$3", [email,oldEmail,managers.rows[0].id]);
+          await client.query("UPDATE invitaciones_usuario SET usado_at=NOW() WHERE usuario_id=$1 AND usado_at IS NULL", [managers.rows[0].id]);
+          await client.query("UPDATE empresas SET email_admin=$1 WHERE id=$2", [email,req.params.id]);
+        }
+      }
+      await client.query(`UPDATE empresas SET ${updates.join(",")} WHERE id=$${i}`, params);
+    });
+  } catch (error) { return res.status(error.status || (error.code === '23505' ? 409 : 500)).json({error:error.status ? error.message : 'No se pudo actualizar la empresa. Revisa si el email ya está registrado.'}); }
   await audit(req, "empresa.actualizada", req.body, req.params.id);
   res.json({ ok: true });
 });
@@ -1744,7 +1782,8 @@ router.get("/stats", superAuth, async (req, res) => {
 // ── DELETE /superadmin/empresas/:id — Eliminar empresa ───────────────────
 router.delete("/empresas/:id", superAuth, async (req, res) => {
   if (!req.body.confirmar) return res.status(400).json({ error: "Incluye confirmar:true" });
-  await db.query("UPDATE empresas SET estado='cancelado' WHERE id=$1", [req.params.id]);
+  const { rows } = await db.query("UPDATE empresas SET estado='cancelado' WHERE id=$1 RETURNING id", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: "Empresa no encontrada" });
   logger.warn(`Empresa ${req.params.id} marcada como cancelada por superadmin ${req.superadmin.email}`);
   res.json({ ok: true });
 });
@@ -1753,101 +1792,31 @@ router.delete("/empresas/:id", superAuth, async (req, res) => {
 // Elimina la empresa y TODOS sus datos (cascada por empresa_id + barrido). Doble
 // seguridad: debe estar CANCELADA y hay que enviar el nombre exacto para confirmar.
 router.delete("/empresas/:id/purgar", superAuth, async (req, res) => {
-  const empresaId = req.params.id;
   try {
-    const { rows } = await db.query("SELECT id, nombre, estado FROM empresas WHERE id=$1", [empresaId]);
-    const empresa = rows[0];
-    if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
-    if (String(empresa.estado || "").toLowerCase() !== "cancelado") {
-      return res.status(409).json({ error: "Cancela la empresa antes de eliminarla definitivamente." });
-    }
-    const confirmar = String(req.body?.confirmar_nombre || "").trim();
-    if (confirmar !== String(empresa.nombre || "").trim()) {
-      return res.status(400).json({ error: "El nombre de confirmacion no coincide con el de la empresa." });
-    }
-    // Datos que NO cascadean (FK ON DELETE SET NULL): se purgan antes para que no
-    // queden huerfanos con empresa_id=NULL. Los audit_log se conservan como rastro.
-    for (const t of ["email_log", "password_reset_requests"]) {
-      try { await db.query(`DELETE FROM "${t}" WHERE empresa_id=$1`, [empresaId]); } catch (_) { /* tabla puede no existir */ }
-    }
-    // Borrado principal: la FK ON DELETE CASCADE por empresa_id arrastra ~todas las
-    // tablas (pedidos, clientes, vehiculos, facturas, usuarios, rutas, ...).
-    await db.query("DELETE FROM empresas WHERE id=$1", [empresaId]);
-    // Barrido de seguridad: cualquier tabla con columna empresa_id sin cascada que
-    // aun contenga filas de esta empresa (las SET NULL ya estan a NULL y no casan).
-    const { rows: tbls } = await db.query(
-      "SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='empresa_id'"
-    );
-    for (const t of tbls) {
-      const name = String(t.table_name || "");
-      if (!/^[a-z_][a-z0-9_]*$/i.test(name)) continue;
-      try { await db.query(`DELETE FROM "${name}" WHERE empresa_id=$1`, [empresaId]); } catch (_) { /* noop */ }
-    }
-    logger.warn(`Empresa "${empresa.nombre}" (${empresaId}) ELIMINADA DEFINITIVAMENTE con todos sus datos por superadmin ${req.superadmin.email}`);
-    res.json({ ok: true, deleted: empresa.nombre });
+    const result = await require("../services/companyDeletion").deleteCompany(db, req.params.id, req.body?.confirmar_nombre);
+    logger.warn(`Empresa ${req.params.id} eliminada definitivamente por superadmin ${req.superadmin.email}`);
+    res.json(result);
   } catch (e) {
-    logger.error("Error al purgar empresa " + empresaId + ": " + e.message);
-    res.status(500).json({ error: "No se pudo eliminar la empresa: " + e.message });
+    logger.error("Error al purgar empresa " + req.params.id + ": " + e.message);
+    res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo eliminar la empresa. No se ha borrado ningún dato; revisa las dependencias en el registro del servidor." });
   }
 });
 
 // ── POST /superadmin/facturas-suscripcion — Emitir factura a empresa ─────
 router.post("/empresas/:id/impersonar", superAuth, async (req, res) => {
-  let { rows } = await db.query(
-    `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.empresa_id, e.plan, e.nombre AS empresa
-     FROM usuarios u
-     JOIN empresas e ON e.id=u.empresa_id
-     WHERE u.empresa_id=$1
-     ORDER BY CASE WHEN u.rol='gerente' THEN 0 ELSE 1 END, u.activo DESC, u.created_at ASC
-     LIMIT 1`,
-    [req.params.id]
-  );
-  let user = rows[0];
-  if (!user) {
-    const empresaRes = await db.query("SELECT id,nombre,plan,email_admin FROM empresas WHERE id=$1", [req.params.id]);
-    const empresa = empresaRes.rows[0];
-    if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
-    const email = String(empresa.email_admin || `soporte.${empresa.id}@transgest.local`).trim().toLowerCase();
-    const hash = await bcrypt.hash(crypto.randomBytes(24).toString("hex"), 12);
-    const created = await db.query(
-      `INSERT INTO usuarios (nombre,email,username,password_hash,rol,empresa_id,activo,debe_cambiar_password)
-       VALUES ('Soporte TransGest', $1, $1, $2, 'gerente', $3, true, true)
-       RETURNING id,nombre,email,username,rol,empresa_id`,
-      [email, hash, empresa.id]
-    );
-    user = {
-      ...created.rows[0],
-      plan: empresa.plan,
-      empresa: empresa.nombre,
-    };
-  }
-
-  const token = jwt.sign(
-    {
-      sub: user.id,
-      rol: user.rol,
-      empresa_id: user.empresa_id,
-      plan: user.plan,
-      superadmin_impersonation: true,
-      impersonado_por: req.superadmin.email,
-    },
-    userJwtSecret(),
-    { expiresIn: "2h" }
-  );
-
-  await audit(req, "empresa.impersonar", { usuario_id: user.id, rol: user.rol }, user.empresa_id);
-  res.json({
-    token,
-    user: {
-      id: user.id,
-      nombre: `${user.nombre} (soporte)`,
-      email: user.email,
-      username: user.username,
-      rol: user.rol,
-      empresa: user.empresa,
-      impersonado_por: req.superadmin.email,
-    },
-  });
+  const { rows } = await db.query("SELECT id,nombre,plan FROM empresas WHERE id=$1", [req.params.id]);
+  const empresa = rows[0];
+  if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
+  const token = jwt.sign({
+    sub: req.superadmin.id || req.superadmin.email,
+    empresa_id: empresa.id,
+    plan: "enterprise",
+    superadmin_impersonation: true,
+    impersonado_por: req.superadmin.email,
+  }, userJwtSecret(), { expiresIn: "2h" });
+  const user = require("../services/supportSession").supportUser(empresa, req.superadmin.email);
+  await audit(req, "empresa.impersonar", { perfil: "superadmin", sesion_temporal: true }, empresa.id);
+  res.json({ token, user });
 });
 
 router.post("/facturas-suscripcion", superAuth, async (req, res) => {

@@ -342,7 +342,10 @@ safeUse(`${api}/route-optimizer`, routeOptimizerAuthUnlessPublic, routeOptimizer
 safeUse(`${api}/notificaciones`, authenticate, requireModulePermission("avisos"), notificacionesRoutes);
 safeUse(`${api}/actividad`,      authenticate, requireModulePermission("actividad"), actividadRoutes);
 safeUse(`${api}/portal-cliente`, authenticate, portalClientePermission, clientePortalRoutes);
-safeUse(`${api}/agenda`,         authenticate, requireModulePermission("agenda"), agendaRoutes);
+safeUse(`${api}/supplier-app`, authenticate, require("./routes/supplier_app"));
+safeUse(`${api}/planner`, authenticate, requireModulePermission("pedidos"), require("./routes/planner"));
+safeUse(`${api}/soporte`, authenticate, require("./routes/soporte").createSupportRouter());
+ safeUse(`${api}/agenda`,         authenticate, requireModulePermission("agenda"), agendaRoutes);
 safeUse(`${api}/plan-diario`,    authenticate, requireModulePermission("plan_diario"), planDiarioRoutes);
 safeUse(`${api}/control-horario`, authenticate, requireModulePermission("control_horario"), controlHorarioRoutes);
 safeUse(`${api}/accounting`,      accountingSsoRoutes);
@@ -485,6 +488,17 @@ async function applyMigrations() {
         PRIMARY KEY (empresa_id, year)
       )
     `).catch(captureStartupMigrationError);
+    await db.transaction(async client => {
+      await client.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_facturas_empresa_numero_unique ON facturas(empresa_id, numero)");
+      await client.query("ALTER TABLE facturas DROP CONSTRAINT IF EXISTS facturas_numero_key");
+    }).catch(captureStartupMigrationError);
+    await db.query(`UPDATE usuarios SET permisos='{}'::jsonb
+WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
+  AND jsonb_typeof(permisos->'modulos')='object'
+  AND permisos->'modulos' <> '{}'::jsonb
+  AND NOT EXISTS (SELECT 1 FROM jsonb_each(permisos->'modulos') AS p
+                  WHERE p.value->>'ver'='true' OR p.value->>'editar'='true');
+`).catch(captureStartupMigrationError);
     await db.query("ALTER TABLE pedidos DROP CONSTRAINT IF EXISTS pedidos_numero_key").catch(captureStartupMigrationError);
     await db.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_pedidos_empresa_numero_unique ON pedidos(empresa_id, numero)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE").catch(captureStartupMigrationError);

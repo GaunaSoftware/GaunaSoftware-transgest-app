@@ -11,6 +11,7 @@ import {
   getPortalClienteNotificaciones,
   getPortalClientePedidos,
   getPortalClientePuntos,
+  calcularRutaPortalCliente,
   getPortalClienteResumen,
   getPortalClienteSolicitudEventos,
   getPortalClienteSolicitudes,
@@ -1593,6 +1594,7 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
   const [puntosLoading, setPuntosLoading] = useState(true);
   const [puntosError, setPuntosError] = useState("");
   const [ordenesCarga, setOrdenesCarga] = useState([]);
+  const [weightUnit,setWeightUnit]=useState("t"),[weightText,setWeightText]=useState(initial?.peso_kg?String(Number(initial.peso_kg)/1000):""),[routing,setRouting]=useState(false),[routeWarning,setRouteWarning]=useState("");
   const isEditing = !!initial?.id;
   const [form, setForm] = useState(() => solicitudToPortalForm(initial || {}));
   const f = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
@@ -1636,7 +1638,19 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
     setPuntos(prev => prev.some(item => String(item.id) === String(point.id)) ? prev : [...prev, point]);
   }
 
+  function weightKg(){const n=Number(String(weightText).replace(',','.'));if(weightText.trim()==='')return null;if(!Number.isFinite(n)||n<0)throw new Error('Introduce un peso válido.');return Math.round(n*(weightUnit==='t'?1000:1)*1000)/1000;}
+  async function calculateRoute(){
+    if(!form.origen||!form.destino){notify('Indica origen y destino.','warning');return;}
+    setRouting(true);setRouteWarning('');
+    try{
+      const points=['origen','destino'].map(key=>{const p=puntos.find(p=>String(p.id)===String(form[`${key}_punto_id`]));return p?{...p,google_maps_url:p.google_maps_url||p.metadata?.google_maps_url,label:form[key]}:{label:form[key]};});
+      const result=await calcularRutaPortalCliente(points);
+      if(!Number.isFinite(Number(result.km)))throw new Error('No se pudo calcular la distancia.');
+      setForm(p=>({...p,km_ruta:result.km}));setRouteWarning(result.warning||'Distancia estimada. Revisa los puntos antes de solicitar el servicio.');
+    }catch(e){notify(e.message,'error');}finally{setRouting(false);}
+  }
   function cleanPayload(source = form) {
+    source={...source,peso_kg:weightKg()};
     const tipo = source.tipo_precio || "viaje";
     let cantidad = source.cantidad;
     if (!cantidad && tipo === "km") cantidad = source.km_ruta;
@@ -1701,7 +1715,7 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
       } else {
         notify("Solicitud enviada. Tráfico la revisara y la convertira en pedido.", "success");
       }
-      if (!isEditing) setForm(solicitudToPortalForm({}));
+      if (!isEditing) { setForm(solicitudToPortalForm({}));setWeightText("");setRouteWarning(""); }
       setOrdenesCarga([]);
       await onDone();
       if (!isEditing) setTab("solicitudes");
@@ -1740,7 +1754,7 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
         {!limitedEdit && <div><label style={lbl}>Hora carga</label><input aria-label="Hora carga" style={inp} value={form.hora_carga} onChange={f("hora_carga")} placeholder="08:00 / Mañana / Cita previa" /></div>}
         {!limitedEdit && <div><label style={lbl}>Fecha descarga</label><input aria-label="Fecha descarga" type="date" min="2000-01-01" max="2100-12-31" style={inp} value={form.fecha_descarga} onChange={f("fecha_descarga")} /></div>}
         {!limitedEdit && <div><label style={lbl}>Hora descarga</label><input aria-label="Hora descarga" style={inp} value={form.hora_descarga} onChange={f("hora_descarga")} placeholder="16:00 / Tarde / Cita previa" /></div>}
-        <div><label style={lbl}>Peso kg</label><input aria-label="Peso kg" type="number" style={inp} value={form.peso_kg} onChange={f("peso_kg")} /></div>
+        <div><label style={lbl}>Peso</label><div style={{display:"flex",gap:8}}><input aria-label="Peso" inputMode="decimal" style={inp} value={weightText} onChange={e=>setWeightText(e.target.value)} placeholder="24,2"/><select aria-label="Unidad de peso" style={inp} value={weightUnit} onChange={e=>{const next=e.target.value;const n=Number(weightText.replace(',','.'));if(weightText&&Number.isFinite(n))setWeightText(String(next==='kg'?n*1000:n/1000));setWeightUnit(next);}}><option value="t">Toneladas</option><option value="kg">Kilogramos</option></select></div><small>{Number.isFinite(Number(weightText.replace(',','.')))&&weightText?`${(Number(weightText.replace(',','.'))*(weightUnit==='t'?1000:1)).toLocaleString('es-ES')} kg`:"24,2 toneladas = 24.200 kg"}</small></div>
         <div><label style={lbl}>Bultos / palets</label><input aria-label="Bultos / palets" type="number" min="0" step="1" style={inp} value={form.bultos} onChange={e=>setForm(p=>({...p,bultos:Number(e.target.value) < 0 ? "" : e.target.value}))} /></div>
         {!limitedEdit && <div><label style={lbl}>Número de viajes</label><input aria-label="Número de viajes" type="number" min="1" max="20" step="1" style={inp} value={form.viajes} onChange={e=>setForm(p=>({...p, viajes: Math.max(1, Math.min(20, Number(e.target.value)||1))}))} /><div style={{fontSize:13,color:"var(--text5)",marginTop:2}}>Cuántos viajes/camiones necesitas. Al aceptarse se crearán ese número de pedidos.</div></div>}
         {!limitedEdit && <div>
@@ -1763,7 +1777,7 @@ function SolicitudServicio({ onDone, setTab, initial = null, onCancel = null, li
           <label style={lbl}>{form.tipo_precio === "viaje" ? "Mínimo EUR" : "Mínimo facturable"}</label>
           <input aria-label={form.tipo_precio === "viaje" ? "Minimo EUR" : "Minimo facturable"} type="number" min="0" step="0.01" inputMode="decimal" style={inp} value={form.tipo_precio === "viaje" ? form.importe_minimo : form.minimo_unidades} onChange={e=>setForm(p=>({...p,[p.tipo_precio === "viaje" ? "importe_minimo" : "minimo_unidades"]:e.target.value}))} placeholder="Opcional" />
         </div>}
-        {!limitedEdit && <div><label style={lbl}>Km ruta estimados</label><input aria-label="Km ruta estimados" type="number" min="0" step="0.1" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Opcional" /></div>}
+        {!limitedEdit && <div><label style={lbl}>Km ruta estimados</label><input aria-label="Km ruta estimados" type="number" min="0" step="0.1" inputMode="decimal" style={inp} value={form.km_ruta} onChange={f("km_ruta")} placeholder="Opcional" /><button type="button" style={{...inp,marginTop:8,color:"var(--accent)"}} disabled={routing} onClick={calculateRoute}>{routing?'Calculando…':'Calcular kilómetros'}</button>{routeWarning&&<small role="status">{routeWarning}</small>}</div>}
         <div style={{ gridColumn: "1/-1" }}><label style={lbl}>Notas</label><textarea aria-label="Notas" style={{ ...inp, minHeight: 86, resize: "vertical" }} value={form.notas} onChange={f("notas")} placeholder="Instrucciones de carga, contacto, horarios, observaciones..." /></div>
         {!limitedEdit && <div style={{ gridColumn: "1/-1" }}>
           <label style={lbl}>Órdenes de carga</label>

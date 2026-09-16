@@ -1,0 +1,37 @@
+const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const root=path.resolve(__dirname,'../build'),out=path.join(root,'qa/unified-actions');
+const user={id:'qa-manager',empresa_id:'qa-company',rol:'gerente',nombre:'Responsable QA',activo:true,plan:'enterprise'};
+const driver={id:'driver-1',nombre:'Ana',apellidos:'Prueba',vehiculo_id:'truck-1',activo:true};
+const truck={id:'truck-1',matricula:'1234-BCD',clase:'tractora',chofer_id:driver.id,marca:'Vehículo QA',activo:true};
+const order={id:'order-1',numero:'QA-001',vehiculo_id:truck.id,chofer_id:driver.id,fecha_carga:'2026-09-14',fecha_pedido:'2026-09-14',origen:'Valencia',destino:'Madrid',estado:'confirmado',importe:350,km_ruta:360};
+let orders=[{...order,id:'cancel-1',numero:'QA-CANCEL',estado:'cancelado'},{...order,id:'active-1',numero:'QA-ACTIVE'},{...order,id:'locked-1',numero:'QA-LOCKED',estado:'entregado',factura_id:'invoice-1',factura_estado:'emitida'}];
+async function main(){fs.mkdirSync(out,{recursive:true});const server=http.createServer((req,res)=>{let f=path.resolve(root,'.'+new URL(req.url,'http://localhost').pathname);if(!f.startsWith(root+path.sep)||!fs.existsSync(f)||fs.statSync(f).isDirectory())f=path.join(root,'index.html');res.setHeader('Content-Type',({'.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.json':'application/json'}[path.extname(f)]||'text/html'));fs.createReadStream(f).pipe(res);});await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;const errors=[],writes=[];
+try{browser=await chromium.launch({headless:true,channel:'msedge'});const page=await browser.newPage({viewport:{width:1672,height:1040}});page.on('pageerror',e=>{errors.push(e.message);console.error('PAGEERROR',e.message)});await page.clock.setFixedTime(new Date('2026-09-14T10:00:00Z'));await page.route('**/api/v1/**',async route=>{const req=route.request(),p=new URL(req.url()).pathname.replace('/api/v1','');let data=[];if(req.method()!=='GET')writes.push({p,body:req.postDataJSON()});
+if(req.method()==='DELETE'&&p.startsWith('/pedidos/')){orders=orders.filter(o=>'/pedidos/'+o.id!==p);data={ok:true};}
+else if(p==='/auth/me')data=user;else if(p==='/vehiculos')data=[truck];else if(p==='/choferes')data=[driver];else if(p==='/pedidos'||p==='/pedidos/resumen-lista')data=orders;else if(p==='/taller/estado')data={stock:[],reparaciones:[{id:'repair-1',vehiculo_id:truck.id,vehiculo_matricula:truck.matricula,descripcion:'Revisión QA',tipo:'Mantenimiento',estado:'abierta',fecha:'2026-09-14',coste_total:100}]};else if(p==='/taller/intervenciones')data=[{id:'repair-1',vehiculo_id:truck.id,vehiculo_matricula:truck.matricula,descripcion:'Revisión QA',tipo:'Mantenimiento',estado:'abierta',fecha:'2026-09-14',coste_total:100}];else if(p.includes('notificaciones'))data={data:[],no_leidas:0};else if(p.includes('empresa'))data={razon_social:'Empresa QA',plan:'enterprise'};
+return route.fulfill({status:200,json:data});});
+await page.addInitScript(u=>{localStorage.setItem('tms_token','qa-only');localStorage.setItem('tms_user',JSON.stringify(u));localStorage.setItem(`tms_onboarding_done:${u.empresa_id}:${u.rol}:${u.id}`,'1');},user);
+await page.goto(`http://127.0.0.1:${server.address().port}`,{waitUntil:'networkidle'});await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});
+const go=async(id,selector)=>{await page.evaluate(id=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:id})),id);await page.locator(selector).waitFor();await page.waitForTimeout(400);};
+const shot=async(name,selector)=>{for(const width of [390,768,1672]){await page.setViewportSize({width,height:1040});await page.waitForTimeout(100);assert.equal(await page.locator(selector).evaluate(n=>n.scrollWidth>n.clientWidth+1),false,`${name} overflow ${width}`);await page.screenshot({path:path.join(out,`${name}-${width}.png`),fullPage:true});}};
+await go('pedidos','.orders-workspace');
+await page.getByRole('button',{name:'+ Nuevo pedido',exact:true}).click();
+const count=page.getByLabel('Cantidad de carga',{exact:true});
+await count.waitFor();
+assert.equal(await count.count(),1);
+await page.locator('select').filter({has:page.locator('option[value="europeo"]')}).selectOption('europeo');
+await count.fill('2');
+await page.getByLabel('Longitud ocupada',{exact:true}).waitFor();
+assert.equal(await page.getByLabel('Longitud ocupada',{exact:true}).inputValue(),'0.8');
+assert.equal(await page.getByLabel('Ancho de carga',{exact:true}).inputValue(),'2.4');
+await page.getByLabel('Longitud ocupada',{exact:true}).fill('2,5');
+await page.getByLabel('Ancho de carga',{exact:true}).fill('2,1');
+await count.fill('4');
+assert.equal(await page.getByLabel('Longitud ocupada',{exact:true}).inputValue(),'2,5');
+assert.equal(await page.getByLabel('Ancho de carga',{exact:true}).inputValue(),'2,1');
+assert.equal(await page.getByText('N. de palets',{exact:true}).count(),0);
+assert.equal(await page.getByText('ML',{exact:true}).count(),0);
+assert.deepEqual(errors,[]);
+console.log('OK cargo form: single fields, automatic dimensions, manual overrides');
+}finally{await browser?.close();await new Promise(r=>server.close(r));}}
+main().catch(e=>{console.error(e);process.exitCode=1;});

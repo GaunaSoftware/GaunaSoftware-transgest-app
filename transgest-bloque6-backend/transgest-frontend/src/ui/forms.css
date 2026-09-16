@@ -29,3 +29,5 @@
  .tgui-dialog-body div[style*="grid-column"]{grid-column:auto!important}
  .tgui-dialog-body{overflow-x:hidden}
 }
+
+:is(.tgui-dialog,.tg-pedido-modal) label.tg-attachment-trigger{color:#fff!important;background:#087e78!important}

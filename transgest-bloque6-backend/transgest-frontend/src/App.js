@@ -1,3 +1,4 @@
+import { isPlannerRoute, hasProduct } from './planner/access';
 import "./pages/workspace/workspace.css";
 import { useState, lazy, Suspense, useEffect, useRef } from "react";
 import OnboardingWizard from "./components/OnboardingWizard";
@@ -44,6 +45,7 @@ const ControlHorario      = lazy(() => import("./pages/ControlHorario"));
 const GestionTrafico      = lazy(() => import("./pages/GestionTrafico"));
 const PlanificacionOperativa = lazy(() => import("./pages/PlanificacionOperativa"));
 const Nominas             = lazy(() => import("./pages/Nominas"));
+const SupplierApp = lazy(()=>import("./pages/SupplierApp"));
 const AppChofer           = lazy(() => import("./pages/AppChofer"));
 const AppMecanico         = lazy(() => import("./pages/AppMecanico"));
 const PortalClientes      = lazy(() => import("./pages/PortalClientes"));
@@ -1881,6 +1883,8 @@ function AppInner() {
     }
   }
 
+  if (user?.rol === "colaborador" || (user?.rol === "chofer" && user?.colaborador_id)) return <Suspense fallback={<p>Cargando…</p>}><SupplierApp/></Suspense>;
+
   return (
     <>
     <LaunchSplash rol={user?.rol} />
@@ -2036,6 +2040,19 @@ function AccountingLaunchRoute() {
   );
 }
 
+function ProductWorkspace({path}) {
+  const {user,loading}=useAuth();
+  if(loading)return <Spinner />;
+  const internal=user && !['cliente','cliente_portal','colaborador','chofer'].includes(user.rol);
+  const plannerOnly=internal && hasProduct(user,'planner') && !hasProduct(user,'transgest');
+  const requested=isPlannerRoute(path,process.env.REACT_APP_PRODUCT,window.location.search);
+  if(plannerOnly || requested) {
+    if(user && !hasProduct(user,'planner'))return <main style={{padding:32,color:'var(--text)',background:'var(--bg)',minHeight:'100vh'}}><h1>Planner no está habilitado</h1><p>Solicita su activación para tu empresa desde superadmin.</p><a href="/?workspace=tms">Volver a TransGest</a></main>;
+    return <Suspense fallback={<Spinner />}><PlannerApp PasswordChangeComponent={PasswordChangeRequired} /></Suspense>;
+  }
+  return <AppInner />;
+}
+
 export default function App() {
   // Special standalone routes (no auth needed)
   const path = window.location.pathname;
@@ -2077,9 +2094,7 @@ export default function App() {
       <MojibakeFixer />
       <ToastProvider>
         <AuthProvider>
-          {process.env.REACT_APP_PRODUCT === 'planner'
-            ? <Suspense fallback={<Spinner />}><PlannerApp PasswordChangeComponent={PasswordChangeRequired} /></Suspense>
-            : <AppInner />}
+          <ProductWorkspace path={path} />
         </AuthProvider>
       </ToastProvider>
     </ThemeProvider>

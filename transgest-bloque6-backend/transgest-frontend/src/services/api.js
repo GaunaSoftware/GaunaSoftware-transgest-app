@@ -475,6 +475,7 @@ export async function getPedidosResumenLista(params = {}, options = {}) {
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
 export const verificarOrdenColaborador = id => apiFetch(`/pedidos/${id}/orden-colaborador`);
 export const getProduct = () => apiFetch('/producto');
+export const plannerApi = (path, options={}) => apiFetch(`/planner${path}`, {silentSuccess:true,...options});
 export const enviarPlanDiario = data => apiFetch('/plan-diario/enviar', {method:'POST',body:data});
 export const getPedidoIdaRetorno = (id)   => apiFetch(`/pedidos/${id}/ida-retorno`);
 // Enlace temporal del portal del proveedor para un viaje (valido 7 dias tras la
@@ -1193,3 +1194,5 @@ export const vincularPaletTransporte = (id, pedido_id) => apiFetch(`/palets/movi
 export const guardarImagenVehiculo = (id, imagen_data) => apiFetch(`/vehiculos/${id}/imagen`, { method:"PUT", body:{imagen_data} });
 
 export const getReclamacionesEnvios = () => apiFetch('/facturas/reclamaciones/envios');
+
+export const transportExchange=(path="",options={})=>apiFetch(`/transport-exchange${path}`,{silentSuccess:true,...options});

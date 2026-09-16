@@ -3,7 +3,7 @@ export const PLANNER_MODULES = [
   ['muelles', 'Muelles y horarios'], ['palets', 'Almacén y stock'],
   ['gestion_trafico', 'Planificación de flota'], ['vehiculos', 'Vehículos'],
   ['ia', 'Intelligence'], ['colaboradores', 'Proveedores de transporte'],
-  ['clientes', 'Destinatarios'], ['documentos', 'Documentos'], ['empresa', 'Empresa'],
+  ['clientes', 'Destinatarios'], ['documentos', 'Documentos'], ['facturacion', 'Facturación'], ['empresa', 'Empresa'],
 ];
 
 export function hasProduct(user, product) {
@@ -16,6 +16,7 @@ export function visiblePlannerModules(user, puedeVer) {
   return PLANNER_MODULES.filter(([id]) =>
     (hasProduct(user, 'transgest') || !['viajes','choferes','gestion_trafico','vehiculos','ia'].includes(id)) &&
     (id !== 'muelles' || user.rol !== 'contable') &&
+    (id !== 'documentos' || (puedeVer('palets') && puedeVer('pedidos'))) &&
     puedeVer(['muelles', 'viajes'].includes(id) ? 'pedidos' : id));
 }
 

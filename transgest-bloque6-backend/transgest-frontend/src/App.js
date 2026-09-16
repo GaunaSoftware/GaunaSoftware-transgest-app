@@ -1,3 +1,4 @@
+import {transportExchange} from './services/api';
 import { isPlannerRoute, hasProduct } from './planner/access';
 import "./pages/workspace/workspace.css";
 import { useState, lazy, Suspense, useEffect, useRef } from "react";
@@ -17,6 +18,7 @@ import { saveCompanyPalette } from "./utils/companyPalette";
 // Carga perezosa de todos los mÃƒÂ³dulos
 const Dashboard    = lazy(() => import("./pages/Dashboard"));
 const Intelligence = lazy(() => import('./pages/Intelligence'));
+const PlannerConnections=lazy(()=>import('./planner/PlannerConnections'));
 const PlannerApp = lazy(() => import('./planner/PlannerApp'));
 const ControlTower = lazy(() => import("./pages/ControlTower"));
 const Clientes     = lazy(() => import("./pages/Clientes"));
@@ -2041,8 +2043,15 @@ function AccountingLaunchRoute() {
 }
 
 function ProductWorkspace({path}) {
-  const {user,loading}=useAuth();
+  const {user,loading,puedeEditar,refreshUser,logout}=useAuth();
+  useEffect(()=>{if(!user||!['gerente','trafico','administrativo'].includes(user.rol)||!puedeEditar('pedidos'))return;let running=false;const sync=async()=>{if(running||document.hidden)return;running=true;try{await transportExchange('/sincronizar',{method:'POST',body:{},silentError:true});}catch{}finally{running=false;}};sync();const timer=setInterval(sync,60000);return()=>clearInterval(timer);},[user,puedeEditar]);
   if(loading)return <Spinner />;
+  if(path==='/transportistas/conexiones'){
+    if(!user)return <Login/>;
+    if(user.debe_cambiar_password)return <PasswordChangeRequired user={user} onChanged={refreshUser} onLogout={logout}/>;
+    if(!['gerente','trafico','administrativo'].includes(user.rol))return <main><h1>Acceso reservado al equipo de tráfico</h1><a href="/">Volver al programa</a></main>;
+    return <Suspense fallback={<Spinner/>}><PlannerConnections/></Suspense>;
+  }
   const internal=user && !['cliente','cliente_portal','colaborador','chofer'].includes(user.rol);
   const plannerOnly=internal && hasProduct(user,'planner') && !hasProduct(user,'transgest');
   const requested=isPlannerRoute(path,process.env.REACT_APP_PRODUCT,window.location.search);

@@ -35,6 +35,8 @@ async function main(){
  const express=req('express'),app=express();app.use(express.json({limit:'12mb'}));req('./middleware/asyncErrors')(logger);
  app.use('/api/v1/auth',auth);
  for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence'])app.use('/api/v1/'+name,req('./middleware/auth').authenticate,req('./routes/'+name));
+ app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
+ app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
  app.use('/api/v1/soporte',req('./middleware/auth').authenticate,req('./routes/soporte').createSupportRouter());
  app.use('/api/v1/mi-cuenta',req('./middleware/auth').authenticate,req('./routes/mi_cuenta'));
  app.use((err,request,res,next)=>res.status(err.status||500).json({error:err.message}));
@@ -97,6 +99,54 @@ async function main(){
 
    }
   }
+  await req('./services/companyProducts').set(company,'combinado');
+  const plannerOrder=await call('Planner: crear carga','POST','/pedidos',{cliente_id:client.id,origen:'Fábrica Valencia',destino:'Madrid',fecha_carga:'2026-09-18',fecha_descarga:'2026-09-19',importe:0,referencia_cliente:'VENTA-QA',peso_kg:0,bultos:0});
+  const article=await call('Planner: crear referencia','POST','/planner/inventario/articulos',{referencia:'REF-QA',descripcion:'Mercancía de pruebas',coste:2.1,precio_venta:3.5,peso_kg:1.25,unidades_palet:20});
+  if(!plannerOrder.id||!article.id)throw Error('Planner: no se pudo iniciar la preparación');
+  const stock=await call('Planner: fabricación','POST','/planner/inventario/movimientos',{articulo_id:article.id,tipo:'fabricacion',almacen:'Principal',ubicacion:'A1',lote:'QA-2026',cantidad:100,motivo:'Fin de producción',operacion:crypto.randomUUID()});
+  const prep=await call('Planner: reserva mercancía','POST','/planner/inventario/preparaciones',{pedido_id:plannerOrder.id,lineas:[{existencia_id:stock.id,cantidad:25,precio_venta:3.5}]});
+  if(!prep.id)throw Error('Planner: no se pudo reservar mercancía');
+  let prepared=await call('Planner: consultar preparación','GET','/planner/inventario/preparaciones/'+prep.id);
+  for(const l of prepared.lineas)prepared=await call('Planner: verificar picking','POST','/planner/inventario/preparaciones/'+prep.id+'/accion',{version:prepared.version,accion:'preparar_linea',linea_id:l.id,preparada:true});
+  prepared=await call('Planner: mercancía lista','POST','/planner/inventario/preparaciones/'+prep.id+'/accion',{version:prepared.version,accion:'lista'});
+  const note=await call('Planner: generar albarán','POST','/planner/inventario/preparaciones/'+prep.id+'/albaran',{});
+  const pdf=await call('Planner: descargar albarán PDF','GET','/planner/inventario/albaranes/'+note.id+'/pdf');if(!Buffer.from(pdf.file_base64||'','base64').subarray(0,4).equals(Buffer.from('%PDF')))throw Error('Albarán PDF inválido');
+  for(const situacion of ['espera_carga','cargando','cargado'])prepared=await call('Planner: estado '+situacion,'POST','/planner/inventario/preparaciones/'+prep.id+'/accion',{version:prepared.version,accion:'camion',situacion});
+  await call('Planner: expedir','POST','/planner/inventario/preparaciones/'+prep.id+'/accion',{version:prepared.version,accion:'expedir'});
+  const sale=await call('Planner: factura de mercancía','POST','/facturas',{cliente_id:client.id,serie:'A',estado:'borrador',planner_preparacion_id:prep.id,referencia_cliente:'VENTA-QA',lineas:[{concepto:'No confiar en cliente',cantidad:1,precio_unit:0.01}]});
+  if(!sale.id||Number(sale.base_imponible)!==87.5)throw Error('Factura Planner no respeta el precio de mercancía');
+  await call('Planner: revisar factura de venta','POST','/facturas/'+sale.id+'/revision',{confirmado:true});
+  await call('Planner: emitir factura de venta','PATCH','/facturas/'+sale.id+'/estado',{estado:'emitida'});
+  const rest=(await db.query('SELECT cantidad,reservado FROM planner_existencias WHERE id=$1',[stock.id])).rows[0];if(Number(rest.cantidad)!==75||Number(rest.reservado)!==0)throw Error('Saldo tras expedición incorrecto');
+  const authorisedVehicle=await call('Planner: alta vehículo autorizado','POST','/planner/vehiculos-autorizados',{matricula:'5678QA',tipo:'tractora'});
+  if(!authorisedVehicle.id)throw Error('No se creó el vehículo autorizado');
+  const missingDocuments=await call('Planner: rechazar autorización sin documentos','PATCH','/planner/vehiculos-autorizados/'+authorisedVehicle.id,{estado:'autorizado',version:1});if(!missingDocuments.error)throw Error('Autorizó vehículo sin documentación');
+  const vehicleDocument=await call('Planner: documentación vehículo','POST','/planner/vehiculos-autorizados/'+authorisedVehicle.id+'/documentos',{tipo:'seguro',nombre:'Seguro.pdf',file_mime:'application/pdf',file_base64:pdf.file_base64,vencimiento:'2030-12-31'});
+  if(!vehicleDocument.id)throw Error('No se guardó documento del vehículo');
+  const authorised=await call('Planner: autorizar vehículo revisado','PATCH','/planner/vehiculos-autorizados/'+authorisedVehicle.id,{estado:'autorizado',version:2});if(authorised.estado!=='autorizado')throw Error('No se autorizó vehículo revisado');
+  const downloaded=await call('Planner: descargar documento vehículo','GET','/planner/vehiculos-autorizados/'+authorisedVehicle.id+'/documentos/'+vehicleDocument.id);if(downloaded.file_base64!==pdf.file_base64)throw Error('Documento alterado');
+  const transportCompany=crypto.randomUUID(),transportClient=crypto.randomUUID(),supplier=crypto.randomUUID();
+  await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'Transportista conectado','B55555555','connected@example.invalid','profesional','activa')",[transportCompany]);
+  await db.query("INSERT INTO clientes(id,empresa_id,nombre,cif) VALUES($1,$2,'Almacén auditoría','B00000000')",[transportClient,transportCompany]);
+  await db.query("INSERT INTO colaboradores(id,empresa_id,nombre,cif,email) VALUES($1,$2,'Transportista conectado','B55555555','supplier@example.invalid')",[supplier,company]);
+  const sharedOrder=await call('Planner: encargo a empresa externa','POST','/pedidos',{cliente_id:client.id,colaborador_id:supplier,precio_colaborador:350,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-18',importe:500});
+  if(!sharedOrder.id)throw Error('No se pudo crear el encargo compartido');
+  const invitation=crypto.randomBytes(32).toString('hex');await db.query("INSERT INTO colaborador_pedido_tokens(pedido_id,empresa_id,accion,token_hash,expires_at) VALUES($1,$2,'confirmar',$3,NOW()+INTERVAL '1 hour')",[sharedOrder.id,company,crypto.createHash('sha256').update(invitation).digest('hex')]);
+  const exchange=req('./services/plannerExchange'),assertPlanner=require('assert/strict');
+  await assertPlanner.rejects(exchange.connect(db,company,user,{token:invitation,cliente_id:client.id}),/no está disponible/);
+  const connected=await exchange.connect(db,transportCompany,user,{token:invitation,cliente_id:transportClient});
+  const repeated=await exchange.connect(db,transportCompany,user,{token:invitation,cliente_id:transportClient});assertPlanner.equal(repeated.viaje_id,connected.viaje_id);
+  const transported=(await db.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2',[connected.viaje_id,transportCompany])).rows[0];assertPlanner.equal(Number(transported.importe),350,'carrier sees its agreed sale price, not shipper sale price');assertPlanner.equal(transported.cliente_id,transportClient);
+  await db.query("UPDATE pedidos SET estado='en_curso',updated_at=NOW()+INTERVAL '1 second' WHERE id=$1",[transported.id]);
+  await db.query("INSERT INTO pedido_docs(empresa_id,pedido_id,tipo,nombre,file_base64,file_mime) VALUES($1,$2,'pod','Entrega.pdf',$3,'application/pdf')",[transportCompany,transported.id,pdf.file_base64]);
+  await exchange.synchronize(db,company);await exchange.synchronize(db,transportCompany);
+  assertPlanner.equal((await db.query('SELECT estado FROM pedidos WHERE id=$1',[sharedOrder.id])).rows[0].estado,'en_curso');
+  assertPlanner.equal((await db.query("SELECT COUNT(*)::int AS n FROM pedido_docs WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='pod'",[company,sharedOrder.id])).rows[0].n,1,'shared POD is idempotent');
+  await db.query('UPDATE planner_conexiones_transporte SET activo=false WHERE transportista_empresa_id=$1',[transportCompany]);
+  await db.query("UPDATE pedidos SET estado='entregado',updated_at=NOW()+INTERVAL '2 seconds' WHERE id=$1",[transported.id]);await exchange.synchronize(db,company);
+  assertPlanner.equal((await db.query('SELECT estado FROM pedidos WHERE id=$1',[sharedOrder.id])).rows[0].estado,'en_curso','disconnected supplier cannot update shipper');
+  await call('Planner: albaran de otro transportista bloqueado','GET','/transport-exchange/viajes/'+transported.id+'/albaran');
+  evidence.plannerExchange={singleTrip:true,ownTenant:true,agreedPrice:true,stateSync:true,podSync:true,revoke:true};
   const warehouse=await call('Crear almacén','POST','/palets/almacenes',{nombre:'Almacén auditoría'});
   await call('Crear producto stock','POST','/palets/mercancias',{nombre:'Producto auditoría',cliente_id:client.id,almacen_id:warehouse.id,stock_actual:20,stock_minimo:5,precio_compra:10,precio_venta:15});
   await call('Entrada palets cliente','POST','/palets/movimientos',{tipo:'entrada',propietario_cliente_id:client.id,cliente_movimiento_id:client.id,almacen_id:warehouse.id,cantidad:30,num_albaran:'AUD-001',fecha:'2026-09-16'});
@@ -164,6 +214,8 @@ async function main(){
  assert.ok(evidence.retryDelivery.emails>0);
  assert.equal(evidence.duplicateDelivery.emails,0);
  const expectedErrors=new Map([
+  ['Planner: albaran de otro transportista bloqueado',404],
+  ['Planner: rechazar autorización sin documentos',409],
   ['Bloquear rectificativa sin revision',409],['Emitir SIN revisar documentación',409],['Enviar SIN documentación',409],['Revision sin documentos bloqueada',409],
   ['Revision caducada por cambio de pedido',409],['Impedir emitida a borrador',409],
   ['Guardar taller usuario B con lectura anterior',409],['Montar segundo neumático en posición ocupada',409],

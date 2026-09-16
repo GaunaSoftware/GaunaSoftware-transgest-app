@@ -5,6 +5,8 @@ export const BRAND_VERSION_LABEL = `${BRAND_VERSION_NAME} v${BRAND_VERSION}`;
 export const BRAND_FULL_NAME = `${BRAND_NAME} ${BRAND_VERSION_LABEL}`;
 
 const PLAN_BRAND_SUFFIX = {
+  planner: "Planner",
+  pro_planner: "Pro Planner",
   lite: "Go",
   basico: "Control",
   profesional: "Pro",

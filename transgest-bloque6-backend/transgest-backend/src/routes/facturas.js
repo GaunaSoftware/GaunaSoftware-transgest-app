@@ -1103,12 +1103,19 @@ router.post("/", GERENTE_O_CONTABLE,
     // queda sin capturar y Express NUNCA responde: el cliente se queda cargando
     // indefinidamente (era la causa de "no crea el borrador, se queda cargando").
     try {
-    const { cliente_id, serie, fecha, fecha_vencimiento, estado, forma_pago, vencimiento,
+    let { cliente_id, serie, fecha, fecha_vencimiento, estado, forma_pago, vencimiento,
             lineas, extracostes = [], pedidos_ids = [], observaciones, notas_internas,
             referencia_cliente, factura_original_id, motivo_rectificacion, tipo_rectificacion } = req.body;
     const empresaId = req.empresaId || req.user.empresa_id;
     if (estado && estado !== 'borrador') return res.status(409).json({error:'Crea primero el borrador y confirma su revisión antes de emitir.',code:'REVISION_FACTURA_PENDIENTE'});
     await invoiceReview.ensureSchema();
+    const plannerPreparation=req.body.planner_preparacion_id;
+    if(plannerPreparation){
+      if(!/^[0-9a-f-]{36}$/i.test(plannerPreparation)||pedidos_ids.length||factura_original_id) return res.status(400).json({error:'La factura de mercancía se genera por preparación, separada del transporte.'});
+      if(!require('../services/companyProducts').moduleAvailable(req.user.productos,'planner')) return res.status(403).json({error:'Planner no está habilitado.'});
+      await require('../services/plannerSchema').ensurePlannerSchema();
+    }
+
     if(factura_original_id && (!/^[0-9a-f-]{36}$/i.test(String(factura_original_id)) || !String(motivo_rectificacion || '').trim() || !['diferencia','sustitucion'].includes(tipo_rectificacion)))return res.status(400).json({error:'Indica la factura original, el motivo y el tipo de rectificación.'});
     if(factura_original_id && pedidos_ids.length)return res.status(400).json({error:'Los pedidos conservan su factura original. No los vincules de nuevo a la rectificativa.'});
     const pedidosIdsUnicos = [...new Set((pedidos_ids || []).filter(Boolean))];
@@ -1149,6 +1156,7 @@ router.post("/", GERENTE_O_CONTABLE,
     }
 
     const created = await db.transaction(async (client) => {
+      if(plannerPreparation) lineas=await require('../services/plannerInvoice').saleLines(client,empresaId,plannerPreparation,cliente_id);
       let original=null;
       if(factura_original_id){
         original=(await client.query('SELECT * FROM facturas WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[factura_original_id,empresaId])).rows[0];
@@ -1215,6 +1223,7 @@ router.post("/", GERENTE_O_CONTABLE,
          cobrosConfig.dias_entre_reclamaciones, String(referencia_cliente || "").trim() || null]
       );
 
+      if(plannerPreparation) await client.query('UPDATE facturas SET planner_preparacion_id=$1 WHERE id=$2 AND empresa_id=$3',[plannerPreparation,fac.id,empresaId]);
       if(original){
         await client.query('UPDATE facturas SET factura_original_id=$1,factura_original_numero=$2,motivo_rectificacion=$3,tipo_rectificacion=$4 WHERE id=$5 AND empresa_id=$6',[original.id,original.numero,String(motivo_rectificacion).trim(),tipo_rectificacion,fac.id,empresaId]);
         Object.assign(fac,{factura_original_id:original.id,factura_original_numero:original.numero,motivo_rectificacion:String(motivo_rectificacion).trim(),tipo_rectificacion});

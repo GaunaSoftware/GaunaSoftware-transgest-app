@@ -343,8 +343,9 @@ safeUse(`${api}/route-optimizer`, routeOptimizerAuthUnlessPublic, routeOptimizer
 safeUse(`${api}/notificaciones`, authenticate, requireModulePermission("avisos"), notificacionesRoutes);
 safeUse(`${api}/actividad`,      authenticate, requireModulePermission("actividad"), actividadRoutes);
 safeUse(`${api}/portal-cliente`, authenticate, portalClientePermission, clientePortalRoutes);
+safeUse(`${api}/transport-exchange`, authenticate, require("./routes/planner_exchange"));
 safeUse(`${api}/supplier-app`, authenticate, require("./routes/supplier_app"));
-safeUse(`${api}/planner`, authenticate, requireModulePermission("pedidos"), require("./routes/planner"));
+safeUse(`${api}/planner`, authenticate, (req,res,next)=>requireModulePermission(req.path.startsWith("/inventario")?"palets":"pedidos")(req,res,next), require("./routes/planner"));
 safeUse(`${api}/soporte`, authenticate, require("./routes/soporte").createSupportRouter());
  safeUse(`${api}/agenda`,         authenticate, requireModulePermission("agenda"), agendaRoutes);
 safeUse(`${api}/plan-diario`,    authenticate, requireModulePermission("plan_diario"), planDiarioRoutes);

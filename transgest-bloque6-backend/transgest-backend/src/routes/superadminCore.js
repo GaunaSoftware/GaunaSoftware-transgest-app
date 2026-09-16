@@ -1229,6 +1229,7 @@ router.post("/empresas", superAuth, async (req, res) => {
   if (!nombre_empresa || !email_admin || !nombre_admin) {
     return res.status(400).json({ error: "Nombre empresa, email admin y nombre admin son obligatorios" });
   }
+  if (!["lite","basico","profesional","enterprise","planner","pro_planner"].includes(plan)) return res.status(400).json({error:"Plan no válido"});
   try {
     const dominio = nombre_empresa.toLowerCase()
       .normalize("NFD").replace(/[̀-ͯ]/g, "")
@@ -1423,7 +1424,7 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
   const updates = [], params = [];
   let i = 1;
   if (plan !== undefined) {
-    if (!["lite","basico","profesional","enterprise"].includes(plan)) return res.status(400).json({ error: "Plan no válido" });
+    if (!["lite","basico","profesional","enterprise","planner","pro_planner"].includes(plan)) return res.status(400).json({ error: "Plan no válido" });
     updates.push(`plan=$${i++}`); params.push(plan);
   }
   if (estado !== undefined) {
@@ -1454,8 +1455,9 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
   if (!updates.length) return res.status(400).json({ error: "Nada que actualizar" });
   params.push(req.params.id);
   try {
+    if (plan !== undefined) await require('../services/companyProducts').get(req.params.id);
     await db.transaction(async client => {
-      const previous = await client.query("SELECT email_admin FROM empresas WHERE id=$1 FOR UPDATE", [req.params.id]);
+      const previous = await client.query("SELECT email_admin,plan FROM empresas WHERE id=$1 FOR UPDATE", [req.params.id]);
       if (!previous.rows.length) throw Object.assign(new Error("Empresa no encontrada"), { status:404 });
       if ("email_admin" in req.body) {
         const email = String(req.body.email_admin || "").trim().toLowerCase();
@@ -1472,6 +1474,9 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
         }
       }
       await client.query(`UPDATE empresas SET ${updates.join(",")} WHERE id=$${i}`, params);
+      if (plan !== undefined && (['planner','pro_planner'].includes(plan) || ['planner','pro_planner'].includes(previous.rows[0].plan))) {
+        await client.query(`INSERT INTO empresa_productos(empresa_id,modalidad) VALUES($1,$2) ON CONFLICT(empresa_id) DO UPDATE SET modalidad=EXCLUDED.modalidad,updated_at=NOW()`,[req.params.id,plan==='planner'?'planner':plan==='pro_planner'?'combinado':'transgest']);
+      }
     });
   } catch (error) { return res.status(error.status || (error.code === '23505' ? 409 : 500)).json({error:error.status ? error.message : 'No se pudo actualizar la empresa. Revisa si el email ya está registrado.'}); }
   await audit(req, "empresa.actualizada", req.body, req.params.id);

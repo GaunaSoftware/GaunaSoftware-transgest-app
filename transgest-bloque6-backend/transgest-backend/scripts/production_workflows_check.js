@@ -3,8 +3,8 @@ const {estimateFuelCost,fillMissingFuelCost}=require('../src/services/orderFuelC
 const {missingBillingData}=require('../src/services/billingData');
 function loadRoute(file,db,extras={}){
  const routes={},uses=[];const router={use(...h){uses.push(...h);}};
- for(const verb of ['get','post','patch','delete'])router[verb]=(p,...h)=>routes[`${verb} ${p}`]=h.at(-1);
- const sandbox={module:{exports:{}},process,console,Date,require(name){if(name==='express')return{Router:()=>router};if(name.includes('/db'))return db;if(name.includes('/supportSchema'))return {ensureSupportSchema:async()=>{}};if(name.includes('/auth'))return{requireRole:()=>()=>{}};if(name==='crypto')return require('node:crypto');if(extras[name])return extras[name];throw Error(name);}};
+ for(const verb of ['get','post','put','patch','delete'])router[verb]=(p,...h)=>routes[`${verb} ${p}`]=h.at(-1);
+ const sandbox={module:{exports:{}},process,console,Date,require(name){if(name==='express')return{Router:()=>router};if(name.includes('/db'))return db;if(name.includes('/supportSchema'))return {ensureSupportSchema:async()=>{}};if(name.includes('/auth'))return{requireRole:()=>()=>{}};if((name==='./planner_inventory'||name==='./planner_vehicles'))return {};if(name.includes('/plannerBooking'))return require('../src/services/plannerBooking');if(name==='crypto')return require('node:crypto');if(extras[name])return extras[name];throw Error(name);}};
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/routes',file),'utf8'),sandbox);
  return {routes,uses,exported:sandbox.module.exports};
 }
@@ -22,7 +22,7 @@ async function main(){
  let res=response();await support.routes['get /:id'](req,res,e=>{throw e;});assert.equal(res.code,404);assert.equal(calls.length,1);assert.ok(calls[0].sql.includes('s.empresa_id=$2 AND s.usuario_id=$3'));assert.deepEqual(Array.from(calls[0].args),[id,'company','user']);
  calls=[];res=response();await support.routes['post /:id/mensajes'](req,res,e=>{throw e;});assert.equal(res.code,404);assert.equal(calls.length,1);assert.ok(calls[0].sql.includes('FOR UPDATE'));
  const admin=loadRoute('soporte.js',db);admin.exported.createSupportRouter(true);calls=[];answer=[{id}];res=response();await admin.routes['post /:id/mensajes']({...req,superadmin:{id:'admin'}},res,e=>{throw e;});assert.equal(res.code,200);assert.ok(calls.some(c=>c.args?.includes(true)));assert.equal(calls.at(-1).args[0],'respondida');
- let overlap=true;calls=[];const slotDb={transaction:async fn=>fn(slotDb),query:async(sql,args)=>{calls.push({sql,args});return{rows:sql.startsWith('SELECT id FROM planner_muelles')?[{id}]:sql.startsWith('SELECT id FROM planner_reservas')?(overlap?[{id}]:[]):[{id}]};}};
+ let overlap=true;calls=[];const slotDb={transaction:async fn=>fn(slotDb),query:async(sql,args)=>{calls.push({sql,args});return{rows:sql.startsWith('SELECT * FROM planner_muelles')?[{id,activo:true,dias:[1,2,3,4,5],capacidad:33,margen_min:15,zona_horaria:'Europe/Madrid',horario_inicio:'06:00',horario_fin:'18:00'}]:sql.includes('AS abre')?[{abre:true,cierra:true,mismo_dia:true,dia:2}]:sql.startsWith('SELECT id FROM planner_reservas')?(overlap?[{id}]:[]):[{id}]};}};
  const planner=loadRoute('planner.js',slotDb);const slot={...req,body:{muelle_id:id,tipo:'carga',inicio:'2026-09-15T08:00:00Z',fin:'2026-09-15T09:00:00Z'}};
  res=response();await planner.routes['post /reservas'](slot,res,e=>{throw e;});assert.equal(res.code,409);assert.ok(calls[0].sql.includes('FOR UPDATE'));assert.ok(!calls.some(c=>c.sql.startsWith('INSERT')));
  overlap=false;calls=[];res=response();await planner.routes['post /reservas'](slot,res,e=>{throw e;});assert.equal(res.code,201);assert.ok(calls.some(c=>c.sql.startsWith('INSERT')));

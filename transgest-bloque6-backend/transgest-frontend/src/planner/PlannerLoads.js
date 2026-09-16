@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getPedidos, getPedido, getClientes, getColaboradores, crearPedido, editarPedido, enviarWorkflowColaborador } from '../services/api';
+import { getPedidos, getPedido, getClientes, getColaboradores, crearPedido, editarPedido, enviarWorkflowColaborador,transportExchange,plannerApi } from '../services/api';
 import { supplierPriceType } from '../utils/supplierPricing';
 import { orderTown } from '../utils/orderTown';
+import PlannerSlots from './PlannerSlots';
+import {PageHead,Metrics,Panel,Badge} from './PlannerUI';
 import { loadPlannerClients } from './catalogs';
 
 const rowsOf = data => Array.isArray(data) ? data : data?.data || [];
@@ -11,8 +13,9 @@ const statusLabels = { espera_carga:'En espera de carga',cargando:'Cargando',en_
 const parseStops = value => { try { return typeof value === 'string' ? JSON.parse(value) : value || []; } catch { return []; } };
 const empty = () => ({ cliente_id:'', colaborador_id:'', referencia_cliente:'', fecha_carga:localDate(), fecha_descarga:'', mercancia:'', peso_kg:'', bultos:'', notas:'', tipo_precio_colaborador:'viaje', precio_colaborador:'', precio_colaborador_unitario:'', minimo_colaborador_unidades:'', puntos_carga:[{nombre:'',direccion:'',ciudad:'',provincia:'',pais:'España'}], puntos_descarga:[{nombre:'',direccion:'',ciudad:'',provincia:'',pais:'España'}] });
 
-export default function PlannerLoads({onPlan}) {
+export default function PlannerLoads({onPlan,onPrepare,focusOrder,onFocusConsumed}) {
   const { puedeEditar, puedeVer } = useAuth();
+  const [summary,setSummary]=useState(null);
   const [orders,setOrders] = useState([]), [clients,setClients] = useState([]), [agencies,setAgencies] = useState([]);
   const [month,setMonth] = useState(localDate().slice(0,7)), [page,setPage] = useState(1), [hasNext,setHasNext] = useState(false);
   const [draft,setDraft] = useState(null), [error,setError] = useState(''), [notice,setNotice] = useState(''), [busy,setBusy] = useState(false), [loading,setLoading] = useState(false);
@@ -22,17 +25,18 @@ export default function PlannerLoads({onPlan}) {
     const version = ++request.current;
     setLoading(true); setError('');
     try {
+      if(canEdit)await transportExchange('/sincronizar',{method:'POST',body:{}});
       const [y,m] = month.split('-').map(Number);
       const end = `${month}-${new Date(y,m,0).getDate()}`;
-      const data = await getPedidos({ desde:`${month}-01`, hasta:end, page, limit:50 });
+      const [data,stats]=await Promise.all([getPedidos({desde:`${month}-01`,hasta:end,page,limit:50}),plannerApi(`/resumen?mes=${month}`)]);
       if (version !== request.current) return;
-      const rows = rowsOf(data); setOrders(rows);
+      const rows = rowsOf(data); setOrders(rows);setSummary(stats);
       setHasNext(data?.pagination?.hasNext ?? (data?.pagination?.totalPages ? page < data.pagination.totalPages : rows.length === 50));
     } catch (err) { if (version === request.current) setError(err.message); }
     finally { if (version === request.current) setLoading(false); }
-  }, [month,page]);
+  }, [month,page,canEdit]);
   const cancelLoad = useCallback(() => { request.current++; }, []);
-  useEffect(() => { load(); return cancelLoad; }, [load,cancelLoad]);
+  useEffect(() => { load();const timer=setInterval(()=>{if(!document.hidden)load();},60000); return ()=>{clearInterval(timer);cancelLoad();}; }, [load,cancelLoad]);
   useEffect(() => {
     let active = true;
     async function fetchCatalogs() {
@@ -56,6 +60,7 @@ export default function PlannerLoads({onPlan}) {
     catch (err) { setError(err.message); }
     finally { setBusy(false); }
   }
+  useEffect(()=>{if(!focusOrder)return;let alive=true;getPedido(focusOrder).then(full=>{if(alive){open({...full,puntos_carga:parseStops(full.puntos_carga),puntos_descarga:parseStops(full.puntos_descarga),tipo_precio_colaborador:supplierPriceType(full)});onFocusConsumed?.();}}).catch(err=>{if(alive)setError(err.message);});return()=>{alive=false;};},[focusOrder,onFocusConsumed]);
   function change(key,value) { setDraft(d => ({...d,[key]:value})); }
   function changeStop(key,index,field,value) { setDraft(d => ({...d,[key]:d[key].map((stop,i) => i === index ? {...stop,[field]:value} : stop)})); }
   async function save(event) {
@@ -86,13 +91,17 @@ export default function PlannerLoads({onPlan}) {
     finally { setBusy(false); }
   }
   return <section className="planner-loads">
-    <div className="planner-toolbar"><h1>Cargas</h1><p>{onPlan ? 'Asigna un proveedor o planifica el transporte con tu flota en Gestión de viajes.' : 'Gestiona tus cargas y asígnalas a tus proveedores de transporte.'}</p><label>Mes<input type="month" value={month} required onChange={e=>{if(e.target.value){setMonth(e.target.value);setPage(1);}}}/></label><button disabled={loading} onClick={load}>Actualizar</button>{canEdit && <button className="primary" onClick={()=>open(empty())}>Nueva carga</button>}</div>
+    <PageHead icon="truck" title="Planificación de cargas" description="Organiza las cargas, prepara la mercancía y coordina la aceptación de los transportistas.">{canEdit&&<button className="primary" onClick={()=>open(empty())}>+ Nueva carga</button>}</PageHead>
+    <Metrics items={[{label:'Cargas del mes',value:summary?.cargas??'—',icon:'truck',note:'Todas las cargas del mes seleccionado'},{label:'Sin transportista',value:summary?.sin_asignar??'—',icon:'alert',tone:'amber'},{label:'Aceptadas por proveedor',value:summary?.aceptadas??'—',icon:'file',tone:'blue'},{label:'Incidencias',value:summary?.incidencias??'—',icon:'alert',tone:'red'}]}/>
+    <PlannerSlots compact onOrder={id=>{const order=orders.find(o=>o.id===id);edit(order||{id});}}/>
+    <Panel title="Cargas y asignación de transporte" icon="truck"><div className="pl-filters"><label>Mes<input type="month" value={month} required onChange={e=>{if(e.target.value){setMonth(e.target.value);setPage(1);}}}/></label><button disabled={loading} onClick={load}>Actualizar</button></div>
     {error && !draft && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <div className="planner-table" aria-busy={loading}><table><thead><tr><th>Referencia</th><th>Carga</th><th>Destino</th><th>Transportista / flota</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>
-      {orders.map(order=><tr key={order.id}><td><button disabled={busy} onClick={()=>edit(order)}>{order.numero}</button><small>{order.referencia_cliente}</small></td><td>{order.fecha_carga?.slice(0,10)}<small>{orderTown(parseStops(order.puntos_carga)[0] || {}, order.origen)}</small></td><td>{orderTown(parseStops(order.puntos_descarga)[0] || {}, order.destino)}</td><td>{order.colaborador_nombre || agencies.find(a=>a.id===order.colaborador_id)?.nombre || (order.vehiculo_id?`Flota propia · ${order.vehiculo_matricula||'Vehículo asignado'}`:'Sin asignar')}</td><td>{statusLabels[order.estado] || order.estado}</td><td>{onPlan&&<button onClick={()=>onPlan(order)}>Planificar viaje</button>}{canEdit && <button disabled={busy} onClick={()=>edit(order)}>Editar / asignar</button>}{canEdit && order.colaborador_id && !['cancelado','entregado','facturado'].includes(order.estado) && <button disabled={busy} onClick={()=>notifyAgency(order)}>Enviar encargo</button>}</td></tr>)}
+      {orders.map(order=><tr key={order.id}><td><button disabled={busy} onClick={()=>edit(order)}>{order.numero}</button><small>{order.referencia_cliente}</small></td><td>{order.fecha_carga?.slice(0,10)}<small>{orderTown(parseStops(order.puntos_carga)[0] || {}, order.origen)}</small></td><td>{orderTown(parseStops(order.puntos_descarga)[0] || {}, order.destino)}</td><td>{order.colaborador_nombre || agencies.find(a=>a.id===order.colaborador_id)?.nombre || (order.vehiculo_id?`Flota propia · ${order.vehiculo_matricula||'Vehículo asignado'}`:'Sin asignar')}</td><td><Badge value={order.estado}>{statusLabels[order.estado] || order.estado}</Badge></td><td>{canEdit&&onPrepare&&<button onClick={()=>onPrepare(order.id)}>Preparar mercancía</button>}{onPlan&&<button onClick={()=>onPlan(order)}>Planificar viaje</button>}{canEdit && <button disabled={busy} onClick={()=>edit(order)}>Editar / asignar</button>}{canEdit && order.colaborador_id && !['cancelado','entregado','facturado'].includes(order.estado) && <button disabled={busy} onClick={()=>notifyAgency(order)}>Enviar encargo</button>}</td></tr>)}
       {!orders.length && <tr><td colSpan="6">{loading ? 'Cargando...' : 'No hay cargas en este periodo.'}</td></tr>}
     </tbody></table></div>
     <div className="planner-pagination"><button disabled={page===1 || loading} onClick={()=>setPage(p=>p-1)}>Anterior</button><span>Página {page}</span><button disabled={!hasNext || loading} onClick={()=>setPage(p=>p+1)}>Siguiente</button></div>
+    </Panel>
     {draft && <div className="planner-overlay"><form className="planner-dialog" role="dialog" aria-modal="true" aria-labelledby="planner-load-title" onSubmit={save}>
       <header><h2 id="planner-load-title">{draft.id ? draft.numero : 'Nueva carga'}</h2><button type="button" onClick={close} aria-label="Cerrar">×</button></header>
       <div className="planner-dialog-body">

@@ -9,6 +9,8 @@ const companyProducts = require("../services/companyProducts");
 const GRACE_DAYS = 7;
 
 const PLAN_ALIAS = {
+  planner: "profesional",
+  pro_planner: "profesional",
   lite: "lite",
   mini: "lite",
   transgest_lite: "lite",

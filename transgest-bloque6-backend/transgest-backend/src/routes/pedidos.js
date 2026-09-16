@@ -3380,6 +3380,7 @@ router.get("/colaborador/confirmar/:token", async (req, res) => {
     if (docControl?.documento) await logColaboradorDocumentoControl(data.pedido_id, data.empresa_id, "consultado", { accion: "confirmar", codigo_control: docControl.documento.codigo_control || null });
     res.send(colaboradorPage("Confirmar transporte", `
       <h1>Confirmar transporte</h1>
+      ${/^https?:\/\//.test(process.env.APP_URL||process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'')?`<p><a class="btn" href="${htmlEscape((process.env.APP_URL||process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL).replace(/\/$/,''))}/transportistas/conexiones#encargo=${encodeURIComponent(req.params.token)}">Aceptar en mi TransGest Pro</a></p>`:''}
       <p><strong>${htmlEscape(data.empresa_nombre || "")}</strong> solicita confirmar el pedido <strong>${htmlEscape(data.numero)}</strong>.</p>
       ${renderColaboradorPedidoBox(data, { mostrarPrecio: true })}
       ${renderColaboradorDocumentoControlBox(docControl)}
@@ -5606,30 +5607,7 @@ async function nextPedidoNumero(client, empresaId, prefix = "DCD") {
   return `${prefix}-${anio}-${String(lastNum + 1).padStart(4, "0")}`;
 }
 
-async function nextGestionPedidoNumero(client, empresaId) {
-  const year = new Date().getFullYear();
-  const prefix = `PED-${year}-`;
-  await client.query(
-    `INSERT INTO pedido_numero_counters (empresa_id, year, last_num)
-     SELECT $1, $2,
-            COALESCE(MAX(CASE WHEN numero ~ $3 THEN substring(numero from $3)::int ELSE 0 END), 0)
-       FROM pedidos
-      WHERE empresa_id=$1 AND numero LIKE $4
-     ON CONFLICT (empresa_id, year) DO UPDATE
-       SET last_num=GREATEST(pedido_numero_counters.last_num, EXCLUDED.last_num),
-           updated_at=NOW()`,
-    [empresaId, year, `^${prefix}([0-9]+)$`, `${prefix}%`]
-  );
-  const { rows } = await client.query(
-    `UPDATE pedido_numero_counters
-        SET last_num=last_num+1, updated_at=NOW()
-      WHERE empresa_id=$1 AND year=$2
-      RETURNING last_num`,
-    [empresaId, year]
-  );
-  const next = Number(rows[0]?.last_num || 1);
-  return `${prefix}${String(next).padStart(4, "0")}`;
-}
+const {nextGestionPedidoNumero}=require('../services/pedidoNumbers');
 
 async function usuarioPuedeGestionarPedido(req, pedido) {
   if (ROLES_GESTION_PEDIDOS.has(req.user?.rol)) return true;

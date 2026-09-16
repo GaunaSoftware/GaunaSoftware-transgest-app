@@ -31,5 +31,5 @@ test('licenses distinguish TMS-only, Planner-only and combined companies', () =>
   expect(visiblePlannerModules({rol:'gerente',productos:['transgest']},()=>true)).toEqual([]);
   expect(visiblePlannerModules({rol:'gerente'},()=>true)).toEqual([]);
   const modules=visiblePlannerModules({rol:'gerente',productos:['planner']},()=>true).map(([id])=>id);
-  expect(modules).toEqual(['pedidos','muelles','palets','colaboradores','clientes','documentos','empresa']);
+  expect(modules).toEqual(['pedidos','muelles','palets','colaboradores','clientes','documentos','facturacion','empresa']);
 });

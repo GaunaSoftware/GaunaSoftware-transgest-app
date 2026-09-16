@@ -21,7 +21,7 @@ function ensureSchema() {
   return schema;
 }
 async function snapshot(client,id,empresaId) {
-  const invoice=await client.query('SELECT id,cliente_id,numero,fecha,fecha_vencimiento,base_imponible,total,tipo_iva,cuota_iva,tipo_irpf,cuota_irpf,observaciones,referencia_cliente,factura_original_id,factura_original_numero,motivo_rectificacion,tipo_rectificacion FROM facturas WHERE id=$1 AND empresa_id=$2',[id,empresaId]);
+  const invoice=await client.query(`SELECT id,cliente_id,numero,fecha,fecha_vencimiento,base_imponible,total,tipo_iva,cuota_iva,tipo_irpf,cuota_irpf,observaciones,referencia_cliente,factura_original_id,factura_original_numero,motivo_rectificacion,tipo_rectificacion,to_jsonb(facturas)->>'planner_preparacion_id' AS planner_preparacion_id FROM facturas WHERE id=$1 AND empresa_id=$2`,[id,empresaId]);
   if(!invoice.rows[0])throw Object.assign(new Error('Factura no encontrada'),{status:404});
   const originalId=invoice.rows[0].factura_original_id;
   let original=null;
@@ -40,11 +40,22 @@ async function snapshot(client,id,empresaId) {
     FROM pedidos p WHERE p.empresa_id=$2 AND (p.factura_id=$1 OR EXISTS(SELECT 1 FROM factura_pedidos fp WHERE fp.factura_id=$1 AND fp.pedido_id=p.id)) ORDER BY p.id`,[sourceId,empresaId]);
   const lines=await client.query('SELECT concepto,cantidad,precio_unit FROM factura_lineas WHERE factura_id=$1 ORDER BY id FOR UPDATE',[id]);
   const extras=await client.query('SELECT tipo,concepto,importe FROM factura_extracostes WHERE factura_id=$1 ORDER BY id FOR UPDATE',[id]);
-  const value={factura:invoice.rows[0],original,pedidos:orders.rows,lineas:lines.rows,extracostes:extras.rows};
+  let mercancia=null;
+  if(invoice.rows[0].planner_preparacion_id){
+    mercancia=(await client.query(`SELECT r.id,r.estado,p.cliente_id,p.referencia_cliente,a.id AS albaran_id,a.datos AS albaran FROM planner_preparaciones r JOIN pedidos p ON p.id=r.pedido_id AND p.empresa_id=r.empresa_id LEFT JOIN planner_albaranes a ON a.preparacion_id=r.id AND a.empresa_id=r.empresa_id WHERE r.id=$1 AND r.empresa_id=$2 FOR UPDATE OF r`,[invoice.rows[0].planner_preparacion_id,empresaId])).rows[0]||{estado:'no_disponible'};
+  }
+  const value={mercancia,factura:invoice.rows[0],original,pedidos:orders.rows,lineas:lines.rows,extracostes:extras.rows};
   return {...value,huella:crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')};
 }
 function problems(value,waiver='') {
   const result=[];
+  if(value.mercancia){
+    const m=value.mercancia;
+    if(m.estado!=='expedida')result.push('Mercancía pendiente de expedición');
+    if(String(m.cliente_id)!==String(value.factura.cliente_id))result.push('La mercancía pertenece a otro cliente');
+    if(!m.albaran_id)result.push('Genera y revisa el albarán de salida de mercancía');
+    if(!String(m.referencia_cliente||value.factura.referencia_cliente||'').trim()&&!String(waiver).trim())result.push('Revisa la referencia de la carga o justifica que no procede');
+  }
   for(const p of value.pedidos) {
     if(String(p.cliente_id)!==String(value.factura.cliente_id))result.push(`${p.numero}: pertenece a otro cliente`);
     if(!['entregado','facturado'].includes(p.estado))result.push(`${p.numero}: pendiente de entrega`);

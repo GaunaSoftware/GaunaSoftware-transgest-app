@@ -43,6 +43,27 @@ router.get('/pedidos/:id/documentos/:docId',wrap(async(req,res)=>{
  const doc=(await db.query("SELECT nombre,file_mime,file_base64 FROM pedido_docs WHERE id=$1 AND pedido_id=$2 AND empresa_id=$3 AND tipo IN ('albaran','albaran_colaborador','pod','cmr')",[req.params.docId,req.params.id,req.empresaId])).rows[0];
  if(!doc)return res.status(404).json({error:'Documento no encontrado'});res.json(doc);
 }));
+const plannerEnabled=async(req,res,next)=>{try{
+ const enabled=await require('../services/companyProducts').get(req.empresaId);
+ if(!enabled.productos.includes('planner'))return res.status(403).json({error:'El cargador no tiene Planner activo.'});
+ await require('../services/plannerSchema').ensurePlannerSchema();next();
+}catch(e){next(e);}};
+router.get('/pedidos/:id/hueco',plannerEnabled,wrap(async(req,res)=>{
+ if(!(await documentScope(req)).rows.length)return res.status(404).json({error:'Carga no encontrada'});
+ const reservas=(await db.query(`SELECT r.id,r.inicio,r.fin,m.nombre AS muelle,m.almacen,m.zona_horaria FROM planner_reservas r JOIN planner_muelles m ON m.id=r.muelle_id AND m.empresa_id=r.empresa_id WHERE r.empresa_id=$1 AND r.pedido_id=$2 AND r.tipo='carga' ORDER BY r.inicio`,[req.empresaId,req.params.id])).rows;
+ const solicitudes=(await db.query('SELECT id,inicio,fin,estado,notas FROM planner_solicitudes_hueco WHERE empresa_id=$1 AND pedido_id=$2 AND colaborador_id=$3 ORDER BY created_at DESC LIMIT 10',[req.empresaId,req.params.id,req.user.colaborador_id])).rows;
+ res.json({reservas,solicitudes});
+}));
+router.post('/pedidos/:id/hueco',plannerEnabled,wrap(async(req,res)=>{
+ if(req.user.rol!=='colaborador')return res.status(403).json({error:'El responsable del transportista debe solicitar el hueco.'});
+ res.status(201).json(await require('../services/plannerSupplierSlots').requestSlot(db,req.empresaId,req.user.colaborador_id,req.user.id,req.params.id,req.body));
+}));
+router.get('/pedidos/:id/albaran-salida',plannerEnabled,wrap(async(req,res)=>{
+ if(!(await documentScope(req)).rows.length)return res.status(404).json({error:'Carga no encontrada'});
+ const note=(await db.query('SELECT a.* FROM planner_albaranes a JOIN planner_preparaciones p ON p.id=a.preparacion_id AND p.empresa_id=a.empresa_id WHERE p.pedido_id=$1 AND p.empresa_id=$2',[req.params.id,req.empresaId])).rows[0];
+ if(!note)return res.status(404).json({error:'El almacén todavía no ha generado el albarán.'});
+ const pdf=await require('../services/plannerDeliveryPdf').deliveryPdf(note);res.json({nombre:`${note.numero}.pdf`,file_mime:'application/pdf',file_base64:pdf.toString('base64')});
+}));
 router.get('/vehiculos',wrap(async(req,res)=>res.json((await db.query('SELECT id,matricula,marca,modelo,tipo FROM colaborador_vehiculos WHERE empresa_id=$1 AND colaborador_id=$2 AND activo=true ORDER BY matricula',supplier(req))).rows)));
 router.post('/vehiculos',wrap(async(req,res)=>{
  if(req.user.rol!=='colaborador')return res.status(403).json({error:'Solo el responsable del proveedor puede dar de alta vehículos'});

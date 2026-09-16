@@ -1,4 +1,6 @@
 const PLAN_ALIAS = {
+  planner: "profesional",
+  pro_planner: "profesional",
   lite: "lite",
   mini: "lite",
   transgest_lite: "lite",

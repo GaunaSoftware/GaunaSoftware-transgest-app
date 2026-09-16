@@ -80,9 +80,9 @@ async function saFetch(path, opts={}){
   return data;
 }
 
-const PLAN_COLOR   = {lite:"#0f766e",basico:"#6b7280",profesional:"#3b82f6",enterprise:"#8b5cf6"};
+const PLAN_COLOR   = {planner:"#008f82",pro_planner:"#0e7490",lite:"#0f766e",basico:"#6b7280",profesional:"#3b82f6",enterprise:"#8b5cf6"};
 const ESTADO_COLOR = {activo:"#10b981",suspendido:"#f59e0b",cancelado:"#ef4444"};
-const PLANES_OPTS  = ["lite","basico","profesional","enterprise"];
+const PLANES_OPTS  = ["lite","basico","profesional","enterprise","planner","pro_planner"];
 const PLAN_PRICES  = {lite:49,basico:99,profesional:199,enterprise:399};
 const ACCOUNTING_MAPPING_ITEM_LABELS = {
   chart_of_accounts:"Plan contable",
@@ -3235,7 +3235,7 @@ export default function SuperAdmin(){
                         <span style={{fontSize:12,color:"#e2e8f0",fontWeight:600}}>{getBrandDisplayName(plan)}</span>
                         <div style={{display:"flex",gap:12,fontSize:11}}>
                           <span style={{color:PLAN_COLOR[plan],fontWeight:700}}>{count} empresas</span>
-                          <span style={{color:"#64748b"}}>{fmt2(revenue)} EUR/mes</span>
+                          <span style={{color:"#64748b"}}>{Object.prototype.hasOwnProperty.call(PLAN_PRICES,plan)?`${fmt2(revenue)} EUR/mes`:'Tarifa pendiente de configurar'}</span>
                         </div>
                       </div>
                       <div style={{height:6,background:"#1e2a45",borderRadius:3,overflow:"hidden"}}>

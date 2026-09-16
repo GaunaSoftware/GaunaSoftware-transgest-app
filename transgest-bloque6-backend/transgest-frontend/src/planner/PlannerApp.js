@@ -1,5 +1,5 @@
 import { PLANNER_MODULES, visiblePlannerModules, hasProduct } from './access';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import Login from '../pages/Login';
@@ -13,13 +13,16 @@ import SupportInbox from '../components/SupportInbox';
 const SupplierApp=lazy(()=>import('../pages/SupplierApp'));
 const Orders=lazy(()=>import('../pages/Pedidos'));
 const Drivers=lazy(()=>import('../pages/Choferes'));
-const Warehouse=lazy(()=>import('../pages/Palets'));
+const Connections=lazy(()=>import('./PlannerConnections'));
+const AuthorizedVehicles=lazy(()=>import('./PlannerVehicles'));
+const Warehouse=lazy(()=>import('./PlannerWarehouse'));
+const Finance=lazy(()=>import('../pages/Facturacion'));
 const Fleet=lazy(()=>import('../pages/Vehiculos'));
 const Traffic=lazy(()=>import('../pages/GestionTrafico'));
 const Intelligence=lazy(()=>import('../pages/Intelligence'));
 const Agencies = lazy(() => import('../pages/Colaboradores'));
 const Recipients = lazy(() => import('../pages/Clientes'));
-const Documents = lazy(() => import('../pages/Documentos'));
+const Documents = lazy(() => import('./PlannerDocuments'));
 const Company = lazy(() => import('../pages/Empresa'));
 const logo = require('../assets/brand/transgest_logo_white.svg').default;
 const modules = PLANNER_MODULES;
@@ -31,6 +34,10 @@ export default function PlannerApp({ PasswordChangeComponent }) {
   const [product, setProduct] = useState('');
   const [error, setError] = useState('');
   const [support,setSupport]=useState(false);
+  const [focusOrder,setFocusOrder]=useState('');
+  const [providerTab,setProviderTab]=useState('colaboradores');
+  const [editOrder,setEditOrder]=useState('');
+  const consumeEdit=useCallback(()=>setEditOrder(''),[]);
   useEffect(()=>{const navigate=e=>{const target=e.detail==='pedidos'?'viajes':e.detail;if(modules.some(([id])=>id===target))setView(target);};window.addEventListener('tms:navegar',navigate);return()=>window.removeEventListener('tms:navegar',navigate);},[]);
   useEffect(() => {
     const onBlocked = event => setBloqueado(event.detail);
@@ -59,19 +66,20 @@ export default function PlannerApp({ PasswordChangeComponent }) {
   const active = visible.some(([id]) => id === view) ? view : visible[0]?.[0];
   return <div className="planner-app">
     <header className="planner-header"><img src={logo} alt="TransGest"/><strong>Planner</strong>{hasProduct(user, 'transgest') && <a className="planner-return" href="/?workspace=tms">Volver a TransGest</a>}<span>{user.nombre}</span><button onClick={()=>setSupport(true)}>Soporte</button><button onClick={toggle}>{theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}</button><button onClick={logout}>Salir</button></header>
-    <p className="planner-context">Trabajas con los datos de tu empresa. Los cambios que guardes son reales y se comparten entre los productos que tengas habilitados.</p>
+
     {support&&<SupportInbox onClose={()=>setSupport(false)}/>}
     <nav aria-label="Planner">{visible.map(([id,label]) => <button key={id} aria-current={active === id ? 'page' : undefined} onClick={() => setView(id)}>{label}</button>)}</nav>
     <main><Suspense fallback={<p>Cargando...</p>}>
-      {active === 'pedidos' && <PlannerLoads onPlan={visible.some(([id])=>id==='gestion_trafico')?order=>{setRuntimeFocus('tms_trafico_focus',{pedido_id:order.id,fecha_carga:order.fecha_carga});setView('gestion_trafico');}:null} />}
+      {active === 'pedidos' && <PlannerLoads focusOrder={editOrder} onFocusConsumed={consumeEdit} onPrepare={id=>{setFocusOrder(id);setView('palets');}} onPlan={visible.some(([id])=>id==='gestion_trafico')?order=>{setRuntimeFocus('tms_trafico_focus',{pedido_id:order.id,fecha_carga:order.fecha_carga});setView('gestion_trafico');}:null} />}
       {active === 'viajes' && <Orders />}
       {active === 'choferes' && <Drivers />}
-      {active === 'muelles' && <PlannerSlots />}
-      {active === 'palets' && <Warehouse />}
+      {active === 'muelles' && <PlannerSlots onOrder={id=>{setEditOrder(id);setView('pedidos');}} />}
+      {active === 'palets' && <Warehouse focusOrder={focusOrder} onDocuments={()=>setView('documentos')} onInvoices={()=>setView('facturacion')} />}
+      {active === 'facturacion' && <Finance />}
       {active === 'vehiculos' && <Fleet />}
       {active === 'gestion_trafico' && <Traffic />}
       {active === 'ia' && <Intelligence />}
-      {active === 'colaboradores' && <Agencies />}
+      {active === 'colaboradores' && <><div className="pl-tabs"><button aria-pressed={providerTab==='colaboradores'} onClick={()=>setProviderTab('colaboradores')}>Colaboradores de transporte</button><button aria-pressed={providerTab==='vehiculos'} onClick={()=>setProviderTab('vehiculos')}>Vehículos autorizados</button><button aria-pressed={providerTab==='conexiones'} onClick={()=>setProviderTab('conexiones')}>Conexiones con TransGest</button></div>{providerTab==='vehiculos'?<AuthorizedVehicles/>:providerTab==='conexiones'?<Connections embedded/>:<Agencies/>}</>}
       {active === 'clientes' && <Recipients />}
       {active === 'documentos' && <Documents />}
       {active === 'empresa' && <Company />}

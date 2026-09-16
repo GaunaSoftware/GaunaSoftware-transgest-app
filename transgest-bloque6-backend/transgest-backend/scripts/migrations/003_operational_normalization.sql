@@ -14,11 +14,9 @@ CREATE INDEX IF NOT EXISTS idx_gps_integraciones_empresa ON gps_integraciones(em
 CREATE TABLE IF NOT EXISTS puntos_interes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
-  cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL,
   nombre VARCHAR(180) NOT NULL,
   cif VARCHAR(40),
   direccion TEXT NOT NULL,
-  direccion_key TEXT,
   codigo_postal VARCHAR(20),
   ciudad VARCHAR(120),
   provincia VARCHAR(120),
@@ -36,35 +34,7 @@ CREATE TABLE IF NOT EXISTS puntos_interes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-ALTER TABLE puntos_interes ADD COLUMN IF NOT EXISTS direccion_key TEXT;
-DROP INDEX IF EXISTS idx_puntos_interes_empresa_dir;
-DROP INDEX IF EXISTS idx_puntos_interes_empresa_cliente_dir;
-WITH ranked AS (
-  SELECT
-    id,
-    ROW_NUMBER() OVER (
-      PARTITION BY
-        empresa_id,
-        COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid),
-        LOWER(TRIM(direccion))
-      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
-    ) AS rn
-  FROM puntos_interes
-  WHERE activo=true
-    AND COALESCE(TRIM(direccion), '') <> ''
-)
-UPDATE puntos_interes p
-   SET activo=false,
-       updated_at=NOW(),
-       notas=CONCAT_WS(E'\n', NULLIF(p.notas, ''), 'Duplicado desactivado automaticamente al normalizar puntos por cliente.')
-  FROM ranked r
- WHERE p.id=r.id
-   AND r.rn > 1;
--- Unicidad por (empresa, cliente, direccion): cada cliente puede tener su propia
--- copia de una misma direccion; cliente_id NULL = punto general compartido.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cli_dir ON puntos_interes(empresa_id, COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid), LOWER(TRIM(direccion))) WHERE activo=true;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cli_dir_key ON puntos_interes(empresa_id, COALESCE(cliente_id, '00000000-0000-0000-0000-000000000000'::uuid), direccion_key) WHERE activo=true AND direccion_key IS NOT NULL AND direccion_key <> '';
-CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_cliente ON puntos_interes(empresa_id, cliente_id) WHERE activo=true;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_puntos_interes_empresa_dir ON puntos_interes(empresa_id, LOWER(TRIM(direccion))) WHERE activo=true;
 CREATE INDEX IF NOT EXISTS idx_puntos_interes_empresa_nombre ON puntos_interes(empresa_id, LOWER(nombre)) WHERE activo=true;
 
 CREATE TABLE IF NOT EXISTS almacenes (

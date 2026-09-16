@@ -59,7 +59,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
     }
   }
   await page.getByRole('button',{name:'Ver tarjetas',exact:true}).click();await page.getByRole('img',{name:'Icono de bañera'}).waitFor();
-  await page.getByRole('button',{name:'Ver 1234-BCD',exact:true}).click();const form=page.locator('.fleet-form');await form.waitFor();
+  await page.locator('.fleet-list').getByRole('button',{name:'Ver',exact:true}).first().click();const form=page.locator('.fleet-form');await form.waitFor();
   await form.getByLabel('Foto del vehículo').setInputFiles({name:'vehicle.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNlsAAAAASUVORK5CYII=','base64')});await form.locator('.workshop-portrait img').waitFor();
   assert(writes.some(w=>w.path==='/vehiculos/truck-1/imagen'&&w.body.imagen_data));await form.getByRole('button',{name:'Quitar foto',exact:true}).click();await form.getByRole('img',{name:'Icono de tractora'}).waitFor();
 
@@ -69,7 +69,7 @@ async function main(){fs.mkdirSync(out,{recursive:true});
   }
   await form.getByRole('button',{name:'Cerrar',exact:true}).first().click();
   await page.getByRole('button',{name:'+ Nuevo vehículo',exact:true}).click();await form.getByText('Nueva tractora',{exact:true}).waitFor();await form.getByRole('button',{name:'Cerrar',exact:true}).first().click();
-  await page.getByRole('button',{name:'Gestión de flota y GPS',exact:true}).click();await page.getByRole('button',{name:'Volver al resumen de vehículos',exact:true}).click();await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor().catch(async e=>{console.error(await page.locator('body').innerText());throw e;});
+  await page.getByRole('button',{name:'Gestión de flota y GPS',exact:true}).click();await page.getByRole('button',{name:'Cerrar gestión GPS',exact:true}).click();await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor().catch(async e=>{console.error(await page.locator('body').innerText());throw e;});
   checks.push('Search/type filters, export, table/cards, type-specific icons, existing create/edit and all internal tabs, mobile and desktop');
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'vehiculos_remolques'})));await page.getByLabel('Tipo de vehículo').selectOption('remolques');await page.locator('.fleet-list').getByRole('button',{name:'Ver',exact:true}).first().click();await form.getByRole('img',{name:'Icono de bañera'}).waitFor();await form.getByRole('button',{name:'Cerrar',exact:true}).first().click();
   user.rol='visualizador';await page.evaluate(u=>localStorage.setItem(`tms_onboarding_done:${u.empresa_id}:${u.rol}:${u.id}`,'1'),user);await page.reload({waitUntil:'networkidle'});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'vehiculos_tractoras'})));await page.getByRole('heading',{name:'Gestión de vehículos',exact:true}).waitFor().catch(async e=>{console.error(await page.locator('body').innerText());throw e;});await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});

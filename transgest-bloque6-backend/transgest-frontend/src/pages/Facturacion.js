@@ -1,3 +1,4 @@
+import { guardarControlCobrosConfig, getReclamacionesEnvios } from '../services/api';
 import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal, Icon, AlertCard } from "../ui";
 import InvoiceList from "./finance/InvoiceList";
 import TreasuryView from "./finance/TreasuryView";
@@ -7,6 +8,7 @@ import "./finance/summary.css";
 import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
+import { registrarRevisionFactura } from '../services/api';
 import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
@@ -567,6 +569,10 @@ function getFacturaFiscalRowMeta(factura) {
 
 function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
   const empresa = useEmpresaPerfil();
+  const [revisionConfirmada,setRevisionConfirmada]=useState(false);
+  const [motivoSinReferencia,setMotivoSinReferencia]=useState('');
+  const [revisionRegistrada,setRevisionRegistrada]=useState(false);
+  const [revisionBusy,setRevisionBusy]=useState(false);
   // Safety: ensure factura has required fields
   if (!factura || !factura.id) {
     return (
@@ -670,10 +676,14 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
             const wrapper = document.getElementById("factura-print-wrapper");
             if (!wrapper) { notify("Error: no se encontro el contenido de la factura", "error"); return; }
             const w = window.open("","_blank","width=900,height=700");
+            if(!w){notify('Permite abrir la ventana de impresión en el navegador.','error');return;}
+            const clean=wrapper.cloneNode(true);
+            clean.querySelectorAll('[data-internal],button,input,select,textarea').forEach(node=>node.remove());
             w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>Factura ${factura.numero||""}</title>
+<title>Factura</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
+  :root{--text:#111;--text2:#374151;--text3:#475569;--text4:#64748b;--border:#d1d5db;--bg:#fff;--bg2:#fff;--bg3:#f8fafc;--bg4:#f1f5f9;--green:#047857}
   body{font-family:'Segoe UI',Arial,sans-serif;padding:32px;color:#111;font-size:12px;line-height:1.5;background:#fff}
   img{max-height:52px;max-width:160px;object-fit:contain;display:block;margin-bottom:8px}
   table{width:100%;border-collapse:collapse;margin:12px 0}
@@ -690,16 +700,16 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
   .fiscal-note{margin-top:10px;font-size:10px;color:#475569;line-height:1.5}
   @media print{@page{margin:1cm;size:A4}body{padding:0}}
 </style></head><body>`);
-            w.document.write(wrapper.innerHTML);
+            w.document.write(clean.innerHTML);
             w.document.write("</body></html>");
             w.document.close();
             w.focus();
             setTimeout(()=>w.print(), 500);
           }}>Imprimir / PDF</button>
-          {!esRect && factura.estado!=="rectificada" && !rectificadasIds.has(factura.id) && !rectificadasIds.has(factura.numero) && !rectificadasIds.has(String(factura.id)) && (
+          {!esRect && factura.estado!=="borrador" && factura.estado!=="rectificada" && !rectificadasIds.has(factura.id) && !rectificadasIds.has(factura.numero) && !rectificadasIds.has(String(factura.id)) && (
             <button style={{...S.btn,background:"rgba(249,115,22,.15)",color:"#f97316",border:"1px solid rgba(249,115,22,.3)"}} onClick={()=>onRectificar(factura)}>Rectificar</button>
           )}
-          {onCambiarEstado && !esRect && factura.estado !== "cobrada" && factura.estado !== "rectificada" && (
+          {onCambiarEstado && !esRect && factura.estado !== "borrador" && factura.estado !== "cobrada" && factura.estado !== "rectificada" && (
             <button
               style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}
               onClick={()=>onCambiarEstado(factura.id, "cobrada")}
@@ -727,6 +737,14 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
         </div>
 
         {/* Contenido */}
+        {factura.estado==='borrador'&&<section className="finance-review" aria-label="Revisión antes de emitir">
+          <h3>Revisión antes de emitir</h3>
+          <p>Comprueba referencias, importes y archivos de entrega. La revisión queda registrada con tu usuario; cualquier cambio posterior requiere revisarla de nuevo.</p>
+          <label><input type="checkbox" checked={revisionConfirmada} onChange={e=>{setRevisionConfirmada(e.target.checked);setRevisionRegistrada(false);}}/> He revisado referencias, importes y documentación</label>
+          {pedidosFactura.some(p=>!String(p.referencia_cliente || factura.referencia_cliente || '').trim())&&<label>Si una referencia no procede, indica el motivo<input className="tgui-input" maxLength={1000} value={motivoSinReferencia} onChange={e=>{setMotivoSinReferencia(e.target.value);setRevisionRegistrada(false);}} placeholder="Ej.: el cliente no utiliza referencias de compra"/></label>}
+          <button className="tgui-button tgui-button--primary" disabled={!revisionConfirmada||revisionBusy} onClick={async()=>{setRevisionBusy(true);try{await registrarRevisionFactura(factura.id,{confirmado:true,motivo_sin_referencia:motivoSinReferencia});setRevisionRegistrada(true);notify('Revisión registrada. Ya puedes emitir la factura.','success');}catch(e){notify(e.message,'error');}finally{setRevisionBusy(false);}}}>{revisionBusy?'Registrando…':'Registrar revisión'}</button>
+          {onCambiarEstado&&<button className="tgui-button" disabled={revisionBusy||!revisionRegistrada} onClick={()=>onCambiarEstado(factura.id,'emitida')}>Emitir factura</button>}
+        </section>}
         <div style={{padding:"28px 32px"}} id="factura-print-wrapper">
           {/* Cabecera */}
           <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
@@ -832,7 +850,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
           `}</style>
 
           {pedidosFactura.length>0&&(
-            <div className="tg-factura-linked-panel">
+            <div className="tg-factura-linked-panel" data-internal="true">
               <div className="tg-factura-linked-head">
                 <div>
                   <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)"}}>Pedidos vinculados y verificacion</div>
@@ -1281,7 +1299,7 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
         cliente_id:             facturaOriginal.cliente_id,
         serie:                  serieRect,
         fecha:                  localDateValue(),
-        estado:                 "emitida",
+        estado:                 "borrador",
         factura_original_id:    facturaOriginal.id,
         factura_original_numero:facturaOriginal.numero,
         motivo_rectificacion:   motivo,
@@ -1290,15 +1308,10 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
         lineas: tipoRect==="diferencia"
           ? [{concepto:`Rectificacion factura ${facturaOriginal.numero} - ${motivo}`,cantidad:1,precio_unit:parseFloat(importe)}]
           : [{concepto:`Anulacion total factura ${facturaOriginal.numero}`,cantidad:1,precio_unit:-(parseFloat(facturaOriginal.base_imponible)||0)}],
-        pedidos_ids: facturaOriginal.pedidos_ids || [],
+        pedidos_ids: [],
       };
       await crearRectificativa(data);
-      const cambioEstado = await cambiarEstadoFactura(facturaOriginal.id, "rectificada");
-      broadcastFacturasChanged(normalizarDetalleCambioFactura(cambioEstado, {
-        factura_id: facturaOriginal.id,
-        estado_nuevo: "rectificada",
-        pedido_estado_aplicado: "facturado",
-      }));
+      notify("Borrador rectificativo creado. Ábrelo para revisar y emitir.", "success");
       onSaved();
     } catch(e) { notify("Error: "+e.message, "error"); }
     finally { setSaving(false); }
@@ -1343,14 +1356,14 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
         )}
         {tipoRect==="sustitucion"&&(
           <div style={{background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.15)",borderRadius:8,padding:"9px 14px",marginTop:12,fontSize:12,color:"#5a7ab8"}}>
-            Se emitira una rectificativa por -{fmt2(facturaOriginal.base_imponible)} EUR (base) que anula la factura original completa.
+            Se preparará un borrador rectificativo por -{fmt2(facturaOriginal.base_imponible)} EUR (base) que anula la factura original completa.
           </div>
         )}
 
         <div style={{display:"flex",flexWrap:"wrap",gap:10,marginTop:20,justifyContent:"flex-end"}}>
           <button style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border)"}} onClick={onClose}>Cancelar</button>
           <button style={{...S.btn,background:"rgba(249,115,22,.2)",color:"#f97316",border:"1px solid rgba(249,115,22,.4)"}} onClick={emitir} disabled={saving}>
-            {saving?"Emitiendo...":"Emitir rectificativa"}
+            {saving?"Guardando...":"Crear borrador rectificativo"}
           </button>
         </div>
       </div>
@@ -2074,12 +2087,16 @@ export default function Facturacion() {
     String(a.fecha_descarga || a.fecha_carga || "").localeCompare(String(b.fecha_descarga || b.fecha_carga || ""))
   ), [sinFacturar]);
   const sinFacturarTotal = useMemo(() => sinFacturar.reduce((s, p) => s + Number(p.importe || p.precio || 0), 0), [sinFacturar]);
+  const [invoiceTotals,setInvoiceTotals]=useState(null);
+  const [collectionHistory,setCollectionHistory]=useState([]);
+  const [savingCollections,setSavingCollections]=useState(false);
   const [cobrosCfg,    setCobrosCfg]    = useState({
     dias_revision_post_vencimiento: 1,
     dias_entre_reclamaciones: 7,
     max_envios_reclamacion: 6,
     dias_hasta_juridico: 45,
     envio_email_auto: true,
+    programacion_activa: false,
   });
 
   const cargar = useCallback(async () => {
@@ -2095,21 +2112,12 @@ export default function Facturacion() {
       const data   = await getFacturas(params);
       const rows   = Array.isArray(data?.data)?data.data:Array.isArray(data)?data:[];
       setFacturas(rows);
+      setInvoiceTotals(data?.resumen || null);
       if (data?.pagination) {
         setTotalPages(data.pagination.totalPages || 1);
         setTotalCount(data.pagination.total || rows.length);
       } else { setTotalPages(1); setTotalCount(rows.length); }
-      // Auto-cleanup: delete orphan borradores (borrador with 0 linked pedidos)
-      const orphans = rows.filter(f=>f.estado==="borrador" && Number(f.num_pedidos||0)===0);
-      for(const f of orphans){
-        try{ await borrarFactura(f.id); } catch(e){ /* ignore */ }
-      }
-      if(orphans.length>0) {
-        // Reload after cleanup
-        const data2 = await getFacturas(params);
-        const rows2 = Array.isArray(data2?.data)?data2.data:Array.isArray(data2)?data2:[];
-        setFacturas(rows2);
-      }
+      getReclamacionesEnvios().then(setCollectionHistory).catch(()=>setCollectionHistory([]));
       getControlCobros().then(d => {
         setControlCobros(d);
         if (d?.config) setCobrosCfg(prev => ({ ...prev, ...d.config }));
@@ -2612,7 +2620,7 @@ export default function Facturacion() {
     ]);
   }, [agruparCliente, filtradas, facturasPorCliente, clientesAbiertos]);
 
-  const total     = useMemo(() => facturas.filter(f=>f.estado!=="rectificada").reduce((s,f)=>s+Number(f.total||0),0), [facturas]);
+  const total     = useMemo(() => invoiceTotals?.base_emitida ?? facturas.filter(f=>!['borrador','anulada','cancelada'].includes(f.estado)).reduce((s,f)=>s+Number(f.base_imponible??0),0), [facturas,invoiceTotals]);
   const cobrado   = useMemo(() => facturas.filter(f=>f.estado==="cobrada").reduce((s,f)=>s+Number(f.total||0),0), [facturas]);
   const pendiente = useMemo(() => facturas.filter(f=>["emitida","enviada","vencida"].includes(f.estado)&&Number(f.total||0)>0).reduce((s,f)=>s+Number(f.total||0),0), [facturas]);
   const nRect          = facturas.filter(f=>f.estado==="rectificada"||(f.serie&&f.serie.length<=3&&!["A","B"].includes(f.serie))).length;
@@ -2699,7 +2707,7 @@ export default function Facturacion() {
   const fiscalSetupStatus = fiscalResumen?.status || null;
   const usaVerifacti = fiscalResumen?.config?.modo === "verifactu" && fiscalResumen?.config?.verifactu?.proveedor === "verifacti";
   // IDs de facturas que ya tienen rectificativa emitida
-  const rectificadasIds = new Set(facturas.filter(f=>f.factura_original_id||f.factura_original_numero).map(f=>f.factura_original_id||f.factura_original_numero));
+  const rectificadasIds = new Set(facturas.filter(f=>f.estado!=="borrador" && (f.factura_original_id||f.factura_original_numero)).map(f=>f.factura_original_id||f.factura_original_numero));
   const fiscalQuickFilters = [
     { key: "todos", label: "Todo", value: Number(fiscalInfo.total_registros || 0), color: "var(--text3)" },
     { key: "aceptado", label: "Aceptadas", value: Number(fiscalInfo.aceptados || 0), color: "var(--green)" },
@@ -2800,7 +2808,7 @@ export default function Facturacion() {
           <KpiCard icon="invoice" label="Reclamado" value={`${Number(controlResumen.reclamadas || 0)} facturas`} tone="warning" />
           <KpiCard icon="shield" label="Bloqueado documentalmente" value={`${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} €`} />
         </> : <>
-          <KpiCard icon="invoice" label="Total facturado" value={`${fmt2(total)} €`} detail={isSummary ? "Facturas cargadas" : "Facturas cargadas del período"} />
+          <KpiCard icon="invoice" label="Facturación emitida" value={`${fmt2(total)} €`} detail="Base sin IVA del listado filtrado · Incluye rectificaciones" />
           <KpiCard icon="coins" label="Por cobrar" value={`${fmt2(pendiente)} €`} detail={isSummary ? "Facturas cargadas" : "Facturas cargadas del período"} />
           <KpiCard icon="wallet" label="Por pagar" value={`${fmt2(totalPorPagar)} €`} detail={isSummary ? "Pagos cargados" : "Pagos pendientes cargados"} />
           <KpiCard icon="clock" label="Tesorería 30 días" value={`${fmt2(previsionTesoreria.saldoPrevisto30)} €`} tone={previsionTesoreria.saldoPrevisto30 < 0 ? "danger" : "neutral"} detail="Saldo previsto" />
@@ -3115,11 +3123,19 @@ export default function Facturacion() {
         <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
           <div style={{flex:"1 1 260px"}}>
             <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Control de cobros</div>
+            {esGerenteFacturacion&&<label style={{display:'block',marginTop:10,fontSize:13}}><input type="checkbox" disabled={savingCollections} checked={!!cobrosCfg.programacion_activa} onChange={async e=>{
+              setSavingCollections(true);try{const cfg=await guardarControlCobrosConfig({...cobrosCfg,programacion_activa:e.target.checked});setCobrosCfg(cfg);notify('Programación de reclamaciones guardada','success');}catch(err){notify(err.message,'error');}finally{setSavingCollections(false);}
+            }}/> Reclamar automáticamente las facturas vencidas (comprobación cada 15 minutos; respeta la frecuencia y el máximo configurados)</label>}
+            <details style={{marginTop:10}}><summary>Historial de envíos y errores ({collectionHistory.length})</summary>
+              {collectionHistory.length===0?<p>No hay intentos registrados.</p>:<ul>{collectionHistory.map(item=><li key={item.id}>{item.numero} · {item.destinatario} · {item.estado==='enviando'?'En proceso; verificar si persiste':item.estado} · {new Date(item.updated_at).toLocaleString('es-ES')}{item.error&&<p role="status">{item.error}</p>}</li>)}</ul>}
+              <small>Los envíos por verificar requieren revisar el registro del servidor de correo antes de reenviar.</small>
+            </details>
+
             <div style={{fontSize:12,color:"var(--text4)"}}>
               {Number(controlResumen.revisar_hoy||0)} factura(s) a revisar hoy - {fmt2(controlResumen.importe_pendiente||0)} EUR pendientes
             </div>
           </div>
-          {canEdit && (<button onClick={async()=>{ try { const r = await procesarReclamacionesFacturas(); notify(`Revision cobro: ${r.reclamadas||0} reclamadas, ${r.sin_cobrar||0} sin cobrar, ${r.emails||0} emails`, "success"); cargar(); } catch(e) { notify(e.message, "error"); } }} style={{...S.btn,background:"rgba(249,115,22,.12)",color:"#f97316",border:"1px solid rgba(249,115,22,.25)"}}>Revisar cobros</button>)}
+          {canEdit && (<button onClick={async()=>{ try { const r = await procesarReclamacionesFacturas(); notify(`Revisión: ${r.emails||0} enviados, ${r.emails_fallidos||0} fallidos, ${r.emails_simulados||0} simulados, ${r.sin_destinatario||0} sin destinatario.`, r.emails_fallidos || r.emails_simulados ? "warning" : "success"); cargar(); } catch(e) { notify(e.message, "error"); } }} style={{...S.btn,background:"rgba(249,115,22,.12)",color:"#f97316",border:"1px solid rgba(249,115,22,.25)"}}>Revisar cobros</button>)}
           <button onClick={descargarInformeCobros} style={{...S.btn,background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.25)"}}>Informe cobros</button>
           <Badge tone="danger">{Number(controlResumen.sin_cobrar || 0)} sin cobrar</Badge>
         </div>

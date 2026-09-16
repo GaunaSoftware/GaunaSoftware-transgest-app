@@ -77,8 +77,14 @@ async function main(){fs.mkdirSync(out,{recursive:true});
    checks.push(`${theme} ${width} responsive stock and form`);
   }
  }
- await page.getByRole('button',{name:'Historial detallado y facturación'}).click();await page.getByRole('button',{name:'Volver al resumen de almacén'}).click();
- failList=true;await page.reload({waitUntil:'networkidle'});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'palets'})));await page.getByRole('button',{name:'Reintentar',exact:true}).waitFor();failList=false;await page.getByRole('button',{name:'Reintentar',exact:true}).click();await page.locator('.warehouse-main tbody tr').first().waitFor();
+ await page.getByRole('button',{name:'Historial detallado y facturación'}).click();await page.getByRole('heading',{name:'Historial y facturación',exact:true}).waitFor();await page.getByRole('button',{name:'Stock y movimientos',exact:true}).click();
+ failList=true;await page.reload({waitUntil:'networkidle'});await page.locator('[style*="tgSplashLogo"]').waitFor({state:'hidden'});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'palets'})));
+ await page.getByRole('button',{name:'Reintentar',exact:true}).waitFor();
+ const retried=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/palets/movimientos')&&r.status()===503);
+ await page.getByRole('button',{name:'Reintentar',exact:true}).click();await retried;
+ await page.getByRole('alert').filter({hasText:'No se pudieron cargar los movimientos'}).waitFor();
+ failList=false;await page.reload({waitUntil:'networkidle'});await home();
+ checks.push('Failed list displays actionable error, retry calls API again, restored connection recovers data');
  user.rol='visualizador';user.permisos={modulos:{palets:{ver:true,editar:false}}};await page.reload({waitUntil:'networkidle'});await home();assert.equal(await page.getByRole('button',{name:'+ Nuevo movimiento',exact:true}).count(),0);
  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({checks,errors,writes},null,2));console.log(JSON.stringify({checks,errors},null,2));
  }finally{await browser?.close();await new Promise(resolve=>server.close(resolve));}

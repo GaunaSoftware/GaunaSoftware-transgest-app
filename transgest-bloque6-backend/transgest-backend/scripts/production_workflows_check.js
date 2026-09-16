@@ -4,7 +4,7 @@ const {missingBillingData}=require('../src/services/billingData');
 function loadRoute(file,db,extras={}){
  const routes={},uses=[];const router={use(...h){uses.push(...h);}};
  for(const verb of ['get','post','patch','delete'])router[verb]=(p,...h)=>routes[`${verb} ${p}`]=h.at(-1);
- const sandbox={module:{exports:{}},process,console,Date,require(name){if(name==='express')return{Router:()=>router};if(name.includes('/db'))return db;if(name.includes('/auth'))return{requireRole:()=>()=>{}};if(name==='crypto')return require('node:crypto');if(extras[name])return extras[name];throw Error(name);}};
+ const sandbox={module:{exports:{}},process,console,Date,require(name){if(name==='express')return{Router:()=>router};if(name.includes('/db'))return db;if(name.includes('/supportSchema'))return {ensureSupportSchema:async()=>{}};if(name.includes('/auth'))return{requireRole:()=>()=>{}};if(name==='crypto')return require('node:crypto');if(extras[name])return extras[name];throw Error(name);}};
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/routes',file),'utf8'),sandbox);
  return {routes,uses,exported:sandbox.module.exports};
 }

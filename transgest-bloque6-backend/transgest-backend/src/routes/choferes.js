@@ -1204,7 +1204,7 @@ router.post("/app/jornada/cerrar", requireChoferApp, async (req, res) => {
             km_fin=$1,
             hace_noche=$2,
             noche_lugar=$3,
-            notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(chofer_jornadas.notas,''), $4)),
+            notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(chofer_jornadas.notas,''), $4::text)),
             eventos=$5::jsonb,
             updated_at=NOW()
       WHERE id=$6 AND empresa_id=$7

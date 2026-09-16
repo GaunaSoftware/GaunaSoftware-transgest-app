@@ -12,6 +12,8 @@ logs/
 *.log
 
 # Build outputs
+# Generated from the pinned MapLibre dependency by the build/start lifecycle.
+transgest-bloque6-backend/transgest-frontend/public/vendor/maplibre/
 dist/
 dist-desktop/
 build/

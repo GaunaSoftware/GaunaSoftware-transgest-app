@@ -537,7 +537,7 @@ async function avisarClientePendienteRevision(empresaId, cliente, faltan = [], c
 }
 
 function tempPassword() {
-  return `Portal${Math.random().toString(36).slice(2, 8)}${Math.floor(10 + Math.random() * 89)}`;
+  return require('../services/passwordPolicy').generateTemporaryPassword();
 }
 
 async function assertClienteEmpresa(clienteId, empresaId) {
@@ -632,7 +632,7 @@ router.get("/", async (req, res) => {
 
   const { rows } = await db.query(
     `SELECT * FROM clientes WHERE ${where.join(" AND ")}
-      ORDER BY COALESCE(pendiente_revision,false) DESC, nombre ASC
+      ORDER BY LOWER(nombre) ASC, id ASC
       LIMIT $${i} OFFSET $${i+1}`,
     [...params, limitN + 1, offset]
   );

@@ -101,7 +101,7 @@ async function main() {
     });
     await sa.goto(origin+'/superadmin');
     await sa.getByRole('navigation',{name:'Navegacion de superadmin'}).getByRole('button',{name:'Empresas',exact:true}).click();
-    await sa.getByRole('button',{name:'Gestionar',exact:true}).click();
+    await sa.getByRole('button',{name:'Gestionar / Planner',exact:true}).click();
     await sa.getByLabel('Productos habilitados',{exact:true}).selectOption('combinado');
     await sa.getByRole('button',{name:'Guardar productos',exact:true}).click();
     await sa.getByRole('status').filter({hasText:'Configuración guardada'}).waitFor();

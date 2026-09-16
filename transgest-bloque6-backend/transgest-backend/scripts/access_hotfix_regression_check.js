@@ -17,6 +17,7 @@ async function main() {
     if (name.endsWith('/logger')) return {warn(){},info(){},error(){}};
     if (name.endsWith('/supportSession')) return {supportUser};
     if (name.endsWith('/empresaApiKeys')) return {};
+    if (name.endsWith('/companyProducts')) return {get:async()=>({productos:['transgest','planner']}),moduleAvailable:require('../src/services/companyProducts').moduleAvailable};
     throw Error(name);
   }};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/middleware/auth.js'),'utf8'),sandbox);

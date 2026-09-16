@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { crearCliente, editarCliente, crearVehiculo, crearChofer, crearPedido, crearColaborador, crearFactura, getClientes, crearRutaCliente, getDatosMaestrosReadiness } from "../services/api";
+import { crearCliente, editarCliente, crearVehiculo, crearChofer, crearPedido, crearColaborador, crearFactura, getClientes, getVehiculos, getChoferes, crearRutaCliente, getDatosMaestrosReadiness } from "../services/api";
 import { notify } from "../services/notify";
 
 let clientesImportCachePromise = null;
@@ -31,6 +31,8 @@ function parseImportNumber(value, fallback = 0) {
       : normalized.replace(/,/g, "");
   } else if (normalized.includes(",")) {
     normalized = normalized.replace(",", ".");
+  } else if (/^[+-]?\d{1,3}(\.\d{3})+$/.test(normalized)) {
+    normalized = normalized.replace(/\./g, "");
   }
   const n = Number(normalized);
   return Number.isFinite(n) ? n : fallback;
@@ -45,15 +47,36 @@ async function findClienteForImport(data, label = "registro") {
   const clientes = await getClientesImportCache();
   const nombre = String(data.cliente_nombre || data.nombre || "").trim().toLowerCase();
   const cif = String(data.cliente_cif || data.cif || "").trim().toLowerCase();
-  const cliente = clientes.find((c) => {
+  const matches = clientes.filter((c) => {
     const sameCif = cif && String(c.cif || "").trim().toLowerCase() === cif;
     const sameName = nombre && String(c.nombre || "").trim().toLowerCase() === nombre;
-    return sameCif || sameName;
+    return cif ? sameCif : sameName;
   });
+  if(matches.length > 1) throw new Error(`Hay varios clientes para ${label}. Identifica el cliente por su CIF único.`);
+  const cliente = matches[0];
   if (!cliente?.id) {
     throw new Error(`Cliente no encontrado para ${label}: ${data.cliente_nombre || data.cliente_cif || data.nombre || "sin identificar"}`);
   }
   return cliente;
+}
+
+async function importarPedido(data) {
+  const cliente = await findClienteForImport(data, 'pedido');
+  const payload = {...data,cliente_id:cliente.id,estado:data.estado || 'pendiente',importe:parseImportNumber(data.importe),peso_kg:parseImportNumber(data.peso_kg),bultos:parseImportNumber(data.bultos)};
+  const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/gi,'').toLowerCase();
+  if(data.vehiculo_matricula) {
+    const rows=await getVehiculos();
+    const matches=(Array.isArray(rows)?rows:rows.data || []).filter(v=>normalize(v.matricula)===normalize(data.vehiculo_matricula));
+    if(matches.length!==1) throw new Error(`Matrícula no encontrada o duplicada: ${data.vehiculo_matricula}`);
+    payload.vehiculo_id=matches[0].id;
+  }
+  if(data.chofer_nombre) {
+    const rows=await getChoferes();
+    const matches=(Array.isArray(rows)?rows:rows.data || []).filter(c=>normalize(`${c.nombre || ''} ${c.apellidos || ''}`)===normalize(data.chofer_nombre));
+    if(matches.length!==1) throw new Error(`Conductor no encontrado o ambiguo: ${data.chofer_nombre}. Revisa nombre y apellidos.`);
+    payload.chofer_id=matches[0].id;
+  }
+  return crearPedido(payload);
 }
 
 const TEMPLATES = {
@@ -183,7 +206,7 @@ const TEMPLATES = {
       { k:"estado",        l:"Estado",                req:false, example:"entregado" },
       { k:"notas",         l:"Notas",                 req:false, example:"Urgente" },
     ],
-    apiFn: crearPedido,
+    apiFn: importarPedido,
   },
   viajes_pendientes: {
     nombre: "Viajes pendientes",
@@ -203,7 +226,7 @@ const TEMPLATES = {
       { k:"estado",        l:"Estado",                req:false, example:"pendiente" },
       { k:"notas",         l:"Notas",                 req:false, example:"Pendiente de asignar" },
     ],
-    apiFn: (data) => crearPedido({
+    apiFn: (data) => importarPedido({
       ...data,
       estado: data.estado || "pendiente",
       importe: parseImportNumber(data.importe, 0),
@@ -212,7 +235,7 @@ const TEMPLATES = {
     }),
   },
   facturas_pendientes: {
-    nombre: "Facturas pendientes",
+    nombre: "Facturas pendientes (borradores para revisar)",
     icon: "",
     columns: [
       { k:"cliente_nombre",    l:"Nombre cliente",              req:false, example:"Transportes Garcia S.L." },
@@ -233,19 +256,19 @@ const TEMPLATES = {
       const tipoIva = parseImportNumber(data.tipo_iva, cliente.tipo_iva ?? 21);
       const base = data.base ? parseImportNumber(data.base, 0) : (tipoIva ? total / (1 + tipoIva / 100) : total);
       const estados = ["borrador", "emitida", "enviada", "vencida", "reclamada", "sin_cobrar"];
-      const estado = estados.includes(String(data.estado || "").toLowerCase()) ? String(data.estado).toLowerCase() : "emitida";
+      const estadoOrigen = estados.includes(String(data.estado || "").toLowerCase()) ? String(data.estado).toLowerCase() : "emitida";
       return crearFactura({
         cliente_id: cliente.id,
         serie: "A",
         fecha: data.fecha || undefined,
         fecha_vencimiento: data.fecha_vencimiento || undefined,
-        estado,
+        estado: "borrador",
         forma_pago: data.forma_pago || cliente.forma_pago || "transferencia",
         observaciones: [
           data.numero_origen ? `Factura origen importada: ${data.numero_origen}` : "",
           data.notas || "",
         ].filter(Boolean).join(" | "),
-        notas_internas: "Importada como factura pendiente inicial. Revisar conciliacion/cobro en gestion financiera.",
+        notas_internas: `Importación para revisión. Estado en origen: ${estadoOrigen}. Comprobar el documento original y su numeración antes de emitir o reclamar.`,
         lineas: [{
           concepto: data.numero_origen ? `Saldo pendiente factura ${data.numero_origen}` : "Saldo pendiente importado",
           cantidad: 1,
@@ -295,22 +318,21 @@ const READINESS_SECTIONS = [
 
 // ── Parse CSV / TSV ────────────────────────────────────────────────────────
 function parseCSV(text){
-  const lines = text.trim().split(/\r?\n/);
-  if(lines.length < 2) return { headers:[], rows:[] };
-  const sep = lines[0].includes("\t") ? "\t" : ",";
-  const parseRow = row => {
-    const cells=[]; let cur="", inQ=false;
-    for(const ch of row){
-      if(ch==='"'){inQ=!inQ;}
-      else if(ch===sep&&!inQ){cells.push(cur.trim());cur="";}
-      else cur+=ch;
-    }
-    cells.push(cur.trim());
-    return cells;
-  };
-  const headers = parseRow(lines[0]).map(h=>h.replace(/['"]/g,"").trim());
-  const rows = lines.slice(1).map(l=>parseRow(l));
-  return { headers, rows };
+  const source=String(text || '').replace(/^\uFEFF/,'');
+  const counts={',':0,';':0,'\t':0};let quoted=false;
+  for(let i=0;i<source.length;i++) {const ch=source[i];if(ch==='"'){if(quoted&&source[i+1]==='"'){i++;continue;}quoted=!quoted;}else if(!quoted){if(ch==='\n'||ch==='\r')break;if(ch in counts)counts[ch]++;}}
+  const sep=Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];
+  const records=[];let row=[],cell='';quoted=false;
+  for(let i=0;i<source.length;i++) {
+    const ch=source[i];
+    if(ch==='"'){if(quoted&&source[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}
+    else if(!quoted&&ch===sep){row.push(cell.trim());cell='';}
+    else if(!quoted&&(ch==='\n'||ch==='\r')){row.push(cell.trim());if(row.some(Boolean))records.push(row);row=[];cell='';if(ch==='\r'&&source[i+1]==='\n')i++;}
+    else cell+=ch;
+  }
+  if(quoted)throw new Error('CSV incompleto: falta cerrar unas comillas.');
+  row.push(cell.trim());if(row.some(Boolean))records.push(row);
+  return {headers:records[0] || [],rows:records.slice(1)};
 }
 
 // ── Match column headers to template keys ─────────────────────────────────
@@ -421,7 +443,9 @@ export default function Importacion(){
     const reader = new FileReader();
     reader.onload = () => {
       const text = reader.result;
-      const {headers,rows} = parseCSV(text);
+      let headers, rows;
+      try { ({headers,rows} = parseCSV(text)); }
+      catch(error) { notify(error.message, "error"); return; }
       const mapping = matchHeaders(headers, tpl.columns);
       // Parse rows into objects
       const parsed = rows.filter(r=>r.some(c=>c.trim())).map((row,ri)=>{

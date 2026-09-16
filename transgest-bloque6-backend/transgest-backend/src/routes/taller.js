@@ -219,19 +219,25 @@ function normalizar(data) {
 router.get("/estado", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const { rows } = await db.query(
-    "SELECT data FROM taller_estado WHERE empresa_id=$1",
+    "SELECT data, md5(data::text) AS version FROM taller_estado WHERE empresa_id=$1",
     [empresaId(req)]
   );
-  res.json(normalizar(rows[0]?.data));
+  res.json({ ...normalizar(rows[0]?.data), _version: rows[0]?.version || '0' });
 });
 
-router.put("/estado", PUEDE_EDITAR_TALLER, async (req, res) => {
+router.put("/estado", PUEDE_EDITAR_TALLER, asyncRoute(async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const data = normalizar(req.body || {});
-  const currentRows = await db.query(
-    "SELECT data FROM taller_estado WHERE empresa_id=$1",
+  const expected = data._version;
+  delete data._version;
+  if (typeof expected !== 'string') return res.status(428).json({ error: 'Recarga el taller antes de guardar. Falta la versión del registro.' });
+  const result = await db.transaction(async client => {
+  await client.query('SELECT id FROM empresas WHERE id=$1 FOR UPDATE', [empresaId(req)]);
+  const currentRows = await client.query(
+    "SELECT data, md5(data::text) AS version FROM taller_estado WHERE empresa_id=$1 FOR UPDATE",
     [empresaId(req)]
-  ).catch(() => ({ rows: [] }));
+  );
+  if ((currentRows.rows[0]?.version || '0') !== expected) return null;
   const current = normalizar(currentRows.rows[0]?.data);
   const mergedSolicitudes = new Map();
   (current.solicitudes_mecanico || []).forEach(s => {
@@ -243,15 +249,18 @@ router.put("/estado", PUEDE_EDITAR_TALLER, async (req, res) => {
   data.solicitudes_mecanico = [...mergedSolicitudes.values()]
     .sort((a, b) => new Date(b.fecha || b.updated_at || 0) - new Date(a.fecha || a.updated_at || 0))
     .slice(0, 300);
-  await db.query(
+  const saved = await client.query(
     `INSERT INTO taller_estado (empresa_id, data, updated_by, updated_at)
      VALUES ($1,$2,$3,NOW())
      ON CONFLICT (empresa_id)
-     DO UPDATE SET data=$2, updated_by=$3, updated_at=NOW()`,
+     DO UPDATE SET data=$2, updated_by=$3, updated_at=NOW() RETURNING md5(data::text) AS version`,
     [empresaId(req), data, req.user.id]
   );
-  res.json({ ok: true, data });
-});
+  return saved.rows[0].version;
+  });
+  if (!result) return res.status(409).json({ error: 'Otro usuario ha actualizado el taller. Recarga los datos y vuelve a aplicar tu cambio; no se ha sobrescrito ningún registro.' });
+  res.json({ ok: true, data, _version: result });
+}));
 
 router.get("/solicitudes", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
@@ -298,32 +307,34 @@ router.get("/solicitudes/capacidades", async (req, res) => {
   });
 });
 
-router.post("/solicitudes", async (req, res) => {
+router.post("/solicitudes", asyncRoute(async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const body = req.body || {};
   if (!body.motivo && !body.motivo_label) return res.status(400).json({ error: "Motivo obligatorio" });
-  const { rows } = await db.query(
-    "SELECT data FROM taller_estado WHERE empresa_id=$1",
+  const result = await db.transaction(async tx => {
+  await tx.query("SELECT id FROM empresas WHERE id=$1 FOR UPDATE", [empresaId(req)]);
+  const { rows } = await tx.query(
+    "SELECT data FROM taller_estado WHERE empresa_id=$1 FOR UPDATE",
     [empresaId(req)]
   );
   const data = normalizar(rows[0]?.data);
   const proveedores = Array.isArray(data.proveedores) ? data.proveedores.filter(p => p && p.nombre) : [];
-  const { rows: mecanicosRows } = await db.query(
+  const { rows: mecanicosRows } = await tx.query(
     "SELECT COUNT(*)::int AS total FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('mecanico','responsable_taller')",
     [empresaId(req)]
   ).catch(() => ({ rows: [{ total: 0 }] }));
   const puedeMecanico = Number(mecanicosRows[0]?.total || 0) > 0;
   const puedeTallerExterno = proveedores.length > 0;
   if (!puedeMecanico && !puedeTallerExterno) {
-    return res.status(409).json({ error: "No hay mecanicos ni talleres externos configurados para recibir solicitudes." });
+    throw Object.assign(new Error("No hay mecanicos ni talleres externos configurados para recibir solicitudes."), {status:409});
   }
   let canal = String(body.canal || "").toLowerCase();
   if (!["mecanico", "taller_externo"].includes(canal)) canal = puedeMecanico ? "mecanico" : "taller_externo";
   if (canal === "mecanico" && !puedeMecanico) {
-    return res.status(409).json({ error: "La empresa no tiene mecanico interno configurado. Selecciona un taller externo." });
+    throw Object.assign(new Error("La empresa no tiene mecanico interno configurado. Selecciona un taller externo."), {status:409});
   }
   if (canal === "taller_externo" && !puedeTallerExterno) {
-    return res.status(409).json({ error: "La empresa no tiene talleres externos configurados." });
+    throw Object.assign(new Error("La empresa no tiene talleres externos configurados."), {status:409});
   }
   const proveedorId = body.proveedor_id ? String(body.proveedor_id) : "";
   const proveedor = canal === "taller_externo"
@@ -363,23 +374,28 @@ router.post("/solicitudes", async (req, res) => {
   const solicitudes = Array.isArray(data.solicitudes_mecanico) ? data.solicitudes_mecanico : [];
   const yaExistente = solicitudes.find(s => String(s.id) === String(solicitud.id));
   data.solicitudes_mecanico = [solicitud, ...solicitudes.filter(s => s.id !== solicitud.id)].slice(0, 300);
-  await db.query(
+  await tx.query(
     `INSERT INTO taller_estado (empresa_id, data, updated_by, updated_at)
      VALUES ($1,$2,$3,NOW())
      ON CONFLICT (empresa_id)
      DO UPDATE SET data=$2, updated_by=$3, updated_at=NOW()`,
     [empresaId(req), data, req.user.id]
   );
+  return {solicitud,yaExistente};
+  });
+  const {solicitud,yaExistente}=result;
   if (!yaExistente) {
     notificarSolicitudTaller(empresaId(req), solicitud).catch(e => logger.warn("Aviso taller solicitud:", e.message));
   }
   res.status(yaExistente ? 200 : 201).json({ ...solicitud, sincronizada: !!yaExistente });
-});
+}));
 
-router.patch("/solicitudes/:id", PUEDE_GESTIONAR_SOLICITUDES, async (req, res) => {
+router.patch("/solicitudes/:id", PUEDE_GESTIONAR_SOLICITUDES, asyncRoute(async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
-  const { rows } = await db.query(
-    "SELECT data FROM taller_estado WHERE empresa_id=$1",
+  const result = await db.transaction(async tx => {
+  await tx.query("SELECT id FROM empresas WHERE id=$1 FOR UPDATE", [empresaId(req)]);
+  const { rows } = await tx.query(
+    "SELECT data FROM taller_estado WHERE empresa_id=$1 FOR UPDATE",
     [empresaId(req)]
   );
   const data = normalizar(rows[0]?.data);
@@ -416,19 +432,22 @@ router.patch("/solicitudes/:id", PUEDE_GESTIONAR_SOLICITUDES, async (req, res) =
     };
     return found;
   });
-  if (!found) return res.status(404).json({ error: "Solicitud no encontrada" });
-  await db.query(
+  if (!found) throw Object.assign(new Error("Solicitud no encontrada"), {status:404});
+  await tx.query(
     `INSERT INTO taller_estado (empresa_id, data, updated_by, updated_at)
      VALUES ($1,$2,$3,NOW())
      ON CONFLICT (empresa_id)
      DO UPDATE SET data=$2, updated_by=$3, updated_at=NOW()`,
     [empresaId(req), data, req.user.id]
   );
+  return found;
+  });
+  const found=result;
   if (["en_proceso", "resuelto", "cerrado"].includes(found.estado)) {
     notificarRespuestaSolicitudTaller(empresaId(req), found, req);
   }
   res.json(found);
-});
+}));
 
 router.get("/piezas", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
@@ -1280,7 +1299,16 @@ router.get("/neumaticos", async (req, res) => {
   res.json(rows);
 });
 
-router.post("/neumaticos", PUEDE_EDITAR_TALLER, async (req, res) => {
+async function lockTyrePosition(client, company, vehicle, position, tyreId = null) {
+  if (!vehicle || !String(position || '').trim()) throw Object.assign(new Error('Indica el vehiculo y la posicion de montaje.'), {status:400});
+  const owned = await client.query('SELECT id FROM vehiculos WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[vehicle,company]);
+  if (!owned.rows.length) throw Object.assign(new Error('Vehiculo no encontrado en esta empresa.'),{status:404});
+  const occupied = await client.query(`SELECT id FROM taller_neumaticos WHERE empresa_id=$1 AND vehiculo_id=$2
+    AND LOWER(TRIM(posicion))=LOWER(TRIM($3)) AND estado='montado' AND ($4::uuid IS NULL OR id<>$4::uuid)`,[company,vehicle,position,tyreId]);
+  if (occupied.rows.length) throw Object.assign(new Error('Esta posicion ya tiene un neumatico montado. Registra la retirada del anterior antes de montar otro.'),{status:409});
+}
+
+router.post("/neumaticos", PUEDE_EDITAR_TALLER, asyncRoute(async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const {
     codigo_barras, marca, modelo, medida, lote, precio_compra,
@@ -1290,9 +1318,14 @@ router.post("/neumaticos", PUEDE_EDITAR_TALLER, async (req, res) => {
   if (!medida) return res.status(400).json({ error: "Medida obligatoria" });
   const total = Math.max(1, Math.min(200, Math.trunc(num(cantidad, 1) || 1)));
 
+  if (estado && !['stock','montado','baja'].includes(estado)) return res.status(400).json({error:'Estado no valido'});
+  if (estado === 'montado' && total !== 1) return res.status(400).json({error:'Monta un neumatico por posicion.'});
+  if (vehiculo_id && estado !== 'montado') return res.status(400).json({error:'Selecciona montado para asignar un vehiculo.'});
+  const rows = await db.transaction(async client => {
+  if (estado === 'montado') await lockTyrePosition(client, empresaId(req), vehiculo_id, posicion);
   const rows = [];
   for (let i = 0; i < total; i++) {
-    const inserted = await db.query(
+    const inserted = await client.query(
       `INSERT INTO taller_neumaticos
         (empresa_id,codigo_barras,marca,modelo,medida,lote,precio_compra,tipo,proveedor,dot,profundidad_mm,
          estado,vehiculo_id,posicion,km_montaje,fecha_montaje,fecha_baja,notas)
@@ -1321,14 +1354,18 @@ router.post("/neumaticos", PUEDE_EDITAR_TALLER, async (req, res) => {
     );
     rows.push(inserted.rows[0]);
   }
+  return rows;
+  });
   res.status(201).json({ ...rows[0], items: rows, cantidad_creada: rows.length });
-});
+}));
 
-router.patch("/neumaticos/:id/montar", PUEDE_EDITAR_TALLER, async (req, res) => {
+router.patch("/neumaticos/:id/montar", PUEDE_EDITAR_TALLER, asyncRoute(async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const { vehiculo_id, posicion, km_montaje, fecha_montaje, notas } = req.body || {};
   if (!vehiculo_id || !posicion) return res.status(400).json({ error: "Vehiculo y posicion son obligatorios" });
-  const { rows } = await db.query(
+  const { rows } = await db.transaction(async client => {
+    await lockTyrePosition(client, empresaId(req), vehiculo_id, posicion, req.params.id);
+    return client.query(
     `UPDATE taller_neumaticos SET
        estado='montado', vehiculo_id=$1, posicion=$2, km_montaje=$3,
        fecha_montaje=COALESCE($4::date,CURRENT_DATE), fecha_baja=NULL,
@@ -1345,9 +1382,10 @@ router.patch("/neumaticos/:id/montar", PUEDE_EDITAR_TALLER, async (req, res) => 
       empresaId(req),
     ]
   );
+  });
   if (!rows[0]) return res.status(404).json({ error: "Neumatico no encontrado" });
   res.json(rows[0]);
-});
+}));
 
 router.patch("/neumaticos/:id/baja", PUEDE_EDITAR_TALLER, async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });

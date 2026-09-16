@@ -684,6 +684,7 @@ export const getFacturacionFiscalResumen = () => apiFetch("/facturas/fiscal/resu
 export const procesarColaFiscalFacturas = (data={}) => apiFetch("/facturas/fiscal/procesar-cola", { method:"POST", body:data });
 export const crearFactura   = (data)      => apiFetch("/facturas", { method:"POST", body:data, timeoutMs:60000 });
 export const procesarReclamacionesFacturas = (data={}) => apiFetch("/facturas/reclamaciones/procesar", { method:"POST", body:data });
+export const registrarRevisionFactura = (id,data) => apiFetch(`/facturas/${id}/revision`,{method:'POST',body:data});
 export const cambiarEstadoFactura = (id, estado, motivo) =>
   apiFetch(`/facturas/${id}/estado`, { method:"PATCH", body:{ estado, motivo } });
 export const borrarFactura  = (id)        => apiFetch(`/facturas/${id}`, { method:"DELETE" });
@@ -1190,3 +1191,5 @@ export const calcularDistanciaGeo = (origin, destination) =>
 export const vincularPaletTransporte = (id, pedido_id) => apiFetch(`/palets/movimientos/${id}/transporte`, { method:"PUT", body:{pedido_id}, silentSuccess:true });
 
 export const guardarImagenVehiculo = (id, imagen_data) => apiFetch(`/vehiculos/${id}/imagen`, { method:"PUT", body:{imagen_data} });
+
+export const getReclamacionesEnvios = () => apiFetch('/facturas/reclamaciones/envios');

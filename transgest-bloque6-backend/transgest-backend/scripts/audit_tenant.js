@@ -2,7 +2,11 @@ const fs = require("fs");
 const path = require("path");
 
 const routesDir = path.join(__dirname, "../src/routes");
-const skipFiles = new Set(["superadmin.js", "auth.js", "stripe_webhook.js", "exportacion.js", "registro.js"]);
+// El panel SaaS opera intencionadamente entre empresas y ya se protege mediante
+// el wrapper RBAC de superadmin.js. superadminCore.js contiene el router historico
+// que antes vivia en superadmin.js, por lo que mantiene la misma exclusion del
+// auditor multiempresa que tenia antes del hardening.
+const skipFiles = new Set(["superadmin.js", "superadminCore.js", "auth.js", "stripe_webhook.js", "exportacion.js", "registro.js"]);
 const riskyTables = [
   "pedidos", "facturas", "clientes", "vehiculos", "choferes", "colaboradores",
   "pedido_descargas", "grupajes", "pedido_docs", "vehiculo_repostajes", "vehiculo_noches",

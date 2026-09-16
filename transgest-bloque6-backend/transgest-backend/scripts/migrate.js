@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const db = require("../src/services/db");
+const { isPublishedHistoricalVariant } = require("./migrationHistory");
 
 const migrationsDir = path.join(__dirname, "migrations");
 
@@ -49,6 +50,10 @@ async function run() {
       continue;
     }
     if (rows[0] && rows[0].checksum !== hash) {
+      if (isPublishedHistoricalVariant(id, rows[0].checksum, hash)) {
+        console.log(`OK ${id}: variante histórica publicada; se conserva su registro y se completa mediante 018`);
+        continue;
+      }
       throw new Error(`La migracion ${id} ya fue aplicada con otro checksum. Crea una nueva migracion en vez de editarla.`);
     }
 
@@ -61,6 +66,9 @@ async function run() {
     });
     console.log(`APLICADA ${id}`);
   }
+  await require("../src/services/supportSchema").ensureSupportSchema();
+  await require("../src/services/invoiceReview").ensureSchema();
+  await require("../src/services/collectionScheduler").ensureSchema();
   await require("../src/services/pointIdentity").ensurePointIdentitySchema(db);
   await require("../src/services/deliveryAutomationQueue").ensureSchema();
   await db.query("ALTER TABLE choferes ADD COLUMN IF NOT EXISTS remolque_id UUID REFERENCES vehiculos(id) ON DELETE SET NULL");

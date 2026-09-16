@@ -30,7 +30,11 @@ function superAuth(req, res, next) {
 
 function csvCell(value) {
   if (value === null || value === undefined) return "";
-  const raw = value instanceof Date ? value.toISOString() : String(value);
+  let raw = value instanceof Date ? value.toISOString() : String(value);
+  // Excel/LibreOffice pueden interpretar cadenas que empiezan por estos
+  // caracteres como formulas. Solo neutralizamos valores originalmente string
+  // para no convertir importes numericos negativos en texto.
+  if (typeof value === "string" && /^[=+\-@]/.test(raw.trimStart())) raw = `'${raw}`;
   return /[",\n\r;]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
 }
 

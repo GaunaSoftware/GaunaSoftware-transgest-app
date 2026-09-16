@@ -1,3 +1,4 @@
+const { CUSTOMER_INVOICE_DOCUMENT_SCOPE } = require('../services/invoiceCustomerDocuments');
 const express = require("express");
 const crypto = require("crypto");
 const db = require("../services/db");
@@ -1092,7 +1093,7 @@ router.get("/facturas", requireCliente, async (req, res) => {
   res.json(rows);
 });
 
-router.get("/facturas/:id", requireCliente, async (req, res) => {
+router.get("/facturas/:id", requireCliente, asyncRoute(async (req, res) => {
   const eid = empresaId(req);
   const factura = await db.query(
     `SELECT id,numero,serie,fecha,fecha_vencimiento,base_imponible,cuota_iva,total,estado,
@@ -1128,12 +1129,13 @@ router.get("/facturas/:id", requireCliente, async (req, res) => {
       [req.params.id, eid, req.user.cliente_id]
     ).catch(() => ({ rows: [] })),
     db.query(
-      `SELECT id,nombre,tipo,file_base64,file_mime,created_at
-         FROM factura_docs
-        WHERE factura_id=$1 AND empresa_id=$2
-        ORDER BY created_at DESC`,
+      `SELECT fd.id,fd.nombre,fd.tipo,fd.file_base64,fd.file_mime,fd.created_at
+         FROM factura_docs fd
+        WHERE fd.factura_id=$1 AND fd.empresa_id=$2
+          AND ${CUSTOMER_INVOICE_DOCUMENT_SCOPE}
+        ORDER BY fd.created_at DESC,fd.id`,
       [req.params.id, eid]
-    ).catch(() => ({ rows: [] })),
+    ),
     db.query(
       `SELECT d.id,d.nombre,d.tipo,d.file_mime,d.file_size_kb,d.created_at,
               p.id AS pedido_id,p.numero AS pedido_numero
@@ -1165,7 +1167,7 @@ router.get("/facturas/:id", requireCliente, async (req, res) => {
       download_url: `/api/v1/portal-cliente/pedidos/${encodeURIComponent(row.pedido_id)}/albaranes/${encodeURIComponent(row.id)}/descargar`,
     })),
   });
-});
+}));
 
 router.get("/documentos-resumen", requireCliente, async (req, res) => {
   const { rows } = await db.query(

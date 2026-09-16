@@ -8,6 +8,12 @@ const logger = createLogger({
   format: format.combine(
     format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
     format.errors({ stack: true }),
+    format(info => {
+      const {redactSecrets}=require("./integrationSecrets");
+      const clean=redactSecrets(info);
+      for(const key of Object.keys(info)) info[key]=clean[key];
+      return info;
+    })(),
     isProduction ? format.json() : format.combine(
       format.colorize(),
       format.printf(({ timestamp, level, message, ...rest }) => {

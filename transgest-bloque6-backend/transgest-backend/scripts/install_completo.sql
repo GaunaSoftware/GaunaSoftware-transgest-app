@@ -265,7 +265,8 @@ CREATE TABLE IF NOT EXISTS ruta_precios_cliente (
   cliente_id  UUID NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
   precio      NUMERIC(10,2),
   tipo_precio VARCHAR(20) DEFAULT 'viaje',
-  activo      BOOLEAN NOT NULL DEFAULT true
+  activo      BOOLEAN NOT NULL DEFAULT true,
+  UNIQUE(ruta_id,cliente_id)
 );
 
 -- ─────────────────────────────────────────────────────────────────────────

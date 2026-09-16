@@ -1,3 +1,4 @@
+const { assertStrongPassword } = require("../services/passwordPolicy");
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const db = require("../services/db");
@@ -44,36 +45,7 @@ async function safeRows(sql, params) {
   }
 }
 
-async function ensureSupportSchema() {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS soporte_mensajes (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE,
-      usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
-      nombre VARCHAR(180),
-      email VARCHAR(255),
-      mensaje TEXT NOT NULL,
-      estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      resuelto_at TIMESTAMPTZ
-    )
-  `).catch(async () => {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS soporte_mensajes (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE,
-        usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
-        nombre VARCHAR(180),
-        email VARCHAR(255),
-        mensaje TEXT NOT NULL,
-        estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        resuelto_at TIMESTAMPTZ
-      )
-    `);
-  });
-  await db.query("CREATE INDEX IF NOT EXISTS idx_soporte_mensajes_empresa ON soporte_mensajes(empresa_id, created_at DESC)").catch(() => {});
-}
+const { ensureSupportSchema } = require('../services/supportSchema');
 
 router.get("/", async (req, res) => {
   const empId = empresaId(req);
@@ -166,9 +138,8 @@ router.patch("/datos", async (req, res) => {
 router.post("/cambiar-password", async (req, res) => {
   const passwordActual = String(req.body?.password_actual || "");
   const passwordNuevo = String(req.body?.password_nuevo || "");
-  if (!passwordActual || passwordNuevo.length < 8) {
-    return res.status(400).json({ error: "La nueva contrasena debe tener al menos 8 caracteres" });
-  }
+  if (!passwordActual) return res.status(400).json({error:"Indica la contraseña actual"});
+  try { assertStrongPassword(passwordNuevo); } catch(error) { return res.status(400).json({error:error.message}); }
 
   try {
     const { rows } = await db.query(
@@ -219,13 +190,14 @@ router.post("/soporte", async (req, res) => {
 
   try {
     await ensureSupportSchema();
-    const { rows } = await db.query(
-      `INSERT INTO soporte_mensajes (empresa_id, usuario_id, nombre, email, mensaje)
-       VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, estado, created_at`,
-      [empId, req.user.id || null, req.user.nombre || null, req.user.email || req.user.username || null, mensaje]
-    );
-    res.status(201).json({ ok: true, ...rows[0] });
+    const id = require('crypto').randomUUID();
+    await db.transaction(async client => {
+      await client.query('INSERT INTO soporte_solicitudes(id,empresa_id,usuario_id,asunto) VALUES($1,$2,$3,$4)',
+        [id,empId,req.user.id,'Consulta desde Mi cuenta']);
+      await client.query(`INSERT INTO soporte_mensajes(id,solicitud_id,autor_id,autor_nombre,desde_soporte,mensaje)
+        VALUES($1,$2,$3,$4,false,$5)`,[require('crypto').randomUUID(),id,String(req.user.id),req.user.nombre || 'Usuario',mensaje]);
+    });
+    res.status(201).json({ ok: true, id, estado: 'abierta' });
   } catch (err) {
     logger.error(`[MiCuenta] POST /soporte: ${err.message}`);
     res.status(500).json({ error: "No se pudo enviar el mensaje a soporte" });

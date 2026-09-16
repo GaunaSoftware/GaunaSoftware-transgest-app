@@ -10,21 +10,20 @@ export default function InvoiceList({ rows, loading, canEdit, states, stateLabel
     // Preserve the original state conditions and handlers, including draft state selection.
     if (canEdit && f.estado !== "rectificada") {
       if (f.estado === "borrador") {
-        items.push({ label: "Emitir", onClick: () => changeState(f.id, "emitida") });
-        items.push({ label: "Cambiar estado…", onClick: () => openStates(f, states) });
+        items.push({ label: "Revisar y emitir", onClick: () => openInvoice(f.id, f) });
       } else {
         if (["emitida", "enviada"].includes(f.estado)) items.push({ label: f.estado === "enviada" ? "Reenviar" : "Enviar", onClick: () => sendInvoice(f) });
         if (f.estado !== "cobrada") items.push({ label: "Marcar cobrada", onClick: () => changeState(f.id, "cobrada") });
         if (!["reclamada", "sin_cobrar", "cobrada", "rectificada"].includes(f.estado)) items.push({ label: "Reclamar", onClick: () => changeState(f.id, "reclamada") });
         if (f.estado === "reclamada") items.push({ label: "Sin cobrar", onClick: () => changeState(f.id, "sin_cobrar") });
       }
-      items.push({ label: "Rectificar", onClick: () => rectify(f) });
+      if(f.estado!=="borrador") items.push({ label: "Rectificar", onClick: () => rectify(f) });
       if (f.estado !== "borrador" && f.fiscal_modo) items.push({ label: "Fiscal · reencolar", onClick: () => retryFiscal(f.id) });
       if (f.estado === "borrador") items.push({ label: "Eliminar borrador", danger: true, onClick: () => remove(f.id) });
     }
     return <div className="tgui-actions" onClick={e => e.stopPropagation()}><Button onClick={() => openInvoice(f.id, f)} aria-label={`Ver factura ${f.numero}`}>Ver</Button><DropdownMenu label={`Acciones de ${f.numero}`} items={items} /></div>;
   };
-  return <DataTable rowId={f => `factura-row-${f.id}`} rows={rows} loading={loading} emptyTitle="Sin facturas" rowKey={f => f.__group ? `cliente-${f.key}` : f.id} onRowClick={rowClick} rowClassName={f => String(focusedId || "") === String(f.id) ? "finance-row-focused" : undefined} renderGroup={group => <Button className="finance-client-group" aria-expanded={!!openGroups[group.key]} onClick={() => toggleGroup(group.key)}><span>{openGroups[group.key] ? "⌄" : "›"} {group.cliente}</span><span>{group.facturas.length} facturas · <span className="tgui-number">{money(group.total)} €</span></span></Button>} columns={[
+  return <div className="finance-invoices"><DataTable rowId={f => `factura-row-${f.id}`} rows={rows} loading={loading} emptyTitle="Sin facturas" rowKey={f => f.__group ? `cliente-${f.key}` : f.id} onRowClick={rowClick} rowClassName={f => String(focusedId || "") === String(f.id) ? "finance-row-focused" : undefined} renderGroup={group => <Button className="finance-client-group" aria-expanded={!!openGroups[group.key]} onClick={() => toggleGroup(group.key)}><span>{openGroups[group.key] ? "⌄" : "›"} {group.cliente}</span><span>{group.facturas.length} {group.facturas.length===1 ? "factura" : "facturas"} · <span className="tgui-number">{money(group.total)} €</span></span></Button>} columns={[
     { key: "numero", label: "Factura", render: number },
     { key: "cliente_nombre", label: "Cliente" },
     { key: "fecha", label: "Fecha", className: "tgui-table-secondary", render: f => date(f.fecha) },
@@ -35,5 +34,5 @@ export default function InvoiceList({ rows, loading, canEdit, states, stateLabel
     { key: "estado", label: "Estado", render: status },
     { key: "fiscal", label: "Fiscal", render: fiscal },
     { key: "acciones", label: "Acciones", render: actions },
-  ]} renderMobile={f => <MobileDataCard title={number(f)} amount={`${money(f.total)} €`} subtitle={f.cliente_nombre} actions={actions(f)}>{status(f)}{fiscal(f)}<div className="finance-invoice-dates">{date(f.fecha)} → {date(f.fecha_vencimiento)}</div></MobileDataCard>} />;
+  ]} renderMobile={f => <MobileDataCard title={number(f)} amount={`${money(f.total)} €`} subtitle={f.cliente_nombre} actions={actions(f)}>{status(f)}{fiscal(f)}<div className="finance-invoice-dates">{date(f.fecha)} → {date(f.fecha_vencimiento)}</div></MobileDataCard>} /></div>;
 }

@@ -27,7 +27,7 @@ export default function OrderDistanceFields({ S, getRoutePlaces, form, calcularK
                 </label>
                 <input type="text" inputMode="decimal" style={S.input} value={form.km_ruta||""} onChange={e=>{ const km=parseLocaleNumber(e.target.value,0); setForm(p=>{ const u=syncPrecioClienteCol(syncCantidadSiVacia({...p,km_ruta:e.target.value})); if(km>0&&!u.colaborador_id){u.coste_gasoil=calcularCosteGasoil(u);} return u; }); }}
                   placeholder="Se calcula automaticamente"/>
-              </div><OrderDisclosure title="Kilómetros en vacío" initiallyOpen={parseLocaleNumber(form.km_vacio,0)>0}><div>
+              </div><OrderDisclosure className="order-editor-empty-distance" title="Kilómetros en vacío" initiallyOpen={parseLocaleNumber(form.km_vacio,0)>0}><div>
                 <label style={S.label}>
                   Km en vacio
                   {form.vehiculo_id && form.origen && (

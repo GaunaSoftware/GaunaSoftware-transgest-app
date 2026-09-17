@@ -2724,23 +2724,11 @@ async function crearFacturaBorradorPedido(pedidoId, empresaId, userId = null) {
       ]
     );
     const factura = facRows[0];
-    const revisionCombustible = Math.max(0, Number(pedido.importe_revision_combustible || 0));
-    const recargoCombustiblePct = Number(pedido.recargo_combustible_pct || 0);
-    const porteSinRevision = revisionCombustible > 0 && revisionCombustible < base
-      ? Math.round((base - revisionCombustible) * 100) / 100
-      : base;
-    await client.query(
-      "INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, orden) VALUES ($1,$2,1,$3,0)",
-      [factura.id, `Porte ${pedido.numero || ""} ${pedido.origen || ""} - ${pedido.destino || ""}`.trim(), porteSinRevision]
-    );
-    if (revisionCombustible > 0 && revisionCombustible < base) {
+    const invoiceLines = require('../services/invoiceFuelLines').fuelInvoiceLines(pedido, base);
+    for (const [index, line] of invoiceLines.entries()) {
       await client.query(
-        "INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, orden) VALUES ($1,$2,1,$3,1)",
-        [
-          factura.id,
-          `Revision combustible art. 38 Ley 15/2009${recargoCombustiblePct ? ` (${recargoCombustiblePct}%)` : ""}`,
-          revisionCombustible,
-        ]
+        "INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, importe, orden) VALUES ($1,$2,1,$3,$3,$4)",
+        [factura.id, line.concepto, line.precio_unit, index]
       );
     }
     await client.query(
@@ -10120,6 +10108,6 @@ table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid
 router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
 router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
-router._test = { pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox };
+router._test = { crearFacturaBorradorPedido, pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox };
 
 module.exports = router;

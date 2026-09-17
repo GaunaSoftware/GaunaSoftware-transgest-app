@@ -63,6 +63,27 @@ async function main(){
   await imports.templates.viajes_pendientes.apiFn({origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-20',cliente_nombre:client.nombre,cliente_cif:client.cif,importe:'500,00',peso_kg:'24.200',bultos:'20'});
   await call('Importar tarifa CSV','POST','/rutas/importar',{cliente_id:client.id,texto:'Origen;Destino;Precio;Km\nValencia;Madrid;500;350'});
   evidence.routesAfterFailedImport=(await db.query('SELECT COUNT(*)::int AS n FROM rutas WHERE empresa_id=$1',[company])).rows[0];
+  // Fuel is already part of the order total: persist separate lines in both invoice paths.
+  const fuelOrders=[];
+  for(const [i,amount,fuel] of [[1,528,48],[2,220,20]]){
+    const trip=await call('Crear viaje con recargo '+i,'POST','/pedidos',{cliente_id:client.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',importe:amount,importe_revision_combustible:fuel,recargo_combustible_pct:10,precio_base_sin_combustible:amount-fuel});
+    await call('Completar viaje con recargo '+i,'PATCH','/pedidos/'+trip.id+'/estado',{estado:'entregado'});
+    await req('./routes/pedidos')._test.crearFacturaBorradorPedido(trip.id,company,user);
+    const saved=(await db.query('SELECT importe,importe_revision_combustible,factura_id FROM pedidos WHERE id=$1',[trip.id])).rows[0];
+    require('node:assert/strict').equal(Number(saved.importe_revision_combustible),fuel);
+    const lines=(await db.query('SELECT concepto,precio_unit,importe FROM factura_lineas WHERE factura_id=$1 ORDER BY orden',[saved.factura_id])).rows;
+    require('node:assert/strict').equal(lines.length,2,'automatic draft must split fuel');
+    require('node:assert/strict').equal(Number(lines[0].importe)+Number(lines[1].importe),amount);
+    fuelOrders.push(trip.id);
+  }
+  const beforeFuel=(await db.query('SELECT factura_id FROM pedidos WHERE id=ANY($1::uuid[]) ORDER BY id',[fuelOrders])).rows;
+  await call('Rechazar recargo incluido en porte','POST','/facturas',{cliente_id:client.id,serie:'A',estado:'borrador',pedidos_ids:fuelOrders,lineas:[{concepto:'Porte con recargo incluido',cantidad:1,precio_unit:748}]});
+  require('node:assert/strict').deepEqual((await db.query('SELECT factura_id FROM pedidos WHERE id=ANY($1::uuid[]) ORDER BY id',[fuelOrders])).rows,beforeFuel,'failed validation must preserve drafts');
+  const fuelInvoice=await call('Agrupar viajes con recargo separado','POST','/facturas',{cliente_id:client.id,serie:'A',estado:'borrador',pedidos_ids:fuelOrders,lineas:[{concepto:'Portes',cantidad:1,precio_unit:680},{concepto:'Recargo de combustible',cantidad:1,precio_unit:68}]});
+  require('node:assert/strict').equal(Number(fuelInvoice.base_imponible),748);
+  require('node:assert/strict').equal(Number(fuelInvoice.total),905.08);
+  const fuelLines=(await db.query('SELECT concepto,importe FROM factura_lineas WHERE factura_id=$1 ORDER BY orden',[fuelInvoice.id])).rows;
+  require('node:assert/strict').equal(fuelLines.length,2);require('node:assert/strict').equal(Number(fuelLines[1].importe),68);
   const order=await call('Crear viaje asignado','POST','/pedidos',{cliente_id:client.id,vehiculo_id:vehicle.id,chofer_id:driver.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',fecha_entrega:'2026-09-17',fecha_descarga:'2026-09-17',hora_carga:'09:00',importe:500,mercancia:'Palets auditoría',peso_kg:24200,bultos:20});
   if(order.id){
    await call('Confirmar viaje','PATCH','/pedidos/'+order.id+'/estado',{estado:'confirmado'});
@@ -226,6 +247,7 @@ async function main(){
  assert.ok(evidence.retryDelivery.emails>0);
  assert.equal(evidence.duplicateDelivery.emails,0);
  const expectedErrors=new Map([
+  ['Rechazar recargo incluido en porte',409],
   ['Planner: albaran de otro transportista bloqueado',404],
   ['Planner: rechazar autorización sin documentos',409],
   ['Bloquear rectificativa sin revision',409],['Emitir SIN revisar documentación',409],['Enviar SIN documentación',409],['Revision sin documentos bloqueada',409],

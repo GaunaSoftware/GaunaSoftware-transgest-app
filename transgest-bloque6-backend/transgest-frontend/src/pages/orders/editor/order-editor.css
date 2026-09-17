@@ -97,3 +97,19 @@
 
 .order-editor-map-links:empty { display:none; }
 .tg-order-editor-dialog .order-editor-notes textarea { min-height:72px; }
+
+/* Wrapper-based selectors (autocomplete) share the same label and control geometry. */
+.tg-order-editor-dialog :is(.tg-pedido-form-grid-2,.tg-pedido-form-grid-3,.tg-pedido-form-grid-4) > div > label:first-child:not(:has(input)) {
+ display:block; min-height:34px; margin:0 0 5px !important; line-height:17px;
+ text-transform:none !important; letter-spacing:0 !important; font-size:12px !important; color:var(--text3) !important;
+}
+.tg-order-editor-dialog :is(.tg-pedido-form-grid-2,.tg-pedido-form-grid-3,.tg-pedido-form-grid-4) { align-items:start; }
+.tg-order-editor-dialog input:not([type=checkbox]):not([type=radio]):not([type=file]),
+.tg-order-editor-dialog select { height:44px; box-sizing:border-box; }
+.tg-order-editor-dialog .order-editor-empty-distance { margin-top:39px; }
+.tg-order-editor-dialog .order-editor-empty-distance > button { min-height:44px; box-sizing:border-box; }
+.tg-order-editor-dialog .order-editor-notes textarea { height:96px !important; min-height:96px; box-sizing:border-box; }
+@media (max-width:600px) {
+ .tg-order-editor-dialog :is(.tg-pedido-form-grid-2,.tg-pedido-form-grid-3,.tg-pedido-form-grid-4) > div > label:first-child:not(:has(input)) { min-height:0; }
+ .tg-order-editor-dialog .order-editor-empty-distance { margin-top:0; }
+}

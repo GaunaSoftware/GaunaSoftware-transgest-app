@@ -1,3 +1,4 @@
+import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import OrderNotesFields from "./orders/editor/OrderNotesFields";
 import OrderEditorShell, { OrderSection } from "./orders/editor/OrderEditorShell";
 import OrderRouteFields from "./orders/editor/OrderRouteFields";
@@ -9170,6 +9171,8 @@ export default function Pedidos() {
       notify("Solo gerencia, contabilidad o administracion pueden facturar pedidos.", "warning");
       return;
     }
+    // The compact list does not carry every billing field; fetch the stored surcharge too.
+    pedido = { ...pedido, ...await getPedido(pedido.id), conceptoFactura: pedido.conceptoFactura, importeFactura: pedido.importeFactura };
     if (pedidoTieneFacturaFinal(pedido) || pedidoTieneFacturaBorrador(pedido)) {
       notify(pedidoTieneFacturaBorrador(pedido) ? "El pedido ya tiene un borrador de factura vinculado: " + (pedido.factura_numero || "borrador") : "Pedido ya facturado: " + (pedido.factura_numero || "factura emitida"), "warning");
       return;
@@ -9208,7 +9211,7 @@ export default function Pedidos() {
       fecha: new Date().toISOString().slice(0,10),
       estado: "borrador",
       pedidos_ids: [pedido.id],
-      lineas: [{ concepto, cantidad: 1, precio_unit: Number(pedido.importeFactura || pedido.importe || 0) }],
+      lineas: buildTransportInvoiceLines([{ ...pedido, importe: pedido.importeFactura || pedido.importe }], "linea", concepto),
       observaciones: pedido.notas || "",
     });
     if (cambiaEstado) await cambiarEstadoPedido(pedido.id, "entregado");

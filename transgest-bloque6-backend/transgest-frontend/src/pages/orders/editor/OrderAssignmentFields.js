@@ -148,7 +148,7 @@ export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEti
               )}</div></div>
  <div hidden={!useSupplier}><div style={{gridColumn:"1/-1",background:"rgba(139,92,246,.05)",border:"1px solid rgba(139,92,246,.15)",borderRadius:9,padding:"12px 14px",marginTop:4}}>
 
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                <div className="tg-pedido-form-grid-3">
                   <div><label style={S.label}>Colaborador / proveedor</label>
                     <div style={{position:"relative",marginBottom:6}}>
                       <input
@@ -216,9 +216,6 @@ export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEti
                     <div>
                       <label style={S.label}>
                         Lo que cobramos al cliente (EUR, sin IVA)
-                        <span style={{marginLeft:4,fontSize:9,color:"var(--text5)",fontWeight:400,textTransform:"none"}}>
-                          - precio del viaje
-                        </span>
                       </label>
                       <input type="text" inputMode="decimal" style={S.input}
                         value={form.precio_cliente_col||""}

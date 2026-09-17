@@ -1,7 +1,7 @@
 const {fail,text}=require('./plannerInventory');
 async function requestSlot(db,company,collaborator,user,orderId,input){
- const start=new Date(input.inicio),end=new Date(input.fin);
- if(!Number.isFinite(+start)||!Number.isFinite(+end)||start<Date.now()||end<=start||end-start>86400000)throw fail('Selecciona una fecha futura y un intervalo de hasta 24 horas.');
+ const start=new Date(input.inicio),end=new Date(+start+60000);
+ if(!Number.isFinite(+start)||start<Date.now())throw fail('Selecciona una fecha futura de llegada.');
  return db.transaction(async tx=>{
   const order=(await tx.query('SELECT id,estado,colaborador_precio_confirmado FROM pedidos WHERE id=$1 AND empresa_id=$2 AND colaborador_id=$3 FOR UPDATE',[orderId,company,collaborator])).rows[0];
   if(!order)throw fail('Carga no encontrada.',404);

@@ -567,7 +567,7 @@ function getFacturaFiscalRowMeta(factura) {
   };
 }
 
-function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
+export function VistaFactura({registerReview=registrarRevisionFactura, factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
   const empresa = useEmpresaPerfil();
   const [revisionConfirmada,setRevisionConfirmada]=useState(false);
   const [motivoSinReferencia,setMotivoSinReferencia]=useState('');
@@ -706,7 +706,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
             w.focus();
             setTimeout(()=>w.print(), 500);
           }}>Imprimir / PDF</button>
-          {!esRect && factura.estado!=="borrador" && factura.estado!=="rectificada" && !rectificadasIds.has(factura.id) && !rectificadasIds.has(factura.numero) && !rectificadasIds.has(String(factura.id)) && (
+          {onRectificar && !esRect && factura.estado!=="borrador" && factura.estado!=="rectificada" && !rectificadasIds.has(factura.id) && !rectificadasIds.has(factura.numero) && !rectificadasIds.has(String(factura.id)) && (
             <button style={{...S.btn,background:"rgba(249,115,22,.15)",color:"#f97316",border:"1px solid rgba(249,115,22,.3)"}} onClick={()=>onRectificar(factura)}>Rectificar</button>
           )}
           {onCambiarEstado && !esRect && factura.estado !== "borrador" && factura.estado !== "cobrada" && factura.estado !== "rectificada" && (
@@ -742,7 +742,7 @@ function VistaFactura({factura, onClose, onRectificar, onSyncFiscal, onExportFis
           <p>Comprueba referencias, importes y archivos de entrega. La revisión queda registrada con tu usuario; cualquier cambio posterior requiere revisarla de nuevo.</p>
           <label><input type="checkbox" checked={revisionConfirmada} onChange={e=>{setRevisionConfirmada(e.target.checked);setRevisionRegistrada(false);}}/> He revisado referencias, importes y documentación</label>
           {pedidosFactura.some(p=>!String(p.referencia_cliente || factura.referencia_cliente || '').trim())&&<label>Si una referencia no procede, indica el motivo<input className="tgui-input" maxLength={1000} value={motivoSinReferencia} onChange={e=>{setMotivoSinReferencia(e.target.value);setRevisionRegistrada(false);}} placeholder="Ej.: el cliente no utiliza referencias de compra"/></label>}
-          <button className="tgui-button tgui-button--primary" disabled={!revisionConfirmada||revisionBusy} onClick={async()=>{setRevisionBusy(true);try{await registrarRevisionFactura(factura.id,{confirmado:true,motivo_sin_referencia:motivoSinReferencia});setRevisionRegistrada(true);notify('Revisión registrada. Ya puedes emitir la factura.','success');}catch(e){notify(e.message,'error');}finally{setRevisionBusy(false);}}}>{revisionBusy?'Registrando…':'Registrar revisión'}</button>
+          <button className="tgui-button tgui-button--primary" disabled={!revisionConfirmada||revisionBusy} onClick={async()=>{setRevisionBusy(true);try{await registerReview(factura.id,{confirmado:true,motivo_sin_referencia:motivoSinReferencia});setRevisionRegistrada(true);notify('Revisión registrada. Ya puedes emitir la factura.','success');}catch(e){notify(e.message,'error');}finally{setRevisionBusy(false);}}}>{revisionBusy?'Registrando…':'Registrar revisión'}</button>
           {onCambiarEstado&&<button className="tgui-button" disabled={revisionBusy||!revisionRegistrada} onClick={()=>onCambiarEstado(factura.id,'emitida')}>Emitir factura</button>}
         </section>}
         <div style={{padding:"28px 32px"}} id="factura-print-wrapper">
@@ -1280,7 +1280,7 @@ function ModalCorregirPedidoFactura({ pedido, onClose, onSaved }) {
   );
 }
 
-function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
+export function ModalRectificativa({facturaOriginal, onClose, onSaved, create=crearRectificativa}) {
   const empresa   = useEmpresaPerfil();
   const serieRect = empresa.serie_rectificativas || "R";
   const [motivo,   setMotivo]   = useState("");
@@ -1310,7 +1310,7 @@ function ModalRectificativa({facturaOriginal, onClose, onSaved}) {
           : [{concepto:`Anulacion total factura ${facturaOriginal.numero}`,cantidad:1,precio_unit:-(parseFloat(facturaOriginal.base_imponible)||0)}],
         pedidos_ids: [],
       };
-      await crearRectificativa(data);
+      await create(data);
       notify("Borrador rectificativo creado. Ábrelo para revisar y emitir.", "success");
       onSaved();
     } catch(e) { notify("Error: "+e.message, "error"); }

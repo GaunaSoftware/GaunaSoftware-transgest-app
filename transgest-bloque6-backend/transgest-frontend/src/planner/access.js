@@ -1,6 +1,6 @@
 export const PLANNER_MODULES = [
-  ['pedidos', 'Cargas'],
-  ['muelles', 'Muelles y horarios'], ['palets', 'Almacén y stock'],
+  ['pedidos', 'Cargas y muelles'],
+  ['palets', 'Almacén y stock'],
   ['ia', 'Intelligence'], ['colaboradores', 'Proveedores de transporte'],
   ['clientes', 'Clientes / Destinatarios'], ['documentos', 'Documentos'], ['facturacion', 'Facturación'], ['empresa', 'Empresa'],
 ];

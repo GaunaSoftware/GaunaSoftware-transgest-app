@@ -12,6 +12,8 @@ import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from
 import { verificarOrdenColaborador } from '../services/api';
 import AdrPanel from "../components/AdrPanel";
 import QuickAssignModal from "../components/QuickAssignModal";
+import { tariffEndpointScore, bestTariffCandidates } from "../utils/tariffLocation";
+import { clearAssignmentPatch, hasAssignment } from "../utils/assignment";
 import { buildPedidoUpdatePatch } from "../utils/pedidoUpdatePatch";
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion } from "../utils/adr";
 import { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } from "../utils/number";
@@ -4347,7 +4349,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                     <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>{p.direccion || "-"}{p.ciudad ? ` · ${p.ciudad}` : ""}</div>
                     <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
                       <button type="button" onClick={()=>usarPuntoBuscado(p, "principal")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--accent)",background:"var(--accent-a08)",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Usar principal</button>
-                      <button type="button" onClick={()=>usarPuntoBuscado(p, "adicional")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Anadir parada</button>
+                      <button type="button" onClick={()=>usarPuntoBuscado(p, "adicional")} style={{padding:"5px 10px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Añadir parada</button>
                     </div>
                   </div>
                 ))}
@@ -4413,7 +4415,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
               </button>
             </div>
             <div className="tg-stop-footer-group" style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              <button data-pedido-mutation="true" type="button" onClick={addParada} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Anadir {label}</button>
+              <button data-pedido-mutation="true" type="button" onClick={addParada} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Añadir {label}</button>
               <button type="button" onClick={()=>{ setAdding(false); resetNewStop(); }} style={{padding:"6px 14px",borderRadius:6,border:"1px solid var(--border2)",background:"transparent",color:"var(--text4)",fontSize:12,cursor:"pointer"}}>Cancelar</button>
             </div>
           </div>
@@ -5919,6 +5921,7 @@ function TabDocsPedido({ pedido }) {
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
         <div style={{fontSize:13,fontWeight:600,color:"var(--text3)"}}>Documentos del viaje</div>
+        <button type="button" style={S.btn} onClick={async()=>{try{await verArchivoProtegido(`/pedidos/${pedido.id}/albaran-pdf`,`ALB-${pedido.numero}.pdf`);}catch(e){notify(e.message,'error');}}}>Preparar albarán / PDF</button>
         {docs.length > 0 && docs.some(d=>!d.visible_chofer) && (
           <button
             onClick={async()=>{
@@ -6731,37 +6734,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   }, [form.cliente_id]);
 
   const normalizarTipoRuta = (value) => String(value || "cualquiera").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const endpointMatchScore = (actual, esperado, provinciaActual = "") => {
-    const a = normalizePlaceText(actual);
-    const e = normalizePlaceText(esperado);
-    const provincia = normalizePlaceText(provinciaActual);
-    if (!e) return 1;
-    if (a && (a === e || a.includes(e) || e.includes(a))) return 4;
-    // Una tarifa guardada con destino "Alicante" puede actuar como tarifa
-    // provincial para Benissa, Denia, Alcoy, etc. No se equiparan entre si dos
-    // municipios distintos: la provincia debe coincidir con el extremo guardado.
-    if (provincia && (e === provincia || e === `provincia ${provincia}` || e === `${provincia} provincia`)) return 3;
-    // Misma provincia: si la provincia del destino guardado en la tarifa coincide
-    // con la provincia del extremo actual (la ultima descarga), se aplica como
-    // tarifa provincial aunque el municipio sea distinto. La provincia de la
-    // tarifa se resuelve con el mapa completo de municipios (p.ej. Onda ->
-    // Castellon), no solo con el diccionario pequeno.
-    if (provincia) {
-      const provinciaEsperada = normalizePlaceText(provinciaDeLugar(esperado) || "");
-      const compat = provinciaEsperada && (
-        provinciaEsperada === provincia ||
-        (provinciaEsperada.length >= 5 && provincia.length >= 5 && (provinciaEsperada.includes(provincia) || provincia.includes(provinciaEsperada)))
-      );
-      if (compat) return 3;
-    }
-    if (!a) return 0;
-    const stop = new Set(["de","del","la","el","los","las","s","sl","sa","sau","slu","calle","av","avenida","ctra","carretera"]);
-    const aTokens = new Set(a.split(/\W+/).filter(t => t.length >= 3 && !stop.has(t)));
-    const eTokens = e.split(/\W+/).filter(t => t.length >= 3 && !stop.has(t));
-    if (!eTokens.length) return 0;
-    const hits = eTokens.filter(t => aTokens.has(t)).length;
-    return hits >= Math.min(2, eTokens.length) ? 2 : 0;
-  };
+  const endpointMatchScore = tariffEndpointScore;
   const endpointContextFromDraft = (draft, tipo) => {
     const isCarga = tipo === "carga";
     const stops = parseStops(isCarga ? draft.puntos_carga : draft.puntos_descarga);
@@ -6786,8 +6759,8 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     ].filter(Boolean)));
     const inferred = inferPlaceGeo(ref, ...labels);
     const provincia =
-      stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia)
-      || provinciaDeLugar(poblacion)
+      provinciaDeLugar(poblacion)
+      || stopRegion(ref, isCarga ? draft.origen_provincia : draft.destino_provincia)
       || inferred?.provincia
       || provinciaDeLugar(textoLibre)
       || "";
@@ -6814,13 +6787,6 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     const d = routeEndpointScore(draft, ruta, "descarga");
     const ok = (s) => s >= 3 || s === 1;
     return ok(o) && ok(d) && (o >= 3 || d >= 3);
-  };
-  const bestRouteForDraft = (draft, candidates = rutasCompatibles, requireTarifaMatch = false) => {
-    return candidates
-      .filter(r => !requireTarifaMatch || routeTarifaMatchesDraft(r, draft))
-      .filter(r => routeEndpointsMatch(draft, r))
-      .map(r => ({ ruta:r, score:routeDraftScore(draft, r) }))
-      .sort((a,b) => b.score - a.score || String(a.ruta.id || "").localeCompare(String(b.ruta.id || "")))[0]?.ruta || null;
   };
   // Si hay una tarifa/ruta guardada vinculada pero el ORIGEN cuadra y el DESTINO
   // ya NO (p.ej. se cargo la tarifa Alicante->San Vicente y luego se cambio el
@@ -7655,7 +7621,7 @@ async function guardar() {
       rutaAutoId = await maybeCrearRutaClienteDesdePedido();
     } catch (e) {
       console.warn("No se pudo crear la ruta:", e.message);
-      notify("El pedido se ha guardado, pero la ruta no pudo anadirse al cliente. Puedes crearla despues desde su ficha.", "warning");
+      notify("El pedido se ha guardado, pero la ruta no pudo añadirse al cliente. Puedes crearla despues desde su ficha.", "warning");
     }
 
     if (pedidoId && rutaAutoId && !payload.ruta_id) {
@@ -7961,8 +7927,9 @@ const provinciasCogidas =
   !!endpointContextFromDraft(form, "carga").provincia &&
   !!endpointContextFromDraft(form, "descarga").provincia;
 const rutaTarifaSugerida = form.cliente_id && form.origen && form.destino && provinciasCogidas
-  ? bestRouteForDraft(form, rutasCompatibles, true)
+  ? (() => { const matches = bestTariffCandidates(rutasCompatibles.filter(r=>routeEndpointsMatch(form,r)), r=>routeDraftScore(form,r)); return matches.length === 1 ? matches[0] : null; })()
   : null;
+const tarifasCoincidentes = provinciasCogidas ? bestTariffCandidates(rutasCompatibles.filter(r=>routeEndpointsMatch(form,r)), r=>routeDraftScore(form,r)) : [];
 
 useEffect(() => {
   if (!rutaTarifaSugerida?.id || !form.cliente_id || form.ruta_id) return;
@@ -8243,6 +8210,13 @@ useEffect(() => {
                 </div>
               )}
               {/* Regla tarifaria por ruta */}
+              {tarifasCoincidentes.length > 1 && !form.ruta_id && <div role="status" style={{gridColumn:'1/-1',padding:12,border:'1px solid var(--border2)',borderRadius:8}}>
+                <strong>Hay varias tarifas compatibles. Selecciona la que corresponde.</strong>
+                <p>Se conservarán las direcciones del pedido.</p>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>{tarifasCoincidentes.map(r=><button type="button" key={r.id} style={S.btn} onClick={()=>setForm(p=>syncPrecioClienteCol(aplicarTarifaRutaADraft({...p,ruta_id:r.id},r)))}>
+                  {r.origen} → {r.destino} · {Number(r.precio_base||0).toLocaleString('es-ES')} € / {r.tarifa_tipo||'viaje'}
+                </button>)}</div>
+              </div>}
               {form.cliente_id&&form.origen&&form.destino&&(()=>{
                 const rutaTarifa = rutaTarifaSugerida;
                 if(!rutaTarifa) return null;
@@ -8595,7 +8569,7 @@ useEffect(() => {
                 </label>
               ))}
               {(form.tipo_carga||"completa")==="grupaje" && (
-                <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>Se anadira a Grupajes para combinarlo con otros pedidos</span>
+                <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>Se añadirá a Grupajes para combinarlo con otros pedidos</span>
               )}
             </div>
             <div className="tg-pedido-form-grid-2">
@@ -10916,7 +10890,7 @@ export default function Pedidos() {
     }
     const ok = await confirmDialog({
       title: "Limpiar asignacion",
-      message: `Se quitara la asignacion operativa de ${pedido.numero || "este pedido"} para volver a planificarlo.\n\nSe eliminaran vehiculo, chofer y conjunto, pero el resto del viaje seguira intacto.`,
+      message: `Se quitara la asignacion operativa de ${pedido.numero || "este pedido"} para volver a planificarlo.\n\nSe quitarán proveedor, vehículo, conductor y matrículas, pero el resto del viaje seguira intacto.`,
       confirmText: "Limpiar asignacion",
       tone: "warning",
     });
@@ -10924,10 +10898,7 @@ export default function Pedidos() {
     setReprogrammingPedidoId(String(pedido.id));
     try {
       await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, {
-        vehiculo_id: "",
-        chofer_id: "",
-        remolque_id: "",
-        remolque_id_manual: "",
+        ...clearAssignmentPatch(),
         pendiente_completar: true,
         aviso_completar: "Asignacion limpiada desde pedidos: volver a planificar recurso y horario operativo.",
       }));
@@ -11102,7 +11073,7 @@ export default function Pedidos() {
 
   async function limpiarAsignacionesSeleccionadas() {
     const lista = selectedPedidosOperables.filter(
-      p => !pedidoTieneFacturaBorrador(p) && (p.vehiculo_id || p.chofer_id || p.remolque_id || p.remolque_id_manual)
+      p => !pedidoTieneFacturaBorrador(p) && hasAssignment(p)
     );
     if (!lista.length) {
       notify("No hay asignaciones seleccionadas para limpiar.", "info");
@@ -11119,10 +11090,7 @@ export default function Pedidos() {
     try {
       for (const pedido of lista) {
         await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, {
-          vehiculo_id: "",
-          chofer_id: "",
-          remolque_id: "",
-          remolque_id_manual: "",
+          ...clearAssignmentPatch(),
           pendiente_completar: true,
           aviso_completar: "Asignacion limpiada desde seleccion multiple: volver a planificar recurso y horario operativo.",
         }));

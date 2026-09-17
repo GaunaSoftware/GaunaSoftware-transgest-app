@@ -40,7 +40,7 @@ router.get('/preparaciones',wrap(async(req,res)=>res.json((await db.query(`SELEC
  (SELECT COUNT(*)::int FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id) AS lineas,
  (SELECT COUNT(*)::int FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id AND l.preparada) AS lineas_preparadas,
  (SELECT COALESCE(SUM(l.cantidad*ROUND(l.precio_venta*(1-l.descuento_pct/100),4)),0) FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id) AS venta,
- (SELECT COALESCE(SUM(l.cantidad*l.coste_unitario),0) FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id) AS coste
+ (SELECT COALESCE(SUM(l.cantidad*l.coste_unitario),0) FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id) + COALESCE((r.reparto_coste->>'total')::numeric,COALESCE(p.precio_colaborador,0)+COALESCE(p.coste_gasoil,0)+COALESCE(p.coste_peajes,0)+COALESCE(p.coste_dietas,0)+COALESCE(p.coste_otros,0)) AS coste
  FROM planner_preparaciones r JOIN pedidos p ON p.id=r.pedido_id AND p.empresa_id=r.empresa_id
  LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=r.empresa_id LEFT JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=r.empresa_id
  WHERE r.empresa_id=$1 ORDER BY r.created_at DESC LIMIT 300`,[req.empresaId])).rows)));
@@ -74,12 +74,11 @@ router.post('/preparaciones/:id/albaran',write,wrap(async(req,res)=>{
   const old=(await tx.query('SELECT * FROM planner_albaranes WHERE preparacion_id=$1 AND empresa_id=$2',[prep.id,req.empresaId])).rows[0];if(old)return old;
   const order=(await tx.query(`SELECT p.*,c.nombre AS cliente_nombre,c.cif AS cliente_cif,c.direccion AS cliente_direccion FROM pedidos p JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id WHERE p.id=$1 AND p.empresa_id=$2`,[prep.pedido_id,req.empresaId])).rows[0];
   if(!order)throw inventory.fail('Completa el destinatario de la carga.',409);
-  const company=(await tx.query('SELECT nombre,cif FROM empresas WHERE id=$1',[req.empresaId])).rows[0];
+
   const lines=(await tx.query(`SELECT l.referencia,l.descripcion,l.unidad,l.cantidad,l.parada,l.peso_kg,e.lote,e.ubicacion FROM planner_preparacion_lineas l JOIN planner_existencias e ON e.id=l.existencia_id AND e.empresa_id=l.empresa_id
    JOIN planner_articulos a ON a.id=e.articulo_id AND a.empresa_id=e.empresa_id WHERE l.preparacion_id=$1 AND l.empresa_id=$2 ORDER BY l.parada,a.referencia`,[prep.id,req.empresaId])).rows;
   // Snapshot never includes costs or transport purchase prices in the recipient document.
-  const data={empresa:company,pedido_numero:order.numero,cliente_nombre:order.cliente_nombre,cliente_cif:order.cliente_cif,cliente_direccion:order.cliente_direccion,
-    origen:order.origen,destino:order.destino,puntos_descarga:order.puntos_descarga,fecha_carga:order.fecha_carga,lineas:lines};
+  const data=await require('../services/deliveryData').deliveryData(tx,req.empresaId,order.id,lines);
   const id=crypto.randomUUID(),number=`ALB-${order.numero}-${id.slice(0,8).toUpperCase()}`;
   return (await tx.query('INSERT INTO planner_albaranes(id,empresa_id,preparacion_id,numero,datos,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[id,req.empresaId,prep.id,number,JSON.stringify(data),req.user.id])).rows[0];
  });res.status(201).json(row);

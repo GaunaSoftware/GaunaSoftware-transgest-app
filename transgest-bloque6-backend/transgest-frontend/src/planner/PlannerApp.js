@@ -14,7 +14,7 @@ import SupportInbox from '../components/SupportInbox';
 const SupplierApp=lazy(()=>import('../pages/SupplierApp'));
 const Providers=lazy(()=>import('./PlannerProviders'));
 const Warehouse=lazy(()=>import('./PlannerWarehouse'));
-const Finance=lazy(()=>import('../pages/Facturacion'));
+const Finance=lazy(()=>import('./PlannerFinance'));
 const Intelligence=lazy(()=>import('../pages/Intelligence'));
 const Recipients = lazy(() => import('../pages/Clientes'));
 const Documents = lazy(() => import('./PlannerDocuments'));
@@ -32,7 +32,7 @@ export default function PlannerApp({ PasswordChangeComponent }) {
   const [editOrder,setEditOrder]=useState('');
   const consumeEdit=useCallback(()=>setEditOrder(''),[]);
   const consumePreparation=useCallback(()=>setFocusOrder(''),[]);
-  useEffect(()=>{const navigate=e=>{const target=['pedidos','viajes','gestion_trafico'].includes(e.detail)?'pedidos':['choferes','vehiculos'].includes(e.detail)?'colaboradores':e.detail;if(modules.some(([id])=>id===target))setView(target);};window.addEventListener('tms:navegar',navigate);return()=>window.removeEventListener('tms:navegar',navigate);},[]);
+  useEffect(()=>{const navigate=e=>{const target=['pedidos','viajes','gestion_trafico','muelles'].includes(e.detail)?'pedidos':['choferes','vehiculos'].includes(e.detail)?'colaboradores':e.detail;if(modules.some(([id])=>id===target))setView(target);};window.addEventListener('tms:navegar',navigate);return()=>window.removeEventListener('tms:navegar',navigate);},[]);
   useEffect(() => {
     const onBlocked = event => setBloqueado(event.detail);
     window.addEventListener('tms:bloqueado', onBlocked);

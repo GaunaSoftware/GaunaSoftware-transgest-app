@@ -25,6 +25,7 @@ export default function PlannerLoads({onPlan,onPrepare,focusOrder,onFocusConsume
   const [day,setDay] = useState(localDate()), [month,setMonth] = useState(localDate().slice(0,7)), [page,setPage] = useState(1), [hasNext,setHasNext] = useState(false);
   const [draft,setDraft] = useState(null), [error,setError] = useState(''), [notice,setNotice] = useState(''), [busy,setBusy] = useState(false), [loading,setLoading] = useState(false);
   const request = useRef(0), baseline = useRef('');
+  const [slotsVersion,setSlotsVersion]=useState(0);
   const canEdit = puedeEditar('pedidos');
   const load = useCallback(async () => {
     const version = ++request.current;
@@ -42,6 +43,7 @@ export default function PlannerLoads({onPlan,onPrepare,focusOrder,onFocusConsume
   }, [month,day,page,canEdit]);
   const cancelLoad = useCallback(() => { request.current++; }, []);
   useEffect(() => { load();const timer=setInterval(()=>{if(!document.hidden)load();},60000); return ()=>{clearInterval(timer);cancelLoad();}; }, [load,cancelLoad]);
+  useEffect(()=>{const refresh=()=>load();window.addEventListener('tms:planner-changed',refresh);return()=>window.removeEventListener('tms:planner-changed',refresh);},[load]);
   useEffect(() => {
     let active = true;
     async function fetchCatalogs() {
@@ -66,14 +68,14 @@ export default function PlannerLoads({onPlan,onPrepare,focusOrder,onFocusConsume
     finally { setBusy(false); }
   }
   useEffect(()=>{if(!focusOrder)return;let alive=true;getPedido(focusOrder).then(full=>{if(alive){open({...full,puntos_carga:parseStops(full.puntos_carga),puntos_descarga:parseStops(full.puntos_descarga),tipo_precio_colaborador:supplierPriceType(full)});onFocusConsumed?.();}}).catch(err=>{if(alive)setError(err.message);});return()=>{alive=false;};},[focusOrder,onFocusConsumed]);
-  function change(key,value) { setDraft(d => ({...d,[key]:value})); }
+  function change(key,value) { setDraft(d => ({...d,[key]:value,...(key==='bultos'&&(!value||Number(value)===0)?{peso_kg:'',palets_cantidad:0,metros_lineales:0}:{} )})); }
   function changeStop(key,index,field,value) { setDraft(d => ({...d,[key]:d[key].map((stop,i) => i === index ? {...stop,[field]:value} : stop)})); }
   async function save(event) {
     event.preventDefault(); if (busy) return;
     if (draft.id && JSON.stringify(draft) === baseline.current) { setDraft(null); return; }
     setBusy(true); setError(''); setNotice('');
     try {
-      const keys = ['tipo_carga','cliente_id','colaborador_id','referencia_cliente','fecha_carga','fecha_descarga','mercancia','peso_kg','bultos','notas','tipo_precio_colaborador','precio_colaborador','precio_colaborador_unitario','minimo_colaborador_unidades','puntos_carga','puntos_descarga'];
+      const keys = ['tipo_carga','cliente_id','colaborador_id','referencia_cliente','fecha_carga','fecha_descarga','mercancia','peso_kg','bultos','palets_cantidad','metros_lineales','notas','tipo_precio_colaborador','precio_colaborador','precio_colaborador_unitario','minimo_colaborador_unidades','puntos_carga','puntos_descarga'];
       const payload = Object.fromEntries(keys.map(key => [key,draft[key] ?? null]));
       payload.origen = draft.puntos_carga[0]?.nombre || draft.puntos_carga[0]?.ciudad;
       payload.destino = draft.puntos_descarga[0]?.nombre || draft.puntos_descarga[0]?.ciudad;
@@ -87,7 +89,7 @@ export default function PlannerLoads({onPlan,onPrepare,focusOrder,onFocusConsume
         const created=await crearPedido({...payload,workspace:'planner',estado:'pendiente',tipo_precio:'viaje',importe:0,precio_unitario:0});
         if(event.nativeEvent?.submitter?.value==='prepare')prepare(created.id||created.pedido?.id);
       }
-      setDraft(null); setNotice('Carga guardada.'); await load();
+      setDraft(null); setNotice('Carga guardada.'); setSlotsVersion(v=>v+1); await load();
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   }
@@ -101,7 +103,7 @@ export default function PlannerLoads({onPlan,onPrepare,focusOrder,onFocusConsume
   return <section className="planner-loads">
     <PageHead icon="truck" title="Planificación de cargas" description="Organiza las cargas, prepara la mercancía y coordina la aceptación de los transportistas.">{canEdit&&<button className="primary" onClick={()=>open(empty())}>+ Nueva carga</button>}</PageHead>
     <Metrics items={[{label:'Cargas del mes',value:summary?.cargas??'—',icon:'truck',note:'Todas las cargas del mes seleccionado'},{label:'Sin transportista',value:summary?.sin_asignar??'—',icon:'alert',tone:'amber'},{label:'Aceptadas por proveedor',value:summary?.aceptadas??'—',icon:'file',tone:'blue'},{label:'Incidencias',value:summary?.incidencias??'—',icon:'alert',tone:'red'}]}/>
-    <PlannerSlots compact selectedDay={day||undefined} onDayChange={value=>{setDay(value);setMonth(value.slice(0,7));setPage(1);}} onOrder={id=>{const order=orders.find(o=>o.id===id);edit(order||{id});}}/>
+    <PlannerSlots refreshKey={slotsVersion} compact selectedDay={day||undefined} onDayChange={value=>{setDay(value);setMonth(value.slice(0,7));setPage(1);}} onOrder={id=>{const order=orders.find(o=>o.id===id);edit(order||{id});}}/>
     <Panel title="Cargas y asignación de transporte" icon="truck"><div className="pl-filters"><label>Mes<input type="month" value={month} required onChange={e=>{if(e.target.value){setMonth(e.target.value);setDay('');setPage(1);}}}/></label><label>Día<input type="date" value={day} onChange={e=>{setDay(e.target.value);if(e.target.value)setMonth(e.target.value.slice(0,7));setPage(1);}}/></label><button onClick={()=>{setDay(localDate());setMonth(localDate().slice(0,7));setPage(1);}}>Hoy</button><button aria-pressed={!day} onClick={()=>{setDay('');setPage(1);}}>Todo el mes</button><button disabled={loading} onClick={load}>Actualizar</button></div>
     {error && !draft && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     <div className="planner-table" aria-busy={loading}><table><thead><tr><th>Referencia / cliente</th><th>Carga</th><th>Destino</th><th>Transportista / flota</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>

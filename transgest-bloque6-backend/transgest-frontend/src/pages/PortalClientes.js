@@ -1,3 +1,4 @@
+import PortalArrival from '../components/PortalArrival';
 import { useCallback, useEffect, useState } from "react";
 import {
   actualizarPortalClienteSolicitud,
@@ -949,6 +950,7 @@ export default function PortalClientes() {
                     <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 13, fontWeight: 800, color: estado.c, background: `${estado.c}18`, border: `1px solid ${estado.c}30` }}>{estado.l}</span>
                   </div>
 
+                  <PortalArrival orderId={p.id}/>
                   <div className="portal-timeline" style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 16 }}>
                     {TIMELINE.map(([k, label], i) => {
                       const done = i <= stIdx;

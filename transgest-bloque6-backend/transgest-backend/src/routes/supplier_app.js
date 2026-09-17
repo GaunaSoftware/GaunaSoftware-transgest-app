@@ -50,7 +50,7 @@ const plannerEnabled=async(req,res,next)=>{try{
 }catch(e){next(e);}};
 router.get('/pedidos/:id/hueco',plannerEnabled,wrap(async(req,res)=>{
  if(!(await documentScope(req)).rows.length)return res.status(404).json({error:'Carga no encontrada'});
- const reservas=(await db.query(`SELECT r.id,r.inicio,r.fin,m.nombre AS muelle,m.almacen,m.zona_horaria FROM planner_reservas r JOIN planner_muelles m ON m.id=r.muelle_id AND m.empresa_id=r.empresa_id WHERE r.empresa_id=$1 AND r.pedido_id=$2 AND r.tipo='carga' ORDER BY r.inicio`,[req.empresaId,req.params.id])).rows;
+ const reservas=await require('../services/plannerArrival').arrivals(db,req.empresaId,req.params.id);
  const solicitudes=(await db.query('SELECT id,inicio,fin,estado,notas FROM planner_solicitudes_hueco WHERE empresa_id=$1 AND pedido_id=$2 AND colaborador_id=$3 ORDER BY created_at DESC LIMIT 10',[req.empresaId,req.params.id,req.user.colaborador_id])).rows;
  res.json({reservas,solicitudes});
 }));

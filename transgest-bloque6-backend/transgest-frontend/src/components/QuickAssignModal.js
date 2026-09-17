@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ResourcePicker from "./ResourcePicker";
 import { formatMatricula } from "../utils/formatos";
 import { getDisponibilidadRecursos } from "../services/api";
+import { clearAssignmentPatch, assignmentPricePatch, parseAssignmentMoney } from "../utils/assignment";
 
 // Popup rapido de asignacion desde el boton "Asignar" de la lista de pedidos.
 // Permite elegir una matricula de la flota o escribirla a mano (asignacion
@@ -19,6 +20,16 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
     pedido?.remolque_matricula || pedido?.remolque_matricula_manual || ""
   );
   const [trabajando, setTrabajando] = useState(false);
+  const [external, setExternal] = useState({
+    matricula_colaborador: pedido?.matricula_colaborador || '',
+    remolque_matricula_colaborador: pedido?.remolque_matricula_colaborador || '',
+    conductor_efectivo_nombre: pedido?.conductor_efectivo_nombre || '',
+    conductor_efectivo_apellidos: pedido?.conductor_efectivo_apellidos || '',
+    conductor_efectivo_telefono: pedido?.conductor_efectivo_telefono || '',
+  });
+  const [sale, setSale] = useState('');
+  const [purchase, setPurchase] = useState('');
+  const [error, setError] = useState('');
   const [activePicker, setActivePicker] = useState("");
   const [availabilityError, setAvailabilityError] = useState(false);
 
@@ -110,6 +121,10 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
   }
 
   async function asignar() {
+    setError('');
+    let prices;
+    try { prices = assignmentPricePatch(sale, modo === 'proveedor' ? purchase : ''); }
+    catch (e) { setError(e.message); return; }
     // Proveedor externo: excluyente con la flota propia, asi que se limpia todo
     // lo de transporte propio al asignarlo.
     if (modo === "proveedor") {
@@ -118,6 +133,9 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
       setTrabajando(true);
       try {
         await onAssign({
+          ...clearAssignmentPatch(),
+          ...prices,
+          ...Object.fromEntries(Object.entries(external).map(([key, value]) => [key, value.trim() || null])),
           colaborador_id: colaboradorId,
           colaborador_nombre: col?.nombre || "",
           vehiculo_id: "", chofer_id: "", chofer2_id: "",
@@ -132,7 +150,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
     const rem = String(remolque || "").trim().toUpperCase();
     if (!mat && !choferId) { return; }
     const remVeh = rem ? vehiculos.find(v => String(v.matricula || "").toUpperCase() === rem) : null;
-    const patch = {};
+    const patch = { ...clearAssignmentPatch(), ...prices };
     if (vehMatch) {
       patch.vehiculo_id = vehMatch.id;
       patch.colaborador_id = "";
@@ -199,17 +217,22 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
         {modo === "proveedor" ? (
           <>
             <label style={S.label}>Proveedor / transportista externo</label>
-            <select style={S.input} value={colaboradorId} onChange={e => setColaboradorId(e.target.value)}>
+            <select aria-label="Proveedor" style={S.input} value={colaboradorId} onChange={e => { setColaboradorId(e.target.value); setExternal(Object.fromEntries(Object.keys(external).map(key=>[key,'']))); }}>
               <option value="">Selecciona un proveedor</option>
               {colaboradores.map(c => (
                 <option key={c.id} value={c.id}>{c.nombre}{c.cif ? ` - ${c.cif}` : ""}</option>
               ))}
             </select>
-            <div style={{ ...S.ayuda, marginTop: 8 }}>
-              Al asignarlo se quita el camion propio. Despues, desde el pedido, puedes generar
-              su enlace de acceso para que confirme, ponga su matricula y conductor, marque estados
-              y suba los albaranes.
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12}}>
+              {[
+                ['matricula_colaborador','Matrícula de la tractora'],
+                ['remolque_matricula_colaborador','Matrícula del remolque'],
+                ['conductor_efectivo_nombre','Nombre del conductor'],
+                ['conductor_efectivo_apellidos','Apellidos del conductor'],
+                ['conductor_efectivo_telefono','Teléfono del conductor'],
+              ].map(([key,label])=><label key={key} style={S.label}>{label}<input style={S.input} maxLength={120} value={external[key]} onChange={e=>setExternal({...external,[key]:key.includes('matricula')?formatMatricula(e.target.value):e.target.value})}/></label>)}
             </div>
+            <div style={S.ayuda}>Puedes completar las matrículas y el conductor aquí. Guardar la asignación no sustituye la aceptación del proveedor.</div>
             {colaboradores.length === 0 && (
               <div style={S.avisoOcupado}>No hay proveedores dados de alta. Crealos en Colaboradores.</div>
             )}
@@ -233,6 +256,20 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
         </div>
         </>
         )}
+
+        <fieldset style={{border:'1px solid var(--border2)',borderRadius:8,marginTop:16,padding:12}}>
+          <legend>Importes del viaje</legend>
+          <label style={S.label}>Precio de venta total (€)<input style={S.input} inputMode="decimal" value={sale} placeholder={esBulk?'Conservar el precio de cada pedido':String(pedido?.importe ?? '')} onChange={e=>setSale(e.target.value)}/></label>
+          {modo==='proveedor' && <label style={S.label}>Coste total del proveedor (€)<input style={S.input} inputMode="decimal" value={purchase} placeholder={esBulk?'Conservar el coste de cada pedido':String(pedido?.precio_colaborador ?? '')} onChange={e=>setPurchase(e.target.value)}/></label>}
+          <div style={S.ayuda}>En blanco se conserva el importe actual. Los importes introducidos son totales por viaje, sin impuestos{esBulk?' y se aplican a cada pedido seleccionado':''}.</div>
+          {modo==='proveedor' && (!esBulk || (sale && purchase)) && (()=>{
+            const revenue=parseAssignmentMoney(sale || pedido?.importe);
+            const cost=parseAssignmentMoney(purchase || pedido?.precio_colaborador);
+            if(revenue===null || cost===null || !Number.isFinite(revenue+cost))return <div style={S.ayuda}>Indica venta y coste para calcular el margen.</div>;
+            return <div role="status" style={{fontWeight:700,color:revenue<cost?'var(--danger,#c33)':'var(--accent)'}}>Margen sobre transporte: {(revenue-cost).toLocaleString('es-ES',{style:'currency',currency:'EUR'})}{revenue>0?` (${((revenue-cost)/revenue*100).toFixed(1)} %)`:''}<div style={S.ayuda}>Antes de otros costes operativos.</div></div>;
+          })()}
+        </fieldset>
+        {error && <div role="alert" style={S.avisoOcupado}>{error}</div>}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
           <button style={S.btn} onClick={onClose} disabled={trabajando}>Cancelar</button>

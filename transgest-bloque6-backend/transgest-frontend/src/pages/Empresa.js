@@ -1,3 +1,4 @@
+import { PAYMENT_METHODS, validateCompanyPaymentSettings, formatCompanyPaymentTerms } from "../utils/companyPayment";
 import { useState, useEffect, useCallback } from "react";
 import { getEmpresa, saveEmpresa, getEmpresaBackend, saveEmpresaBackend, getEmailConfig, saveEmailConfig, getEmailConfigBackend, saveEmailConfigBackend, getEmailLogBackend, getEmpresaConfig, setConfigTrafico, setConfigPrecios, setConfigAlertas, getLogo, subirLogo, eliminarLogo, getEmpresaFiscalConfig, saveEmpresaFiscalConfig, testEmpresaFiscalConfig, getEmpresaFiscalQueueSummary, getEmpresaIntegracionesStatus, getPuestaMarchaComercial, descargarPuestaMarchaInforme, getJornadaDiariaOperativa, descargarJornadaDiariaInforme, solicitarBackupEmpresa, getControlCobrosConfig, guardarControlCobrosConfig, actualizarCapitalTesoreria, getCalendarioLaboral, getCalendarioLaboralCcaa, getToken, getWhatsappConfig, guardarWhatsappConfig, getWhatsappLog } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -111,9 +112,9 @@ export default function Empresa() {
     razon_social:"", cif:"", domicilio:"", cp:"", municipio:"",
     provincia:"", pais:"España", telefono:"", email:"", web:"",
     iban:"", bic:"", banco:"", regimen_iva:"Régimen general",
-    forma_pago_colaboradores:"dias_fijos", dias_pago_colaboradores:"15", plazo_pago_colaboradores:60,
-    forma_pago_clientes:"recepcion_factura", dias_pago_clientes:"", plazo_pago_clientes:60,
-    texto_pago_clientes:"Transferencia 60 dias fecha recepcion factura",
+    forma_pago_colaboradores:"recepcion_factura", dias_pago_colaboradores:"15", plazo_pago_colaboradores:30,
+    forma_pago_clientes:"recepcion_factura", dias_pago_clientes:"", plazo_pago_clientes:30,
+    texto_pago_clientes:"",
     tipo_iva_defecto:"21", serie_facturas:"A", serie_rectificativas:"R",
     texto_pie:"", logo_url:"",
     documento_control:{ habilitado:false, sistema:"codigo_numerico", dominio_url:"", dominio_comunicado:false, usar_orden_carga_como_soporte:true, observaciones:"" },
@@ -428,12 +429,12 @@ export default function Empresa() {
   const ffb = k => e => setFiscalCfg(p => ({ ...p, factura_b2b:{ ...p.factura_b2b, [k]: e.target.type==="checkbox" ? e.target.checked : e.target.value } }));
 
   async function guardarEmpresa() {
+    const paymentError = validateCompanyPaymentSettings(empresa);
+    if (paymentError) { notify(paymentError, "error"); return; }
     const empresaToSave = {
       ...empresa,
       paleta_colores: puedePersonalizarColores ? normalizePaletteConfig(empresa.paleta_colores) : normalizePaletteConfig(),
     };
-    saveEmpresa(empresaToSave);
-    saveCompanyPalette(empresaToSave.paleta_colores);
     try {
       const res = await saveEmpresaBackend(empresaToSave);
       if (res?.perfil) {
@@ -1594,60 +1595,48 @@ export default function Empresa() {
               </div>
             </div>
             <div style={{ marginTop:10 }}>
-              <div style={{gridColumn:"1/-1",marginTop:10,padding:"12px 14px",background:"rgba(139,92,246,.06)",border:"1px solid rgba(139,92,246,.18)",borderRadius:8}}>
-                <div style={{fontWeight:700,fontSize:11,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Condiciones de pago a colaboradores</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 12px"}}>
-                  <div>
-                    <label style={S.lbl}>Forma de pago</label>
-                    <select style={{...S.inp}} value={empresa.forma_pago_colaboradores||"dias_fijos"} onChange={fe("forma_pago_colaboradores")} disabled={!esGerente}>
-                      <option value="dias_fijos">Días fijos del mes (ej: día 15)</option>
-                      <option value="fin_mes">Fin de mes</option>
-                      <option value="transferencia_inmediata">Transferencia inmediata</option>
-                    </select>
+              <datalist id="company-payment-methods">
+                {PAYMENT_METHODS.map(method => <option key={method} value={method} />)}
+              </datalist>
+              {['colaboradores', 'clientes'].map(party => (
+                <section key={party} style={{marginTop:14,padding:16,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10}}>
+                  <h3 style={{margin:"0 0 8px",fontSize:14,color:"var(--text)"}}>Condiciones de pago {party === 'clientes' ? 'de clientes' : 'a colaboradores'}</h3>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:12}}>
+                    <label style={S.lbl}>Medio de pago (selecciona o escribe)
+                      <input list="company-payment-methods" maxLength={120} style={S.inp} value={empresa[`medio_pago_${party}`] ?? "Transferencia bancaria"} onChange={fe(`medio_pago_${party}`)} disabled={!esGerente} placeholder="Transferencia bancaria, pagaré…" />
+                    </label>
+                    <label style={S.lbl}>Criterio de vencimiento
+                      <select style={S.inp} value={empresa[`forma_pago_${party}`] || "recepcion_factura"} onChange={fe(`forma_pago_${party}`)} disabled={!esGerente}>
+                        <option value="recepcion_factura">Plazo pactado desde recepción de factura</option>
+                        <option value="dias_fijos">Días fijos del mes</option>
+                        <option value="fin_mes">Fin de mes</option>
+                        <option value="contado">Al contado</option>
+                        {empresa[`forma_pago_${party}`] === 'transferencia_inmediata' && <option value="transferencia_inmediata">Inmediato</option>}
+                      </select>
+                    </label>
+                    <label style={S.lbl}>Plazo pactado (días naturales)
+                      <input type="number" min="0" max="60" step="1" style={S.inp} value={empresa[`plazo_pago_${party}`] ?? 30} onChange={fe(`plazo_pago_${party}`)} disabled={!esGerente || ['contado','transferencia_inmediata'].includes(empresa[`forma_pago_${party}`])} />
+                    </label>
+                    {empresa[`forma_pago_${party}`] === 'dias_fijos' && <label style={S.lbl}>Días del mes
+                      <input style={S.inp} value={empresa[`dias_pago_${party}`] || ""} onChange={fe(`dias_pago_${party}`)} disabled={!esGerente} placeholder="15,30" />
+                    </label>}
                   </div>
-                  <div>
-                    <label style={S.lbl}>Día(s) de pago del mes</label>
-                    <input type="text" style={S.inp} value={empresa.dias_pago_colaboradores||"15"} onChange={fe("dias_pago_colaboradores")} placeholder="Ej: 15 ó 15,30" disabled={!esGerente}/>
-                    <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Separa con coma para múltiples días</div>
-                  </div>
-                  <div>
-                    <label style={S.lbl}>Plazo desde recepción factura (días)</label>
-                    <input type="number" style={S.inp} value={empresa.plazo_pago_colaboradores||60} onChange={fe("plazo_pago_colaboradores")} placeholder="Ej: 60" disabled={!esGerente}/>
-                    <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>El contador empieza al recibir la factura</div>
-                  </div>
-                </div>
-                <div style={{marginTop:8,fontSize:11,color:"var(--text4)"}}>
-                  Ejemplo: plazo 60 días + día 15 -> si recibes factura el 5 de marzo, el pago se vence el 5 de mayo, pero se paga el día 15 de mayo.
-                </div>
-              </div>
-
-              <div style={{gridColumn:"1/-1",marginTop:10,padding:"12px 14px",background:"rgba(59,130,246,.06)",border:"1px solid rgba(59,130,246,.18)",borderRadius:8}}>
-                <div style={{fontWeight:700,fontSize:11,color:"#60a5fa",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Condiciones de pago de clientes</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 12px"}}>
-                  <div>
-                    <label style={S.lbl}>Forma de pago</label>
-                    <select style={{...S.inp}} value={empresa.forma_pago_clientes||"recepcion_factura"} onChange={fe("forma_pago_clientes")} disabled={!esGerente}>
-                      <option value="recepcion_factura">Transferencia desde recepcion factura</option>
-                      <option value="fin_mes">Fin de mes</option>
-                      <option value="transferencia_inmediata">Transferencia inmediata</option>
-                      <option value="contado">Contado</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={S.lbl}>Plazo pago clientes (dias)</label>
-                    <input type="number" style={S.inp} value={empresa.plazo_pago_clientes||60} onChange={fe("plazo_pago_clientes")} placeholder="Ej: 60" disabled={!esGerente}/>
-                  </div>
-                  <div>
-                    <label style={S.lbl}>Dia(s) pago si aplica</label>
-                    <input type="text" style={S.inp} value={empresa.dias_pago_clientes||""} onChange={fe("dias_pago_clientes")} placeholder="Ej: 15,30" disabled={!esGerente}/>
-                  </div>
-                </div>
-                <label style={S.lbl}>Texto exacto para ordenes</label>
-                <input style={S.inp} value={empresa.texto_pago_clientes||""} onChange={fe("texto_pago_clientes")} placeholder="Transferencia 60 dias fecha recepcion factura" disabled={!esGerente}/>
-                <div style={{marginTop:8,fontSize:11,color:"var(--text4)"}}>
-                  Este texto se imprimira en la orden de carga de transporte propio y sirve como condicion economica visible para cliente/expedidor.
-                </div>
-              </div>
+                  <label style={S.lbl}>Texto personalizado para órdenes (opcional, sustituye el texto automático)
+                    <textarea rows={2} maxLength={500} style={S.inp} value={empresa[`texto_pago_${party}`] || ""} onChange={fe(`texto_pago_${party}`)} disabled={!esGerente} placeholder="Déjalo vacío para utilizar el medio y plazo configurados." />
+                  </label>
+                  <div style={{padding:12,borderLeft:"3px solid var(--accent)",fontSize:13,color:"var(--text)",lineHeight:1.6}}><strong>Así aparecerá en el pedido:</strong><br />{formatCompanyPaymentTerms(empresa, party)}</div>
+                </section>
+              ))}
+              <p style={{fontSize:12,color:"var(--text4)",lineHeight:1.6}}>
+                Transporte entre empresas en España: 30 días naturales en ausencia de pacto; hasta 60 mediante acuerdo válido.
+                El pagaré, confirming u otro medio de pago no amplía ese límite. Los días fijos y el fin de mes nunca deben retrasar el pago más allá de 60 días desde el inicio del cómputo.
+                El cómputo legal depende de la entrega, la recepción acreditada de la factura y el contrato; si la recepción es dudosa o hay autofacturación, se toma la entrega en destino.
+                {' '}<a href="https://www.boe.es/buscar/act.php?id=BOE-A-2004-21830#a4" target="_blank" rel="noreferrer">Ley 3/2004, art. 4</a>{' · '}
+                <a href="https://www.boe.es/buscar/act.php?id=BOE-A-2009-18004#a41" target="_blank" rel="noreferrer">Ley 15/2009, art. 41</a>.
+                {' '}Esta configuración se aplica a las condiciones mostradas en pedidos y órdenes; no modifica facturas ya emitidas ni vencimientos registrados.
+              </p>
+              {esGerente && <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={guardarEmpresa}>Guardar condiciones de pago</button>}
+              {saved === 'empresa' && <span role="status" style={{...S.saved,marginLeft:12}}>Guardado correctamente</span>}
 
               <div style={{gridColumn:"1/-1",marginTop:10,padding:"12px 14px",background:"rgba(16,185,129,.06)",border:"1px solid rgba(16,185,129,.18)",borderRadius:8}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:10,flexWrap:"wrap"}}>

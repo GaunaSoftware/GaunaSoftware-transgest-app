@@ -1,3 +1,4 @@
+const { formatCompanyPaymentTerms } = require("./companyPayment");
 ﻿const crypto = require("crypto");
 
 const DOC_CONTROL_DEFAULTS = {
@@ -114,15 +115,7 @@ function buildReadiness(checks = []) {
 }
 
 function formatClientPaymentTerms(empresa = {}) {
-  const custom = String(empresa?.texto_pago_clientes || "").trim();
-  if (custom) return custom;
-  const plazo = Number(empresa?.plazo_pago_clientes || 0);
-  const dias = String(empresa?.dias_pago_clientes || "").trim();
-  const forma = String(empresa?.forma_pago_clientes || "recepcion_factura");
-  if (forma === "contado") return "Pago al contado";
-  if (forma === "transferencia_inmediata") return "Transferencia inmediata";
-  if (forma === "fin_mes") return `Transferencia fin de mes${plazo ? ` + ${plazo} dias` : ""}${dias ? `; pago dias ${dias}` : ""}`;
-  return `Transferencia ${plazo || 60} dias fecha recepcion factura${dias ? `; pago dias ${dias}` : ""}`;
+  return formatCompanyPaymentTerms(empresa, "clientes");
 }
 
 function cleanCmrOptionalField(value = "") {

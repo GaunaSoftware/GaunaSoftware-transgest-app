@@ -1,3 +1,4 @@
+const { calculateCompanyPaymentDate } = require("../services/companyPayment");
 const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
 const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
 const { assertSupplierOrder } = require("../services/supplierOrder");
@@ -1949,23 +1950,7 @@ function isoDate(date) {
 }
 
 function calcularFechaPagoColaborador(fechaRecepcion, perfil = {}) {
-  const baseInput = normalizePedidoDate(fechaRecepcion);
-  if (!baseInput) return null;
-  const plazo = Number(perfil.plazo_pago_colaboradores || 60);
-  const forma = String(perfil.forma_pago_colaboradores || "dias_fijos");
-  const dias = String(perfil.dias_pago_colaboradores || "15")
-    .split(",")
-    .map(d => Number.parseInt(d.trim(), 10))
-    .filter(d => Number.isFinite(d) && d >= 1 && d <= 31)
-    .sort((a, b) => a - b);
-  const base = addDays(`${baseInput}T00:00:00`, plazo);
-  if (forma === "transferencia_inmediata") return isoDate(base);
-  if (forma === "fin_mes") return isoDate(new Date(base.getFullYear(), base.getMonth() + 1, 0));
-  const paymentDays = dias.length ? dias : [15];
-  const nextDay = paymentDays.find(d => d >= base.getDate());
-  return isoDate(nextDay
-    ? new Date(base.getFullYear(), base.getMonth(), nextDay)
-    : new Date(base.getFullYear(), base.getMonth() + 1, paymentDays[0]));
+  return calculateCompanyPaymentDate(normalizePedidoDate(fechaRecepcion), perfil);
 }
 
 async function getEmpresaPerfilPagos(empresaId) {

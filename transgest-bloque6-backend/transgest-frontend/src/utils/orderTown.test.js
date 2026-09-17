@@ -10,3 +10,14 @@ test('lists towns, never street addresses or company names', () => {
 test('commercial names preserve existing plan identifiers', () => {
   expect(['lite','basico','profesional','enterprise'].map(getBrandDisplayName)).toEqual(['TransGest Go','TransGest Control','TransGest Pro','TransGest Pro Intelligence']);
 });
+
+// A reordered secondary stop can contain only direccion, without ciudad.
+test('reordered unloading towns remain visible without guessing from a company', () => {
+  expect(orderTown({ciudad:'',direccion:'CASTELLÓN'}, 'CASTELLÓN')).toBe('CASTELLÓN');
+  expect(orderTown({ciudad:'',direccion:'CASTELLÓN'}, 'Vinaròs')).toBe('CASTELLÓN');
+  expect(orderTown({ciudad:'Vinaròs',direccion:'VINAROZ'}, 'CASTELLÓN')).toBe('VINARÒS');
+  expect(orderTown({ciudad:' ',poblacion:'Benissa'})).toBe('BENISSA');
+  expect(orderTown({direccion:'Calle Castellón 5'})).toBe('POBLACION PENDIENTE');
+  expect(orderTown({direccion:'CEMENTOS CASTELLÓN'})).toBe('POBLACION PENDIENTE');
+  expect(orderTown({direccion:'constructor'})).toBe('POBLACION PENDIENTE');
+});

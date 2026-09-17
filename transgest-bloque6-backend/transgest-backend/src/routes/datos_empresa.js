@@ -1,3 +1,4 @@
+const { validateCompanyPaymentSettings, formatCompanyPaymentTerms } = require("../services/companyPayment");
 const { cacheMiddleware } = require("../services/cache");
 // ── Rutas que migran localStorage → BD ───────────────────────────────────
 // Cubre: gastos estructura, gasoil/repostajes, noches, objetivos,
@@ -122,13 +123,13 @@ const EMPRESA_PROFILE_DEFAULTS = {
   bic: "",
   banco: "",
   regimen_iva: "Regimen general",
-  forma_pago_colaboradores: "dias_fijos",
+  forma_pago_colaboradores: "recepcion_factura",
   dias_pago_colaboradores: "15",
-  plazo_pago_colaboradores: 60,
+  plazo_pago_colaboradores: 30,
   forma_pago_clientes: "recepcion_factura",
   dias_pago_clientes: "",
-  plazo_pago_clientes: 60,
-  texto_pago_clientes: "Transferencia 60 dias fecha recepcion factura",
+  plazo_pago_clientes: 30,
+  texto_pago_clientes: "",
   tipo_iva_defecto: "21",
   serie_facturas: "A",
   serie_rectificativas: "R",
@@ -520,7 +521,7 @@ async function buildPuestaMarchaComercial(req) {
       key: "facturacion_base",
       area: "Facturacion",
       label: "Series, IVA y pago configurados",
-      ok: !!(perfil.serie_facturas && perfil.tipo_iva_defecto && perfil.texto_pago_clientes && Number(perfil.plazo_pago_clientes || 0) >= 0),
+      ok: !!(perfil.serie_facturas && perfil.tipo_iva_defecto && formatCompanyPaymentTerms(perfil, "clientes") && Number(perfil.plazo_pago_clientes || 0) >= 0),
       required: true,
       weight: 12,
       detail: "Series y reglas de pago listas para emitir borradores/facturas.",
@@ -1022,8 +1023,8 @@ function normalizeEmpresaProfile(raw = {}) {
   return {
     ...EMPRESA_PROFILE_DEFAULTS,
     ...(raw && typeof raw === "object" ? raw : {}),
-    plazo_pago_colaboradores: Number(raw?.plazo_pago_colaboradores || EMPRESA_PROFILE_DEFAULTS.plazo_pago_colaboradores),
-    plazo_pago_clientes: Number(raw?.plazo_pago_clientes || EMPRESA_PROFILE_DEFAULTS.plazo_pago_clientes),
+    plazo_pago_colaboradores: Number(raw?.plazo_pago_colaboradores ?? EMPRESA_PROFILE_DEFAULTS.plazo_pago_colaboradores),
+    plazo_pago_clientes: Number(raw?.plazo_pago_clientes ?? EMPRESA_PROFILE_DEFAULTS.plazo_pago_clientes),
     paleta_colores: normalizeEmpresaPalette(raw?.paleta_colores),
   };
 }
@@ -1598,6 +1599,8 @@ router.put("/config/precios", async (req,res) => {
     const { rows } = await db.query("SELECT cfg_precios FROM empresas WHERE id=$1", [empresaId]);
     const prev = rows[0]?.cfg_precios && typeof rows[0].cfg_precios === "object" ? rows[0].cfg_precios : {};
     const incoming = req.body && typeof req.body === "object" ? { ...req.body } : {};
+    const paymentError = validateCompanyPaymentSettings(incoming.empresa_perfil || incoming);
+    if (paymentError) return res.status(400).json({ error: paymentError });
     if (prev.tesoreria || incoming.tesoreria) {
       incoming.tesoreria = {
         ...(incoming.tesoreria || {}),
@@ -1803,6 +1806,8 @@ router.get("/perfil", async (req,res) => {
 
 router.put("/perfil", SOLO_GERENTE, async (req,res) => {
   try {
+    const paymentError = validateCompanyPaymentSettings(req.body || {});
+    if (paymentError) return res.status(400).json({ error: paymentError });
     const perfil = normalizeEmpresaProfile(req.body || {});
     const planRes = await db.query("SELECT plan FROM empresas WHERE id=$1", [EID(req)]).catch(() => ({ rows: [] }));
     const plan = String(planRes.rows[0]?.plan || "").toLowerCase();

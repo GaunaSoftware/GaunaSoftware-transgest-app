@@ -6511,6 +6511,14 @@ router.get("/resumen-lista", async (req, res) => {
 });
 
 // GET /pedidos/:id
+router.get('/:id/albaran-pdf', GERENTE_O_TRAFICO, async(req,res,next)=>{
+  try {
+    const data=await require('../services/deliveryData').deliveryData(db,req.empresaId||req.user.empresa_id,req.params.id);
+    const numero=`ALB-${data.pedido_numero}`;
+    const pdf=await require('../services/plannerDeliveryPdf').deliveryPdf({numero,datos:data});
+    res.type('application/pdf').set('Content-Disposition',`attachment; filename="${numero.replace(/[^a-z0-9-]/gi,'_')}.pdf"`).send(pdf);
+  }catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
+});
 router.get("/:id/orden-colaborador", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
@@ -7736,7 +7744,7 @@ router.get("/:id", async (req, res) => {
   }
   // Proveedor invitado: solo puede abrir los viajes de SU colaborador.
   if (req.user?.rol === "colaborador"
-      && String(rows[0].colaborador_id || "") !== String(req.user?.colaborador_id || " ")) {
+      && String(rows[0].colaborador_id || "") !== String(req.user?.colaborador_id || "\u0000")) {
     return res.status(403).json({ error: "No puedes acceder a este pedido" });
   }
 
@@ -9251,6 +9259,13 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
   );
   if (!pedidoActualRows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
   await require("../services/orderFuelCost").fillMissingFuelCost(db,body,pedidoActualRows[0],empresaId);
+  if('precio_venta_total' in body){
+    const total=parseLocaleNumber(body.precio_venta_total);
+    const current=pedidoActualRows[0];
+    const supplements=Math.max(0,parseLocaleNumber(current.extracostes_importe??current.extracostes)||0)+sumAdditionalDescargaPrices(current.puntos_carga)+sumAdditionalDescargaPrices(current.puntos_descarga);
+    if(!Number.isFinite(total)||total<supplements)return res.status(400).json({error:'El precio total debe cubrir los suplementos y las paradas adicionales ya guardados.'});
+    Object.assign(body,{tipo_precio:'viaje',precio_unitario:roundMoney(total-supplements),importe:total,precio_cliente_col:total,importe_minimo:0,minimo_unidades:0});
+  }
   try {
     assertPedidoDateInputs(body || {}, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga", "firma_fecha"]));
   } catch (dateErr) {
@@ -9528,7 +9543,12 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
       if (body.asignar_solo_si_libre === true && (current.rows[0].colaborador_id || (current.rows[0].vehiculo_id && String(current.rows[0].vehiculo_id) !== String(body.vehiculo_id)))) {
         throw Object.assign(new Error("El pedido ya está asignado a otro vehículo o colaborador. Actualiza la mesa y revisa su asignación."), {status:409});
       }
+      await require('../services/plannerCargoGuard').assertCargoEditable(tx, empresaId, current.rows[0], body);
       await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+      if ('colaborador_id' in body && String(body.colaborador_id || '') !== String(current.rows[0].colaborador_id || '')) {
+        await tx.query('UPDATE colaborador_pedido_tokens SET expires_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
+        await tx.query('UPDATE pedidos SET colaborador_precio_confirmado=false,colaborador_precio_confirmado_at=NULL WHERE id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
+      }
       return tx.query(`UPDATE pedidos SET ${setClauses} WHERE id=$${values.length-1} AND empresa_id=$${values.length} RETURNING *`, values);
     });
     if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
@@ -9604,7 +9624,12 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
         const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id,empresaId]);
         if (!current.rows[0]) return null;
         if (body.asignar_solo_si_libre === true && (current.rows[0].colaborador_id || (current.rows[0].vehiculo_id && String(current.rows[0].vehiculo_id)!==String(body.vehiculo_id)))) throw Object.assign(new Error("El pedido ya tiene una asignación. Actualiza la mesa."),{status:409});
+        await require('../services/plannerCargoGuard').assertCargoEditable(tx, empresaId, current.rows[0], body);
         await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+        if ('colaborador_id' in body && String(body.colaborador_id || '') !== String(current.rows[0].colaborador_id || '')) {
+          await tx.query('UPDATE colaborador_pedido_tokens SET expires_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
+          await tx.query('UPDATE pedidos SET colaborador_precio_confirmado=false,colaborador_precio_confirmado_at=NULL WHERE id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
+        }
         return updateExistingPedidoFields(tx, fields, req.params.id, empresaId);
       });
       if (!updatedPedido) return res.status(400).json({ error: "No hay campos compatibles para actualizar" });
@@ -9695,6 +9720,10 @@ router.delete("/:id", async (req,res) => {
     if (!rows[0]) return res.status(404).json({error:"Pedido no encontrado"});
     if (rows[0].estado !== "cancelado") {
       return res.status(400).json({error:`Solo se eliminan pedidos cancelados. Estado actual: ${rows[0].estado}`});
+    }
+    const plannerTable=(await db.query("SELECT to_regclass('planner_preparaciones') AS tabla")).rows[0]?.tabla;
+    if(plannerTable && (await db.query('SELECT id FROM planner_preparaciones WHERE pedido_id=$1 AND empresa_id=$2 LIMIT 1',[req.params.id,empresaId])).rows.length) {
+      return res.status(409).json({error:'Este pedido conserva un historial de almacén. Libera la mercancía pendiente desde Almacén y stock y mantén el pedido cancelado para conservar la trazabilidad.'});
     }
     const facturaId = rows[0].factura_id;
     await db.query("DELETE FROM pedidos WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);

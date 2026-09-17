@@ -18,7 +18,7 @@ test('external accounts cannot open the internal Planner regardless of order acc
 
 test('shows only permitted modules and respects the dock API role restrictions', () => {
   expect(visiblePlannerModules({productos:['transgest','planner'],rol:'trafico'}, id => id === 'pedidos').map(([id])=>id))
-    .toEqual(['pedidos','muelles']);
+    .toEqual(['pedidos']);
   expect(visiblePlannerModules({productos:['transgest','planner'],rol:'gerente'}, () => false)).toEqual([]);
   expect(visiblePlannerModules({productos:['transgest','planner'],rol:'contable'}, id => id === 'pedidos').map(([id])=>id))
     .toEqual(['pedidos']);
@@ -31,5 +31,5 @@ test('licenses distinguish TMS-only, Planner-only and combined companies', () =>
   expect(visiblePlannerModules({rol:'gerente',productos:['transgest']},()=>true)).toEqual([]);
   expect(visiblePlannerModules({rol:'gerente'},()=>true)).toEqual([]);
   const modules=visiblePlannerModules({rol:'gerente',productos:['planner']},()=>true).map(([id])=>id);
-  expect(modules).toEqual(['pedidos','muelles','palets','colaboradores','clientes','documentos','facturacion','empresa']);
+  expect(modules).toEqual(['pedidos','palets','colaboradores','clientes','documentos','facturacion','empresa']);
 });

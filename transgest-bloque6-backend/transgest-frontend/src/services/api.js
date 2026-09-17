@@ -1196,3 +1196,5 @@ export const guardarImagenVehiculo = (id, imagen_data) => apiFetch(`/vehiculos/$
 export const getReclamacionesEnvios = () => apiFetch('/facturas/reclamaciones/envios');
 
 export const transportExchange=(path="",options={})=>apiFetch(`/transport-exchange${path}`,{silentSuccess:true,...options});
+
+export const getPortalPedidoMuelle = id => apiFetch(`/portal-cliente/pedidos/${id}/muelle`,{silentError:true});

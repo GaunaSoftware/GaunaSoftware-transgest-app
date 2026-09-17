@@ -27,7 +27,7 @@ function unbilledOptions(query = {}, clienteId) {
 
 function pendingQuery(empresaId, options) {
   const params = [empresaId];
-  const where = ["p.empresa_id=$1", "p.estado='entregado'",
+  const where = ["p.empresa_id=$1", "p.estado='entregado'", "COALESCE(to_jsonb(p)->>'origen_producto','transgest')<>'planner'",
     `(p.factura_id IS NULL OR (f.estado='borrador' AND f.cliente_id=p.cliente_id))`,
     // A stale reverse link must not allow billing a trip a second time.
     `NOT EXISTS (

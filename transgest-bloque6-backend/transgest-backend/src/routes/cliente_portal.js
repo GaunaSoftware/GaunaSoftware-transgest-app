@@ -1491,6 +1491,17 @@ router.get("/integracion/feed", requireClienteIntegracion("feed"), async (req, r
   }
 });
 
+router.get('/pedidos/:id/muelle', requireCliente, async (req,res,next)=>{
+  try {
+    const company=empresaId(req);
+    const order=(await db.query("SELECT id,to_jsonb(p)->>'origen_producto' AS producto FROM pedidos p WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3",[req.params.id,company,req.user.cliente_id])).rows[0];
+    if(!order)return res.status(404).json({error:'Pedido no encontrado'});
+    if(order.producto!=='planner')return res.json([]);
+    await require('../services/plannerSchema').ensurePlannerSchema();
+    res.json(await require('../services/plannerArrival').arrivals(db,company,req.params.id));
+  }catch(error){next(error);}
+});
+
 router.get("/pedidos/:id/albaranes", requireCliente, async (req, res) => {
   const pedido = await db.query(
     "SELECT id FROM pedidos WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3",

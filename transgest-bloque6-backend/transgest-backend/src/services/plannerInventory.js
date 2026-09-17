@@ -70,6 +70,7 @@ async function prepare(db,company,user,input){
   totalPallets=Math.max(totalPallets,supportPallets);
   await tx.query('UPDATE pedidos SET peso_kg=$3,palets_cantidad=$4,bultos=$4,mercancia=$5 WHERE id=$1 AND empresa_id=$2',[order.id,company,Number(totalWeight.toFixed(3)),totalPallets,[...new Set(descriptions)].join('; ').slice(0,200)]);
   const pricing={};if(require('./supplierPricing').applySupplierPricing(pricing,{peso_kg:Number(totalWeight.toFixed(3))},order))await tx.query('UPDATE pedidos SET precio_colaborador=$3 WHERE id=$1 AND empresa_id=$2',[order.id,company,pricing.precio_colaborador]);
+  prep.reparto_coste=await require('./plannerCosts').snapshotCosts(tx,company,user,prep,input.criterio_coste||'peso');
   return prep;
  });
 }
@@ -81,7 +82,9 @@ async function transition(db,company,user,id,input){
   if(['expedida','cancelada'].includes(prep.estado))throw fail('La preparación está cerrada.',409);
   const lines=(await tx.query('SELECT * FROM planner_preparacion_lineas WHERE preparacion_id=$1 AND empresa_id=$2 ORDER BY existencia_id,parada',[id,company])).rows;
   const action=input.accion;
-  if(action==='preparar_linea'){
+  if(action==='repartir_coste'){
+   await require('./plannerCosts').snapshotCosts(tx,company,user,prep,input.criterio||'peso');
+  }else if(action==='preparar_linea'){
    if(typeof input.preparada!=='boolean')throw fail('Indica si la línea está preparada.');
    const row=(await tx.query('UPDATE planner_preparacion_lineas SET preparada=$4 WHERE id=$1 AND preparacion_id=$2 AND empresa_id=$3 RETURNING id',[input.linea_id,id,company,Boolean(input.preparada)])).rows[0];
    if(!row||prep.estado!=='preparando')throw fail('No se puede cambiar esta línea.',409);
@@ -91,7 +94,10 @@ async function transition(db,company,user,id,input){
    const next={pendiente:'espera_carga',espera_carga:'cargando',cargando:'cargado',cargado:'salida'}[prep.situacion_camion];
    if(input.situacion!==next||next==='salida')throw fail('Secuencia no válida. Registra espera, carga y camión cargado; después confirma la expedición.',409);
    const assigned=(await tx.query('SELECT colaborador_id,colaborador_precio_confirmado FROM pedidos WHERE id=$1 AND empresa_id=$2',[prep.pedido_id,company])).rows[0];
-   if(assigned?.colaborador_id&&!assigned.colaborador_precio_confirmado)throw fail('El transportista debe aceptar la carga antes de registrar su llegada.',409);
+   if(assigned?.colaborador_id&&!assigned.colaborador_precio_confirmado){
+    const planned=(await tx.query('SELECT id FROM planner_reservas WHERE pedido_id=$1 AND empresa_id=$2',[prep.pedido_id,company])).rows[0];
+    if(!planned)throw fail('Asigna un muelle o solicita la aceptación del transportista antes de registrar su llegada.',409);
+   }
    if(['cargando','cargado'].includes(next)&&prep.estado!=='lista')throw fail('La mercancía debe estar lista antes de cargar.',409);
   }else if(['expedir','cancelar'].includes(action)){
    if(action==='expedir'&&(prep.estado!=='lista'||prep.situacion_camion!=='cargado'))throw fail('La mercancía debe estar lista y el camión cargado antes de dar salida.',409);
@@ -103,10 +109,16 @@ async function transition(db,company,user,id,input){
     if(!stock)throw fail('La reserva de stock no coincide. No se ha aplicado ningún movimiento.',409);
     await log(tx,{company,user,stock,type:action==='expedir'?'expedicion':'liberacion',quantity:-Number(line.cantidad),reason:action==='expedir'?'Salida de mercancía':text(input.motivo,2000),reference:order?.numero||'',preparation:id});
    }
+   if(action==='cancelar')await tx.query('UPDATE pedidos SET peso_kg=NULL,bultos=NULL,palets_cantidad=NULL,metros_lineales=NULL WHERE id=$1 AND empresa_id=$2',[prep.pedido_id,company]);
+   if(action==='expedir')await require('./plannerCosts').snapshotCosts(tx,company,user,prep,prep.reparto_coste?.criterio_solicitado||'peso');
   }else throw fail('Acción no reconocida.');
+  if(action==='camion')await tx.query("INSERT INTO planner_eventos(empresa_id,pedido_id,preparacion_id,tipo,datos,created_by) VALUES($1,$2,$3,'camion.estado',$4,$5)",[company,prep.pedido_id,id,JSON.stringify({anterior:prep.situacion_camion,situacion:input.situacion}),user]);
   return (await tx.query(`UPDATE planner_preparaciones SET version=version+1,
     estado=CASE WHEN $3='lista' THEN 'lista' WHEN $3='expedir' THEN 'expedida' WHEN $3='cancelar' THEN 'cancelada' ELSE estado END,
     situacion_camion=CASE WHEN $3='camion' THEN $4 WHEN $3='expedir' THEN 'salida' ELSE situacion_camion END,
+    muelle_carga_id=CASE WHEN $3='camion' AND $4='cargando' THEN (SELECT r.muelle_id FROM planner_reservas r WHERE r.pedido_id=planner_preparaciones.pedido_id AND r.empresa_id=$2 AND r.tipo='carga' ORDER BY r.inicio DESC LIMIT 1) ELSE muelle_carga_id END,
+    carga_inicio_at=CASE WHEN $3='camion' AND $4='cargando' THEN now() ELSE carga_inicio_at END,
+    carga_fin_at=CASE WHEN $3='camion' AND $4='cargado' THEN now() ELSE carga_fin_at END,
     expedida_at=CASE WHEN $3='expedir' THEN now() ELSE expedida_at END WHERE id=$1 AND empresa_id=$2 RETURNING *`,[id,company,action,input.situacion||null])).rows[0];
  });
 }

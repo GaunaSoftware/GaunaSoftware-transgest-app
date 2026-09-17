@@ -151,6 +151,7 @@ router.get("/", GERENTE_O_CONTABLE, async (req, res) => {
   const { estado, cliente_id, serie, desde, hasta, fiscal_estado, fiscal_modo, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
   const where  = ["f.empresa_id = $1"]; // tenant isolation
+  where.push(`${req.plannerInvoiceWorkspace ? '' : 'NOT '}${require('../services/invoiceWorkspace').plannerInvoiceSql('f')}`);
   const params = [req.empresaId||req.user.empresa_id];
   let i = 2;
 

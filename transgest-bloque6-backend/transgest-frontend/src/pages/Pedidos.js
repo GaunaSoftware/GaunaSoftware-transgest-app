@@ -1,3 +1,4 @@
+import { formatCompanyPaymentTerms, calculateCompanyPaymentDate } from "../utils/companyPayment";
 import { driverName, stopSchedule, assignDriver } from "./orders/quickInfo";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
 import { Modal as WorkspaceModal } from "../ui";
@@ -1871,28 +1872,11 @@ function applyRouteEndpointsFromSavedPoints(draft = {}, ruta = {}) {
 }
 
 function formatPaymentTerms(empresa = {}) {
-  const plazo = Number(empresa?.plazo_pago_colaboradores || 0);
-  const dias = String(empresa?.dias_pago_colaboradores || "").trim();
-  const forma = String(empresa?.forma_pago_colaboradores || "dias_fijos");
-  if (forma === "transferencia_inmediata") return "Transferencia inmediata";
-  if (forma === "fin_mes") return `Transferencia fin de mes${plazo ? ` + ${plazo} dias desde recepcion de factura` : ""}`;
-  if (forma === "dias_fijos") {
-    return `Transferencia ${plazo || 60} dias fecha recepcion factura${dias ? ` · pago dias ${dias}` : ""}`;
-  }
-  return empresa?.texto_pie || "Transferencia bancaria";
+  return formatCompanyPaymentTerms(empresa, "colaboradores");
 }
 
 function formatClientPaymentTerms(empresa = {}) {
-  const custom = String(empresa?.texto_pago_clientes || "").trim();
-  if (custom) return custom;
-  const plazo = Number(empresa?.plazo_pago_clientes || 0);
-  const dias = String(empresa?.dias_pago_clientes || "").trim();
-  const forma = String(empresa?.forma_pago_clientes || "recepcion_factura");
-  if (forma === "contado") return "Pago al contado";
-  if (forma === "transferencia_inmediata") return "Transferencia inmediata";
-  if (forma === "fin_mes") return `Transferencia fin de mes${plazo ? ` + ${plazo} dias` : ""}${dias ? `; pago dias ${dias}` : ""}`;
-  if (forma === "recepcion_factura") return `Transferencia ${plazo || 60} dias fecha recepcion factura${dias ? `; pago dias ${dias}` : ""}`;
-  return "Transferencia bancaria";
+  return formatCompanyPaymentTerms(empresa, "clientes");
 }
 
 function buildOperativaCargaLabels(pedido = {}) {
@@ -3715,31 +3699,7 @@ function PagoColaboradorPanel({ pedido, onUpdated }) {
   }, [pedido.id]);
 
   function calcFechaPago(fechaRecepcion) {
-    const empresa = getEmpresaPerfilSync();
-    const plazo   = Number(empresa.plazo_pago_colaboradores || 60);
-    const dias    = (empresa.dias_pago_colaboradores || "15").split(",").map(d => parseInt(d.trim())).filter(d => !isNaN(d));
-    const forma   = empresa.forma_pago_colaboradores || "dias_fijos";
-
-    const base = new Date(fechaRecepcion);
-    base.setDate(base.getDate() + plazo);
-
-    if (forma === "transferencia_inmediata") return base.toISOString().slice(0, 10);
-    if (forma === "fin_mes") {
-      base.setMonth(base.getMonth() + 1, 0);
-      return base.toISOString().slice(0, 10);
-    }
-    // dias_fijos: encontrar el proximo dia de pago tras la fecha base
-    const diaBase = base.getDate();
-    const mesBase = base.getMonth();
-    const anoBase = base.getFullYear();
-    const diasOrdenados = [...dias].sort((a, b) => a - b);
-    const siguiente = diasOrdenados.find(d => d >= diaBase);
-    if (siguiente) {
-      return new Date(anoBase, mesBase, siguiente).toISOString().slice(0, 10);
-    } else {
-      // next month, first payment day
-      return new Date(anoBase, mesBase + 1, diasOrdenados[0]).toISOString().slice(0, 10);
-    }
+    return calculateCompanyPaymentDate(fechaRecepcion, getEmpresaPerfilSync());
   }
 
   function handleFile(e) {

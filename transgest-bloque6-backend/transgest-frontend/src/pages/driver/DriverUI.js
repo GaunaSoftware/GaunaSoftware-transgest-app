@@ -2,6 +2,7 @@ import { useTheme } from "../../context/ThemeContext";
 import logoDark from "../../assets/brand/transgest_logo_dark.svg";
 import logoWhite from "../../assets/brand/transgest_logo_white.svg";
 import "./driver.css";
+import "./driver-redesign.css";
 
 const paths = {
   activos: "M3 6h11v11H3z M14 10h4l3 4v3h-7 M7 17a2 2 0 1 0 0 .01 M18 17a2 2 0 1 0 0 .01",
@@ -17,6 +18,8 @@ const paths = {
   salir: "M10 3H4v18h6 M9 12h12 M17 8l4 4-4 4",
   actualizar: "M20 4v5h-5 M4 20v-5h5 M20 9A8 8 0 0 0 6 5 M4 15a8 8 0 0 0 14 4",
   documento: "M6 3h8l4 4v14H6z M14 3v5h4 M9 12h6 M9 16h6",
+  qr: "M3 3h6v6H3z M15 3h6v6h-6z M3 15h6v6H3z M15 15h2v2h-2z M20 14v3 M14 20h3 M20 20h1v1h-1z",
+  compartir: "M12 16V3 M8 7l4-4 4 4 M7 11H4v10h16V11h-3",
 };
 export function DriverIcon({ name, size = 22 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.documento}/></svg>;
@@ -25,12 +28,12 @@ export function DriverHeading({ icon, title, children }) {
   return <div className="driver-section-heading"><span className="driver-icon-tile"><DriverIcon name={icon}/></span><div><h2>{title}</h2>{children && <p>{children}</p>}</div></div>;
 }
 const titles = { inicio:"Tu día, en un vistazo", activos:"Mis viajes", nuevo:"Nuevo viaje", jornada:"Mi jornada", datos:"Mis datos", vacaciones:"Mis vacaciones", historial:"Historial de viajes", solicitud:"Solicitudes de taller", avisos:"Avisos y rutas", mas:"Más opciones" };
-export function DriverHeader({ user, tab, onNavigate, onRefresh, unread, loading }) {
+export function DriverHeader({ user, tab, onNavigate, unread }) {
   const { isDark } = useTheme() || {};
   const initials = (user?.nombre || "Chófer").trim().split(/\s+/).slice(0,2).map(s=>s[0]).join("").toUpperCase();
   return <>
-    <header className="driver-header"><img src={isDark ? logoWhite : logoDark} alt="TransGest"/><div className="driver-header-tools"><button aria-label="Actualizar información" onClick={onRefresh} disabled={loading}><DriverIcon name="actualizar"/></button><button aria-label="Avisos y rutas" onClick={()=>onNavigate("avisos")}><DriverIcon name="avisos"/>{unread > 0 && <span className="driver-notification-dot"/>}</button><button className="driver-avatar" aria-label="Mis datos" onClick={()=>onNavigate("datos")}>{initials}</button></div></header>
-    <div className="driver-page-heading"><p>Área del chófer</p><h1>{titles[tab] || "Mis viajes"}</h1><span>{user?.nombre}</span></div>
+    <header className="driver-header"><img src={isDark ? logoWhite : logoDark} alt="TransGest"/><div className="driver-header-tools"><button aria-label="Avisos y rutas" onClick={()=>onNavigate("avisos")}><DriverIcon name="avisos"/>{unread > 0 && <span className="driver-notification-dot"/>}</button><button className="driver-avatar" aria-label="Mis datos" onClick={()=>onNavigate("datos")}>{initials}</button></div></header>
+    <div className="driver-page-heading"><h1>{tab==="detalle" ? "Detalle de viaje" : titles[tab] || "Mis viajes"}</h1><span>{user?.nombre}</span></div>
   </>;
 }
 export function DriverNavigation({ tab, onNavigate }) {
@@ -46,7 +49,7 @@ export function DriverHome({ pedidos, jornada, onNavigate, loading, offline, pen
     <p className="driver-sync" role="status">{offline ? "Sin conexión" : "Conexión disponible"} · {pending ? `${pending} acciones pendientes de sincronizar` : "Sin acciones pendientes de sincronizar"}</p>
   </div>;
 }
-export function DriverMore({ tabs, onNavigate, onLogout, onNotifications, notificationPermission }) {
+export function DriverMore({ tabs, onNavigate, onLogout, onNotifications, notificationPermission, onRefresh, loading }) {
   const { toggle, isDark } = useTheme() || {};
-  return <div className="driver-section-shell"><section className="driver-card"><DriverHeading icon="mas" title="Tu espacio">Datos, documentos y preferencias de la app.</DriverHeading><div className="driver-menu">{tabs.map(([id,label])=><button key={id} onClick={()=>onNavigate(id)}><DriverIcon name={id}/><span>{label}</span><span aria-hidden="true">›</span></button>)}<button onClick={toggle}><DriverIcon name="inicio"/><span>{isDark ? "Usar tema claro" : "Usar tema oscuro"}</span></button>{notificationPermission==="default" && <button onClick={onNotifications}><DriverIcon name="avisos"/><span>Activar notificaciones</span></button>}<button className="driver-logout" onClick={onLogout}><DriverIcon name="salir"/><span>Cerrar sesión</span></button></div></section></div>;
+  return <div className="driver-section-shell"><section className="driver-card"><DriverHeading icon="mas" title="Tu espacio">Datos, documentos y preferencias de la app.</DriverHeading><div className="driver-menu"><button onClick={onRefresh} disabled={loading}><DriverIcon name="actualizar"/><span>Actualizar información</span></button>{tabs.map(([id,label])=><button key={id} onClick={()=>onNavigate(id)}><DriverIcon name={id}/><span>{label}</span><span aria-hidden="true">›</span></button>)}<button onClick={toggle}><DriverIcon name="inicio"/><span>{isDark ? "Usar tema claro" : "Usar tema oscuro"}</span></button>{notificationPermission==="default" && <button onClick={onNotifications}><DriverIcon name="avisos"/><span>Activar notificaciones</span></button>}<button className="driver-logout" onClick={onLogout}><DriverIcon name="salir"/><span>Cerrar sesión</span></button></div></section></div>;
 }

@@ -2,6 +2,7 @@ const nodemailer = require("nodemailer");
 const db         = require("./db");
 const logger     = require("./logger");
 const { encryptSecret, decryptSecret, maskSecret } = require("./apiKeys");
+const { emailBrand, transportEmail } = require("./transportEmail");
 
 // ── Transporter ───────────────────────────────────────
 let transporter;
@@ -787,19 +788,22 @@ async function enviarEmail({ trigger, destinatario, plantilla, datos, empresa_id
     return { simulado: true };
   }
 
-  const tmpl = PLANTILLAS[plantilla]?.(datos);
+  const branded = ["invitacion_usuario","colaborador_confirmar","colaborador_carga","colaborador_camino","colaborador_descarga"].includes(plantilla);
+  const company = branded && empresa_id ? (await db.query("SELECT nombre,logo_base64,cfg_precios FROM empresas WHERE id=$1",[empresa_id])).rows[0] : null;
+  const brand = branded ? emailBrand(company || {}) : null;
+  const tmpl = branded ? transportEmail(plantilla,datos,brand) : PLANTILLAS[plantilla]?.(datos);
   if (!tmpl) throw new Error(`Plantilla '${plantilla}' no encontrada`);
 
   try {
     const fromAddress = cfg.smtp_from || cfg.smtp_user;
     const fromName = cfg.smtp_from_nombre || datos?.empresa || "TransGest TMS";
     const info = await getTransporter(cfg, source === "gauna" ? "platform" : "global").sendMail({
-      from:    fromName ? `"${fromName}" <${fromAddress}>` : fromAddress,
-      replyTo: cfg.reply_to || fromAddress,
+      from:    { name: fromName, address: fromAddress },
+      replyTo: source === "empresa" ? (cfg.reply_to || fromAddress) : (brand?.replyTo || cfg.reply_to || fromAddress),
       to:      destinatario,
       subject: tmpl.asunto,
       html:    tmpl.html,
-      attachments: Array.isArray(attachments) ? attachments : [],
+      attachments: [...(Array.isArray(attachments) ? attachments : []), ...(brand?.attachments || [])],
     });
 
     // Log en BD

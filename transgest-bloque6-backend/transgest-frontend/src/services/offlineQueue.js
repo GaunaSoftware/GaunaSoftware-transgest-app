@@ -2,32 +2,44 @@ export const OFFLINE_QUEUE_KEY = "tms_offline_queue";
 const MAX_ITEMS = 150;
 const MAX_ATTEMPTS = 12;
 
-export function readOfflineQueue() {
+export function getOfflineOwner() {
   try {
-    const raw = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
+    const user = JSON.parse(localStorage.getItem("tms_user") || "null");
+    return user?.empresa_id && user?.id ? `${user.empresa_id}:${user.id}` : null;
+  } catch { return null; }
+}
+
+function storageKey(owner) { return `${OFFLINE_QUEUE_KEY}:${owner}`; }
+
+export function readOfflineQueue(owner = getOfflineOwner()) {
+  if (!owner) return [];
+  try {
+    // Legacy unowned actions remain stored, but must never replay under another login.
+    const raw = JSON.parse(localStorage.getItem(storageKey(owner)) || "[]");
     return Array.isArray(raw) ? raw.map(normalizeQueueItem).filter(Boolean) : [];
   } catch {
     return [];
   }
 }
 
-export function writeOfflineQueue(items = []) {
+export function writeOfflineQueue(items = [], owner = getOfflineOwner()) {
+  if (!owner) return [];
   const next = (Array.isArray(items) ? items : [])
     .map(normalizeQueueItem)
     .filter(Boolean)
     .slice(-MAX_ITEMS);
-  localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(next));
-  emitQueueChanged(next);
+  localStorage.setItem(storageKey(owner), JSON.stringify(next));
+  if (owner === getOfflineOwner()) emitQueueChanged(next);
   return next;
 }
 
-export function enqueueOfflineItem(item) {
+export function enqueueOfflineItem(item, owner = getOfflineOwner()) {
   const normalized = normalizeQueueItem(item);
-  if (!normalized) return readOfflineQueue();
-  const current = readOfflineQueue();
+  if (!normalized) return readOfflineQueue(owner);
+  const current = readOfflineQueue(owner);
   const dedupeKey = normalized.dedupe_key || normalized.id;
   const filtered = current.filter(existing => (existing.dedupe_key || existing.id) !== dedupeKey);
-  return writeOfflineQueue([...filtered, normalized]);
+  return writeOfflineQueue([...filtered, normalized], owner);
 }
 
 export function readyOfflineItems(now = Date.now()) {

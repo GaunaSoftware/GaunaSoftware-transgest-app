@@ -1,3 +1,4 @@
+const { assertDriverWorkday } = require('../services/driverWorkday');
 const { calculateCompanyPaymentDate } = require("../services/companyPayment");
 const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
 const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
@@ -5638,54 +5639,9 @@ router.get("/chofer/clientes", async (req, res) => {
     if (req.user?.rol !== "chofer") return res.status(403).json({ error: "Solo app chofer" });
     const empresaId = req.empresaId || req.user.empresa_id;
     const q = String(req.query?.q || "").trim();
-    const access = await getChoferAccessForUser(req.user, empresaId);
-    const ownClauses = [];
-    const ownParams = [empresaId];
-    if (access.choferIds.length) {
-      ownParams.push(access.choferIds);
-      ownClauses.push(`(p.chofer_id = ANY($${ownParams.length}::uuid[]) OR p.chofer2_id = ANY($${ownParams.length}::uuid[]))`);
-    }
-    if (access.vehiculoIds.length) {
-      ownParams.push(access.vehiculoIds);
-      ownClauses.push(`p.vehiculo_id = ANY($${ownParams.length}::uuid[])`);
-    }
-
-    if (!q) {
-      if (!ownClauses.length) return res.json([]);
-      const { rows } = await db.query(
-        `SELECT c.id, c.nombre, c.cif, c.direccion, c.ciudad, c.pais,
-                COUNT(p.id)::int AS cargas_total,
-                MAX(p.fecha_carga) AS ultima_carga,
-                TRUE AS acceso_rapido
-           FROM pedidos p
-           JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
-          WHERE p.empresa_id=$1
-            AND COALESCE(c.activo,true)=true
-            AND p.cliente_id IS NOT NULL
-            AND (${ownClauses.join(" OR ")})
-          GROUP BY c.id
-          ORDER BY COUNT(p.id) DESC, MAX(p.fecha_carga) DESC NULLS LAST, c.nombre ASC
-          LIMIT 8`,
-        ownParams
-      );
-      return res.json(rows);
-    }
-
-    const params = [empresaId, `%${q.toLowerCase()}%`];
-    const { rows } = await db.query(
-      `SELECT c.id, c.nombre, c.cif, c.direccion, c.ciudad, c.pais,
-              COUNT(p.id)::int AS cargas_total,
-              MAX(p.fecha_carga) AS ultima_carga,
-              FALSE AS acceso_rapido
-         FROM clientes c
-         LEFT JOIN pedidos p ON p.cliente_id=c.id AND p.empresa_id=c.empresa_id
-        WHERE c.empresa_id=$1
-          AND COALESCE(c.activo,true)=true
-          AND (LOWER(c.nombre) LIKE $2 OR LOWER(COALESCE(c.cif,'')) LIKE $2)
-        GROUP BY c.id
-        ORDER BY COUNT(p.id) DESC, c.nombre ASC
-        LIMIT 20`,
-      params
+    const {rows}=await db.query(
+      "SELECT id,nombre,cif,direccion,ciudad,pais FROM clientes WHERE empresa_id=$1 AND COALESCE(activo,true)=true AND ($2='' OR nombre ILIKE $3 OR COALESCE(cif,'') ILIKE $3) ORDER BY nombre ASC LIMIT 100",
+      [empresaId,q,'%'+q+'%']
     );
     res.json(rows);
   } catch (e) {
@@ -5713,11 +5669,11 @@ router.get("/chofer/clientes/:clienteId/puntos-carga", async (req, res) => {
         WHERE empresa_id=$1
           AND cliente_id=$2
           AND activo=true
-          AND (tipo='carga' OR tipo='ambos')
+          AND (tipo=$3 OR tipo='ambos')
         ORDER BY CASE WHEN LOWER(COALESCE(metadata->>'pending_review','')) IN ('true','t','1','yes') THEN true ELSE false END DESC,
                  nombre ASC
         LIMIT 100`,
-      [empresaId, clienteId]
+      [empresaId, clienteId, req.query.tipo === "descarga" ? "descarga" : "carga"]
     );
     res.json(rows);
   } catch (e) {
@@ -7821,6 +7777,7 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
       return res.status(403).json({ error: "No puedes modificar este pedido" });
     }
     const patch = normalizeChoferPasosPayload(req.body || {});
+    if(Object.keys(patch).some(key=>!key.startsWith("dcd_") && key!=="updated_at")) await assertDriverWorkday(req);
     const saved = await savePedidoChoferPasos({
       pedidoId: req.params.id,
       empresaId,
@@ -8445,6 +8402,7 @@ router.post("/chofer", async (req, res) => {
     if (req.user?.rol !== "chofer") {
       return res.status(403).json({ error: "Solo la app de chofer puede crear viajes propios desde este endpoint." });
     }
+    await assertDriverWorkday(req);
     await ensureColaboradorWorkflowSchema();
     const empresaId = req.empresaId || req.user.empresa_id;
     const chofer = await resolveChoferPrincipalForUser(req.user, empresaId);
@@ -9060,6 +9018,7 @@ router.patch("/:id/estado",
 
     try {
     const { estado } = req.body;
+    await assertDriverWorkday(req);
     let facturacionMes = null;
     if (estado === "entregado" && req.body.facturacion_mes != null) {
       facturacionMes = normalizePedidoDate(req.body.facturacion_mes);

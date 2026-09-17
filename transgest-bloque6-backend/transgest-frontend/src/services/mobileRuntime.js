@@ -1,6 +1,31 @@
 import { Capacitor } from "@capacitor/core";
 import { Geolocation } from "@capacitor/geolocation";
 import { Network } from "@capacitor/network";
+import { App } from "@capacitor/app";
+import { Browser } from "@capacitor/browser";
+import { Share } from "@capacitor/share";
+
+export async function openMobileDocument(url) {
+  const parsed = new URL(url);
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Enlace de documento no válido.');
+  if (isNativeMobileApp()) return Browser.open({ url: parsed.href });
+  window.open(parsed.href, '_blank', 'noopener,noreferrer');
+}
+
+export async function shareMobileDocument(data) {
+  if (isNativeMobileApp()) return Share.share(data);
+  if (navigator.share) return navigator.share(data);
+  await navigator.clipboard.writeText(data.url);
+  return { copied:true };
+}
+
+export async function listenNativeBack(onBack) {
+  if (!isNativeMobileApp()) return () => {};
+  const listener=await App.addListener('backButton',onBack);
+  return () => listener.remove();
+}
+
+export async function exitMobileApp() { if(isNativeMobileApp()) await App.exitApp(); }
 
 export function isNativeMobileApp() {
   try {

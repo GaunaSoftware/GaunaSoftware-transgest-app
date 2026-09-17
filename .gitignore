@@ -38,6 +38,7 @@ uploads/
 
 # Coverage
 coverage/
+.npm-driver-cache/
 
 # AWS / credentials
 .aws/

@@ -123,7 +123,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
   async function asignar() {
     setError('');
     let prices;
-    try { prices = assignmentPricePatch(sale, modo === 'proveedor' ? purchase : ''); }
+    try { prices = modo === 'proveedor' ? assignmentPricePatch(sale, purchase) : {}; }
     catch (e) { setError(e.message); return; }
     // Proveedor externo: excluyente con la flota propia, asi que se limpia todo
     // lo de transporte propio al asignarlo.
@@ -257,7 +257,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
         </>
         )}
 
-        <fieldset style={{border:'1px solid var(--border2)',borderRadius:8,marginTop:16,padding:12}}>
+        {modo === 'proveedor' && <fieldset style={{border:'1px solid var(--border2)',borderRadius:8,marginTop:16,padding:12}}>
           <legend>Importes del viaje</legend>
           <label style={S.label}>Precio de venta total (€)<input style={S.input} inputMode="decimal" value={sale} placeholder={esBulk?'Conservar el precio de cada pedido':String(pedido?.importe ?? '')} onChange={e=>setSale(e.target.value)}/></label>
           {modo==='proveedor' && <label style={S.label}>Coste total del proveedor (€)<input style={S.input} inputMode="decimal" value={purchase} placeholder={esBulk?'Conservar el coste de cada pedido':String(pedido?.precio_colaborador ?? '')} onChange={e=>setPurchase(e.target.value)}/></label>}
@@ -268,7 +268,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
             if(revenue===null || cost===null || !Number.isFinite(revenue+cost))return <div style={S.ayuda}>Indica venta y coste para calcular el margen.</div>;
             return <div role="status" style={{fontWeight:700,color:revenue<cost?'var(--danger,#c33)':'var(--accent)'}}>Margen sobre transporte: {(revenue-cost).toLocaleString('es-ES',{style:'currency',currency:'EUR'})}{revenue>0?` (${((revenue-cost)/revenue*100).toFixed(1)} %)`:''}<div style={S.ayuda}>Antes de otros costes operativos.</div></div>;
           })()}
-        </fieldset>
+        </fieldset>}
         {error && <div role="alert" style={S.avisoOcupado}>{error}</div>}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>

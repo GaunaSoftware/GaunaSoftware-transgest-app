@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useId, useRef, useState } from "react";
+import { Fragment, forwardRef, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./transgest-ui.css";
 import "./forms.css";
@@ -59,7 +59,7 @@ export function EmptyState({ title = "Sin datos", text, action }) { return <div 
 export function MobileDataCard({ title, amount, subtitle, children, actions }) {
   return <Card className="tgui-mobile-card"><div className="tgui-mobile-card-heading"><strong>{title}</strong><strong className="tgui-number">{amount}</strong></div>{subtitle && <p>{subtitle}</p>}<div className="tgui-mobile-card-body">{children}</div>{actions && <footer className="tgui-actions">{actions}</footer>}</Card>;
 }
-export function DataTable({ rows, columns, renderMobile, rowKey = row => row.id, loading, emptyTitle = "Sin datos", onRowClick, renderGroup, rowClassName, rowId }) {
+export function DataTable({ rows, columns, renderMobile, rowKey = row => row.id, loading, emptyTitle = "Sin datos", onRowClick, renderGroup, rowClassName, rowId, renderExpanded }) {
   if (loading) return <div className="tgui-empty" role="status">Cargando…</div>;
   if (!rows.length) return <EmptyState title={emptyTitle} />;
   return (
@@ -73,9 +73,9 @@ export function DataTable({ rows, columns, renderMobile, rowKey = row => row.id,
             {rows.map(row => row.__group && renderGroup ? (
               <tr key={rowKey(row)}><td colSpan={columns.length}>{renderGroup(row)}</td></tr>
             ) : (
-              <tr key={rowKey(row)} id={rowId?.(row)} className={rowClassName?.(row)} onClick={onRowClick ? () => onRowClick(row) : undefined}>
+              <Fragment key={rowKey(row)}><tr id={rowId?.(row)} className={rowClassName?.(row)} onClick={onRowClick ? () => onRowClick(row) : undefined}>
                 {columns.map(col => <td key={col.key} className={col.className}>{col.render ? col.render(row) : row[col.key]}</td>)}
-              </tr>
+              </tr>{renderExpanded?.(row) && <tr className="tgui-expanded-row"><td colSpan={columns.length}>{renderExpanded(row)}</td></tr>}</Fragment>
             ))}
           </tbody>
         </table>

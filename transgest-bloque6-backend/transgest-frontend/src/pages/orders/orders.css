@@ -146,14 +146,6 @@
 .orders-inline-stops h3 { font-size:12px; margin:0 0 6px; }
 .orders-inline-stops p { white-space:pre-line; overflow-wrap:anywhere; margin:0; }
 .orders-list-card .tgui-expanded-row > td { padding:8px 12px 16px; }
-@container orders-list (max-width:1040px) {
-  .orders-list-card .tgui-desktop-data { display:none; }
-  .orders-list-card .tgui-mobile-data { display:grid; gap:10px; padding:10px; }
-  .orders-list-card .tgui-mobile-card-body { display:grid; gap:8px; }
-  .orders-list-card .orders-row-actions { display:flex; flex-wrap:wrap !important; }
-  .orders-list-card .orders-row-actions .tgui-button { width:auto; }
-  .orders-inline-details dl { grid-template-columns:repeat(2,minmax(0,1fr)); }
-}
 @media(max-width:1199px) {
   .orders-layout,.orders-layout--collapsed { display:flex; flex-direction:column; }
   .orders-main,.orders-aside { width:100%; }
@@ -168,3 +160,6 @@
 }
 
 .orders-list-card .tgui-mobile-card-body > .tgui-badge { justify-self:start; }
+
+/* Panel folding changes available width, never the desktop representation. */
+@media(min-width:768px){.orders-list-card .tgui-table{min-width:1660px}.orders-layout--collapsed .orders-list-card .tgui-table{min-width:1040px}.orders-list-card .tgui-table-wrap{overflow-x:auto}}

@@ -140,7 +140,7 @@ function NuevoViajeChofer({ onCreado, jornadaAbierta, onAbrirJornada }) {
         cliente_id: form.cliente_id,
         origen: form.origen,
         destino: form.destino,
-        notas: "Propuesta desde nuevo viaje DCD.",
+        notas: "Propuesta desde nuevo viaje.",
       });
       notify("Ruta creada y enviada a tráfico para revisar tarifa.", "success");
       const fresh = await getChoferClienteRutas(form.cliente_id).catch(() => []);
@@ -196,7 +196,7 @@ function NuevoViajeChofer({ onCreado, jornadaAbierta, onAbrirJornada }) {
         puntos_descarga:(form.puntos_descarga||[]).map(p=>({...p,fecha:form.fecha_descarga,hora:form.hora_descarga})),
       });
       setCreated(res);
-      notify("Viaje creado con DCD y QR.", "success");
+      notify("Viaje creado. Completa la carga desde Activos.", "success");
       setForm(prev => ({
         ...prev,
         ruta_id: "",
@@ -224,7 +224,7 @@ function NuevoViajeChofer({ onCreado, jornadaAbierta, onAbrirJornada }) {
   return (
     <div className="tg-chofer-section-shell" style={{padding:"12px 16px"}}>
       <div className="tg-chofer-card" style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
-        <DriverHeading icon="nuevo" title="Nuevo viaje DCD"/>
+        <DriverHeading icon="nuevo" title="Nuevo viaje"/>
         <div style={{fontSize:14,color:"var(--text5)",lineHeight:1.4,marginBottom:12}}>Crea un viaje propio para disponer del documento de control digital y su QR.</div>
         <ol className="driver-wizard-steps" aria-label="Pasos del nuevo viaje">{["Datos básicos","Carga y horarios","Revisión"].map((label,i)=><li key={label} aria-current={step===i?"step":undefined}><span>{i+1}</span>{label}</li>)}</ol>
         {!jornadaAbierta && <p className="driver-workday-required" role="status">Para crear el viaje necesitas abrir tu jornada. <button onClick={onAbrirJornada}>Abrir jornada</button></p>}
@@ -305,16 +305,10 @@ function NuevoViajeChofer({ onCreado, jornadaAbierta, onAbrirJornada }) {
         {step===2 && <section className="driver-review"><h3>Revisa el viaje</h3><dl>{[["Cliente",form.cliente_nombre],["Origen",form.origen],["Destino",form.destino],["Carga",[form.fecha_carga,form.hora_carga].filter(Boolean).join(" · ")],["Descarga",[form.fecha_descarga,form.hora_descarga].filter(Boolean).join(" · ")],["Mercancía",form.mercancia],["Peso (kg)",form.peso_kg],["Bultos",form.bultos],["Referencia",form.referencia_cliente],["Notas",form.notas]].map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value||"—"}</dd></div>)}</dl></section>}
         <div className="driver-wizard-actions">{step>0 && <button type="button" onClick={()=>setStep(step-1)} disabled={saving}>Anterior</button>}{step<2 && <button type="button" className="driver-primary" onClick={()=>{if(step===0&&(!form.cliente_id||!form.origen.trim()||!form.destino.trim())){notify("Selecciona un cliente e indica origen y destino.","warning");return;}if(step===1&&(!form.mercancia.trim()||!form.fecha_carga||!form.fecha_descarga||form.fecha_descarga<form.fecha_carga)){notify("Completa mercancía y fechas válidas.","warning");return;}setStep(step+1);}}>Siguiente: {step===0?"Carga y horarios":"Revisión"}</button>}</div>
           <button hidden={step!==2} onClick={guardar} disabled={saving||!jornadaAbierta} style={{padding:"13px",borderRadius:8,border:"none",background:"var(--accent)",color:"#fff",fontSize:14,fontWeight:900,cursor:saving?"default":"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-            {saving ? "Creando..." : "Crear viaje y DCD"}
+            {saving ? "Creando..." : "Crear viaje"}
           </button>
         </div>
-        {created?.documento_control?.qr?.data_url && (
-          <div style={{marginTop:14,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.22)",borderRadius:10,padding:12,textAlign:"center"}}>
-            <div style={{fontSize:14,fontWeight:900,color:"#10b981",marginBottom:8}}>QR generado</div>
-            <img src={created.documento_control.qr.data_url} alt="QR DCD creado" style={{width:190,height:190,objectFit:"contain",background:"#fff",borderRadius:8,padding:8}}/>
-            <div style={{fontSize:14,color:"var(--text5)",marginTop:8}}>El viaje aparece ya en Activos.</div>
-          </div>
-        )}
+        {created&&<p role="status">Viaje creado. Continúa desde Mis viajes.</p>}
       </div>
     </div>
   );

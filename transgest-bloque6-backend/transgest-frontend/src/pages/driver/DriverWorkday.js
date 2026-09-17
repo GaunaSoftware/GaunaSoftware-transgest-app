@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp } from "../../services/api";
+import { iniciarChoferJornada, cambiarChoferJornadaActividad, cerrarChoferJornada, getChoferConjuntoApp, cambiarChoferConjuntoApp, getDriverLocations } from "../../services/api";
 
 
 import { notify } from "../../services/notify";
@@ -9,8 +9,13 @@ import { notify } from "../../services/notify";
 import { DriverHeading } from "./DriverUI";
 
 import { Mini } from "./driverSupport";
-function ConjuntoChofer({ onRefresh }) {
+export function ConjuntoChofer({ onRefresh, jornadaInfo }) {
   const [data, setData] = useState(null);
+  const [km,setKm]=useState("");
+  const [oldKm,setOldKm]=useState("");
+  const [location,setLocation]=useState("");
+  const [locations,setLocations]=useState([]);
+  useEffect(()=>{getDriverLocations().then(setLocations).catch(()=>{});},[]);
   const [vehiculoId, setVehiculoId] = useState("");
   const [remolqueId, setRemolqueId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -42,7 +47,7 @@ function ConjuntoChofer({ onRefresh }) {
   async function guardar() {
     setSaving(true);
     try {
-      await cambiarChoferConjuntoApp({ vehiculo_id: vehiculoId || null, remolque_id: remolqueId || null });
+      await cambiarChoferConjuntoApp({ vehiculo_id: vehiculoId || null, remolque_id: remolqueId || null, km_odometro:km, km_fin_anterior:oldKm, ubicacion:location });
       notify("Conjunto actualizado. Tráfico queda avisado.", "success");
       await load();
       await onRefresh?.();
@@ -78,6 +83,12 @@ function ConjuntoChofer({ onRefresh }) {
               <option key={r.id} value={r.id}>{r.matricula || "Sin matrícula"}</option>
             ))}
           </select>
+          <div className="driver-expense-form">
+            <label>Kilómetros de la tractora seleccionada<input type="number" min="0" step="0.1" value={km} onChange={e=>setKm(e.target.value)}/></label>
+            {jornadaInfo?.jornada && String(vehiculoId)!==String(jornadaInfo.jornada.vehiculo_id) && <label>Kilómetros al dejar la tractora anterior<input type="number" min="0" step="0.1" value={oldKm} onChange={e=>setOldKm(e.target.value)}/></label>}
+            <label>Ubicación del cambio<input list="driver-set-locations" value={location} onChange={e=>setLocation(e.target.value)} placeholder="Madrid, España"/></label>
+            <datalist id="driver-set-locations">{locations.map(l=><option key={l.id} value={`${l.nombre} · ${l.poblacion}, ${l.pais}`}/>)}</datalist>
+          </div>
           <button disabled={saving} onClick={guardar} style={{...S.btn,width:"100%",marginTop:12,background:"var(--accent)",color:"#fff",borderColor:"var(--accent)",opacity:saving?0.65:1}}>
             {saving ? "Guardando..." : "Actualizar conjunto"}
           </button>
@@ -91,8 +102,6 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
   const jornada = jornadaInfo?.jornada || null;
   const chofer = jornadaInfo?.chofer || null;
   const resumen = jornada?.resumen || {};
-  const [confirmed, setConfirmed] = useState(false);
-  useEffect(()=>setConfirmed(false),[chofer?.vehiculo_id,chofer?.vehiculo_remolque_id,jornada?.id]);
   const [kmInicio, setKmInicio] = useState("");
   const [kmFin, setKmFin] = useState("");
   const [haceNoche, setHaceNoche] = useState(false);
@@ -163,7 +172,7 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
     return Math.round(n * 10) / 10;
   }
   function confirmedSet() {
-    if(!confirmed || !chofer?.vehiculo_id) { notify("Selecciona y confirma tu conjunto antes de continuar.", "warning"); return null; }
+    if(!chofer?.vehiculo_id) { notify("Selecciona tu tractora y remolque antes de continuar.", "warning"); return null; }
     return { conjunto_confirmado:true, vehiculo_id:chofer.vehiculo_id, remolque_id:chofer.vehiculo_remolque_id || null };
   }
   async function iniciarJornadaConKm() {
@@ -176,9 +185,9 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
     const km = kmValido(kmFin, "Km cierre");
     if (km == null) return;
     const conjunto=confirmedSet(); if(!conjunto) return;
-    if(km < Number(jornada.km_inicio)+1) { notify("El cierre debe superar a la apertura en al menos 1 km.","warning"); return; }
+    if(km < Number(jornada.km_tramo_inicio??jornada.km_inicio)+1) { notify("El cierre debe superar al inicio del tramo de esta tractora en al menos 1 km.","warning"); return; }
     const ok=await run(()=>cerrarChoferJornada({ ...conjunto, km_fin:km, hace_noche:haceNoche, noche_lugar:nocheLugar||null, notas }));
-    if(ok) { setKmFin("");setKmInicio("");setConfirmed(false);notify("Jornada cerrada y descanso registrado.","success"); }
+    if(ok) { setKmFin("");setKmInicio("");notify("Jornada cerrada y descanso registrado.","success"); }
 
   }
   return (
@@ -213,8 +222,8 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
         )}
         </details>
       </div>
-      <details className="driver-card driver-set-editor"><summary><strong>Mi conjunto</strong><span>{chofer?.vehiculo_matricula || "Selecciona tractora"}{chofer?.remolque_matricula ? " · " + chofer.remolque_matricula : ""}</span><span>Cambiar conjunto</span></summary><ConjuntoChofer onRefresh={onRefresh}/></details>
-      <label className="driver-set-confirm"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/><span>Confirmo que trabajo con {chofer?.vehiculo_matricula || "la tractora seleccionada"}{chofer?.remolque_matricula ? " y el remolque " + chofer.remolque_matricula : " sin remolque"}.</span></label>
+      <details className="driver-card driver-set-editor" open={!jornada}><summary><strong>Mi conjunto</strong><span>{chofer?.vehiculo_matricula || "Selecciona tractora"}{chofer?.remolque_matricula ? " · " + chofer.remolque_matricula : ""}</span><span>Cambiar conjunto</span></summary><ConjuntoChofer onRefresh={onRefresh} jornadaInfo={jornadaInfo}/></details>
+
       {!jornada ? (
         <div className="tg-chofer-card" style={S.card}>
           <DriverHeading icon="jornada" title="Iniciar jornada"/><label style={S.label}>Kilómetros al iniciar</label>
@@ -263,7 +272,7 @@ function JornadaChofer({ jornadaInfo, gpsSeguimientoEstado, onRefresh }) {
               <div style={{display:"grid",gap:7}}>
                 {eventos.slice(-8).reverse().map((ev, idx)=>(
                   <div key={`${ev.at || idx}-${idx}`} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:14,color:"var(--text3)",borderBottom:idx===Math.min(7,eventos.length-1)?"none":"1px solid var(--border)",paddingBottom:6}}>
-                    <span style={{fontWeight:800,color:"var(--text)"}}>{actividadLabel(ev.tipo)}{ev.objetivo_descanso_min ? ` ${fmtMin(ev.objetivo_descanso_min)}` : ""}</span>
+                    <span style={{fontWeight:800,color:"var(--text)"}}>{ev.accion==='cambio_conjunto'?`Cambio de conjunto · ${ev.ubicacion} · ${ev.km_inicio} km`:actividadLabel(ev.tipo)}{ev.objetivo_descanso_min ? ` ${fmtMin(ev.objetivo_descanso_min)}` : ""}</span>
                     <span>{ev.at ? new Date(ev.at).toLocaleString("es-ES",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "-"}</span>
                   </div>
                 ))}

@@ -1,7 +1,7 @@
 const express = require("express");
 const db      = require("../services/db");
 const logger  = require("../services/logger");
-const { authenticate, GERENTE_O_TRAFICO, SOLO_GERENTE } = require("../middleware/auth");
+const { authenticate, GERENTE_O_TRAFICO, SOLO_GERENTE, requireRole } = require("../middleware/auth");
 const { crearNotificacion } = require("../services/notificaciones");
 const { validateBase64Upload } = require("../services/uploadValidation");
 const { validateOdometer, validateConfirmedSet, externalGpsTimestamp, freshGps, workdayError } = require('../services/driverWorkday');
@@ -170,6 +170,8 @@ async function ensureChoferJornadaSchema() {
   `);
   await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_abierta ON chofer_jornadas(empresa_id, chofer_id, estado) WHERE estado='abierta'").catch(failChoferSchema);
   await db.query("CREATE INDEX IF NOT EXISTS idx_chofer_jornadas_fecha ON chofer_jornadas(empresa_id, chofer_id, inicio_at DESC)").catch(failChoferSchema);
+  await db.query("ALTER TABLE chofer_jornadas ADD COLUMN IF NOT EXISTS km_tramo_inicio NUMERIC(12,1)");
+  await db.query("ALTER TABLE chofer_jornadas ADD COLUMN IF NOT EXISTS km_acumulados NUMERIC(12,1) NOT NULL DEFAULT 0");
   jornadaSchemaReady = true;
 }
 
@@ -213,11 +215,11 @@ async function resolveChoferApp(req) {
     params.push(req.user.chofer_id);
     clauses.push(`ch.id=$${params.length}`);
   }
-  if (req.user.email) {
+  if (!req.user.chofer_id && req.user.email) {
     params.push(String(req.user.email).toLowerCase());
     clauses.push(`LOWER(ch.email)=$${params.length}`);
   }
-  if (req.user.nombre) {
+  if (!req.user.chofer_id && !req.user.email && req.user.nombre) {
     params.push(String(req.user.nombre).trim().toLowerCase());
     clauses.push(`LOWER(TRIM(CONCAT(ch.nombre, ' ', COALESCE(ch.apellidos,''))))=$${params.length}`);
     clauses.push(`LOWER(TRIM(ch.nombre))=$${params.length}`);
@@ -489,7 +491,7 @@ async function notifyAsignacionConjunto(empresaId, tipo, titulo, mensaje, data =
   }).catch(() => null)));
 }
 
-async function setChoferConjunto({ empresaId, choferId, vehiculoId = null, remolqueId = null, actorId = null, notify = false }) {
+async function setChoferConjunto({ empresaId, choferId, vehiculoId = null, remolqueId = null, actorId = null, notify = false, cambio = null }) {
   if (!empresaId || !choferId) return null;
   await ensureChoferJornadaSchema();
   const chRes = await db.query(
@@ -537,10 +539,10 @@ async function setChoferConjunto({ empresaId, choferId, vehiculoId = null, remol
     const { rows } = await db.query(
       `SELECT r.*, t.id AS tractora_asignada_id, t.matricula AS tractora_asignada_matricula
          FROM vehiculos r
-         LEFT JOIN vehiculos t ON t.remolque_id=r.id AND t.empresa_id=r.empresa_id AND t.id<>$3 AND t.activo=true
+         LEFT JOIN vehiculos t ON t.remolque_id=r.id AND t.empresa_id=r.empresa_id AND t.id<>$3 AND ($4::uuid IS NULL OR t.id<>$4) AND t.activo=true
         WHERE r.id=$1 AND r.empresa_id=$2 AND r.activo IS DISTINCT FROM false AND r.estado IS DISTINCT FROM 'baja'
         LIMIT 1`,
-      [nextRemolqueId, empresaId, nextVehiculoId]
+      [nextRemolqueId, empresaId, nextVehiculoId, chofer.vehiculo_id]
     );
     remolque = rows[0];
     if (!remolque) {
@@ -559,10 +561,38 @@ async function setChoferConjunto({ empresaId, choferId, vehiculoId = null, remol
     const locked = await client.query('SELECT id, vehiculo_id FROM choferes WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[choferId,empresaId]);
     if (!locked.rows[0]) throw workdayError('Conductor no encontrado.', 404);
     chofer.vehiculo_id = locked.rows[0].vehiculo_id;
-    if(String(chofer.vehiculo_id||'')!==String(nextVehiculoId||'')) {
-      const open=await client.query("SELECT id FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' LIMIT 1",[empresaId,choferId]);
-      if(open.rows.length) throw workdayError('Cierra la jornada de la tractora actual antes de cambiar de vehículo y abre otra con su cuentakilómetros.');
+    const open=(await client.query("SELECT * FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' LIMIT 1 FOR UPDATE",[empresaId,choferId])).rows[0];
+    // Serialize competing assignments to the same tractor/trailer.
+    await client.query('SELECT id FROM vehiculos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',[empresaId,[chofer.vehiculo_id,nextVehiculoId,nextRemolqueId].filter(Boolean)]);
+    if(nextVehiculoId){
+      const busy=(await client.query('SELECT id FROM choferes WHERE empresa_id=$1 AND vehiculo_id=$2 AND id<>$3 AND activo=true',[empresaId,nextVehiculoId,choferId])).rows[0];
+      if(busy)throw workdayError('La tractora acaba de ser asignada a otro conductor.');
     }
+    if(nextRemolqueId){
+      const busy=(await client.query('SELECT id FROM vehiculos WHERE empresa_id=$1 AND remolque_id=$2 AND id<>$3 AND ($4::uuid IS NULL OR id<>$4) AND activo=true',[empresaId,nextRemolqueId,nextVehiculoId,chofer.vehiculo_id])).rows[0];
+      if(busy)throw workdayError('El remolque acaba de ser asignado a otra tractora.');
+    }
+    if(cambio){
+      if(!nextVehiculoId)throw workdayError('Selecciona una tractora.',400);
+      const location=String(cambio.ubicacion||'').trim().slice(0,250);
+      if(!location)throw workdayError('Indica la ubicación del cambio de conjunto.',400);
+      const km=validateOdometer(cambio.km_odometro);
+      const next=(await client.query('SELECT km_actuales FROM vehiculos WHERE id=$1 AND empresa_id=$2',[nextVehiculoId,empresaId])).rows[0];
+      if(next?.km_actuales!=null&&km<Number(next.km_actuales))throw workdayError('Los kilómetros son inferiores a los últimos de esta tractora.',400);
+      if(open){
+        const changed=String(open.vehiculo_id)!==String(nextVehiculoId);
+        const end=changed?validateOdometer(cambio.km_fin_anterior):km;
+        const start=Number(open.km_tramo_inicio??open.km_inicio);
+        if(end<start)throw workdayError('El cierre del tramo no puede ser inferior al inicio.',400);
+        const prev=(await client.query('SELECT km_actuales FROM vehiculos WHERE id=$1 AND empresa_id=$2',[open.vehiculo_id,empresaId])).rows[0];
+        if(prev?.km_actuales!=null&&end<Number(prev.km_actuales))throw workdayError('Revisa los kilómetros de la tractora anterior.',400);
+        await client.query('UPDATE vehiculos SET km_actuales=$1,ubicacion_actual=$2,updated_at=NOW() WHERE id=$3 AND empresa_id=$4',[end,location,open.vehiculo_id,empresaId]);
+        const event={tipo:open.actividad_actual,accion:'cambio_conjunto',at:new Date().toISOString(),vehiculo_anterior_id:open.vehiculo_id,vehiculo_id:nextVehiculoId,remolque_id:nextRemolqueId,km_fin_anterior:end,km_inicio:km,ubicacion:location};
+        await client.query('UPDATE chofer_jornadas SET vehiculo_id=$1,km_tramo_inicio=$2,km_acumulados=km_acumulados+$3,eventos=$4::jsonb,updated_at=NOW() WHERE id=$5 AND empresa_id=$6',[nextVehiculoId,km,end-start,JSON.stringify([...jornadaEventos(open),event]),open.id,empresaId]);
+      }
+      await client.query('UPDATE vehiculos SET km_actuales=$1,ubicacion_actual=$2,updated_at=NOW() WHERE id=$3 AND empresa_id=$4',[km,location,nextVehiculoId,empresaId]);
+    } else if(open&&String(chofer.vehiculo_id||'')!==String(nextVehiculoId||''))throw workdayError('Registra el cambio desde Conjunto en la app, con kilómetros y ubicación.');
+    if(chofer.vehiculo_id&&String(chofer.vehiculo_id)!==String(nextVehiculoId))await client.query('UPDATE vehiculos SET remolque_id=NULL WHERE id=$1 AND empresa_id=$2 AND remolque_id=$3',[chofer.vehiculo_id,empresaId,nextRemolqueId]);
     await client.query("UPDATE vehiculos SET chofer_id=NULL WHERE empresa_id=$1 AND chofer_id=$2", [empresaId, choferId]);
     if (chofer.vehiculo_id && (!nextVehiculoId || String(chofer.vehiculo_id) !== String(nextVehiculoId))) {
       await client.query(
@@ -716,6 +746,8 @@ router.post("/app/firma-base", requireChoferApp, async (req, res) => {
   }
 });
 
+require("../services/driverExpenses").registerRoutes(router,{resolveChoferApp,requireChoferApp,manager:requireRole("gerente","trafico","contable","administrativo","visualizador")});
+
 router.get("/app/conjunto", requireChoferApp, async (req, res) => {
   const empresaId = req.empresaId || req.user?.empresa_id;
   const chofer = await resolveChoferApp(req);
@@ -776,6 +808,7 @@ router.post("/app/conjunto", requireChoferApp, async (req, res) => {
       remolqueId: req.body?.remolque_id || null,
       actorId: req.user?.id || null,
       notify: true,
+      cambio: req.body,
     });
     res.json({ chofer: updated, conjunto: { vehiculo_id: updated?.vehiculo_id || null, remolque_id: updated?.vehiculo_remolque_id || null } });
   } catch (e) {
@@ -1155,7 +1188,7 @@ router.post("/app/jornada/cerrar", requireChoferApp, async (req, res) => {
       const vehicleId=current.vehiculo_id;
       const vehicle=(await tx.query('SELECT id,remolque_id,km_actuales FROM vehiculos WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[vehicleId,empresaId])).rows[0];
       validateConfirmedSet(req.body,vehicleId,vehicle?.remolque_id);
-      const kmFin=validateOdometer(req.body.km_fin,current.km_inicio);
+      const kmFin=validateOdometer(req.body.km_fin,current.km_tramo_inicio??current.km_inicio);
       if(vehicle?.km_actuales!=null && kmFin<Number(vehicle.km_actuales)) throw workdayError('El cierre es inferior al último cuentakilómetros de esta tractora.',400);
       const eventos=[...jornadaEventos(current)],nowIso=new Date().toISOString();
       if(current.actividad_actual!=='descanso') eventos.push({tipo:'descanso',at:nowIso,objetivo_descanso_min:TACOGRAFO.descansoDiarioNormalMin,nota:'Descanso al cerrar jornada'});
@@ -1354,12 +1387,14 @@ router.delete("/:id", SOLO_GERENTE, async (req, res) => {
     await db.query("UPDATE vehiculos SET chofer_id=NULL, updated_at=NOW() WHERE empresa_id=$1 AND id=$2", [empresaId, chofer.vehiculo_id || null]).catch(() => {});
     await db.query("UPDATE usuarios SET chofer_id=NULL WHERE empresa_id=$1 AND chofer_id=$2", [empresaId, choferId]).catch(() => {});
 
-    if (pedidosAsociados > 0) {
+    await require("../services/driverExpenses").ensureSchema();
+    const gastosAsociados = (await db.query('SELECT id FROM chofer_gastos WHERE empresa_id=$1 AND chofer_id=$2 LIMIT 1',[empresaId,choferId])).rows.length;
+    if (pedidosAsociados > 0 || gastosAsociados > 0) {
       const historial = Array.isArray(chofer.historial_laboral) ? chofer.historial_laboral : [];
       const baja = {
         tipo: "baja",
         fecha: new Date().toISOString().slice(0, 10),
-        motivo: "Eliminado desde ficha de chofer; conserva historico por pedidos asociados.",
+        motivo: "Eliminado desde ficha de chofer; conserva histórico por pedidos o gastos asociados.",
         usuario_id: req.user?.id || null,
         created_at: new Date().toISOString(),
       };
@@ -1389,6 +1424,7 @@ router.initializeSchema = async function initializeChoferesSchema() {
   await ensureChoferesTransparencySchema();
   await ensureChoferJornadaSchema();
   await ensureChoferVacacionesSchema();
+  await require("../services/driverExpenses").ensureSchema();
 };
 
 module.exports = router;

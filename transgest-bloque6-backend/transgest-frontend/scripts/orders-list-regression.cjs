@@ -70,7 +70,9 @@ let current={...base,notas:'Nota completa de la prueba',condiciones_adicionales:
     return {overflow:document.documentElement.scrollWidth>innerWidth+1,tableVisible:!!table.getClientRects().length,tableOverflow:table.scrollWidth>table.clientWidth+1,main:main.getBoundingClientRect().right,aside:aside.getBoundingClientRect().left,divider:divider.getBoundingClientRect().left};
    });
    assert.equal(geometry.overflow,false,`${width} viewport overflow`);
-   if(geometry.tableVisible)assert.equal(geometry.tableOverflow,false,`${width} table overflow`);
+   assert.equal(geometry.tableVisible,width>=768,`${width}: folding must preserve table representation`);
+   if(width>=1280&&!folded)assert.equal(geometry.tableOverflow,true,`${width}: expanded panel preserves horizontal table scrolling`);
+   if(width>=1662&&folded)assert.equal(geometry.tableOverflow,false,`${width}: collapsed panel fits columns`);
    if(width>1199&&!folded)assert.ok(geometry.main<=geometry.divider && geometry.divider<geometry.aside);
    await summary().click();await detail.waitFor();assert.ok((await detail.innerText()).includes('Entrega con cita previa'));await summary().click();
    await list.getByRole('heading',{name:'Pedidos / Tráfico',exact:true}).scrollIntoViewIfNeeded();

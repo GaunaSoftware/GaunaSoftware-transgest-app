@@ -1,0 +1,9 @@
+import "../pages/driver/driver-expenses.css";
+import { useEffect, useState } from 'react';
+import { getCompanyDriverLocations, createCompanyDriverLocation, deleteCompanyDriverLocation } from '../services/api';
+export default function DriverLocationsSettings(){
+ const [rows,setRows]=useState([]),[form,setForm]=useState({nombre:'',poblacion:'',provincia:'',pais:'España',es_base:false}),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const load=()=>getCompanyDriverLocations().then(setRows).catch(e=>setError(e.message));useEffect(()=>{load();},[]);
+ async function save(e){e.preventDefault();setBusy(true);setError('');try{await createCompanyDriverLocation(form);setForm({nombre:'',poblacion:'',provincia:'',pais:'España',es_base:false});await load();}catch(e){setError(e.message);}finally{setBusy(false);}}
+ return <section className="driver-card"><h2>Bases y ubicaciones para los chóferes</h2><p>Accesos rápidos para cambios de conjunto y repostajes.</p><form className="driver-expense-form" onSubmit={save}>{[['nombre','Nombre'],['poblacion','Población'],['provincia','Provincia'],['pais','País']].map(([k,l])=><label key={k}>{l}<input required={k!=='provincia'} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}<label>Tipo<select aria-label="Tipo" value={form.es_base?'base':'ubicacion'} onChange={e=>setForm({...form,es_base:e.target.value==='base'})}><option value="ubicacion">Ubicación habitual</option><option value="base">Base de la empresa</option></select></label><button disabled={busy}>Guardar ubicación</button></form>{error&&<p role="alert">{error}</p>}<div className="driver-expense-list">{rows.map(r=><article key={r.id}>{r.nombre} · {r.poblacion}, {r.pais} {r.es_base?'· Base':''}<button type="button" onClick={async()=>{try{await deleteCompanyDriverLocation(r.id);await load();}catch(e){setError(e.message);}}}>Retirar de accesos rápidos</button></article>)}</div></section>;
+}

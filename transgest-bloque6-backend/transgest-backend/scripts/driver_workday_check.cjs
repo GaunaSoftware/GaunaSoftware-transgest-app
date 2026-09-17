@@ -16,7 +16,7 @@ async function main(){
  const scope={...helpers,db,router,Date,requireChoferApp:()=>{},ensureChoferJornadaSchema:async()=>{},resolveChoferApp:async req=>(await db.query('SELECT id,vehiculo_id FROM choferes WHERE id=$1 AND empresa_id=$2',[driver,req.empresaId])).rows[0],serializeJornada:x=>x,jornadaEventos:x=>x.eventos||[],normalizeActividad:x=>x,diffMinutes:(a,b)=>Math.max(0,(Date.parse(b)-Date.parse(a))/60000),TACOGRAFO:{descansoDiarioReducidoMin:540,descansoDiarioNormalMin:660}};
  for(const [start,end]of [['router.post("/app/jornada/iniciar"','router.post("/app/jornada/actividad"'],['router.post("/app/jornada/cerrar"','router.get("/:id"']])vm.runInNewContext(source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start))),scope);
  const call=async(name,body,empresaId=company)=>{const res={code:200,status(n){this.code=n;return this;},json(x){this.data=x;return this;}};await handlers['/app/jornada/'+name]({empresaId,user:{id:user,empresa_id:empresaId,rol:'chofer'},body},res);return res;};
- const rig={conjunto_confirmado:true,vehiculo_id:vehicle,remolque_id:null};
+ const rig={vehiculo_id:vehicle,remolque_id:null};
  assert.equal((await call('iniciar',{km_inicio:100})).code,400);
  assert.equal((await call('iniciar',{...rig,km_inicio:99})).code,400);
  assert.equal((await call('iniciar',{...rig,km_inicio:100},other)).code,404);

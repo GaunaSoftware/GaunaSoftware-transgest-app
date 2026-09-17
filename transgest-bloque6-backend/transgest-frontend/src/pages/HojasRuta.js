@@ -1,3 +1,5 @@
+import DriverExpenseReview from "./personnel/DriverExpenseReview";
+import { getVehicleDriverExpenses } from "../services/api";
 import { PersonnelHeader, RouteSheetsOverview } from "./personnel/PersonnelWorkspace";
 import { getLogoDataUrl } from "../services/logoHelper";
 import { useState, useEffect, useCallback } from "react";
@@ -364,6 +366,8 @@ export default function HojasRuta(){
   const [litrosSel,setLitrosSel]=useState(0);
   const [nochesSel,setNochesSel]=useState(0);    // total importe noches
   const [nochesCount,setNochesCount]=useState(0); // número de noches
+  const [driverExpenses,setDriverExpenses]=useState([]);
+  const [expensesError,setExpensesError]=useState("");
   const [repostajesPeriodo,setRepostajesPeriodo]=useState([]);
   const [nochesPeriodo,setNochesPeriodo]=useState([]);
   const [gasoilCfgData,setGasoilCfgData]=useState({tipo:'fijo',precio_fijo:1.65,periodos:[]});
@@ -424,6 +428,17 @@ export default function HojasRuta(){
     });
   },[vehiculoSel,fechaDesde,fechaHasta,cfgV]);
 
+  useEffect(()=>{
+    if(!vehiculoSel)return;
+    let alive=true;setDriverExpenses([]);setExpensesError('');
+    getVehicleDriverExpenses(vehiculoSel,fechaDesde,fechaHasta).then(rows=>{if(alive)setDriverExpenses(rows);}).catch(e=>{if(alive)setExpensesError(e.message);});
+    return()=>{alive=false;};
+  },[vehiculoSel,fechaDesde,fechaHasta,cfgV]);
+  const gastosRegistrados = driverExpenses.filter(x=>x.estado==='registrado');
+  const gastosCombustible = gastosRegistrados.filter(x=>x.tipo==='gasoil');
+  const gastosDietas = gastosRegistrados.filter(x=>x.tipo==='dieta');
+  const litrosTotales = litrosSel+gastosCombustible.reduce((t,x)=>t+Number(x.litros||0),0);
+  const dietasTotales = nochesCount+gastosDietas.length;
   const vehiculo=vehiculos.find(v=>v.id===vehiculoSel);
   const chofer=vehiculo?choferes.find(c=>c.vehiculo_id===vehiculo.id||c.id===vehiculo.chofer_id):null;
   const choferExt = useChoferConfig(chofer?.id);
@@ -453,11 +468,11 @@ export default function HojasRuta(){
       const importe=Number(x.importe||0);
       if(importe>0) return s+importe;
       const precio=Number(x.precio_litro||0);
-      return precio>0 ? s+(Number(x.litros||0)*precio) : s;
+      return s+Number(x.litros||0)*(precio>0?precio:precioLitro);
     },0);
-    const costeGasoil=costeGasoilReal>0?costeGasoilReal:litrosSel*precioLitro;
+    const costeGasoil=(costeGasoilReal>0?costeGasoilReal:litrosSel*precioLitro)+gastosCombustible.reduce((t,x)=>t+Number(x.importe||0),0);
     const costeTaller=taller.reparaciones.filter(r=>r.vehiculo_id===vehiculo.id&&r.fecha>=fechaDesde&&r.fecha<=fechaHasta).reduce((s,r)=>s+Number(r.coste_total||0),0);
-    const costeNoches=nochesSel;
+    const costeNoches=nochesSel+gastosDietas.reduce((t,x)=>t+Number(x.importe||0),0);
     const salarioBase=nominaEmitida?Number(nominaEmitida.salario_base||0):Number(choferExt.salario_base||0);
     const ssTrabajador=nominaEmitida?Number(nominaEmitida.ss_trabajador||0):salarioBase*0.0655;
     const ssEmpresa=nominaEmitida?Number(nominaEmitida.ss_empresa||0):salarioBase*0.2940;
@@ -489,12 +504,12 @@ export default function HojasRuta(){
     w.document.write("<div style='display:flex;justify-content:space-between;margin-bottom:16px'><div>"+(getLogoDataUrl()?`<img src='${getLogoDataUrl()}' style='max-height:44px;max-width:140px;object-fit:contain;margin-bottom:4px;display:block;' alt='Logo'/>`:"")+"<h1>HOJA DE RUTA - "+vehiculo.matricula+"</h1><div>"+vehiculo.marca+" "+vehiculo.modelo+" - Periodo: "+fechaDesde+" a "+fechaHasta+"</div></div><div style='text-align:right;font-size:11px;color:#555'><div style='font-weight:bold;font-size:14px'>"+(empresa.razon_social||"EMPRESA")+"</div><div>Generado: "+new Date().toLocaleDateString("es-ES")+"</div></div></div>");
     if(chofer) w.document.write("<div style='background:#f0f4ff;border:1px solid #c7d5f8;padding:8px 12px;margin-bottom:14px;font-size:11px'>Chofer: <strong>"+chofer.nombre+" "+(chofer.apellidos||"")+"</strong>"+(choferExt.salario_base?" - Salario: <strong>"+fmt2(choferExt.salario_base)+" EUR</strong>":"")+(choferExt.incentivo_pct?" - Incentivo: <strong>"+choferExt.incentivo_pct+"%</strong>":"")+"</div>");
     w.document.write("<div style='margin-bottom:16px'>");
-    [["Viajes",hoja.viajes,""],["Km cargado",fmtN(hoja.kmCargado),"km"],["Km vacio",fmtN(hoja.kmVacio),"km"],["Gasoil",fmtN(litrosSel),"L"],["Ingresos",fmt2(hoja.ingresos),"EUR"],["Margen",fmt2(hoja.margen),"EUR"]].forEach(function(k){w.document.write("<div class='kpi'><div class='kpi-val'>"+k[1]+" "+k[2]+"</div><div class='kpi-lbl'>"+k[0]+"</div></div>");});
+    [["Viajes",hoja.viajes,""],["Km cargado",fmtN(hoja.kmCargado),"km"],["Km vacio",fmtN(hoja.kmVacio),"km"],["Gasoil",fmtN(litrosTotales),"L"],["Ingresos",fmt2(hoja.ingresos),"EUR"],["Margen",fmt2(hoja.margen),"EUR"]].forEach(function(k){w.document.write("<div class='kpi'><div class='kpi-val'>"+k[1]+" "+k[2]+"</div><div class='kpi-lbl'>"+k[0]+"</div></div>");});
     w.document.write("</div><h3 style='font-size:12px;text-transform:uppercase;color:#555;margin:14px 0 6px 0'>Viajes del periodo</h3>");
     w.document.write("<table><thead><tr><th>N Pedido</th><th>Fecha</th><th>Origen</th><th>Destino</th><th>Cliente</th><th>Km</th><th>Importe</th></tr></thead><tbody>");
     hoja.pedVeh.forEach(function(p){w.document.write("<tr><td>"+p.numero+"</td><td>"+(p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"")+"</td><td>"+(p.origen||"")+"</td><td>"+(p.destino||"")+"</td><td>"+(p.cliente_nombre||"")+"</td><td style='text-align:right'>"+fmtN(p.km_ruta||p.km||0)+"</td><td style='text-align:right'>"+fmt2(p.importe||0)+" EUR</td></tr>");});
     w.document.write("</tbody></table><h3 style='font-size:12px;text-transform:uppercase;color:#555;margin:14px 0 6px 0'>Resumen de costes</h3><div style='max-width:400px'>");
-    w.document.write("<div class='resumen-row'><span>Gasoil ("+fmtN(litrosSel)+" L x "+fmt2(hoja.precioLitro)+" EUR/L)</span><span>"+fmt2(hoja.costeGasoil)+" EUR</span></div>");
+    w.document.write("<div class='resumen-row'><span>Gasoil ("+fmtN(litrosTotales)+"  L; importes registrados o precio configurado)</span><span>"+fmt2(hoja.costeGasoil)+" EUR</span></div>");
     w.document.write("<div class='resumen-row'><span>Mantenimiento / Taller</span><span>"+fmt2(hoja.costeTaller)+" EUR</span></div>");
     w.document.write("<div class='resumen-row'><span>Noches / Dietas</span><span>"+fmt2(hoja.costeNoches)+" EUR</span></div>");
     w.document.write("<div class='resumen-row'><span>Salario base chofer</span><span>"+fmt2(hoja.salarioBase)+" EUR</span></div>");
@@ -542,6 +557,8 @@ export default function HojasRuta(){
 
       {!loading&&vehiculo&&detalleAbierto&&(
         <>
+          {expensesError&&<p role="alert">No se han cargado los gastos de la app. Los totales están incompletos: {expensesError}</p>}
+          <DriverExpenseReview rows={driverExpenses} onRefresh={recargar}/>
           <div className="personnel-card personnel-responsive-flex" style={{...S.card,display:"flex",gap:28,flexWrap:"wrap",alignItems:"center",marginBottom:10,minHeight:70}}>
             <div style={{paddingRight:28,borderRight:"1px solid var(--border)"}}>
               <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:22,color:"var(--text)"}}>{vehiculo.matricula}</div>
@@ -567,14 +584,14 @@ export default function HojasRuta(){
           {tab==="hoja"&&hoja&&(
             <>
               <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(165px,1fr))",gap:14,marginBottom:18}}>
-                {[["Viajes",hoja.viajes,"","var(--accent)"],["Km cargado",fmtN(hoja.kmCargado),"km","#10b981"],["Km vacío",fmtN(hoja.kmVacio),"km","#f59e0b"],["Km pagados",fmtN(hoja.kmRetribuidos),"km","#0ea5e9"],["Gasoil",fmtN(litrosSel),"L","#f97316"],["Dietas",nochesCount,"reg.","#a78bfa"],["Disponibilidad",fmt2(hoja.disponibilidad),"€","#6366f1"],["Ingresos",fmt2(hoja.ingresos),"€","#10b981"],["Costes totales",fmt2(hoja.totalCostes),"€","#ef4444"],["Margen bruto",fmt2(hoja.margen),"€",hoja.margen>=0?"#10b981":"#ef4444"],["€/km (ing.)",fmt2(hoja.eurosKmIngresos),"€/km","#8b5cf6"],["€/km (margen)",fmt2(hoja.eurosKmMargen),"€/km",hoja.eurosKmMargen>=0?"#10b981":"#ef4444"],["€/km (coste)",fmt2(hoja.eurosKmCostes),"€/km","#f97316"]].map(([l,v,u,c])=>(
+                {[["Viajes",hoja.viajes,"","var(--accent)"],["Km cargado",fmtN(hoja.kmCargado),"km","#10b981"],["Km vacío",fmtN(hoja.kmVacio),"km","#f59e0b"],["Km pagados",fmtN(hoja.kmRetribuidos),"km","#0ea5e9"],["Gasoil",fmtN(litrosTotales),"L","#f97316"],["Dietas",dietasTotales,"reg.","#a78bfa"],["Disponibilidad",fmt2(hoja.disponibilidad),"€","#6366f1"],["Ingresos",fmt2(hoja.ingresos),"€","#10b981"],["Costes totales",fmt2(hoja.totalCostes),"€","#ef4444"],["Margen bruto",fmt2(hoja.margen),"€",hoja.margen>=0?"#10b981":"#ef4444"],["€/km (ing.)",fmt2(hoja.eurosKmIngresos),"€/km","#8b5cf6"],["€/km (margen)",fmt2(hoja.eurosKmMargen),"€/km",hoja.eurosKmMargen>=0?"#10b981":"#ef4444"],["€/km (coste)",fmt2(hoja.eurosKmCostes),"€/km","#f97316"]].map(([l,v,u,c])=>(
                   <RouteKpi key={l} label={l} value={v} unit={u} color={c} icon={l==="Gasoil"?"fuel":l==="Ingresos"||l==="Disponibilidad"?"money":String(l).includes("Margen")||String(l).includes("km")?"trend":l==="Viajes"?"truck":"doc"} />
                 ))}
               </div>
               <div className="personnel-card" style={{...S.card,padding:"20px 24px"}}>
                 <div style={{fontWeight:900,fontSize:13,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".04em",marginBottom:14}}>Desglose de costes</div>
                 <div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse"}}><tbody>
-                  {[["Gasoil",repostajesPeriodo.some(r=>Number(r.importe||0)>0||Number(r.precio_litro||0)>0)?fmtN(litrosSel)+"L con precio real":fmtN(litrosSel)+"L x "+fmt2(hoja.precioLitro)+" EUR/L",fmt2(hoja.costeGasoil)],["Taller / Mantenimiento","",fmt2(hoja.costeTaller)],["Dietas / manutención",nochesCount+" registro(s)",fmt2(hoja.costeNoches)],["Km retribuidos",fmtN(hoja.kmRetribuidos)+" km x "+fmt2(choferExt.precio_km||0)+" EUR/km",fmt2(hoja.pagoKm)],["Disponibilidad pactada",hoja.diasActivos+" dia(s) + mensual",fmt2(hoja.disponibilidad)],["Salario base chofer","",fmt2(hoja.salarioBase)],["SS empresa","",fmt2(hoja.ssEmpresa)],...(hoja.incentivo>0?[["Incentivo",hoja.incentivoPct+"% x "+fmt2(hoja.ingresos)+" EUR",fmt2(hoja.incentivo)]]:[] )].map(([l,d,v])=>(
+                  {[["Gasoil",fmtN(litrosTotales)+" L; importes registrados o precio configurado",fmt2(hoja.costeGasoil)],["Taller / Mantenimiento","",fmt2(hoja.costeTaller)],["Dietas / manutención",dietasTotales+" registro(s)",fmt2(hoja.costeNoches)],["Km retribuidos",fmtN(hoja.kmRetribuidos)+" km x "+fmt2(choferExt.precio_km||0)+" EUR/km",fmt2(hoja.pagoKm)],["Disponibilidad pactada",hoja.diasActivos+" dia(s) + mensual",fmt2(hoja.disponibilidad)],["Salario base chofer","",fmt2(hoja.salarioBase)],["SS empresa","",fmt2(hoja.ssEmpresa)],...(hoja.incentivo>0?[["Incentivo",hoja.incentivoPct+"% x "+fmt2(hoja.ingresos)+" EUR",fmt2(hoja.incentivo)]]:[] )].map(([l,d,v])=>(
                     <tr key={l}><td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{l}</td><td style={{...S.td,color:"var(--text5)",fontSize:12}}>{d}</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--text)"}}>{v} EUR</td></tr>
                   ))}
                   <tr style={{background:"linear-gradient(90deg, rgba(239,68,68,.09), rgba(239,68,68,.04))"}}><td style={{...S.td,fontWeight:900,color:"#ef4444"}} colSpan={2}>TOTAL COSTES</td><td style={{...S.td,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,fontSize:15,color:"#ef4444"}}>{fmt2(hoja.totalCostes)} EUR</td></tr>
@@ -608,7 +625,7 @@ export default function HojasRuta(){
                 </div>
               </div>
               <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
-                {[["Litros periodo",fmtN(litrosSel)+" L","#f97316"],["Precio aplicado",fmt2(precioCombDia(fechaDesde,gasoilCfg))+" EUR/L","var(--green)"],["Coste total gasoil",fmt2(hoja?.costeGasoil||0)+" EUR","var(--red)"]].map(([l,v,c])=>(
+                {[["Litros periodo",fmtN(litrosTotales)+" L","#f97316"],["Precio para registros sin importe",fmt2(precioCombDia(fechaDesde,gasoilCfg))+" EUR/L","var(--green)"],["Coste total gasoil",fmt2(hoja?.costeGasoil||0)+" EUR","var(--red)"]].map(([l,v,c])=>(
                   <div key={l} style={{background:"var(--bg3)",borderRadius:8,padding:"12px 16px",textAlign:"center"}}>
                     <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:18,color:c}}>{v}</div>
                     <div style={{fontSize:12,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".06em"}}>{l}</div>

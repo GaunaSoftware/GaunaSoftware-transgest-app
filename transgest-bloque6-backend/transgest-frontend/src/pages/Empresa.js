@@ -1,3 +1,4 @@
+import DriverLocationsSettings from "../components/DriverLocationsSettings";
 import { PAYMENT_METHODS, validateCompanyPaymentSettings, formatCompanyPaymentTerms } from "../utils/companyPayment";
 import { useState, useEffect, useCallback } from "react";
 import { getEmpresa, saveEmpresa, getEmpresaBackend, saveEmpresaBackend, getEmailConfig, saveEmailConfig, getEmailConfigBackend, saveEmailConfigBackend, getEmailLogBackend, getEmpresaConfig, setConfigTrafico, setConfigPrecios, setConfigAlertas, getLogo, subirLogo, eliminarLogo, getEmpresaFiscalConfig, saveEmpresaFiscalConfig, testEmpresaFiscalConfig, getEmpresaFiscalQueueSummary, getEmpresaIntegracionesStatus, getPuestaMarchaComercial, descargarPuestaMarchaInforme, getJornadaDiariaOperativa, descargarJornadaDiariaInforme, solicitarBackupEmpresa, getControlCobrosConfig, guardarControlCobrosConfig, actualizarCapitalTesoreria, getCalendarioLaboral, getCalendarioLaboralCcaa, getToken, getWhatsappConfig, guardarWhatsappConfig, getWhatsappLog } from "../services/api";
@@ -797,6 +798,8 @@ export default function Empresa() {
         )}
       </div>
       <div style={S.sub}>Datos fiscales y configuración - alimentan todas las facturas y comunicaciones</div>
+
+      <DriverLocationsSettings/>
 
       {/* ── Logo de empresa ────────────────────────────────────────── */}
       <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"16px 18px",marginBottom:16}}>

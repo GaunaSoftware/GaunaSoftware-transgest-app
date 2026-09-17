@@ -2360,7 +2360,7 @@ function RutaMapaVisual({ plan, remotePlan, onPreferencia, estado }) {
   return <section style={{border:'1px solid var(--border)',borderRadius:10,padding:12,marginBottom:14}}>
     <div className="traffic-responsive-flex" style={{display:'flex',justifyContent:'space-between',gap:12,marginBottom:12}}>
       <div><strong>Mapa de la ruta</strong><p style={{fontSize:12,color:'var(--text3)',margin:'6px 0'}}>{geometry.length>1 ? `Recorrido por carretera · ${remotePlan?.provider_label || 'Ruta calculada'}` : 'Sin trazado por carretera. Calcula la ruta para mostrar el recorrido; los puntos indican las paradas localizadas.'}</p></div>
-      <div style={{display:'flex',gap:8,alignItems:'start'}}><button type="button" onClick={()=>onPreferencia('rapida')}>Alternativa rápida</button><button type="button" onClick={()=>onPreferencia('eficiente')}>Alternativa eficiente</button></div>
+      <div style={{display:'flex',gap:8,alignItems:'start'}}><button type="button" className="tgui-button" onClick={()=>onPreferencia('rapida')}>Alternativa rápida</button><button type="button" className="tgui-button" onClick={()=>onPreferencia('eficiente')}>Alternativa eficiente</button></div>
     </div>
     {remotePlan && !remotePlan.truck_aware && <p style={{fontSize:12,color:'var(--text3)'}}>Ruta orientativa: este proveedor no comprueba restricciones de peso, altura o circulación de camiones.</p>}
     <RouteMapCanvas points={points} geometry={geometry}/>

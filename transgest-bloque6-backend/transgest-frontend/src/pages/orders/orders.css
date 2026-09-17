@@ -106,3 +106,5 @@
 .orders-info-trigger:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
 .orders-stop-count { display:table; margin-top:4px; padding:1px 6px; border:1px solid var(--accent-border,var(--border)); border-radius:5px; background:var(--accent-a10); color:var(--accent-xl,var(--accent)); font-size:10px; font-weight:600; white-space:nowrap; }
 .orders-info-popup { position:fixed; z-index:2100; box-sizing:border-box; padding:12px 14px; border:1px solid var(--border2); border-radius:8px; background:var(--bg2); color:var(--text); box-shadow:var(--shadow); font:12px/1.6 'DM Sans',sans-serif; white-space:pre-line; overflow-wrap:anywhere; max-height:min(320px,calc(100dvh - 24px)); overflow-y:auto; }
+
+.orders-assignment-summary{display:block;margin-top:5px;color:var(--accent-xl,var(--accent));font-size:11px;line-height:1.5;overflow-wrap:break-word}

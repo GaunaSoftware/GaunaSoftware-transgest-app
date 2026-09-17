@@ -1,4 +1,27 @@
 const clean = value => String(value || '').trim();
+export function stopSchedule(stop = {}) {
+  const day = clean(stop.fecha).slice(0,10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.split('-').reverse().join('/') : day;
+  const window = clean(stop.ventana) || [stop.ventana_inicio,stop.ventana_fin].filter(Boolean).map(v=>String(v).slice(0,5)).join('–');
+  return [date,clean(stop.hora).slice(0,5),window && `Ventana: ${window}`].filter(Boolean).join(' · ');
+}
+export function assignDriver(form, id, drivers, vehicles) {
+  const selected = drivers.find(d=>String(d.id)===String(id));
+  const previous = drivers.find(d=>String(d.id)===String(form.chofer_id));
+  const linked = d => d && (vehicles.find(v=>String(v.id)===String(d.vehiculo_id)) || vehicles.find(v=>String(v.chofer_id)===String(d.id)));
+  const truck = linked(selected), oldTruck = linked(previous);
+  const replaceTruck = !form.vehiculo_id || form.vehiculo_id === oldTruck?.id;
+  const targetTruck = replaceTruck ? truck : vehicles.find(v=>v.id===form.vehiculo_id);
+  const replaceTrailer = !form.remolque_id_manual || form.remolque_id_manual === (previous?.remolque_id || oldTruck?.remolque_id);
+  return {...form,chofer_id:id,
+    ...(id ? {
+      vehiculo_id: replaceTruck ? truck?.id || '' : form.vehiculo_id,
+      remolque_id_manual: replaceTrailer ? ((targetTruck === truck ? selected?.remolque_id : '') || targetTruck?.remolque_id || '') : form.remolque_id_manual,
+      colaborador_id:'',colaborador_nombre:'',precio_cliente_col:'',precio_colaborador:'',precio_colaborador_unitario:'',minimo_colaborador_unidades:'',
+      ...(targetTruck ? {matricula_manual:'',remolque_matricula_manual:''} : {}),
+    } : {}),
+  };
+}
 export function driverName(driver = {}, order = {}) {
   const alias = clean(driver.alias || order.chofer_alias);
   if (alias) return alias;

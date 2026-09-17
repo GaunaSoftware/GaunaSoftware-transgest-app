@@ -7775,7 +7775,7 @@ router.get("/:id/eventos", async (req, res) => {
     }
     const { rows } = await db.query(
       `SELECT pe.id,pe.tipo,pe.actor_tipo,pe.actor_id,pe.detalle,pe.created_at,
-              COALESCE(NULLIF(TRIM(CONCAT(u.nombre,' ',u.apellidos)),''), u.nombre, u.email) AS actor_nombre,
+              COALESCE(NULLIF(TRIM(CONCAT(u.nombre,' ',to_jsonb(u)->>'apellidos')),''), u.nombre, u.email) AS actor_nombre,
               u.email AS actor_email,
               u.rol AS actor_rol
          FROM pedido_eventos pe

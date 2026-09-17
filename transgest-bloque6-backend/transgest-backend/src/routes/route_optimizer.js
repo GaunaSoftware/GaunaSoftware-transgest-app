@@ -450,7 +450,7 @@ async function routeLocal(stops, googleKey) {
   let data;
   try {
     data = await fetchJson(
-      `https://router.project-osrm.org/route/v1/driving/${coordinates.map(([lon, lat]) => `${lon},${lat}`).join(";")}?overview=false&steps=true`
+      `https://router.project-osrm.org/route/v1/driving/${coordinates.map(([lon, lat]) => `${lon},${lat}`).join(";")}?overview=full&geometries=geojson&steps=true`
     );
   } catch (e) {
     return estimatedRouteFromCoordinates(coordinates, stops, e.message);
@@ -464,7 +464,7 @@ async function routeLocal(stops, googleKey) {
     distance_km: route.distance ? Math.round(Number(route.distance) / 1000) : null,
     duration_min: route.duration ? Math.round(Number(route.duration) / 60) : null,
     waypoint_coordinates: coordinates.map(([lon, lat], idx) => ({ idx, lon, lat, address: stops[idx]?.address || "" })),
-    geometry: null,
+    geometry: route.geometry || null,
     steps: (route.legs || []).flatMap(l => l.steps || []).slice(0, 80),
   };
 }

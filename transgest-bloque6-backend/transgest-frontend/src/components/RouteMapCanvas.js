@@ -14,7 +14,7 @@ const style = key
   : "https://tiles.openfreemap.org/styles/liberty";
 const empty = { type: "FeatureCollection", features: [] };
 
-export default function RouteMapCanvas({ points, geometry, vehicle, stableFrame = false }) {
+export default function RouteMapCanvas({ points = [], geometry = [], vehicle, stableFrame = false }) {
   const container = useRef(null);
   const mapRef = useRef(null);
   const fitRef = useRef(() => {});

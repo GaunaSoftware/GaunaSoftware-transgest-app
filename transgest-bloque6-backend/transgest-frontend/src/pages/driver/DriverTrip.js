@@ -24,6 +24,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const kmActuales = ""; // Odometer entry belongs to the workday. Preserve historical trip readings.
   const [pasos,        setPasos]        = useState({});
   const [tick,         setTick]         = useState(0);
+  const cargaFinalizada = !!pasos.carga_ok;
   const [docControl,   setDocControl]   = useState(null);
   const [docControlLoading, setDocControlLoading] = useState(false);
   const [choferDocs,   setChoferDocs]   = useState([]);
@@ -80,6 +81,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   const cargarDocumentoControl = useCallback(async () => {
+    if(!cargaFinalizada)return null;
     setDocControlLoading(true);
     try {
       const data = await getPedidoDocumentoControl(pedido.id);
@@ -91,14 +93,14 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     } finally {
       setDocControlLoading(false);
     }
-  }, [pedido.id]);
+  }, [pedido.id,cargaFinalizada]);
 
   useEffect(() => {
     let alive = true;
-    if (!expanded) return undefined;
+    if (!expanded || !cargaFinalizada) return undefined;
     cargarDocumentoControl().then(data => { if (!alive) return; if (data) setDocControl(data); });
     return () => { alive = false; };
-  }, [expanded, cargarDocumentoControl]);
+  }, [expanded, cargaFinalizada, cargarDocumentoControl]);
 
   const docControlSupportUrl = docControl?.documento?.soporte_url || docControl?.soporte_url || "";
   const dcd = docControl?.documento || null;
@@ -809,7 +811,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
             </div>
           )}
 
-          <div style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:12}}>
+          {cargaFinalizada && <div className="driver-dcd-panel" style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:12}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
               <div>
                 <div style={{fontSize:14,fontWeight:900,color:"var(--text)"}}>Documento de control digital</div>
@@ -901,7 +903,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                 {docControlSupportUrl && <DriverDcdActions onView={()=>abrirDocumentoControl(false)} onQr={verQrDocumentoControl} onShare={compartirDocumentoControl} onPrint={()=>abrirDocumentoControl(true)} onDownload={descargarDocumentoControl} onReview={marcarDcdRevisado} reviewed={dcdOperativoOk}/>}
               </>
             )}
-          </div>
+          </div>}
 
           <details className="driver-map-disclosure"><summary>Mapa, paradas y posición del vehículo</summary><DriverTripMap pedido={pedido} pasos={pasos} chofer={jornadaInfo?.chofer}/></details>
 

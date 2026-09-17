@@ -16,8 +16,8 @@ function validateOdometer(value, start = null) {
 }
 
 function validateConfirmedSet(body, vehicleId, trailerId) {
-  if (!vehicleId || body.conjunto_confirmado !== true || String(body.vehiculo_id || '') !== String(vehicleId) || String(body.remolque_id || '') !== String(trailerId || '')) {
-    throw workdayError('Revisa y confirma la tractora y el remolque de la jornada antes de continuar.', 400);
+  if (!vehicleId || String(body.vehiculo_id || '') !== String(vehicleId) || String(body.remolque_id || '') !== String(trailerId || '')) {
+    throw workdayError('Selecciona la tractora y el remolque actuales antes de continuar.', 400);
   }
 }
 

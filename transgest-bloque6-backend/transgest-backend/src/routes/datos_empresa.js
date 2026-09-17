@@ -1312,8 +1312,8 @@ router.get("/chofer-jornadas/:chofer_id", async (req,res) => {
       SELECT j.*,
              v.matricula AS vehiculo_matricula,
              CASE
-               WHEN j.km_inicio IS NOT NULL AND j.km_fin IS NOT NULL AND j.km_fin >= j.km_inicio
-               THEN j.km_fin - j.km_inicio
+               WHEN j.km_inicio IS NOT NULL AND j.km_fin IS NOT NULL AND j.km_fin >= COALESCE(j.km_tramo_inicio,j.km_inicio)
+               THEN COALESCE(j.km_acumulados,0) + j.km_fin - COALESCE(j.km_tramo_inicio,j.km_inicio)
                ELSE NULL
              END AS km_jornada
       FROM chofer_jornadas j

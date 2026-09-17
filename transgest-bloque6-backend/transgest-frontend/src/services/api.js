@@ -1210,3 +1210,13 @@ export const getReclamacionesEnvios = () => apiFetch('/facturas/reclamaciones/en
 export const transportExchange=(path="",options={})=>apiFetch(`/transport-exchange${path}`,{silentSuccess:true,...options});
 
 export const getPortalPedidoMuelle = id => apiFetch(`/portal-cliente/pedidos/${id}/muelle`,{silentError:true});
+
+// Driver expenses use company-scoped endpoints and retain their vehicle at capture.
+export const getDriverLocations = () => apiFetch('/choferes/app/ubicaciones');
+export const getCompanyDriverLocations = () => apiFetch('/choferes/ubicaciones-operativas');
+export const createCompanyDriverLocation = body => apiFetch('/choferes/ubicaciones-operativas',{method:'POST',body});
+export const deleteCompanyDriverLocation = id => apiFetch(`/choferes/ubicaciones-operativas/${id}`,{method:'DELETE'});
+export const getDriverExpenses = () => apiFetch('/choferes/app/gastos');
+export const createDriverExpense = body => apiFetch('/choferes/app/gastos',{method:'POST',body});
+export const getVehicleDriverExpenses = (vehiculo_id,desde,hasta) => apiFetch(`/choferes/gastos?${new URLSearchParams({vehiculo_id,desde,hasta})}`);
+export const completeBaseExpense = (id,body) => apiFetch(`/choferes/gastos/${id}/base`,{method:'PATCH',body});

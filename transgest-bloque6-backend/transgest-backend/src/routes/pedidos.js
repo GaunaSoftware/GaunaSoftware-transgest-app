@@ -6723,6 +6723,7 @@ router.get("/:id/documento-control-digital", async (req, res) => {
     if (req.user?.rol === "chofer" && !(await usuarioPuedeGestionarPedido(req, ctx.pedido))) {
       return res.status(403).json({ error: "No puedes acceder a este pedido" });
     }
+    if(req.user?.rol==='chofer' && !(await getPedidoChoferPasos(req.params.id,empresaId)).data.carga_ok) return res.status(409).json({error:'El documento estará disponible cuando marques la carga como finalizada.'});
     res.json(await buildPedidoDocumentoControlResponse(req, ctx, empresaId));
   } catch (e) {
     res.status(500).json({ error: e.message });

@@ -1,0 +1,64 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const {PGlite}=require('@electric-sql/pglite');
+async function main(){
+ const pg=new PGlite(),id=n=>`${String(n).padStart(8,'0')}-1111-4111-8111-111111111111`;
+ const company=id(1),other=id(2),user=id(3),driver=id(4),truck=id(5),nextTruck=id(6),trailer=id(7),day=id(8);
+ const db={query:(s,p)=>pg.query(s,p),transaction:fn=>pg.transaction(tx=>fn(tx))};
+ const load=(file,requires,extra={})=>{const scope={module:{exports:{}},require:requires,Buffer,Date,Set,console,...extra};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/'+file),'utf8'),scope);return scope.module.exports;};
+ const workday=load('services/driverWorkday.js',()=>db);
+ const expenses=load('services/driverExpenses.js',name=>name==='./db'?db:name==='./driverWorkday'?workday:require('../src/services/uploadValidation'));
+ try{
+ await pg.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY);CREATE TABLE usuarios(id uuid PRIMARY KEY);
+ CREATE TABLE vehiculos(id uuid PRIMARY KEY,empresa_id uuid,matricula text,chofer_id uuid,remolque_id uuid,km_actuales numeric,updated_at timestamptz,activo boolean DEFAULT true,estado text,ubicacion_actual text,ubicacion_ts timestamptz,gps_provider text,gps_external_id text,gps_lat numeric,gps_lng numeric);
+ CREATE TABLE choferes(id uuid PRIMARY KEY,empresa_id uuid,vehiculo_id uuid,nombre text,apellidos text,activo boolean DEFAULT true);
+ CREATE TABLE chofer_jornadas(id uuid PRIMARY KEY,empresa_id uuid,chofer_id uuid,vehiculo_id uuid,km_inicio numeric,km_tramo_inicio numeric,km_acumulados numeric DEFAULT 0,estado text,inicio_at timestamptz DEFAULT now(),actividad_actual text,eventos jsonb DEFAULT '[]',updated_at timestamptz);`);
+ await db.query('INSERT INTO empresas VALUES($1),($2)',[company,other]);await db.query('INSERT INTO usuarios VALUES($1)',[user]);
+ await db.query('INSERT INTO vehiculos(id,empresa_id,matricula,chofer_id,remolque_id,km_actuales) VALUES($1,$2,\'QA-1\',$3,$4,100),($5,$2,\'QA-2\',NULL,NULL,1000),($4,$2,\'QA-R\',NULL,NULL,0)',[truck,company,driver,trailer,nextTruck]);
+ await db.query('INSERT INTO choferes(id,empresa_id,vehiculo_id,nombre) VALUES($1,$2,$3,\'QA\')',[driver,company,truck]);
+ await db.query("INSERT INTO chofer_jornadas(id,empresa_id,chofer_id,vehiculo_id,km_inicio,estado,actividad_actual) VALUES($1,$2,$3,$4,100,'abierta','otros_trabajos')",[day,company,driver,truck]);
+ await expenses.ensureSchema();
+ const handlers={},router={};for(const method of ['get','post','patch','delete'])router[method]=(p,...h)=>handlers[`${method}:${p}`]=h.at(-1);
+ expenses.registerRoutes(router,{resolveChoferApp:async req=>(await db.query('SELECT * FROM choferes WHERE id=$1 AND empresa_id=$2',[driver,req.empresaId])).rows[0],requireChoferApp:()=>{},manager:()=>{}});
+ const call=async(method,url,body={},opts={})=>{const res={code:200,status(c){this.code=c;return this;},json(x){this.body=x;return this;},set(){return this;},send(x){this.body=x;return this;}};await handlers[`${method}:${url}`]({empresaId:company,user:{id:user,rol:'chofer',empresa_id:company},query:{desde:'2026-09-01',hasta:'2026-09-30'},params:{},body,...opts},res);return res;};
+ const base={solicitud_id:id(10),tipo:'gasoil',fecha:'2026-09-17',poblacion:'Madrid',provincia:'Madrid',litros:'60,5',importe:'90,25',vehiculo_id:truck};
+ assert.equal((await call('post','/app/gastos',{...base,importe:0})).code,400);
+ assert.equal((await call('post','/app/gastos',{...base,fecha:'2026-02-30'})).code,400);
+ assert.equal((await call('post','/app/gastos',{...base,vehiculo_id:nextTruck})).code,409);
+ assert.equal((await call('post','/app/gastos',base,{empresaId:other})).code,403);
+ assert.equal((await call('post','/app/gastos',base,{user:{id:user,rol:'chofer',empresa_id:company,colaborador_id:id(99)}})).code,403);
+ assert.equal((await call('post','/app/gastos',{...base,ticket:{base64:Buffer.from('<html>bad</html>').toString('base64'),mime:'image/jpeg',nombre:'ticket.jpg'}})).code,400);
+ const pdf=Buffer.from('%PDF-1.4 synthetic receipt').toString('base64');
+ const saved=await call('post','/app/gastos',{...base,ticket:{base64:pdf,mime:'application/pdf',nombre:'ticket.pdf'}});assert.equal(saved.code,201);
+ assert.equal((await call('post','/app/gastos',base)).body.id,saved.body.id,'retry is idempotent');
+ let rows=(await call('get','/app/gastos')).body;assert.equal(rows.length,1);assert.equal(Number(rows[0].importe),90.25);assert.equal(rows[0].ticket_base64,undefined);
+ assert.equal((await call('get','/app/gastos/:id/ticket',{}, {params:{id:saved.body.id}})).body.toString(),Buffer.from(pdf,'base64').toString());
+ assert.equal((await call('get','/gastos/:id/ticket',{}, {empresaId:other,user:{rol:'gerente'},params:{id:saved.body.id}})).code,404);
+ const pending=await call('post','/app/gastos',{...base,solicitud_id:id(11),en_base:true,importe:'',litros:'',provincia:''});assert.equal(pending.code,201);
+ assert.equal((await call('patch','/gastos/:id/base',{litros:40,importe:50},{empresaId:other,params:{id:pending.body.id}})).code,409);
+ assert.equal((await call('patch','/gastos/:id/base',{litros:40,importe:50},{params:{id:pending.body.id}})).code,200);
+ assert.equal((await call('patch','/gastos/:id/base',{litros:40,importe:50},{params:{id:pending.body.id}})).code,409);
+ assert.equal((await call('post','/app/gastos',{...base,solicitud_id:id(12),tipo:'dieta',importe:15})).code,201);
+ rows=(await call('get','/gastos')).body;assert.equal(rows.reduce((s,r)=>s+Number(r.importe),0),155.25);
+ assert.equal((await call('get','/gastos',{}, {empresaId:other})).body.length,0);
+ const source=fs.readFileSync(path.join(__dirname,'../src/routes/choferes.js'),'utf8'),scope={db,...workday,ensureChoferJornadaSchema:async()=>{},jornadaEventos:r=>r.eventos||[],Date};
+ vm.runInNewContext(source.slice(source.indexOf('async function setChoferConjunto('),source.indexOf('async function syncAvisoVacacionesChofer')),scope);
+ const change={empresaId:company,choferId:driver,vehiculoId:nextTruck,remolqueId:trailer,cambio:{km_odometro:1000,km_fin_anterior:125,ubicacion:'Base · Madrid, España'}};
+ await assert.rejects(()=>scope.setChoferConjunto({...change,cambio:{...change.cambio,km_fin_anterior:99}}),/inferior/);
+ assert.equal((await db.query('SELECT vehiculo_id FROM choferes')).rows[0].vehiculo_id,truck,'invalid change rolls back');
+ await scope.setChoferConjunto(change);
+ const j=(await db.query('SELECT * FROM chofer_jornadas')).rows[0];assert.equal(j.vehiculo_id,nextTruck);assert.equal(Number(j.km_acumulados),25);assert.equal(Number(j.km_tramo_inicio),1000);assert.equal(j.eventos[0].ubicacion,'Base · Madrid, España');
+ assert.equal((await db.query('SELECT remolque_id FROM vehiculos WHERE id=$1',[truck])).rows[0].remolque_id,null);
+ assert.equal((await db.query('SELECT remolque_id FROM vehiculos WHERE id=$1',[nextTruck])).rows[0].remolque_id,trailer);
+ assert.equal(Number(j.km_acumulados)+workday.validateOdometer(1010,j.km_tramo_inicio)-Number(j.km_tramo_inicio),35,'distance combines truck segments');
+ assert.equal((await call('post','/app/gastos',{...base,solicitud_id:id(13)})).code,409,'stale truck cannot receive expense');
+ // DCD is unavailable to the assigned driver until loading is completed, but remains available to dispatch.
+ let loaded=false,allowed=true,built=0,dcdHandler;
+ const pedidoSource=fs.readFileSync(path.join(__dirname,'../src/routes/pedidos.js'),'utf8');
+ const dcdScope={router:{get:(p,h)=>dcdHandler=h},getPedidoDocumentoControlContext:async(order,tenant)=>{assert.equal(tenant,company);return{pedido:{id:order}};},usuarioPuedeGestionarPedido:async()=>allowed,getPedidoChoferPasos:async()=>({data:{carga_ok:loaded}}),buildPedidoDocumentoControlResponse:async()=>{built++;return{ok:true};}};
+ vm.runInNewContext(pedidoSource.slice(pedidoSource.indexOf('router.get("/:id/documento-control-digital",'),pedidoSource.indexOf('router.post("/:id/documento-control-digital/generar",')),dcdScope);
+ const readDcd=async rol=>{const res={code:200,status(n){this.code=n;return this;},json(x){this.body=x;return this;}};await dcdHandler({empresaId:company,user:{rol},params:{id:id(20)}},res);return res;};
+ assert.equal((await readDcd('chofer')).code,409);assert.equal(built,0);loaded=true;assert.equal((await readDcd('chofer')).code,200);allowed=false;assert.equal((await readDcd('chofer')).code,403);loaded=false;assert.equal((await readDcd('gerente')).code,200);
+ console.log('PASS PostgreSQL driver expenses: validation, tickets, tenant isolation, external restrictions, idempotency, base completion, totals; midday truck change, odometer segments, rollback and trailer transfer.');
+ }finally{await pg.close();}
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

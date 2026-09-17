@@ -298,6 +298,8 @@ function portalClientePermission(req, res, next) {
 }
 function choferesPermissionUnlessApp(req, res, next) {
   if (req.user?.rol === "chofer" && req.path.startsWith("/app/")) return next();
+  if (/^\/gastos(?:\/|$)/.test(req.path)) return requireModulePermission("hojas_ruta")(req, res, next);
+  if (/^\/ubicaciones-operativas(?:\/|$)/.test(req.path)) return requireModulePermission("empresa")(req, res, next);
   return requireModulePermission("choferes")(req, res, next);
 }
 function vehiculosPermissionUnlessChoferAlertas(req, res, next) {

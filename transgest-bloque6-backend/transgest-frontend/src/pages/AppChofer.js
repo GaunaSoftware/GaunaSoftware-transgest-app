@@ -1,3 +1,4 @@
+import DriverExpenses from "./driver/DriverExpenses";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getPedidos, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDocChofer, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -11,7 +12,7 @@ import { DriverHeader, DriverNavigation, DriverHome, DriverMore, DriverIcon, Dri
 import { leerOfflineQueue, prepararArchivoEscaner, capturarUbicacionActual, buildUploadEvidence, FirmaLaboralCanvas } from "./driver/driverSupport";
 import { TarjetaViaje } from "./driver/DriverTrip";
 import { SolicitudMecanico } from "./driver/DriverWorkshop";
-import { JornadaChofer } from "./driver/DriverWorkday";
+import { JornadaChofer, ConjuntoChofer } from "./driver/DriverWorkday";
 import { VacacionesChofer, DatosChofer } from "./driver/DriverProfile";
 import { NuevoViajeChofer } from "./driver/DriverNewTrip";
 export default function AppChofer(){
@@ -293,9 +294,11 @@ export default function AppChofer(){
       vehiculo_id: jornadaInfo.chofer.vehiculo_id,
       matricula: jornadaInfo.chofer.matricula || jornadaInfo.chofer.vehiculo_matricula || "",
     } : null);
-  const tabsChofer = isLitePlan
+  const baseTabsChofer = isLitePlan
     ? [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["historial","Historial"]]
     : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Taller"]];
+
+  const tabsChofer = [...baseTabsChofer,["conjunto","Conjunto"],...(!user?.colaborador_id?[["repostajes","Repostajes y dietas"]]:[])];
 
   useEffect(() => {
     const app = document.querySelector(".tg-app-chofer-page");
@@ -501,7 +504,7 @@ export default function AppChofer(){
         </button>
       )}
 
-      {tab==="inicio" && <DriverHome pedidos={pedidos} jornada={jornadaInfo?.jornada} onNavigate={setTab} loading={loading} offline={offline} pending={offlineQueueSummary.total}/>}
+      {tab==="inicio" && <DriverHome externalDriver={!!user?.colaborador_id} pedidos={pedidos} jornada={jornadaInfo?.jornada} onNavigate={setTab} loading={loading} offline={offline} pending={offlineQueueSummary.total}/>}
       {tab==="mas" && <DriverMore onRefresh={()=>cargar({forceLoading:true})} loading={loading} tabs={tabsChofer.filter(([id])=>!["activos","jornada"].includes(id))} onNavigate={setTab} onLogout={logout} onNotifications={pedirNotificaciones} notificationPermission={notifPerm}/>}
       {tab==="avisos" && routeNotifications.length===0 && <div className="driver-section-shell"><section className="driver-card"><DriverHeading icon="avisos" title="Avisos y rutas">Aquí encontrarás las rutas y avisos de tráfico disponibles para tu cuenta.</DriverHeading><p className="driver-empty">No hay avisos disponibles.</p></section></div>}
       {/* Lista viajes */}
@@ -576,6 +579,8 @@ export default function AppChofer(){
         />
       )}
 
+      {tab==="conjunto" && <ConjuntoChofer jornadaInfo={jornadaInfo} onRefresh={cargar}/>}
+      {tab==="repostajes" && !user?.colaborador_id && <DriverExpenses jornadaInfo={jornadaInfo}/>}
       {tab==="jornada" && (
         <JornadaChofer jornadaInfo={jornadaInfo} gpsSeguimientoEstado={gpsSeguimientoEstado} onRefresh={cargar} />
       )}

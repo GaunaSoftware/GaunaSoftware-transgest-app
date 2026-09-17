@@ -1,0 +1,54 @@
+/* Portaled dialogs live outside .planner-app; keep their form system scoped. */
+.planner-app, .planner-form, .planner-dialog {
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
+  --pl-line: var(--border, #e0e9ef);
+  --pl-muted: var(--text3, #647b94);
+  --pl-teal: #008b80;
+}
+.planner-form *, .planner-dialog * { box-sizing: border-box; min-width: 0; }
+.planner-form label, .planner-dialog label {
+  display: flex; flex-direction: column; align-items: stretch; gap: 7px;
+  font-size: 13px; line-height: 1.45; color: var(--text2, #39526b);
+}
+.planner-form input:not([type=checkbox]):not([type=radio]),
+.planner-form select, .planner-form textarea,
+.planner-dialog input:not([type=checkbox]):not([type=radio]),
+.planner-dialog select, .planner-dialog textarea {
+  display: block; width: 100%; max-width: 100%; min-height: 42px;
+  border: 1px solid var(--pl-line); border-radius: 8px; padding: 10px 12px;
+  background: var(--bg2, #fff); color: var(--text, #11263c); font: inherit;
+}
+.planner-form input:focus-visible, .planner-form select:focus-visible,
+.planner-form textarea:focus-visible { outline: 2px solid var(--pl-teal); outline-offset: 2px; }
+.planner-form .planner-grid, .planner-dialog .planner-grid { align-items: start; gap: 18px 22px; }
+.planner-form .pl-check-line { flex-direction: row; align-items: center; gap: 10px; }
+.planner-form .pl-check-line input { flex: none; }
+.planner-form > p { margin: 0; line-height: 1.6; }
+.planner-form button { white-space: normal; }
+.planner-header .planner-brand { width: 245px; max-width: 70vw; height: 34px; object-fit: contain; }
+.planner-launch {
+  position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center;
+  background: radial-gradient(ellipse at 50% 42%, #14584b, #071c1c 70%);
+  pointer-events: none; opacity: 1; transition: opacity .45s ease;
+}
+.planner-launch-leaving { opacity: 0; }
+.planner-launch-content { display: grid; justify-items: center; gap: 24px; padding: 32px; animation: planner-brand-in .65s ease both; }
+.planner-launch .planner-brand { width: 440px; max-width: 80vw; height: auto; }
+.planner-launch p { color: #c0ddd7; font-size: 13px; margin: 0; text-align: center; letter-spacing: .025em; }
+.planner-launch-track { height: 3px; width: 180px; background: #ccfbf126; border-radius: 10px; overflow: hidden; }
+.planner-launch-track span { display: block; width: 100%; height: 100%; background: #40dac0; transform-origin: left; animation: planner-launch-progress 1.8s ease-out both; }
+@keyframes planner-brand-in { from { opacity: 0; transform: translateY(9px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes planner-launch-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .planner-launch, .planner-launch-content, .planner-launch-track span { animation: none; transition: none; }
+}
+@media (max-width: 650px) {
+  .planner-header .planner-brand { width: 210px; height: 30px; }
+  .planner-form .planner-grid, .planner-dialog .planner-grid { grid-template-columns: minmax(0, 1fr); gap: 15px; }
+}
+
+.tgui-dialog:has(.planner-form) { --dialog-width: 780px !important; font-family: 'DM Sans', 'Segoe UI', sans-serif; }
+.tgui-dialog:has(.planner-form) .tgui-dialog-header h2 { font-family: inherit; font-size: 21px; letter-spacing: -.025em; }
+.tgui-dialog:has(.pl-picking-line) { --dialog-width: 1040px !important; }
+.pl-picking-line { display: grid; gap: 14px; }
+.planner-form [role=alert] { color: var(--red, #d83251); }

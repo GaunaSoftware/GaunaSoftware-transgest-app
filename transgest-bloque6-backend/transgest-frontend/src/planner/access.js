@@ -1,9 +1,8 @@
 export const PLANNER_MODULES = [
-  ['pedidos', 'Cargas'], ['viajes', 'Gestión de viajes'], ['choferes', 'Conductores'],
+  ['pedidos', 'Cargas'],
   ['muelles', 'Muelles y horarios'], ['palets', 'Almacén y stock'],
-  ['gestion_trafico', 'Planificación de flota'], ['vehiculos', 'Vehículos'],
   ['ia', 'Intelligence'], ['colaboradores', 'Proveedores de transporte'],
-  ['clientes', 'Destinatarios'], ['documentos', 'Documentos'], ['facturacion', 'Facturación'], ['empresa', 'Empresa'],
+  ['clientes', 'Clientes / Destinatarios'], ['documentos', 'Documentos'], ['facturacion', 'Facturación'], ['empresa', 'Empresa'],
 ];
 
 export function hasProduct(user, product) {

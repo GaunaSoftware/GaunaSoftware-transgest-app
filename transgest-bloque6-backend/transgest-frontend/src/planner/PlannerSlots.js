@@ -6,12 +6,14 @@ import {confirmDialog} from '../services/notify';
 import {PageHead,Metrics,Panel,Badge,Empty,dayKey} from './PlannerUI';
 const time=d=>new Date(d).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
 const localInput=d=>`${dayKey(d)}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-export default function PlannerSlots({compact=false,onOrder}){
+export default function PlannerSlots({compact=false,onOrder,selectedDay,onDayChange}){
  const {puedeEditar}=useAuth(),canEdit=puedeEditar('pedidos');
- const [day,setDay]=useState(dayKey()),[view,setView]=useState('dia'),[warehouse,setWarehouse]=useState(''),[docks,setDocks]=useState([]),[bookings,setBookings]=useState([]),[requests,setRequests]=useState([]),[orders,setOrders]=useState([]),[draft,setDraft]=useState(null),[dock,setDock]=useState(null),[selected,setSelected]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const [ownDay,setOwnDay]=useState(dayKey()),[view,setView]=useState('dia'),[warehouse,setWarehouse]=useState(''),[docks,setDocks]=useState([]),[bookings,setBookings]=useState([]),[requests,setRequests]=useState([]),[orders,setOrders]=useState([]),[draft,setDraft]=useState(null),[dock,setDock]=useState(null),[selected,setSelected]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const day=selectedDay||ownDay;
+ const setDay=value=>{setOwnDay(value);onDayChange?.(value);};
  const load=useCallback(async()=>{
    const start=new Date(`${day}T00:00:00`),end=new Date(start);end.setDate(end.getDate()+(view==='semana'?7:1));
-   const [d,b,o,r]=await Promise.all([plannerApi('/muelles'),plannerApi(`/reservas?${new URLSearchParams({desde:start.toISOString(),hasta:end.toISOString()})}`),getPedidos({desde:day,hasta:dayKey(end),limit:200}),plannerApi('/solicitudes-hueco')]);
+   const [d,b,o,r]=await Promise.all([plannerApi('/muelles'),plannerApi(`/reservas?${new URLSearchParams({desde:start.toISOString(),hasta:end.toISOString()})}`),getPedidos({workspace:'planner',desde:day,hasta:dayKey(end),limit:200}),plannerApi('/solicitudes-hueco')]);
    setDocks(d);setBookings(b);setOrders(Array.isArray(o)?o:o.data||[]);setRequests(r);
  },[day,view]);
  useEffect(()=>{load().catch(e=>setError(e.message));},[load]);

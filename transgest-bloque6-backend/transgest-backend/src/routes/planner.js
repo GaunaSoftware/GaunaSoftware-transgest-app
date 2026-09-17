@@ -15,7 +15,7 @@ router.get('/resumen',wrap(async(req,res)=>{
  const month=String(req.query.mes||'');if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return res.status(400).json({error:'Selecciona un mes válido.'});
  res.json((await db.query(`SELECT COUNT(*)::int AS cargas,COUNT(*) FILTER(WHERE colaborador_id IS NULL AND vehiculo_id IS NULL)::int AS sin_asignar,
  COUNT(*) FILTER(WHERE colaborador_precio_confirmado)::int AS aceptadas,COUNT(*) FILTER(WHERE estado::text='incidencia')::int AS incidencias
- FROM pedidos WHERE empresa_id=$1 AND fecha_carga >= $2::date AND fecha_carga < $2::date+INTERVAL '1 month'`,[req.empresaId,month+'-01'])).rows[0]);
+ FROM pedidos WHERE empresa_id=$1 AND origen_producto='planner' AND fecha_carga >= $2::date AND fecha_carga < $2::date+INTERVAL '1 month'`,[req.empresaId,month+'-01'])).rows[0]);
 }));
 router.get('/muelles',wrap(async(req,res)=>res.json((await db.query('SELECT * FROM planner_muelles WHERE empresa_id=$1 ORDER BY almacen,nombre',[req.empresaId])).rows)));
 router.post('/muelles',write,wrap(async(req,res)=>{
@@ -47,6 +47,7 @@ router.delete('/reservas/:id',write,wrap(async(req,res)=>{
   const {rows}=await db.transaction(async tx=>{await tx.query("UPDATE planner_solicitudes_hueco SET reserva_id=NULL,estado='pendiente' WHERE reserva_id=$1 AND empresa_id=$2",[req.params.id,req.empresaId]);return tx.query('DELETE FROM planner_reservas WHERE id=$1 AND empresa_id=$2 RETURNING id',[req.params.id,req.empresaId]);});
   if(!rows.length)return res.status(404).json({error:'Reserva no encontrada'});res.json({ok:true});
 }));
+router.use('/proveedores',require('./planner_providers'));
 router.use('/vehiculos-autorizados',require('./planner_vehicles'));
 router.use('/inventario',require('./planner_inventory'));
 module.exports=router;

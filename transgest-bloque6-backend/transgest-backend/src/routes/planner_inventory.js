@@ -14,7 +14,7 @@ router.get('/articulos',wrap(async(req,res)=>{
 const articleBody=b=>{
  const out={referencia:inventory.text(b.referencia,80).toUpperCase(),descripcion:inventory.text(b.descripcion,240),familia:inventory.text(b.familia,100),unidad:inventory.text(b.unidad,20)||'unidad'};
  if(!out.referencia||!out.descripcion)throw inventory.fail('Indica la referencia y descripción del artículo.');
- if(!['unidad','kg','litro','palet','caja','metro'].includes(out.unidad))throw inventory.fail('Unidad no válida.');
+ if(!['unidad','kg','litro','palet','caja','saco','metro'].includes(out.unidad))throw inventory.fail('Unidad no válida.');
  for(const key of ['coste','precio_venta','peso_kg','stock_minimo'])out[key]=inventory.decimal(b[key]??0);
  out.unidades_palet=inventory.decimal(b.unidades_palet??1,{positive:true});return out;
 };
@@ -39,7 +39,7 @@ router.get('/preparaciones',wrap(async(req,res)=>res.json((await db.query(`SELEC
  p.matricula_colaborador,p.vehiculo_id,c.nombre AS cliente,co.nombre AS colaborador,
  (SELECT COUNT(*)::int FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id) AS lineas,
  (SELECT COUNT(*)::int FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id AND l.preparada) AS lineas_preparadas,
- (SELECT COALESCE(SUM(l.cantidad*l.precio_venta),0) FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id) AS venta,
+ (SELECT COALESCE(SUM(l.cantidad*ROUND(l.precio_venta*(1-l.descuento_pct/100),4)),0) FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id) AS venta,
  (SELECT COALESCE(SUM(l.cantidad*l.coste_unitario),0) FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id) AS coste
  FROM planner_preparaciones r JOIN pedidos p ON p.id=r.pedido_id AND p.empresa_id=r.empresa_id
  LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=r.empresa_id LEFT JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=r.empresa_id

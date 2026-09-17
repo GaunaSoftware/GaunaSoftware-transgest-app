@@ -21,11 +21,12 @@ async function reserve(db,company,user,input){
   if(!window.abre||!window.cierra||!window.mismo_dia||!dock.dias.includes(window.dia))throw fail('El hueco está fuera del horario o de los días de apertura del muelle.',409);
   let preparedPallets=0;
   if(input.pedido_id){
-   const order=(await tx.query('SELECT id,estado FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[input.pedido_id,company])).rows[0];
+   const order=(await tx.query('SELECT id,estado,origen_producto FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[input.pedido_id,company])).rows[0];
    if(!order)throw fail('Pedido no encontrado',404);
+   if(order.origen_producto!=='planner')throw fail('Selecciona una carga de Planner.',409);
    if(['cancelado','entregado','facturado'].includes(order.estado))throw fail('El viaje está cerrado.',409);
    const existing=(await tx.query('SELECT id FROM planner_reservas WHERE empresa_id=$1 AND pedido_id=$2 AND tipo=$3',[company,order.id,input.tipo])).rows[0];
-   preparedPallets=Number((await tx.query(`SELECT COALESCE(SUM(CEIL(l.cantidad/l.unidades_palet)),0) AS palets FROM planner_preparaciones p JOIN planner_preparacion_lineas l ON l.preparacion_id=p.id AND l.empresa_id=p.empresa_id JOIN planner_existencias e ON e.id=l.existencia_id AND e.empresa_id=l.empresa_id JOIN planner_articulos a ON a.id=e.articulo_id AND a.empresa_id=e.empresa_id WHERE p.pedido_id=$1 AND p.empresa_id=$2 AND p.estado<>'cancelada'`,[order.id,company])).rows[0]?.palets||0);
+   preparedPallets=Number((await tx.query(`SELECT GREATEST(COALESCE(SUM(CEIL(l.cantidad/l.unidades_palet)) FILTER(WHERE l.unidad<>'palet'),0),COALESCE(SUM(l.cantidad) FILTER(WHERE l.unidad='palet'),0)) AS palets FROM planner_preparaciones p JOIN planner_preparacion_lineas l ON l.preparacion_id=p.id AND l.empresa_id=p.empresa_id JOIN planner_existencias e ON e.id=l.existencia_id AND e.empresa_id=l.empresa_id JOIN planner_articulos a ON a.id=e.articulo_id AND a.empresa_id=e.empresa_id WHERE p.pedido_id=$1 AND p.empresa_id=$2 AND p.estado<>'cancelada'`,[order.id,company])).rows[0]?.palets||0);
    if(existing)throw fail('La carga ya tiene un hueco. Libera su reserva anterior para reprogramarla.',409);
   }
   const overlaps=await tx.query(`SELECT id FROM planner_reservas WHERE muelle_id=$1 AND empresa_id=$2

@@ -100,7 +100,8 @@ async function main(){
    }
   }
   await req('./services/companyProducts').set(company,'combinado');
-  const plannerOrder=await call('Planner: crear carga','POST','/pedidos',{cliente_id:client.id,origen:'Fábrica Valencia',destino:'Madrid',fecha_carga:'2026-09-18',fecha_descarga:'2026-09-19',importe:0,referencia_cliente:'VENTA-QA',peso_kg:0,bultos:0});
+  const plannerOrder=await call('Planner: crear carga','POST','/pedidos',{workspace:'planner',cliente_id:client.id,origen:'Fábrica Valencia',destino:'Madrid',fecha_carga:'2026-09-18',fecha_descarga:'2026-09-19',importe:0,referencia_cliente:'VENTA-QA',peso_kg:0,bultos:0});
+  const scopedLoads=await call('Planner: cargas separadas','GET','/pedidos?workspace=planner&todos=true');if(!scopedLoads.data.some(p=>p.id===plannerOrder.id)||scopedLoads.data.some(p=>p.id!==plannerOrder.id))throw Error('Planner mezcló pedidos de TransGest');
   const article=await call('Planner: crear referencia','POST','/planner/inventario/articulos',{referencia:'REF-QA',descripcion:'Mercancía de pruebas',coste:2.1,precio_venta:3.5,peso_kg:1.25,unidades_palet:20});
   if(!plannerOrder.id||!article.id)throw Error('Planner: no se pudo iniciar la preparación');
   const stock=await call('Planner: fabricación','POST','/planner/inventario/movimientos',{articulo_id:article.id,tipo:'fabricacion',almacen:'Principal',ubicacion:'A1',lote:'QA-2026',cantidad:100,motivo:'Fin de producción',operacion:crypto.randomUUID()});

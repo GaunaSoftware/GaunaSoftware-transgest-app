@@ -1,0 +1,99 @@
+.tg-order-editor-overlay { z-index:90; padding:16px; background:var(--overlay-bg,rgba(8,25,35,.6)); }
+.tg-order-editor-dialog { width:min(1200px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); border-radius:16px; }
+.tg-order-editor-dialog .tgui-dialog-header { padding:14px 22px; }
+.tg-order-editor-dialog .tgui-dialog-header h2 { flex:1; min-width:0; font:inherit; }
+.order-editor-brand { display:flex; align-items:center; gap:12px; width:100%; font-size:12px; }
+.order-editor-brand img { width:150px; height:28px; object-fit:contain; margin-right:auto; }
+.order-editor-brand > span:not(.order-editor-alert-slot) { overflow-wrap:anywhere; }
+.order-editor-alert-slot { display:inline-flex; flex-shrink:0; }
+.order-editor-alert-button { border:1px solid var(--border2); border-radius:8px; padding:7px 9px; background:var(--bg3); color:var(--text); cursor:pointer; font-size:11px; }
+.order-editor-alert-content { position:absolute; right:12px; top:64px; z-index:60; max-width:calc(100vw - 24px); max-height:calc(100dvh - 160px); overflow:auto; }
+.order-editor-alert-content .avimp-panel { top:0 !important; left:0 !important; width:min(430px,calc(100vw - 24px)) !important; }
+.tg-order-editor-dialog .tgui-dialog-body { padding:0 20px 14px; background:var(--bg); overflow-x:hidden; }
+.tg-order-editor-dialog .tgui-tabs { justify-content:center; margin:0 -20px 14px; padding:4px 20px; background:var(--card-bg,var(--bg2)); }
+.tg-order-editor-dialog .tgui-tabs button { flex:0 1 340px; justify-content:center; white-space:normal; min-height:48px; }
+.order-editor-step { display:grid; gap:10px; }
+.tg-order-editor-dialog [hidden] { display:none !important; }
+.tg-pedido-modal, .tg-pedido-modal * { box-sizing:border-box; min-width:0; }
+.tg-order-editor-dialog .tg-pedido-modal { padding:0 !important; border:0 !important; border-radius:0 !important; box-shadow:none !important; background:transparent !important; max-height:none !important; }
+.order-editor-map-grid { display:grid; grid-template-columns:minmax(180px,1fr) minmax(0,2fr); gap:20px; align-items:center; }
+.order-editor-map-grid h4 { font-size:20px; margin:0 0 12px; line-height:1.5; }
+.order-editor-map-grid p { font-size:12px; color:var(--text4); }
+.tg-order-editor-dialog input:not([type=checkbox]):not([type=radio]):not([type=file]), .tg-order-editor-dialog select, .tg-order-editor-dialog textarea { width:100%; max-width:100%; min-height:36px; font-size:13px !important; border-radius:8px !important; }
+.tg-order-editor-dialog label { line-height:1.4; }
+.tg-order-editor-dialog label:has(+ input), .tg-order-editor-dialog label:has(+ select), .tg-order-editor-dialog label:has(+ textarea) { display:block; margin:0 0 5px !important; text-transform:none !important; letter-spacing:0 !important; font-size:12px !important; color:var(--text3) !important; }
+.order-editor-section { padding:14px 16px; overflow:visible; border:1px solid var(--border); box-shadow:none; }
+.tg-order-editor-dialog section.order-editor-section { margin:0; padding:10px 14px; }
+.order-editor-section > header { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.order-editor-section h3 { font-size:14px; font-weight:750; margin:0; flex:1; }
+.order-editor-icon { background:var(--accent-a10); color:var(--accent); width:28px; height:28px; border-radius:50%; display:grid; place-items:center; flex-shrink:0; }
+.tg-pedido-form-grid-2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.tg-pedido-form-grid-3 { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.tg-pedido-form-grid-4 { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.order-editor-cargo-grid { display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:12px; }
+.order-editor-cargo-grid > :first-child { grid-column:auto !important; }
+.order-editor-planning-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px 16px; }
+@media (min-width:1150px) { .order-editor-planning-grid { grid-template-columns:1.2fr .8fr 1fr 1.2fr .8fr 1fr 1.1fr; gap:10px; } }
+.order-editor-stops { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.order-editor-disclosure { margin-top:10px; min-width:0; }
+.order-editor-disclosure-trigger.tgui-button { width:100%; display:flex; text-align:left; justify-content:space-between; gap:12px; padding:9px 12px; font-size:12px; background:var(--bg3); white-space:normal; font-weight:500; }
+.order-editor-disclosure-trigger small { display:block; color:var(--text4); }
+.order-editor-disclosure-body { padding:12px 0 2px; }
+.order-editor-disclosure-body [style*="grid-column"] { grid-column:auto !important; }
+.order-editor-mode { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; margin-bottom:12px; background:var(--accent-a10); border-radius:8px; font-size:12px; }
+.order-editor-mode > :first-child { font-weight:700; margin-right:auto; }
+.order-editor-mode input { width:18px; height:18px; accent-color:var(--accent); }
+.order-editor-route-summary { display:flex; align-items:center; gap:12px; flex-wrap:wrap; border:1px solid var(--border); background:var(--accent-a10); border-radius:10px; padding:12px 16px; }
+.order-editor-route-summary span { font-size:12px; color:var(--text4); }
+.order-editor-money { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding:10px 14px; margin-top:10px; background:var(--accent-a10); border-radius:8px; }
+.order-editor-money span { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; font-size:12px; }
+.order-editor-money strong { color:var(--accent); font-variant-numeric:tabular-nums; }
+.order-editor-help { color:var(--text4); font-size:12px; margin:0 0 10px; }
+.order-editor-document-summary { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; font-size:12px; padding:6px 0; }
+.order-editor-document-summary small { display:block; color:var(--text4); }
+.order-editor-clear-client { background:none; border:0; color:var(--accent); padding:4px 0; font-size:11px; cursor:pointer; }
+.order-editor-cost-trigger { display:flex; justify-content:space-between; align-items:center; gap:12px; width:100%; white-space:normal; text-align:left; }
+.order-editor-cost-trigger span { color:var(--text4); font-size:12px; }
+.order-editor-risk-ok { color:var(--green); font-size:12px; margin:8px 0; }
+.order-editor-map-links { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; padding-top:6px; }
+.order-editor-map-links a { color:var(--accent); }
+.tg-pedido-actions-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.order-editor-footer { display:flex; gap:12px; align-items:center; width:100%; }
+.order-editor-footer small { flex:1; color:var(--text4); font-size:11px; text-align:right; }
+.order-editor-footer .tgui-button { min-width:115px; }
+.tg-order-editor-dialog .tgui-dialog-footer { position:relative; background:var(--card-bg,var(--bg2)); flex-shrink:0; padding:12px 20px; }
+.order-editor-map { margin:0 !important; padding:12px 16px !important; }
+.order-editor-map .route-map-canvas { max-height:220px; }
+@media (max-width:900px) {
+ .order-editor-cargo-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .order-editor-stops { grid-template-columns:minmax(0,1fr); }
+ .tg-order-editor-dialog .tgui-dialog-body { padding:0 12px 12px; }
+ .tg-order-editor-dialog .tgui-tabs { margin:0 -12px 12px; padding:4px 12px; }
+}
+@media (max-width:600px) {
+ .tg-order-editor-overlay { padding:0; }
+ .tg-order-editor-dialog { width:100vw; height:100dvh; max-height:100dvh; border-radius:0; }
+ .tg-order-editor-dialog .tgui-dialog-header { padding:10px 12px; }
+ .order-editor-brand { flex-wrap:wrap; gap:6px; }
+ .order-editor-brand img { width:120px; height:24px; }
+ .order-editor-brand > span:not(.order-editor-alert-slot) { font-size:10px; }
+ .order-editor-section { padding:12px; }
+ .order-editor-map-grid { grid-template-columns:minmax(0,1fr); gap:10px; }
+ .order-editor-map-grid h4 { font-size:16px; margin:0; }
+ .tg-order-editor-dialog .tgui-tabs button { font-size:12px; padding:10px 6px; }
+ .tg-order-editor-dialog .tgui-tabs button svg { display:none; }
+ .tg-pedido-form-grid-2, .tg-pedido-form-grid-3, .tg-pedido-form-grid-4, .order-editor-cargo-grid, .order-editor-planning-grid { grid-template-columns:minmax(0,1fr); }
+ .tg-pedido-modal [style*="grid-template-columns"] { grid-template-columns:minmax(0,1fr) !important; }
+ .tg-pedido-modal [style*="grid-column"] { grid-column:1/-1 !important; }
+ .tg-pedido-modal [style*="display: flex"] { flex-wrap:wrap; }
+ .tg-pedido-modal button { max-width:100%; white-space:normal; }
+ .order-editor-money { gap:8px; grid-template-columns:minmax(0,1fr); }
+ .order-editor-footer { gap:8px; }
+ .order-editor-footer small { display:none; }
+ .order-editor-footer > button { flex:1; min-width:0; }
+ .tg-order-editor-dialog .tgui-dialog-footer { padding:10px 12px max(10px,env(safe-area-inset-bottom)); }
+ .order-editor-mode > span:last-child { flex-basis:100%; color:var(--text4); }
+}
+
+.order-editor-map-links:empty { display:none; }
+.tg-order-editor-dialog .order-editor-notes textarea { min-height:72px; }

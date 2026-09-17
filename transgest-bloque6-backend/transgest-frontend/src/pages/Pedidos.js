@@ -1,16 +1,26 @@
+import OrderNotesFields from "./orders/editor/OrderNotesFields";
+import OrderEditorShell, { OrderSection } from "./orders/editor/OrderEditorShell";
+import OrderRouteFields from "./orders/editor/OrderRouteFields";
+import OrderPlanningFields from "./orders/editor/OrderPlanningFields";
+import OrderDistanceFields from "./orders/editor/OrderDistanceFields";
+import OrderCargoFields from "./orders/editor/OrderCargoFields";
+import OrderPriceFields from "./orders/editor/OrderPriceFields";
+import OrderCostFields from "./orders/editor/OrderCostFields";
+import OrderAssignmentFields from "./orders/editor/OrderAssignmentFields";
+import OrderDocumentFields from "./orders/editor/OrderDocumentFields";
 import { formatCompanyPaymentTerms, calculateCompanyPaymentDate } from "../utils/companyPayment";
-import { driverName, stopSchedule, assignDriver } from "./orders/quickInfo";
+import { driverName, stopSchedule } from "./orders/quickInfo";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
-import { Modal as WorkspaceModal } from "../ui";
+import { DropdownMenu, Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
-import { PALLET_SIZES, cargoCount, cargoLength, cargoPayload, updateCargo } from "../utils/cargoDimensions";
+import { cargoPayload } from "../utils/cargoDimensions";
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
 import { orderTown } from '../utils/orderTown';
 import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from '../utils/supplierPricing';
 import { verificarOrdenColaborador } from '../services/api';
-import AdrPanel from "../components/AdrPanel";
+
 import QuickAssignModal from "../components/QuickAssignModal";
 import { tariffEndpointScore, bestTariffCandidates } from "../utils/tariffLocation";
 import { clearAssignmentPatch, hasAssignment } from "../utils/assignment";
@@ -25,7 +35,7 @@ import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRuta
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente, editarRutaCliente,
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, setClienteMercanciaHabitual, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
-         crearColaboradorLiquidacionToken,
+         crearColaboradorLiquidacionToken, revocarColaboradorLiquidacionToken,
          getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta, resolveGeoPlace,
          getPedidoWhatsappPreflight, enviarPedidoWhatsapp, notificarPedidoChoferApp, getPedidoChoferPasos, calcularDistanciaGeo, getChoferUltimoViaje, combinarGrupaje } from "../services/api";
 import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
@@ -34,12 +44,12 @@ import { confirmDialog, promptDialog, notify } from "../services/notify";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
-import { formatMatricula, formatDni, upperFromEvent } from "../utils/formatos";
+import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
 import BulkOrderReasonDialog from "./orders/BulkOrderReasonDialog";
-import EndpointAutocomplete from "../components/EndpointAutocomplete";
+
 import { pedidoOriginalMonth } from "../utils/pedidoBillingMonth";
 
 let puntosInteresCache = [];
@@ -3832,7 +3842,7 @@ function PagoColaboradorPanel({ pedido, onUpdated }) {
 
 
 // ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ DescargasEditor: gestiona multiples puntos de descarga ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
-function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
+function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = false }) {
   const [adding, setAdding] = useState(false);
   const [editingStopIndex, setEditingStopIndex] = useState(null);
   const [puntosInteres, setPuntosInteres] = useState(getPuntosInteres);
@@ -4263,7 +4273,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 <datalist id={stopRegionListId}>
                   {stopRegions.map(region => <option key={region} value={region} />)}
                 </datalist>
-                <div className="tg-stop-mini-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginTop:6,maxWidth:680}}>
+                <div hidden={compact && editingStopIndex !== i} className="tg-stop-mini-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginTop:6,maxWidth:680}}>
                   <input
                     list={countryListId}
                     style={inp}
@@ -4311,7 +4321,12 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                 )}
               </div>
               {!disabled && (
-                <div className="tg-stop-card-actions" style={{display:"flex",gap:2,alignItems:"center"}}>
+compact ? <DropdownMenu data-pedido-mutation="true" label={`Acciones de ${label} ${i+1}`} items={[
+ {label:editingStopIndex === i ? "Cerrar edición" : "Editar punto",onClick:()=>setEditingStopIndex(current=>current===i?null:i)},
+ ...(i>0 ? [{label:"Subir",onClick:()=>moveStop(i,-1)}] : []),
+ ...(i<stopsOrdenados.length-1 ? [{label:"Bajar",onClick:()=>moveStop(i,1)}] : []),
+ ...(stopsOrdenados.length>1 ? [{label:"Eliminar punto",danger:true,onClick:()=>removeStop(i)}] : []),
+ ]}/> : (                <div className="tg-stop-card-actions" style={{display:"flex",gap:2,alignItems:"center"}}>
                   <button type="button" onClick={() => setEditingStopIndex(current => current === i ? null : i)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:12,fontWeight:800,padding:"2px 5px"}}>
                     {editingStopIndex === i ? "Cerrar" : "Editar"}
                   </button>
@@ -4319,7 +4334,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId }) {
                   <button data-pedido-mutation="true" type="button" onClick={() => moveStop(i, -1)} disabled={i===0} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===0?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Subir</button>
                   <button data-pedido-mutation="true" type="button" onClick={() => moveStop(i, 1)} disabled={i===stopsOrdenados.length-1} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===stopsOrdenados.length-1?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Bajar</button>
                   <button data-pedido-mutation="true" type="button" onClick={() => removeStop(i)} disabled={stopsOrdenados.length<=1} style={{background:"none",border:"none",color:stopsOrdenados.length<=1?"var(--text5)":"var(--red)",cursor:stopsOrdenados.length<=1?"not-allowed":"pointer",fontSize:14,padding:"2px 6px"}}>x</button>
-                </div>
+                </div>)
               )}
             </div>
           )})}
@@ -5868,8 +5883,9 @@ function ModalAutoAsignacion({ pedido, vehiculos, choferes, onAsignar, onClose }
 }
 
 // ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Tab Documentos de Pedido ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬
-function TabDocsPedido({ pedido }) {
+function TabDocsPedido({ pedido, compact = false, onCount }) {
   const [docs,       setDocs]       = useState([]);
+  useEffect(()=>{ onCount?.(docs.length); },[docs.length,onCount]);
   const [uploading,  setUploading]  = useState(false);
   const [loading,    setLoading]    = useState(true);
 
@@ -5920,8 +5936,8 @@ function TabDocsPedido({ pedido }) {
   return (
     <div>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
-        <div style={{fontSize:13,fontWeight:600,color:"var(--text3)"}}>Documentos del viaje</div>
-        <button type="button" style={S.btn} onClick={async()=>{try{await verArchivoProtegido(`/pedidos/${pedido.id}/albaran-pdf`,`ALB-${pedido.numero}.pdf`);}catch(e){notify(e.message,'error');}}}>Preparar albarán / PDF</button>
+        <div style={{fontSize:13,fontWeight:600,color:"var(--text3)"}}>Documentos del viaje ({docs.length})</div>
+        {(!compact || (pedido.cliente_id && pedido.origen && pedido.destino)) && <button type="button" style={S.btn} onClick={async()=>{try{await verArchivoProtegido(`/pedidos/${pedido.id}/albaran-pdf`,`ALB-${pedido.numero}.pdf`);}catch(e){notify(e.message,'error');}}}>Preparar albarán / PDF</button>}
         {docs.length > 0 && docs.some(d=>!d.visible_chofer) && (
           <button
             onClick={async()=>{
@@ -5945,8 +5961,8 @@ function TabDocsPedido({ pedido }) {
       {loading ? (
         <div style={{color:"var(--text5)",fontSize:12,textAlign:"center",padding:20}}>Cargando...</div>
       ) : docs.length === 0 ? (
-        <div style={{textAlign:"center",padding:"24px 0",color:"var(--text5)"}}>
-          <div style={{fontSize:28,marginBottom:6}}>Docs</div>
+        <div style={{textAlign:"center",padding:compact?"4px 0":"24px 0",color:"var(--text5)"}}>
+          {!compact && <div style={{fontSize:28,marginBottom:6}}>Docs</div>}
           <div style={{fontSize:12}}>Sin documentos adjuntos</div>
           <div style={{fontSize:11,marginTop:4}}>Adjunta CMR, albaranes, fotos de descarga, etc.</div>
         </div>
@@ -6041,7 +6057,8 @@ const PesoAlerta = React.memo(function PesoAlerta({ pesoKg, vehiculoId, remolque
 });
 
 
-function PedidoTimeline({ pedido }) {
+function PedidoTimeline({ pedido, compact = false }) {
+  const [expanded,setExpanded] = useState(false);
   const [eventos, setEventos] = useState([]);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
@@ -6107,13 +6124,13 @@ function PedidoTimeline({ pedido }) {
 
   return (
     <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>
-      <div style={{fontSize:12,fontWeight:800,color:"var(--text4)",marginBottom:10,textTransform:"uppercase",letterSpacing:".06em"}}>Trazabilidad del viaje</div>
+      <div style={{fontSize:12,fontWeight:800,color:"var(--text4)",marginBottom:10,textTransform:"uppercase",letterSpacing:".06em"}}>Trazabilidad del viaje {compact && eventos.length > 1 && <button type="button" style={S.btn} onClick={()=>setExpanded(v=>!v)}>{expanded ? "Contraer" : `Ver historial (${eventos.length})`}</button>}</div>
       {loading
         ? <div style={{fontSize:12,color:"var(--text5)"}}>Cargando historial...</div>
         : eventos.length===0
           ? <div style={{fontSize:12,color:"var(--text5)"}}>Sin eventos registrados todavia.</div>
           : <div style={{display:"grid",gap:8}}>
-              {eventos.slice(0,8).map(ev => {
+              {(compact && !expanded ? eventos.slice(0,1) : eventos).map(ev => {
                 const isAiEvent = ev.tipo === "pedido.creado_bandeja_ia";
                 const isSignatureWarning = ev.tipo === "firma.contexto_modificado";
                 const actor = ev.actor_nombre || ev.actor_email || ev.actor_tipo || "Sistema";
@@ -6176,7 +6193,7 @@ function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
       </div>
       {loading ? (
         <div style={{fontSize:12,color:"var(--text5)"}}>Calculando rentabilidad...</div>
-      ) : !data ? (
+      ) : !data || !(Number(data.ingreso?.total)>0 || Number(ingresoLive)>0) || !data.costes ? (
         <div style={{fontSize:12,color:"var(--text5)"}}>Sin datos suficientes para calcular rentabilidad.</div>
       ) : (
         <>
@@ -6437,7 +6454,7 @@ function buildPedidoMapPoints(pedido = {}, choferPasos = null) {
   }));
 }
 
-function PedidoMapaOperativo({ pedido, choferPasos }) {
+function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
   const mapPoints = buildPedidoMapPoints(pedido, choferPasos);
   if (!mapPoints.length) return null;
   const pasos = getPedidoMapaPasos(pedido, choferPasos);
@@ -6453,8 +6470,9 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
           : pasos.carga_proceso || pasos.carga_iniciada
             ? "En carga"
           : LABEL_ESTADO[estado] || estado;
+  if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{pedido?.origen || "Origen pendiente"} → {pedido?.destino || "Destino pendiente"}</h4><p>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame/></div></OrderSection>;
   return (
-    <div className="tg-pedido-map-section" style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
+    <div className={`tg-pedido-map-section ${compact ? "order-editor-map" : ""}`} style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>
         <div>
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Ruta operativa</div>
@@ -6464,7 +6482,8 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
           {currentLabel}
         </span>
       </div>
-      <RutaMapa key={pedido?.id || "nuevo"} points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame />
+      <RutaMapa compact={compact} key={pedido?.id || "nuevo"} points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame />
+      {!compact && <>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginTop:9}}>
         {mapPoints.map(point => (
           <div key={`card-${point.tipo}-${point.index}-${point.label}`} style={{border:`1px solid ${point.tone.border}`,borderRadius:8,padding:"8px 10px",background:point.tone.bg}}>
@@ -6480,6 +6499,7 @@ function PedidoMapaOperativo({ pedido, choferPasos }) {
           </div>
         ))}
       </div>
+      </>}
     </div>
   );
 }
@@ -6491,6 +6511,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const { user } = useAuth();
   const esGerente = String(user?.rol || "").toLowerCase() === "gerente";
   const asignacionRef = React.useRef(null);
+  const [editorStep, setEditorStep] = useState(editando?._focus_asignacion ? 2 : 1);
   const [choferPasosMapa, setChoferPasosMapa] = useState(null);
   const [clientes, setClientes] = useState(clientesProp || []);
   const [rutas,    setRutas]    = useState(rutas_prop || []);
@@ -6595,7 +6616,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [creandoColaborador, setCreandoColaborador] = useState(false);
   const [calcKm,     setCalcKm]     = useState(false);
   const [avisoVehiculo, setAvisoVehiculo] = useState(null); // {matricula, notas}
-  const [showCostes, setShowCostes] = useState(!!(editando?.coste_gasoil || editando?.coste_peajes || editando?.coste_dietas || editando?.coste_otros));
+  const [showCostes, setShowCostes] = useState(false);
   const [poiDraft, setPoiDraft] = useState(null);
   const [managePointsOpen, setManagePointsOpen] = useState(false);
   const [managePointsMode, setManagePointsMode] = useState("carga");
@@ -6629,7 +6650,8 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
     setAccesoTemporalColaborador(null);
     setPendingDocs(Array.isArray(editando?._ai_docs) ? editando._ai_docs : []);
     setShowColaboradorSuggestions(false);
-    setShowCostes(!!(nextForm.coste_gasoil || nextForm.coste_peajes || nextForm.coste_dietas || nextForm.coste_otros));
+    setShowCostes(false);
+    setEditorStep(editando?._focus_asignacion ? 2 : 1);
     tarifaAutoAplicadaRef.current = "";
     userInteractedWithFormRef.current = false;
     initialFormRef.current = pedidoDraftSignature(nextForm);
@@ -7464,6 +7486,11 @@ async function notificarColaborador(force = false) {
   setNotificandoColaborador(true);
   try {
     const resp = await enviarWorkflowColaborador(editando.id, force);
+    setForm(p=>{
+      const next = {...p,workflow_colaborador_enviado_at:p.workflow_colaborador_enviado_at || new Date().toISOString()};
+      if (!userInteractedWithFormRef.current || pedidoDraftSignature(p) === initialFormRef.current) initialFormRef.current = pedidoDraftSignature(next);
+      return next;
+    });
     notify(resp?.already ? "El colaborador ya tenia el flujo enviado." : "Email enviado al colaborador.", resp?.already ? "info" : "success");
   } catch (e) {
     notify(e.message || "No se pudo enviar el email al colaborador.", "error");
@@ -7526,9 +7553,26 @@ async function copiarAccesoTemporalColaborador() {
   }
 }
 
+async function revocarAccesoTemporalColaborador() {
+  const acceso = accesoTemporalColaborador;
+  if (!acceso?.id || !acceso.colaborador_id) return;
+  const ok = await confirmDialog({ title: "Revocar acceso temporal", message: "El enlace de este viaje dejará de funcionar. ¿Quieres revocarlo?", confirmText: "Revocar", cancelText: "Cancelar", tone: "danger" });
+  if (!ok) return;
+  setGenerandoAccesoTemporal(true);
+  try {
+    await revocarColaboradorLiquidacionToken(acceso.colaborador_id, acceso.id);
+    setAccesoTemporalColaborador(null);
+    notify("Acceso temporal revocado.", "success");
+  } catch (e) {
+    notify(e.message || "No se pudo revocar el acceso temporal.", "error");
+  } finally {
+    setGenerandoAccesoTemporal(false);
+  }
+}
+
 async function guardar() {
-  if (!form.cliente_id) { notify("Selecciona un cliente", "warning"); return; }
-  if (!form.fecha_carga) { notify("La fecha de carga es obligatoria.", "warning"); return; }
+  if (!form.cliente_id) { setEditorStep(1); notify("Selecciona un cliente", "warning"); return; }
+  if (!form.fecha_carga) { setEditorStep(1); notify("La fecha de carga es obligatoria.", "warning"); return; }
   try {
     assertValidPedidoDates({
       fecha_pedido: form.fecha_pedido,
@@ -7538,23 +7582,23 @@ async function guardar() {
       firma_fecha: form.firma_fecha,
     });
   } catch (dateErr) {
-    notify(dateErr.message, "warning");
+    setEditorStep(1); notify(dateErr.message, "warning");
     return;
   }
   if (descargaAntesQueCarga(form.fecha_carga, form.fecha_descarga || form.fecha_entrega)) {
-    notify("La fecha de descarga no puede ser anterior a la fecha de carga.", "warning");
+    setEditorStep(1); notify("La fecha de descarga no puede ser anterior a la fecha de carga.", "warning");
     return;
   }
   if (!editando?.id && bloqueoClienteModal) {
-    notify(bloqueoClienteModal.message, "error");
+    setEditorStep(1); notify(bloqueoClienteModal.message, "error");
     return;
   }
   if (rutaIncompatible) {
-    notify("La ruta seleccionada no es compatible con el remolque actual. Cambia el remolque antes de guardar.", "warning");
+    setEditorStep(1); notify("La ruta seleccionada no es compatible con el remolque actual. Cambia el remolque antes de guardar.", "warning");
     return;
   }
   if (editando?.id && String(editando?.estado || "").toLowerCase() === "entregado" && String(form.estado || "").toLowerCase() !== "entregado" && !esGerente) {
-    notify("Solo gerencia puede cambiar el estado de un pedido marcado como entregado.", "warning");
+    setEditorStep(1); notify("Solo gerencia puede cambiar el estado de un pedido marcado como entregado.", "warning");
     return;
   }
   if (clienteRiesgoPedido?.requiere_confirmacion && !isRiskConfirmationFresh(riesgoConfirmadoRef, form.cliente_id, clienteRiesgoPedido)) {
@@ -7956,78 +8000,10 @@ useEffect(() => {
   // The modal JSX (extracted from Pedidos main render)
   return (
     <>
-<div className="tg-pedido-modal-overlay" style={S.modal}>
-          <style>{`
-            .tg-pedido-modal, .tg-pedido-modal * { box-sizing:border-box; min-width:0; }
-            .tg-pedido-modal input, .tg-pedido-modal select, .tg-pedido-modal textarea, .tg-pedido-modal button { max-width:100%; }
-            .tg-pedido-modal-header { position:relative; z-index:20; isolation:isolate; margin:0 0 16px; padding:0 0 12px; background:var(--bg2); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; max-width:100%; overflow:hidden; }
-            .tg-pedido-modal-title { min-width:0; overflow-wrap:anywhere; word-break:break-word; line-height:1.25; }
-            .tg-pedido-map-section { max-width:100%; min-width:0; overflow:hidden; isolation:isolate; position:relative; z-index:0; }
-            .tg-pedido-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-            .tg-pedido-form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
-            .tg-pedido-form-grid-4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:10px; }
-            .tg-pedido-actions-row { display:flex; gap:6px; margin-top:6px; }
-            @media (max-width: 760px) {
-              .tg-pedido-modal-overlay { align-items:flex-start !important; justify-content:center !important; padding:8px !important; overflow:auto !important; }
-              .tg-pedido-modal { width:100% !important; max-width:calc(100vw - 16px) !important; max-height:calc(100dvh - 16px) !important; padding:16px 14px 18px !important; border-radius:12px !important; overflow-x:hidden !important; }
-              .tg-pedido-modal-header { margin:0 0 12px !important; padding:0 0 10px !important; align-items:flex-start !important; }
-              .tg-pedido-modal-title { font-size:15px !important; padding-top:7px !important; }
-              .tg-pedido-map-section { padding:10px !important; border-radius:10px !important; margin-bottom:12px !important; }
-              .tg-pedido-map-section [style*="grid-template-columns"] { grid-template-columns:1fr !important; }
-              .tg-pedido-form-grid-2, .tg-pedido-form-grid-3, .tg-pedido-form-grid-4 { grid-template-columns:1fr !important; }
-              .tg-pedido-form-grid-2 > *, .tg-pedido-form-grid-3 > *, .tg-pedido-form-grid-4 > * { grid-column:1/-1 !important; }
-              .tg-pedido-actions-row { display:grid !important; grid-template-columns:1fr !important; }
-              .tg-pedido-actions-row > * { width:100% !important; }
-              .tg-pedido-modal [style*="grid-template-columns:1fr 1fr"],
-              .tg-pedido-modal [style*="grid-template-columns: 1fr 1fr"],
-              .tg-pedido-modal [style*="grid-template-columns:1fr 1fr 1fr"],
-              .tg-pedido-modal [style*="grid-template-columns: 1fr 1fr 1fr"],
-              .tg-pedido-modal [style*="grid-template-columns:1fr 1fr 1fr 1fr"],
-              .tg-pedido-modal [style*="grid-template-columns: 1fr 1fr 1fr 1fr"],
-              .tg-pedido-modal [style*="grid-template-columns:repeat(4"],
-              .tg-pedido-modal [style*="grid-template-columns: repeat(4"],
-              .tg-pedido-modal [style*="grid-template-columns:2fr"],
-              .tg-pedido-modal [style*="grid-template-columns: 2fr"],
-              .tg-pedido-modal [style*="grid-template-columns:1fr 2fr"],
-              .tg-pedido-modal [style*="grid-template-columns: 1fr 2fr"] {
-                grid-template-columns:1fr !important;
-              }
-              .tg-pedido-modal [style*="grid-column:1/3"],
-              .tg-pedido-modal [style*="grid-column:3/5"] {
-                grid-column:1/-1 !important;
-              }
-            }
-          `}</style>
-          <div
-            className="tg-pedido-modal"
-            style={S.mbox}
-            onInputCapture={() => { userInteractedWithFormRef.current = true; }}
-            onChangeCapture={() => { userInteractedWithFormRef.current = true; }}
-            onDropCapture={() => { userInteractedWithFormRef.current = true; }}
-            onClickCapture={event => {
-              if (event.target.closest("[data-pedido-mutation]")) userInteractedWithFormRef.current = true;
-            }}
-          >
-            <div className="tg-pedido-modal-header">
-              <div className="tg-pedido-modal-title" style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,color:"var(--text)",flex:1}}>
-                {editando?._readonly
-                  ? editando.numero
-                  : editando?._duplicado
-                    ? `Duplicar ${editando.numero || "pedido"}`
-                    : editando
-                      ? `Editar ${editando.numero}`
-                      : "Nuevo pedido"}
-              </div>
-              <button
-                type="button"
-                onClick={requestClose}
-                title="Cerrar pedido"
-                aria-label="Cerrar pedido"
-                style={{position:"relative",zIndex:1,flex:"0 0 36px",width:36,height:36,borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:20,lineHeight:"20px",cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center",fontWeight:800}}
-              >
-                x
-              </button>
-            </div>
+<OrderEditorShell title={editando?._duplicado ? `Duplicar ${editando.numero || "pedido"}` : editando?.numero || "Nuevo pedido"}
+ status={LABEL_ESTADO[form.estado] || "Borrador"} step={editorStep} onStep={setEditorStep}
+ onClose={requestClose} onSave={guardar} saving={saving} saved={!!editando?.id} readonly={editando?._readonly && !desvinculado}>
+ <div className="tg-pedido-modal" onInputCapture={() => { userInteractedWithFormRef.current = true; }} onChangeCapture={() => { userInteractedWithFormRef.current = true; }} onDropCapture={() => { userInteractedWithFormRef.current = true; }} onClickCapture={event => { if (event.target.closest("[data-pedido-mutation]")) userInteractedWithFormRef.current = true; }}>
             {form.pendiente_completar && (
               <div style={{background:"rgba(251,191,36,.1)",border:"1px solid rgba(251,191,36,.28)",borderRadius:8,padding:"9px 12px",marginBottom:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                 <div style={{fontSize:12,color:"#fbbf24",fontWeight:700,flex:1}}>
@@ -8070,756 +8046,129 @@ useEffect(() => {
             )}
 
             <PedidoIncidenciaPanel pedido={form || editando} />
-            <PedidoMapaOperativo pedido={mapPedidoDraft || editando} choferPasos={choferPasosMapa} />
+            <div hidden={editorStep !== 1} className="order-editor-step">
+            <PedidoMapaOperativo pedido={mapPedidoDraft || editando} choferPasos={choferPasosMapa} compact />
 
-            <div style={S.sec}>Cliente y ruta</div>
-            <div className="tg-pedido-form-grid-2">
-              <div style={{gridColumn:"1/-1"}}>
-                <label style={S.label}>Cliente *</label>
-                {/* Autocomplete por nombre */}
-                <div style={{position:"relative"}}>
-                  <input
-                    placeholder="Escribe el nombre del cliente..."
-                    style={{...S.input,width:"100%"}}
-                    value={nombreBusqueda || (form.cliente_id ? clientes.find(c=>c.id===form.cliente_id)?.nombre||"" : "")}
-                    onChange={e=>{
-                      const val = e.target.value;
-                      setNombreBusqueda(val);
-                      if(!val) { setForm(p=>({...p,cliente_id:""})); }
-                      setShowSuggestions(true);
-                    }}
-                    onFocus={()=>setShowSuggestions(true)}
-                    onBlur={()=>setTimeout(()=>setShowSuggestions(false),200)}
-                  />
-                  {/* Sugerencias */}
-                  {showSuggestions && nombreBusqueda && (()=>{
-                    const sugs = clientes.filter(c=>
-                      c.nombre.toLowerCase().includes(nombreBusqueda.toLowerCase()) ||
-                      (c.cif||"").toLowerCase().includes(nombreBusqueda.toLowerCase())
-                    ).slice(0,6);
-                    if(sugs.length===0) return(
-                      <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,zIndex:50,padding:"10px 14px"}}>
-                        <div style={{fontSize:12,color:"var(--text4)",marginBottom:8}}>
-                          No hay ningun cliente con ese nombre.
-                        </div>
-                        <div style={{display:"flex",gap:8}}>
-                          <button type="button"
-                            onClick={()=>{ setModalNuevoCliente({nombre:nombreBusqueda}); setShowSuggestions(false); }}
-                            style={{...S.btn,background:"var(--accent)",color:"#fff",fontSize:12,padding:"5px 12px"}}>
-                            Crear cliente "{nombreBusqueda}"
-                          </button>
-                          <button type="button"
-                            onClick={()=>{ setNombreBusqueda(""); setShowSuggestions(false); }}
-                            style={{...S.btn,background:"transparent",border:"1px solid var(--border2)",color:"var(--text4)",fontSize:12,padding:"5px 10px"}}>
-                            Cancelar
-                          </button>
-                        </div>
-                        <div style={{fontSize:11,color:"var(--text5)",marginTop:6}}>
-                          Aviso: sin cliente no se puede crear el viaje.
-                        </div>
-                      </div>
-                    );
-                    return(
-                      <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,zIndex:50,overflow:"hidden"}}>
-                        {sugs.map(c=>(
-                          <div key={c.id}
-                            onMouseDown={()=>{
-                              setForm(p=>({
-                                ...p,
-                                cliente_id: c.id,
-                                tipo_iva: c.tipo_iva ?? p.tipo_iva ?? 21,
-                                iva_regimen: c.iva_regimen || ivaOptionValue({ tipo_iva: c.tipo_iva ?? p.tipo_iva }),
-                                ventana_carga: p.ventana_carga || c.horario_carga || "",
-                                ventana_descarga: p.ventana_descarga || c.horario_descarga || "",
-                                // Mercancia habitual del cliente (si no hay una escrita ya)
-                                mercancia: p.mercancia || c.mercancia_habitual || "",
-                              }));
-                              setNombreBusqueda("");
-                              setShowSuggestions(false);
-                            }}
-                            style={{padding:"9px 14px",cursor:"pointer",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}
-                            onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"}
-                            onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                            <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{c.nombre}</span>
-                            {c.cif&&<span style={{fontSize:11,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{c.cif}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                </div>
-                {/* Cliente seleccionado */}
-                {form.cliente_id&&!nombreBusqueda&&(()=>{
-                  const c=clientes.find(x=>x.id===form.cliente_id);
-                  if(!c) return null;
-                  return(
-                    <div style={{marginTop:6,padding:"6px 12px",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.2)",borderRadius:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <span style={{fontSize:12,color:"var(--accent)",fontWeight:600}}>{c.nombre}{c.cif?" | "+c.cif:""}</span>
-                      <button data-pedido-mutation="true" type="button" onClick={()=>setForm(p=>({...p,cliente_id:""}))}
-                        style={{background:"none",border:"none",color:"var(--text5)",cursor:"pointer",fontSize:14,padding:"0 4px"}}>Quitar</button>
-                    </div>
-                  );
-                })()}
-              </div>
-              {!editando?.id && bloqueoClienteModal && (
-                <div style={{gridColumn:"1/-1",padding:"10px 12px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,fontSize:12,color:"#b91c1c",fontWeight:800}}>
-                  {bloqueoClienteModal.title}: {bloqueoClienteModal.message}
-                </div>
-              )}
-              {form.cliente_id && clienteRiesgoLoading && (
-                <div style={{gridColumn:"1/-1",padding:"8px 12px",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7,fontSize:12,color:"var(--text4)"}}>
-                  Revisando cobros pendientes y limite de riesgo del cliente...
-                </div>
-              )}
-              {form.cliente_id && clienteRiesgo && (() => {
-                const nivel = clienteRiesgoPedido.nivel || "medio";
-                const danger = nivel === "critico" || nivel === "alto";
-                const color = nivel === "critico" ? "#ef4444" : danger ? "#f59e0b" : "#22c55e";
-                const money = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                return (
-                  <div style={{gridColumn:"1/-1",padding:"10px 12px",background:danger ? "rgba(245,158,11,.09)" : "rgba(34,197,94,.08)",border:`1px solid ${danger ? "rgba(245,158,11,.3)" : "rgba(34,197,94,.24)"}`,borderRadius:8,display:"grid",gap:6}}>
-                    <div style={{display:"flex",gap:8,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
-                      <strong style={{fontSize:12,color}}>Aviso de cobro/riesgo del cliente</strong>
-                      <span style={{fontSize:18,color,fontWeight:900,fontFamily:"'JetBrains Mono',monospace"}}>
-                        {formatRiskPct(clienteRiesgoPedido.riesgo_pct_actual)}
-                      </span>
-                    </div>
-                    <div style={{fontSize:11,color:"var(--text4)"}}>
-                      Pendiente: {money(clienteRiesgo.total_pendiente)} EUR
-                      {clienteRiesgo.limite_riesgo > 0 ? ` de ${money(clienteRiesgo.limite_riesgo)} EUR` : " | Sin limite de riesgo configurado"}
-                      {clienteRiesgoPedido.riesgo_pct_proyectado !== null ? ` | con este pedido: ${formatRiskPct(clienteRiesgoPedido.riesgo_pct_proyectado)}` : ""}
-                    </div>
-                    {clienteRiesgoPedido.avisos.length > 0 && (
-                      <div style={{display:"grid",gap:4}}>
-                        {clienteRiesgoPedido.avisos.map((av, idx) => (
-                          <div key={`${av.tipo}-${idx}`} style={{fontSize:12,color:"var(--text3)"}}>{av.mensaje}</div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              {form.cliente_id && rutas.length > 0 && (
-                <div style={{gridColumn:"1/-1",padding:"8px 12px",background:"rgba(16,185,129,.07)",border:"1px solid rgba(16,185,129,.2)",borderRadius:7,fontSize:12,color:"var(--text3)"}}>
-                  Hay {rutas.length} tarifa(s) guardada(s) para este cliente. Usa "Cargar tarifa / ruta guardada" para rellenar origen, destino, km, precio, minimos y recargos.
-                </div>
-              )}
-              {cmrInternacionalModal && (
-                <div style={{gridColumn:"1/-1",padding:"9px 12px",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.22)",borderRadius:8,fontSize:12,color:"var(--text3)",lineHeight:1.35}}>
-                  <strong style={{color:"#2563eb"}}>eCMR internacional:</strong> origen o destino fuera de España. El documento se preparara como CMR internacional con trazabilidad, firmas/evidencias, historial y exportacion eFTI/eCMR cuando generes la carta de porte/documento digital.
-                </div>
-              )}
-              {/* Regla tarifaria por ruta */}
-              {tarifasCoincidentes.length > 1 && !form.ruta_id && <div role="status" style={{gridColumn:'1/-1',padding:12,border:'1px solid var(--border2)',borderRadius:8}}>
-                <strong>Hay varias tarifas compatibles. Selecciona la que corresponde.</strong>
-                <p>Se conservarán las direcciones del pedido.</p>
-                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>{tarifasCoincidentes.map(r=><button type="button" key={r.id} style={S.btn} onClick={()=>setForm(p=>syncPrecioClienteCol(aplicarTarifaRutaADraft({...p,ruta_id:r.id},r)))}>
-                  {r.origen} → {r.destino} · {Number(r.precio_base||0).toLocaleString('es-ES')} € / {r.tarifa_tipo||'viaje'}
-                </button>)}</div>
-              </div>}
-              {form.cliente_id&&form.origen&&form.destino&&(()=>{
-                const rutaTarifa = rutaTarifaSugerida;
-                if(!rutaTarifa) return null;
-                const precioVista = Number(rutaTarifa.precio_base || 0) * (1 + ((Number(rutaTarifa.recargo_combustible_pct || 0) || 0) / 100));
-                const tipos={viaje:"viaje",kg:"EUR/100kg",tonelada:"EUR/tn",km:"EUR/km",hora:"EUR/h",palet:"EUR/palet"};
-                return(
-                  <div style={{gridColumn:"1/-1",padding:"8px 12px",background:"rgba(16,185,129,.07)",border:"1px solid rgba(16,185,129,.2)",borderRadius:7,display:"flex",alignItems:"center",gap:10,fontSize:12}}>
-                    <span style={{fontSize:14}}>Ruta</span>
-                    <span style={{color:"var(--text3)"}}>
-                      Regla encontrada: <strong style={{color:"#10b981"}}>{precioVista.toLocaleString("es-ES",{minimumFractionDigits:2})} EUR {tipos[rutaTarifa.tarifa_tipo]||rutaTarifa.tarifa_tipo}</strong>
-                      {Number(rutaTarifa.recargo_combustible_pct||0)>0 && <span style={{marginLeft:8,color:"#fbbf24"}}>+{Number(rutaTarifa.recargo_combustible_pct).toLocaleString("es-ES")} % combustible</span>}
-                    </span>
-                    <button type="button" onClick={()=>{
-                      setForm(p=>{
-                        const next = aplicarTarifaRutaADraft(p, rutaTarifa);
-                        return syncPrecioClienteCol(next);
-                      });
-                    }} style={{marginLeft:"auto",padding:"3px 10px",borderRadius:5,border:"none",background:"rgba(16,185,129,.2)",color:"#10b981",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-                      Aplicar precio
-                    </button>
-                  </div>
-                );
-              })()}
-              <div><label style={S.label}>Cargar tarifa / ruta guardada</label>
-                <select value={form.ruta_id||""} onChange={e=>{
-  const r=rutas.find(rt=>rt.id===e.target.value);
-  setForm(p=>{
-    const newForm = {...p, ruta_id:e.target.value};
-    if (r) {
-      // Auto-fill route data
-      if (r.origen)  newForm.origen  = r.origen;
-      if (r.destino) newForm.destino = r.destino;
-      if (r.km)      newForm.km_ruta = r.km;
-      Object.assign(newForm, applyRouteEndpointsFromSavedPoints(newForm, r));
-
-      // Auto-fill peajes cost if ruta has it
-      if (r.peajes && Number(r.peajes) > 0) {
-        newForm.coste_peajes = Number(r.peajes);
-        setShowCostes(true);
-      }
-      Object.assign(newForm, aplicarTarifaRutaADraft(newForm, r));
-
-      // Auto-fill estimated gasoil cost if km available
-      if (r.km && !newForm.colaborador_id) {
-        newForm.coste_gasoil = calcularCosteGasoil(newForm);
-        setShowCostes(true);
-      }
-    }
-    return syncPrecioClienteCol(newForm);
-  });
-}} style={S.sel}>
-                  <option value="">Sin ruta / Manual</option>
-                  {groupRutasByOrigen(rutas).map(g => (
-                    <optgroup key={g.origen} label={g.origen}>
-                      {g.rutas.map(r=>{
-                        const compatible = rutaCompatibleConConjunto(r);
-                        const tipoReq = r.tipo_vehiculo && r.tipo_vehiculo !== "cualquiera" ? ` (${r.tipo_vehiculo})` : "";
-                        return (
-                          <option key={r.id} value={r.id} disabled={!compatible}>
-                            {r.destino}{tipoReq}{!compatible ? " - requiere cambio de remolque" : ""}
-                          </option>
-                        );
-                      })}
-                    </optgroup>
-                  ))}
-                </select>
-                <div style={{marginTop:6,fontSize:11,color:"var(--text5)"}}>
-                  Al seleccionar una ruta se cargan automaticamente origen, destino, km, precio, minimo facturable y recargo.
-                </div>
-                {form.cliente_id && rutas.length > rutasCompatibles.length && (
-                  <div style={{marginTop:6,fontSize:11,color:"var(--text5)"}}>
-                    Hay {rutas.length - rutasCompatibles.length} ruta(s) del cliente no compatibles con el remolque actual. Cambia el remolque para poder seleccionarlas.
-                  </div>
-                )}
-                {rutaIncompatible && (
-                  <div style={{marginTop:6,fontSize:11,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.22)",borderRadius:7,padding:"7px 9px"}}>
-                    La ruta exige {rutaSeleccionada.tipo_vehiculo}; el remolque actual parece {tipoRemolqueActual || "sin clasificar"}. Cambia el remolque a uno compatible antes de guardar.
-                    {remolquesCompatiblesRuta.length > 0 && (
-                      <button data-pedido-mutation="true" type="button" onClick={()=>setForm(p=>({...p,remolque_id_manual:remolquesCompatiblesRuta[0].id}))}
-                        style={{marginLeft:8,padding:"3px 8px",borderRadius:6,border:"1px solid rgba(245,158,11,.35)",background:"transparent",color:"#f59e0b",fontSize:11,fontWeight:800,cursor:"pointer"}}>
-                        Usar {remolquesCompatiblesRuta[0].matricula}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-              <div><label style={S.label}>Referencia cliente</label><input style={S.input} value={form.referencia_cliente||""} onChange={f("referencia_cliente")} placeholder="Ref. pedido del cliente"/></div>
-              <div>
-                <label style={S.label}>Origen (carga) *</label>
-                <EndpointAutocomplete
-                  inputStyle={S.input}
-                  value={form.origen||""}
-                  onChange={aplicarEndpointText("origen", "carga")}
-                  onBlur={e=>resolverEndpointEnFormulario("origen", "carga", e.currentTarget.value)}
-                  placeholder="Escribe o elige un punto de carga"
-                  suggestions={puntosCargaSugeridosModal}
-                  getValue={p => p.nombre || p.direccion}
-                  getLabel={p => direccionCompletaPunto(p) || p.direccion || p.nombre}
-                  onPick={p => setForm(x => applyPuntoCargaToDraft(x, p))}
-                />
-                {form.cliente_id && (
-                  <div style={{marginTop:6}}>
-                    {puntosCargaClienteModal.length > 0 ? (
-                      <PuntoInteresPicker
-                        placeholder="Elegir punto de carga del cliente"
-                        puntos={puntosCargaClienteModal}
-                        clienteId={form.cliente_id}
-                        tipo="carga"
-                        onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
-                        style={{...S.sel,width:"100%"}}
-                      />
-                    ) : (
-                      <div style={{fontSize:11,color:"var(--text5)",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:7,padding:"7px 9px"}}>
-                        {puntosCargaClienteLoading ? "Cargando puntos de carga del cliente..." : "Este cliente no tiene puntos de carga propios. Crea un punto nuevo asociado a este cliente."}
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div className="tg-pedido-actions-row">
-                  <PuntoInteresPicker
-                    placeholder="Usar punto como origen"
-                    clienteId={form.cliente_id}
-                    tipo="carga"
-                    onPick={p=>setForm(x=>applyPuntoCargaToDraft(x, p))}
-                    style={{...S.sel,flex:1}}
-                  />
-                  <button type="button" onClick={()=>setPoiDraft({nombre:form.origen,direccion:"",tipo:"carga",cliente_id:form.cliente_id || "",ventana:form.ventana_carga || "",pais:"España"})} disabled={!form.origen?.trim()}
-                    style={{...S.btn,background:"transparent",color:form.origen?.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
-                    Guardar punto
-                  </button>
-                  <button type="button" onClick={()=>{ setManagePointsMode("carga"); setManagePointsOpen(true); }}
-                    style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
-                    Puntos
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label style={S.label}>Destino (entrega) *</label>
-                <EndpointAutocomplete
-                  inputStyle={S.input}
-                  value={form.destino||""}
-                  onChange={aplicarEndpointText("destino", "descarga")}
-                  onBlur={e=>resolverEndpointEnFormulario("destino", "descarga", e.currentTarget.value)}
-                  placeholder="Escribe o elige un punto de descarga"
-                  suggestions={puntosDescargaSugeridosModal}
-                  getValue={p => p.nombre || p.direccion}
-                  getLabel={p => direccionCompletaPunto(p) || p.direccion || p.nombre}
-                  onPick={p => setForm(x => applyPuntoDescargaToDraft(x, p))}
-                />
-                <div className="tg-pedido-actions-row">
-                  <PuntoInteresPicker
-                    placeholder="Usar punto como destino"
-                    clienteId={form.cliente_id}
-                    tipo="descarga"
-                    onPick={p=>setForm(x=>{
-                      return applyPuntoDescargaToDraft(x, p);
-                    })}
-                    style={{...S.sel,flex:1}}
-                  />
-                  <button type="button" onClick={()=>setPoiDraft({nombre:form.destino,direccion:"",tipo:"descarga",cliente_id:form.cliente_id || "",ventana:form.ventana_descarga || "",pais:"España"})} disabled={!form.destino?.trim()}
-                    style={{...S.btn,background:"transparent",color:form.destino?.trim()?"var(--accent)":"var(--text5)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
-                    Guardar punto
-                  </button>
-                  <button type="button" onClick={()=>{ setManagePointsMode("descarga"); setManagePointsOpen(true); }}
-                    style={{...S.btn,background:"transparent",color:"var(--text3)",border:"1px solid var(--border2)",padding:"8px 10px"}}>
-                    Puntos
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div style={S.sec}>Planificacion</div>
-            <div className="tg-pedido-form-grid-4">
-              <div><label style={S.label}>Fecha pedido</label><input type="date" min="2000-01-01" max="2100-12-31" style={S.input} value={form.fecha_pedido||""} onChange={f("fecha_pedido")}/></div>
-              <div><label style={S.label}>Fecha carga</label><input type="date" min="2000-01-01" max="2100-12-31" style={S.input} value={form.fecha_carga||""} onChange={f("fecha_carga")}/></div>
-              <div><label style={S.label}>Hora carga</label><input type="time" style={S.input} value={form.hora_carga||""} onChange={f("hora_carga")}/></div>
-              <div><label style={S.label}>Ventana carga</label><input style={S.input} value={form.ventana_carga||""} onChange={f("ventana_carga")} placeholder="08:00-14:00"/></div>
-              <div><label style={S.label}>Fecha descarga</label><input type="date" min="2000-01-01" max="2100-12-31" style={S.input} value={form.fecha_descarga||""} onChange={f("fecha_descarga")}/></div>
-              <div><label style={S.label}>Hora descarga</label><input type="time" style={S.input} value={form.hora_descarga||""} onChange={f("hora_descarga")}/></div>
-              <div><label style={S.label}>Ventana descarga</label><input style={S.input} value={form.ventana_descarga||""} onChange={f("ventana_descarga")} placeholder="07:00-17:00"/></div>
-              <div><label style={S.label}>Estado</label>
-                <select
-                  value={form.estado||"pendiente"}
-                  onChange={f("estado")}
-                  disabled={editando?.id && String(editando?.estado || "").toLowerCase() === "entregado" && !esGerente}
-                  style={{...S.sel,opacity:editando?.id && String(editando?.estado || "").toLowerCase() === "entregado" && !esGerente ? 0.65 : 1}}
-                >
-                  {ESTADOS_RAW.map(e=><option key={e} value={e}>{LABEL_ESTADO[e]}</option>)}
-                </select>
-                {editando?.id && String(editando?.estado || "").toLowerCase() === "entregado" && !esGerente && (
-                  <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>Estado bloqueado: solo gerencia puede cambiar un pedido entregado.</div>
-                )}
-              </div>
-              <div style={{gridColumn:"1/3"}}>
-                <label style={S.label}>Google Maps carga</label>
-                <input
-                  style={S.input}
-                  value={getPrimaryStopField(form.puntos_carga, "google_maps_url")}
-                  onChange={e=>setForm(p=>({
-                    ...p,
-                    puntos_carga: updatePrimaryStop(
-                      p.puntos_carga,
-                      { google_maps_url: e.target.value },
-                      p.origen || ""
-                    ),
-                  }))}
-                  placeholder="https://maps.google.com/..."
-                />
-              </div>
-              <div style={{gridColumn:"3/5"}}>
-                <label style={S.label}>Google Maps descarga</label>
-                <input
-                  style={S.input}
-                  value={getPrimaryStopField(form.puntos_descarga, "google_maps_url")}
-                  onChange={e=>setForm(p=>({
-                    ...p,
-                    puntos_descarga: updatePrimaryStop(
-                      p.puntos_descarga,
-                      { google_maps_url: e.target.value },
-                      p.destino || ""
-                    ),
-                  }))}
-                  placeholder="https://maps.google.com/..."
-                />
-              </div>
-            </div>
-
-            {etiquetasCatalogo.length > 0 && (
-              <div style={{margin:"2px 0 12px"}}>
-                <label style={S.label}>Etiquetas del viaje</label>
-                {(()=>{
-                  const etiquetaTipo = (e) => e?.tipo === "perfil" ? "perfil" : e?.tipo === "categoria" ? "categoria" : (String(e?.auto_match||"").trim() ? "categoria" : "perfil");
-                  const grupoLabel = {fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text5)",margin:"4px 0 4px"};
-                  const chip = (et)=>{
-                    const nombre = String(et.nombre||"").trim();
-                    if(!nombre) return null;
-                    const activa = Array.isArray(form.etiquetas) && form.etiquetas.map(String).includes(nombre);
-                    return (
-                      <button type="button" key={nombre}
-                        onClick={()=>setForm(p=>{
-                          const list = Array.isArray(p.etiquetas)?p.etiquetas.map(String).filter(Boolean):[];
-                          const set = new Set(list);
-                          set.has(nombre)?set.delete(nombre):set.add(nombre);
-                          return {...p, etiquetas:[...set]};
-                        })}
-                        style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 11px",borderRadius:20,border:`1px solid ${activa?(et.color||"var(--accent)"):"var(--border2)"}`,background:activa?`${et.color||"#14b8a6"}22`:"var(--bg4)",color:activa?"var(--text)":"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
-                        <span style={{width:9,height:9,borderRadius:"50%",background:et.color||"var(--accent-l)",display:"inline-block"}}/>
-                        {nombre}
-                      </button>
-                    );
-                  };
-                  const cats = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="categoria" && String(e.nombre||"").trim());
-                  const perfs = etiquetasCatalogo.filter(e=>etiquetaTipo(e)==="perfil" && String(e.nombre||"").trim());
-                  return (
-                    <>
-                      {cats.length>0 && (<>
-                        <div style={grupoLabel}>Categorias de vehiculo</div>
-                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{cats.map(chip)}</div>
-                      </>)}
-                      {perfs.length>0 && (<>
-                        <div style={{...grupoLabel,marginTop:8}}>Perfiles de viaje</div>
-                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{perfs.map(chip)}</div>
-                      </>)}
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-
-            <div style={S.sec}>Distancias</div>
-            <div className="tg-pedido-form-grid-2" style={{marginBottom:10}}>
-              <div>
-                <label style={S.label}>
-                  Km en ruta
-                  {getRoutePlaces(form).length >= 2 && (
-                    <button type="button" onClick={async()=>{
-                      const km = await calcularKmRuta(form.origen, form.destino, getRoutePlaces(form));
-                      if(km) setForm(p=>{
-                        const next = {...p, km_ruta:km};
-                        if (!next.colaborador_id) {
-                          next.coste_gasoil = calcularCosteGasoil(next);
-                          setShowCostes(true);
-                        }
-                        return syncCantidadSiVacia(next);
-                      });
-                    }} disabled={calcKm}
-                      style={{marginLeft:8,padding:"1px 8px",borderRadius:5,border:"1px solid var(--accent)",background:"transparent",color:"var(--accent)",fontSize:10,cursor:calcKm?"not-allowed":"pointer",fontWeight:700}}>
-                      {calcKm ? "Calculando..." : "Calcular"}
-                    </button>
-                  )}
-                </label>
-                <input type="text" inputMode="decimal" style={S.input} value={form.km_ruta||""} onChange={e=>{ const km=parseLocaleNumber(e.target.value,0); setForm(p=>{ const u=syncPrecioClienteCol(syncCantidadSiVacia({...p,km_ruta:e.target.value})); if(km>0&&!u.colaborador_id){u.coste_gasoil=calcularCosteGasoil(u); setShowCostes(true);} return u; }); }}
-                  placeholder="Se calcula automaticamente"/>
-              </div>
-              <div>
-                <label style={S.label}>
-                  Km en vacio
-                  {form.vehiculo_id && form.origen && (
-                    <button type="button" onClick={async()=>{
-                      const result = await calcularKmVacio(form.vehiculo_id, form.origen);
-                      if(result) {
-                        setForm(p=>({...p, km_vacio:result.km}));
-                        if(result.km > 0)
-                          notify(`Km en vacio calculados: ${result.km} km (desde ${result.desde} hasta ${form.origen})`, "success");
-                      } else {
-                        notify("No hay viajes anteriores de este vehiculo o no se pudo calcular la distancia.", "warning");
-                      }
-                    }} disabled={calcKm}
-                      style={{marginLeft:8,padding:"1px 8px",borderRadius:5,border:"1px solid #a78bfa",background:"transparent",color:"#a78bfa",fontSize:10,cursor:calcKm?"not-allowed":"pointer",fontWeight:700}}>
-                      {calcKm ? "..." : "Calcular"}
-                    </button>
-                  )}
-                </label>
-                <input type="text" inputMode="decimal" style={S.input} value={form.km_vacio||""} onChange={f("km_vacio")}
-                  placeholder="Distancia hasta punto de carga"/>
-              </div>
-              <div style={{gridColumn:"1/-1",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:9,padding:"12px 14px"}}>
-                <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:10}}>Operativa de carga</div>
-                <div style={{display:"flex",gap:18,flexWrap:"wrap"}}>
-                  {[
-                    ["carga_lateral","Carga lateral"],
-                    ["carga_trasera","Carga trasera"],
-                    ["carga_techo","Techo"],
-                    ["intercambio_palets","Intercambio de palets"],
-                    ["requiere_cinchas","Necesario llevar cinchas"],
-                  ].map(([key,label])=>(
-                    <label key={key} style={{display:"flex",alignItems:"center",gap:8,fontSize:13,color:"var(--text3)",cursor:"pointer"}}>
-                      <input type="checkbox" checked={!!form[key]} onChange={e=>setForm(p=>({...p,[key]:e.target.checked}))} />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div style={S.sec}>Puntos de carga</div>
-            <CargasEditor pedidoId={editando?.id} form={form} setForm={setForm} disabled={editando?._readonly}/>
-
-            <div style={S.sec}>Puntos de descarga</div>
-            <DescargasEditor pedidoId={editando?.id} form={form} setForm={setForm} disabled={editando?._readonly}/>
-
-            <div style={S.sec}>Mercancia</div>
-            <div style={{display:"flex",gap:16,marginBottom:10,alignItems:"center",padding:"10px 14px",background:"var(--bg4)",borderRadius:8,border:"1px solid var(--border2)"}}>
-              <span style={{fontSize:12,fontWeight:700,color:"var(--text3)"}}>Tipo de carga:</span>
-              {["completa","grupaje"].map(t=>(
-                <label key={t} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:t===(form.tipo_carga||"completa")?"700":"400",color:t===(form.tipo_carga||"completa")?"var(--accent)":"var(--text4)"}}>
-                  <input type="radio" name="tipo_carga" value={t} checked={(form.tipo_carga||"completa")===t}
-                    onChange={()=>setForm(p=>({...p,tipo_carga:t}))} style={{accentColor:"var(--accent)"}}/>
-                  {t==="completa"?"Carga completa":"Grupaje (carga parcial)"}
-                </label>
-              ))}
-              {(form.tipo_carga||"completa")==="grupaje" && (
-                <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>Se añadirá a Grupajes para combinarlo con otros pedidos</span>
-              )}
-            </div>
-            <div className="tg-pedido-form-grid-2">
-              <div style={{gridColumn:"1/-1"}}><label style={S.label}>Descripcion mercancia</label><input style={S.input} value={form.mercancia||""} onChange={f("mercancia")} placeholder="Pallets de ceramica, maquinaria..."/></div>
-                <div>
-                  <label style={S.label}>Peso (kg)</label>
-                  <input type="text" inputMode="decimal" style={S.input} value={form.peso_kg||""} onChange={e=>setForm(p=>{
-                    const next = syncPrecioClienteCol(syncCantidadSiVacia({...p, peso_kg:e.target.value}));
-                    if (!next.colaborador_id && parseLocaleNumber(next.km_ruta, 0) > 0) {
-                      next.coste_gasoil = calcularCosteGasoil(next);
-                      setShowCostes(true);
-                    }
-                    return next;
-                  })} onBlur={()=>setForm(p=>{
-                    const next = normalizePesoKgDraft(p);
-                    if (!next.colaborador_id && parseLocaleNumber(next.km_ruta, 0) > 0) next.coste_gasoil = calcularCosteGasoil(next);
-                    return next;
-                  })}/>
-                  <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>Acepta kg totales o toneladas con coma. Ej: 27,6 -> 27.600 kg.</div>
-                  <PesoAlerta
-                    pesoKg={form.peso_kg}
-                    vehiculoId={form.vehiculo_id}
-                    remolqueId={form.remolque_id_manual}
-                  vehiculos={vehiculosLocal}
-                />
-              </div>
-              <div><label style={S.label}>{form.palets_tipo === "granel" ? "Número de bultos" : "Número de palets / bultos"}</label><input aria-label="Cantidad de carga" type="number" min="0" step="1" style={S.input} value={cargoCount(form)||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia(updateCargo(p,"palets_cantidad",e.target.value))))}/></div>
-              {/* Detalle de la carga: con esto el grupaje calcula la ocupacion
-                  real del remolque (metros lineales, peso y palets). */}
-              {<>
-              <div><label style={S.label}>Tipo de palet</label>
-                <select style={S.sel} value={form.palets_tipo||""} onChange={e=>setForm(p=>updateCargo(p,"palets_tipo",e.target.value))}>
-                  <option value="">Sin especificar</option>
-                  <option value="europeo">Europeo (120x80)</option>
-                  <option value="americano">Americano (120x100)</option>
-                  <option value="medio">Medio palet (80x60)</option>
-                  <option value="granel">Sin paletizar / granel</option>
-                </select>
-                {PALLET_SIZES[form.palets_tipo] && <small>Medidas del palet: {PALLET_SIZES[form.palets_tipo].map(v=>v*100).join(" × ")} cm. La ocupación se calcula al indicar la cantidad.</small>}
-              </div>
-
-              <div style={{display:"flex",alignItems:"flex-end",paddingBottom:6}}>
-                <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"var(--text3)",cursor:"pointer"}}>
-                  <input type="checkbox" checked={!!form.palets_apilables} onChange={e=>setForm(p=>updateCargo(p,"palets_apilables",e.target.checked))}/>
-                  Se pueden apilar
-                </label>
-              </div>
-              <div><label style={S.label}>Longitud ocupada / ML (m)</label><input type="text" inputMode="decimal" style={S.input} aria-label="Longitud ocupada" value={form.carga_largo_m ?? (cargoLength(form)||"")} onChange={e=>setForm(p=>updateCargo(p,"carga_largo_m",e.target.value))} placeholder="Calculada según los palets"/></div>
-              <div><label style={S.label}>Ancho carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_ancho_m||""} aria-label="Ancho de carga" onChange={e=>setForm(p=>updateCargo(p,"carga_ancho_m",e.target.value))}/></div>
-              <div><label style={S.label}>Alto carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_alto_m||""} onChange={f("carga_alto_m")}/></div>
-              </>}
-              <div><label style={S.label}>Temperatura (C)</label><input type="text" inputMode="decimal" style={S.input} value={form.temperatura_c??""} onChange={f("temperatura_c")} placeholder="Ej: -18 (vacio = sin frio)"/></div>
-              <div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>
-
-            </div>
-
-            <AdrPanel
-              adr={!!form.adr}
-              items={Array.isArray(form.adr_items) ? form.adr_items : []}
-              onChange={({ adr, adr_items }) => setForm(p => ({ ...p, adr, adr_items }))}
+            <OrderRouteFields
+              S={S}
+              nombreBusqueda={nombreBusqueda}
+              form={form}
+              clientes={clientes}
+              setNombreBusqueda={setNombreBusqueda}
+              setForm={setForm}
+              setShowSuggestions={setShowSuggestions}
+              showSuggestions={showSuggestions}
+              setModalNuevoCliente={setModalNuevoCliente}
+              ivaOptionValue={ivaOptionValue}
+              editando={editando}
+              bloqueoClienteModal={bloqueoClienteModal}
+              clienteRiesgoLoading={clienteRiesgoLoading}
+              clienteRiesgo={clienteRiesgo}
+              clienteRiesgoPedido={clienteRiesgoPedido}
+              formatRiskPct={formatRiskPct}
+              rutas={rutas}
+              cmrInternacionalModal={cmrInternacionalModal}
+              tarifasCoincidentes={tarifasCoincidentes}
+              syncPrecioClienteCol={syncPrecioClienteCol}
+              aplicarTarifaRutaADraft={aplicarTarifaRutaADraft}
+              rutaTarifaSugerida={rutaTarifaSugerida}
+              applyRouteEndpointsFromSavedPoints={applyRouteEndpointsFromSavedPoints}
+              setShowCostes={setShowCostes}
+              calcularCosteGasoil={calcularCosteGasoil}
+              groupRutasByOrigen={groupRutasByOrigen}
+              rutaCompatibleConConjunto={rutaCompatibleConConjunto}
+              rutasCompatibles={rutasCompatibles}
+              rutaIncompatible={rutaIncompatible}
+              rutaSeleccionada={rutaSeleccionada}
+              tipoRemolqueActual={tipoRemolqueActual}
+              remolquesCompatiblesRuta={remolquesCompatiblesRuta}
+              f={f}
+              aplicarEndpointText={aplicarEndpointText}
+              resolverEndpointEnFormulario={resolverEndpointEnFormulario}
+              puntosCargaSugeridosModal={puntosCargaSugeridosModal}
+              direccionCompletaPunto={direccionCompletaPunto}
+              applyPuntoCargaToDraft={applyPuntoCargaToDraft}
+              puntosCargaClienteModal={puntosCargaClienteModal}
+              PuntoInteresPicker={PuntoInteresPicker}
+              puntosCargaClienteLoading={puntosCargaClienteLoading}
+              setPoiDraft={setPoiDraft}
+              setManagePointsMode={setManagePointsMode}
+              setManagePointsOpen={setManagePointsOpen}
+              puntosDescargaSugeridosModal={puntosDescargaSugeridosModal}
+              applyPuntoDescargaToDraft={applyPuntoDescargaToDraft}
             />
 
-            <div style={S.sec}>Precio</div>
-            <div style={{fontSize:11,color:"var(--text5)",margin:"-6px 0 8px"}}>El porte se introduce sin IVA. Selecciona aqui si la orden va con IVA, 0% o exenta.</div>
-            <div className="tg-pedido-form-grid-3">
-              <div><label style={S.label}>Tipo tarificacion</label>
-                <select value={form.tipo_precio||"viaje"} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia({...p,tipo_precio:e.target.value}, true)))} style={S.sel}>
-                  {opcionesTipoPrecio(form.tipo_precio).map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
-                </select>
-              </div>
-              <div><label style={S.label}>{form.tipo_precio==="viaje"?"Precio viaje (EUR)":form.tipo_precio==="kg"?"EUR por 100 kg":form.tipo_precio==="tonelada"?"EUR por tonelada":form.tipo_precio==="km"?"EUR por km":form.tipo_precio==="palet"?"EUR por palet":"EUR por hora"}</label>
-                <input type="text" inputMode="decimal" style={S.input} value={form.precio_unitario||""} onChange={e => {
-                  const v = e.target.value;
-                  setForm(p => syncPrecioClienteCol({
-                    ...p,
-                    precio_unitario: v,
-                  }));
-                }}/>
-              </div>
-              {form.tipo_precio!=="viaje"&&<div><label style={S.label}>{form.tipo_precio==="kg"?"Peso kg":form.tipo_precio==="tonelada"?"Toneladas":form.tipo_precio==="km"?"Kilometros":form.tipo_precio==="palet"?"Palets":"Horas"}</label>
-                <input type="text" inputMode="decimal" style={S.input} value={compactNumberInput(form.cantidad)} onChange={e=>setForm(p=>syncPrecioClienteCol(syncPrecioColaboradorCalc({...p,cantidad:e.target.value})))}/>
-              </div>}
-              <div><label style={S.label}>Extracostes / Esperas (EUR)</label><input type="text" inputMode="decimal" style={S.input} value={form.extracostes ?? form.extracostes_importe ?? ""} onChange={e=>setForm(p=>syncPrecioClienteCol({...p,extracostes:e.target.value,extracostes_importe:e.target.value}))} placeholder="0.00"/></div>
-              <div>
-                <label style={S.label}>IVA del viaje</label>
-                <select value={ivaOptionValue(form)} onChange={e=>setForm(p=>applyIvaOptionToDraft(p,e.target.value))} style={S.sel}>
-                  {IVA_PEDIDO_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{...S.label,color:"#f59e0b"}}>Clausula gasoil (%)</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  style={S.input}
-                  value={form.recargo_combustible_pct || ""}
-                  onChange={e=>setForm(p=>{
-                    const base = parseLocaleNumber(p.precio_base_sin_combustible || p.precio_unitario, 0);
-                    const pct = parseLocaleNumber(e.target.value, 0);
-                    const next = {
-                      ...p,
-                      recargo_combustible_pct:e.target.value,
-                      precio_base_sin_combustible:p.precio_base_sin_combustible || p.precio_unitario || "",
-                      precio_unitario:base > 0 && pct > 0 ? Number((base * (1 + pct / 100)).toFixed(2)) : p.precio_unitario,
-                    };
-                    return {...next, importe_revision_combustible:calcRevisionCombustible(next)};
-                  })}
-                  placeholder="Ej. 5"
-                />
-              </div>
-              <div>
-                <label style={{...S.label,color:"#f59e0b"}}>Precio base sin gasoil</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  style={S.input}
-                  value={(() => {
-                    // El precio base sin gasoil debe cumplir: EUR/tn = base * (1 + %gasoil).
-                    // Si el valor guardado no cuadra con el EUR/tn y el % actuales (p. ej.
-                    // arrastrado de una tarifa antigua), mostramos el valor correcto derivado
-                    // (con % = 0, la base es el propio EUR/tn).
-                    const stored = form.precio_base_sin_combustible;
-                    const pct = parseLocaleNumber(form.recargo_combustible_pct, 0);
-                    const unit = parseLocaleNumber(form.precio_unitario, NaN);
-                    const storedNum = parseLocaleNumber(stored, NaN);
-                    const cuadra = Number.isFinite(storedNum) && Number.isFinite(unit) && Math.abs(storedNum * (1 + pct / 100) - unit) < 0.01;
-                    if (stored !== "" && stored != null && cuadra) return stored;
-                    if (Number.isFinite(unit) && unit > 0) return String(Number((pct > 0 ? unit / (1 + pct / 100) : unit).toFixed(2)));
-                    return stored || "";
-                  })()}
-                  onChange={e=>setForm(p=>{
-                    const base = parseLocaleNumber(e.target.value, 0);
-                    const pct = parseLocaleNumber(p.recargo_combustible_pct, 0);
-                    const next = {...p,precio_base_sin_combustible:e.target.value,precio_unitario:base > 0 ? Number((base * (1 + pct / 100)).toFixed(2)) : p.precio_unitario};
-                    return {...next, importe_revision_combustible:calcRevisionCombustible(next)};
-                  })}
-                  placeholder="Importe antes del recargo"
-                />
-                <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>Importe del viaje antes de aplicar la clausula de gasoil.</div>
-              </div>
+            <OrderPlanningFields
+              S={S}
+              form={form}
+              f={f}
+              editando={editando}
+              esGerente={esGerente}
+              ESTADOS_RAW={ESTADOS_RAW}
+              LABEL_ESTADO={LABEL_ESTADO}
+              getPrimaryStopField={getPrimaryStopField}
+              setForm={setForm}
+              updatePrimaryStop={updatePrimaryStop}
+              etiquetasCatalogo={etiquetasCatalogo}
+            />
+
+            <OrderDistanceFields
+              S={S}
+              getRoutePlaces={getRoutePlaces}
+              form={form}
+              calcularKmRuta={calcularKmRuta}
+              setForm={setForm}
+              calcularCosteGasoil={calcularCosteGasoil}
+              setShowCostes={setShowCostes}
+              syncCantidadSiVacia={syncCantidadSiVacia}
+              calcKm={calcKm}
+              syncPrecioClienteCol={syncPrecioClienteCol}
+              calcularKmVacio={calcularKmVacio}
+              f={f}
+            />
+
+            <OrderSection title="Puntos de carga y descarga" icon="route"><div className="order-editor-stops">
+            <CargasEditor compact pedidoId={editando?.id} form={form} setForm={setForm} disabled={editando?._readonly}/>
+
+
+            <DescargasEditor compact pedidoId={editando?.id} form={form} setForm={setForm} disabled={editando?._readonly}/></div></OrderSection>
+
+            <OrderCargoFields
+              S={S}
+              form={form}
+              setForm={setForm}
+              f={f}
+              syncPrecioClienteCol={syncPrecioClienteCol}
+              syncCantidadSiVacia={syncCantidadSiVacia}
+              calcularCosteGasoil={calcularCosteGasoil}
+              setShowCostes={setShowCostes}
+              normalizePesoKgDraft={normalizePesoKgDraft}
+              PesoAlerta={PesoAlerta}
+              vehiculosLocal={vehiculosLocal}
+            />
+
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:8}}>
-              <div>
-                <label style={{...S.label,color:"#f59e0b"}}>{form.tipo_precio==="kg"?"Minimo facturable (kg)":form.tipo_precio==="tonelada"?"Minimo facturable (toneladas)":form.tipo_precio==="km"?"Minimo facturable (km)":form.tipo_precio==="palet"?"Minimo facturable (palets)":form.tipo_precio==="hora"?"Minimo facturable (horas)":"Minimo facturable (EUR)"}</label>
-                <input type="text" inputMode="decimal" style={S.input}
-                  value={form.tipo_precio==="viaje" ? compactNumberInput(form.importe_minimo) : compactNumberInput(form.minimo_unidades)}
-                  onChange={e=>setForm(p=>syncPrecioClienteCol(syncPrecioColaboradorCalc({...p,[p.tipo_precio==="viaje" ? "importe_minimo" : "minimo_unidades"]:e.target.value})))}
-                  placeholder="Dejar vacio si no hay minimo"/>
-                <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>
-                  {form.tipo_precio==="viaje" ? "Si el calculo queda por debajo, se cobra este importe." : "Para kg, toneladas, km, palets u horas se aplica el minimo de unidades antes de multiplicar por el precio."}
-                </div>
-              </div>
-              <div>
-                <label style={{...S.label,color:"#ef4444"}}>Importe paralizacion (EUR, sin IVA)</label>
-                <input type="text" inputMode="decimal"
-                  style={{...S.input, borderColor:"rgba(239,68,68,.35)"}}
-                  value={form.importe_paralizacion||""} onChange={f("importe_paralizacion")}
-                  placeholder="0 si no hay paralizacion"/>
-                <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>
-                  Se factura en documento separado sin IVA
-                </div>
-              </div>
-            </div>
-            {parseLocaleNumber(form.importe_paralizacion,0)>0&&(
-              <div style={{background:"rgba(239,68,68,.06)",border:"1px solid rgba(239,68,68,.2)",borderRadius:7,padding:"8px 14px",fontSize:11,color:"#ef4444",fontWeight:600,marginTop:4}}>
-                Se generara factura de paralizacion por {parseLocaleNumber(form.importe_paralizacion,0).toFixed(2)} EUR sin IVA
-              </div>
-            )}
-            {(calcImporte(form)>0 || form.precio_unitario)&&(
-              <div style={{background:"rgba(34,211,160,.07)",border:"1px solid rgba(34,211,160,.2)",borderRadius:8,padding:"10px 16px",marginTop:4}}>
-                {(() => {
-                  const cargaItems = additionalStopPriceItems(form.puntos_carga);
-                  const descItems = additionalStopPriceItems(form.puntos_descarga);
-                  if (!cargaItems.length && !descItems.length) return null;
-                  const extracostes = parseLocaleNumber(form.extracostes ?? form.extracostes_importe, 0);
-                  const sumExtras = [...cargaItems, ...descItems].reduce((s, it) => s + it.precio, 0) + (extracostes > 0 ? extracostes : 0);
-                  const fleteBase = calcImporte(form) - sumExtras;
-                  const row = { display:"flex", justifyContent:"space-between", marginBottom:4 };
-                  const lbl = { fontSize:11, color:"var(--text3)" };
-                  const val = { fontFamily:"'JetBrains Mono',monospace", fontWeight:700, fontSize:13, color:"var(--green)" };
-                  return (
-                    <>
-                      <div style={row}>
-                        <span style={lbl}>Flete base (viaje)</span>
-                        <span style={{ ...val, color:"var(--text2)" }}>{fleteBase.toFixed(2)} EUR</span>
-                      </div>
-                      {cargaItems.map(it => (
-                        <div key={`c-${it.num}`} style={row}>
-                          <span style={lbl}>+ Carga {it.num}{it.label ? ` · ${it.label}` : ""}</span>
-                          <span style={val}>+{it.precio.toFixed(2)} EUR</span>
-                        </div>
-                      ))}
-                      {descItems.map(it => (
-                        <div key={`d-${it.num}`} style={row}>
-                          <span style={lbl}>+ Descarga {it.num}{it.label ? ` · ${it.label}` : ""}</span>
-                          <span style={val}>+{it.precio.toFixed(2)} EUR</span>
-                        </div>
-                      ))}
-                      {extracostes > 0 && (
-                        <div style={row}>
-                          <span style={lbl}>+ Extracostes</span>
-                          <span style={val}>+{extracostes.toFixed(2)} EUR</span>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:12,color:"var(--text2)"}}>
-                    Importe viaje sin IVA
-                    {((form.tipo_precio==="viaje" && parseLocaleNumber(form.importe_minimo,0)>0 && calcImporte(form)===parseLocaleNumber(form.importe_minimo,0)) ||
-                      (form.tipo_precio!=="viaje" && parseLocaleNumber(form.minimo_unidades,0)>parseLocaleNumber(form.cantidad,0))) &&
-                      <span style={{fontSize:10,color:"#f59e0b",marginLeft:6}}>minimo</span>}
-                  </span>
-                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:18,color:"var(--green)"}}>{calcImporte(form).toFixed(2)} EUR</span>
-                </div>
-                <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(34,211,160,.2)"}}>
-                  <span style={{fontSize:11,color:"var(--text3)"}}>EUR/km venta</span>
-                  {(() => {
-                    const eurKm = precioKmPedidoInfo(form);
-                    return <span title={eurKm.hint} style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:13,color:eurKm.value ? "var(--green)" : "var(--text5)"}}>{eurKm.label}</span>;
-                  })()}
-                </div>
-                {parseLocaleNumber(form.importe_paralizacion,0)>0&&(
-                  <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(34,211,160,.2)"}}>
-                    <span style={{fontSize:11,color:"#ef4444"}}>+ Paralizacion (sin IVA)</span>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#ef4444"}}>+{parseLocaleNumber(form.importe_paralizacion,0).toFixed(2)} EUR</span>
-                  </div>
-                )}
-                {calcRevisionCombustible(form)>0&&(
-                  <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(245,158,11,.25)"}}>
-                    <span style={{fontSize:11,color:"#f59e0b"}}>Revision combustible desglosable en factura ({Number(form.recargo_combustible_pct||0).toLocaleString("es-ES")}%)</span>
-                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#f59e0b"}}>{calcRevisionCombustible(form).toFixed(2)} EUR</span>
-                  </div>
-                )}
-                {(()=> {
-                  const iva = calcIvaPedido(form);
-                  return (
-                    <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(34,211,160,.2)"}}>
-                      <span style={{fontSize:11,color:iva.aplica?"var(--text3)":"#64748b"}}>{iva.aplica ? `IVA ${iva.tipo_iva}%` : (iva.iva_regimen === "exento" ? "Exento de IVA" : "IVA 0%")}</span>
-                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:iva.aplica?"var(--green)":"#64748b"}}>{iva.aplica ? `+${iva.cuota.toFixed(2)} EUR` : "Sin IVA"}</span>
-                    </div>
-                  );
-                })()}
-                <div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid rgba(34,211,160,.3)"}}>
-                  <span style={{fontSize:11,fontWeight:700,color:"var(--text3)"}}>{calcIvaPedido(form).aplica ? "TOTAL CON IVA" : "TOTAL SIN IVA"}</span>
-                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:14,color:"var(--green)"}}>{(calcIvaPedido(form).total+parseLocaleNumber(form.importe_paralizacion,0)).toFixed(2)} EUR</span>
-                </div>
-              </div>
-            )}
+            <div hidden={editorStep !== 2} className="order-editor-step">
+            <div className="order-editor-route-summary"><strong>{form.origen || "Origen pendiente"} → {form.destino || "Destino pendiente"}</strong><span>{clientes.find(c => c.id === form.cliente_id)?.nombre} · {form.fecha_carga || "Fecha pendiente"}</span>{form.km_ruta && <span>{form.km_ruta} km</span>}</div>
+            <OrderPriceFields
+              S={S}
+              form={form}
+              setForm={setForm}
+              syncPrecioClienteCol={syncPrecioClienteCol}
+              syncCantidadSiVacia={syncCantidadSiVacia}
+              opcionesTipoPrecio={opcionesTipoPrecio}
+              compactNumberInput={compactNumberInput}
+              syncPrecioColaboradorCalc={syncPrecioColaboradorCalc}
+              ivaOptionValue={ivaOptionValue}
+              applyIvaOptionToDraft={applyIvaOptionToDraft}
+              IVA_PEDIDO_OPTIONS={IVA_PEDIDO_OPTIONS}
+              calcRevisionCombustible={calcRevisionCombustible}
+              f={f}
+              calcImporte={calcImporte}
+              additionalStopPriceItems={additionalStopPriceItems}
+              precioKmPedidoInfo={precioKmPedidoInfo}
+              calcIvaPedido={calcIvaPedido}
+            />
 
             {/* Banner aviso operacional vehiculo */}
             {avisoVehiculo && (
@@ -8853,523 +8202,76 @@ useEffect(() => {
             )}
 
             {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Costes reales del viaje ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",
-              background:"rgba(239,68,68,.06)",border:"1px solid rgba(239,68,68,.18)",borderRadius:8,
-              padding:"8px 14px",marginBottom:showCostes?8:14}}
-              onClick={()=>setShowCostes(v=>!v)}>
-              <span style={{fontWeight:700,fontSize:12,color:"#ef4444"}}>Costes del viaje</span>
-              <span style={{fontSize:11,color:"var(--text4)"}}>
-                {(()=>{
-                  const total = [form.coste_gasoil,form.coste_peajes,form.coste_dietas,form.coste_otros]
-                    .reduce((s,v)=>s+Number(v||0),0);
-                  const ingresoTotal = calcImporte(form) + parseLocaleNumber(form.importe_paralizacion, 0);
-                  const margen = ingresoTotal - total;
-                  return total>0
-                    ? `Total costes: ${total.toFixed(2)}EUR - Margen: ${margen.toFixed(2)}EUR (${ingresoTotal>0?(margen/ingresoTotal*100).toFixed(1):0}%)`
-                    : showCostes ? "Ocultar" : "Registrar costes";
-                })()}
-              </span>
-            </div>
-            {showCostes && (
-              <div style={{background:"rgba(239,68,68,.04)",border:"1px solid rgba(239,68,68,.15)",borderRadius:8,padding:"14px",marginBottom:14}}>
-                {!form.colaborador_id&&<button type="button" style={{...S.btn,marginBottom:10}} onClick={async()=>{
-                  if(parseLocaleNumber(form.km_ruta,0)<=0){notify("Calcula o indica los kilómetros de la ruta antes de estimar el gasoil.","warning");return;}
-                  const estimate=calcularCosteGasoil(form);
-                  if(parseLocaleNumber(form.coste_gasoil,0)>0&&!await confirmDialog({title:"Recalcular gasoil",message:`Sustituir el gasoil registrado por la estimación de ${estimate.toLocaleString("es-ES")} EUR. Peajes, dietas y otros costes se conservan.`,confirmText:"Recalcular"}))return;
-                  setForm(p=>({...p,coste_gasoil:estimate}));
-                }}>Calcular gasoil estimado</button>}
-                {parseLocaleNumber(form.km_ruta, 0) > 0 && (
-                  <div style={{fontSize:11,color:"var(--text4)",marginBottom:10}}>
-                    {form.colaborador_id
-                      ? "Viaje realizado por colaborador: el coste es su precio acordado, sin gasoil propio."
-                      : `Estimación de gasoil con ${consumoLitros100PorPeso(form.peso_kg)} L/100 km segun peso (${parseLocaleNumber(form.peso_kg,0).toLocaleString("es-ES")} kg) y ${parseLocaleNumber(form.km_ruta,0).toLocaleString("es-ES")} km y ${precioGasoilDefault().toLocaleString("es-ES")} EUR/litro.`}
-                  </div>
-                )}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                  {[
-                    {l:"Gasoil (EUR)",    k:"coste_gasoil"},
-                    {l:"Peajes (EUR)",     k:"coste_peajes"},
-                    {l:"Dietas (EUR)",     k:"coste_dietas"},
-                    {l:"Otros costes (EUR)", k:"coste_otros"},
-                  ].map(({l,k})=>(
-                    <div key={k}>
-                      <label style={{...S.label,color:"var(--text3)"}}>{l}</label>
-                      <input type="number" min="0" step="0.01" style={S.sel}
-                        disabled={k==="coste_gasoil" && !!form.colaborador_id}
-                        value={k==="coste_gasoil" && form.colaborador_id ? "" : form[k]||""}
-                        onChange={e=>setForm(p=>({...p,[k]:e.target.value}))}
-                        placeholder={k==="coste_gasoil" && form.colaborador_id ? "0 por colaborador" : "0.00"}/>
-                    </div>
-                  ))}
-                </div>
-                {/* Resumen margen */}
-                {(()=>{
-                  const ingreso = calcImporte(form) + parseLocaleNumber(form.importe_paralizacion, 0);
-                  const totalC  = [form.coste_gasoil,form.coste_peajes,form.coste_dietas,form.coste_otros]
-                    .reduce((s,v)=>s+Number(v||0),0);
-                  const margen  = ingreso - totalC;
-                  const pct     = ingreso>0 ? (margen/ingreso*100).toFixed(1) : 0;
-                  return ingreso>0||totalC>0 ? (
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
-                      {[
-                        {l:"Ingresos",v:`${ingreso.toFixed(2)} EUR`,c:"var(--green)"},
-                        {l:"Costes",  v:`${totalC.toFixed(2)} EUR`, c:"#ef4444"},
-                        {l:"Margen",  v:`${margen.toFixed(2)} EUR (${pct}%)`,
-                          c:margen>=0?"var(--green)":"#ef4444"},
-                      ].map(({l,v,c})=>(
-                        <div key={l} style={{background:"var(--bg3)",borderRadius:6,padding:"8px 10px",textAlign:"center"}}>
-                          <div style={{fontSize:13,fontWeight:800,color:c}}>{v}</div>
-                          <div style={{fontSize:9,color:"var(--text5)",textTransform:"uppercase",letterSpacing:".07em",marginTop:2}}>{l}</div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null;
-                })()}
-                <div>
-                  <label style={{...S.label,color:"var(--text3)"}}>Notas de costes</label>
-                  <input style={S.sel} value={form.coste_notas||""} placeholder="Ej: Conductor extra, esperas en carga..."
-                    onChange={e=>setForm(p=>({...p,coste_notas:e.target.value}))}/>
-                </div>
-              </div>
-            )}
+            <OrderCostFields
+              showCostes={showCostes}
+              setShowCostes={setShowCostes}
+              form={form}
+              calcImporte={calcImporte}
+              S={S}
+              calcularCosteGasoil={calcularCosteGasoil}
+              setForm={setForm}
+              consumoLitros100PorPeso={consumoLitros100PorPeso}
+              precioGasoilDefault={precioGasoilDefault}
+            />
 
-            <div style={S.sec}>Asignacion</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              <div><label style={S.label}>Vehiculo</label>
-                <select value={form.vehiculo_id||""} onChange={e=>{
-                  const vid = e.target.value;
-                  const veh = vehiculosLocal.find(v=>v.id===vid);
-                  const prevVeh = vehiculosLocal.find(v=>v.id===form.vehiculo_id);
-                  const remolqueAuto = vehiculosLocal.find(v=>v.id===(veh&&veh.remolque_id));
-                  const autoEt = vid ? [...autoEtiquetasVehiculo(etiquetasCatalogo, veh), ...autoEtiquetasVehiculo(etiquetasCatalogo, remolqueAuto)] : [];
-                  setForm(p=>{
-                    const choferEraDelAnterior = !p.chofer_id || p.chofer_id === prevVeh?.chofer_id;
-                    const remolqueEraDelAnterior = !p.remolque_id_manual || p.remolque_id_manual === prevVeh?.remolque_id;
-                    const choferDelVehiculo = veh?.chofer_id ||
-                      choferesLocal.find(ch => ch.vehiculo_id === vid)?.id || "";
-                    return {
-                      ...p,
-                      vehiculo_id: vid,
-                      // Camion propio y colaborador son excluyentes: al asignar vehiculo se quita el colaborador
-                      ...(vid ? { colaborador_id:"", colaborador_nombre:"", precio_cliente_col:"", precio_colaborador:"", precio_colaborador_unitario:"", minimo_colaborador_unidades:"" } : {}),
-                      chofer_id: choferEraDelAnterior ? choferDelVehiculo : p.chofer_id,
-                      remolque_id_manual: remolqueEraDelAnterior ? (veh?.remolque_id || "") : p.remolque_id_manual,
-                      matricula_manual: vid ? "" : p.matricula_manual,
-                      remolque_matricula_manual: vid ? "" : p.remolque_matricula_manual,
-                      etiquetas: vid ? mergeEtiquetas(p.etiquetas, autoEt) : p.etiquetas,
-                    };
-                  });
-                  // Mostrar aviso operacional si el vehiculo tiene notas
-                  if (isMeaningfulVehicleNotice(veh?.notas_operacion)) {
-                    setAvisoVehiculo({ matricula: veh.matricula, notas: veh.notas_operacion });
-                  } else {
-                    setAvisoVehiculo(null);
-                  }
-                }} style={S.sel}>
-                  <option value="">Sin asignar</option>
-                  {(()=>{
-                    // Detectar remolques: por clase, por matricula R-*, o por ser remolque_id de alguien
-                    const esRemolqueDeAlguien = new Set(vehiculosLocal.map(v=>v.remolque_id).filter(Boolean));
-                    const esRemolque = v => {
-                      const clase = (v.clase||v.tipo||"").toLowerCase();
-                      const mat = (v.matricula||"").toUpperCase();
-                      return clase.includes("remolque") || clase.includes("semirremolque") || clase.includes("dolly") ||
-                             esRemolqueDeAlguien.has(v.id) ||
-                             /^R[-_\s]/i.test(mat) || mat.endsWith("-R") || mat.endsWith("_R");
-                    };
-                    return vehiculosLocal
-                      .filter(v => !esRemolque(v))
-                      .map(v => {
-                        const label = v.matricula;
-                        return <option key={v.id} value={v.id}>{label}</option>;
-                      });
-                  })()}
-                </select>
-              </div>
-              <div>
-                <label style={S.label}>
-                  Chofer principal
-                  {form.vehiculo_id&&vehiculosLocal.find(v=>v.id===form.vehiculo_id)?.chofer_id&&(
-                    <span style={{marginLeft:6,fontSize:10,color:"var(--accent)",fontWeight:500}}>
-                      - auto del vehiculo
-                    </span>
-                  )}
-                </label>
-                <select value={form.chofer_id||""} onChange={e=>{ const cid=e.target.value; setForm(p=>assignDriver(p,cid,choferesLocal,vehiculosLocal)); }} style={S.sel}>
-                  <option value="">Sin asignar</option>
-                  {choferesLocal.map(c=><option key={c.id} value={c.id}>{driverName(c)}</option>)}
-                </select>
-              </div>
-              {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Remolque del conjunto ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
-              <div>
-                <label style={S.label}>
-                  Remolque
-                  {form.vehiculo_id && vehiculosLocal.find(v=>v.id===form.vehiculo_id)?.remolque_id && (
-                    <span style={{marginLeft:6,fontSize:10,color:"#a78bfa",fontWeight:500}}>- del conjunto</span>
-                  )}
-                </label>
-                <select
-                  value={form.remolque_id_manual||vehiculosLocal.find(v=>v.id===form.vehiculo_id)?.remolque_id||""}
-                  onChange={e=>setForm(p=>({...p, remolque_id_manual: e.target.value||""}))}
-                  style={S.sel}>
-                  <option value="">Sin remolque</option>
-                  {(()=>{
-                    const remolqueIds2 = new Set(vehiculosLocal.map(v=>v.remolque_id).filter(Boolean));
-                    const esRemolque2 = v => {
-                      const clase = (v.clase||v.tipo||"").toLowerCase();
-                      const mat = (v.matricula||"").toUpperCase();
-                      return clase.includes("remolque") || clase.includes("semirremolque") || clase.includes("dolly") ||
-                             remolqueIds2.has(v.id) ||
-                             /^R[-_\s]/i.test(mat) || mat.endsWith("-R") || mat.endsWith("_R");
-                    };
-                    return vehiculosLocal.filter(v => esRemolque2(v))
-                      .map(v=>(
-                        <option key={v.id} value={v.id}>{v.matricula}{v.marca?" - "+v.marca:""}</option>
-                      ));
-                  })()}
-                </select>
-                {form.remolque_id_manual && form.vehiculo_id &&
-                 form.remolque_id_manual !== vehiculosLocal.find(v=>v.id===form.vehiculo_id)?.remolque_id && (
-                  <div style={{marginTop:4,fontSize:11,color:"#fbbf24",padding:"4px 9px",background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.2)",borderRadius:6}}>
-                    Aviso: Distinto al conjunto habitual - al guardar se actualizara el conjunto de la tractora
-                  </div>
-                )}
-                {avisoCargaExcedeRemolque && (
-                  <div style={{marginTop:4,fontSize:11,color:"#f87171",fontWeight:700,padding:"5px 9px",background:"rgba(239,68,68,.09)",border:"1px solid rgba(239,68,68,.28)",borderRadius:6}}>
-                    Aviso: la carga ({cargaMetrosLineales.toString().replace(".", ",")} m) supera los metros de carga del remolque {remolqueActual?.matricula ? `(${remolqueActual.matricula}, ${remolqueMetrosCarga.toString().replace(".", ",")} m)` : `(${remolqueMetrosCarga.toString().replace(".", ",")} m)`}. Revisa la asignacion.
-                  </div>
-                )}
-              </div>
+            <div ref={asignacionRef}><OrderAssignmentFields draftDirty={!!userInteractedWithFormRef.current && pedidoDraftSignature(form) !== initialFormRef.current}
+              S={S}
+              form={form}
+              vehiculosLocal={vehiculosLocal}
+              autoEtiquetasVehiculo={autoEtiquetasVehiculo}
+              etiquetasCatalogo={etiquetasCatalogo}
+              setForm={setForm}
+              choferesLocal={choferesLocal}
+              mergeEtiquetas={mergeEtiquetas}
+              isMeaningfulVehicleNotice={isMeaningfulVehicleNotice}
+              setAvisoVehiculo={setAvisoVehiculo}
+              avisoCargaExcedeRemolque={avisoCargaExcedeRemolque}
+              cargaMetrosLineales={cargaMetrosLineales}
+              remolqueActual={remolqueActual}
+              remolqueMetrosCarga={remolqueMetrosCarga}
+              f={f}
+              colaboradorBusqueda={colaboradorBusqueda}
+              setColaboradorBusqueda={setColaboradorBusqueda}
+              setShowColaboradorSuggestions={setShowColaboradorSuggestions}
+              showColaboradorSuggestions={showColaboradorSuggestions}
+              colaboradoresLocal={colaboradoresLocal}
+              creandoColaborador={creandoColaborador}
+              crearColaboradorDesdePedido={crearColaboradorDesdePedido}
+              aplicarColaborador={aplicarColaborador}
+              importeClienteColCalculado={importeClienteColCalculado}
+              importeColaboradorCalculado={importeColaboradorCalculado}
+              sumAdditionalStopPrices={sumAdditionalStopPrices}
+              syncPrecioColaboradorCalc={syncPrecioColaboradorCalc}
+              calcImporte={calcImporte}
+              unidadesFacturablesPedido={unidadesFacturablesPedido}
+              previsualizandoColaborador={previsualizandoColaborador}
+              editando={editando}
+              previsualizarColaborador={previsualizarColaborador}
+              notificandoColaborador={notificandoColaborador}
+              notificarColaborador={notificarColaborador}
+              generandoAccesoTemporal={generandoAccesoTemporal}
+              generarAccesoTemporalColaborador={generarAccesoTemporalColaborador}
+              accesoTemporalColaborador={accesoTemporalColaborador}
+              revocarAccesoTemporalColaborador={revocarAccesoTemporalColaborador}
+              copiarAccesoTemporalColaborador={copiarAccesoTemporalColaborador}
+              formatPaymentTerms={formatPaymentTerms}
+            /></div>
 
-              <div><label style={S.label}>2o Chofer (opcional)</label>
-                <select value={form.chofer2_id||""} onChange={f("chofer2_id")} style={S.sel}>
-                  <option value="">Sin segundo chofer</option>
-                  {choferesLocal.filter(c=>c.id!==form.chofer_id).map(c=><option key={c.id} value={c.id}>{driverName(c)}</option>)}
-                </select>
-              </div>
-              {!form.vehiculo_id && !form.colaborador_id && form.matricula_manual && (
-                <div style={{gridColumn:"1/-1",fontSize:12,color:"var(--text3)",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 12px"}}>
-                  Matricula asignada a mano: <strong style={{color:"var(--text)"}}>{form.matricula_manual}</strong>{form.remolque_matricula_manual?` · Remolque ${form.remolque_matricula_manual}`:""} — para cambiarla usa el boton "Asignar" de la lista.
-                </div>
-              )}
-              {form.chofer2_id&&(
-                <div style={{gridColumn:"1/-1",background:"rgba(139,92,246,.06)",border:"1px solid rgba(139,92,246,.18)",borderRadius:8,padding:"10px 14px",display:"flex",alignItems:"center",gap:12}}>
-                  <span style={{fontSize:13}}></span>
-                  <div style={{flex:1,fontSize:12,color:"var(--text3)"}}>Viaje compartido entre dos choferes. El importe se repartira a partes iguales en las hojas de ruta.</div>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    <label style={{fontSize:11,color:"var(--text4)"}}>% chofer 1:</label>
-                    <input type="number" min="0" max="100" style={{...S.input,width:60,padding:"4px 8px",fontSize:12}} value={form.reparto_chofer1??50}
-                      onChange={e=>{ const v=Math.max(0,Math.min(100,Number(e.target.value)||0)); setForm(p=>({...p, reparto_chofer1:v})); }}/>
-                    <label style={{fontSize:11,color:"var(--text4)"}}>% chofer 2:</label>
-                    <input type="number" min="0" max="100" style={{...S.input,width:60,padding:"4px 8px",fontSize:12}} value={100-Number(form.reparto_chofer1??50)}
-                      onChange={e=>{ const v2=Math.max(0,Math.min(100,Number(e.target.value)||0)); setForm(p=>({...p, reparto_chofer1:100-v2})); }}/>
-                  </div>
-                </div>
-              )}
+            <OrderDocumentFields
+              editando={editando}
+              seleccionarDocsPendientes={seleccionarDocsPendientes}
+              TabDocsPedido={TabDocsPedido}
+              pendingDocs={pendingDocs}
+              setPendingDocs={setPendingDocs}
+            />
 
-              {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Colaborador ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
-
-              <div style={{gridColumn:"1/-1",background:"rgba(139,92,246,.05)",border:"1px solid rgba(139,92,246,.15)",borderRadius:9,padding:"12px 14px",marginTop:4}}>
-                <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#a78bfa",marginBottom:10}}>Colaborador (transporte subcontratado)</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                  <div><label style={S.label}>Colaborador / proveedor</label>
-                    <div style={{position:"relative",marginBottom:6}}>
-                      <input
-                        style={S.input}
-                        placeholder="Buscar o crear colaborador..."
-                        value={colaboradorBusqueda}
-                        onChange={e=>{ setColaboradorBusqueda(e.target.value); setShowColaboradorSuggestions(true); }}
-                        onFocus={()=>setShowColaboradorSuggestions(true)}
-                        onBlur={()=>setTimeout(()=>setShowColaboradorSuggestions(false),200)}
-                      />
-                      {showColaboradorSuggestions && colaboradorBusqueda && (()=>{
-                        const q = colaboradorBusqueda.toLowerCase();
-                        const sugs = colaboradoresLocal.filter(c =>
-                          String(c.nombre || "").toLowerCase().includes(q) ||
-                          String(c.cif || "").toLowerCase().includes(q) ||
-                          String(c.email || "").toLowerCase().includes(q)
-                        ).slice(0,6);
-                        if (!sugs.length) return (
-                          <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,zIndex:60,padding:"10px 14px"}}>
-                            <div style={{fontSize:12,color:"var(--text4)",marginBottom:8}}>No hay ningun colaborador con ese nombre.</div>
-                            <button type="button" disabled={creandoColaborador}
-                              onMouseDown={e=>{ e.preventDefault(); crearColaboradorDesdePedido(colaboradorBusqueda); }}
-                              style={{...S.btn,background:"var(--accent)",color:"#fff",fontSize:12,padding:"5px 12px",opacity:creandoColaborador ? .7 : 1}}>
-                              {creandoColaborador ? "Creando..." : `Crear colaborador "${colaboradorBusqueda}"`}
-                            </button>
-                          </div>
-                        );
-                        return (
-                          <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,zIndex:60,overflow:"hidden"}}>
-                            {sugs.map(c=>(
-                              <div key={c.id}
-                                onMouseDown={()=>aplicarColaborador(c)}
-                                style={{padding:"9px 14px",cursor:"pointer",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}
-                                onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"}
-                                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                                <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{c.nombre}</span>
-                                {c.cif&&<span style={{fontSize:11,color:"var(--text5)",fontFamily:"'JetBrains Mono',monospace"}}>{c.cif}</span>}
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                    <select value={form.colaborador_id||""} onChange={e=>{
-                      const col=colaboradoresLocal.find(c=>c.id===e.target.value);
-                      const impActual = importeClienteColCalculado(form) || parseLocaleNumber(form.precio_unitario, 0);
-                      setForm(p=>({
-                        ...p,
-                        colaborador_id: e.target.value,
-                        colaborador_nombre: col?.nombre||"",
-                        // Excluyente con transporte propio: al poner colaborador se quita el camion/chofer asignado
-                        ...(e.target.value ? { vehiculo_id:"", chofer_id:"", chofer2_id:"", remolque_id_manual:"", matricula_manual:"", remolque_matricula_manual:"" } : {}),
-                        // Siempre sincronizar precio del viaje -> lo que cobramos al colaborador
-                        precio_cliente_col: e.target.value ? (impActual || p.precio_cliente_col || "") : "",
-                        precio_colaborador: e.target.value ? (importeColaboradorCalculado({ ...p, colaborador_id: e.target.value }) || p.precio_colaborador || "") : "",
-                        coste_gasoil: e.target.value ? 0 : p.coste_gasoil,
-                      }));
-                      setColaboradorBusqueda("");
-                    }} style={S.sel}>
-                      <option value="">Sin colaborador (chofer propio)</option>
-                      {colaboradoresLocal.map(c=><option key={c.id} value={c.id}>{c.nombre} {c.cif?`- ${c.cif}`:""}</option>)}
-                    </select>
-                  </div>
-                  {form.colaborador_id&&(<>
-                    <div>
-                      <label style={S.label}>
-                        Lo que cobramos al cliente (EUR, sin IVA)
-                        <span style={{marginLeft:4,fontSize:9,color:"var(--text5)",fontWeight:400,textTransform:"none"}}>
-                          - precio del viaje
-                        </span>
-                      </label>
-                      <input type="text" inputMode="decimal" style={S.input}
-                        value={form.precio_cliente_col||""}
-                        onChange={e=>{
-                          const v = e.target.value;
-                          setForm(p=>{
-                            // "Lo que cobramos al cliente" ES el total del viaje: al
-                            // editarlo, el importe del pedido pasa a valer eso. Se
-                            // despeja el precio unitario segun el tipo de tarifa (sin
-                            // cambiar el tipo, para no ocultar los campos por tonelada
-                            // del colaborador) y se descuentan extracostes/paradas para
-                            // que el total (base+extras) coincida con lo tecleado.
-                            const nv = parseLocaleNumber(v, NaN);
-                            if (!Number.isFinite(nv)) return { ...p, precio_cliente_col: v };
-                            const extras = parseLocaleNumber(p.extracostes ?? p.extracostes_importe, 0)
-                              + sumAdditionalStopPrices(p.puntos_descarga)
-                              + sumAdditionalStopPrices(p.puntos_carga);
-                            const base = Math.max(0, nv - extras);
-                            const cant = parseLocaleNumber(p.cantidad, 0);
-                            const minU = parseLocaleNumber(p.minimo_unidades, 0);
-                            const units = minU > 0 ? Math.max(cant, minU) : cant;
-                            const tipo = p.tipo_precio || "viaje";
-                            if (tipo !== "viaje" && units > 0) {
-                              const precioUnit = tipo === "kg" ? (base * 100 / units) : (base / units);
-                              return { ...p, precio_cliente_col: v, precio_unitario: String(Number(precioUnit.toFixed(4))) };
-                            }
-                            // Tarifa por viaje (o por unidad sin cantidad aun): precio de
-                            // viaje cerrado = base.
-                            return { ...p, precio_cliente_col: v, tipo_precio: "viaje", precio_unitario: String(Number(base.toFixed(2))), importe_minimo: "" };
-                          });
-                        }}
-                        placeholder="Ej: 850"/>
-                    </div>
-                    <div>
-                      <label style={S.label}>Tarifa del proveedor</label>
-                      <select style={S.sel} value={supplierPriceType(form)} onChange={e=>setForm(p=>({
-                        ...p, tipo_precio_colaborador:e.target.value, precio_colaborador:"",
-                        precio_colaborador_unitario:"", minimo_colaborador_unidades:"",
-                      }))}>
-                        <option value="viaje">Precio cerrado por viaje</option>
-                        <option value="tonelada">Por tonelada cargada</option>
-                      </select>
-                    </div>
-                    {supplierPriceType(form)==="tonelada" ? (<>
-                      <div>
-                        <label style={S.label}>Precio acordado EUR/tonelada</label>
-                        <input type="text" inputMode="decimal" style={S.input}
-                          value={form.precio_colaborador_unitario ?? ""}
-                          onChange={e=>setForm(p=>syncPrecioColaboradorCalc({...p,precio_colaborador_unitario:e.target.value}))}
-                          placeholder="Ej: 32,50"/>
-                      </div>
-                      <div>
-                        <label style={S.label}>Minimo facturable acordado (toneladas)</label>
-                        <input type="text" inputMode="decimal" style={S.input}
-                          value={form.minimo_colaborador_unidades ?? ""}
-                          onChange={e=>setForm(p=>syncPrecioColaboradorCalc({...p,minimo_colaborador_unidades:e.target.value}))}
-                          placeholder="Ej: 25,5"/>
-                      </div>
-                      <div>
-                        <label style={S.label}>Liquidacion</label>
-                        <div style={{...S.input,background:"var(--bg3)"}}>Segun toneladas cargadas</div>
-                      </div>
-                    </>) : (
-                      <div><label style={S.label}>Lo que pagamos al colaborador (EUR, sin IVA)</label>
-                        <input type="text" inputMode="decimal" style={S.input} value={form.precio_colaborador||""} onChange={f("precio_colaborador")} placeholder="Ej: 650"/>
-                      </div>
-                    )}
-                    <div><label style={S.label}>Matricula tractora colaborador</label>
-                      <input style={S.input} value={form.matricula_colaborador||""} onChange={e=>setForm(p=>({...p,matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Ej: 1234-ABC"/>
-                    </div>
-                    <div><label style={S.label}>Matricula remolque colaborador</label>
-                      <input style={S.input} value={form.remolque_matricula_colaborador||""} onChange={e=>setForm(p=>({...p,remolque_matricula_colaborador:formatMatricula(e.target.value)}))} placeholder="Opcional"/>
-                    </div>
-                    {(supplierPriceType(form)!=="tonelada"&&calcImporte(form)>0&&parseLocaleNumber(form.precio_colaborador)>0)&&(
-                      <div style={{gridColumn:"1/-1",display:"flex",gap:16,background:"var(--bg3)",borderRadius:7,padding:"8px 14px",alignItems:"center"}}>
-                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Beneficio viaje: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:16,color:calcImporte(form)-parseLocaleNumber(form.precio_colaborador)>=0?"var(--green)":"var(--red)"}}>{(calcImporte(form)-parseLocaleNumber(form.precio_colaborador)).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span></div>
-                        <div><span style={{fontSize:11,color:"var(--text5)"}}>Margen: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"#f59e0b"}}>{calcImporte(form)>0?((1-parseLocaleNumber(form.precio_colaborador)/calcImporte(form))*100).toFixed(1):0}%</span></div>
-                        {form.tipo_precio==="tonelada" && form.precio_colaborador_unitario && (
-                          <div><span style={{fontSize:11,color:"var(--text5)"}}>Pago acordado: </span><span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,color:"var(--text2)"}}>{parseLocaleNumber(form.precio_colaborador_unitario,0).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR/tn x {unidadesFacturablesPedido(form, form.minimo_colaborador_unidades).toLocaleString("es-ES")} tn</span></div>
-                        )}
-                        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6,background:"rgba(251,191,36,.1)",border:"1px solid rgba(251,191,36,.25)",borderRadius:6,padding:"4px 10px"}}>
-                          <span style={{fontSize:12}}>!</span><span style={{fontSize:11,fontWeight:700,color:"#fbbf24"}}>Pendiente de pago al colaborador</span>
-                        </div>
-                      </div>
-                    )}
-                    <div style={{gridColumn:"1/-1",display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",background:"rgba(15,118,110,.08)",border:"1px solid rgba(15,118,110,.22)",borderRadius:8,padding:"9px 12px",flexWrap:"wrap"}}>
-                      <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
-                        Se enviara un enlace para que el colaborador confirme precio y matriculas. Despues recibira enlaces para marcar carga, en camino, descarga y subir albaranes.
-                      </div>
-                      <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                        <button
-                          type="button"
-                          disabled={previsualizandoColaborador || !editando?.id}
-                          onClick={previsualizarColaborador}
-                          style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",opacity:(previsualizandoColaborador || !editando?.id)?0.6:1}}
-                        >
-                          {previsualizandoColaborador ? "Abriendo..." : "Previsualizar"}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={notificandoColaborador || !editando?.id}
-                          onClick={()=>notificarColaborador(true)}
-                          style={{...S.btn,background:"var(--green)",color:"#fff",opacity:(notificandoColaborador || !editando?.id)?0.6:1}}
-                        >
-                          {notificandoColaborador ? "Enviando..." : editando?.id ? "Enviar/Reenviar enlace" : "Guarda para enviar"}
-                        </button>
-                      </div>
-                    </div>
-                    <div style={{gridColumn:"1/-1",background:"rgba(37,99,235,.07)",border:"1px solid rgba(37,99,235,.2)",borderRadius:8,padding:"10px 12px"}}>
-                      <div style={{display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap"}}>
-                        <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.45,flex:"1 1 360px"}}>
-                          <strong>Acceso temporal de conductor.</strong> Da acceso solo a este viaje para completar conductor, estados, albaranes y DCD. Caduca al entregar o cancelar el viaje.
-                        </div>
-                        <button type="button" disabled={generandoAccesoTemporal || !editando?.id} onClick={generarAccesoTemporalColaborador}
-                          style={{...S.btn,background:"#2563eb",color:"#fff",opacity:(generandoAccesoTemporal || !editando?.id)?0.6:1}}>
-                          {generandoAccesoTemporal ? "Generando..." : editando?.id ? "Generar acceso temporal" : "Guarda para generar"}
-                        </button>
-                      </div>
-                      {accesoTemporalColaborador?.operativa_url&&(
-                        <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginTop:10}}>
-                          <input readOnly value={accesoTemporalColaborador.operativa_url} onFocus={e=>e.target.select()} style={{...S.input,minWidth:0,flex:"1 1 260px",fontSize:11}} />
-                          <button type="button" onClick={copiarAccesoTemporalColaborador} style={{...S.btn,whiteSpace:"nowrap"}}>Copiar</button>
-                          <button type="button" onClick={()=>window.open(accesoTemporalColaborador.operativa_url,"_blank","noopener,noreferrer")} style={{...S.btn,whiteSpace:"nowrap"}}>Abrir</button>
-                        </div>
-                      )}
-                    </div>
-                    <div style={{gridColumn:"1/-1",background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.18)",borderRadius:8,padding:"10px 12px"}}>
-                      <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:"var(--accent)",marginBottom:4}}>Forma de pago al colaborador</div>
-                      <div style={{fontSize:12,color:"var(--text3)",fontWeight:700}}>{formatPaymentTerms(getEmpresaPerfilSync())}</div>
-                    </div>
-                    <div style={{gridColumn:"1/-1",display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
-                      {[
-                        ["Precio y matriculas", form.colaborador_precio_confirmado_at || form.colaborador_precio_confirmado],
-                        ["Carga", form.colaborador_carga_confirmada_at],
-                        ["En camino", form.colaborador_en_camino_confirmada_at],
-                        ["Descarga y albaranes", form.colaborador_descarga_confirmada_at],
-                      ].map(([label, done])=>(
-                        <div key={label} style={{border:"1px solid "+(done?"rgba(16,185,129,.28)":"var(--border2)"),background:done?"rgba(16,185,129,.08)":"var(--bg3)",borderRadius:8,padding:"8px 10px"}}>
-                          <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".05em",color:done?"var(--green)":"var(--text5)"}}>{done?"Confirmado":"Pendiente"}</div>
-                          <div style={{fontSize:12,fontWeight:700,color:"var(--text)",marginTop:2}}>{label}</div>
-                          {typeof done === "string" && <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>{new Date(done).toLocaleString("es-ES")}</div>}
-                        </div>
-                      ))}
-                    </div>
-                  </>)}
-                </div>
-
-                <div style={{gridColumn:"1/-1",borderTop:"1px solid rgba(139,92,246,.15)",marginTop:12,paddingTop:12}}>
-                  <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text3)",marginBottom:8}}>Conductor efectivo</div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
-                    <div><label style={S.label}>Nombre</label><input style={S.input} value={form.conductor_efectivo_nombre||""} onChange={f("conductor_efectivo_nombre")} placeholder="Nombre" /></div>
-                    <div><label style={S.label}>Apellidos</label><input style={S.input} value={form.conductor_efectivo_apellidos||""} onChange={f("conductor_efectivo_apellidos")} placeholder="Apellidos" /></div>
-                    <div><label style={S.label}>DNI / NIE</label><input style={S.input} value={form.conductor_efectivo_dni||""} onChange={e=>setForm(p=>({...p,conductor_efectivo_dni:formatDni(e.target.value)}))} placeholder="Documento de identidad" /></div>
-                    <div><label style={S.label}>Telefono</label><input type="tel" style={S.input} value={form.conductor_efectivo_telefono||""} onChange={f("conductor_efectivo_telefono")} placeholder="Telefono" /></div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{gridColumn:"1/-1"}}><label style={S.label}>Notas / Instrucciones</label>
-                <textarea style={{...S.input,height:64,resize:"vertical"}} value={form.notas||""} onChange={f("notas")}/>
-                <label style={{display:"flex",alignItems:"center",gap:8,marginTop:7,cursor:form.notas?"pointer":"default",fontSize:12,color:form.notas?"var(--text3)":"var(--text5)"}}>
-                  <input type="checkbox" checked={!!form.nota_visible} disabled={!form.notas}
-                    onChange={e=>setForm(p=>({...p,nota_visible:e.target.checked}))}
-                    style={{width:15,height:15,cursor:form.notas?"pointer":"default",accentColor:"var(--accent)"}}/>
-                  Dejar nota visible en el pedido
-                  <span style={{fontSize:10,color:"var(--text5)"}}>- aparece al pasar el raton por encima del pedido en la lista</span>
-                </label>
-              </div>
-              <div style={{gridColumn:"1/-1"}}>
-                <label style={S.label}>
-                  Condiciones del encargo
-                  <span style={{marginLeft:6,fontSize:9,color:"var(--text5)",fontWeight:400,
-                    textTransform:"none",letterSpacing:"normal"}}>
-                    - aparecen al pie de la orden de carga
-                  </span>
-                </label>
-                <textarea
-                  style={{...S.input,height:72,resize:"vertical",fontSize:12,color:"var(--text3)"}}
-                  value={form.condiciones_adicionales||""}
-                  onChange={f("condiciones_adicionales")}
-                  placeholder="Ej: Mercancia fragil - manipular con precaucion. Temperatura 2-8oC. Firmar albaran en destino y devolver copia..."/>
-              </div>
-            </div>
-
-            {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Documentos adjuntos ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
-            <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
-                <div>
-                  <div style={{fontSize:12,fontWeight:700,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".06em"}}>Documentacion de la carga</div>
-                  <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>CMR, albaranes, fotos, pesajes o instrucciones. Se adjuntan al pedido y a la factura.</div>
-                </div>
-                {!editando?.id && (
-                  <label className="tg-attachment-trigger" style={{marginLeft:"auto",padding:"6px 12px",borderRadius:7,background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                    Adjuntar antes de crear
-                    <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" style={{display:"none"}} onChange={seleccionarDocsPendientes}/>
-                  </label>
-                )}
-              </div>
-              {editando?.id ? (
-                <TabDocsPedido pedido={editando}/>
-              ) : pendingDocs.length ? (
-                <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  {pendingDocs.map((d, idx)=>(
-                    <div key={`${d.nombre}-${idx}`} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--bg3)",borderRadius:8,border:"1px solid var(--border)"}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:12,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.nombre}</div>
-                        <div style={{fontSize:10,color:"var(--text5)"}}>{d.tipo} | {d.file_size_kb}KB | se subira al guardar</div>
-                      </div>
-                      <button type="button" onClick={()=>setPendingDocs(prev=>prev.filter((_, i)=>i!==idx))} style={{background:"none",border:"none",color:"var(--text5)",cursor:"pointer",fontSize:13}}>Quitar</button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{padding:"14px 0",fontSize:12,color:"var(--text5)"}}>Sin documentos preparados.</div>
-              )}
-            </div>
-
+            <OrderNotesFields S={S} form={form} f={f} setForm={setForm}/>
             {editando?.id && <PedidoRentabilidadPredictiva pedido={editando} ingresoLive={calcImporte(form) + parseLocaleNumber(form.importe_paralizacion, 0)}/>}
-            {editando?.id && <PedidoTimeline pedido={editando}/>}
+            {editando?.id && <PedidoTimeline compact pedido={editando}/>}
 
-            <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
-              <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}} onClick={requestClose}>Salir</button>
-              {!(editando?._readonly && !desvinculado) && (
-                <button style={{...S.btn,background:"#3b6ef5",color:"#fff",opacity:saving?0.7:1}} onClick={guardar} disabled={saving}>{saving?"Guardando...":editando?.id?"Guardar cambios":"Crear pedido"}</button>
-              )}
             </div>
           </div>
-        </div>
+        </OrderEditorShell>
 
       {modalNuevoCliente && (
         <ModalNuevoClienteRapido

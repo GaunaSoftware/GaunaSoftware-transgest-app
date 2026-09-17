@@ -14,7 +14,7 @@ const style = key
   : "https://tiles.openfreemap.org/styles/liberty";
 const empty = { type: "FeatureCollection", features: [] };
 
-export default function RouteMapCanvas({ points = [], geometry = [], vehicle, stableFrame = false }) {
+export default function RouteMapCanvas({ points = [], geometry = [], vehicle, stableFrame = false, compact = false }) {
   const container = useRef(null);
   const mapRef = useRef(null);
   const fitRef = useRef(() => {});
@@ -95,7 +95,7 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
 
   return (
     <div data-map-engine="maplibre">
-      <div style={{ position: "relative", height: "clamp(280px, 38vh, 440px)" }}>
+      <div style={{ position: "relative", height: compact ? "180px" : "clamp(280px, 38vh, 440px)" }}>
         <div ref={container} aria-label="Mapa de la ruta del pedido" style={{ position: "absolute", inset: 0 }} />
         <button type="button" title="Centrar ruta" aria-label="Centrar ruta" onClick={() => fitRef.current()} style={{ position: "absolute", top: 10, left: 10, width: 34, height: 34, background: "white", color: "#20252b", border: "1px solid #bbc5ca", borderRadius: 4, cursor: "pointer", fontSize: 22 }}>&#8982;</button>
       </div>

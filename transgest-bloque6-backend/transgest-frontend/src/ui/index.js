@@ -97,7 +97,7 @@ export function DataTable({ rows, columns, renderMobile, rowKey = row => row.id,
 const overlayStack = [];
 let bodyOverflowBeforeOverlays = "";
 const focusable = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]';
-function Overlay({ title, children, footer, onClose, width = 560, drawer, closeOnBackdrop = true }) {
+function Overlay({ title, children, footer, onClose, width = 560, drawer, closeOnBackdrop = true, className, overlayClassName }) {
   const ref = useRef(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -111,6 +111,8 @@ function Overlay({ title, children, footer, onClose, width = 560, drawer, closeO
     panel.focus();
     const keydown = e => {
       if (overlayStack[overlayStack.length - 1] !== panel) return;
+      // Legacy point editors still render sibling dialogs; let their controls handle keys.
+      if (className === "tg-order-editor-dialog" && !panel.contains(document.activeElement)) return;
       if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeRef.current?.(); }
       if (e.key === "Tab") {
         const elements = [...panel.querySelectorAll(focusable)].filter(el => el.getClientRects().length);
@@ -124,8 +126,8 @@ function Overlay({ title, children, footer, onClose, width = 560, drawer, closeO
     return () => { overlayStack.splice(overlayStack.indexOf(panel), 1); if (!overlayStack.length) document.body.style.overflow = bodyOverflowBeforeOverlays; document.removeEventListener("keydown", keydown); if (previous?.isConnected) previous.focus(); };
   }, []);
   return createPortal(
-    <div className={cx("tgui-overlay", drawer && "tgui-overlay--drawer")} onMouseDown={e => closeOnBackdrop && e.target === e.currentTarget && onClose?.()}>
-      <div ref={ref} className={cx("tgui-dialog", drawer && "tgui-drawer")} style={{ "--dialog-width": `${width}px` }} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
+    <div className={cx("tgui-overlay", drawer && "tgui-overlay--drawer", overlayClassName)} onMouseDown={e => closeOnBackdrop && e.target === e.currentTarget && onClose?.()}>
+      <div ref={ref} className={cx("tgui-dialog", drawer && "tgui-drawer", className)} style={{ "--dialog-width": `${width}px` }} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <header className="tgui-dialog-header">
           <h2 id={titleId}>{title || "Detalle"}</h2>
           {onClose && <Button aria-label="Cerrar" onClick={onClose}>×</Button>}
@@ -153,7 +155,7 @@ export function FilterBar({ search, children, advanced }) {
     </div>
   );
 }
-export function DropdownMenu({ label = "Más acciones", items }) {
+export function DropdownMenu({ label = "Más acciones", items, ...triggerProps }) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({});
   const trigger = useRef(null), menu = useRef(null);
@@ -170,7 +172,7 @@ export function DropdownMenu({ label = "Más acciones", items }) {
     return () => { document.removeEventListener("pointerdown", close); window.removeEventListener("resize", resize); };
   }, [open]);
   if (!items.length) return null;
-  return <><Button ref={trigger} aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} onClick={e => { e.stopPropagation(); setOpen(v => !v); }}>···</Button>{open && createPortal(<div ref={menu} id={id} role="menu" aria-label={label} className="tgui-menu" style={position} onClick={e => e.stopPropagation()} onKeyDown={e => {
+  return <><Button {...triggerProps} ref={trigger} aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} onClick={e => { e.stopPropagation(); setOpen(v => !v); }}>···</Button>{open && createPortal(<div ref={menu} id={id} role="menu" aria-label={label} className="tgui-menu" style={position} onClick={e => e.stopPropagation()} onKeyDown={e => {
     if (e.key === "Escape" || e.key === "Tab") { e.stopPropagation(); setOpen(false); trigger.current?.focus(); }
     if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) { e.preventDefault(); const list = [...menu.current.querySelectorAll('[role="menuitem"]')]; const index = list.indexOf(document.activeElement); list[e.key === "Home" ? 0 : e.key === "End" ? list.length - 1 : (index + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length]?.focus(); }
   }}>{items.map(item => <button key={item.id || item.label} type="button" role="menuitem" className={item.danger ? "tgui-tone--danger" : undefined} onClick={() => { setOpen(false); trigger.current?.focus(); item.onClick(); }}>{item.label}</button>)}</div>, document.body)}</>;

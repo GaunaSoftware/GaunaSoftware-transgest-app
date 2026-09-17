@@ -189,7 +189,18 @@ async function main(){
  if(driver.id){
   const driverUser=crypto.randomUUID();await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo,chofer_id) VALUES($1,$2,'Conductor auditoría','driver-login@example.invalid',$3,'chofer',true,$4)",[driverUser,company,await req('bcryptjs').hash(password,10),driver.id]);
   const managerToken=token;token=null;const driverLogin=await call('Login app chófer','POST','/auth/login',{email:'driver-login@example.invalid',password});token=driverLogin.token;
-  if(token){await call('Leer jornada chófer','GET','/choferes/app/jornada');await call('Iniciar jornada','POST','/choferes/app/jornada/iniciar',{km_inicio:10000});await call('Registrar conducción','POST','/choferes/app/jornada/actividad',{actividad:'conduccion'});await call('Rechazar km de cierre inferiores','POST','/choferes/app/jornada/cerrar',{km_fin:9000});await call('Cerrar jornada','POST','/choferes/app/jornada/cerrar',{km_fin:10350});await call('Chófer sin permiso de facturación','GET','/facturas');}
+  if(token){
+   const day=await call('Leer jornada chófer','GET','/choferes/app/jornada');
+   const rig={conjunto_confirmado:true,vehiculo_id:day.chofer.vehiculo_id,remolque_id:day.chofer.vehiculo_remolque_id||null};
+   await call('Catálogo de clientes del chófer','GET','/pedidos/chofer/clientes');
+   await call('Rechazar jornada sin confirmar conjunto','POST','/choferes/app/jornada/iniciar',{km_inicio:10000});
+   await call('Iniciar jornada','POST','/choferes/app/jornada/iniciar',{...rig,km_inicio:10000});
+   await call('Registrar conducción','POST','/choferes/app/jornada/actividad',{actividad:'conduccion'});
+   await call('Rechazar km de cierre inferiores','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:9000});
+   await call('Rechazar km de cierre iguales','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:10000});
+   await call('Cerrar jornada','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:10350});
+   await call('Chófer sin permiso de facturación','GET','/facturas');
+  }
   token=managerToken;
  }
  await call('Soporte antiguo tras abrir chat nuevo','POST','/mi-cuenta/soporte',{mensaje:'Prueba compatibilidad sin envío'});
@@ -220,6 +231,7 @@ async function main(){
   ['Bloquear rectificativa sin revision',409],['Emitir SIN revisar documentación',409],['Enviar SIN documentación',409],['Revision sin documentos bloqueada',409],
   ['Revision caducada por cambio de pedido',409],['Impedir emitida a borrador',409],
   ['Guardar taller usuario B con lectura anterior',409],['Montar segundo neumático en posición ocupada',409],
+  ['Rechazar jornada sin confirmar conjunto',400],['Rechazar km de cierre iguales',400],
   ['Rechazar km de cierre inferiores',400],['Chófer sin permiso de facturación',403]
  ]);
  for(const c of evidence.checks) {if(expectedErrors.has(c.label))assert.equal(c.status,expectedErrors.get(c.label),JSON.stringify(c));else assert.ok(c.status>=200 && c.status<300,JSON.stringify(c));}

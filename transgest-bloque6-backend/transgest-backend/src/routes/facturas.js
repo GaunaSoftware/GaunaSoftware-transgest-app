@@ -1157,6 +1157,13 @@ router.post("/", GERENTE_O_CONTABLE,
     }
 
     const created = await db.transaction(async (client) => {
+      if (pedidosIdsUnicos.length) {
+        const { rows: fuelOrders } = await client.query(
+          "SELECT id, numero, importe, importe_revision_combustible FROM pedidos WHERE id=ANY($1::uuid[]) AND empresa_id=$2 FOR UPDATE",
+          [pedidosIdsUnicos, empresaId]
+        );
+        require('../services/invoiceFuelLines').validateFuelInvoiceLines(fuelOrders, lineas);
+      }
       if(plannerPreparation) lineas=await require('../services/plannerInvoice').saleLines(client,empresaId,plannerPreparation,cliente_id);
       let original=null;
       if(factura_original_id){

@@ -1,3 +1,4 @@
+import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import { guardarControlCobrosConfig, getReclamacionesEnvios } from '../services/api';
 import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal, Icon, AlertCard } from "../ui";
 import InvoiceList from "./finance/InvoiceList";
@@ -1480,34 +1481,7 @@ function ModalFacturarMultiple({ onClose }) {
   function buildLineas(){
     const cliente = clientes.find(c=>c.id===clienteSel);
     const modoFact = modo || cliente?.modo_facturacion || "linea";
-    if (modoFact==="agrupada_linea" || modo==="linea") {
-      return [{ concepto, cantidad:1, precio_unit: totalSel }];
-    }
-    if (modoFact==="agrupada_kg" || modo==="kg") {
-      // Group by tarifa (precio_unitario)
-      const tarifas = {};
-      selArr.forEach(p=>{
-        const t = p.precio_unitario||0;
-        const k = String(t);
-        if (!tarifas[k]) tarifas[k]={ tarifa:t, kg:0, importes:0, n:0 };
-        tarifas[k].kg    += Number(p.peso_kg||p.kg||0);
-        tarifas[k].importes += Number(p.importe||0);
-        tarifas[k].n++;
-      });
-      return Object.values(tarifas).map(t=>({
-        concepto: t.tarifa>0
-          ? `Transporte ${fmtN(t.kg)} kg a ${fmt2(t.tarifa)} EUR/tn (${t.n} viajes)`
-          : `Transporte - ${t.n} viajes`,
-        cantidad: t.tarifa>0 ? t.kg/1000 : 1,
-        precio_unit: t.tarifa>0 ? t.tarifa : t.importes,
-      }));
-    }
-    // detalle: one line per pedido
-    return selArr.map(p=>({
-      concepto: `${p.numero}${p.referencia_cliente ? " / Ref. "+p.referencia_cliente : ""} - ${p.origen||""}${p.destino?" -> "+p.destino:""} (${p.fecha_carga?new Date(p.fecha_carga).toLocaleDateString("es-ES"):"-"})`,
-      cantidad: 1,
-      precio_unit: Number(p.importe||0),
-    }));
+    return buildTransportInvoiceLines(selArr, modoFact, concepto);
   }
 
   useEffect(() => {
@@ -1714,8 +1688,8 @@ function ModalFacturarMultiple({ onClose }) {
           <label style={lbl}>Formato de la factura</label>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             {[
-              ["linea",   "Una sola linea",     "Un concepto global con importe total"],
-              ["detalle", "Linea por viaje",     "Una linea por cada pedido con detalle"],
+              ["linea",   "Portes agrupados",   "Transporte agrupado y recargo de combustible aparte"],
+              ["detalle", "Detalle por viaje",  "Porte y recargo de combustible por pedido"],
               ["kg",      "Agrupado por kg/tarifa","Agrupa por tarifa, muestra kg y precio/tn"],
             ].map(([v,l,d])=>(
               <button key={v} onClick={()=>setModo(v)}
@@ -1830,7 +1804,7 @@ function ModalFacturarMultiple({ onClose }) {
                 ))}
                 <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",marginTop:8,paddingTop:6,borderTop:"2px solid rgba(16,185,129,.3)"}}>
                   <div style={{fontSize:12,color:"var(--text4)"}}>
-                    {selArr.length} viaje(s) - {fmtN(totalKg)} kg - {modo==="linea"?"1 linea":`${buildLineas().length} lineas`}
+                    {selArr.length} viaje(s) - {fmtN(totalKg)} kg - {`${buildLineas().length} lineas`}
                   </div>
                   <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:18,color:"var(--green)"}}>{fmt2(totalSel)} EUR</div>
                 </div>

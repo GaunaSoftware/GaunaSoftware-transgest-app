@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import {transportExchange} from './services/api';
 import { isPlannerRoute, hasProduct } from './planner/access';
 import "./pages/workspace/workspace.css";
@@ -889,6 +890,12 @@ function writeAvimSeen(user, keys) {
 function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove, onMarkRead, hidden = false }) {
   const items = Array.isArray(data?.items) ? data.items : [];
   const pageSize = 12;
+  const [orderEditorAnchor, setOrderEditorAnchor] = useState(null);
+  useEffect(() => {
+    const change = e => setOrderEditorAnchor(e.detail?.anchor || null);
+    window.addEventListener("tms:order-editor", change);
+    return () => window.removeEventListener("tms:order-editor", change);
+  }, []);
   const minimizedKey = avimStorageKey(user);
   const [visibleCount, setVisibleCount] = useState(pageSize);
   const [minimized, setMinimized] = useState(() => readAvimMinimized(user));
@@ -939,6 +946,7 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
   }
 
   function setPanelMinimized(value) {
+    if (value && orderEditorAnchor) orderEditorAnchor.querySelector("details")?.removeAttribute("open");
     writeAvimMinimized(user, value);
     setMinimized(value);
   }
@@ -971,7 +979,7 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
     }
   }
 
-  if (minimized) {
+  if (minimized && !orderEditorAnchor) {
     return (
       <button
         type="button"
@@ -987,8 +995,7 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
     );
   }
 
-  return (
-    <div className="avimp-panel" style={{position:"fixed",left:position.x,top:position.y,zIndex:9000,width:open?430:300,maxWidth:"calc(100vw - 32px)",fontFamily:"'DM Sans',sans-serif"}}>
+  const panel = <div className="avimp-panel" style={{position:orderEditorAnchor ? "relative" : "fixed",left:orderEditorAnchor ? 0 : position.x,top:orderEditorAnchor ? 0 : position.y,zIndex:9000,width:open?430:300,maxWidth:"calc(100vw - 32px)",fontFamily:"'DM Sans',sans-serif"}}>
       <div className="avimp-heading"
         onPointerDown={startDrag}
         onPointerMove={moveDrag}
@@ -1081,8 +1088,8 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
           </div>
         </div>
       )}
-    </div>
-  );
+    </div>;
+  return orderEditorAnchor ? createPortal(<details className="order-editor-alert-popover"><summary className="order-editor-alert-button">AvIm · {totalAvisos}</summary><div className="order-editor-alert-content">{panel}</div></details>, orderEditorAnchor) : panel;
 }
 
 function dateKey(value) {

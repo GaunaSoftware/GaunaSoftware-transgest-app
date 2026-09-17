@@ -1,3 +1,4 @@
+import { DropdownMenu } from "../ui";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { calcularRutaGeo, resolveGeoPlace } from "../services/api";
 import RouteMapCanvas from "./RouteMapCanvas";
@@ -98,7 +99,7 @@ function resolvedDisplayPoints(route, routePoints) {
   })).filter(point => point.lat !== null && point.lng !== null);
 }
 
-function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) {
+function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false, compact = false }) {
   const [routeState, setRouteState] = useState({ key: "", data: null });
   const [loadingKey, setLoadingKey] = useState("");
   const [errorState, setErrorState] = useState({ key: "", message: "" });
@@ -160,7 +161,7 @@ function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) 
 
   return (
     <div style={{ position:"relative", zIndex:0, isolation:"isolate", border:"1px solid var(--border2)", borderRadius:8, overflow:"hidden", background:"var(--bg3)" }}>
-      <RouteMapCanvas points={displayPoints} geometry={geometry} vehicle={vehicleCoords} stableFrame={stableFrame} />
+      <RouteMapCanvas compact={compact} points={displayPoints} geometry={geometry} vehicle={vehicleCoords} stableFrame={stableFrame} />
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, padding:"9px 11px", flexWrap:"wrap" }}>
         <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap", fontSize:11, color:"var(--text4)" }}>
           {loading && <strong style={{ color:"var(--accent)" }}>Calculando ruta...</strong>}
@@ -171,7 +172,7 @@ function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) 
           {route?.warning && <span style={{ color:"#b45309" }}>{route.warning}</span>}
           {error && <span role="alert" style={{ color:"#64748b" }}>{error}</span>}
         </div>
-        {(routeReady || singleReady || error) && (
+        {compact && route && !error && !loading ? <DropdownMenu label="Opciones de ruta" items={[{label:"Recalcular ruta",onClick:recalcular}]}/> : (routeReady || singleReady || error) && (
           <button type="button" onClick={recalcular} disabled={loading} title="Recalcular sin cache" style={{ border:"1px solid var(--border2)", background:"var(--button-bg)", color:"var(--text)", borderRadius:7, padding:"6px 10px", fontWeight:800, cursor:"pointer" }}>
             {loading ? "Recalculando..." : "Recalcular"}
           </button>
@@ -181,6 +182,6 @@ function RutaMapa({ points = [], vehiclePosition = null, stableFrame = false }) 
   );
 }
 
-export default memo(RutaMapa, (prev, next) => prev.stableFrame === next.stableFrame
+export default memo(RutaMapa, (prev, next) => prev.compact === next.compact && prev.stableFrame === next.stableFrame
   && JSON.stringify(prev.points) === JSON.stringify(next.points)
   && JSON.stringify(prev.vehiclePosition) === JSON.stringify(next.vehiclePosition));

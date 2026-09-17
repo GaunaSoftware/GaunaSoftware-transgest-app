@@ -133,9 +133,16 @@ export function removeToken() {
   if (typeof window !== "undefined") {
     window.__TMS_TOKEN = "";
     window.__TMS_USER = null;
+    window.__TMS_SUSCRIPCION = null;
+    window.__TMS_BLOQUEADO = null;
+    window.__TMS_CHOFER_PASOS = {};
+    window.__TMS_SOLICITUDES_TALLER = [];
   }
   localStorage.removeItem("tms_token");
   localStorage.removeItem("tms_user");
+  localStorage.removeItem("tms_suscripcion");
+  localStorage.removeItem("tms_bloqueado");
+  window.dispatchEvent(new Event("tms:session-cleared"));
 }
 export function getUser() {
   if (typeof window !== "undefined" && window.__TMS_USER && typeof window.__TMS_USER === "object") return window.__TMS_USER;
@@ -190,6 +197,10 @@ async function apiFetch(path, options = {}) {
     if (timeoutId) clearTimeout(timeoutId);
   }
 
+  // An earlier account's response must never overwrite or clear the current session.
+  if (!path.startsWith("/auth/login") && getToken() !== token) {
+    throw new Error("La sesión ha cambiado. Vuelve a abrir la información con la cuenta actual.");
+  }
   // Token expirado → logout
   if (res.status === 401 && !path.startsWith("/auth/login")) {
     removeToken();
@@ -544,6 +555,7 @@ export const getPlanificacionCargaIA = (id) =>
 export const crearPedido    = (data)      => apiFetch("/pedidos", { method:"POST", body:data, timeoutMs:60000 });
 export const crearPedidoChofer = (data)   => apiFetch("/pedidos/chofer", { method:"POST", body:data, timeoutMs:60000 });
 export const getChoferClientes = (q = "") => apiFetch(`/pedidos/chofer/clientes${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+export const getChoferClientePuntosDescarga = (clienteId) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/puntos-carga?tipo=descarga`);
 export const getChoferClientePuntosCarga = (clienteId) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/puntos-carga`);
 export const crearChoferClientePuntoCarga = (clienteId, data) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/puntos-carga`, { method:"POST", body:data });
 export const getChoferClienteRutas = (clienteId) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/rutas`);

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { getToken, getUser, setUser as setCachedUser, removeToken, login as apiLogin, getMe } from "../services/api";
+import { hasProduct } from "../planner/access";
 
 const AuthContext = createContext(null);
 
@@ -14,9 +15,11 @@ export function AuthProvider({ children }) {
       if (!token) { setLoading(false); return; }
       try {
         const me = await getMe();
+        if (getToken() !== token) return;
         setUser(me);
         setCachedUser(me);
       } catch (err) {
+        if (getToken() !== token) return;
         const cachedUser = getUser();
         if (err?.message === "suscripcion_bloqueada") {
           setUser(cachedUser);
@@ -36,15 +39,42 @@ export function AuthProvider({ children }) {
     init();
   }, []);
 
+  useEffect(() => {
+    const restore = async () => {
+      delete window.__TMS_TOKEN;
+      delete window.__TMS_USER;
+      delete window.__TMS_SUSCRIPCION;
+      delete window.__TMS_BLOQUEADO;
+      const token = getToken();
+      if (!token) { setUser(null); return; }
+      setUser(null);
+      try { const me=await getMe(); if(getToken()===token){setUser(me);setCachedUser(me);} }
+      catch { if(getToken()===token) setUser(getUser()); }
+    };
+    const onStorage = event => { if(['tms_token','tms_user'].includes(event.key)) restore(); };
+    const onPageshow = event => { if(event.persisted) restore(); };
+    const onCleared = () => setUser(null);
+    window.addEventListener('storage',onStorage);
+    window.addEventListener('pageshow',onPageshow);
+    window.addEventListener('tms:session-cleared',onCleared);
+    return ()=>{window.removeEventListener('storage',onStorage);window.removeEventListener('pageshow',onPageshow);window.removeEventListener('tms:session-cleared',onCleared);};
+  }, []);
+
   const login = useCallback(async (email, password) => {
     const data = await apiLogin(email, password);
+    if (!hasProduct(data.user, "planner")) {
+      window.history.replaceState(null, "", "/?workspace=tms");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
     setUser(data.user);
     window.dispatchEvent(new CustomEvent("tms:launch-splash"));
     return data;
   }, []);
 
   const refreshUser = useCallback(async () => {
+    const token = getToken();
     const me = await getMe();
+    if(getToken() !== token) return null;
     setUser(me);
     setCachedUser(me);
     return me;
@@ -53,6 +83,8 @@ export function AuthProvider({ children }) {
   const logout = useCallback(() => {
     removeToken();
     setUser(null);
+    window.history.replaceState(null, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
   }, []);
 
   // Guards de rol

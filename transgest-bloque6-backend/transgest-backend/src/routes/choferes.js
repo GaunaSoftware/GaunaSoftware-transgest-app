@@ -4,6 +4,7 @@ const logger  = require("../services/logger");
 const { authenticate, GERENTE_O_TRAFICO, SOLO_GERENTE } = require("../middleware/auth");
 const { crearNotificacion } = require("../services/notificaciones");
 const { validateBase64Upload } = require("../services/uploadValidation");
+const { validateOdometer, validateConfirmedSet, externalGpsTimestamp, freshGps, workdayError } = require('../services/driverWorkday');
 const router  = express.Router();
 router.use(authenticate);
 
@@ -490,6 +491,7 @@ async function notifyAsignacionConjunto(empresaId, tipo, titulo, mensaje, data =
 
 async function setChoferConjunto({ empresaId, choferId, vehiculoId = null, remolqueId = null, actorId = null, notify = false }) {
   if (!empresaId || !choferId) return null;
+  await ensureChoferJornadaSchema();
   const chRes = await db.query(
     "SELECT id, nombre, apellidos, vehiculo_id, activo FROM choferes WHERE id=$1 AND empresa_id=$2 LIMIT 1",
     [choferId, empresaId]
@@ -554,6 +556,13 @@ async function setChoferConjunto({ empresaId, choferId, vehiculoId = null, remol
   }
 
   await db.transaction(async client => {
+    const locked = await client.query('SELECT id, vehiculo_id FROM choferes WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[choferId,empresaId]);
+    if (!locked.rows[0]) throw workdayError('Conductor no encontrado.', 404);
+    chofer.vehiculo_id = locked.rows[0].vehiculo_id;
+    if(String(chofer.vehiculo_id||'')!==String(nextVehiculoId||'')) {
+      const open=await client.query("SELECT id FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' LIMIT 1",[empresaId,choferId]);
+      if(open.rows.length) throw workdayError('Cierra la jornada de la tractora actual antes de cambiar de vehículo y abre otra con su cuentakilómetros.');
+    }
     await client.query("UPDATE vehiculos SET chofer_id=NULL WHERE empresa_id=$1 AND chofer_id=$2", [empresaId, choferId]);
     if (chofer.vehiculo_id && (!nextVehiculoId || String(chofer.vehiculo_id) !== String(nextVehiculoId))) {
       await client.query(
@@ -667,6 +676,7 @@ router.get("/app/jornada", requireChoferApp, async (req, res) => {
       LIMIT 1`,
     [empresaId, chofer.id]
   );
+  chofer.external_gps_at = await externalGpsTimestamp(empresaId,chofer.vehiculo_id).catch(()=>null);
   res.json({ chofer, jornada: serializeJornada(rows[0]) });
 });
 
@@ -782,7 +792,7 @@ router.post("/app/gps", requireChoferApp, async (req, res) => {
   if (req.body?.vehiculo_id && String(req.body.vehiculo_id) !== String(chofer.vehiculo_id)) {
     return res.status(403).json({ error: "El vehiculo no esta asignado a tu ficha de chofer" });
   }
-  if (vehiculoTieneGpsExterno(chofer)) return res.json({ ok: true, skipped: "gps_externo_configurado" });
+  if (vehiculoTieneGpsExterno(chofer) && freshGps(await externalGpsTimestamp(empresaId,chofer.vehiculo_id))) return res.json({ ok:true, skipped:"gps_externo_reciente" });
 
   const lat = Number(req.body?.lat);
   const lng = Number(req.body?.lng);
@@ -827,6 +837,7 @@ router.post("/app/gps", requireChoferApp, async (req, res) => {
           OR gps_provider=''
           OR gps_provider IN ('manual','app_chofer')
           OR NULLIF(TRIM(COALESCE(gps_external_id,'')), '') IS NULL
+          OR NOT EXISTS (SELECT 1 FROM gps_position_log g WHERE g.vehiculo_id=vehiculos.id AND g.empresa_id=vehiculos.empresa_id AND g.provider NOT IN ('app_chofer','manual') AND g.recorded_at BETWEEN NOW()-INTERVAL '5 minutes' AND NOW()+INTERVAL '1 minute')
         )
       RETURNING id, matricula, ubicacion_actual, ubicacion_ts, gps_lat, gps_lng, gps_provider`,
     [ubicacion, recordedIso, lat, lng, chofer.vehiculo_id, empresaId]
@@ -1050,74 +1061,33 @@ router.post("/vacaciones/adjudicar", GERENTE_O_TRAFICO, async (req, res) => {
 });
 
 router.post("/app/jornada/iniciar", requireChoferApp, async (req, res) => {
-  await ensureChoferJornadaSchema();
-  const empresaId = req.empresaId || req.user?.empresa_id;
-  const chofer = await resolveChoferApp(req);
-  if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
-  const kmInicio = req.body?.km_inicio === "" || req.body?.km_inicio == null ? null : Number(req.body.km_inicio);
-  if (kmInicio == null) return res.status(400).json({ error: "Kilometros de inicio obligatorios" });
-  if (kmInicio != null && (!Number.isFinite(kmInicio) || kmInicio < 0)) return res.status(400).json({ error: "Kilometros de inicio no validos" });
-  const open = await db.query(
-    `SELECT * FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' ORDER BY inicio_at DESC LIMIT 1`,
-    [empresaId, chofer.id]
-  );
-  if (open.rows[0]) return res.json({ chofer, jornada: serializeJornada(open.rows[0]) });
-  const actividad = normalizeActividad(req.body?.actividad || "otros_trabajos");
-  const { rows: lastClosedRows } = await db.query(
-    `SELECT id, fin_at, actividad_actual, eventos
-       FROM chofer_jornadas
-      WHERE empresa_id=$1 AND chofer_id=$2 AND estado='cerrada' AND fin_at IS NOT NULL
-      ORDER BY fin_at DESC
-      LIMIT 1`,
-    [empresaId, chofer.id]
-  ).catch(() => ({ rows: [] }));
-  const lastClosed = lastClosedRows[0] || null;
-  const descansoEntreTurnosMin = lastClosed?.fin_at ? diffMinutes(lastClosed.fin_at, new Date().toISOString()) : 0;
-  const inicioEventos = [];
-  if (descansoEntreTurnosMin > 0) {
-    inicioEventos.push({
-      tipo: "descanso_entre_turnos",
-      at: lastClosed.fin_at,
-      hasta: new Date().toISOString(),
-      minutos: descansoEntreTurnosMin,
-      valido_9h: descansoEntreTurnosMin >= TACOGRAFO.descansoDiarioReducidoMin,
-      valido_11h: descansoEntreTurnosMin >= TACOGRAFO.descansoDiarioNormalMin,
+  try {
+    await ensureChoferJornadaSchema();
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const chofer = await resolveChoferApp(req);
+    if (!chofer) throw workdayError('Tu usuario no está vinculado a un chófer.',404);
+    const kmInicio = validateOdometer(req.body.km_inicio);
+    const result = await db.transaction(async tx => {
+      const locked = (await tx.query('SELECT vehiculo_id FROM choferes WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[chofer.id,empresaId])).rows[0];
+      const vehicle = locked?.vehiculo_id ? (await tx.query('SELECT id,matricula,remolque_id,km_actuales FROM vehiculos WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[locked.vehiculo_id,empresaId])).rows[0] : null;
+      validateConfirmedSet(req.body, vehicle?.id, vehicle?.remolque_id);
+      const open = (await tx.query("SELECT * FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' ORDER BY inicio_at DESC LIMIT 1 FOR UPDATE",[empresaId,chofer.id])).rows[0];
+      if(open) return {jornada:serializeJornada(open)};
+      if(vehicle.km_actuales != null && kmInicio < Number(vehicle.km_actuales)) throw workdayError('El cuentakilómetros no puede ser inferior al último registrado para esta tractora.',400);
+      const last=(await tx.query("SELECT fin_at FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='cerrada' ORDER BY fin_at DESC LIMIT 1",[empresaId,chofer.id])).rows[0];
+      const descanso=last?.fin_at ? diffMinutes(last.fin_at,new Date().toISOString()) : 0;
+      const eventos=[];
+      if(descanso>0) eventos.push({tipo:'descanso_entre_turnos',at:last.fin_at,hasta:new Date().toISOString(),minutos:descanso,valido_9h:descanso>=TACOGRAFO.descansoDiarioReducidoMin,valido_11h:descanso>=TACOGRAFO.descansoDiarioNormalMin});
+      const actividad=normalizeActividad(req.body.actividad||'otros_trabajos');
+      eventos.push({tipo:actividad,at:new Date().toISOString(),km:kmInicio,vehiculo_id:vehicle.id,matricula:vehicle.matricula,remolque_id:vehicle.remolque_id,nota:'Inicio de jornada; conjunto confirmado'});
+      const row=(await tx.query(
+        'INSERT INTO chofer_jornadas (empresa_id,chofer_id,usuario_id,vehiculo_id,km_inicio,actividad_actual,eventos,notas) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8) RETURNING *',
+        [empresaId,chofer.id,req.user.id,vehicle.id,kmInicio,actividad,JSON.stringify(eventos),req.body.notas||null])).rows[0];
+      await tx.query('UPDATE vehiculos SET km_actuales=$1,updated_at=NOW() WHERE id=$2 AND empresa_id=$3',[kmInicio,vehicle.id,empresaId]);
+      return {jornada:serializeJornada(row),descanso_entre_turnos_min:descanso};
     });
-  }
-  inicioEventos.push({ tipo: actividad, at: new Date().toISOString(), km: kmInicio, nota: "Inicio de jornada" });
-  const { rows } = await db.query(
-    `INSERT INTO chofer_jornadas
-      (empresa_id, chofer_id, usuario_id, vehiculo_id, km_inicio, actividad_actual, eventos, notas)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
-     RETURNING *`,
-    [
-      empresaId,
-      chofer.id,
-      req.user.id,
-      chofer.vehiculo_id || null,
-      kmInicio,
-      actividad,
-      JSON.stringify(inicioEventos),
-      req.body?.notas || null,
-    ]
-  );
-  const row = rows[0] || (await db.query(
-    `SELECT * FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' ORDER BY inicio_at DESC LIMIT 1`,
-    [empresaId, chofer.id]
-  )).rows[0];
-  if (chofer.vehiculo_id && kmInicio != null) {
-    await db.query(
-      `UPDATE vehiculos
-          SET km_actuales = CASE
-                WHEN km_actuales IS NULL OR $1 >= km_actuales THEN $1
-                ELSE km_actuales
-              END,
-              updated_at=NOW()
-        WHERE id=$2 AND empresa_id=$3`,
-      [Math.round(kmInicio), chofer.vehiculo_id, empresaId]
-    ).catch(() => {});
-  }
-  res.status(201).json({ chofer, descanso_entre_turnos_min: descansoEntreTurnosMin, jornada: serializeJornada(row) });
+    res.status(201).json({chofer,...result});
+  } catch(e) { res.status(e.status||500).json({error:e.message}); }
 });
 
 router.post("/app/jornada/actividad", requireChoferApp, async (req, res) => {
@@ -1174,64 +1144,31 @@ router.post("/app/jornada/actividad", requireChoferApp, async (req, res) => {
 });
 
 router.post("/app/jornada/cerrar", requireChoferApp, async (req, res) => {
-  await ensureChoferJornadaSchema();
-  const empresaId = req.empresaId || req.user?.empresa_id;
-  const chofer = await resolveChoferApp(req);
-  if (!chofer) return res.status(404).json({ error: "Tu usuario no esta vinculado a una ficha de chofer" });
-  const kmFin = req.body?.km_fin === "" || req.body?.km_fin == null ? null : Number(req.body.km_fin);
-  if (kmFin == null) return res.status(400).json({ error: "Kilometros de cierre obligatorios" });
-  if (kmFin != null && (!Number.isFinite(kmFin) || kmFin < 0)) return res.status(400).json({ error: "Kilometros de cierre no validos" });
-  const { rows: currentRows } = await db.query(
-    `SELECT * FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' ORDER BY inicio_at DESC LIMIT 1`,
-    [empresaId, chofer.id]
-  );
-  const current = currentRows[0];
-  if (!current) return res.status(400).json({ error: "No hay jornada abierta" });
-  if (kmFin != null && current.km_inicio != null && kmFin < Number(current.km_inicio)) {
-    return res.status(400).json({ error: "Los kilometros de cierre no pueden ser inferiores a los de inicio" });
-  }
-  const nowIso = new Date().toISOString();
-  const eventos = [...jornadaEventos(current)];
-  if (current.actividad_actual !== "descanso") {
-    eventos.push({ tipo: "descanso", at: nowIso, objetivo_descanso_min: TACOGRAFO.descansoDiarioNormalMin, nota: "Descanso automatico al cerrar jornada" });
-  }
-  eventos.push({ tipo: "fin", at: nowIso, km: kmFin, noche: !!req.body?.hace_noche, nota: "Cierre de turno. El descanso se contabiliza hasta la siguiente apertura." });
-  const { rows } = await db.query(
-    `UPDATE chofer_jornadas
-        SET estado='cerrada',
-            fin_at=NOW(),
-            actividad_actual='descanso',
-            km_fin=$1,
-            hace_noche=$2,
-            noche_lugar=$3,
-            notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(chofer_jornadas.notas,''), $4::text)),
-            eventos=$5::jsonb,
-            updated_at=NOW()
-      WHERE id=$6 AND empresa_id=$7
-      RETURNING *`,
-    [kmFin, !!req.body?.hace_noche, req.body?.noche_lugar || null, req.body?.notas || null, JSON.stringify(eventos), current.id, empresaId]
-  );
-  if (chofer.vehiculo_id && kmFin != null) {
-    await db.query(
-      `UPDATE vehiculos
-          SET km_actuales = CASE
-                WHEN km_actuales IS NULL OR $1 >= km_actuales THEN $1
-                ELSE km_actuales
-              END,
-              updated_at=NOW()
-        WHERE id=$2 AND empresa_id=$3`,
-      [Math.round(kmFin), chofer.vehiculo_id, empresaId]
-    ).catch(() => {});
-    if (req.body?.hace_noche) {
-      await db.query(
-        `INSERT INTO vehiculo_noches (empresa_id, vehiculo_id, fecha, ciudad, chofer_id, notas)
-         VALUES ($1,$2,CURRENT_DATE,$3,$4,$5)
-         ON CONFLICT DO NOTHING`,
-        [empresaId, chofer.vehiculo_id, req.body?.noche_lugar || null, chofer.id, "Registrado desde app chofer"]
-      ).catch(() => {});
-    }
-  }
-  res.json({ chofer, jornada: serializeJornada(rows[0]) });
+  try {
+    await ensureChoferJornadaSchema();
+    const empresaId=req.empresaId||req.user.empresa_id,chofer=await resolveChoferApp(req);
+    if(!chofer) throw workdayError('Tu usuario no está vinculado a un chófer.',404);
+    const row=await db.transaction(async tx=>{
+      await tx.query('SELECT id FROM choferes WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[chofer.id,empresaId]);
+      const current=(await tx.query("SELECT * FROM chofer_jornadas WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta' ORDER BY inicio_at DESC LIMIT 1 FOR UPDATE",[empresaId,chofer.id])).rows[0];
+      if(!current) throw workdayError('No hay jornada abierta.',400);
+      const vehicleId=current.vehiculo_id;
+      const vehicle=(await tx.query('SELECT id,remolque_id,km_actuales FROM vehiculos WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[vehicleId,empresaId])).rows[0];
+      validateConfirmedSet(req.body,vehicleId,vehicle?.remolque_id);
+      const kmFin=validateOdometer(req.body.km_fin,current.km_inicio);
+      if(vehicle?.km_actuales!=null && kmFin<Number(vehicle.km_actuales)) throw workdayError('El cierre es inferior al último cuentakilómetros de esta tractora.',400);
+      const eventos=[...jornadaEventos(current)],nowIso=new Date().toISOString();
+      if(current.actividad_actual!=='descanso') eventos.push({tipo:'descanso',at:nowIso,objetivo_descanso_min:TACOGRAFO.descansoDiarioNormalMin,nota:'Descanso al cerrar jornada'});
+      eventos.push({tipo:'fin',at:nowIso,km:kmFin,vehiculo_id:vehicleId,remolque_id:vehicle?.remolque_id,noche:!!req.body.hace_noche,nota:'Cierre; conjunto confirmado'});
+      const saved=(await tx.query(
+        "UPDATE chofer_jornadas SET estado='cerrada',fin_at=NOW(),actividad_actual='descanso',km_fin=$1,hace_noche=$2,noche_lugar=$3,notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ',NULLIF(notas,''),$4::text)),eventos=$5::jsonb,updated_at=NOW() WHERE id=$6 AND empresa_id=$7 RETURNING *",
+        [kmFin,!!req.body.hace_noche,req.body.noche_lugar||null,req.body.notas||null,JSON.stringify(eventos),current.id,empresaId])).rows[0];
+      await tx.query('UPDATE vehiculos SET km_actuales=$1,updated_at=NOW() WHERE id=$2 AND empresa_id=$3',[kmFin,vehicleId,empresaId]);
+      if(req.body.hace_noche) await tx.query('INSERT INTO vehiculo_noches (empresa_id,vehiculo_id,fecha,ciudad,chofer_id,notas) VALUES ($1,$2,CURRENT_DATE,$3,$4,$5) ON CONFLICT DO NOTHING',[empresaId,vehicleId,req.body.noche_lugar||null,chofer.id,'Registrado desde app chófer']);
+      return saved;
+    });
+    res.json({chofer,jornada:serializeJornada(row)});
+  } catch(e) { res.status(e.status||500).json({error:e.message}); }
 });
 router.get("/:id", async (req,res)=>{
   await ensureChoferesTransparencySchema();

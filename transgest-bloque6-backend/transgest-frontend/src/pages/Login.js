@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { BRAND_NAME, getBrandDisplayName, getBrandVersionLabel } from "../branding";
+import { BRAND_NAME, getBrandVersionLabel } from "../branding";
 import { getLoginBrand, getPublicAppMeta, healthCheck, requestPasswordReset } from "../services/api";
 import { confirmDialog } from "../services/notify";
-import { getEmpresaPlanLocal } from "../utils/planFeatures";
 import { getConfiguredServer, setConfiguredServer, clearConfiguredServer, isDesktopApp, DEFAULT_API_URL } from "../utils/serverConfig";
 import { useTheme } from "../context/ThemeContext";
 import transgestLogoDark from "../assets/brand/transgest_logo_dark.svg";
@@ -48,8 +47,7 @@ const S = {
 export default function Login() {
   const { login }   = useAuth();
   const { isDark, toggle } = useTheme() || {};
-  const plan = getEmpresaPlanLocal();
-  const brandDisplayName = getBrandDisplayName(plan);
+  const brandDisplayName = BRAND_NAME;
   const [appMeta, setAppMeta] = useState(null);
   const [loginBrand, setLoginBrand] = useState(null);
   const versionLabel = getBrandVersionLabel(appMeta);

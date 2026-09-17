@@ -2057,14 +2057,19 @@ function ProductWorkspace({path}) {
   const requested=isPlannerRoute(path,process.env.REACT_APP_PRODUCT,window.location.search);
   if(plannerOnly || requested) {
     if(user && !hasProduct(user,'planner'))return <main style={{padding:32,color:'var(--text)',background:'var(--bg)',minHeight:'100vh'}}><h1>Planner no está habilitado</h1><p>Solicita su activación para tu empresa desde superadmin.</p><a href="/?workspace=tms">Volver a TransGest</a></main>;
-    return <Suspense fallback={<Spinner />}><PlannerApp PasswordChangeComponent={PasswordChangeRequired} /></Suspense>;
+    return <Suspense fallback={<Spinner />}><PlannerApp key={user ? `${user.empresa_id}:${user.id}` : "anonymous"} PasswordChangeComponent={PasswordChangeRequired} /></Suspense>;
   }
-  return <AppInner />;
+  return <AppInner key={user ? `${user.empresa_id}:${user.id}` : "anonymous"} />;
 }
 
 export default function App() {
   // Special standalone routes (no auth needed)
-  const path = window.location.pathname;
+  const [path, setPath] = useState(window.location.pathname);
+  useEffect(() => {
+    const update = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", update);
+    return () => window.removeEventListener("popstate", update);
+  }, []);
   if (path === "/registro" || path.startsWith("/registro/")) {
     return <Suspense fallback={<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#0f1420",color:"#e2e8f0",fontFamily:"DM Sans,sans-serif"}}>Cargando...</div>}><Registro /></Suspense>;
   }

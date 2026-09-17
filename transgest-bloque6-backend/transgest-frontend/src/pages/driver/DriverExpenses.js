@@ -14,7 +14,7 @@ export default function DriverExpenses({jornadaInfo}) {
  const scanned=doc=>{setTicket({...doc,nombre:'ticket.jpg'});setScanner(false);};
  async function choose(e){const file=e.target.files?.[0];if(!file)return;setBusy(true);setError('');try{setTicket({...await prepararArchivoEscaner(file),nombre:file.type.startsWith('image/')?'ticket.jpg':file.name});}catch(err){setError(err.message);}finally{setBusy(false);e.target.value='';}}
  async function save(e){e.preventDefault();setBusy(true);setError('');setSuccess('');try{await createDriverExpense({...form,vehiculo_id:vehicle?.vehiculo_id,ticket:ticket?{nombre:ticket.nombre,mime:ticket.mime,base64:ticket.base64}:null});setForm(newForm());setTicket(null);setSuccess('Gasto guardado y vinculado a la hoja de ruta del camión.');await load();}catch(err){setError(err.message);}finally{setBusy(false);}}
- return <div className="driver-section-shell"><section className="driver-card"><DriverHeading icon="repostajes" title="Repostajes y dietas">Camión: {vehicle?.vehiculo_matricula||'Selecciona tu conjunto'}</DriverHeading>
+ return <div className="driver-section-shell"><section className="driver-card"><DriverHeading icon="repostajes" title="Nuevo gasto">Camión: {vehicle?.vehiculo_matricula||'Selecciona tu conjunto'}</DriverHeading>
  <form className="driver-expense-form" onSubmit={save}>
  <label>Tipo<select aria-label="Tipo" value={form.tipo} onChange={e=>setForm(f=>({...f,tipo:e.target.value,en_base:false}))}><option value="gasoil">Gasoil / repostaje</option><option value="dieta">Dieta / manutención</option></select></label>
  <label>Fecha<input type="date" required value={form.fecha} onChange={e=>set('fecha',e.target.value)}/></label>

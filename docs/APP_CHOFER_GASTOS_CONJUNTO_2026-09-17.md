@@ -22,7 +22,7 @@ Esquema aditivo e idempotente: empresa_ubicaciones_operativas, chofer_gastos y d
 - Prueba de DCD: rechazo antes de carga, acceso después, rechazo a otro conductor y acceso de gerencia.
 - 25 suites / 60 pruebas unitarias frontend y compilación de producción. Advertencias anteriores de lint no relacionadas con estos cambios.
 - Navegador con APIs sintéticas: tabla a 1920/1662/1440/1280/768/390 px; panel abierto/plegado; costes en Hojas de ruta y valoración sin duplicados.
-- scripts/driver_browser_check.cjs verifica jornadas sin casillas, conjunto, DCD, ticket y recorte con una imagen sintética; revisar su resultado antes de desplegar.
+- scripts/driver_browser_check.cjs verifica jornadas sin casillas, conjunto, DCD, ticket y recorte con una imagen sintética. Flujo completo superado sin errores JavaScript.
 
 ## Comprobación del cliente
 

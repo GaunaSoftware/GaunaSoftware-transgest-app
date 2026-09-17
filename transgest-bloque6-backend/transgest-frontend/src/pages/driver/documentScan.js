@@ -72,7 +72,7 @@ function detectarRectanguloPapel(canvas) {
     maxX = strongMaxX;
     maxY = strongMaxY;
   }
-  const pad = Math.round(Math.min(w, h) * 0.025);
+  const pad = Math.round(Math.min(w, h) * 0.004);
   minX = Math.max(0, minX - pad);
   minY = Math.max(0, minY - pad);
   maxX = Math.min(w, maxX + pad);

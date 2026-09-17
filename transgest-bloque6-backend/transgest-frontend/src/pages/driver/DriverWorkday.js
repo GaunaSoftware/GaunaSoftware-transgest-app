@@ -59,7 +59,7 @@ export function ConjuntoChofer({ onRefresh, jornadaInfo }) {
   }
   return (
     <div className="tg-chofer-card" style={S.card}>
-      <DriverHeading icon="activos" title="Mi conjunto"/>
+      <DriverHeading icon="activos" title="Tractora y remolque"/>
       <div style={{fontSize:14,color:"var(--text4)",marginTop:4,lineHeight:1.45}}>
         Puedes seleccionar una tractora y remolque libres. Si necesitas mover un equipo ocupado, lo revisa tráfico.
       </div>

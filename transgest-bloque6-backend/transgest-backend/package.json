@@ -23,7 +23,7 @@
     "security:check": "node scripts/security_check.js",
     "security:roundtrip": "node scripts/security_roundtrip.js",
     "portal:regression": "node scripts/portal_cliente_regression_check.js",
-    "geo:regression": "node scripts/geocoding_regression_check.js && node scripts/geo_location_integrity_check.js",
+    "geo:regression": "node scripts/geocoding_regression_check.js && node scripts/geo_location_integrity_check.js && node scripts/optimizer_geometry_check.cjs",
     "ai:regression": "node scripts/ai_config_regression_check.js",
     "daily-plan:regression": "node scripts/daily_plan_regression_check.js && node scripts/operational_permissions_check.js && node scripts/driver_documents_access_check.js",
     "production:regression": "node scripts/production_workflows_check.js && node scripts/production_database_check.js && node scripts/supplier_invitation_check.js && npm run planner:regression",

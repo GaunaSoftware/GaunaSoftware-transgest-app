@@ -1,3 +1,4 @@
+import IntelligenceAnswer from '../components/IntelligenceAnswer';
 import React, { useEffect, useRef, useState } from 'react';
 import { getIntelligenceStatus, queryIntelligence } from '../services/api';
 import './Intelligence.css';
@@ -22,13 +23,13 @@ export default function Intelligence() {
     event.preventDefault();
     if (!draft.trim() || busy || !available) return;
     const content = draft.trim();
-    const history = [...messages.map(({role,content}) => ({role,content})), {role:'user',content}];
+    const history = [...messages, {role:'user',content}];
     if (history.length > 16) { setError('Inicia una nueva consulta para continuar.'); return; }
     const run = ++generation.current;
     setBusy(true); setError(''); setDraft('');
     setMessages(history);
     try {
-      const result = await queryIntelligence({ messages:history });
+      const result = await queryIntelligence({ messages:history.map(({role,content})=>({role,content})) });
       if (run !== generation.current) return;
       setMessages([...history, {role:'assistant', content:result.answer, sources:result.sources, checked_at:result.checked_at}]);
     } catch (e) {
@@ -37,8 +38,8 @@ export default function Intelligence() {
     } finally { if (run === generation.current) setBusy(false); }
   }
   const suggestions = [
-    'Que pedidos pendientes tenemos para hoy?',
-    'Que vehiculos tienen viajes asignados hoy?',
+    '¿Qué pedidos pendientes tenemos para hoy?',
+    '¿Qué vehículos tienen viajes asignados hoy?',
     'Resume los viajes realizados y pendientes de facturar de este mes.',
   ];
   return <section className="intelligence">
@@ -48,14 +49,14 @@ export default function Intelligence() {
     </header>
     <div className="intelligence-status" role="status">{status ? (status.message || (available ? 'TransGest Intelligence · Consultas sobre los datos de tu empresa' : 'Intelligence pendiente de configuración. Contacta con administración.')) : 'Comprobando disponibilidad…'}</div>
     {!messages.length && <div className="intelligence-start">
-      <h2>Que necesitas revisar?</h2>
+      <h2>¿Qué necesitas revisar?</h2>
       <div className="intelligence-suggestions">{suggestions.map(s => <button type="button" key={s} onClick={() => setDraft(s)}>{s}</button>)}</div>
     </div>}
-    <div className="intelligence-messages" role="log" aria-label="Conversacion">
+    <div className="intelligence-messages" role="log" aria-label="Conversación">
       {messages.map((m,i) => <article key={i} className={`intelligence-message ${m.role}`}>
-        <strong>{m.role === 'user' ? 'Tu consulta' : 'TransGest Intelligence'}</strong><div className="intelligence-answer">{m.content}</div>
+        <strong>{m.role === 'user' ? 'Tu consulta' : 'TransGest Intelligence'}</strong><div className="intelligence-answer">{m.role === 'assistant' ? <IntelligenceAnswer content={m.content}/> : m.content}</div>
         {!!m.sources?.length && <details><summary>Fuentes consultadas ({m.sources.length})</summary>
-          <ul>{m.sources.map((s,n) => <li key={n}>{s.name}: {Object.entries(s.filters).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')}{s.limited ? ' · Lista parcial' : ''}</li>)}</ul>
+          <ul>{m.sources.map((s,n) => <li key={n}>{s.name}: {Object.entries(s.filters).filter(([,v])=>v).map(([k,v])=>`${k}: ${v}`).join(' · ')}{s.total != null ? ` · ${s.total} pedidos en total` : ''}{s.page ? ` · Página ${s.page}` : ''}{s.limited ? ' · Lista parcial' : ''}</li>)}</ul>
           <small>{new Date(m.checked_at).toLocaleString('es-ES')}</small>
         </details>}
       </article>)}

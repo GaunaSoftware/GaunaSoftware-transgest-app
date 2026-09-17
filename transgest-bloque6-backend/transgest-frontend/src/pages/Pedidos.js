@@ -1,4 +1,4 @@
-import { driverName, driverOption } from "./orders/quickInfo";
+import { driverName, stopSchedule, assignDriver } from "./orders/quickInfo";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
 import { Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
@@ -9046,10 +9046,7 @@ useEffect(() => {
                     return vehiculosLocal
                       .filter(v => !esRemolque(v))
                       .map(v => {
-                        const rem = v.remolque_matricula;
-                        const label = rem
-                          ? `${v.matricula} - ${rem}` // conjunto: tractora + remolque
-                          : v.matricula;                  // solo tractora
+                        const label = v.matricula;
                         return <option key={v.id} value={v.id}>{label}</option>;
                       });
                   })()}
@@ -9064,9 +9061,9 @@ useEffect(() => {
                     </span>
                   )}
                 </label>
-                <select value={form.chofer_id||""} onChange={e=>{ const cid=e.target.value; setForm(p=>({ ...p, chofer_id:cid, ...(cid && p.colaborador_id ? { colaborador_id:"", colaborador_nombre:"", precio_cliente_col:"", precio_colaborador:"" } : {}) })); }} style={S.sel}>
+                <select value={form.chofer_id||""} onChange={e=>{ const cid=e.target.value; setForm(p=>assignDriver(p,cid,choferesLocal,vehiculosLocal)); }} style={S.sel}>
                   <option value="">Sin asignar</option>
-                  {choferesLocal.map(c=><option key={c.id} value={c.id}>{driverOption(c, vehiculosLocal)}</option>)}
+                  {choferesLocal.map(c=><option key={c.id} value={c.id}>{driverName(c)}</option>)}
                 </select>
               </div>
               {/* ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ Remolque del conjunto ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ÃÂ¢Ã¢â¬ÂÃ¢âÂ¬ */}
@@ -9113,7 +9110,7 @@ useEffect(() => {
               <div><label style={S.label}>2o Chofer (opcional)</label>
                 <select value={form.chofer2_id||""} onChange={f("chofer2_id")} style={S.sel}>
                   <option value="">Sin segundo chofer</option>
-                  {choferesLocal.filter(c=>c.id!==form.chofer_id).map(c=><option key={c.id} value={c.id}>{driverOption(c, vehiculosLocal)}</option>)}
+                  {choferesLocal.filter(c=>c.id!==form.chofer_id).map(c=><option key={c.id} value={c.id}>{driverName(c)}</option>)}
                 </select>
               </div>
               {!form.vehiculo_id && !form.colaborador_id && form.matricula_manual && (
@@ -11613,7 +11610,7 @@ export default function Pedidos() {
           notifyDriver:notificarChoferAppAccion, sendTo:(p,target)=>enviarWhatsappPedidoAccion(p,target)}}
         describe={p => {
           const loads = pedidoStopsForList(p,"carga"), unloads = pedidoStopsForList(p,"descarga");
-          return {origin:pedidoStopListLabel(loads[0] || {},p.origen,p.cliente_id || "","carga"), destination:pedidoStopListLabel(unloads[0] || {},p.destino,p.cliente_id || "","descarga"), loads:loads.length, unloads:unloads.length, loadDetails:loads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.origen:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n"), unloadDetails:unloads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.destino:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n")};
+          return {origin:pedidoStopListLabel(loads[0] || {},p.origen,p.cliente_id || "","carga"), destination:pedidoStopListLabel(unloads[0] || {},p.destino,p.cliente_id || "","descarga"), loads:loads.length, unloads:unloads.length, loadDetails:loads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.origen:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp, stopSchedule(stop)].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n"), unloadDetails:unloads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.destino:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp, stopSchedule(stop)].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n")};
         }}
         filters={{q,setQ,state:filtroEst,setState:setFiltroEst,client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
           setFrom:value => {setFiltroFechasCustom(true);setFiltroDesde(value);},setTo:value => {setFiltroFechasCustom(true);setFiltroHasta(value);},

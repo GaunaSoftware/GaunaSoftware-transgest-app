@@ -1,3 +1,5 @@
+import RouteMapCanvas from "../components/RouteMapCanvas";
+import { routeGeometry } from "../utils/routeGeometry";
 import { driverOption } from "./orders/quickInfo";
 import TrafficMobileBoard from "./traffic/TrafficMobileBoard";
 import { PageHeader } from "../ui";
@@ -2067,7 +2069,8 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
     getRutaOptimizadaPedido(selected.id)
       .then(data => {
         if (!alive) return;
-        if (!data) {
+        if (!data || data.preference !== preferencia || routeGeometry(data.geometry).length < 2 || JSON.stringify((data.stops || []).map(s=>s.address)) !== JSON.stringify((plan?.stops || []).map(s=>s.address))) {
+          // La ruta debe corresponder a las paradas y disponer de trazado real.
           // No hay ruta guardada: se calcula sola al seleccionar el pedido para que
           // el mapa real cargue sin tener que pulsar "Calcular" a mano.
           if (Array.isArray(plan?.stops) && plan.stops.length >= 2) calcularConApi();
@@ -2349,151 +2352,20 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
   );
 }
 
-function routeLonLatToWorld({ lon, lat }, zoom) {
-  const scale = 256 * Math.pow(2, zoom);
-  const x = ((Number(lon) + 180) / 360) * scale;
-  const sin = Math.sin((Number(lat) * Math.PI) / 180);
-  const y = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale;
-  return { x, y };
-}
-
-function buildEmbeddedRouteMap(points, width = 720, height = 310) {
-  const maptilerKey = process.env.REACT_APP_MAPTILER_KEY || "";
-  const valid = points.filter(p => Number.isFinite(Number(p.lon)) && Number.isFinite(Number(p.lat)));
-  if (valid.length < 2) return null;
-  const minLon = Math.min(...valid.map(p => Number(p.lon)));
-  const maxLon = Math.max(...valid.map(p => Number(p.lon)));
-  const minLat = Math.min(...valid.map(p => Number(p.lat)));
-  const maxLat = Math.max(...valid.map(p => Number(p.lat)));
-  const span = Math.max(maxLon - minLon, maxLat - minLat);
-  const zoom = span > 12 ? 5 : span > 6 ? 6 : span > 3 ? 7 : span > 1.4 ? 8 : 9;
-  const center = { lon:(minLon + maxLon) / 2, lat:(minLat + maxLat) / 2 };
-  const centerWorld = routeLonLatToWorld(center, zoom);
-  const topLeft = { x:centerWorld.x - width / 2, y:centerWorld.y - height / 2 };
-  const minTileX = Math.floor(topLeft.x / 256);
-  const maxTileX = Math.floor((topLeft.x + width) / 256);
-  const minTileY = Math.floor(topLeft.y / 256);
-  const maxTileY = Math.floor((topLeft.y + height) / 256);
-  const tiles = [];
-  const maxTile = Math.pow(2, zoom);
-  for (let tx = minTileX; tx <= maxTileX; tx += 1) {
-    for (let ty = minTileY; ty <= maxTileY; ty += 1) {
-      if (ty < 0 || ty >= maxTile) continue;
-      const wrappedX = ((tx % maxTile) + maxTile) % maxTile;
-      const url = maptilerKey
-        ? `https://api.maptiler.com/maps/streets-v2/${zoom}/${wrappedX}/${ty}.png?key=${encodeURIComponent(maptilerKey)}`
-        : `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${ty}.png`;
-      if (!url) continue;
-      tiles.push({
-        key: `${zoom}-${tx}-${ty}`,
-        left: Math.round(tx * 256 - topLeft.x),
-        top: Math.round(ty * 256 - topLeft.y),
-        url,
-      });
-    }
-  }
-  const projected = valid.map(p => {
-    const world = routeLonLatToWorld(p, zoom);
-    return { ...p, x: world.x - topLeft.x, y: world.y - topLeft.y };
-  });
-  return { tiles, projected, width, height };
-}
-
-function RutaMapaVisual({ plan, remotePlan, planUrl, onPreferencia, estado }) {
-  const stateColor=({pendiente:'#f59e0b',confirmado:'#3b82f6',espera_carga:'#eab308',cargando:'#8b5cf6',en_curso:'#06b6d4',espera_descarga:'#f97316',descarga:'#f97316',entregado:'#10b981',facturado:'#10b981',incidencia:'#ef4444',cancelado:'#64748b'})[estado]||'#64748b';
+function RutaMapaVisual({ plan, remotePlan, onPreferencia, estado }) {
+  const color=({pendiente:'#f59e0b',confirmado:'#3b82f6',espera_carga:'#eab308',cargando:'#8b5cf6',en_curso:'#06b6d4',espera_descarga:'#f97316',descarga:'#f97316',entregado:'#10b981',facturado:'#10b981',incidencia:'#ef4444',cancelado:'#64748b'})[estado]||'#64748b';
   const stops = remotePlan?.stops?.length ? remotePlan.stops : plan?.stops || [];
-  const coords = Array.isArray(remotePlan?.waypoint_coordinates) ? remotePlan.waypoint_coordinates : [];
-  const hasCoords = coords.length >= 2;
-  const points = hasCoords ? coords.map(c => ({ lon:Number(c.lon), lat:Number(c.lat) })) : stops.map((_, idx) => ({
-    lon: idx,
-    lat: idx % 2 === 0 ? 0 : 0.35,
-  }));
-  const lons = points.map(p => p.lon);
-  const lats = points.map(p => p.lat);
-  const minLon = Math.min(...lons, 0);
-  const maxLon = Math.max(...lons, 1);
-  const minLat = Math.min(...lats, 0);
-  const maxLat = Math.max(...lats, 1);
-  const pad = 34;
-  const w = 720;
-  const h = 310;
-  const spanLon = Math.max(maxLon - minLon, 0.01);
-  const spanLat = Math.max(maxLat - minLat, 0.01);
-  const xy = p => ({
-    x: pad + ((p.lon - minLon) / spanLon) * (w - pad * 2),
-    y: h - pad - ((p.lat - minLat) / spanLat) * (h - pad * 2),
-  });
-  const svgPts = points.map(xy);
-  const path = svgPts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-  const embeddedMap = hasCoords ? buildEmbeddedRouteMap(points, w, h) : null;
-  const embeddedPath = embeddedMap?.projected?.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ") || "";
-
-  return (
-    <div style={{background:"linear-gradient(180deg,var(--bg3),var(--bg2))",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:14}}>
-      <div className="traffic-responsive-flex" style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
-        <div>
-          <div style={{fontSize:11,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".08em"}}>Mapa operativo · {String(estado||"sin estado").replace(/_/g," ")}</div>
-          <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>
-            {hasCoords ? "Trazado con la ruta calculada." : "Vista esquematica hasta calcular la ruta."}
-          </div>
-        </div>
-        <div className="traffic-responsive-flex" style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-          <button onClick={()=>onPreferencia("rapida")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa rapida</button>
-          <button onClick={()=>onPreferencia("eficiente")} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Alternativa eficiente</button>
-          <button disabled={!hasCoords} style={{padding:"5px 9px",borderRadius:6,border:"1px solid var(--accent-a35)",background:"var(--accent-a10)",color:"var(--accent-l)",fontSize:11,fontWeight:900,cursor:hasCoords?"default":"not-allowed",opacity:hasCoords?1:.55}}>Mapa real</button>
-        </div>
-      </div>
-      <div className="traffic-responsive-grid" style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
-        {!embeddedMap && (
-        <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"radial-gradient(circle at 20% 20%, var(--accent-a14), transparent 26%), linear-gradient(135deg, rgba(15,23,42,.88), rgba(30,41,59,.64))"}}>
-          <svg viewBox={`0 0 ${w} ${h}`} style={{width:"100%",height:"100%",display:"block",minHeight:310}}>
-            {[0,1,2,3,4].map(i => <line key={`v${i}`} x1={pad+i*(w-pad*2)/4} x2={pad+i*(w-pad*2)/4} y1={pad} y2={h-pad} stroke="rgba(148,163,184,.12)" strokeWidth="1"/>)}
-            {[0,1,2,3].map(i => <line key={`h${i}`} y1={pad+i*(h-pad*2)/3} y2={pad+i*(h-pad*2)/3} x1={pad} x2={w-pad} stroke="rgba(148,163,184,.12)" strokeWidth="1"/>)}
-            <path d={path} fill="none" stroke="rgba(20,184,166,.24)" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d={path} fill="none" stroke="#14b8a6" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
-            {svgPts.map((p, idx) => (
-              <g key={idx}>
-                <circle cx={p.x} cy={p.y} r="14" fill={stateColor} stroke="#fff" strokeWidth="2"/>
-                <text x={p.x} y={p.y+4} textAnchor="middle" fontSize="11" fontWeight="900" fill="#fff">{idx+1}</text>
-              </g>
-            ))}
-          </svg>
-        </div>
-        )}
-        {embeddedMap && (
-          <div style={{position:"relative",minHeight:310,border:"1px solid var(--border)",borderRadius:8,overflow:"hidden",background:"var(--bg3)"}}>
-            {!embeddedMap.tiles.length && (
-              <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 22% 20%, var(--accent-a12), transparent 28%), linear-gradient(135deg, rgba(226,245,241,.9), rgba(239,246,255,.92))"}} />
-            )}
-            {embeddedMap.tiles.map(tile => (
-              <img key={tile.key} src={tile.url} alt="" draggable="false" style={{position:"absolute",left:tile.left,top:tile.top,width:256,height:256,userSelect:"none",pointerEvents:"none"}} />
-            ))}
-            <svg viewBox={`0 0 ${w} ${h}`} style={{position:"absolute",inset:0,width:"100%",height:"100%"}}>
-              <path d={embeddedPath} fill="none" stroke="rgba(15,118,110,.22)" strokeWidth="12" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d={embeddedPath} fill="none" stroke="#0f766e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
-              {embeddedMap.projected.map((p, idx) => (
-                <g key={idx}>
-                  <circle cx={p.x} cy={p.y} r="13" fill={stateColor} stroke="#fff" strokeWidth="2"/>
-                  <text x={p.x} y={p.y+4} textAnchor="middle" fontSize="11" fontWeight="900" fill="#fff">{idx+1}</text>
-                </g>
-              ))}
-            </svg>
-            <div style={{position:"absolute",right:8,bottom:8,background:"rgba(255,255,255,.86)",border:"1px solid rgba(148,163,184,.5)",borderRadius:6,padding:"3px 6px",fontSize:10,color:"#334155"}}>
-              Mapa TransGest
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="traffic-responsive-flex" style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
-        {stops.map((s, idx)=>(
-          <div className="traffic-responsive-flex" key={`${s.address}-${idx}`} style={{display:"flex",alignItems:"center",gap:6,border:"1px solid var(--border)",borderRadius:7,padding:"5px 8px",fontSize:11,color:"var(--text4)",background:"var(--bg4)",maxWidth:260}}>
-            <span style={{width:18,height:18,borderRadius:5,background:stateColor,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#fff",flexShrink:0}}>{idx+1}</span>
-            <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.address}</span>
-          </div>
-        ))}
-      </div>
+  const points = (remotePlan?.waypoint_coordinates || []).filter(c => c.lon != null && c.lat != null && Number.isFinite(Number(c.lon)) && Number.isFinite(Number(c.lat))).map((c,i) => ({lng:Number(c.lon),lat:Number(c.lat),stopNumber:i+1,label:c.address || stops[i]?.address || 'Parada',tone:{color,label:String(estado||'').replace(/_/g,' ')}}));
+  const geometry = routeGeometry(remotePlan?.geometry);
+  return <section style={{border:'1px solid var(--border)',borderRadius:10,padding:12,marginBottom:14}}>
+    <div className="traffic-responsive-flex" style={{display:'flex',justifyContent:'space-between',gap:12,marginBottom:12}}>
+      <div><strong>Mapa de la ruta</strong><p style={{fontSize:12,color:'var(--text3)',margin:'6px 0'}}>{geometry.length>1 ? `Recorrido por carretera · ${remotePlan?.provider_label || 'Ruta calculada'}` : 'Sin trazado por carretera. Calcula la ruta para mostrar el recorrido; los puntos indican las paradas localizadas.'}</p></div>
+      <div style={{display:'flex',gap:8,alignItems:'start'}}><button type="button" onClick={()=>onPreferencia('rapida')}>Alternativa rápida</button><button type="button" onClick={()=>onPreferencia('eficiente')}>Alternativa eficiente</button></div>
     </div>
-  );
+    {remotePlan && !remotePlan.truck_aware && <p style={{fontSize:12,color:'var(--text3)'}}>Ruta orientativa: este proveedor no comprueba restricciones de peso, altura o circulación de camiones.</p>}
+    <RouteMapCanvas points={points} geometry={geometry}/>
+    <ol style={{display:'flex',gap:24,flexWrap:'wrap',fontSize:12,paddingLeft:20}}>{stops.map((s,i)=><li key={i}>{s.address || s.name || 'Parada sin dirección'}</li>)}</ol>
+  </section>;
 }
 
 export default function GestionTrafico({ initialVista = "cuadrante", soloOptimizacion = false, hideInternalTabs = false }) {

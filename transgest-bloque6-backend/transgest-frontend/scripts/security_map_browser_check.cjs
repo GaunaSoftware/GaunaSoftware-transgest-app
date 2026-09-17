@@ -50,6 +50,8 @@ async function main() {
         if(route.request().method()==='PUT') {const body=route.request().postDataJSON();updateRequests.push(body);Object.assign(pedido,body);}
         data=pedido;
       }
+      else if (pathname==='/route-optimizer/providers') data={active:'local',providers:{local:{label:'OSRM QA',truck_aware:false}}};
+      else if (pathname.startsWith('/route-optimizer/') && !pathname.endsWith('/dispatches')) data={provider:'local',provider_label:'OSRM QA',preference:'camion',truck_aware:false,distance_km:71,duration_min:65,stops:[{address:'San Vicente del Raspeig'},{address:'Benissa'}],waypoint_coordinates:[{lon:-0.5255,lat:38.3964,address:'San Vicente del Raspeig'},{lon:0.0521,lat:38.7149,address:'Benissa'}],geometry:{type:'LineString',coordinates:[[-0.5255,38.3964],[-0.2,38.5],[0.0521,38.7149]]}};
       else if (pathname==='/vehiculos') data=fleet;
       else if (pathname==='/choferes') data=drivers;
       else if (pathname==='/pedidos/disponibilidad') data={vehiculos:fleet.map((v,i)=>({...v,disponible:i%2===0,motivo:i%2?'Viaje QA ocupado':''})),choferes:drivers.map((c,i)=>({...c,disponible:i%2===0,motivo:i%2?'Servicio QA':''}))};
@@ -113,6 +115,13 @@ async function main() {
     assert.equal(await page.locator('.tg-route-stop-marker').count(),3);
     await modal.locator('.tg-pedido-modal-header button').click();
     await modal.waitFor({state:'hidden'});
+    await page.evaluate(()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'gestion_trafico'})));
+    await page.getByRole('button',{name:'Optimización de rutas',exact:true}).click();
+    await page.getByText('Recorrido por carretera · OSRM QA',{exact:true}).waitFor();
+    await page.locator('[data-map-idle="true"]').waitFor();
+    assert.equal(await page.locator('.tg-route-stop-marker').count(),2);
+    await page.getByText('Ruta orientativa: este proveedor no comprueba restricciones de peso, altura o circulación de camiones.',{exact:true}).waitFor();
+    await page.screenshot({path:path.join(out,'traffic-road-map.png')});
     assert.equal(errors.length,0,errors.join('\n'));
     console.log('PASS MapLibre v6: rendered route, markers, popup, attribution, stable frame, mobile resize and navigation.');
   } catch(error) {

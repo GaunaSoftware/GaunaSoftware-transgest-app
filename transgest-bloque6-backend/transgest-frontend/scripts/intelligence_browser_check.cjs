@@ -13,7 +13,7 @@ async function mock(route) {
   else if(p==='/ia/intelligence/estado') data={configured:true,source:'company',model:'gpt-5-mini'};
   else if(p==='/ia/intelligence/chat') {
     assert.equal(req.postDataJSON().messages.at(-1).role,'user');
-    data={answer:'Un pedido pendiente en septiembre. PED-QA.',sources:[{name:'Pedidos',filters:{desde:'2026-09-01',hasta:'2026-09-30'},limited:false}],checked_at:new Date().toISOString()};
+    data={answer:'## Resumen de pedidos\nUn pedido pendiente en septiembre. PED-QA.\n\n| Pedido | Asignación |\n| --- | --- |\n| PED-QA | Colaborador QA |',sources:[{name:'Pedidos',filters:{desde:'2026-09-01',hasta:'2026-09-30'},limited:false}],checked_at:new Date().toISOString()};
   } else if(p.includes('empresa') || p.includes('config')) data={id:user.empresa_id,nombre:'QA',plan:'enterprise',cfg_alertas:[]};
   else if(p.includes('notificaciones')) data={data:[],no_leidas:0,items:[],resumen:{}};
   await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
@@ -47,6 +47,12 @@ async function main() {
     await page.getByRole('button',{name:'Consultar',exact:true}).click();
     await page.getByText('Un pedido pendiente en septiembre. PED-QA.',{exact:true}).waitFor();
     await page.getByText('Fuentes consultadas (1)',{exact:true}).click();
+    await page.getByRole('heading',{name:'Resumen de pedidos'}).waitFor();
+    await page.locator('.intelligence-answer table').waitFor();
+    await page.getByLabel('Consulta',{exact:true}).fill('Detalla la asignación');
+    await page.getByRole('button',{name:'Consultar',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('.intelligence-answer table').length===2);
+    assert.equal(await page.getByText('Fuentes consultadas (1)',{exact:true}).count(),2);
     await page.screenshot({path:path.join(out,'intelligence-desktop.png')});
     await page.setViewportSize({width:390,height:844});
     assert.ok(await page.locator('.intelligence').evaluate(e=>e.scrollWidth<=e.clientWidth+1));

@@ -1,5 +1,5 @@
 {
-  "buildCommand": "CI=false react-scripts build",
+  "buildCommand": "CI=false npm run build",
   "rewrites": [{ "source": "/planner/:path*", "destination": "/index.html" }],
   "headers": [
     {

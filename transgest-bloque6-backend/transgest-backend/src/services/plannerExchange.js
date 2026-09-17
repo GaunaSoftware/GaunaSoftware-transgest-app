@@ -48,7 +48,7 @@ async function synchronize(db,company){
  let created=0;
  for(const link of links)await db.transaction(async tx=>{
   if(!(await tx.query('SELECT id FROM planner_conexiones_transporte WHERE id=$1 AND activo FOR UPDATE',[link.id])).rows.length)return;
-  const pending=(await tx.query(`SELECT p.* FROM pedidos p WHERE p.empresa_id=$1 AND p.colaborador_id=$2 AND p.colaborador_precio_confirmado AND p.estado::text NOT IN ('cancelado','entregado','facturado') AND p.colaborador_precio_confirmado_at>=$3
+  const pending=(await tx.query(`SELECT p.* FROM pedidos p WHERE p.empresa_id=$1 AND COALESCE(to_jsonb(p)->>'origen_producto','transgest')='planner' AND p.colaborador_id=$2 AND p.colaborador_precio_confirmado AND p.estado::text NOT IN ('cancelado','entregado','facturado') AND p.colaborador_precio_confirmado_at>=$3
    AND NOT EXISTS(SELECT 1 FROM planner_viajes_compartidos v WHERE v.empresa_id=p.empresa_id AND v.pedido_id=p.id) ORDER BY p.id LIMIT 100 FOR UPDATE`,[link.empresa_id,link.colaborador_id,link.created_at])).rows;
   for(const p of pending){await createTrip(tx,link,p);created++;}
   const pairs=(await tx.query(`SELECT v.*,p.puntos_carga AS cargas,p.puntos_descarga AS descargas FROM planner_viajes_compartidos v JOIN pedidos p ON p.id=v.pedido_id AND p.empresa_id=v.empresa_id WHERE v.conexion_id=$1 AND p.colaborador_id=$2`,[link.id,link.colaborador_id])).rows;

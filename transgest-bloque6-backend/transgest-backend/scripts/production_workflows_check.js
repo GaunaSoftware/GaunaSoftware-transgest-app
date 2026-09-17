@@ -4,7 +4,7 @@ const {missingBillingData}=require('../src/services/billingData');
 function loadRoute(file,db,extras={}){
  const routes={},uses=[];const router={use(...h){uses.push(...h);}};
  for(const verb of ['get','post','put','patch','delete'])router[verb]=(p,...h)=>routes[`${verb} ${p}`]=h.at(-1);
- const sandbox={module:{exports:{}},process,console,Date,require(name){if(name==='express')return{Router:()=>router};if(name.includes('/db'))return db;if(name.includes('/supportSchema'))return {ensureSupportSchema:async()=>{}};if(name.includes('/auth'))return{requireRole:()=>()=>{}};if((name==='./planner_inventory'||name==='./planner_vehicles'))return {};if(name.includes('/plannerBooking'))return require('../src/services/plannerBooking');if(name==='crypto')return require('node:crypto');if(extras[name])return extras[name];throw Error(name);}};
+ const sandbox={module:{exports:{}},process,console,Date,require(name){if(name==='express')return{Router:()=>router};if(name.includes('/db'))return db;if(name.includes('/supportSchema'))return {ensureSupportSchema:async()=>{}};if(name.includes('/auth'))return{requireRole:()=>()=>{},requireModulePermission:()=>()=>{}};if((name==='./planner_inventory'||name==='./planner_vehicles'||name==='./planner_providers'))return {};if(name.includes('/plannerBooking'))return require('../src/services/plannerBooking');if(name==='crypto')return require('node:crypto');if(extras[name])return extras[name];throw Error(name);}};
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/routes',file),'utf8'),sandbox);
  return {routes,uses,exported:sandbox.module.exports};
 }
@@ -28,6 +28,10 @@ async function main(){
  overlap=false;calls=[];res=response();await planner.routes['post /reservas'](slot,res,e=>{throw e;});assert.equal(res.code,201);assert.ok(calls.some(c=>c.sql.startsWith('INSERT')));
  const supplier=loadRoute('supplier_app.js',db);calls=[];answer=[];res=response();await supplier.routes['post /pedidos/:id/acceso']({...req,user:{id:'driver',rol:'chofer',colaborador_id:'supplier'}},res,e=>{throw e;});assert.equal(res.code,404);assert.equal(calls.length,1);assert.deepEqual(Array.from(calls[0].args),[id,'company','supplier','driver']);
  calls=[];res=response();await supplier.routes['get /pedidos']({...req,user:{id:'driver',rol:'chofer',colaborador_id:'supplier'}},res,e=>{throw e;});assert.ok(!calls[0].sql.includes('importe'));assert.ok(calls[0].sql.includes('conductor_proveedor_usuario_id=$3'));
+ const providers=loadRoute('planner_providers.js',db,{'../services/plannerInventory':require('../src/services/plannerInventory')});
+ calls=[];answer=[];res=response();await providers.routes['get /conductores'](req,res,e=>{throw e;});assert.ok(calls[0].sql.includes('d.empresa_id=$1'));assert.equal(calls[0].args[0],'company');
+ calls=[];res=response();await providers.routes['post /conductores']({...req,body:{nombre:'Chofer',colaborador_id:id}},res,e=>{throw e;});assert.equal(res.code,404);assert.equal(calls.length,1,'cannot create driver for a foreign supplier');
+ calls=[];answer=[{id}];res=response();await providers.routes['post /conductores']({...req,body:{nombre:'Chofer',colaborador_id:id,email:'invalid'}},res,e=>{throw e;});assert.equal(res.code,400);
  console.log('PASS fuel estimates/manual preservation, billing reasons, support privacy/replies, dock conflicts and supplier isolation');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

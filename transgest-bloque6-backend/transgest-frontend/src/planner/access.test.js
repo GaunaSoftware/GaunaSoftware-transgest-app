@@ -18,10 +18,10 @@ test('external accounts cannot open the internal Planner regardless of order acc
 
 test('shows only permitted modules and respects the dock API role restrictions', () => {
   expect(visiblePlannerModules({productos:['transgest','planner'],rol:'trafico'}, id => id === 'pedidos').map(([id])=>id))
-    .toEqual(['pedidos','viajes','muelles']);
+    .toEqual(['pedidos','muelles']);
   expect(visiblePlannerModules({productos:['transgest','planner'],rol:'gerente'}, () => false)).toEqual([]);
   expect(visiblePlannerModules({productos:['transgest','planner'],rol:'contable'}, id => id === 'pedidos').map(([id])=>id))
-    .toEqual(['pedidos','viajes']);
+    .toEqual(['pedidos']);
   expect(visiblePlannerModules({productos:['transgest','planner'],rol:'gerente'}, id => id === 'palets').map(([id])=>id))
     .toEqual(['palets']);
 });

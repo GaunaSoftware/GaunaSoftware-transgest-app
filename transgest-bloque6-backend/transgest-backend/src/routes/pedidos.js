@@ -5891,10 +5891,15 @@ router.post("/chofer/rutas", async (req, res) => {
 // GET /pedidos
 router.get("/", async (req, res) => {
   await ensureColaboradorWorkflowSchema();
+  if(req.query.workspace==='planner'){
+    if(!require('../services/companyProducts').moduleAvailable(req.user?.productos,'planner'))return res.status(403).json({error:'Planner no está habilitado para tu empresa.'});
+    await require('../services/plannerSchema').ensurePlannerSchema();
+  }
   const { estado, cliente_id, chofer_id, desde, hasta, facturado, pendiente_completar, tipo_carga, q, page = 1, limit = 50 } = req.query;
   const offset = (page - 1) * limit;
   const empresaId = req.empresaId || req.user.empresa_id;
   const where  = ["p.empresa_id = $1"]; // tenant isolation
+  if(req.query.workspace==='planner')where.push("COALESCE(to_jsonb(p)->>'origen_producto','transgest')='planner'");
   const params = [empresaId];
   let i = 2;
 
@@ -8647,6 +8652,11 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
             remolque_id_manual, remolque_id } = req.body; // remolque_id_manual si se especifica uno distinto al del conjunto
 
     const empresaId = req.empresaId||req.user.empresa_id;
+    const plannerCreation=req.body.workspace==='planner';
+    if(plannerCreation){
+      if(!require('../services/companyProducts').moduleAvailable(req.user?.productos,'planner'))return res.status(403).json({error:'Planner no está habilitado para tu empresa.'});
+      await require('../services/plannerSchema').ensurePlannerSchema();
+    }
     await require("../services/orderFuelCost").fillMissingFuelCost(db,req.body,{},empresaId);
     try {
       assertPedidoDateInputs(req.body, new Set(["fecha_pedido", "fecha_carga", "fecha_entrega", "fecha_descarga"]));
@@ -8773,6 +8783,11 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
           );
           pedido = r.rows[0];
         } else { throw colErr; }
+      }
+
+      if(plannerCreation){
+        await client.query("UPDATE pedidos SET origen_producto='planner' WHERE id=$1 AND empresa_id=$2",[pedido.id,empresaId]);
+        pedido.origen_producto='planner';
       }
 
       const ivaPedido = (req.body.tipo_iva !== undefined || req.body.iva_regimen !== undefined)

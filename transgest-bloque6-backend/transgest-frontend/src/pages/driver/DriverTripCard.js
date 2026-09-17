@@ -7,7 +7,7 @@ export default function DriverTripCard({ pedido, state, expanded, onToggle, feat
     <strong className="driver-trip-route">{pedido.origen||'Origen pendiente'} → {pedido.destino||'Destino pendiente'}</strong>
     <span className="driver-trip-client">{pedido.cliente_nombre || 'Cliente pendiente'}</span>
     <span className="driver-trip-card-meta"><span><DriverIcon name="vacaciones" size={20}/><span><small>Carga</small>{date(pedido.fecha_carga)}{pedido.hora_carga ? ` · ${pedido.hora_carga}`:''}</span></span><span><DriverIcon name="documento" size={20}/><span><small>Descarga</small>{date(pedido.fecha_descarga||pedido.fecha_entrega)}{pedido.hora_descarga?` · ${pedido.hora_descarga}`:''}</span></span></span>
-    {featured && <span className="driver-trip-goods"><span>{pedido.mercancia||pedido.descripcion_carga||'Mercancía pendiente'}</span><strong>{pedido.peso_kg ? `${Number(pedido.peso_kg).toLocaleString('es-ES')} kg`:'—'}</strong></span>}
+    {featured && !expanded && <span className="driver-trip-goods"><span>{pedido.mercancia||pedido.descripcion_carga||'Mercancía pendiente'}</span><strong>{pedido.peso_kg ? `${Number(pedido.peso_kg).toLocaleString('es-ES')} kg`:'—'}</strong></span>}
     {!expanded && <span className={featured?'driver-trip-cta':'driver-trip-more'}>Ver detalles del viaje <span aria-hidden="true">→</span></span>}
   </Tag>;
 }

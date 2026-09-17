@@ -717,9 +717,6 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
               ["Mercancía",pedido.mercancia||pedido.descripcion_carga||"-"],
               ["Peso",pedido.peso_kg?(pedido.peso_kg+" kg"):"-"],
               ["Bultos/Palets",pedido.bultos||"-"],
-              ["Km ruta",pedido.km_ruta||pedido.km?(pedido.km_ruta||pedido.km)+" km":"-"],
-              ["F. descarga",pedido.fecha_descarga?new Date(pedido.fecha_descarga).toLocaleDateString("es-ES"):"-"],
-              ["Hora descarga",pedido.hora_descarga||"-"],
             ].map(([l,v])=>(
               <div key={l} style={{background:"var(--bg4)",borderRadius:7,padding:"8px 10px"}}>
                 <div style={{fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text5)",marginBottom:2}}>{l}</div>

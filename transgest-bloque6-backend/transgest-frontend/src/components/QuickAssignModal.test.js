@@ -18,3 +18,23 @@ test('supplier assignment is only submitted after the form and includes plates, 
   expect(save).toHaveBeenCalledTimes(1);expect(save.mock.calls[0][0]).toMatchObject({colaborador_id:'provider',matricula_colaborador:'1234-ABC',remolque_matricula_colaborador:'R-2222-BCD',conductor_efectivo_nombre:'Ana',conductor_efectivo_apellidos:'García',precio_venta_total:600,precio_colaborador:400});
  }finally{await act(async()=>root.unmount());container.remove();}
 });
+
+test.each([1,3])('own fleet keeps prices out of the form and patch, including after switching supplier mode (%i orders)',async(bulkCount)=>{
+ global.IS_REACT_ACT_ENVIRONMENT=true;
+ const container=document.createElement('div');document.body.appendChild(container);const root=createRoot(container),save=jest.fn().mockResolvedValue();
+ try{
+  await act(async()=>root.render(<QuickAssignModal pedido={{id:'order',vehiculo_id:'truck',vehiculo_matricula:'1234-ABC',chofer_id:'driver',importe:500}} vehiculos={[{id:'truck',matricula:'1234-ABC',clase:'tractora',chofer_id:'driver'}]} choferes={[{id:'driver',nombre:'Ana',vehiculo_id:'truck'}]} colaboradores={[{id:'provider',nombre:'Transportista'}]} bulkCount={bulkCount} onAssign={save} onClose={()=>{}}/>));
+  expect(container.textContent).not.toContain('Importes del viaje');
+  const click=async text=>act(async()=>[...container.querySelectorAll('button')].find(b=>b.textContent===text).click());
+  await click('Proveedor externo');
+  const input=[...container.querySelectorAll('label')].find(l=>l.textContent.startsWith('Precio de venta total')).querySelector('input');
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'999');input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await click('Flota propia');
+  expect(container.textContent).not.toContain('Importes del viaje');
+  await click(bulkCount>1?`Asignar a ${bulkCount}`:'Asignar');
+  expect(save).toHaveBeenCalledTimes(1);
+  const patch=save.mock.calls[0][0];
+  expect(patch).toMatchObject({vehiculo_id:'truck',chofer_id:'driver',colaborador_id:''});
+  for(const key of ['importe','precio_unitario','precio_venta_total','precio_colaborador','tipo_precio'])expect(patch).not.toHaveProperty(key);
+ }finally{await act(async()=>root.unmount());container.remove();}
+});

@@ -4,6 +4,11 @@
   "headers": [
     {
       "source": "/",
+      "has": [{ "type": "host", "value": "transgest.app" }],
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, follow" }]
+    },
+    {
+      "source": "/",
       "headers": [
         { "key": "Cache-Control", "value": "no-store, max-age=0, must-revalidate" },
         { "key": "X-TransGest-Frontend-Build", "value": "2026-09-14-acciones-unificadas" }

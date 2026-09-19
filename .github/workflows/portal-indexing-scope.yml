@@ -1,0 +1,49 @@
+name: Portal indexing scope
+
+on:
+  pull_request:
+    paths:
+      - 'transgest-bloque6-backend/transgest-frontend/vercel.json'
+      - '.github/workflows/portal-indexing-scope.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'transgest-bloque6-backend/transgest-frontend/vercel.json'
+      - '.github/workflows/portal-indexing-scope.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.16.0'
+      - name: Validate JSON, rule scope and retained security headers
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const config = JSON.parse(readFileSync('transgest-bloque6-backend/transgest-frontend/vercel.json', 'utf8'));
+          const rules = config.headers.filter(rule => rule.headers.some(header => header.key.toLowerCase() === 'x-robots-tag'));
+          assert.equal(rules.length, 1);
+          assert.equal(rules[0].source, '/');
+          assert.deepEqual(rules[0].has, [{ type: 'host', value: 'transgest.app' }]);
+          assert.deepEqual(rules[0].headers, [{ key: 'X-Robots-Tag', value: 'noindex, follow' }]);
+          const applies = (host, pathname) => host === rules[0].has[0].value && pathname === rules[0].source;
+          assert.equal(applies('transgest.app', '/'), true);
+          for (const path of ['/web', '/web/cliente', '/planner', '/api/documentos/ejemplo', '/index.html', '/sw.js']) assert.equal(applies('transgest.app', path), false);
+          for (const host of ['gauna.es', 'api.transgest.app', 'otro.example']) assert.equal(applies(host, '/'), false);
+          assert.deepEqual(config.rewrites, [{ source: '/planner/:path*', destination: '/index.html' }]);
+          const common = config.headers.find(rule => rule.source === '/(.*)');
+          assert.ok(common.headers.some(header => header.key === 'Content-Security-Policy'));
+          assert.ok(common.headers.some(header => header.key === 'X-Frame-Options' && header.value === 'DENY'));
+          assert.ok(common.headers.some(header => header.key === 'X-Content-Type-Options' && header.value === 'nosniff'));
+          console.log('Scoped noindex: only https://transgest.app/; public paths and existing security/routing retained.');
+          NODE

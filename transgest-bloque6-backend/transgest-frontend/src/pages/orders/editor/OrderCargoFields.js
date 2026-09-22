@@ -1,7 +1,7 @@
 import { OrderSection, OrderDisclosure } from "./OrderEditorShell";
 
 import { parseLocaleNumber } from "../../../utils/number";
-import { cargoCount } from "../../../utils/cargoDimensions";
+import { cargoCount, fullLoadLength } from "../../../utils/cargoDimensions";
 import { updateCargo } from "../../../utils/cargoDimensions";
 import { PALLET_SIZES } from "../../../utils/cargoDimensions";
 import { cargoLength } from "../../../utils/cargoDimensions";
@@ -15,7 +15,7 @@ export default function OrderCargoFields({ S, form, setForm, f, syncPrecioClient
               {["completa","grupaje"].map(t=>(
                 <label key={t} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:13,fontWeight:t===(form.tipo_carga||"completa")?"700":"400",color:t===(form.tipo_carga||"completa")?"var(--accent)":"var(--text4)"}}>
                   <input type="radio" name="tipo_carga" value={t} checked={(form.tipo_carga||"completa")===t}
-                    onChange={()=>setForm(p=>({...p,tipo_carga:t}))} style={{accentColor:"var(--accent)"}}/>
+                    onChange={()=>setForm(p=>({...p,tipo_carga:t,...(t==="completa"?{carga_largo_m:fullLoadLength(p,vehiculosLocal),metros_lineales:fullLoadLength(p,vehiculosLocal)}:{carga_largo_m:'',metros_lineales:'',_cargoLengthManual:false})}))} style={{accentColor:"var(--accent)"}}/>
                   {t==="completa"?"Carga completa":"Grupaje (carga parcial)"}
                 </label>
               ))}
@@ -23,6 +23,7 @@ export default function OrderCargoFields({ S, form, setForm, f, syncPrecioClient
                 <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>Se añadirá a Grupajes para combinarlo con otros pedidos</span>
               )}
             </div>
+            {(form.tipo_carga||"completa")==="completa" && <p className="order-editor-help">Carga completa: {fullLoadLength(form,vehiculosLocal).toLocaleString("es-ES")} m de remolque. Se utilizan 13,65 m cuando no hay una longitud configurada.</p>}
             <div className="order-editor-cargo-grid"><div style={{gridColumn:"1/-1"}}><label style={S.label}>Descripcion mercancia</label><input style={S.input} value={form.mercancia||""} onChange={f("mercancia")} placeholder="Pallets de ceramica, maquinaria..."/></div>
 <div>
                   <label style={S.label}>Peso (kg)</label>

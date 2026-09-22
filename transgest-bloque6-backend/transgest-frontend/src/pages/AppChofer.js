@@ -1,3 +1,4 @@
+import {planHasFeature} from "../utils/planFeatures";
 import DriverExpenses from "./driver/DriverExpenses";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getPedidos, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDocChofer, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
@@ -19,6 +20,9 @@ export default function AppChofer(){
   const { user, logout } = useAuth();
   const planNorm = String(user?.plan || "").toLowerCase();
   const isLitePlan = ["lite", "mini", "transgest_lite", "transgest_mini"].includes(planNorm);
+  const externalDriver=!!user?.colaborador_id;
+  const workshopEnabled=!externalDriver && planHasFeature(planNorm,'taller') && (!Array.isArray(user?.productos)||user.productos.includes('transgest'));
+  const leaveEnabled=!externalDriver && !isLitePlan;
   const [pedidos,   setPedidos]   = useState([]);
   const [solicitudesChofer, setSolicitudesChofer] = useState([]);
   const [vacacionesChofer, setVacacionesChofer] = useState([]);
@@ -81,17 +85,17 @@ export default function AppChofer(){
         setSolicitudesChofer([]);
         setVacacionesChofer([]);
       } else {
-        const solicitudes = await getTallerSolicitudes().catch(() => []);
+        const solicitudes = workshopEnabled ? await getTallerSolicitudes().catch(() => []) : [];
         const nextSolicitudes = Array.isArray(solicitudes) ? solicitudes.slice(0, 50) : [];
         setSolicitudesChofer(nextSolicitudes);
-        const vacaciones = await getChoferVacacionesApp().catch(() => []);
+        const vacaciones = leaveEnabled ? await getChoferVacacionesApp().catch(() => []) : [];
         const vacacionesArr = Array.isArray(vacaciones) ? vacaciones : Array.isArray(vacaciones?.solicitudes) ? vacaciones.solicitudes : [];
         setVacacionesChofer(vacacionesArr.slice(0, 50));
       }
       cargaInicialRef.current = true;
     }catch(e){ setLoadError(e.message || "No se pudo actualizar la información. Reintenta la conexión."); }
     finally{ if (mostrarCarga) setLoading(false); }
-  }, [user?.id, user?.chofer_id, user?.rol, user?.permisos?.modulos?.avisos?.ver, user?.permisos?.avisos?.ver, isLitePlan]);
+  }, [user?.id, user?.chofer_id, user?.rol, user?.permisos?.modulos?.avisos?.ver, user?.permisos?.avisos?.ver, isLitePlan, workshopEnabled, leaveEnabled]);
 
   useEffect(()=>{ cargar(); },[cargar]);
   useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden)getChoferJornadaApp().then(setJornadaInfo).catch(()=>{});},60000);return()=>clearInterval(timer);},[user?.id]);
@@ -298,7 +302,7 @@ export default function AppChofer(){
     ? [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["historial","Historial"]]
     : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Taller"]];
 
-  const tabsChofer = [...baseTabsChofer,["conjunto","Conjunto"],...(!user?.colaborador_id?[["repostajes","Repostajes y dietas"]]:[])];
+  const tabsChofer = [...baseTabsChofer.filter(([key])=> (key!=="solicitud"||workshopEnabled)&&(key!=="vacaciones"||leaveEnabled)),["conjunto","Conjunto"],...(!user?.colaborador_id?[["repostajes","Repostajes y dietas"]]:[])];
 
   useEffect(() => {
     const app = document.querySelector(".tg-app-chofer-page");

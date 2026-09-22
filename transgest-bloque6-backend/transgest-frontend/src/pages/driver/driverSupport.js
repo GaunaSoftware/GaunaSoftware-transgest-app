@@ -117,6 +117,8 @@ function normalizeChoferPasos(value = {}) {
     }
   });
   if (source.updated_at) next.updated_at = source.updated_at;
+  if(source.paradas && typeof source.paradas==="object") next.paradas=source.paradas;
+  if(source.parada_id) next.parada_id=String(source.parada_id);
   return next;
 }
 
@@ -307,6 +309,7 @@ function FirmaCanvas({ pedido, onFirma, onCancel, title = "Confirmación de entr
   const drawing   = useRef(false);
   const hasInk = useRef(false);
   const lastPt    = useRef(null);
+  const [saving,setSaving]=useState(false);
   const [firmaNombre, setFirmaNombre] = useState("");
 
   function getPos(e, canvas){
@@ -328,13 +331,17 @@ function FirmaCanvas({ pedido, onFirma, onCancel, title = "Confirmación de entr
   }
   function end(){ drawing.current=false; }
   function limpiar(){ const ctx=canvasRef.current.getContext("2d"); ctx.clearRect(0,0,300,150); hasInk.current=false; }
-  function confirmar(){
+  async function confirmar(){
+    if(saving)return;
     if (!String(firmaNombre || "").trim()) {
       notify("Indica el nombre de quien firma la entrega", "warning");
       return;
     }
     if (!hasInk.current) { notify("Firma en el recuadro antes de continuar.", "warning"); return; }
-    onFirma(canvasRef.current.toDataURL("image/png"), String(firmaNombre || "").trim());
+    setSaving(true);
+    try { await onFirma(canvasRef.current.toDataURL("image/png"), String(firmaNombre || "").trim()); }
+    catch(error){notify(error.message||"No se pudo guardar la firma", "error");}
+    finally {setSaving(false);}
   }
 
   return(
@@ -352,7 +359,7 @@ function FirmaCanvas({ pedido, onFirma, onCancel, title = "Confirmación de entr
         <div style={{display:"flex",gap:8,marginTop:12}}>
           <button onClick={limpiar} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:14,fontWeight:600,cursor:"pointer"}}>Borrar</button>
           <button onClick={onCancel} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #ddd",background:"#f5f5f5",fontSize:14,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
-          <button onClick={confirmar} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>Confirmar</button>
+          <button disabled={saving} onClick={confirmar} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#10b981",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>{saving?"Guardando…":"Confirmar"}</button>
         </div>
       </div>
     </div>
@@ -537,7 +544,7 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
 }
 
 // Tarjeta de viaje movil
-function EscanerAlbaran({ pedido, fase, onUploaded }) {
+function EscanerAlbaran({ pedido, fase, parada, onUploaded }) {
   const [{queueOfflineCriticalAction}] = useState(createDriverOfflineActions);
   const [scanner,setScanner]=useState(false);
   const [procesando, setProcesando] = useState(false);
@@ -580,7 +587,7 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
       const location = await capturarUbicacionActual();
       const uploadEvidence = buildUploadEvidence(tipo, location);
       uploadPayload = {
-        nombre: `${faseLabel(fase)} - albaran ${pedido.numero || pedido.id}`,
+        nombre: `${faseLabel(fase)}${parada ? ` ${parada.index+1} · ${parada.label}` : ""} - albaran ${pedido.numero || pedido.id}`,
         tipo,
         file_base64: doc.base64,
         file_mime: doc.mime,
@@ -588,6 +595,7 @@ function EscanerAlbaran({ pedido, fase, onUploaded }) {
         notas: `Subido desde app chofer en fase ${faseLabel(fase)}\n${uploadEvidence.note}`,
         metadata: {
           ...uploadEvidence.evidence,
+          ...(parada ? {parada_id:parada.id,parada_tipo:parada.tipo,parada_nombre:parada.label}:{}),
           scan: {
             detected: !!doc.scan_detected,
             crop: doc.scan_crop || null,
